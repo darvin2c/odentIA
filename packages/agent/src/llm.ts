@@ -221,8 +221,11 @@ export function viaResponses(model: unknown): boolean {
  * (el modelo de demostración), el texto solo. Medido el 2026-10-29 (ADR 0012 y
  * 0075): en Argos y en el dictado de latidIA, donde la parte fija es todo el
  * mensaje de sistema, OpenAI ya la leía sin el corte de lo que guardó la
- * llamada anterior, y el corte no bajó su costo. No se midió el corte que
- * separa lo fijo de lo que cambia dentro del mismo mensaje.
+ * llamada anterior, y el corte no bajó su costo. Probado con la API el
+ * 2026-11-16: varios cortes en una llamada se leen cada uno (el dictado con
+ * una ficha lleva el de las instrucciones y el de las fichas); en un bloque de
+ * un mensaje de sistema, por Chat Completions, OpenAI corre el corte al final
+ * de ese mensaje, y por /v1/responses lo deja al final del bloque.
  */
 export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean): string | ContentBlock[] {
   if (provider !== "openai") return text

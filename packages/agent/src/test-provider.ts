@@ -64,9 +64,12 @@ export function toolCallReply(response: ServerResponse, url: string | undefined,
   })
 }
 
-/** El primer bloque del mensaje de sistema tal como llegó: `input` en /v1/responses, `messages` en Chat Completions. */
-export const systemBlock = (request: Received | undefined) =>
-  ((request?.body.input ?? request?.body.messages) as Array<{ content: unknown[] }> | undefined)?.[0]?.content[0]
+/** El contenido de un mensaje tal como llegó: `input` en /v1/responses, `messages` en Chat Completions. */
+export const messageContent = (request: Received | undefined, index: number) =>
+  ((request?.body.input ?? request?.body.messages) as Array<{ content: unknown }> | undefined)?.[index]?.content
+
+/** El primer bloque del mensaje de sistema. */
+export const systemBlock = (request: Received | undefined) => (messageContent(request, 0) as unknown[] | undefined)?.[0]
 
 /** Un bloque con el corte de caché explícito. */
 export const cacheMarked = (type: "text" | "input_text", text: unknown = expect.any(String)) => ({ type, text, prompt_cache_breakpoint: { mode: "explicit" } })

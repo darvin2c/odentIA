@@ -7,12 +7,13 @@
 import { type AgentConfig, type HelpTopic, helpAreaQuestion, helpDataQuestion, helpAreas, helpJoinQuestion, helpOptions, helpQuestion, helpWriteInstructions, type OrgLocale } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { agentTextsFor, argosCatalogText, argosFiguresText, compileArgosFigure } from "@odentia/services"
+import { agentTextsFor, argosCatalogText, argosFiguresText, compileArgosFigure, formQuestionsOf, productHooksFor } from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { argosRouteQuestion, argosRules, argosSchemas, figureWords } from "./argos"
 import { knowledgeQuestion } from "./decision/knowledge"
 import { triageQuestions } from "./decision/points"
-import { extraction, systemPrompt } from "./dental/dictation"
+import { DENTAL_DICTATION_PROFILE, extraction, systemPrompt } from "./dental/dictation"
+import { dictationMessages } from "./dictation"
 import { receptionPrompt } from "./graph"
 import { type AgentToolCtx, makeAgentTools } from "./tools"
 
@@ -106,6 +107,34 @@ describe("prompts de odentIA, iguales a los de antes", () => {
       golden("clio.txt"),
     )
     await expect(json(z.toJSONSchema(extraction))).toMatchFileSnapshot(golden("clio-esquema.json"))
+  })
+
+  it("Clío en una pausa con una ficha empezada: el mensaje de la pausa y sus cortes de caché", async () => {
+    const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-de-ortodoncia")
+    const forms = formQuestionsOf([{ id: "orto", title: form?.title ?? null, snapshot: form?.schema, answers: { overjet: 6 } }])
+    const [, ...pause] = dictationMessages(
+      {
+        provider: "openai",
+        services: ["Resina compuesta", "Endodoncia"],
+        diagnosisList: "CIE-10",
+        catalog: dictationFindingsText(),
+        zone,
+        now: new Date("2026-11-16T15:00:00Z"),
+        transcript: "Overbite de dos.",
+        context: "Overjet de seis milímetros.",
+        pending: [{ label: "Fichas · Overjet: 6 mm" }],
+        forms,
+      },
+      DENTAL_DICTATION_PROFILE,
+      false,
+    )
+    // Cada mensaje después del de sistema tal como llega al proveedor; tras un bloque con corte, la marca: lo de antes se lee de la caché.
+    const shown = pause.map((message) =>
+      typeof message.content === "string"
+        ? message.content
+        : (message.content as Array<{ text: string; prompt_cache_breakpoint?: unknown }>).map((block) => `${block.text}${block.prompt_cache_breakpoint ? "\n⟦corte de caché⟧" : ""}`).join(""),
+    )
+    await expect(shown.join("\n⟦otro mensaje⟧\n")).toMatchFileSnapshot(golden("clio-pausa-con-ficha.txt"))
   })
 })
 
