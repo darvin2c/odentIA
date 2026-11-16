@@ -722,6 +722,44 @@ describe("«Datos recibidos» y lo que se borró sin cargar", () => {
       source: "respaldo",
     })
   })
+
+  it("mientras falta, ofrece lo que llegó por correo o por un chat en 30 días y nadie marcó (solo a Administración)", async () => {
+    const { clientId } = await clinic("files-candidatos")
+    const attachment = (filename: string, source: string, receivedAt: Date, deletedAt?: Date) =>
+      ownerDb.insert(saasClientFile).values({
+        clientId,
+        kind: "correo",
+        filename,
+        objectKey: `inbound/${crypto.randomUUID()}.csv`,
+        contentType: "text/csv",
+        sizeBytes: 1,
+        source,
+        receivedAt,
+        createdAt: receivedAt,
+        ...(deletedAt ? { deletedAt } : {}),
+      })
+    await attachment("pacientes.csv", "correo", ago(3))
+    await attachment("agenda.xlsx", "whatsapp", ago(1))
+    await attachment("viejo.csv", "correo", ago(40))
+    await attachment("borrado.csv", "messenger", ago(2), ago(1))
+
+    const step = stepOf(await onboardingSteps(ownerDb, admin, clientId, NOW), "archivos")
+    expect(step.state).toBe("falta")
+    expect(step.candidates?.map((c) => [c.filename, c.via])).toEqual([
+      ["agenda.xlsx", "whatsapp"],
+      ["pacientes.csv", "correo"],
+    ])
+    expect(step.candidates?.[1]).toMatchObject({ receivedAt: ago(3), cargaDueNow: false })
+    // Soporte no marca la carga ni ve esos archivos.
+    expect(
+      stepOf(await onboardingSteps(ownerDb, support, clientId, NOW), "archivos"),
+    ).not.toHaveProperty("candidates")
+    // Marcada la carga, el paso está hecho y ya no ofrece nada.
+    await archivoClinica(clientId, { receivedAt: ago(3), deleteAfter: dayAgo(-27) })
+    const done = stepOf(await onboardingSteps(ownerDb, admin, clientId, NOW), "archivos")
+    expect(done.state).toBe("hecho")
+    expect(done).not.toHaveProperty("candidates")
+  })
 })
 
 describe("«No aplica»", () => {

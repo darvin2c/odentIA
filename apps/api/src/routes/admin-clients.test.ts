@@ -337,6 +337,14 @@ describe("clientes", () => {
     expect((await call("GET", `/${clientId}/timeline?filter=todo&limit=20`, SUPPORT)).status).toBe(
       200,
     )
+    // Las vistas por fase y los nombres de antes, que llegan en enlaces guardados (ADR 0196).
+    for (const view of ["en_alta", "activos", "con_cuenta"])
+      await expectStatus(await call("GET", `/?view=${view}`, SUPPORT), 200)
+    await expectStatus(await call("GET", "/?view=cuentas", SUPPORT), 400)
+    for (const filter of ["conversaciones", "alta", "plan", "contactos", "cuenta"])
+      await expectStatus(await call("GET", `/${clientId}/timeline?filter=${filter}`, ADMIN), 200)
+    const detail = (await json(await call("GET", `/${clientId}`, ADMIN))).data
+    expect(detail).toMatchObject({ phase: "por_vender", alta: null, openSupportCases: 0 })
     expect((await call("GET", `/${clientId}/contacts`, SUPPORT)).status).toBe(200)
     expect((await call("GET", `/${clientId}/onboarding`, SUPPORT)).status).toBe(200)
     expect((await call("GET", "/tasks?who=todas", SUPPORT)).status).toBe(200)
@@ -896,6 +904,48 @@ describe("documentos", () => {
 
     expect((await call("DELETE", `/files/${file.id}`, ADMIN)).status).toBe(200)
     expect(objects.has(row?.objectKey ?? "")).toBe(false)
+  })
+
+  it("se ve sin descargar: imagen por enlace de 5 minutos, PDF por la API y aislado; lo demás no", async () => {
+    const clientId = await newClient("Clínica Vista (ficticia)", "vista@andes.test")
+    const uploaded = await call(
+      "POST",
+      `/${clientId}/files`,
+      ADMIN,
+      form(pdfBytes, "application/pdf"),
+    )
+    await expectStatus(uploaded, 201)
+    const pdf = (await json(uploaded)).data
+    const csv = new FormData()
+    csv.set("file", new File(["nombre\nRosa\n"], "lista.csv", { type: "text/csv" }))
+    const sheet = (await json(await call("POST", `/${clientId}/files`, ADMIN, csv))).data
+
+    const preview = await call("GET", `/files/${pdf.id}/preview`, ADMIN)
+    await expectStatus(preview, 302)
+    expect(preview.headers.get("location")).toContain(`clients/${clientId}/`)
+    const content = await call("GET", `/files/${pdf.id}/content`, ADMIN)
+    await expectStatus(content, 200)
+    expect(content.headers.get("content-type")).toBe("application/pdf")
+    expect(content.headers.get("content-disposition")).toMatch(/^inline; filename\*=UTF-8''/)
+    expect(content.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(content.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
+    expect(content.headers.get("cache-control")).toBe("private, max-age=300")
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(pdfBytes)
+    // Un CSV no tiene vista: se descarga.
+    await expectStatus(await call("GET", `/files/${sheet.id}/preview`, ADMIN), 409)
+    await expectStatus(await call("GET", `/files/${sheet.id}/content`, ADMIN), 409)
+    // Lo de Administración no existe para Soporte, tampoco para verlo.
+    await expectStatus(await call("GET", `/files/${pdf.id}/content`, SUPPORT), 404)
+    await expectStatus(await call("GET", `/files/${pdf.id}/preview`, SUPPORT), 404)
+    // Lo que dice ser un PDF y no lo es, no sale.
+    const [row] = await ownerDb.select().from(saasClientFile).where(eq(saasClientFile.id, pdf.id))
+    objects.set(row?.objectKey ?? "", new TextEncoder().encode("<html>no</html>"))
+    await expectStatus(await call("GET", `/files/${pdf.id}/content`, ADMIN), 409)
+
+    // El informe de la carga: solo Administración y solo el que tiene su PDF guardado.
+    await expectStatus(await call("GET", `/${clientId}/reports/1/content`, SUPPORT), 403)
+    await expectStatus(await call("GET", `/${clientId}/reports/1/content`, ADMIN), 404)
+    await expectStatus(await call("GET", `/${clientId}/reports/cero/content`, ADMIN), 404)
   })
 
   it("acepta lo mismo que llega por correo y lo adjunta a una respuesta, que sale con él", async () => {

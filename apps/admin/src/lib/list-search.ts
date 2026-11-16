@@ -127,10 +127,15 @@ export function rememberedWaitlistFilters(): WaitlistFilters {
  * Las mismas reglas: cada clave va siempre, con `undefined` si su valor no sirve.
  */
 
-/** Las vistas de la lista, como las cuenta el servidor (`CLIENT_VIEWS`). Sin vista: «Por vender». */
+/**
+ * Las vistas de la lista, por fase, como las cuenta el servidor (`CLIENT_VIEWS`, ADR 0196). Sin
+ * vista: «Por vender». «Con cuenta» se partió en «En alta» y «Activos»: un enlace guardado con
+ * `?vista=con_cuenta` abre «En alta».
+ */
 export const CLIENT_LIST_VIEWS = [
   "por_vender",
-  "con_cuenta",
+  "en_alta",
+  "activos",
   "no_por_ahora",
   "perdidos",
   "todos",
@@ -179,7 +184,7 @@ const personKey = (value: unknown): string | undefined =>
   typeof value === "string" && /^[\w-]{1,120}$/.test(value) ? value : undefined
 
 export function clientsSearchOf(search: Record<string, unknown>): ClientsSearch {
-  const vista = oneOf(CLIENT_LIST_VIEWS, search.vista)
+  const vista = search.vista === "con_cuenta" ? "en_alta" : oneOf(CLIENT_LIST_VIEWS, search.vista)
   return {
     vista: vista === "por_vender" ? undefined : vista,
     producto: isClinicalProduct(search.producto) ? search.producto : undefined,
@@ -218,9 +223,14 @@ export function rememberedClientsSearch(): ClientsSearch {
   }
 }
 
-/** Las pestañas de la ficha de un cliente, en su orden. */
+/**
+ * Lo que puede pedir la dirección de la ficha (`?tab=`). Cuáles se muestran y en qué orden lo
+ * decide la fase (`clientTabsFor`); `contactos` abre el Resumen con sus personas al lado y
+ * `soporte`, la pestaña aunque no tenga casos abiertos (hay enlaces guardados con ellas).
+ */
 export const CLIENT_TABS = [
   "resumen",
+  "conversaciones",
   "historial",
   "contactos",
   "venta",
@@ -231,8 +241,15 @@ export const CLIENT_TABS = [
   "documentos",
 ] as const
 export type ClientTab = (typeof CLIENT_TABS)[number]
-/** Los filtros del historial (`TIMELINE_FILTERS`). Sin filtro: «Todo». */
-export const CLIENT_HISTORY_FILTERS = ["todo", "contactos", "venta", "cuenta", "soporte"] as const
+/** Los filtros del historial (`TIMELINE_FILTERS`, por lo que pasó). Sin filtro: «Todo». */
+export const CLIENT_HISTORY_FILTERS = [
+  "todo",
+  "conversaciones",
+  "venta",
+  "alta",
+  "plan",
+  "soporte",
+] as const
 export type ClientHistoryFilter = (typeof CLIENT_HISTORY_FILTERS)[number]
 
 export interface ClientSearch {
@@ -243,7 +260,11 @@ export interface ClientSearch {
 
 export function clientSearchOf(search: Record<string, unknown>): ClientSearch {
   const tab = oneOf(CLIENT_TABS, search.tab)
-  const historial = oneOf(CLIENT_HISTORY_FILTERS, search.historial)
+  // Los nombres de antes: «Contactos» es Conversaciones; «Cuenta y pagos» se partió y abre Todo.
+  const historial =
+    search.historial === "contactos"
+      ? "conversaciones"
+      : oneOf(CLIENT_HISTORY_FILTERS, search.historial)
   return {
     tab: tab === "resumen" ? undefined : tab,
     historial: historial === "todo" ? undefined : historial,
@@ -256,13 +277,15 @@ export function clientSearchOf(search: Record<string, unknown>): ClientSearch {
  */
 export function clientsSearchFromWaitlist(search: WaitlistSearch): ClientsSearch {
   const vista: ClientListView | undefined =
-    search.etapa === "entro" || search.etapa === "paga"
-      ? "con_cuenta"
-      : search.etapa === "descartada"
-        ? "perdidos"
-        : search.etapa === "todas"
-          ? "todos"
-          : undefined
+    search.etapa === "entro"
+      ? "en_alta"
+      : search.etapa === "paga"
+        ? "activos"
+        : search.etapa === "descartada"
+          ? "perdidos"
+          : search.etapa === "todas"
+            ? "todos"
+            : undefined
   return clientsSearchOf({ vista, producto: search.producto, q: search.q })
 }
 

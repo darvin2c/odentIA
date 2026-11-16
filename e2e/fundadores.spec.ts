@@ -166,9 +166,9 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / DAY)).toBe(90)
   expect(sub?.guaranteedUntil).not.toBeNull()
 
-  // «Entró» de antes es «Con cuenta» en Clientes: el mismo cliente, ahora con su cuenta.
+  // «Entró» de antes es «En alta» en Clientes (ADR 0196): el mismo cliente, ahora con su cuenta.
   await gotoHydrated(page, hostUrl("admin", `/waitlist?etapa=entro&q=${tag}`))
-  await expect(page).toHaveURL(/vista=con_cuenta/)
+  await expect(page).toHaveURL(/vista=en_alta/)
   await expect(page.getByRole("row").filter({ hasText: `Clínica Sonrisa ${tag}` })).toBeVisible()
   await shot(page, "lista-entraron")
 })
@@ -187,9 +187,9 @@ test("precio negociado: vence, se marca en Hoy, se renueva en su ficha y se avis
     .set({ planId, discountBps: 1000, discountEndsAt: new Date(Date.now() + 6 * DAY - 60_000) })
     .where(eq(saasSubscription.organizationId, org.id))
 
-  // Su cuenta es un cliente (lo liga Kairós): en Clientes, «Con cuenta», con su búsqueda.
+  // Su cuenta es un cliente (lo liga Kairós): en Clientes, en «Todos» con su búsqueda.
   await accountClient(fixtureDb, { org, product: "dental" })
-  await gotoHydrated(page, hostUrl("admin", `/clients?vista=con_cuenta&q=${encodeURIComponent(org.name)}`))
+  await gotoHydrated(page, hostUrl("admin", `/clients?vista=todos&q=${encodeURIComponent(org.name)}`))
   await expect(page.getByRole("row").filter({ hasText: org.name })).toBeVisible()
 
   // En Hoy el precio negociado se marca con su vencimiento y lleva a renovarlo en su ficha.

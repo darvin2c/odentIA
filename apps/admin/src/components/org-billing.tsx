@@ -118,6 +118,8 @@ interface BillingTerms {
   notices: Array<{ kind: string; sentAt: string | null }>
   /** «Pasar a Fundadores»: lo que tendría si pasa ahora; null si no puede (ADR 0192). */
   founders?: FoundersMove | null
+  /** «Cambios del plan»: de las dos auditorías, del más nuevo al más viejo (ADR 0196). */
+  changes?: Array<{ id: string; at: string; action: string; words: string; by: { userId: string; name: string } | null }>
 }
 
 interface FoundersMove {
@@ -226,6 +228,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     <div className="flex flex-col gap-4">
       <h2 className="text-base font-medium">Precio y prueba</h2>
       <PlanSummary data={data} halfWords={halfWords} />
+      <PlanChanges changes={data.changes ?? []} />
 
       {data.founders ? (
         <FoundersMoveSection
@@ -307,88 +310,175 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
   )
 }
 
+/** El estado del plan en palabras, cuando no es el de siempre (en prueba o activo). */
+const STATUS_WORDS: Record<string, string> = {
+  gracia: "En gracia",
+  restringida: "Restringida: la clínica solo puede leer",
+  pausada: "Pausada",
+  cancelada: "Cancelada",
+}
+
 /**
- * El plan que rige y, si cambia solo (una Fundadora al terminar sus condiciones), a cuál y
- * desde cuándo, en una línea; los precios de los dos se despliegan. Debajo, la prueba, el
- * vendedor y cómo se factura.
+ * Lo que rige hoy y lo que viene, en filas (ADR 0196): «Hoy rige» (el plan, su cuota y su
+ * crédito del mes, y hasta cuándo si termina), «Después» (el plan que sigue, su cuota y desde
+ * cuándo), «Prueba» (el día que va, cuándo termina y el regalo que le queda) y «Cobro» (cada cuánto
+ * se factura y quién vende). El precio de cada acción, en «Ver los precios de cada acción».
  */
 function PlanSummary({ data, halfWords }: { data: BillingTerms; halfWords: string }) {
   const { plan, next } = data
-  const status =
+  const ends = next?.startsAt ?? data.guaranteedUntil
+  const trialDay =
     data.status === "prueba" && data.trial.startedAt
-      ? `En prueba · día ${Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))} de ${data.trial.days}${data.trial.endsAt ? `, hasta el ${shortDay(data.trial.endsAt)}` : ""}`
-      : `Estado: ${data.status}`
-  const facts = `${status}${data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura ${data.billingCycle === "quincenal" ? halfWords : "cada mes"}`
-  if (!plan) return <p className="text-sm text-muted-foreground">{facts}</p>
-  const rows = PRICE_ROWS.filter((row) => (plan.prices?.[row.key] ?? null) !== null || (next?.prices[row.key] ?? null) !== null)
+      ? Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))
+      : null
+  const gift =
+    data.status === "prueba" && data.consumption.period.credit === "prueba" && data.consumption.creditCents > 0
+      ? {
+          left: Math.max(0, data.consumption.creditCents - data.consumption.subtotalCents),
+          total: data.consumption.creditCents,
+          currency: data.consumption.currency ?? plan?.currency ?? "USD",
+        }
+      : null
+  const rows = plan
+    ? PRICE_ROWS.filter((row) => (plan.prices?.[row.key] ?? null) !== null || (next?.prices[row.key] ?? null) !== null)
+    : []
   const cell = "py-1 text-right tabular-nums"
+  const line = "grid gap-0.5 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-3"
+  const label = "text-xs font-medium text-muted-foreground sm:pt-0.5"
   return (
-    <Collapsible className="flex flex-col gap-3 rounded-lg border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <p className="text-sm">
-            Plan activo: <span className="font-medium">{plan.name}</span>
-            {/* «Hasta el … después»: lo mismo que se le dice a la clínica, y el cambio ocurre ese día. */}
-            {next ? (
+    <Collapsible className="flex flex-col gap-2 rounded-lg border p-3">
+      <dl className="flex flex-col divide-y text-sm">
+        <div className={line}>
+          <dt className={label}>Hoy rige</dt>
+          <dd className="min-w-0 [overflow-wrap:anywhere]">
+            {plan ? (
               <>
-                {" "}
-                hasta el {shortDay(next.startsAt)} · después pasa al <span className="font-medium">{next.name}</span>
+                <span className="font-medium">{plan.name}</span> · {moneyText(plan.priceCents, plan.currency)} al mes ·{" "}
+                {moneyText(plan.creditCents, plan.currency)} de crédito al mes
+                {/* «Hasta el … después»: lo mismo que se le dice a la clínica, y el cambio ocurre ese día. */}
+                {ends ? <> · hasta el {shortDay(ends)}</> : null}
+                {data.guaranteedUntil && !next ? <span className="text-muted-foreground"> (condiciones de Fundadora)</span> : null}
               </>
-            ) : data.guaranteedUntil ? (
-              <> · condiciones de Fundadora hasta el {shortDay(data.guaranteedUntil)}</>
-            ) : null}
-          </p>
-          <p className="text-xs text-muted-foreground">{facts}</p>
+            ) : (
+              <span className="text-muted-foreground">Sin un plan con precios por acción</span>
+            )}
+            {STATUS_WORDS[data.status] ? <span className="block text-muted-foreground">{STATUS_WORDS[data.status]}</span> : null}
+          </dd>
         </div>
-        <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="group shrink-0" />}>
-          Ver detalles
-          <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]:rotate-180" />
-        </CollapsibleTrigger>
-      </div>
-      <CollapsibleContent>
-        <table className="w-full max-w-2xl text-sm">
-          <caption className="sr-only">{next ? `Precios de ${plan.name} y de ${next.name}` : `Precios de ${plan.name}`}</caption>
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th scope="col" className="py-1 font-medium">
-                Concepto
-              </th>
-              <th scope="col" className="py-1 text-right font-medium">
-                {next ? `${plan.name} (hasta el ${shortDay(next.startsAt)})` : plan.name}
-              </th>
-              {next ? (
-                <th scope="col" className="py-1 text-right font-medium">
-                  {next.name} (después)
-                </th>
-              ) : null}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="py-1">Cuota del mes</td>
-              <td className={cell}>{moneyText(plan.priceCents, plan.currency)}</td>
-              {next ? <td className={cell}>{moneyText(next.priceCents, next.currency)}</td> : null}
-            </tr>
-            <tr>
-              <td className="py-1">Crédito del mes</td>
-              <td className={cell}>{moneyText(plan.creditCents, plan.currency)}</td>
-              {next ? <td className={cell}>{moneyText(next.creditCents, next.currency)}</td> : null}
-            </tr>
-            {rows.map((row) => {
-              const today = plan.prices?.[row.key] ?? null
-              const later = next?.prices[row.key] ?? null
-              return (
-                <tr key={row.key}>
-                  <td className="py-1">{row.label}</td>
-                  <td className={cell}>{today === null ? "—" : priceText(today, plan.currency)}</td>
-                  {next ? <td className={cell}>{later === null ? "—" : priceText(later, next.currency)}</td> : null}
+        {next ? (
+          <div className={line}>
+            <dt className={label}>Después</dt>
+            <dd className="min-w-0 [overflow-wrap:anywhere]">
+              <span className="font-medium">{next.name}</span> · {moneyText(next.priceCents, next.currency)} al mes ·{" "}
+              {moneyText(next.creditCents, next.currency)} de crédito · desde el {shortDay(next.startsAt)}
+            </dd>
+          </div>
+        ) : null}
+        {trialDay !== null ? (
+          <div className={line}>
+            <dt className={label}>Prueba</dt>
+            <dd className="min-w-0 [overflow-wrap:anywhere]">
+              Día {Math.min(trialDay, data.trial.days || trialDay)} de {data.trial.days}
+              {data.trial.endsAt ? ` · termina el ${shortDay(data.trial.endsAt)}` : ""}
+              {gift ? ` · le quedan ${moneyText(gift.left, gift.currency)} de ${moneyText(gift.total, gift.currency)} de regalo` : ""}
+            </dd>
+          </div>
+        ) : null}
+        <div className={line}>
+          <dt className={label}>Cobro</dt>
+          <dd className="min-w-0 [overflow-wrap:anywhere]">
+            Lo que pasa del crédito se factura {data.billingCycle === "quincenal" ? halfWords : "al cerrar el mes"} ·{" "}
+            {data.seller ? `vende ${data.seller.name}` : "sin vendedor"}
+          </dd>
+        </div>
+      </dl>
+      {plan && rows.length ? (
+        <>
+          <div>
+            <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="group" />}>
+              Ver los precios de cada acción
+              <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]:rotate-180" />
+            </CollapsibleTrigger>
+          </div>
+          <CollapsibleContent>
+            <table className="w-full max-w-2xl text-sm">
+              <caption className="sr-only">{next ? `Precios de ${plan.name} y de ${next.name}` : `Precios de ${plan.name}`}</caption>
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th scope="col" className="py-1 font-medium">
+                    Concepto
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    {next ? `${plan.name} (hasta el ${shortDay(next.startsAt)})` : plan.name}
+                  </th>
+                  {next ? (
+                    <th scope="col" className="py-1 text-right font-medium">
+                      {next.name} (después)
+                    </th>
+                  ) : null}
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </CollapsibleContent>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const today = plan.prices?.[row.key] ?? null
+                  const later = next?.prices[row.key] ?? null
+                  return (
+                    <tr key={row.key}>
+                      <td className="py-1">{row.label}</td>
+                      <td className={cell}>{today === null ? "—" : priceText(today, plan.currency)}</td>
+                      {next ? <td className={cell}>{later === null ? "—" : priceText(later, next.currency)}</td> : null}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </CollapsibleContent>
+        </>
+      ) : null}
     </Collapsible>
+  )
+}
+
+/** Cuántos cambios se ven de entrada; «Ver todos» muestra el resto. */
+const CHANGES_SHOWN = 6
+
+/**
+ * «Cambios del plan»: una línea por cambio (el día, qué cambió y quién), del más nuevo al más viejo,
+ * de las dos auditorías (`listSaasPlanChanges`). Lo que hizo el sistema dice «Sistema».
+ */
+function PlanChanges({ changes }: { changes: NonNullable<BillingTerms["changes"]> }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? changes : changes.slice(0, CHANGES_SHOWN)
+  return (
+    <section aria-labelledby="plan-cambios" className="flex flex-col gap-1">
+      <h3 id="plan-cambios" className="text-sm font-medium">
+        Cambios del plan
+      </h3>
+      {changes.length ? (
+        <>
+          <ul className="flex flex-col divide-y text-sm">
+            {shown.map((change) => (
+              <li key={change.id} className="flex flex-wrap gap-x-2 gap-y-0.5 py-1.5">
+                <time dateTime={change.at} className="w-20 shrink-0 text-muted-foreground tabular-nums">
+                  {shortDay(change.at)}
+                </time>
+                <span className="min-w-0 flex-1 basis-48 [overflow-wrap:anywhere]">{change.words}</span>
+                <span className="text-muted-foreground">{change.by?.name ?? "Sistema"}</span>
+              </li>
+            ))}
+          </ul>
+          {changes.length > CHANGES_SHOWN ? (
+            <div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setAll((current) => !current)}>
+                {all ? "Ver menos" : `Ver todos (${changes.length})`}
+              </Button>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">Todavía no cambió nada de su plan.</p>
+      )}
+    </section>
   )
 }
 

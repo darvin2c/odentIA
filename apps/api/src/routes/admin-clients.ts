@@ -38,13 +38,15 @@ import {
   archiveClient,
   assignInboundEmail,
   CLIENT_STAGES,
-  CLIENT_VIEWS,
+  CLIENT_VIEW_INPUTS,
   ClientDuplicateError,
   cancelClientTask,
   clearDueCargaNow,
   clearStepNotApplicable,
   clientCreateSchema,
+  clientFileContent,
   clientFileKey,
+  clientFilePreviewUrl,
   clientFileUrl,
   clientPatchSchema,
   clientTimeline,
@@ -72,6 +74,7 @@ import {
   listClientFiles,
   listClients,
   listClientTasks,
+  listProgressReports,
   listSaasProposals,
   markClientFileCarga,
   markInvitationSent,
@@ -96,13 +99,14 @@ import {
   registerClientFile,
   reopenClientOpportunity,
   resolveOutreach,
+  rfc5987,
   ServiceError,
   type Storage,
   schedulePresentation,
   setOpportunity,
   setPrimaryClientContact,
   settleKairosOutreach,
-  TIMELINE_FILTERS,
+  TIMELINE_FILTER_INPUTS,
   updateClient,
   updateClientContact,
   writeAdminAudit,
@@ -175,7 +179,8 @@ const optionalText = (max: number) =>
   z.string().trim().max(max, `Usa como máximo ${max} caracteres`).nullable().optional()
 
 const listQuery = z.strictObject({
-  view: z.enum(CLIENT_VIEWS, "Elige una vista").optional(),
+  // «con_cuenta» llega de una pantalla de antes o de un enlace guardado: el servicio abre «En alta».
+  view: z.enum(CLIENT_VIEW_INPUTS, "Elige una vista").optional(),
   product: z.enum(CLINICAL_PRODUCTS, "Elige un producto").optional(),
   owner: z.string().trim().min(1).max(120, "Elige un responsable").optional(),
   origin: z.enum(SAAS_CLIENT_ORIGINS, "Elige cómo llegó").optional(),
@@ -188,7 +193,8 @@ const listQuery = z.strictObject({
 const pipelineQuery = listQuery.pick({ product: true, owner: true, origin: true })
 
 const timelineQuery = z.strictObject({
-  filter: z.enum(TIMELINE_FILTERS, "Elige qué mostrar").optional(),
+  // Con los nombres de antes («contactos», «cuenta»): los traen enlaces guardados.
+  filter: z.enum(TIMELINE_FILTER_INPUTS, "Elige qué mostrar").optional(),
   before: instant("desde cuándo").optional(),
   limit: z.coerce.number().int().min(1).max(100, "Pide como mucho 100").optional(),
 })
@@ -476,6 +482,80 @@ const bodyOf = (c: Context) => c.req.json().catch(() => null)
 const at = (value: string | null | undefined) =>
   value ? new Date(value) : value === null ? null : undefined
 
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d] // «%PDF-»
+const isPdfHead = (bytes: Uint8Array) => PDF_MAGIC.every((byte, index) => bytes[index] === byte)
+
+/**
+ * El cuerpo de un PDF del almacenamiento, si de verdad es un PDF: con flujo, lee lo justo para
+ * mirar su comienzo y sigue sin cargarlo entero; sin él, lo lee (los dobles de prueba). Null si
+ * no empieza como un PDF.
+ */
+async function pdfBody(
+  storage: Storage,
+  objectKey: string,
+): Promise<ReadableStream<Uint8Array> | Uint8Array | null> {
+  if (storage.streamAttachment) {
+    const reader = (await storage.streamAttachment(objectKey)).getReader()
+    const parts: Uint8Array[] = []
+    let size = 0
+    while (size < PDF_MAGIC.length) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+      size += value.byteLength
+    }
+    const head = new Uint8Array(size)
+    let at = 0
+    for (const part of parts) {
+      head.set(part, at)
+      at += part.byteLength
+    }
+    if (!isPdfHead(head)) {
+      await reader.cancel().catch(() => {})
+      return null
+    }
+    return new ReadableStream<Uint8Array>({
+      start: (controller) => controller.enqueue(head),
+      pull: async (controller) => {
+        const { done, value } = await reader.read()
+        if (done) controller.close()
+        else controller.enqueue(value)
+      },
+      cancel: (reason) => reader.cancel(reason),
+    })
+  }
+  if (!storage.getAttachment)
+    throw new ServiceError(
+      "STORAGE_UNAVAILABLE",
+      503,
+      "No se pudo leer el archivo. Inténtalo de nuevo.",
+    )
+  const bytes = await storage.getAttachment(objectKey)
+  return isPdfHead(bytes) ? bytes : null
+}
+
+/**
+ * Un PDF para verse dentro de la ficha (pdf.js lo dibuja): `inline`, sin que el navegador adivine
+ * otro tipo y, si alguien lo abriera como página, aislado y sin poder cargar nada. Se guarda en el
+ * navegador de quien mira 5 minutos, lo que dura la vista.
+ */
+async function pdfResponse(c: Context, storage: Storage, objectKey: string, filename: string) {
+  const body = await pdfBody(storage, objectKey)
+  if (!body)
+    throw new ServiceError(
+      "PREVIEW_UNSUPPORTED",
+      409,
+      "Este archivo no se puede ver aquí: descárgalo para abrirlo",
+    )
+  c.header("Content-Type", "application/pdf")
+  c.header("Content-Disposition", `inline; filename*=UTF-8''${rfc5987(filename)}`)
+  c.header("X-Content-Type-Options", "nosniff")
+  c.header("Content-Security-Policy", "sandbox; default-src 'none'")
+  // Reemplaza el `no-store` de toda la administración: la vista pide sus páginas al pasar.
+  c.header("Cache-Control", "private, max-age=300")
+  return c.body(body instanceof Uint8Array ? body.slice() : body, 200)
+}
+
 /** «domingo 1 de noviembre», en UTC: el instante exacto lo dice el enlace. */
 function dayText(date: Date): string {
   return new Intl.DateTimeFormat("es", {
@@ -500,6 +580,8 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     runService(c, status, () => fn(staffOf(c)))
   const adminRun = <T>(c: Context, status: 200 | 201, fn: (actor: AdminActor) => Promise<T>) =>
     runService(c, status, () => fn(adminOf(c)))
+  // Lo mismo en la ficha y en Alta: sin «Conectar con Facebook», WhatsApp dice «Espera a Meta».
+  const onboardingOptions = { metaSignupAvailable: deps.metaSignupAvailable ?? false }
 
   /* ----- Tareas y embudo ----- */
 
@@ -707,6 +789,38 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     }
   })
 
+  /**
+   * Ver una imagen o un PDF sin descargarlo (ADR 0196): 302 a una dirección firmada de 5 minutos
+   * que el almacenamiento sirve para verse, con el tipo que se revisó al recibirlo. Lo demás
+   * responde 409 y se descarga. El mismo permiso que descargar y su constancia, una vez al día.
+   */
+  app.get("/files/:fileId/preview", async (c) => {
+    try {
+      const actor = staffOf(c)
+      const { url } = await owner((tx) =>
+        clientFilePreviewUrl(tx, actor, deps.storage, c.req.param("fileId")),
+      )
+      return c.redirect(url, 302)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
+  /**
+   * Los bytes de un PDF (hasta 10 MB) para dibujarlo en la ficha con pdf.js: el almacenamiento no
+   * responde al navegador de la administración. Nunca se abre como página: va con `sandbox` y sin
+   * poder cargar nada, y solo sale lo que empieza como un PDF.
+   */
+  app.get("/files/:fileId/content", async (c) => {
+    try {
+      const actor = staffOf(c)
+      const file = await owner((tx) => clientFileContent(tx, actor, c.req.param("fileId")))
+      return await pdfResponse(c, deps.storage, file.objectKey, file.filename)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
   /** Borrar es de Administración; el objeto se borra después del commit. */
   app.delete("/files/:fileId", (c) =>
     adminRun(c, 200, async (actor) => {
@@ -815,7 +929,9 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   })
 
   app.get(`/${ID}`, (c) =>
-    staffRun(c, 200, (actor) => owner((tx) => getClient(tx, actor, c.req.param("id")))),
+    staffRun(c, 200, (actor) =>
+      owner((tx) => getClient(tx, actor, c.req.param("id"), new Date(), onboardingOptions)),
+    ),
   )
 
   app.patch(`/${ID}`, async (c) => {
@@ -1313,7 +1429,6 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
 
   /* ----- Alta, documentos, borradores ----- */
 
-  const onboardingOptions = { metaSignupAvailable: deps.metaSignupAvailable ?? false }
   app.get(`/${ID}/onboarding`, (c) =>
     staffRun(c, 200, (actor) =>
       owner((tx) => onboardingSteps(tx, actor, c.req.param("id"), new Date(), onboardingOptions)),
@@ -1354,6 +1469,37 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   app.get(`/${ID}/files`, (c) =>
     staffRun(c, 200, (actor) => owner((tx) => listClientFiles(tx, actor, c.req.param("id")))),
   )
+
+  /**
+   * El PDF de un informe de la carga tal como salió, para verlo en el historial y en Documentos
+   * (solo Administración, como el registro de la carga). Del mismo registro que lee Alta.
+   */
+  app.get(`/${ID}/reports/:number/content`, async (c) => {
+    try {
+      adminOf(c)
+      const number = Number(c.req.param("number"))
+      if (!Number.isInteger(number) || number < 1)
+        throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
+      const pdfKey = await owner(async (tx) => {
+        const [client] = await tx
+          .select({ organizationId: saasClient.organizationId })
+          .from(saasClient)
+          .where(eq(saasClient.id, c.req.param("id")))
+          .limit(1)
+        if (!client) throw new ServiceError("NOT_FOUND", 404, "Cliente no encontrado")
+        const reports = client.organizationId
+          ? await listProgressReports(tx, client.organizationId)
+          : []
+        const found = reports.find((report) => report.number === number)
+        if (!found?.pdfKey)
+          throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+        return found.pdfKey
+      })
+      return await pdfResponse(c, deps.storage, pdfKey, `informe-${number}.pdf`)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
 
   /**
    * Subir un documento (multipart `file`, `kind`, `adminOnly`): el tipo real se
