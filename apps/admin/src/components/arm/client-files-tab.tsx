@@ -1,17 +1,15 @@
 /**
- * Ficha del cliente › Documentos (ARM, ADR 0185): lo que le mandamos (carta,
- * propuestas, presentaciones) y lo que nos mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
- * que se borra. Lo que manda la clínica es solo de Administración; se borra a
- * los 30 días de llegar solo lo que Administración dice que es la carga de
- * datos (lo promete el contrato de encargo): lo que se sube como «Lo que mandó
- * la clínica» o el adjunto marcado con «Es la carga de datos» (`useMarkCarga`,
- * también en el correo). Lo demás se guarda. Soporte no ve lo que es solo de
- * Administración y la API tampoco se lo da. Borrar y marcar la carga es de
- * Administración.
+ * Ficha del cliente › Documentos (ARM, ADR 0185 y 0196): lo que llegó de la clínica (por correo,
+ * por un chat o subido como lo que mandó) y lo que salió de nosotros (carta, propuestas,
+ * presentaciones, otros y, para Administración, los informes de la carga), en miniaturas
+ * alineadas: la imagen, la primera página del PDF o su ícono. Cada uno se abre en el visor
+ * (`file-viewer.tsx`), nunca como página dentro de la administración; ahí van «Descargar», «Es la
+ * carga de datos» y «Borrar». Lo que manda la clínica es solo de Administración; se borra a los 30
+ * días de llegar solo lo que Administración dice que es la carga de datos (lo promete el contrato
+ * de encargo). Soporte no ve lo que es solo de Administración y la API tampoco se lo da.
  */
-import { Badge, Button, Input, toast } from "@odentia/ui"
+import { Button, Input, toast } from "@odentia/ui"
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorState,
   FormDrawer,
@@ -21,195 +19,73 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Download, Upload } from "lucide-react"
-import { useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Upload } from "lucide-react"
+import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
-import { API_URL } from "../../lib/auth-client"
-import { limaDayWords } from "../../lib/invitation-words"
 import { supportDay } from "../../lib/support-words"
+import { type Report, useOrgLoadRecord } from "../org-load-record"
 import { ClientFilesSkeleton } from "../skeletons/client-account"
 import type { ClientTabProps } from "./account-tabs"
+import {
+  CLIENT_FILE_ACCEPT,
+  CLIENT_FILE_KINDS,
+  CLIENT_FILE_TYPES_HINT,
+  type ClientFile,
+  type ClientFileKind,
+  cameFromClinic,
+  clientReportContentPath,
+  deleteOnWords,
+  FILE_KIND_WORDS,
+  fileDay,
+  useClientFiles,
+  whoWords,
+} from "./client-file-model"
+import { InformeDrawer } from "./client-history-drawers"
 import { invalidateClient } from "./client-model"
+import { FileThumb, FileViewer, PdfThumb } from "./file-viewer"
 
-export const CLIENT_FILE_KINDS = [
-  "carta",
-  "propuesta",
-  "presentacion",
-  "archivo_clinica",
-  "correo",
-  "otro",
-] as const
-export type ClientFileKind = (typeof CLIENT_FILE_KINDS)[number]
-
-export const FILE_KIND_WORDS: Record<ClientFileKind, string> = {
-  carta: "Carta de bienvenida",
-  propuesta: "Propuesta",
-  presentacion: "Presentación",
-  archivo_clinica: "Lo que mandó la clínica",
-  correo: "Adjunto de un correo",
-  otro: "Otro",
-}
+// El modelo de los documentos vive en `client-file-model.tsx`; estos nombres se siguen leyendo de
+// aquí (el correo, los chats, Alta y las respuestas con archivos).
+export {
+  CLIENT_FILE_ACCEPT,
+  CLIENT_FILE_KINDS,
+  CLIENT_FILE_TYPES_HINT,
+  type CargaCandidate,
+  type ClientFile,
+  type ClientFileKind,
+  cargaConfirmWords,
+  cargaMarkedWords,
+  clientFileHref,
+  clientFilesKey,
+  deleteOnWords,
+  FILE_KIND_WORDS,
+  type MarkCargaResult,
+  markCargaResultSchema,
+  useClientFiles,
+  useMarkCarga,
+} from "./client-file-model"
 
 /** Lo que solo maneja Administración (lo que trae datos de la clínica); el servidor lo exige. */
 const ADMIN_KINDS: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica", "correo"])
 /** Lo de la carga que se sube a mano: solo de Administración y se borra a los 30 días. */
 const CLINIC_SENT: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica"])
 
-const fileSchema = z.object({
-  id: z.string(),
-  clientId: z.string(),
-  kind: z.enum(CLIENT_FILE_KINDS),
-  filename: z.string(),
-  contentType: z.string(),
-  sizeBytes: z.number(),
-  adminOnly: z.boolean(),
-  deleteAfter: z.string().nullable(),
-  source: z.enum(["persona", "kairos", "correo"]).nullable(),
-  createdAt: z.string(),
-  createdBy: z.object({ userId: z.string(), name: z.string() }).nullable(),
-  /** Cuándo llegó (la hora del correo si vino por correo). */
-  receivedAt: z.string().nullable().default(null),
-  cargaAt: z.string().nullable().default(null),
-  inboundEmailId: z.string().nullable().default(null),
-  /** En un adjunto: el día en que se borraría si se marca ahora como la carga (lo dice el servidor). */
-  cargaDeleteAfter: z.string().nullable().default(null),
-  /** Marcarlo ahora lo borra en el acto. */
-  cargaDueNow: z.boolean().default(false),
-})
-export type ClientFile = z.infer<typeof fileSchema>
+const GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
+const CARD =
+  "relative flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card transition-colors hover:bg-muted/40 focus-within:ring-3 focus-within:ring-ring/40"
+/** El nombre es el botón de la tarjeta: tocar cualquier parte la abre, y el teclado llega a él. */
+const CARD_BUTTON =
+  "line-clamp-2 text-left text-sm font-medium outline-none after:absolute after:inset-0 [overflow-wrap:anywhere]"
 
-const filesSchema = z.object({
-  items: z.array(fileSchema),
-  agreement: z
-    .object({ version: z.string(), acceptedAt: z.string(), acceptedBy: z.string().nullable() })
-    .nullable(),
-})
-
-export const clientFilesKey = (clientId: string) => ["admin", "client", clientId, "files"] as const
-
-/** Los documentos vigentes del cliente (los que quien mira puede ver). */
-export function useClientFiles(clientId: string, enabled = true) {
-  return useQuery({
-    queryKey: clientFilesKey(clientId),
-    enabled,
-    queryFn: async () =>
-      filesSchema.parse(await api<unknown>(`/api/admin/clients/${clientId}/files`)),
-  })
-}
-
-/** Lo que se puede subir: lo mismo que entra por correo (el servidor lo revisa por sus bytes). */
-export const CLIENT_FILE_ACCEPT =
-  "application/pdf,image/jpeg,image/png,image/webp,image/gif,.xlsx,.docx,.csv,text/csv"
-export const CLIENT_FILE_TYPES_HINT = "PDF, imagen, Excel, CSV o Word; hasta 10 MB"
-
-/** El enlace de descarga: la API responde con la dirección firmada de 15 minutos y deja auditoría. */
-export const clientFileHref = (fileId: string) => `${API_URL}/api/admin/clients/files/${fileId}`
-
-const sizeWords = (bytes: number) =>
-  bytes >= 1024 * 1024
-    ? `${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 }).format(bytes / (1024 * 1024))} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`
-
-/** Quién lo dejó, en palabras. */
-function whoWords(file: ClientFile): string {
-  const name = file.createdBy?.name.split(" ")[0]
-  if (file.source === "kairos") return "lo dejó Kairós"
-  if (file.source === "correo") return "llegó por correo"
-  return name ? `lo subió ${name}` : "lo subió el equipo"
-}
-
-/** «se borra el jue 12 dic» de un día de Lima. */
-export const deleteOnWords = (day: string): string => `se borra el ${limaDayWords(day)}`
-
-/** Lo que se marca como la carga: un adjunto, con el plazo que dijo el servidor. */
-export interface CargaCandidate {
-  fileId: string
-  filename: string
-  cargaDeleteAfter: string | null
-  cargaDueNow: boolean
-}
-
-/** Lo que dice el diálogo de «Es la carga de datos» antes de marcarlo. */
-export function cargaConfirmWords(file: CargaCandidate): string {
-  if (file.cargaDueNow || !file.cargaDeleteAfter)
-    return `${file.filename} llegó hace más de 30 días: se borra al marcarlo, con el texto del correo en que llegó, como promete el contrato de encargo. No se puede deshacer.`
-  return `${file.filename} pasa a «Lo que mandó la clínica» y se borra el ${limaDayWords(file.cargaDeleteAfter)}, a los 30 días de llegar, con el texto del correo en que llegó. Lo promete el contrato de encargo. No se puede deshacer.`
-}
-
-export const markCargaResultSchema = z.object({
-  file: z.object({ id: z.string(), deleteAfter: z.string().nullable() }),
-  dueNow: z.boolean(),
-  deletedNow: z.boolean(),
-})
-export type MarkCargaResult = z.infer<typeof markCargaResultSchema>
-
-/** Lo que dice el aviso al terminar de marcarlo. */
-export function cargaMarkedWords(filename: string, result: MarkCargaResult): string {
-  if (result.deletedNow) return `${filename} se borró: llegó hace más de 30 días`
-  if (result.dueNow) return `${filename} es la carga de datos: se borra en los próximos minutos`
-  return result.file.deleteAfter
-    ? `${filename} es la carga de datos: ${deleteOnWords(result.file.deleteAfter)}`
-    : `${filename} es la carga de datos`
-}
-
-/**
- * «Es la carga de datos» (solo Administración): pregunta con la fecha que dice
- * el servidor y marca. Lo usan Documentos y el correo. Devuelve `ask`, que
- * abre el diálogo, y `dialog`, para ponerlo en la pantalla. La confirmación se
- * justifica: es un borrado de datos que no se deshace.
- */
-export function useMarkCarga(clientId: string | null, onDone?: () => void) {
-  const queryClient = useQueryClient()
-  const [target, setTarget] = useState<CargaCandidate | null>(null)
-  const mark = useMutation({
-    mutationFn: async (file: CargaCandidate) =>
-      markCargaResultSchema.parse(
-        await api<unknown>(`/api/admin/clients/files/${file.fileId}/carga`, { method: "POST" }),
-      ),
-    onSuccess: (result, file) => {
-      toast.success(cargaMarkedWords(file.filename, result))
-      setTarget(null)
-      if (clientId) invalidateClient(queryClient, clientId)
-      onDone?.()
-    },
-  })
-  const dialog = (
-    <ConfirmDialog
-      open={target !== null}
-      title="¿Es la carga de datos?"
-      description={target ? cargaConfirmWords(target) : ""}
-      confirmLabel="Sí, es la carga"
-      pending={mark.isPending}
-      error={mark.isError ? submitErrorMessage(mark.error) : null}
-      onConfirm={() => {
-        if (target) mark.mutate(target)
-      }}
-      onClose={() => {
-        mark.reset()
-        setTarget(null)
-      }}
-    />
-  )
-  return { ask: setTarget, dialog }
-}
-
-export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
-  const queryClient = useQueryClient()
+export function ClientFilesTab({ clientId, organizationId, isAdmin }: ClientTabProps) {
   const [uploading, setUploading] = useState(false)
-  const [toDelete, setToDelete] = useState<ClientFile | null>(null)
+  const [viewing, setViewing] = useState<string | null>(null)
+  const [report, setReport] = useState<number | null>(null)
   const files = useClientFiles(clientId)
-  const carga = useMarkCarga(clientId)
-  const remove = useMutation({
-    mutationFn: (file: ClientFile) =>
-      api(`/api/admin/clients/files/${file.id}`, { method: "DELETE" }),
-    onSuccess: (_, file) => {
-      toast.success(`Se borró ${file.filename}`)
-      setToDelete(null)
-      invalidateClient(queryClient, clientId)
-    },
-  })
+  // Los informes de la carga que salieron, con su PDF: solo Administración (el servidor lo exige).
+  const record = useOrgLoadRecord(isAdmin ? organizationId : null)
 
   if (files.isPending)
     return (
@@ -218,8 +94,14 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
       </SkeletonRegion>
     )
 
+  const items = files.data?.items ?? []
+  const arrived = items.filter(cameFromClinic)
+  const sent = items.filter((file) => !cameFromClinic(file))
+  const reports = (record.data?.reports ?? []).filter((item) => item.state !== "enviando")
+  const open = items.find((file) => file.id === viewing) ?? null
+
   return (
-    <section aria-labelledby="documentos" className="flex flex-col gap-3">
+    <section aria-labelledby="documentos" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="documentos" className="text-base font-semibold">
           Documentos
@@ -245,7 +127,7 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
               lee de su cuenta, no se guarda como archivo.
             </p>
           ) : null}
-          {files.data.items.length === 0 ? (
+          {items.length === 0 && reports.length === 0 ? (
             <EmptyState
               title="Sin documentos"
               description="Aquí quedan la carta de bienvenida, las propuestas, las presentaciones y lo que mande la clínica."
@@ -253,64 +135,44 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
               onAction={() => setUploading(true)}
             />
           ) : (
-            <ul className="flex flex-col gap-2">
-              {files.data.items.map((file) => (
-                <li
-                  key={file.id}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card p-4"
-                >
-                  <div className="min-w-0 flex-1 basis-56">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      <span className="[overflow-wrap:anywhere]">{file.filename}</span>
-                      {file.adminOnly ? <Badge variant="outline">Solo Administración</Badge> : null}
-                    </p>
-                    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                      {FILE_KIND_WORDS[file.kind]} · {whoWords(file)} el{" "}
-                      {supportDay(
-                        file.source === "correo" && file.receivedAt
-                          ? file.receivedAt
-                          : file.createdAt,
-                      )}{" "}
-                      · {sizeWords(file.sizeBytes)}
-                      {file.kind === "archivo_clinica" && file.deleteAfter
-                        ? ` · ${deleteOnWords(file.deleteAfter)}`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      render={<a href={clientFileHref(file.id)} target="_blank" rel="noreferrer" />}
-                    >
-                      <Download aria-hidden />
-                      Descargar
-                    </Button>
-                    {isAdmin && file.kind === "correo" ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          carga.ask({
-                            fileId: file.id,
-                            filename: file.filename,
-                            cargaDeleteAfter: file.cargaDeleteAfter,
-                            cargaDueNow: file.cargaDueNow,
-                          })
-                        }
-                      >
-                        Es la carga de datos
-                      </Button>
-                    ) : null}
-                    {isAdmin ? (
-                      <Button size="sm" variant="ghost" onClick={() => setToDelete(file)}>
-                        Borrar
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <>
+              {isAdmin ? (
+                <p className="text-xs text-muted-foreground">
+                  «lo ve Soporte» marca lo que Soporte también ve; lo demás es solo de
+                  Administración.
+                </p>
+              ) : null}
+              <FileGroup
+                id="documentos-llegaron"
+                title="Llegaron"
+                hint="De la clínica: por correo, por un chat o lo que se subió como lo que mandó."
+                empty="Aún no llegó nada de la clínica."
+                count={arrived.length}
+              >
+                {arrived.map((file) => (
+                  <FileCard key={file.id} file={file} isAdmin={isAdmin} onOpen={setViewing} />
+                ))}
+              </FileGroup>
+              <FileGroup
+                id="documentos-salieron"
+                title="Salieron"
+                hint="De nosotros: la carta, las propuestas, las presentaciones y los informes de la carga."
+                empty="Aún no le mandamos nada."
+                count={sent.length + reports.length}
+              >
+                {sent.map((file) => (
+                  <FileCard key={file.id} file={file} isAdmin={isAdmin} onOpen={setViewing} />
+                ))}
+                {reports.map((item) => (
+                  <ReportCard
+                    key={`informe-${item.number}`}
+                    clientId={clientId}
+                    report={item}
+                    onOpen={setReport}
+                  />
+                ))}
+              </FileGroup>
+            </>
           )}
         </>
       )}
@@ -321,23 +183,125 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
           onClose={() => setUploading(false)}
         />
       ) : null}
-      {carga.dialog}
-      <ConfirmDialog
-        open={toDelete !== null}
-        title={toDelete ? `Borrar ${toDelete.filename}` : "Borrar el documento"}
-        description="Deja de verse en la ficha y se borra del almacenamiento. Queda anotado quién lo borró. No se puede deshacer."
-        confirmLabel="Borrar"
-        pending={remove.isPending}
-        error={remove.isError ? submitErrorMessage(remove.error) : null}
-        onConfirm={() => {
-          if (toDelete) remove.mutate(toDelete)
-        }}
-        onClose={() => {
-          remove.reset()
-          setToDelete(null)
-        }}
+      <FileViewer
+        clientId={clientId}
+        file={open}
+        open={open !== null}
+        onClose={() => setViewing(null)}
+        isAdmin={isAdmin}
       />
+      {organizationId ? (
+        <InformeDrawer
+          clientId={clientId}
+          organizationId={organizationId}
+          number={report}
+          onClose={() => setReport(null)}
+        />
+      ) : null}
     </section>
+  )
+}
+
+/** Un grupo de documentos con su título, su cuenta y sus tarjetas en filas alineadas. */
+function FileGroup({
+  id,
+  title,
+  hint,
+  empty,
+  count,
+  children,
+}: {
+  id: string
+  title: string
+  hint: string
+  empty: string
+  count: number
+  children: ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className="flex flex-col gap-2">
+      <div className="flex flex-col gap-0.5">
+        <h3 id={id} className="text-sm font-semibold">
+          {title} · {count}
+        </h3>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      {count ? (
+        <ul className={GRID}>{children}</ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      )}
+    </section>
+  )
+}
+
+/** Una tarjeta: la miniatura, el nombre (que la abre) y de dónde vino. */
+function FileCard({
+  file,
+  isAdmin,
+  onOpen,
+}: {
+  file: ClientFile
+  isAdmin: boolean
+  onOpen: (fileId: string) => void
+}) {
+  return (
+    <li className={CARD}>
+      <div className="aspect-[4/3] w-full overflow-hidden border-b bg-muted/30">
+        <FileThumb file={file} />
+      </div>
+      <div className="flex min-w-0 flex-col gap-0.5 p-3">
+        <button type="button" className={CARD_BUTTON} onClick={() => onOpen(file.id)}>
+          <span className="sr-only">Ver </span>
+          {file.filename}
+        </button>
+        <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {FILE_KIND_WORDS[file.kind]} · {whoWords(file)} el {supportDay(fileDay(file))}
+        </span>
+        {file.kind === "archivo_clinica" && file.deleteAfter ? (
+          <span className="text-xs text-muted-foreground">{deleteOnWords(file.deleteAfter)}</span>
+        ) : null}
+        {isAdmin && !file.adminOnly ? (
+          <span className="text-xs text-muted-foreground">lo ve Soporte</span>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+/** Un informe de la carga que salió: su primera página y a quién, y se abre en su cajón. */
+function ReportCard({
+  clientId,
+  report,
+  onOpen,
+}: {
+  clientId: string
+  report: Report
+  onOpen: (number: number) => void
+}) {
+  return (
+    <li className={CARD}>
+      <div className="aspect-[4/3] w-full overflow-hidden border-b bg-muted/30">
+        {report.hasPdf ? (
+          <PdfThumb
+            path={clientReportContentPath(clientId, report.number)}
+            contentType="application/pdf"
+          />
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-col gap-0.5 p-3">
+        <button type="button" className={CARD_BUTTON} onClick={() => onOpen(report.number)}>
+          <span className="sr-only">Ver el </span>
+          Informe N.º {report.number}
+          {report.stage ? ` · ${report.stage}` : ""}
+        </button>
+        <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {report.state === "desconocido" ? "No se sabe si salió" : "Salió"} el{" "}
+          {supportDay(report.at)}
+          {report.to ? ` a ${report.to}` : ""}
+        </span>
+      </div>
+    </li>
   )
 }
 
