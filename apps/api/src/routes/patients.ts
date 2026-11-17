@@ -453,6 +453,8 @@ const finalizeInput = z
     endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
     // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
     consentSkipReason: z.string().trim().max(2000).nullish(),
+    // Por qué se firma sin la colegiatura en el perfil (17 nov): se escribe, no bloquea.
+    registrationSkipReason: z.string().trim().max(2000).nullish(),
     // «¿Terminaste?» de lo trabajado hoy: «Sí, terminar» o «Falta otra sesión».
     completePlanItemIds: z.array(z.uuid()).max(52).optional(),
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),

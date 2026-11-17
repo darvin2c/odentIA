@@ -50,8 +50,8 @@ export interface OwnProfessionalProfile extends ProfessionalProfile {
 export interface ProfessionalSignature {
   name: string
   title: string
-  /** Colegio y número, como se imprime: «<colegio> <número>». */
-  registration: string
+  /** Colegio y número, como se imprime: «<colegio> <número>»; null si el perfil no la tiene. */
+  registration: string | null
 }
 
 // Título y colegio dependen del país y de la profesión: no hay valor por
@@ -305,25 +305,40 @@ export async function setProfessionalProfile(
 }
 
 /**
- * Firma del profesional para un documento clínico. Sin colegiatura no se
- * firma: el documento no puede quedar a nombre de alguien no identificable.
+ * La firma del profesional de su perfil: nombre, título y colegiatura, o la colegiatura nula si
+ * el perfil no la tiene. Cerrar la atención la usa así: sin colegiatura se firma igual, con un
+ * motivo escrito (17 nov).
  */
-export async function requireProfessionalSignature(
+export async function professionalSignature(
   tx: Db,
   orgId: string,
   userId: string,
 ): Promise<ProfessionalSignature> {
   const profile = await getProfessionalProfile(tx, orgId, userId)
-  if (!profile.registrationNumber) {
+  return {
+    name: profile.signatureName ?? profile.accountName,
+    title: profile.professionalTitle,
+    registration: profile.registrationNumber ? `${profile.registrationBody} ${profile.registrationNumber}` : null,
+  }
+}
+
+/**
+ * Firma del profesional para un documento clínico (consentimiento, receta,
+ * odontograma firmado). Sin colegiatura no se firma: el documento no puede
+ * quedar a nombre de alguien no identificable.
+ */
+export async function requireProfessionalSignature(
+  tx: Db,
+  orgId: string,
+  userId: string,
+): Promise<ProfessionalSignature & { registration: string }> {
+  const signature = await professionalSignature(tx, orgId, userId)
+  if (!signature.registration) {
     throw new ServiceError(
       "PROFILE_INCOMPLETE",
       409,
       "Registra tu colegiatura en tu perfil profesional para firmar",
     )
   }
-  return {
-    name: profile.signatureName ?? profile.accountName,
-    title: profile.professionalTitle,
-    registration: `${profile.registrationBody} ${profile.registrationNumber}`,
-  }
+  return { ...signature, registration: signature.registration }
 }

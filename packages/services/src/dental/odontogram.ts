@@ -64,8 +64,9 @@ async function audit(
 
 // El odontograma (ADR 0036 y 0079): lo dental de la historia, fuera de lo
 // común. Lo común no lo llama directo: lo pide al producto (`products.ts`).
-// Numeración FDI y nomenclatura de la NTS 188 en todos los países; las siglas,
-// la variante obligatoria y el odontograma firmado solo en clínicas de Perú
+// Numeración FDI y nomenclatura de la NTS 188 en todos los países; las siglas
+// y el odontograma firmado solo en clínicas de Perú. La variante es opcional en
+// todos (17 nov)
 // (`orgDentalProfile`, ADR 0036 y 0079). La validación vive en `@odentia/clinical`
 // (fail closed: condición desconocida, anatomía incompatible o datos
 // faltantes = error); el servicio añade tenant, paciente, atención y CIE-10.
@@ -125,7 +126,7 @@ function coveredTeeth(record: FindingRecord): number[] {
   return [record.toothNumber]
 }
 
-/** Con odontograma oficial (Perú) la variante es obligatoria; si no, opcional. */
+/** Con odontograma oficial (Perú) la variante se nombra por su sigla; en todos es opcional. */
 export async function orgStrictVariants(tx: Db, orgId: string): Promise<boolean> {
   return (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
 }
@@ -422,7 +423,7 @@ async function signOdontogram(
     observations: string
     encounterId: string | null
     standard: string
-    signer: { name: string; title: string; registration: string }
+    signer: { name: string; title: string; registration: string | null }
   },
 ): Promise<OdontogramAssessmentRow> {
   const patientRow = await requirePatient(tx, orgId, patientId)
@@ -473,7 +474,8 @@ async function signOdontogram(
       observations: input.observations,
       examinerName: input.signer.name,
       examinerTitle: input.signer.title,
-      registrationNumber: input.signer.registration,
+      // Firmado al cerrar sin colegiatura (17 nov: no bloquea, se escribió el motivo): queda vacía.
+      registrationNumber: input.signer.registration ?? "",
       patientName,
       patientNumber: patientRow.patientNumber,
       entries,
@@ -752,7 +754,7 @@ export async function signClosingOdontogram(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  signer: { name: string; title: string; registration: string },
+  signer: { name: string; title: string; registration: string | null },
 ): Promise<OdontogramAssessmentRow | null> {
   const closing = await closingOdontogramOf(tx, orgId, patientId, encounterId)
   if (!closing) return null

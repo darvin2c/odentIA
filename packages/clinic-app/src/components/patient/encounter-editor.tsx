@@ -766,7 +766,8 @@ export function EncounterEditor({
   }
   const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
-  const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
+  // Sin colegiatura en el perfil se firma igual (17 nov): el cierre la pide o pide escribir por qué.
+  const needsRegistration = closingQuery.isSuccess && Boolean(closingQuery.data.data.registrationMissing)
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
   // Lo que espera su firma (o que quien atiende confirme la de su enlace). El que la clínica no
   // activó no se puede firmar hoy: lo dice Documentos y no cuenta como falta.
@@ -1362,7 +1363,8 @@ export function EncounterEditor({
     signIdsRef.current = null
     setFinalizing(true)
     try {
-      if (needsRegistration) {
+      // La colegiatura escrita en el cierre queda en su perfil; sin ella, va el motivo.
+      if (needsRegistration && value.registrationNumber.trim()) {
         await saveProfessionalProfileApi("me", {
           professionalTitle: value.professionalTitle.trim(),
           registrationBody: value.registrationBody.trim(),
@@ -1431,6 +1433,10 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
+          // Sin colegiatura en el perfil y sin escribirla: por qué firma sin ella.
+          ...(needsRegistration && !value.registrationNumber.trim()
+            ? { registrationSkipReason: value.registrationSkipReason.trim() }
+            : {}),
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
           ...sessionAnswerBody(sessionAnswers, askedSessions),
           // Lo que lo de hoy resuelve y la pantalla mostró marcado queda resuelto; lo demás, no.
@@ -2395,15 +2401,30 @@ export function EncounterEditor({
       .map((item) => ({ key: item.key, title: item.title })),
   ]
 
+  // Sin colegiatura: se escribe aquí (queda en su perfil) o se escribe por qué firma sin ella (17 nov).
   const registrationFields = needsRegistration ? (
-    <SignatureRegistrationFields
-      form={closingForm}
-      fields={REGISTRATION_FIELDS}
-      signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
-      askTitle={!profileQuery.data?.data.professionalTitle}
-      disabled={finalizing}
-      numberRef={registrationNumberRef}
-    />
+    <div className="flex flex-col gap-3">
+      <SignatureRegistrationFields
+        form={closingForm}
+        fields={REGISTRATION_FIELDS}
+        signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
+        askTitle={!profileQuery.data?.data.professionalTitle}
+        disabled={finalizing}
+        numberRef={registrationNumberRef}
+        title="No tienes tu colegiatura en el perfil"
+        reason="Escríbela y queda en tu perfil, o firma sin ella escribiendo por qué."
+      />
+      <closingForm.AppField name="registrationSkipReason">
+        {(field) => (
+          <field.TextareaField
+            label="Si firmas sin colegiatura, escribe por qué"
+            rows={2}
+            maxLength={2000}
+            disabled={finalizing}
+          />
+        )}
+      </closingForm.AppField>
+    </div>
   ) : null
   const signatureHint = profileQuery.isSuccess ? (
     <ClosingSignatureHint
@@ -2461,8 +2482,9 @@ export function EncounterEditor({
   const footerWait =
     signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
   // El pie es el único lugar de lo que falta para firmar, y lo dice entero (P10): lo que pide el
-  // cierre, tu colegiatura y las firmas que esperan. Nunca «Listo para firmar» con una firma de la
-  // paciente pendiente («Faltan 2: tu colegiatura y la firma de Carmen»). Cada cosa lleva a su lugar.
+  // cierre y las firmas que esperan. Nunca «Listo para firmar» con una firma de la paciente
+  // pendiente («Falta 1: la firma de Carmen»). Cada cosa lleva a su lugar. La colegiatura no es una
+  // falta (17 nov): el cierre la pide o pide escribir por qué se firma sin ella.
   const footerMissing: Array<{ key: string; words: string; go: () => void }> =
     !dictation.busy && !footerWait && closingQuery.isSuccess
       ? [
@@ -3069,7 +3091,7 @@ export function EncounterEditor({
         canSign={canSign}
         blockedReason={signBlockedReason}
         registration={registrationFields}
-        confirmLabel={needsRegistration ? "Guardar y firmar" : signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
+        confirmLabel={signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
         dictated={confirmWithDictation ? <DictationSignList {...signListProps} /> : null}
         signForms={signForms}
         finishingForms={finishFormsAtSign}

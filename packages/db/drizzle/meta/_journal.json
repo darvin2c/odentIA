@@ -1002,6 +1002,13 @@
       "when": 1794890368095,
       "tag": "0142_hallazgo_y_su_diagnostico",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794936155072,
+      "tag": "0143_firmar_sin_colegiatura_con_motivo",
+      "breakpoints": true
     }
   ]
 }

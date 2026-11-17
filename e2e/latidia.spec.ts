@@ -1082,12 +1082,12 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const firma = page.getByRole("dialog", { name: "Finalizar y firmar" })
-  await expect(firma.getByText("Falta tu colegiatura para firmar")).toBeVisible()
+  await expect(firma.getByText("No tienes tu colegiatura en el perfil")).toBeVisible()
   await expect(firma.getByLabel("Título profesional")).toHaveValue("Médico cirujano")
   await expect(firma.getByLabel("Colegio")).toHaveValue("CMP")
   await page.screenshot({ path: test.info().outputPath("latidia-cierre-pide-colegiatura.png"), fullPage: true })
   await firma.getByLabel("Número de colegiatura").fill("045678")
-  await firma.getByRole("button", { name: "Guardar y firmar", exact: true }).click()
+  await firma.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
 
   const profile = await request<{ data: { professionalTitle: string; registrationBody: string; registrationNumber: string } }>(

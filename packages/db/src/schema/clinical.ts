@@ -965,6 +965,11 @@ export const encounter = pgTable(
      */
     consentSkipReason: text("consent_skip_reason"),
     /**
+     * Por qué se firmó sin la colegiatura de quien firma en su perfil (17 nov: no bloquea, se
+     * escribe el motivo). Historia como el resto: no cambia al cerrar.
+     */
+    registrationSkipReason: text("registration_skip_reason"),
+    /**
      * Lo que se dijo de su salud y seguía sin revisar al firmar, una foto por declaración
      * (`healthAtSigningOf`): `[]` si no quedaba nada, nulo en lo firmado antes de guardarla.
      * Historia como el resto: no cambia después de firmar.
@@ -1013,6 +1018,10 @@ export const encounter = pgTable(
     check(
       "encounter_consent_skip_reason_check",
       sql`${table.consentSkipReason} IS NULL OR char_length(${table.consentSkipReason}) BETWEEN 1 AND 2000`,
+    ),
+    check(
+      "encounter_registration_skip_reason_check",
+      sql`${table.registrationSkipReason} IS NULL OR char_length(${table.registrationSkipReason}) BETWEEN 1 AND 2000`,
     ),
   ],
 )

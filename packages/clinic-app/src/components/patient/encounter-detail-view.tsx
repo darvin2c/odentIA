@@ -367,6 +367,12 @@ export function EncounterDetailView({
               <dd className="whitespace-pre-wrap text-sm">{encounter.consentSkipReason}</dd>
             </div>
           ) : null}
+          {encounter.registrationSkipReason ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Se firmó sin colegiatura</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.registrationSkipReason}</dd>
+            </div>
+          ) : null}
           {productUi().site && teeth.length > 0 ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
