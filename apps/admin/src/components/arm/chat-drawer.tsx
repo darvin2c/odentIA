@@ -809,6 +809,11 @@ function Outbound({
         {entry.byKairos ? <AgentMark size="sm" className="size-4" /> : null}
         <span>{sentLineWords(entry)}</span>
       </div>
+      {entry.status === "enviado" && entry.failedAt ? (
+        <p className="text-xs text-destructive">
+          WhatsApp dijo que no le llegó{entry.failedWhy ? `: ${entry.failedWhy}` : ""}. Vuelve a «Te toca».
+        </p>
+      ) : null}
       {entry.byKairos && entry.basis.length > 0 ? (
         <p className="text-xs text-muted-foreground">
           <span className="font-medium">En qué se basó:</span> {entry.basis.join(" · ")}

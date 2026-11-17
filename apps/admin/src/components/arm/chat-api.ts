@@ -66,6 +66,12 @@ const entrySchema = z.discriminatedUnion("kind", [
     /** Solo WhatsApp: cuándo llegó al teléfono y cuándo lo leyó (lo informa Meta). */
     deliveredAt: z.string().nullable().default(null),
     readAt: z.string().nullable().default(null),
+    /**
+     * Solo WhatsApp: salió, pero Meta dijo después que no llegó (un archivo que no pudo bajar), y
+     * por qué. No cuenta como respuesta: la conversación vuelve a «Te toca».
+     */
+    failedAt: z.string().nullable().default(null),
+    failedWhy: z.string().nullable().default(null),
     /** En qué se basó Kairós para responder («los precios de la web», «la guía de la Ayuda: …»). */
     basis: z.array(z.string()).default([]),
     /** El archivo que salió en este mensaje (en un chat, cada archivo es su propio mensaje). */
@@ -483,10 +489,11 @@ export const isUnsettled = (entry: ChatEntry, now: Date) =>
     (entry.status === "pendiente" && now.getTime() - Date.parse(entry.at) >= CHAT_SEND_SETTLE_MS))
 
 /**
- * Cómo le fue a un mensaje nuestro: «Leído» o «Entregado» si WhatsApp lo dijo, y si no su estado
- * («Salió», «No salió», «No se sabe si salió»).
+ * Cómo le fue a un mensaje nuestro: «No llegó», «Leído» o «Entregado» si WhatsApp lo dijo, y si no
+ * su estado («Salió», «No salió», «No se sabe si salió»).
  */
 export function sentStatusWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {
+  if (entry.status === "enviado" && entry.failedAt) return "No llegó"
   if (entry.status === "enviado" && entry.readAt) return "Leído"
   if (entry.status === "enviado" && entry.deliveredAt) return "Entregado"
   return CHAT_SEND_STATUS_WORDS[entry.status] ?? entry.status
