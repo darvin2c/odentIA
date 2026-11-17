@@ -1,10 +1,9 @@
 /**
  * Hallazgos del odontograma con la nomenclatura de la NTS 188-MINSA/DGIESP-2022
  * (6.1.1–6.1.38 y observaciones 5.15; RM 559-2022-MINSA) y numeración FDI
- * (ISO 3950). La nomenclatura vale en cualquier país; las siglas y la
- * variante obligatoria solo en clínicas de Perú (`clinicalProfileFor`,
- * ADR 0036). Fuera de Perú la variante se pide por su nombre clínico
- * (`variantName`) y es opcional.
+ * (ISO 3950). La nomenclatura vale en cualquier país; las siglas, solo en
+ * clínicas de Perú (`clinicalProfileFor`, ADR 0036). Fuera de Perú la variante
+ * se nombra por su nombre clínico (`variantName`). En todos es opcional (ADR 0200).
  */
 import type { FindingDefinition } from "./types.js"
 

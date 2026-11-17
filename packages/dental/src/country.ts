@@ -18,8 +18,9 @@ export interface OdontogramStandardProfile {
   /** Autoridad que la publica, para la hoja oficial: «MINSA». */
   authority: string
   /**
-   * Variante y sigla obligatorias como en la norma. Sin norma la variante es
-   * opcional y se pide por su nombre clínico («Profundidad», «Material»).
+   * La variante se nombra por su sigla, como en la norma. Sin norma se nombra
+   * por su nombre clínico («Profundidad», «Material»). En todos los países es
+   * opcional: nunca se decide por el profesional (17 nov).
    */
   strictVariants: boolean
   /**

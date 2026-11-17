@@ -820,12 +820,16 @@ it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo
     sql`insert into encounter_diagnosis (organization_id, patient_id, encounter_id, diagnosis_system, diagnosis_code, diagnosis_type)
         values ('org_a', ${paciente}::uuid, ${encounterId}::uuid, 'ICD-10', ${code}, 'confirmed') returning id`
 
-  // Cerrar exige la firma con colegiatura.
+  // Cerrar exige la firma: el nombre y la colegiatura, o el motivo para firmar sin ella (ADR 0200).
   await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, professional_user_id)
     values (${cerrada}::uuid, 'org_a', ${paciente}::uuid, 'rls-professional')`)
   const [d1] = await ownerDb.execute<{ id: string }>(diagnostico(cerrada, "K02.1"))
   await expect(
     ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now() where id = ${cerrada}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_signature_required"))
+  await expect(
+    ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now(), signer_name = 'Dra. Prueba'
+      where id = ${cerrada}::uuid`),
   ).rejects.toMatchObject(guarda("encounter_signature_required"))
   await ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now(),
     signer_name = 'Dra. Prueba', signer_registration = 'COP 1' where id = ${cerrada}::uuid`)

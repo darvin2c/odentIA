@@ -15,6 +15,7 @@ import {
 const values = (over: Partial<ClosingValues> = {}): ClosingValues => ({
   endTime: "",
   consentSkipReason: "",
+  registrationSkipReason: "",
   professionalTitle: "",
   registrationBody: "",
   registrationNumber: "",

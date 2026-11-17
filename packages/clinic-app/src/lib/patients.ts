@@ -524,6 +524,8 @@ export interface Encounter {
   prognosis?: string | null
   /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
   consentSkipReason?: string | null
+  /** Por qué se firmó sin la colegiatura de quien firmó en su perfil (17 nov). */
+  registrationSkipReason?: string | null
   /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó; nulo en lo firmado antes de guardarlo. */
   healthAtSigning?: HealthAtSigning[] | null
   /** La anestesia de ese día al firmar: ASA, peso y máximo; nula si no se anestesió o se firmó antes. */

@@ -319,12 +319,11 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(idle).toBeVisible()
   expect((await dictation()).suggestions).toEqual([])
 
-  // Odontograma por voz (issue 109): el hallazgo va a su bloque y, en Perú, pide la causa de la ausencia con un toque.
+  // Odontograma por voz (issue 109): el hallazgo va a su bloque. La causa de la ausencia es opcional
+  // en todos los países (ADR 0200): queda lista para confirmar, sin pedirla.
   await write("La cuarenta y seis está ausente.")
   const finding = suggested("Odontograma").getByRole("listitem")
   await expect(finding).toContainText("Pieza 46 · Pieza dentaria ausente")
-  await expect(finding).toContainText("Por revisar")
-  await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
   await expect(finding).not.toContainText("Por revisar")
   await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
   // Lo registrado hoy se ve debajo del odontograma, sin abrir nada.
@@ -418,10 +417,12 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await dictated.getByRole("checkbox").click()
   await expect(dictated).toContainText("desmarcada: no entra")
   await closingDialog.getByRole("button", { name: "Firmar sin lo dictado" }).click()
-  await expect(closingDialog.getByText("Elige por qué sigues sin el consentimiento, o fírmalo ahora")).toBeVisible()
+  await expect(closingDialog.getByText("Escribe por qué sigues sin el consentimiento, o fírmalo ahora")).toBeVisible()
   expect((await detail()).encounter.status).toBe("borrador")
-  // Una constancia de un toque, no un campo vacío.
-  await closingDialog.getByRole("radio", { name: "Urgencia" }).or(closingDialog.getByRole("button", { name: "Urgencia" })).click()
+  // El motivo se escribe siempre (17 nov): sin atajos de un toque.
+  await closingDialog
+    .getByLabel("Se hizo hoy sin el consentimiento firmado: escribe por qué")
+    .pressSequentially("Urgencia: dolor intenso")
   await closingDialog.getByRole("button", { name: "Firmar sin lo dictado" }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()

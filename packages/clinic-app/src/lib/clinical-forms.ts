@@ -103,8 +103,6 @@ export interface FormTemplate {
   /** Vino con el producto y, si alguien de la clínica ya la abrió o la cambió. Vienen en la lista de plantillas. */
   fromProduct?: boolean
   looked?: boolean
-  /** Además de por su especialidad, se ofrece a quien tiene menos de estos años. Viene en la lista. */
-  offeredUnderYears?: number | null
   /** Cuándo se creó el formulario (su primera versión): no cambia al volver a usarlo. Viene en la lista. */
   formCreatedAt?: string
 }

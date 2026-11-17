@@ -766,7 +766,8 @@ export function EncounterEditor({
   }
   const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
-  const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
+  // Sin colegiatura en el perfil se firma igual (17 nov): el cierre la pide o pide escribir por qué.
+  const needsRegistration = closingQuery.isSuccess && Boolean(closingQuery.data.data.registrationMissing)
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
   // Lo que espera su firma (o que quien atiende confirme la de su enlace). El que la clínica no
   // activó no se puede firmar hoy: lo dice Documentos y no cuenta como falta.
@@ -1022,11 +1023,6 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
-            // Una urgencia no ofrece la ficha de una vez por plan (la odontoestomatológica, P11): si el
-            // motivo guardado pasa a decirlo, o deja de decirlo, las fichas ofrecidas se vuelven a pedir.
-            const urgency = (text: string | null | undefined) => (text ?? "").trim().toLowerCase().startsWith("urgencia")
-            if (sendable.includes("reason") && urgency(savedTextRef.current.reason) !== urgency(saved.data.reason))
-              void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
             // Lo que quedó guardado es la nueva base de cada texto enviado, también en la caché:
             // al volver a la atención se parte de lo guardado, no de una copia vieja.
             for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null
@@ -1362,7 +1358,8 @@ export function EncounterEditor({
     signIdsRef.current = null
     setFinalizing(true)
     try {
-      if (needsRegistration) {
+      // La colegiatura escrita en el cierre queda en su perfil; sin ella, va el motivo.
+      if (needsRegistration && value.registrationNumber.trim()) {
         await saveProfessionalProfileApi("me", {
           professionalTitle: value.professionalTitle.trim(),
           registrationBody: value.registrationBody.trim(),
@@ -1431,6 +1428,10 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
+          // Sin colegiatura en el perfil y sin escribirla: por qué firma sin ella.
+          ...(needsRegistration && !value.registrationNumber.trim()
+            ? { registrationSkipReason: value.registrationSkipReason.trim() }
+            : {}),
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
           ...sessionAnswerBody(sessionAnswers, askedSessions),
           // Lo que lo de hoy resuelve y la pantalla mostró marcado queda resuelto; lo demás, no.
@@ -2395,6 +2396,8 @@ export function EncounterEditor({
       .map((item) => ({ key: item.key, title: item.title })),
   ]
 
+  // Sin colegiatura: se escribe aquí (queda en su perfil) o se escribe por qué firma sin ella (17 nov).
+  // Las dos salidas en una sola tarjeta (QA del 17 nov, UX U1): escribirla, «o» firmar sin ella.
   const registrationFields = needsRegistration ? (
     <SignatureRegistrationFields
       form={closingForm}
@@ -2403,6 +2406,20 @@ export function EncounterEditor({
       askTitle={!profileQuery.data?.data.professionalTitle}
       disabled={finalizing}
       numberRef={registrationNumberRef}
+      title="No tienes tu colegiatura en el perfil"
+      reason="Escríbela y queda en tu perfil, o firma sin ella escribiendo por qué."
+      orElse={
+        <closingForm.AppField name="registrationSkipReason">
+          {(field) => (
+            <field.TextareaField
+              label="Si firmas sin colegiatura, escribe por qué"
+              rows={2}
+              maxLength={2000}
+              disabled={finalizing}
+            />
+          )}
+        </closingForm.AppField>
+      }
     />
   ) : null
   const signatureHint = profileQuery.isSuccess ? (
@@ -2460,9 +2477,10 @@ export function EncounterEditor({
   // se guarda o se comprueba, dice por qué aún no se firma: la lista de faltantes podría estar vieja.
   const footerWait =
     signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
-  // El pie es el único lugar de lo que falta para firmar, y lo dice entero (P10): lo que pide el
-  // cierre, tu colegiatura y las firmas que esperan. Nunca «Listo para firmar» con una firma de la
-  // paciente pendiente («Faltan 2: tu colegiatura y la firma de Carmen»). Cada cosa lleva a su lugar.
+  // El pie es el único lugar de lo que falta para firmar (P10), y «Faltan» es solo lo que frena:
+  // motivo, diagnóstico y evolución. Las firmas que esperan no frenan (al cerrar se escribe por
+  // qué se sigue sin ellas): van aparte, como aviso (17 nov, ADR 0200). La colegiatura tampoco es
+  // una falta: el cierre la pide o pide escribir por qué se firma sin ella. Cada cosa lleva a su lugar.
   const footerMissing: Array<{ key: string; words: string; go: () => void }> =
     !dictation.busy && !footerWait && closingQuery.isSuccess
       ? [
@@ -2477,6 +2495,12 @@ export function EncounterEditor({
                 : CLOSING_SHORT[requirement],
             go: () => requireBlock(requirement),
           })),
+        ]
+      : []
+  // Lo que espera una firma y no frena: un aviso con su acción, aparte de «Faltan».
+  const footerNotices: Array<{ key: string; words: string; go: () => void }> =
+    !dictation.busy && !footerWait && closingQuery.isSuccess
+      ? [
           ...(awaitingSignature.length > 0
             ? [
                 {
@@ -2988,6 +3012,27 @@ export function EncounterEditor({
             ) : (
               footerText
             )}
+            {footerNotices.length > 0 ? (
+              // «Aviso, no frena: la firma de Rosa. Si firmas sin ella, escribes por qué.»
+              <span className="block text-xs">
+                Aviso, no frena:{" "}
+                {footerNotices.map((item, index) => (
+                  <span key={item.key}>
+                    {index === 0 ? "" : " y "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 align-baseline text-xs"
+                      disabled={!attending || locked}
+                      onClick={item.go}
+                    >
+                      {item.words}
+                    </Button>
+                  </span>
+                ))}
+                . Si firmas sin {footerNotices.length === 1 ? "ella" : "ellas"}, escribes por qué.
+              </span>
+            ) : null}
           </span>
           <Button
             type="button"
@@ -3069,7 +3114,7 @@ export function EncounterEditor({
         canSign={canSign}
         blockedReason={signBlockedReason}
         registration={registrationFields}
-        confirmLabel={needsRegistration ? "Guardar y firmar" : signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
+        confirmLabel={signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
         dictated={confirmWithDictation ? <DictationSignList {...signListProps} /> : null}
         signForms={signForms}
         finishingForms={finishFormsAtSign}
@@ -3078,7 +3123,6 @@ export function EncounterEditor({
           if (form) setFormsToggled((current) => setFromDefault(current, formId, finishesByDefault(form), finish))
         }}
         formProposals={confirmWithDictation ? (formId) => <DictationSignList {...signListProps} responseId={formId} /> : undefined}
-        initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
         onPaper={(need) => void openPaper(need)}
         onClose={() => {

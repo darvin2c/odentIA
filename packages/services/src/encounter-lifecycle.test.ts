@@ -251,13 +251,15 @@ it("por defecto atiende quien abre, aunque la cita sea de otro, y solo un profes
   expect(byColleague.professionalUserId).toBe(colleague)
 })
 
-it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su instantánea", async () => {
+it("cerrar exige motivo, diagnóstico y evolución; sin colegiatura pide el motivo escrito; firma con su instantánea", async () => {
   const f = await clinicalFixture()
   // El borrador del fixture ya existe: se usa como atención en curso.
   const encounterId = f.encounter.id
   expect(await f.run((tx) => getEncounterClosing(tx, ...f.args, encounterId))).toEqual({
     ready: false,
     missing: ["diagnosis", "evolution"],
+    // Quien atiende tiene su colegiatura en el perfil.
+    registrationMissing: false,
     // Sin servicios que pidan consentimiento, no falta ninguno.
     consents: [],
     // Sin cambios en el gráfico, el cierre no firma odontograma.
@@ -283,13 +285,22 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     code: "CLOSING_INCOMPLETE",
   })
   await f.ready(encounterId)
-  // Sin colegiatura no hay firma, aunque el resto esté completo.
+  // Sin colegiatura no es una falta (17 nov): se firma igual, escribiendo el motivo.
   await f.run((tx) =>
     setProfessionalProfile(tx, "org_a", f.actor, f.actor, { registrationNumber: null }),
   )
-  expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, encounterId))).missing).toEqual([
-    "signature",
-  ])
+  expect(await f.run((tx) => getEncounterClosing(tx, ...f.args, encounterId))).toMatchObject({
+    ready: true,
+    missing: [],
+    registrationMissing: true,
+  })
+  await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
+    code: "REGISTRATION_UNSET",
+    status: 409,
+  })
+  await expect(
+    f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId, { registrationSkipReason: "   " })),
+  ).rejects.toMatchObject({ code: "REGISTRATION_UNSET" })
   await expect(
     f.run((tx) =>
       setProfessionalProfile(tx, "org_a", f.actor, f.actor, { registrationNumber: "12 345" }),
@@ -884,4 +895,31 @@ it("si la atención en que se leyó se anula, el día de su cita vuelve a salir;
   const late = await f.run((tx) => createEncounter(tx, ...f.args, {}))
   await ownerDb.update(encounter).set({ startedAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(encounter.id, late.id))
   expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, late.id, f.actor))).visitAnswer).toBeNull()
+})
+
+// 17 nov: la colegiatura no traba la atención. Sin ella se firma escribiendo por qué; el motivo queda
+// en la atención y el papel sale sin colegiatura. Con ella, el motivo no se pide ni se guarda.
+it("sin colegiatura se firma con el motivo escrito, que queda en la atención; con ella, el motivo no se guarda", async () => {
+  const f = await clinicalFixture()
+  const encounterId = f.encounter.id
+  await f.ready(encounterId)
+  await f.run((tx) => setProfessionalProfile(tx, "org_a", f.actor, f.actor, { registrationNumber: null }))
+  const closed = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, encounterId, { registrationSkipReason: "  Colegiatura en trámite  " }),
+  )
+  expect(closed.encounter).toMatchObject({
+    status: "finalizada",
+    signerRegistration: null,
+    registrationSkipReason: "Colegiatura en trámite",
+  })
+
+  const other = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Control" }))
+  await f.ready(other.id)
+  await f.run((tx) =>
+    setProfessionalProfile(tx, "org_a", f.actor, f.actor, { registrationNumber: "54321", signatureName: "Dra. Firma" }),
+  )
+  const signed = await f.run((tx) =>
+    finalizeEncounter(tx, ...f.args, other.id, { registrationSkipReason: "No hace falta" }),
+  )
+  expect(signed.encounter).toMatchObject({ signerRegistration: "COP 54321", registrationSkipReason: null })
 })

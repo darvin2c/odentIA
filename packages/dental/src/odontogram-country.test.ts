@@ -12,11 +12,13 @@ const PERU = { strictVariants: dentalProfileFor("PE").odontogram?.strictVariants
 const COLOMBIA = { strictVariants: dentalProfileFor("CO").odontogram?.strictVariants ?? false }
 
 describe("variante del hallazgo según el país", () => {
-  it("en Perú la variante sigue siendo obligatoria y fuera de Perú es opcional", () => {
+  // Nunca se decide por el profesional (17 nov, ADR 0200): la variante es opcional en todos los
+  // países; con odontograma oficial (Perú) solo cambia cómo se nombra, por su sigla.
+  it("la variante es opcional en Perú y fuera de Perú", () => {
     const caries = { toothNumber: 16, condition: "caries", surfaces: ["occlusal"] }
     expect(PERU.strictVariants).toBe(true)
     expect(COLOMBIA.strictVariants).toBe(false)
-    expect(validateFinding(caries, PERU)).toHaveLength(1)
+    expect(validateFinding(caries, PERU)).toEqual([])
     expect(validateFinding(caries, COLOMBIA)).toEqual([])
     // Una variante que no existe se rechaza en cualquier país.
     expect(
@@ -24,8 +26,11 @@ describe("variante del hallazgo según el país", () => {
     ).toHaveLength(1)
   })
 
-  it("sin opciones valida con el criterio más estricto", () => {
-    expect(validateFinding({ toothNumber: 16, condition: "caries", surfaces: ["occlusal"] })).toHaveLength(1)
+  it("sin opciones tampoco exige la variante, pero rechaza una que no existe", () => {
+    expect(validateFinding({ toothNumber: 16, condition: "caries", surfaces: ["occlusal"] })).toEqual([])
+    expect(
+      validateFinding({ toothNumber: 16, condition: "caries", surfaces: ["occlusal"], details: { variant: "profunda" } }),
+    ).toHaveLength(1)
   })
 })
 
@@ -64,9 +69,9 @@ describe("lo tratado queda dibujado", () => {
     expect(validateLeavesFinding({ condition: "temporary_crown" }, { scope: "tooth", ...PERU })).toHaveLength(1)
   })
 
-  it("al configurar un servicio, en Perú se pide la variante y lo que va en caras exige superficies", () => {
+  it("al configurar un servicio, la variante es opcional en todos los países y lo que va en caras exige superficies", () => {
     const crown = { condition: "crown" }
-    expect(validateLeavesFinding(crown, { scope: "tooth", ...PERU })).toHaveLength(1)
+    expect(validateLeavesFinding(crown, { scope: "tooth", ...PERU })).toEqual([])
     expect(validateLeavesFinding(crown, { scope: "tooth", ...COLOMBIA })).toEqual([])
     // La ausencia no pide causa: se deduce al completar el tratamiento.
     expect(validateLeavesFinding({ condition: "missing_tooth" }, { scope: "tooth", ...PERU })).toEqual([])

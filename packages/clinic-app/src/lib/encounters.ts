@@ -18,8 +18,13 @@ export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
   /**
+   * Quien firma no tiene su colegiatura en el perfil. No bloquea (17 nov): la escribe en el
+   * cierre o escribe por qué firma sin ella (`registrationSkipReason`).
+   */
+  registrationMissing?: boolean
+  /**
    * Consentimientos que pide la atención y no están firmados. No bloquean:
-   * cerrar sin ellos pide decir por qué (`consentSkipReason`).
+   * cerrar sin ellos pide escribir por qué (`consentSkipReason`).
    */
   consents: ConsentNeed[]
   /**

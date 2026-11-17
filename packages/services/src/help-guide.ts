@@ -930,7 +930,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "cerrar-sin-consentimiento-firmado",
         q: "¿Puedo cerrar sin el consentimiento firmado?",
-        a: "Sí, pero el cierre te lo dice y te pide por qué (por ejemplo, una urgencia). El motivo queda en la atención. Lo mejor es «Firmar ahora» desde el mismo cierre.",
+        a: "Sí. El cierre te lo dice y te pide que escribas por qué (por ejemplo, que fue una urgencia); el motivo queda en la atención. Lo mejor es «Firmar ahora» desde el mismo cierre.",
+        // La QA del 17 nov preguntó así y la Ayuda no supo responder.
+        forms: [
+          "que hago si el paciente no firmo el consentimiento",
+          "el paciente no firmo el consentimiento",
+          "firmar la atencion sin consentimiento",
+          "me pide un motivo por el consentimiento",
+        ],
         area: "clinica",
       },
       {
@@ -2403,7 +2410,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-por-que-aparece",
         q: "¿Por qué me aparece esta ficha?",
-        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Una ficha que se llena una vez por plan no aparece en cada sesión ni en una urgencia: aparece mientras el plan no tenga una. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por la especialidad de quien atiende») y, si ya la llenó antes, «la anterior, del 10 nov». Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla, y abrirla o no lo decides tú. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
         forms: [
           "por que me sale esta ficha en la atencion",
           "de donde sale la ficha que aparece sola",

@@ -97,6 +97,8 @@ export type NextControlChoice = "" | "week" | "month" | "recall" | "date" | "non
 export interface ClosingValues extends SignatureRegistration {
   endTime: string
   consentSkipReason: string
+  /** Por qué firma sin su colegiatura en el perfil, si no la escribe aquí (17 nov). */
+  registrationSkipReason: string
   /** «¿Cuándo vuelve?»: ninguno viene marcado. */
   nextControl: NextControlChoice
   /** El día de «Otra fecha» (`yyyy-MM-dd`). */
@@ -122,6 +124,7 @@ export const CLOSING_FIELD_MAP = { endedAt: "endTime", "nextControl.dueAt": "nex
 const EMPTY_CLOSING: ClosingValues = {
   endTime: "",
   consentSkipReason: "",
+  registrationSkipReason: "",
   professionalTitle: "",
   registrationBody: "",
   registrationNumber: "",
@@ -713,67 +716,25 @@ function joinTitles(titles: readonly string[]): string {
   return `${lowered.slice(0, -1).join(", ")} y ${lowered.at(-1)}`
 }
 
-/** Las constancias de un toque para seguir sin el consentimiento de lo que se hizo hoy. */
-const SKIP_REASONS = ["Urgencia"] as const
-
 /**
- * Seguir sin el consentimiento de algo que se hizo hoy (producción, 10 nov): una constancia de un
- * toque («Urgencia») u «Otro motivo» con su texto, no un campo vacío en rojo. Lo firmado en papel
- * no es una palabra: se sube la hoja con «Firmado en papel» en su fila. Lo indicado para otro día
- * nunca llega aquí: se firma antes de hacerlo. La constancia queda en la atención para siempre; una
- * firma posterior se agrega con su fecha.
+ * Seguir sin el consentimiento de algo que se hizo hoy: el motivo se escribe siempre (17 nov: «los
+ * motivos siempre se escriben»), sin atajos de un toque. Lo firmado en papel no es un motivo: se
+ * sube la hoja con «Firmado en papel» en su fila. Lo indicado para otro día nunca llega aquí: se
+ * firma antes de hacerlo. El motivo queda en la atención para siempre; una firma posterior se
+ * agrega con su fecha.
  */
 function ConsentSkipReason({ form, disabled }: { form: ClosingForm; disabled: boolean }): React.JSX.Element {
-  const ids = useId()
-  const reason = useStore(form.store, (state) => state.values.consentSkipReason)
-  const preset = (SKIP_REASONS as readonly string[]).includes(reason)
-  const [other, setOther] = useState(false)
-  const choose = (value: string) => {
-    setOther(false)
-    form.setFieldValue("consentSkipReason", value)
-  }
   return (
-    <div className="flex flex-col gap-2">
-      <p id={`${ids}-motivo`} className="text-sm font-medium">
-        Se hizo hoy sin el consentimiento firmado: ¿por qué?
-      </p>
-      <ToggleGroup
-        aria-labelledby={`${ids}-motivo`}
-        value={other ? ["otro"] : preset ? [reason] : []}
-        onValueChange={(next: unknown[]) => {
-          const picked = next[0]
-          if (picked === "otro") {
-            setOther(true)
-            form.setFieldValue("consentSkipReason", "")
-          } else if (typeof picked === "string") choose(picked)
-        }}
-        disabled={disabled}
-        spacing={2}
-        className="flex-wrap"
-      >
-        {[...SKIP_REASONS, "otro"].map((value) => (
-          <ToggleGroupItem key={value} value={value} className={CHIP}>
-            {(value === "otro" ? other : reason === value) ? <Check aria-hidden className="size-4" /> : null}
-            {value === "otro" ? "Otro motivo" : value}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-      {other ? (
-        <form.AppField name="consentSkipReason">
-          {(field) => <field.TextareaField label="Otro motivo" rows={2} maxLength={2000} />}
-        </form.AppField>
-      ) : (
-        <form.AppField name="consentSkipReason">
-          {(field) =>
-            field.state.meta.errors.length > 0 ? (
-              <p role="alert" className="text-sm text-destructive">
-                {String(field.state.meta.errors[0])}
-              </p>
-            ) : null
-          }
-        </form.AppField>
+    <form.AppField name="consentSkipReason">
+      {(field) => (
+        <field.TextareaField
+          label="Se hizo hoy sin el consentimiento firmado: escribe por qué"
+          rows={2}
+          maxLength={2000}
+          disabled={disabled}
+        />
       )}
-    </div>
+    </form.AppField>
   )
 }
 
@@ -793,7 +754,7 @@ export function useClosingForm(options: {
    * sigue sin ellos. Se lee al enviar (firmar con lo dictado no lo pide).
    */
   needsReason: () => boolean
-  /** El perfil no tiene colegiatura: se pide aquí. */
+  /** El perfil no tiene colegiatura: se escribe aquí, o el motivo para firmar sin ella. */
   needsRegistration: boolean
   /** «Otra fecha» sin día: se pide en su campo. Se lee al enviar. */
   needsNextDay?: (value: ClosingValues) => boolean
@@ -807,8 +768,13 @@ export function useClosingForm(options: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
         if (latest.current.needsReason() && !value.consentSkipReason.trim())
-          fields.consentSkipReason = "Elige por qué sigues sin el consentimiento, o fírmalo ahora"
-        if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
+          fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
+        // Sin colegiatura en el perfil: o la escribe (y va completa) o escribe por qué firma sin ella.
+        if (latest.current.needsRegistration) {
+          if (value.registrationNumber.trim()) Object.assign(fields, signatureRegistrationErrors(value))
+          else if (!value.registrationSkipReason.trim())
+            fields.registrationSkipReason = "Escribe tu colegiatura, o por qué firmas sin ella"
+        }
         if (latest.current.needsNextDay?.(value)) fields.nextControlDate = "Elige el día en que vuelve, o uno de los atajos"
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },

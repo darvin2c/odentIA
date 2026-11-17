@@ -80,7 +80,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "atencion-cerrar-finalizar",
         q: "¿Cómo cierro la atención cuando termino de atender?",
-        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta, respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura. Después ya no se edita: lo que falte se agrega con una adenda.",
+        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo; una firma del paciente que espera va debajo como aviso, porque no frena. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta (o escribes por qué sigues sin él), respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura (sin ella, escribes por qué). Después ya no se edita: lo que falte se agrega con una adenda.",
         forms: [
           "como cierro la atencion",
           "quiero cerrar la atencion",
@@ -132,9 +132,9 @@ export const CLINICA: readonly HelpMore[] = [
       },
       {
         id: "pacientes-firmar-falta-colegiatura",
-        q: "¿Qué hago si al firmar dice que falta mi colegiatura?",
-        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». Se escribe una vez y sirve para todas tus atenciones.",
-        forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "inicio me pide mi colegiatura", "falta tu colegiatura en te espera", "por que me pide mi colegiatura para cerrar la atencion"],
+        q: "¿Qué hago si al firmar dice que no tengo mi colegiatura?",
+        a: "Puedes firmar igual. «Finalizar y firmar» muestra «No tienes tu colegiatura en el perfil» con «Colegio» y «Número de colegiatura» (y «Título profesional» si tu perfil no lo tiene): si la escribes, queda en tu perfil para todas tus atenciones; si no, escribe en «Si firmas sin colegiatura, escribe por qué» el motivo, que queda en la atención, y la hoja sale sin colegiatura. El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». La receta y el consentimiento sí la piden para firmarse, sin perder lo escrito.",
+        forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "puedo cerrar la atencion sin colegiatura", "no tienes tu colegiatura en el perfil", "por que me pide mi colegiatura para cerrar la atencion"],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -384,7 +384,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-ficha-odontoestomatologica-cuando",
         q: "¿Cuándo lleno la ficha odontoestomatológica?",
-        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
+        a: "Cuando tú lo decidas. La atención te la ofrece en «Fichas para esta atención» si es de la especialidad de la cita o de la tuya (índice de caries, higiene oral, riesgo y alta básica); si ya la llenó antes, lo dice («la anterior, del 10 nov») y decides si llenas otra. También sale en una urgencia y en las sesiones siguientes: abrirla o no es tuyo. Si no te la ofrece, «Otra ficha…» o «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
         // Responde también por qué aparece y si hay que llenarla para firmar: la de «¿Por qué me aparece
         // esta ficha?» (Fichas de consulta) explica la regla de cualquier ficha y ya no nombra a esta, para
         // que no se respondan lo mismo (medición de la Ayuda del 16 nov). Las formas que Jev tiene que leer
@@ -713,6 +713,20 @@ export const CLINICA: readonly HelpMore[] = [
 
       // ---------- Palabras de la atención (estudio de la atención del 16 nov, novata) ----------
       // Cada una en una línea y con palabras simples: la odontóloga nueva no entendió ninguna de estas.
+      {
+        id: "palabras-variante-opcional",
+        q: "¿Tengo que elegir la profundidad de la caries?",
+        a: "No. La profundidad de la caries, el material de una corona o de una restauración y las demás variantes son opcionales en todas las clínicas: el campo dice «(opcional)» y el hallazgo se registra sin ella. Si la eliges, en el odontograma se ve con su sigla y debajo, su nombre entero.",
+        forms: [
+          "la profundidad de la caries es obligatoria",
+          "tengo que elegir la profundidad",
+          "tengo que elegir el material de la corona",
+          "registrar una caries sin profundidad",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
       {
         id: "palabras-siglas-caries",
         q: "¿Qué significan MB, CE, CD y CDP?",

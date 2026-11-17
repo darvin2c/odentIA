@@ -110,7 +110,7 @@ export function LeavesFindingField({
       </Field>
       {def?.variants?.length ? (
         <Field data-invalid={variantError ? true : undefined}>
-          <FieldLabel htmlFor={variantId}>{variantFieldLabel(official, def.code)}</FieldLabel>
+          <FieldLabel htmlFor={variantId}>{variantFieldLabel(def.code)}</FieldLabel>
           <Select
             value={variant}
             items={Object.fromEntries(

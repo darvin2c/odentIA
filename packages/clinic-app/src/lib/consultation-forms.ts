@@ -10,10 +10,10 @@ import type { FormFieldDef, FormResponse, FormTemplate } from "./clinical-forms"
 const BASE = "/api/clinical-forms"
 
 /**
- * Por qué la atención ofrece una ficha: por la cita, por la edad, por quien atiende, porque el
- * paciente ya la tiene de antes o porque se empezó aquí con «Otra ficha…».
+ * Por qué la atención ofrece una ficha: por la cita, por quien atiende, porque el paciente ya la
+ * tiene de antes o porque se empezó aquí con «Otra ficha…».
  */
-export type FormOfferWhy = "cita" | "edad" | "profesional" | "tiene" | "empezada"
+export type FormOfferWhy = "cita" | "profesional" | "tiene" | "empezada"
 
 /** Una ficha que la atención ofrece sola. Ofrecer no es pedir: nada la exige. */
 export interface FormOffer {
@@ -22,7 +22,6 @@ export interface FormOffer {
   title: string
   why: FormOfferWhy
   specialtyName: string
-  underYears: number | null
   /** La de esta atención, si ya se empezó. */
   today: { responseId: string; status: "borrador" | "finalizado" } | null
   /** La anterior del mismo tipo, ya en su historia. */
@@ -41,8 +40,7 @@ export function markFormTemplateLooked(id: string) {
 }
 
 /** Por qué aparece, en una línea: «Por la especialidad de su cita: Ortodoncia». */
-export function offerWhyWords(offer: Pick<FormOffer, "why" | "specialtyName" | "underYears">): string {
-  if (offer.why === "edad") return `Por su edad: menor de ${offer.underYears ?? 12} años`
+export function offerWhyWords(offer: Pick<FormOffer, "why" | "specialtyName">): string {
   if (offer.why === "cita") return `Por la especialidad de su cita: ${offer.specialtyName}`
   if (offer.why === "tiene") return "Ya la tiene de una atención anterior"
   if (offer.why === "empezada") return "La empezaste en esta atención"
@@ -56,7 +54,7 @@ export function offerActionWords(offer: Pick<FormOffer, "today">): "Empezar la d
 }
 
 /** El nombre del botón de una ficha ofrecida: qué hace, de cuál es y por qué aparece. */
-export function offerButtonName(offer: Pick<FormOffer, "title" | "today" | "why" | "specialtyName" | "underYears">): string {
+export function offerButtonName(offer: Pick<FormOffer, "title" | "today" | "why" | "specialtyName">): string {
   return `${offerActionWords(offer)}: ${offer.title}. ${offerWhyWords(offer)}`
 }
 
@@ -132,18 +130,16 @@ export function unlooked(template: Pick<FormTemplate, "fromProduct" | "looked"> 
 
 /**
  * Dónde aparece sola una ficha, dicho bajo su título: «Aparece en la atención
- * de: Odontopediatría, y de cualquier menor de 12 años». Sin especialidad no
- * aparece sola: se elige en «Otra ficha…».
+ * de: Odontopediatría». Sin especialidad no aparece sola: se elige en «Otra ficha…».
  */
 export function appearsWords(
-  template: Pick<FormTemplate, "specialtyId" | "offeredUnderYears"> & Partial<Pick<FormTemplate, "inUse">>,
+  template: Pick<FormTemplate, "specialtyId"> & Partial<Pick<FormTemplate, "inUse">>,
   specialtyName: string | null,
 ): string {
   // Apagada no aparece en ningún lado, tampoco en «Otra ficha…»: se dice cómo volver a usarla.
   if (template.inUse === false) return "Sin usar: no aparece en la atención. Para volver a usarla, enciende su interruptor «En uso»"
   if (!template.specialtyId || !specialtyName) return "No aparece sola: se elige en «Otra ficha…»"
-  const byAge = template.offeredUnderYears ? `, y de cualquier menor de ${template.offeredUnderYears} años` : ""
-  return `Aparece en la atención de: ${specialtyName}${byAge}`
+  return `Aparece en la atención de: ${specialtyName}`
 }
 
 /** Una respuesta ya dada, en palabras, para leerla al lado de la de hoy. «—» si no se respondió. */

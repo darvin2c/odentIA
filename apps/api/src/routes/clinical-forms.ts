@@ -730,8 +730,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
-  // Las fichas que la atención ofrece solas: por la especialidad de la cita, por la edad y, sin
-  // servicio, por la de quien atiende. Ofrecer no es pedir: nada de esto frena la atención.
+  // Las fichas que la atención ofrece solas: por la especialidad de la cita y, sin servicio, por la
+  // de quien atiende; nunca por la edad (ADR 0200). Ofrecer no es pedir: nada de esto frena la atención.
   app.get("/form-offers", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")

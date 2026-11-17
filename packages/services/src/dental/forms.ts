@@ -253,15 +253,16 @@ const PEDIATRIC: SuggestedFormTemplate = {
 }
 
 /**
- * La que pide la norma de historia clínica a todo establecimiento: índice de
- * caries, higiene oral, riesgo estomatológico y alta básica. El IHO-S se anota
- * ya calculado, con su condición.
+ * La evaluación estomatológica: índice de caries (CPOD de la OMS), higiene oral
+ * (IHO-S), riesgo estomatológico y alta básica. El IHO-S se anota ya calculado,
+ * con su condición. Se ofrece como las demás, por la especialidad que la
+ * clínica le asigna.
  */
 const STOMATOLOGIC: SuggestedFormTemplate = {
   key: "ficha-odontoestomatologica",
   title: "Ficha odontoestomatológica",
   description:
-    "Índice de caries (CPOD o ceod), higiene oral (IHO-S), riesgo estomatológico, alta básica. La pide la norma de historia clínica.",
+    "Índice de caries (CPOD o ceod), higiene oral (IHO-S), riesgo estomatológico y alta básica.",
   kind: "general",
   schema: {
     sections: [
@@ -312,10 +313,6 @@ const STOMATOLOGIC: SuggestedFormTemplate = {
 
 export const DENTAL_FORMS: ProductForms = {
   suggestions: [ENDODONTICS, ORTHODONTICS, PEDIATRIC, STOMATOLOGIC],
-  // A un niño se le ofrecen las de odontopediatría aunque su cita no diga de qué es.
-  byAge: { underYears: 12, kind: "odontopediatria" },
-  // La de la norma (CPOD, IHO-S, riesgo y alta) es de la evaluación, no de cada sesión (P11, D7).
-  oncePerPlan: [STOMATOLOGIC.key],
   diagnoses: AAE_ICD10,
   qualifiers: AAE_QUALIFIERS,
 }

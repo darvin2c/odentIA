@@ -1,8 +1,8 @@
 /**
  * Tipos del dominio clínico del odontograma: numeración FDI (ISO 3950) y
- * hallazgos con la nomenclatura de la NTS 188-MINSA/DGIESP-2022, que en Perú
- * es además la norma (siglas y variante obligatorias; ADR 0036). Valores en
- * inglés, etiquetas en español.
+ * hallazgos con la nomenclatura de la NTS 188-MINSA/DGIESP-2022; en Perú se
+ * nombran por su sigla (ADR 0036). La variante es opcional en todos los países
+ * (ADR 0200). Valores en inglés, etiquetas en español.
  */
 
 /** Tipo anatómico de pieza. En temporal, 54/55/64/65/74/75/84/85 son molares. */
@@ -75,7 +75,7 @@ export interface FindingDetails {
 /**
  * Lo que cambia con el país de la clínica al validar un hallazgo
  * (`dentalProfileFor(...).odontogram`): con odontograma oficial (Perú) la
- * variante es obligatoria como en la norma; sin él, opcional.
+ * variante se nombra por su sigla. En todos los países es opcional (17 nov).
  */
 export interface ValidateFindingOptions {
   strictVariants: boolean

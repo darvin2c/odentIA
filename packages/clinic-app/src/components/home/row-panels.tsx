@@ -1,19 +1,15 @@
-import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS } from "@odentia/clinical"
-import { Button, buttonVariants, cn, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
+import { Button, buttonVariants, cn, toast } from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchMyProfessionalProfile, saveProfessionalProfileApi } from "../../lib/encounters"
 import { type HomeTextContext, sentence, waitingKey, waitingText } from "../../lib/home"
 import { createReorderDrafts } from "../../lib/inventory"
 import { activeOrgLocale } from "../../lib/locale"
-import { useOrgProfile } from "../../lib/org"
 import { whatsappMessagesKey } from "../../lib/whatsapp"
 import type { WaitingPromotion, WaitingRow } from "../../lib/workspace"
-import { productUi } from "../../product/product-ui"
 import { undoCame, useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { useAttendAppointment } from "../patient/new-encounter-button"
@@ -596,41 +592,9 @@ export function EncounterPanel({
   onVoid: () => void
   onChanged: () => void
 }) {
-  const queryClient = useQueryClient()
   const discard = useDiscardEncounter(row.patientId)
   const text = waitingText(row, context)
-  const orgProfile = useOrgProfile().data
-  const needsLicense = row.missing.includes("signature")
   const has = Object.keys(HAS_WORDS).filter((key) => !row.missing.includes(key)).map((key) => HAS_WORDS[key] as string)
-  const [number, setNumber] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-  const profile = useQuery({
-    queryKey: ["professional-profile", "me"],
-    queryFn: () => fetchMyProfessionalProfile(),
-    enabled: needsLicense,
-    retry: false,
-  })
-  const save = useMutation({
-    retry: false,
-    mutationFn: () => {
-      // Lo que ya tiene el perfil y, si falta, lo que propone el país: se escribe una vez.
-      const current = profile.data?.data
-      const suggested = productUi().country.professional(orgProfile?.countryCode)
-      return saveProfessionalProfileApi("me", {
-        professionalTitle: current?.professionalTitle || suggested?.title || "",
-        registrationBody: current?.registrationBody || suggested?.registrationBody || "",
-        registrationNumber: number.trim(),
-      })
-    },
-    onSuccess: async () => {
-      setSaved(true)
-      setError(null)
-      await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
-      onChanged()
-    },
-    onError: (cause) => setError(submitErrorMessage(cause)),
-  })
   return (
     <DetailDrawer
       open
@@ -687,49 +651,6 @@ export function EncounterPanel({
             <p>{has.join(", ")}.</p>
           </div>
         ) : null}
-        {needsLicense && !saved ? (
-          <form
-            className="flex flex-col gap-1.5 rounded-xl bg-warning/10 p-3"
-            noValidate
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (!number.trim()) {
-                setError("Escribe tu número de colegiatura.")
-                return
-              }
-              if (!isRegistrationNumber(number.trim())) {
-                setError(REGISTRATION_NUMBER_WORDS)
-                return
-              }
-              save.mutate()
-            }}
-          >
-            <Field data-invalid={error ? true : undefined}>
-              <FieldLabel htmlFor="panel-colegiatura">Falta tu colegiatura</FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  id="panel-colegiatura"
-                  value={number}
-                  maxLength={20}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  placeholder="N.º de colegiatura"
-                  aria-invalid={error ? true : undefined}
-                  onChange={(event) => {
-                    setNumber(event.target.value)
-                    setError(null)
-                  }}
-                />
-                <Button type="submit" variant="secondary" className={cn(ACTION, "shrink-0")} disabled={save.isPending}>
-                  {save.isPending ? "Guardando…" : "Guardar"}
-                </Button>
-              </div>
-              {error ? <FieldError>{error}</FieldError> : null}
-            </Field>
-            <p className="text-[13px]">Se escribe una vez y sirve para todas tus atenciones.</p>
-          </form>
-        ) : null}
-        {saved ? <p role="status" className="text-sm">Listo: tu colegiatura quedó guardada para todas tus atenciones.</p> : null}
         {also}
       </div>
     </DetailDrawer>

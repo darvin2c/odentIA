@@ -57,12 +57,11 @@ export function findingWords(
   return variant ? `${label} · ${variant}` : label
 }
 
-/** Cómo se pide la variante: con su sigla y obligatoria en Perú; por su nombre y opcional fuera. */
-export function variantFieldLabel(
-  official: OdontogramStandardProfile | null,
-  condition: string,
-): string {
+/**
+ * Cómo se pide la variante: por su nombre y opcional en todos los países (17 nov: nunca se
+ * decide por el profesional). Con odontograma oficial las opciones muestran su sigla.
+ */
+export function variantFieldLabel(condition: string): string {
   const def = findingDefinition(condition)
-  const name = def?.variantName ?? "Variante"
-  return official ? `${name} · sigla de la ${official.shortName}` : `${name} (opcional)`
+  return `${def?.variantName ?? "Variante"} (opcional)`
 }

@@ -29,7 +29,8 @@ export function useSignedOdontogramPapers(patientId: string): ProductPapers {
       return {
         key: `odontograma-${item.id}`,
         title,
-        detail: `${formatDate(item.createdAt)} · ${item.examinerName} · ${item.registrationNumber}`,
+        // Firmado al cerrar sin colegiatura (ADR 0200): sin « · » suelto.
+        detail: [formatDate(item.createdAt), item.examinerName, item.registrationNumber].filter(Boolean).join(" · "),
         date: item.createdAt,
         action: (
           <Link

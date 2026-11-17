@@ -73,7 +73,10 @@ function rowLabel(item: OdontogramAssessment): string {
     SIGNED_ODONTOGRAM_PURPOSE_SHORT[item.purpose],
     item.examinerName,
     item.registrationNumber,
-  ].join(" · ")
+  ]
+    // Firmado al cerrar sin colegiatura (ADR 0200): sin « · » suelto.
+    .filter(Boolean)
+    .join(" · ")
 }
 
 /**

@@ -155,7 +155,7 @@ import {
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { nextSessionGapOf } from "./session-gap.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import { professionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
 import {
@@ -2276,9 +2276,14 @@ export interface ClosingCheckBase {
   ready: boolean
   missing: ClosingRequirement[]
   /**
+   * Quien firma no tiene su colegiatura en el perfil. No bloquea (17 nov): la escribe en el
+   * cierre, y queda en su perfil, o escribe por qué firma sin ella (`registrationSkipReason`).
+   */
+  registrationMissing: boolean
+  /**
    * Consentimientos que pide la atención y no están firmados (pendientes, sin
    * preparar o sin publicar). No bloquean (decisión 3): cerrar sin ellos pide
-   * decir por qué.
+   * escribir por qué.
    */
   consents: ConsentNeed[]
   /**
@@ -2797,10 +2802,10 @@ const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
 
 /**
  * Mínimo para cerrar (ADR 0003 y 0041): motivo, un diagnóstico de la lista con
- * su tipo («Presuntivo» basta),
- * evolución y firma con colegiatura. Funciones vitales y pronóstico quedan
- * opcionales (los exámenes auxiliares son órdenes de la atención): documentar
- * una consulta no obliga a inventar.
+ * su tipo («Presuntivo» basta) y evolución. La colegiatura no bloquea: sin
+ * ella se firma con un motivo escrito (17 nov). Funciones vitales y pronóstico
+ * quedan opcionales (los exámenes auxiliares son órdenes de la atención):
+ * documentar una consulta no obliga a inventar.
  */
 export async function checkEncounterClosing(
   tx: Db,
@@ -2826,12 +2831,12 @@ export async function checkEncounterClosing(
     .limit(1)
   if (!diagnosis) missing.push("diagnosis")
   if (!row.evolution?.trim()) missing.push("evolution")
+  let registrationMissing = false
   try {
-    await requireProfessionalSignature(tx, orgId, actorUserId)
+    registrationMissing = !(await professionalSignature(tx, orgId, actorUserId)).registration
   } catch (e) {
-    // Sin perfil completo, o quien atiende ya no es miembro: no puede firmar.
-    if (!(e instanceof ServiceError) || (e.code !== "PROFILE_INCOMPLETE" && e.status !== 404))
-      throw e
+    // Quien atiende ya no es miembro: no puede firmar.
+    if (!(e instanceof ServiceError) || e.status !== 404) throw e
     missing.push("signature")
   }
   // Solo lo de lo que se hizo hoy: lo indicado o traído para otro día se firma cuando se haga.
@@ -2879,7 +2884,19 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
-  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, openForms, controls, ...product }
+  return {
+    ready: missing.length === 0,
+    missing,
+    registrationMissing,
+    consents,
+    materials,
+    health,
+    sessions,
+    resolvable,
+    openForms,
+    controls,
+    ...product,
+  }
 }
 
 /** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
@@ -3192,9 +3209,14 @@ export interface FinalizeEncounterInput {
   endedAt?: string | null
   /**
    * «Seguir sin él»: por qué se cierra con un consentimiento sin firmar. Se
-   * pide solo si falta alguno; queda en la atención como el resto.
+   * pide escrito solo si falta alguno; queda en la atención como el resto.
    */
   consentSkipReason?: string | null
+  /**
+   * Por qué firma sin su colegiatura en el perfil (17 nov). Se pide escrito solo si falta;
+   * queda en la atención como el resto.
+   */
+  registrationSkipReason?: string | null
   /**
    * «¿Cuándo vuelve?» (ADR 0152): el día civil del próximo control, o que no
    * hace falta. Sin él, no se indicó: recepción no lo verá.
@@ -3333,18 +3355,29 @@ export async function finalizeEncounter(
       `Para cerrar la atención registra ${closing.missing.map((m) => CLOSING_MESSAGES[m]).join(", ")}`,
     )
   }
-  // Un consentimiento sin firmar avisa sin bloquear: se sigue diciendo por qué.
+  // Un consentimiento sin firmar avisa sin bloquear: se sigue escribiendo por qué.
   let consentSkipReason: string | null = null
   if (closing.consents.length > 0) {
     const reason = input.consentSkipReason?.trim() ?? ""
     if (!reason) {
-      const message = `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o sigue sin él diciendo por qué`
+      const message = `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o escribe por qué sigues sin él`
       throw new ServiceError("CONSENT_UNSIGNED", 409, message, { consentSkipReason: message })
     }
     if (reason.length > 2000) throw invalidField("consentSkipReason", "El motivo admite hasta 2000 caracteres")
     consentSkipReason = reason
   }
-  const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
+  // Sin colegiatura en su perfil se firma igual, con un motivo escrito (17 nov): el papel sale sin ella.
+  const signature = await professionalSignature(tx, orgId, actorUserId)
+  let registrationSkipReason: string | null = null
+  if (!signature.registration) {
+    const reason = input.registrationSkipReason?.trim() ?? ""
+    if (!reason) {
+      const message = "No tienes tu colegiatura en el perfil: escríbela o escribe por qué firmas sin ella"
+      throw new ServiceError("REGISTRATION_UNSET", 409, message, { registrationSkipReason: message })
+    }
+    if (reason.length > 2000) throw invalidField("registrationSkipReason", "El motivo admite hasta 2000 caracteres")
+    registrationSkipReason = reason
+  }
   const now = new Date()
   // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
   const { timezone } = await findOrgLocale(tx, orgId)
@@ -3428,6 +3461,7 @@ export async function finalizeEncounter(
       signerTitle: signature.title,
       signerRegistration: signature.registration,
       consentSkipReason,
+      registrationSkipReason,
       // Lo que dijo de su salud y seguía sin revisar: la constancia del aviso del cierre, que no frena.
       healthAtSigning: await healthAtSigningOf(tx, orgId, patientId, {
         sex: person.sex,

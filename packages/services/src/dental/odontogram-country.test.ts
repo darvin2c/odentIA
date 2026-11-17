@@ -106,12 +106,13 @@ it("los hallazgos solo se registran dentro de una atención de quien la lleva", 
   expect(rows[0]).toMatchObject({ encounterId: mine, leftByPlanItemId: null })
 })
 
-it("en Perú la variante sigue obligatoria y en otro país es opcional", async () => {
+// Nunca se decide por el profesional (17 nov, ADR 0200): la variante es opcional en Perú y fuera.
+it("la variante es opcional en Perú y en otro país", async () => {
   const peru = await attending("org_a")
   const peruDraft = await peru.open()
-  await expect(
-    peru.run((tx) => addOdontogramEntries(tx, ...peru.args, { ...caries16, encounterId: peruDraft })),
-  ).rejects.toMatchObject({ status: 400 })
+  const [peruRow] = await peru.run((tx) => addOdontogramEntries(tx, ...peru.args, { ...caries16, encounterId: peruDraft }))
+  expect(peruRow).toMatchObject({ condition: "caries", surface: "occlusal" })
+  expect(peruRow?.details).toEqual({})
   const bogota = await attending(await colombianClinic())
   const draft = await bogota.open()
   const [row] = await bogota.run((tx) =>
@@ -233,19 +234,18 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
       leavesFinding: { condition: "definitive_restoration", variant: "resin" },
     }),
   )
-  // En Perú lo que deja se configura con su variante.
-  await expect(
-    f.run(async (tx) =>
-      createService(tx, f.orgId, f.actor, {
-        name: "Corona",
-        officialCode: "D2740",
-        specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
-        scope: "tooth",
-        priceCents: 50000,
-        leavesFinding: { condition: "crown" },
-      }),
-    ),
-  ).rejects.toMatchObject({ status: 400 })
+  // Lo que deja se configura también sin su variante, en Perú como fuera (ADR 0200).
+  const crownService = await f.run(async (tx) =>
+    createService(tx, f.orgId, f.actor, {
+      name: "Corona",
+      officialCode: "D2740",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
+      scope: "tooth",
+      priceCents: 50000,
+      leavesFinding: { condition: "crown" },
+    }),
+  )
+  expect(crownService.leavesFinding).toEqual({ condition: "crown" })
   const [caries] = await f.run((tx) =>
     addOdontogramEntries(tx, ...f.args, { ...caries16, details: { variant: "dentin" }, encounterId: draft }),
   )

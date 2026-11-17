@@ -2,8 +2,9 @@
  * Color, sigla, validación y vigencia de hallazgos del odontograma.
  * Reglas conservadoras fundadas en la NTS 188: todo valor desconocido,
  * incompatible o fuera de anatomía se rechaza (fail closed) con mensajes en
- * español. La variante es obligatoria solo con odontograma oficial (Perú,
- * `strictVariants`); fuera es opcional y se dice por su nombre clínico.
+ * español. La variante es opcional en todos los países (17 nov: nunca se decide
+ * por el profesional); con odontograma oficial (Perú, `strictVariants`) se dice
+ * por su sigla, y fuera, por su nombre clínico.
  */
 import {
   FDI_ADULT_ROWS,
@@ -221,9 +222,9 @@ function pushDrawingErrors(errors: string[], drawing: unknown, minPoints: number
  * pieza, tramos no contiguos, arcadas incompletas, evidencia clínica faltante,
  * dibujo ausente o campos no reconocidos producen error.
  *
- * `strictVariants` (por defecto, el criterio más estricto) exige la variante
- * como la norma peruana; quien valida para una clínica lo toma de su país
- * (`dentalProfileFor(country).odontogram?.strictVariants ?? false`).
+ * La variante nunca es obligatoria. `strictVariants` solo cambia cómo se nombra
+ * en el error (sigla oficial o nombre clínico); quien valida para una clínica lo
+ * toma de su país (`dentalProfileFor(country).odontogram?.strictVariants ?? false`).
  */
 export function validateFinding(
   input: FindingInput,
@@ -287,14 +288,11 @@ export function findingIssues(
     add("surfaces", `El hallazgo "${def.label}" no admite superficies.`)
   }
 
-  // Variante: con odontograma oficial, obligatoria cuando el catálogo la
-  // define; sin él, opcional. Siempre prohibida si el hallazgo no tiene.
+  // Variante: opcional en todos los países (17 nov). Si viene, debe ser una del
+  // catálogo; siempre prohibida si el hallazgo no tiene.
   const variantPresent = isPresent(details.variant)
   if (def.variants) {
-    if (!variantPresent) {
-      if (options.strictVariants)
-        add("details.variant", `El hallazgo "${def.label}" requiere variante (sigla oficial).`)
-    } else if (!def.variants.some((item) => item.value === details.variant)) {
+    if (variantPresent && !def.variants.some((item) => item.value === details.variant)) {
       add(
         "details.variant",
         options.strictVariants
