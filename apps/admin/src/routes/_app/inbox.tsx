@@ -1,4 +1,12 @@
-import { Badge, cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import {
+  Badge,
+  cn,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@odentia/ui"
 import {
   EmptyState,
   ErrorState,
@@ -13,8 +21,8 @@ import {
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AtSign, Mail, MessageCircle, MessagesSquare, Paperclip } from "lucide-react"
 import { useRef, useState } from "react"
-import { ChatPane } from "../../components/arm/chat-drawer"
 import { momentWords } from "../../components/arm/chat-api"
+import { ChatPane } from "../../components/arm/chat-drawer"
 import { EmailThreadView } from "../../components/arm/email-thread"
 import {
   CLIENT_PHASE_WORDS,
@@ -58,7 +66,9 @@ interface InboxSearch {
 }
 
 const oneOf = <T extends string>(values: readonly T[], value: unknown): T | undefined =>
-  typeof value === "string" && (values as readonly string[]).includes(value) ? (value as T) : undefined
+  typeof value === "string" && (values as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined
 
 export const Route = createFileRoute("/_app/inbox")({
   validateSearch: (search: Record<string, unknown>): InboxSearch => ({
@@ -68,10 +78,16 @@ export const Route = createFileRoute("/_app/inbox")({
     ),
     fase: oneOf(CLIENT_PHASES, search.fase),
     canal: oneOf(INBOX_CHANNELS, search.canal),
-    c: inboxTargetOf(typeof search.c === "string" ? search.c : undefined) ? String(search.c) : undefined,
+    c: inboxTargetOf(typeof search.c === "string" ? search.c : undefined)
+      ? String(search.c)
+      : undefined,
   }),
   component: InboxPage,
 })
+
+/** Lo que muestra cada filtro (sin `items`, el Select dice el valor crudo: «todas», «todos»). */
+const PHASE_ITEMS: Record<string, string> = { todas: "Todas las fases", ...CLIENT_PHASE_WORDS }
+const CHANNEL_ITEMS: Record<string, string> = { todos: "Todos los canales", ...INBOX_CHANNEL_WORDS }
 
 const CHANNEL_ICON = {
   correo: Mail,
@@ -87,8 +103,8 @@ function InboxPage() {
       <PageShell className="flex flex-col gap-5">
         <PageHeader title="Bandeja" />
         <PageNotice tone="aviso" label="La Bandeja es de Administración">
-          Lo que nos escriben por correo, WhatsApp, Instagram o Messenger lo atiende Administración. Lo
-          tuyo está en <Link to="/support">Soporte</Link>.
+          Lo que nos escriben por correo, WhatsApp, Instagram o Messenger lo atiende Administración.
+          Lo tuyo está en <Link to="/support">Soporte</Link>.
         </PageNotice>
       </PageShell>
     )
@@ -144,129 +160,140 @@ function Inbox() {
         title="Bandeja"
         subtitle="Lo que nos escriben desde fuera de la app: correo, WhatsApp, Instagram y Messenger. La ayuda a quien ya usa su app va por Soporte."
       />
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
-        <section
-          aria-label="Conversaciones"
-          className={cn("flex min-w-0 flex-col gap-3", target && "max-lg:hidden")}
-        >
-          <ViewTabs
-            label="Qué conversaciones ver"
-            value={view}
-            onValueChange={(next) => setSearch({ vista: next === "te_toca" ? undefined : next })}
-            options={VIEWS.map((value) => ({
-              value,
-              label: VIEW_WORDS[value],
-              ...(counts && value === "te_toca" ? { count: counts.teToca } : {}),
-              ...(counts && value === "kairos" ? { count: counts.kairos } : {}),
-              ...(counts && value === "sin_cliente" ? { count: counts.sinCliente } : {}),
-            }))}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Select
-              value={search.fase ?? "todas"}
-              onValueChange={(value) =>
-                setSearch({ fase: value === "todas" ? undefined : (value as ClientPhase) })
-              }
-            >
-              <SelectTrigger aria-label="Fase del cliente" className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todas">Todas las fases</SelectItem>
-                {CLIENT_PHASES.map((phase) => (
-                  <SelectItem key={phase} value={phase}>
-                    {CLIENT_PHASE_WORDS[phase]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={search.canal ?? "todos"}
-              onValueChange={(value) =>
-                setSearch({ canal: value === "todos" ? undefined : (value as InboxChannel) })
-              }
-            >
-              <SelectTrigger aria-label="Canal" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los canales</SelectItem>
-                {INBOX_CHANNELS.map((channel) => (
-                  <SelectItem key={channel} value={channel}>
-                    {INBOX_CHANNEL_WORDS[channel]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {inbox.isPending ? (
-            <SkeletonRegion message="Cargando la Bandeja…">
-              <div className="flex flex-col gap-2">
-                {[0, 1, 2, 3].map((index) => (
-                  <div key={index} className="h-20 animate-pulse rounded-xl bg-muted" />
-                ))}
-              </div>
-            </SkeletonRegion>
-          ) : inbox.isError && !inbox.data ? (
-            <ErrorState
-              title="No pude cargar la Bandeja"
-              error={inbox.error}
-              onRetry={() => void inbox.refetch()}
+      {/* Lista y conversación según el ancho que queda, no el de la ventana: un cajón abierto al
+          lado lo achica, y sin lugar para las dos la conversación abierta se queda con todo. */}
+      <div className="@container min-w-0">
+        <div className="grid min-w-0 gap-5 @4xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+          <section
+            aria-label="Conversaciones"
+            className={cn("flex min-w-0 flex-col gap-3", target && "@max-4xl:hidden")}
+          >
+            <ViewTabs
+              label="Qué conversaciones ver"
+              value={view}
+              onValueChange={(next) => setSearch({ vista: next === "te_toca" ? undefined : next })}
+              options={VIEWS.map((value) => ({
+                value,
+                label: VIEW_WORDS[value],
+                ...(counts && value === "te_toca" ? { count: counts.teToca } : {}),
+                ...(counts && value === "kairos" ? { count: counts.kairos } : {}),
+                ...(counts && value === "sin_cliente" ? { count: counts.sinCliente } : {}),
+              }))}
             />
-          ) : items.length === 0 ? (
-            <EmptyState
-              title={view === "te_toca" ? "Nada te espera" : "No hay conversaciones aquí"}
-              description={
-                view === "te_toca"
-                  ? "Todo lo que nos escribieron tiene respuesta o no la necesita."
-                  : "Cambia la vista o quita los filtros."
-              }
-              {...(view === "te_toca"
-                ? { actionLabel: "Ver todas", onAction: () => setSearch({ vista: "todas" }) }
-                : {})}
-            />
-          ) : (
-            <>
-              <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
-                {items.map((item) => (
-                  <InboxRow
-                    key={`${item.kind}:${item.id}`}
-                    item={item}
-                    selected={search.c === inboxItemPath(item)}
-                    onOpen={() => open(item)}
-                  />
-                ))}
-              </ul>
-              {items.length >= 100 ? (
-                <p className="text-xs text-muted-foreground">
-                  Se ven las 100 primeras. Usa la fase o el canal para encontrar las demás.
-                </p>
-              ) : null}
-            </>
-          )}
-        </section>
-
-        <section
-          aria-label="Conversación abierta"
-          className={cn("min-w-0", !target && "max-lg:hidden")}
-        >
-          {target?.kind === "chat" ? (
-            <ChatPane key={target.chatId} chatId={target.chatId} onClose={close} onDirtyChange={setDirty} />
-          ) : target?.kind === "correo" ? (
-            <EmailThreadView
-              key={target.emailId}
-              emailId={target.emailId}
-              layout="pane"
-              onClose={close}
-              onDirtyChange={setDirty}
-            />
-          ) : (
-            <div className="flex h-full min-h-60 items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-              Elige una conversación para leerla y responder.
+            <div className="flex flex-wrap gap-2">
+              <Select
+                items={PHASE_ITEMS}
+                value={search.fase ?? "todas"}
+                onValueChange={(value) =>
+                  setSearch({ fase: value === "todas" ? undefined : (value as ClientPhase) })
+                }
+              >
+                <SelectTrigger aria-label="Fase del cliente" className="w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas las fases</SelectItem>
+                  {CLIENT_PHASES.map((phase) => (
+                    <SelectItem key={phase} value={phase}>
+                      {CLIENT_PHASE_WORDS[phase]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                items={CHANNEL_ITEMS}
+                value={search.canal ?? "todos"}
+                onValueChange={(value) =>
+                  setSearch({ canal: value === "todos" ? undefined : (value as InboxChannel) })
+                }
+              >
+                <SelectTrigger aria-label="Canal" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los canales</SelectItem>
+                  {INBOX_CHANNELS.map((channel) => (
+                    <SelectItem key={channel} value={channel}>
+                      {INBOX_CHANNEL_WORDS[channel]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </section>
+
+            {inbox.isPending ? (
+              <SkeletonRegion message="Cargando la Bandeja…">
+                <div className="flex flex-col gap-2">
+                  {[0, 1, 2, 3].map((index) => (
+                    <div key={index} className="h-20 animate-pulse rounded-xl bg-muted" />
+                  ))}
+                </div>
+              </SkeletonRegion>
+            ) : inbox.isError && !inbox.data ? (
+              <ErrorState
+                title="No pude cargar la Bandeja"
+                error={inbox.error}
+                onRetry={() => void inbox.refetch()}
+              />
+            ) : items.length === 0 ? (
+              <EmptyState
+                title={view === "te_toca" ? "Nada te espera" : "No hay conversaciones aquí"}
+                description={
+                  view === "te_toca"
+                    ? "Todo lo que nos escribieron tiene respuesta o no la necesita."
+                    : "Cambia la vista o quita los filtros."
+                }
+                {...(view === "te_toca"
+                  ? { actionLabel: "Ver todas", onAction: () => setSearch({ vista: "todas" }) }
+                  : {})}
+              />
+            ) : (
+              <>
+                <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+                  {items.map((item) => (
+                    <InboxRow
+                      key={`${item.kind}:${item.id}`}
+                      item={item}
+                      selected={search.c === inboxItemPath(item)}
+                      onOpen={() => open(item)}
+                    />
+                  ))}
+                </ul>
+                {items.length >= 100 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Se ven las 100 primeras. Usa la fase o el canal para encontrar las demás.
+                  </p>
+                ) : null}
+              </>
+            )}
+          </section>
+
+          <section
+            aria-label="Conversación abierta"
+            className={cn("min-w-0", !target && "@max-4xl:hidden")}
+          >
+            {target?.kind === "chat" ? (
+              <ChatPane
+                key={target.chatId}
+                chatId={target.chatId}
+                onClose={close}
+                onDirtyChange={setDirty}
+              />
+            ) : target?.kind === "correo" ? (
+              <EmailThreadView
+                key={target.emailId}
+                emailId={target.emailId}
+                layout="pane"
+                onClose={close}
+                onDirtyChange={setDirty}
+              />
+            ) : (
+              <div className="flex h-full min-h-60 items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Elige una conversación para leerla y responder.
+              </div>
+            )}
+          </section>
+        </div>
       </div>
       <UnsavedDialog
         open={blocker.status === "blocked"}
@@ -315,11 +342,11 @@ function InboxRow({
         <span className="flex min-w-0 items-center gap-2 text-sm">
           <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           <span className={cn("min-w-0 flex-1 truncate", waiting && "font-semibold")}>{who}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">{momentWords(item.lastInboundAt)}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {momentWords(item.lastInboundAt)}
+          </span>
         </span>
-        {item.subject ? (
-          <span className="truncate text-sm font-medium">{item.subject}</span>
-        ) : null}
+        {item.subject ? <span className="truncate text-sm font-medium">{item.subject}</span> : null}
         <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
           {item.attachments > 0 ? <Paperclip aria-hidden className="size-3.5 shrink-0" /> : null}
           <span className="truncate">

@@ -144,7 +144,11 @@ export function ReplyEditor({
       return
     }
     let prefix = 0
-    while (prefix < value.length && prefix < next.value.length && value[prefix] === next.value[prefix])
+    while (
+      prefix < value.length &&
+      prefix < next.value.length &&
+      value[prefix] === next.value[prefix]
+    )
       prefix++
     let suffix = 0
     while (
@@ -213,7 +217,8 @@ export function ReplyEditor({
   const notes: string[] = []
   if (rules?.formatting === "texto" && hasMarks(value))
     notes.push(`${CHANNEL_WORDS[channel]} no muestra negritas ni cursivas: sale como texto limpio.`)
-  const showCounter = Boolean(length.max) && (channel !== "correo" || length.used > (length.max ?? 0) * 0.8)
+  const showCounter =
+    Boolean(length.max) && (channel !== "correo" || length.used > (length.max ?? 0) * 0.8)
   const describedBy = [control?.["aria-describedby"], showCounter || problem ? counterId : null]
     .filter(Boolean)
     .join(" ")
@@ -302,6 +307,8 @@ export function ReplyEditor({
         ) : null}
       </div>
 
+      {/* scroll-nativo: es una caja de texto; como un textarea, el cursor y la copia dibujada se
+          desplazan juntos con la barra del navegador. */}
       <div
         ref={scroller}
         className={cn(
@@ -352,13 +359,19 @@ export function ReplyEditor({
       </div>
 
       {showCounter || problem || notes.length ? (
-        <div id={counterId} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-xs">
+        <div
+          id={counterId}
+          className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-xs"
+        >
           <span className={problem ? "text-destructive" : "text-muted-foreground"}>
             {problem ?? notes.join(" ")}
           </span>
           {showCounter ? (
             <span
-              className={cn("tabular-nums", length.over ? "text-destructive" : "text-muted-foreground")}
+              className={cn(
+                "tabular-nums",
+                length.over ? "text-destructive" : "text-muted-foreground",
+              )}
             >
               {length.used} de {length.max} {length.unit} de {CHANNEL_WORDS[channel]}
               {appended ? " (con tu firma)" : ""}
@@ -367,8 +380,7 @@ export function ReplyEditor({
         </div>
       ) : null}
 
-      {below}
-
+      {/* Lo que propone Kairós va pegado al texto que cambia, antes de los adjuntos. */}
       {review ? (
         <ImproveReview
           before={review.before}
@@ -384,6 +396,8 @@ export function ReplyEditor({
           }}
         />
       ) : null}
+
+      {below}
     </div>
   )
 }

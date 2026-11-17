@@ -44,7 +44,8 @@ export function PageNotice({ tone, label, children, action, onDismiss, className
         {label}
       </span>
       <p className="min-w-0 flex-1 basis-60">{children}</p>
-      {action ? <span className="shrink-0">{action}</span> : null}
+      {/* Sin lugar en la línea, los botones bajan y se reparten: nunca salen del aviso. */}
+      {action ? <span className="max-w-full shrink-0">{action}</span> : null}
       {onDismiss && tone !== "limite" ? (
         <Button variant="ghost" size="sm" onClick={onDismiss} aria-label="Ocultar aviso">
           Ocultar

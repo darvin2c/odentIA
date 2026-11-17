@@ -57,10 +57,10 @@ import {
   isUnsettled,
   kairosChatState,
   openChatOutcome,
-  pauseKairos,
-  resumeKairos,
   openChatWith,
+  pauseKairos,
   replyHelpWords,
+  resumeKairos,
   sendChatReply,
   sendChatRetomar,
   sentLineWords,
@@ -70,7 +70,12 @@ import {
 import { ChatOwnerDrawer, useNotClinic } from "./chat-owner-drawer"
 import { useMarkCarga } from "./client-files-tab"
 import { ClientName, invalidateArm } from "./hoy-links"
-import { settleConversation, unsettleConversation } from "./inbox-api"
+import {
+  CLIENT_PHASE_WORDS,
+  type ClientPhase,
+  settleConversation,
+  unsettleConversation,
+} from "./inbox-api"
 import { ReplyEditor, replyTextProblem } from "./reply-editor"
 import { ReplyFiles } from "./reply-files"
 import { resolveOutreach, useClientSale } from "./sale-api"
@@ -319,10 +324,17 @@ function Conversation({
   // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
   const [proposal, setProposal] = useState(proposalId)
   const schema = z
-    .object({ body: z.string(), fileIds: z.array(z.string()).max(5, "Adjunta como máximo 5 archivos") })
+    .object({
+      body: z.string(),
+      fileIds: z.array(z.string()).max(5, "Adjunta como máximo 5 archivos"),
+    })
     .superRefine((value, ctx) => {
       if (!value.body.trim() && value.fileIds.length === 0)
-        ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta o adjunta un archivo" })
+        ctx.addIssue({
+          code: "custom",
+          path: ["body"],
+          message: "Escribe la respuesta o adjunta un archivo",
+        })
       const problem = replyTextProblem(value.body, chat.channel, chat.rules)
       if (problem) ctx.addIssue({ code: "custom", path: ["body"], message: problem })
     })
@@ -422,16 +434,22 @@ function Conversation({
   const content = (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2 text-sm">
+        {/* Sin cliente no se repite aquí: el subtítulo ya dice «sin cliente todavía». */}
         {chat.client ? (
           <ClientName clientId={chat.client.id} tab="historial">
             Ver la ficha de {chat.client.name}
           </ClientName>
-        ) : (
-          <span className="text-muted-foreground">Sin cliente todavía</span>
-        )}
+        ) : null}
+        {chat.client?.phase && chat.client.phase in CLIENT_PHASE_WORDS ? (
+          <span className="text-muted-foreground">
+            · {CLIENT_PHASE_WORDS[chat.client.phase as ClientPhase]}
+          </span>
+        ) : null}
         {chat.attendedBy && !kairos ? (
           <span className="text-muted-foreground">
-            {attendedByMe ? "· Lo atiendes tú" : `· Lo atiende ${chat.attendedBy.name.trim().split(/\s+/)[0]}`}
+            {attendedByMe
+              ? "· Lo atiendes tú"
+              : `· Lo atiende ${chat.attendedBy.name.trim().split(/\s+/)[0]}`}
           </span>
         ) : null}
         <div className="ml-auto flex flex-wrap gap-2">
@@ -468,7 +486,12 @@ function Conversation({
             </Button>
           ) : null}
           {isAdmin && chat.client ? (
-            <Button type="button" size="sm" variant="ghost" onClick={() => onAside({ kind: "mover" })}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onAside({ kind: "mover" })}
+            >
               Mover a otra clínica
             </Button>
           ) : null}
@@ -568,7 +591,10 @@ function Conversation({
         </PageNotice>
       ) : null}
 
-      <section aria-labelledby={`chat-responder-${chat.id}`} className="flex flex-col gap-3 border-t pt-4">
+      <section
+        aria-labelledby={`chat-responder-${chat.id}`}
+        className="flex flex-col gap-3 border-t pt-4"
+      >
         <h3 id={`chat-responder-${chat.id}`} className="text-sm font-semibold">
           Responder por {channel}
         </h3>
@@ -606,7 +632,9 @@ function Conversation({
                                 onChange={files.handleChange}
                                 error={
                                   files.state.meta.errors
-                                    .map((issue) => (typeof issue === "string" ? issue : issue?.message))
+                                    .map((issue) =>
+                                      typeof issue === "string" ? issue : issue?.message,
+                                    )
                                     .find(Boolean) ?? null
                                 }
                               />
@@ -811,7 +839,8 @@ function Outbound({
       </div>
       {entry.status === "enviado" && entry.failedAt ? (
         <p className="text-xs text-destructive">
-          WhatsApp dijo que no le llegó{entry.failedWhy ? `: ${entry.failedWhy}` : ""}. Vuelve a «Te toca».
+          WhatsApp dijo que no le llegó{entry.failedWhy ? `: ${entry.failedWhy}` : ""}. Vuelve a «Te
+          toca».
         </p>
       ) : null}
       {entry.byKairos && entry.basis.length > 0 ? (

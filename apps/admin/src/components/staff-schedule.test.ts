@@ -230,8 +230,12 @@ describe("Kairós en los chats", () => {
       files: [],
     }
     expect(sentLineWords(sent)).toBe("Ana Ruiz · 10:00 · Entregado")
-    expect(sentLineWords({ ...sent, readAt: "2026-11-14T15:02:00Z" })).toBe("Ana Ruiz · 10:00 · Leído")
-    expect(sentLineWords({ ...sent, status: "incierto" })).toBe("Ana Ruiz · 10:00 · No se sabe si salió")
+    expect(sentLineWords({ ...sent, readAt: "2026-11-14T15:02:00Z" })).toBe(
+      "Ana Ruiz · 10:00 · Leído",
+    )
+    expect(sentLineWords({ ...sent, status: "incierto" })).toBe(
+      "Ana Ruiz · 10:00 · No se sabe si salió",
+    )
     // Salió, pero WhatsApp dijo después que no llegó: eso manda sobre «Entregado».
     expect(sentLineWords({ ...sent, failedAt: "2026-11-14T15:01:00Z", failedWhy: "131053" })).toBe(
       "Ana Ruiz · 10:00 · No llegó",

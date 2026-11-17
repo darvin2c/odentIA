@@ -109,7 +109,7 @@ export function useNotClinic() {
     mutationFn: (chatId: string) => markNotClinic(chatId),
     onSuccess: (_data, chatId) => {
       refresh(chatId)
-      toast.success("Listo: no es una clínica. Sus próximos mensajes no vuelven a Hoy.", {
+      toast.success("Listo: no es una clínica. Sus próximos mensajes no vuelven a «Te toca».", {
         action: { label: "Deshacer", onClick: () => void undoNow(chatId) },
       })
     },
@@ -250,7 +250,7 @@ function Options({
           />
           <Way
             label="No es una clínica"
-            hint="Un paciente, un proveedor o spam. Sus próximos mensajes no vuelven a Hoy. Se puede deshacer."
+            hint="Un paciente, un proveedor o spam. Sus próximos mensajes no vuelven a «Te toca». Se puede deshacer."
             disabled={busy || mark.isPending}
             onClick={() =>
               mark.mutate(subject.chatId, {
