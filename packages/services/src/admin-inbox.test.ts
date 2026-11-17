@@ -11,11 +11,12 @@ import {
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { chatReplyOutbound, skipChatOutreach } from "./admin-chat-send.js"
 import { clientFileKey, deleteClientFile, registerClientFile } from "./admin-client-files.js"
 import type { AdminActor } from "./admin-core.js"
+import { firstIdSql } from "./admin-email-thread.js"
 import {
   applyChatStatus,
   assignChat,
@@ -502,6 +503,33 @@ describe("el hilo de un correo", () => {
     const forClinic = await kairosImproveContext(ownerDb, admin, { emailId: answer.id })
     expect(JSON.stringify(forClinic.conversation)).toContain("cambiar la clave")
     expect(JSON.stringify(forClinic.conversation)).not.toContain("datos de acceso")
+  })
+
+  it("las cabeceras del hilo se buscan por sus índices: la misma expresión que la regla", async () => {
+    // Cada búsqueda por el primer Message-ID, armada con la misma expresión de la regla
+    // (`firstIdSql`): sin recorrer la tabla, el plan usa su índice de expresión.
+    const planOf = (query: SQL) =>
+      ownerDb.transaction(async (tx) => {
+        await tx.execute(sql`set local enable_seqscan = off`)
+        const rows = await tx.execute<{ "QUERY PLAN": string }>(sql`explain ${query}`)
+        return [...rows].map((row) => row["QUERY PLAN"]).join("\n")
+      })
+    const key = sql.raw(`'<raiz.plan@nadie.test>'`)
+    expect(
+      await planOf(
+        sql`select 1 from admin.saas_inbound_email fe where ${firstIdSql(sql.raw(`fe."references"`))} = ${key}`,
+      ),
+    ).toContain("saas_inbound_email_references_root_idx")
+    expect(
+      await planOf(
+        sql`select 1 from admin.saas_inbound_email fe where ${firstIdSql(sql.raw("fe.in_reply_to"))} = ${key}`,
+      ),
+    ).toContain("saas_inbound_email_reply_root_idx")
+    expect(
+      await planOf(
+        sql`select 1 from admin.saas_outreach rr where ${firstIdSql(sql.raw(`rr."references"`))} = ${key}`,
+      ),
+    ).toContain("saas_outreach_references_root_idx")
   })
 
   it("a quien le respondimos entra en el hilo con su primer correo; quien no, sigue aparte", async () => {

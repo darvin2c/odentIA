@@ -89,7 +89,11 @@ export function outreachThreadKeyOf(
 }
 
 const ALIAS = /^[a-z_][a-z0-9_]*$/
-/** `firstMessageId` en SQL: la misma expresión regular (`[:space:]` es el `\s` de PostgreSQL). */
+/**
+ * `firstMessageId` en SQL: la misma expresión regular (`[:space:]` es el `\s` de PostgreSQL). Los
+ * índices de `references` e `in_reply_to` (migración 0140) son de esta expresión exacta: si cambia,
+ * cambian con ella (lo comprueba el EXPLAIN de `admin-inbox.test.ts`).
+ */
 export const firstIdSql = (expr: SQL) => sql`substring(${expr} from '<[^<>[:space:]]+>')`
 
 function columnsOf(alias: string) {
@@ -156,12 +160,15 @@ function threadAddressSql(key: SQL, sender: SQL): SQL<boolean> {
  */
 export function emailThreadKeySql(alias: string): SQL<string | null> {
   const e = columnsOf(alias)
+  // `offset 0`: que la clave de las cabeceras se lea una vez; sin él, PostgreSQL la vuelve a
+  // armar (con sus búsquedas del padre) en cada lugar donde se usa.
   return sql<string | null>`(select (case when tk.key is null or tk.key = tk.own then tk.key
         when not tk.verified then tk.own
         when ${threadAddressSql(sql.raw("tk.key"), sql.raw("tk.sender"))} then tk.key
         else tk.own end)
     from (select ${headerThreadKeySql(alias)} as key, nullif(btrim(${e("message_id")}), '') as own,
-      lower(btrim(${e("from_address")})) as sender, ${e("sender_verified")} as verified) tk)`
+      lower(btrim(${e("from_address")})) as sender, ${e("sender_verified")} as verified
+      offset 0) tk)`
 }
 
 /** `outreachThreadKeyOf` en SQL sobre una fila de `saas_outreach` con ese alias. */

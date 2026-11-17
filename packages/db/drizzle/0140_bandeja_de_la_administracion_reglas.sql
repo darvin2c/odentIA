@@ -53,4 +53,15 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$$;--> statement-breakpoint
+
+-- El hilo de un correo se lee al buscar por el primer Message-ID de sus cabeceras
+-- (`firstIdSql` de `packages/services/src/admin-email-thread.ts`): quién empezó un hilo que no
+-- conocemos, lo nuestro que lo continúa y los correos de un hilo fuera de la ventana de la Bandeja.
+-- Son índices de expresión con la misma expresión: si cambia allá, cambia aquí.
+CREATE INDEX saas_inbound_email_references_root_idx ON admin.saas_inbound_email
+  USING btree ((substring("references" from '<[^<>[:space:]]+>')));--> statement-breakpoint
+CREATE INDEX saas_inbound_email_reply_root_idx ON admin.saas_inbound_email
+  USING btree ((substring(in_reply_to from '<[^<>[:space:]]+>')));--> statement-breakpoint
+CREATE INDEX saas_outreach_references_root_idx ON admin.saas_outreach
+  USING btree ((substring("references" from '<[^<>[:space:]]+>')));
