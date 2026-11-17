@@ -734,7 +734,11 @@ describe("Mejorar: la red contra lo que agrega", () => {
     ).toEqual(["3"])
     expect(
       checkImprovedText(
-        { text: "hola", channel: "correo", context: { clientName: "Clínica 32 Dientes" } },
+        {
+          text: "hola",
+          channel: "correo",
+          context: { conversation: [], clientName: "Clínica 32 Dientes" },
+        },
         "Hola, Clínica 32 Dientes.",
       ).invented,
     ).toEqual([])
