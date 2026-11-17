@@ -132,9 +132,9 @@ export const CLINICA: readonly HelpMore[] = [
       },
       {
         id: "pacientes-firmar-falta-colegiatura",
-        q: "¿Qué hago si al firmar dice que falta mi colegiatura?",
-        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». Se escribe una vez y sirve para todas tus atenciones.",
-        forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "inicio me pide mi colegiatura", "falta tu colegiatura en te espera", "por que me pide mi colegiatura para cerrar la atencion"],
+        q: "¿Qué hago si al firmar dice que no tengo mi colegiatura?",
+        a: "Puedes firmar igual. «Finalizar y firmar» muestra «No tienes tu colegiatura en el perfil» con «Título profesional», «Colegio» y «Número de colegiatura»: si la escribes, queda en tu perfil para todas tus atenciones; si no, escribe en «Si firmas sin colegiatura, escribe por qué» el motivo, que queda en la atención, y la hoja sale sin colegiatura. El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». La receta y el consentimiento sí la piden para firmarse, sin perder lo escrito.",
+        forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "puedo cerrar la atencion sin colegiatura", "no tienes tu colegiatura en el perfil", "por que me pide mi colegiatura para cerrar la atencion"],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -384,7 +384,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-ficha-odontoestomatologica-cuando",
         q: "¿Cuándo lleno la ficha odontoestomatológica?",
-        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
+        a: "Cuando tú lo decidas. La atención te la ofrece en «Fichas para esta atención» si es de la especialidad de la cita o de la tuya (índice de caries, higiene oral, riesgo y alta básica); si ya la llenó antes, lo dice («la anterior, del 10 nov») y decides si llenas otra. También sale en una urgencia y en las sesiones siguientes: abrirla o no es tuyo. Si no te la ofrece, «Otra ficha…» o «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
         // Responde también por qué aparece y si hay que llenarla para firmar: la de «¿Por qué me aparece
         // esta ficha?» (Fichas de consulta) explica la regla de cualquier ficha y ya no nombra a esta, para
         // que no se respondan lo mismo (medición de la Ayuda del 16 nov). Las formas que Jev tiene que leer
