@@ -122,10 +122,23 @@ interface WaStatusRow {
   id: string
   status: ChatMetaStatus
   callbackData: string | null
+  /** Con `failed`: el primer error que dio Meta, corto («131053: no se pudo descargar…»). */
+  why: string | null
 }
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+/** El primer error de un estado `failed` de WhatsApp: su código y lo que dice, hasta 200. */
+function statusError(errors: unknown): string | null {
+  const first = Array.isArray(errors) ? (errors[0] as Record<string, unknown> | undefined) : null
+  if (!first || typeof first !== "object") return null
+  const data = first.error_data as { details?: unknown } | undefined
+  const said = text(data?.details) ?? text(first.message) ?? text(first.title)
+  const code = typeof first.code === "number" || typeof first.code === "string" ? first.code : null
+  const why = [code === null ? null : String(code), said].filter(Boolean).join(": ")
+  return why ? why.slice(0, 200) : null
 }
 
 /**
@@ -158,7 +171,12 @@ function readWhatsAppRaw(rawBody: string, phoneNumberId: string) {
         if (id && filename) filenames.set(id, filename)
       }
       for (const raw of Array.isArray(value["statuses"]) ? value["statuses"] : []) {
-        const row = raw as { id?: unknown; status?: unknown; biz_opaque_callback_data?: unknown }
+        const row = raw as {
+          id?: unknown
+          status?: unknown
+          biz_opaque_callback_data?: unknown
+          errors?: unknown
+        }
         const id = text(row.id)
         const status = text(row.status)
         if (!id || !status || !["sent", "delivered", "read", "failed"].includes(status)) continue
@@ -166,6 +184,7 @@ function readWhatsAppRaw(rawBody: string, phoneNumberId: string) {
           id,
           status: status as ChatMetaStatus,
           callbackData: text(row.biz_opaque_callback_data),
+          why: status === "failed" ? statusError(row.errors) : null,
         })
       }
     }
@@ -505,7 +524,12 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
           await deps.ownerDb.transaction((tx) =>
             applyChatStatus(
               tx as Db,
-              { externalId: status.id, outreachId: status.callbackData, status: status.status },
+              {
+                externalId: status.id,
+                outreachId: status.callbackData,
+                status: status.status,
+                why: status.why,
+              },
               now,
             ),
           )

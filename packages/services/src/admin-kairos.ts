@@ -20,7 +20,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, ne, notInArray, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import {
   type ClientFileRow,
@@ -40,6 +40,7 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   type AssignChatInput,
   type ChatSuggestion,
@@ -852,9 +853,25 @@ function toItemView(
   }
 }
 
+/**
+ * Lo de Kairós que se decide dentro de su conversación, en la Bandeja (ADR 0196): se sigue
+ * creando (y se aprueba con `decideKairosItem`), pero no sale en Kairós ni en Hoy.
+ */
+export const KAIROS_CONVERSATION_KINDS = [
+  "correo_sin_cliente",
+  "chat_sin_cliente",
+  "responder_chat",
+  "responder_correo",
+] as const satisfies readonly KairosItemKind[]
+
 export interface KairosItemFilter {
   /** «espera»: lo que espera un sí; «hecho»: lo ya decidido, vencido o ejecutado. */
   status: "espera" | "hecho"
+  /**
+   * También lo de las conversaciones (`KAIROS_CONVERSATION_KINDS`), que se decide en la Bandeja:
+   * sin pedirlo no sale.
+   */
+  conversations?: boolean
   /** Solo lo listo para decidir (`isReady`): lo que muestra Hoy. */
   ready?: boolean
   clientId?: string
@@ -869,7 +886,8 @@ export interface KairosItemFilter {
 /**
  * Lo que preparó Kairós: lo que espera un sí (lo que vence antes arriba) o lo
  * ya decidido (lo último arriba). Soporte no ve lo que es solo de
- * administración. Vence antes lo que esperó 48 h.
+ * administración. Vence antes lo que esperó 48 h. Lo de las conversaciones se
+ * decide en la Bandeja: solo sale si se pide (`conversations`).
  */
 export async function listKairosItems(
   tx: Db,
@@ -889,6 +907,7 @@ export async function listKairosItems(
     filter.clientId ? eq(kairosItem.clientId, filter.clientId) : undefined,
     actor.role === "admin" ? undefined : eq(kairosItem.adminOnly, false),
     filter.ready ? kairosReadySql : undefined,
+    filter.conversations ? undefined : notInArray(kairosItem.kind, [...KAIROS_CONVERSATION_KINDS]),
   )
   const cargaFirst = filter.status === "espera" && filter.cargaFirst === true
   // Hoy: la posible carga urgente (a 5 días o menos de borrarse si se marca, o de una clínica
@@ -1072,6 +1091,9 @@ const KEEPS_WAITING = new Set([
   "CHAT_ADMIN_ONLY",
   // «Pasar a…» a alguien que ya no está libre a esa hora: se elige a otra persona.
   "STAFF_BUSY",
+  // El borrador de un correo que ya no es el último de su hilo: se responde en la Bandeja, y la
+  // próxima pasada lo retira (`ruleReplyEmails`).
+  "NEWER_EMAIL",
 ])
 
 /** Lo que cada tipo deja cambiar antes de aprobar. */
@@ -2509,6 +2531,21 @@ const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
  */
 async function ruleReplyEmails(pass: Pass): Promise<void> {
   const { tx } = pass
+  // El borrador de un correo que ya no es el último de su hilo contesta lo de antes: se retira,
+  // y así el del correo nuevo puede prepararse en esta misma pasada (uno en espera por remitente).
+  const behind = await rows<{ id: string }>(
+    tx,
+    sql`select k.id from kairos_item k
+      join saas_inbound_email d on d.id::text = k.payload ->> 'emailId'
+    where k.kind = 'responder_correo' and k.status = 'espera'
+      and exists (select 1 from saas_inbound_email n
+        where n.id <> d.id and (n.received_at, n.id) > (d.received_at, d.id)
+          and ${emailThreadKeySql("n")} = ${emailThreadKeySql("d")})`,
+  )
+  await pass.closeItems(
+    { ids: behind.map((row) => row.id) },
+    "llegó otro correo después en este hilo",
+  )
   const fresh = await rows<{
     id: string
     client_id: string | null
@@ -2529,6 +2566,14 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
       and e.sender_verified
       and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
       and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)
+      -- Solo el último correo de su hilo (la regla de la Bandeja), y si nadie respondió el hilo
+      -- después de que llegó: un borrador de un correo anterior no contesta lo último.
+      and not exists (select 1 from saas_inbound_email n
+        where n.id <> e.id and (n.received_at, n.id) > (e.received_at, e.id)
+          and ${emailThreadKeySql("n")} = ${emailThreadKeySql("e")})
+      and not exists (select 1 from saas_outreach t
+        where t.channel = 'correo' and t.created_at >= e.received_at
+          and ${outreachThreadKeySql("t")} = ${emailThreadKeySql("e")})
       and not exists (select 1 from kairos_item k
         where k.kind = 'responder_correo' and k.payload ->> 'emailId' = e.id::text)
       and not exists (select 1 from kairos_item k

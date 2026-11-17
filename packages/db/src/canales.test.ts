@@ -160,6 +160,47 @@ describe("lo que sale en una conversación", () => {
     )
   })
 
+  it("que no llegó lo que salió se anota una vez, con su motivo, solo en WhatsApp y sin volver atrás", async () => {
+    const FAILED = "e1000000-0000-4000-8000-000000000009"
+    await ownerDb.execute(
+      sql`insert into saas_outreach (id, channel, to_address, body, chat_id) values (${FAILED}::uuid, 'whatsapp', '+51987000001', 'contrato.pdf', ${CHAT}::uuid)`,
+    )
+    // Lo que aún no salió no «no llegó»: eso es «no salió».
+    await expect(
+      ownerDb.execute(
+        sql`update saas_outreach set failed_at = now() where id = ${FAILED}::uuid`,
+      ),
+    ).rejects.toMatchObject(violates("saas_outreach_status_flow"))
+    await ownerDb.execute(
+      sql`update saas_outreach set status = 'enviado', sent_at = now(), external_id = 'wamid.F' where id = ${FAILED}::uuid`,
+    )
+    // El motivo va con su fecha, en el mismo cambio.
+    await expect(
+      ownerDb.execute(sql`update saas_outreach set failed_why = 'x' where id = ${FAILED}::uuid`),
+    ).rejects.toMatchObject(violates("saas_outreach_immutable"))
+    await ownerDb.execute(
+      sql`update saas_outreach set failed_at = now(), failed_why = '131053: no se pudo descargar' where id = ${FAILED}::uuid`,
+    )
+    // Una vez: ni otra fecha ni otro motivo, y sigue enviado (no vuelve a «no salió»).
+    await expect(
+      ownerDb.execute(
+        sql`update saas_outreach set failed_at = now() + interval '1 minute' where id = ${FAILED}::uuid`,
+      ),
+    ).rejects.toMatchObject(violates("saas_outreach_immutable"))
+    await expect(
+      ownerDb.execute(sql`update saas_outreach set failed_why = 'otro' where id = ${FAILED}::uuid`),
+    ).rejects.toMatchObject(violates("saas_outreach_immutable"))
+    await expect(
+      ownerDb.execute(sql`update saas_outreach set status = 'no_salio' where id = ${FAILED}::uuid`),
+    ).rejects.toMatchObject(violates("saas_outreach_status_flow"))
+    // Solo lo dice WhatsApp en una conversación: un correo no.
+    await expect(
+      ownerDb.execute(
+        sql`insert into saas_outreach (channel, to_address, body, client_id, failed_at) values ('correo', 'a@b.test', 'Hola', ${CLIENT}::uuid, now())`,
+      ),
+    ).rejects.toMatchObject(violates("saas_outreach_delivery_check"))
+  })
+
   it("«solo administración» se decide al escribirlo y solo sube: en el envío y en el mensaje", async () => {
     // El envío: de no a sí (pasa a un cliente sin app); nunca de sí a no.
     await ownerDb.execute(

@@ -18,6 +18,7 @@ import { Route as AppClientsRouteImport } from './routes/_app/clients'
 import { Route as AppCommissionsRouteImport } from './routes/_app/commissions'
 import { Route as AppComplaintsRouteImport } from './routes/_app/complaints'
 import { Route as AppDemosRouteImport } from './routes/_app/demos'
+import { Route as AppInboxRouteImport } from './routes/_app/inbox'
 import { Route as AppKairosRouteImport } from './routes/_app/kairos'
 import { Route as AppOrganizationsRouteImport } from './routes/_app/organizations'
 import { Route as AppPipelineRouteImport } from './routes/_app/pipeline'
@@ -71,6 +72,11 @@ const AppComplaintsRoute = AppComplaintsRouteImport.update({
 const AppDemosRoute = AppDemosRouteImport.update({
   id: '/demos',
   path: '/demos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInboxRoute = AppInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => AppRoute,
 } as any)
 const AppKairosRoute = AppKairosRouteImport.update({
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/commissions': typeof AppCommissionsRoute
   '/complaints': typeof AppComplaintsRoute
   '/demos': typeof AppDemosRoute
+  '/inbox': typeof AppInboxRoute
   '/kairos': typeof AppKairosRoute
   '/organizations': typeof AppOrganizationsRoute
   '/pipeline': typeof AppPipelineRoute
@@ -153,6 +160,7 @@ export interface FileRoutesByTo {
   '/commissions': typeof AppCommissionsRoute
   '/complaints': typeof AppComplaintsRoute
   '/demos': typeof AppDemosRoute
+  '/inbox': typeof AppInboxRoute
   '/kairos': typeof AppKairosRoute
   '/organizations': typeof AppOrganizationsRoute
   '/pipeline': typeof AppPipelineRoute
@@ -175,6 +183,7 @@ export interface FileRoutesById {
   '/_app/commissions': typeof AppCommissionsRoute
   '/_app/complaints': typeof AppComplaintsRoute
   '/_app/demos': typeof AppDemosRoute
+  '/_app/inbox': typeof AppInboxRoute
   '/_app/kairos': typeof AppKairosRoute
   '/_app/organizations': typeof AppOrganizationsRoute
   '/_app/pipeline': typeof AppPipelineRoute
@@ -198,6 +207,7 @@ export interface FileRouteTypes {
     | '/commissions'
     | '/complaints'
     | '/demos'
+    | '/inbox'
     | '/kairos'
     | '/organizations'
     | '/pipeline'
@@ -217,6 +227,7 @@ export interface FileRouteTypes {
     | '/commissions'
     | '/complaints'
     | '/demos'
+    | '/inbox'
     | '/kairos'
     | '/organizations'
     | '/pipeline'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/_app/commissions'
     | '/_app/complaints'
     | '/_app/demos'
+    | '/_app/inbox'
     | '/_app/kairos'
     | '/_app/organizations'
     | '/_app/pipeline'
@@ -322,6 +334,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDemosRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/inbox': {
+      id: '/_app/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof AppInboxRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/kairos': {
       id: '/_app/kairos'
       path: '/kairos'
@@ -401,6 +420,7 @@ interface AppRouteChildren {
   AppCommissionsRoute: typeof AppCommissionsRoute
   AppComplaintsRoute: typeof AppComplaintsRoute
   AppDemosRoute: typeof AppDemosRoute
+  AppInboxRoute: typeof AppInboxRoute
   AppKairosRoute: typeof AppKairosRoute
   AppOrganizationsRoute: typeof AppOrganizationsRoute
   AppPipelineRoute: typeof AppPipelineRoute
@@ -420,6 +440,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCommissionsRoute: AppCommissionsRoute,
   AppComplaintsRoute: AppComplaintsRoute,
   AppDemosRoute: AppDemosRoute,
+  AppInboxRoute: AppInboxRoute,
   AppKairosRoute: AppKairosRoute,
   AppOrganizationsRoute: AppOrganizationsRoute,
   AppPipelineRoute: AppPipelineRoute,

@@ -15,6 +15,7 @@ import {
   KAIROS_DRAFTS_PER_PASS,
   type KairosDraftWriter,
   type KairosExecutors,
+  type KairosImproveWriter,
   type KairosWeeklyWriter,
   kairosDonePage,
   kairosRulesPass,
@@ -44,6 +45,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { sendChatOutreach } from "../lib/admin-chat-send.js"
 import { adminContextOf } from "../lib/admin-context.js"
+import { createKairosImproveRoute } from "./admin-kairos-improve.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
@@ -64,9 +66,10 @@ export interface AdminKairosDeps {
   mailer: Mailer
   /**
    * El escritor de Kairós con modelo (`createKairosWriter` de `@odentia/agent`);
-   * sin él, el doble determinista (`fakeKairosWriter`), sin gasto.
+   * sin él, el doble determinista (`fakeKairosWriter`), sin gasto. También
+   * «Mejorar con Kairós» (`/improve`).
    */
-  kairos?: KairosDraftWriter & KairosWeeklyWriter
+  kairos?: KairosDraftWriter & KairosWeeklyWriter & KairosImproveWriter
   /**
    * Por dónde salen los correos que se aprueban (conversaciones): el canal de
    * ZeptoMail para conversaciones (`CONVERSATION_SMTP_*`); sin él, `mailer`. Las
@@ -447,6 +450,15 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
       }
     })
   })
+
+  // «Mejorar con Kairós» en el editor de respuesta (ADR 0196): solo Administración, nunca envía.
+  app.route(
+    "/improve",
+    createKairosImproveRoute({
+      ownerDb: deps.ownerDb,
+      ...(deps.kairos ? { kairos: deps.kairos } : {}),
+    }),
+  )
 
   return app
 }

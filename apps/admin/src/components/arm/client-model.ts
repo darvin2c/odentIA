@@ -10,21 +10,35 @@ import type { QueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import type { ClientListView, ClientStageName } from "../../lib/list-search"
 import { supportTime } from "../../lib/support-words"
+import { CLIENT_PHASE_WORDS, CLIENT_PHASES, type ClientPhase } from "./inbox-api"
 import { addDays, dayWords, limaDay, limaInstant, ORIGIN_WORDS } from "./sale-words"
 
 // Las palabras del origen y las fechas de Lima son las de la venta (`sale-words.ts`): una sola copia.
 export { dayWords, limaInstant, ORIGIN_WORDS }
+// La fase es la de la Bandeja (`inbox-api.ts`): la misma regla del servidor, una sola copia.
+export { CLIENT_PHASE_WORDS, CLIENT_PHASES, type ClientPhase }
 
 /* ---------- Palabras ---------- */
 
+/**
+ * La etapa de la venta. «entro» (con cuenta) se dice por su fase, «En alta» o «Activo»
+ * (`stageWords`); sin la fase a mano, «En alta». Nunca «Con cuenta» ni «Entró».
+ */
 export const STAGE_WORDS: Record<ClientStageName, string> = {
   contacto: "Contacto",
   presentacion_agendada: "Presentación agendada",
   presentacion_hecha: "Presentación hecha",
   propuesta: "Propuesta",
-  entro: "Con cuenta",
+  entro: "En alta",
   no_por_ahora: "No por ahora",
   perdido: "Perdido",
+}
+
+/** La etapa de un cliente en palabras: con cuenta, su fase; si no, la etapa de su venta. */
+export function stageWords(client: { stage: string; phase: string }): string {
+  if (client.phase === "en_alta" || client.phase === "activo")
+    return CLIENT_PHASE_WORDS[client.phase]
+  return wordOf(STAGE_WORDS, client.stage, "Contacto")
 }
 /** Las etapas de la venta, antes de decidir: lo que está «por vender». */
 export const SELLING_STAGES: readonly ClientStageName[] = [
@@ -36,7 +50,8 @@ export const SELLING_STAGES: readonly ClientStageName[] = [
 
 export const VIEW_WORDS: Record<ClientListView, string> = {
   por_vender: "Por vender",
-  con_cuenta: "Con cuenta",
+  en_alta: "En alta",
+  activos: "Activos",
   no_por_ahora: "No por ahora",
   perdidos: "Perdidos",
   todos: "Todos",
@@ -85,6 +100,8 @@ export const ACTIVITY_WORDS: Record<string, string> = {
   presentacion: "Presentación",
   propuesta: "Propuesta",
   nota: "Nota",
+  instagram: "Instagram",
+  messenger: "Messenger",
 }
 
 /** El estado del plan de una cuenta, como en Cobros. */
@@ -107,10 +124,12 @@ export const planStatusVariant = (
         ? "destructive"
         : "secondary"
 
+/** La palabra de cada categoría del historial, en su fila. */
 export const HISTORY_CATEGORY_WORDS: Record<string, string> = {
-  contactos: "Contactos",
+  conversaciones: "Conversación",
   venta: "Venta",
-  cuenta: "Cuenta y pagos",
+  alta: "Alta",
+  plan: "Plan y pagos",
   soporte: "Soporte",
 }
 
@@ -146,6 +165,21 @@ export const limaTimeOf = (iso: string): string => supportTime(iso)
 
 const product = z.enum(CLINICAL_PRODUCTS)
 const person = z.object({ userId: z.string(), name: z.string() })
+/** Una fase que no se conoce se lee «Por vender»: un valor nuevo no rompe la pantalla. */
+const phase = z
+  .string()
+  .transform(
+    (value): ClientPhase =>
+      (CLIENT_PHASES as readonly string[]).includes(value) ? (value as ClientPhase) : "por_vender",
+  )
+  .optional()
+
+/**
+ * La fase si la respuesta no la trae (la API de antes, mientras se despliega): de la etapa y de si
+ * tiene cuenta, con «En alta» para toda cuenta hasta que el servidor diga más.
+ */
+const phaseOf = (stage: string, hasAccount: boolean): ClientPhase =>
+  hasAccount ? "en_alta" : stage === "no_por_ahora" || stage === "perdido" ? stage : "por_vender"
 
 export const nextStepSchema = z.object({
   taskId: z.string(),
@@ -160,11 +194,12 @@ export type NextStep = z.infer<typeof nextStepSchema>
 export const signalSchema = z.object({ code: z.string(), words: z.string() })
 export type ClientSignal = z.infer<typeof signalSchema>
 
-export const clientListItemSchema = z.object({
+const clientListItemBase = z.object({
   id: z.string(),
   name: z.string(),
   product,
   stage: z.string(),
+  phase,
   nextStep: nextStepSchema.nullable(),
   owner: person.nullable(),
   origin: z.string(),
@@ -173,6 +208,10 @@ export const clientListItemSchema = z.object({
   signals: z.array(signalSchema),
   createdAt: z.string(),
 })
+export const clientListItemSchema = clientListItemBase.transform((row) => ({
+  ...row,
+  phase: row.phase ?? phaseOf(row.stage, row.organizationId !== null),
+}))
 export type ClientListItem = z.infer<typeof clientListItemSchema>
 
 export const clientListSchema = z.object({
@@ -244,14 +283,28 @@ export const activityRowSchema = z.object({
   byKairos: z.boolean(),
   contactId: z.string().nullable(),
   adminOnly: z.boolean(),
+  /** Quien lo escribió, si llegó de fuera (un correo o un chat): nunca «Sistema». */
+  from: z.string().nullable().default(null),
+  /** El correo o la conversación que abre (solo Administración los recibe). */
+  emailId: z.string().nullable().default(null),
+  chatId: z.string().nullable().default(null),
 })
 export type ActivityRow = z.infer<typeof activityRowSchema>
 
-export const clientDetailSchema = z.object({
+const clientDetailBase = z.object({
   id: z.string(),
   name: z.string(),
   product,
   stage: z.string(),
+  phase,
+  /** En alta: los pasos hechos, de cuántos, y los nombres de los que faltan; si no, nulo. */
+  alta: z
+    .object({ done: z.number(), total: z.number(), missing: z.array(z.string()) })
+    .nullable()
+    .default(null),
+  /** Activa: el primer pago que cuenta. */
+  activeSince: z.string().nullable().default(null),
+  openSupportCases: z.number().default(0),
   countryCode: z.string(),
   city: z.string().nullable(),
   professionals: z.string().nullable(),
@@ -293,7 +346,14 @@ export const clientDetailSchema = z.object({
   summary: z
     .object({
       text: z.string(),
-      sources: z.array(z.object({ text: z.string(), source: z.string() })),
+      // `label`: cómo se dice la fuente («Lo anotado», «Nos escribió por WhatsApp»), del servidor.
+      sources: z.array(
+        z.object({
+          text: z.string(),
+          source: z.string(),
+          label: z.string().nullable().default(null),
+        }),
+      ),
       at: z.string().nullable(),
     })
     .nullable(),
@@ -306,17 +366,50 @@ export const clientDetailSchema = z.object({
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
 })
+export const clientDetailSchema = clientDetailBase.transform((row) => ({
+  ...row,
+  phase: row.phase ?? phaseOf(row.stage, row.organization !== null),
+}))
 export type ClientDetail = z.infer<typeof clientDetailSchema>
+
+/**
+ * Lo que abre una fila del historial: su cajón (correo, chat, envío, actividad, tarea, archivo,
+ * propuesta, informe o carga), la cola de soporte o la pestaña que toca (`pestana`, con su nombre
+ * en `id`). Un tipo que no se conoce se lee como texto y la fila abre su detalle.
+ */
+export const timelineLinkSchema = z.object({
+  kind: z.string(),
+  id: z.string(),
+  orgId: z.string().optional(),
+  number: z.number().optional(),
+  loadId: z.string().optional(),
+})
+export type TimelineLink = z.infer<typeof timelineLinkSchema>
 
 export const timelineEntrySchema = z.object({
   id: z.string(),
   at: z.string(),
   who: z.object({ kind: z.string(), name: z.string() }),
   category: z.string(),
+  /** El canal o lo que es, para su ícono. */
+  icon: z.string().default("nota"),
   title: z.string(),
   detail: z.string().optional(),
   adminOnly: z.boolean(),
-  link: z.object({ kind: z.string(), id: z.string() }).optional(),
+  link: timelineLinkSchema.optional(),
+  /** Una actividad: el texto entero y en qué quedó. */
+  body: z.string().optional(),
+  outcome: z.string().optional(),
+  /** Un envío sin conversación: por dónde, a quién, qué decía y cómo quedó. */
+  envio: z
+    .object({
+      channel: z.string(),
+      to: z.string(),
+      subject: z.string().nullable(),
+      body: z.string(),
+      status: z.string(),
+    })
+    .optional(),
 })
 export type TimelineEntry = z.infer<typeof timelineEntrySchema>
 export const timelineSchema = z.object({

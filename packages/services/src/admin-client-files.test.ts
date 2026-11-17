@@ -10,8 +10,12 @@ import {
   cargaDeleteAfter,
   clearDueCargaNow,
   clientFileDeleteAfter,
+  clientFileContent,
   clientFileKey,
+  clientFilePreviewKind,
+  clientFilePreviewUrl,
   clientFileUrl,
+  clientReportContent,
   deleteClientFile,
   dueClientFileDeletions,
   isLikelyCarga,
@@ -38,9 +42,13 @@ let otherClientId: string
 /** Un almacenamiento de prueba que recuerda lo que borró y puede fallar con una clave. */
 function fakeStorage(failOn?: string) {
   const deleted: string[] = []
+  const served: unknown[] = []
   return {
     deleted,
-    async attachmentUrl(key: string) {
+    /** Con qué nombre y para qué se firmó cada dirección (`serve`). */
+    served,
+    async attachmentUrl(key: string, _ttl?: number, serve?: unknown) {
+      served.push(serve)
       return `https://bucket.test/${key}?firma=1`
     },
     async deleteAttachment(key: string) {
@@ -168,6 +176,8 @@ describe("listar, descargar y borrar", () => {
     const { url, filename } = await clientFileUrl(ownerDb, admin, storage, secret.id)
     expect(url).toContain(`clients/${clientId}/`)
     expect(filename).toBe("agenda exportada.xlsx")
+    // Se firma para guardarse: lo que llegó de fuera no se abre como página del almacenamiento.
+    expect(storage.served.at(-1)).toEqual({ filename: "agenda exportada.xlsx", as: "attachment" })
     const audits = await ownerDb
       .select({ actor: adminAudit.actorUserId })
       .from(adminAudit)
@@ -549,5 +559,128 @@ describe("lo que puede ser la carga", () => {
         isLikelyCarga({ filename: row.filename, contentType: row.content_type }),
       )
     expect(() => likelyCargaSql("f; drop")).toThrow()
+  })
+})
+
+describe("ver sin descargar (ADR 0196)", () => {
+  it("una imagen se ve con una dirección de 5 minutos, un PDF con sus bytes; una constancia al día; lo demás se descarga", async () => {
+    const asked: Array<{ key: string; ttl?: number; inline?: unknown }> = []
+    const storage = {
+      async attachmentUrl(key: string, ttl?: number, inline?: unknown) {
+        asked.push({ key, ttl, inline })
+        return `https://bucket.test/${key}?firma=1`
+      },
+    }
+    const register = (filename: string, contentType: string, adminOnly: boolean, sizeBytes = 10) =>
+      registerClientFile(ownerDb, admin, {
+        clientId,
+        kind: "otro",
+        filename,
+        objectKey: clientFileKey(clientId, filename.split(".").pop() ?? "bin"),
+        contentType,
+        sizeBytes,
+        adminOnly,
+      })
+    const photo = await register("foto del sillón.jpg", "image/jpeg", false)
+    const pdf = await register("contrato.pdf", "application/pdf", true)
+    const sheet = await register("lista.csv", "text/csv", false)
+    const huge = await register("escaneo.pdf", "application/pdf", false, 11 * 1024 * 1024)
+    const morning = new Date("2026-11-16T14:00:00Z")
+    const evening = new Date("2026-11-16T23:00:00Z")
+    const nextDay = new Date("2026-11-17T15:00:00Z")
+
+    expect(clientFilePreviewKind("IMAGE/PNG")).toBe("imagen")
+    expect(clientFilePreviewKind("application/pdf")).toBe("pdf")
+    expect(clientFilePreviewKind("image/svg+xml")).toBeNull()
+    const { url } = await clientFilePreviewUrl(ownerDb, admin, storage, photo.id, morning)
+    expect(url).toContain(`clients/${clientId}/`)
+    expect(asked.at(-1)).toEqual({
+      key: expect.stringContaining(`clients/${clientId}/`),
+      ttl: 300,
+      inline: { filename: "foto del sillón.jpg", contentType: "image/jpeg" },
+    })
+    // Lo que no tiene vista se descarga: ni dirección ni bytes.
+    await expect(clientFilePreviewUrl(ownerDb, admin, storage, sheet.id)).rejects.toMatchObject({
+      code: "PREVIEW_UNSUPPORTED",
+    })
+    await expect(clientFileContent(ownerDb, admin, photo.id)).rejects.toMatchObject({
+      code: "PREVIEW_UNSUPPORTED",
+    })
+    await expect(clientFileContent(ownerDb, admin, huge.id)).rejects.toMatchObject({
+      code: "PREVIEW_TOO_LARGE",
+    })
+    // El mismo permiso que descargar: lo de Administración no existe para Soporte.
+    await expect(clientFileContent(ownerDb, support, pdf.id)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    expect(await clientFileContent(ownerDb, admin, pdf.id, morning)).toMatchObject({
+      filename: "contrato.pdf",
+      objectKey: expect.stringContaining(`clients/${clientId}/`),
+    })
+    // Un PDF no sale por la dirección del almacenamiento: se dibuja con sus bytes desde la API.
+    const signed = asked.length
+    await expect(
+      clientFilePreviewUrl(ownerDb, admin, storage, pdf.id, evening),
+    ).rejects.toMatchObject({ code: "PREVIEW_UNSUPPORTED" })
+    expect(asked).toHaveLength(signed)
+    // Una constancia por persona, archivo y día de Lima, por más que se mire.
+    await clientFileContent(ownerDb, admin, pdf.id, evening)
+    await clientFilePreviewUrl(ownerDb, support, storage, photo.id, evening)
+    await clientFileContent(ownerDb, admin, pdf.id, nextDay)
+    const views = await ownerDb
+      .select({ actor: adminAudit.actorUserId, entityId: adminAudit.entityId })
+      .from(adminAudit)
+      .where(eq(adminAudit.action, "client_file.viewed"))
+    const count = (actor: AdminActor, fileId: string) =>
+      views.filter((row) => row.actor === actor.userId && row.entityId === fileId).length
+    expect(count(admin, pdf.id)).toBe(2)
+    expect(count(admin, photo.id)).toBe(1)
+    expect(count(support, photo.id)).toBe(1)
+  })
+
+  it("el PDF de un informe de la carga: solo Administración, del registro, con su constancia una vez al día", async () => {
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: admin.userId,
+      action: "org.progress_report_sent",
+      organizationId: ORG,
+      entityId: "informe-1",
+      metadata: { to: "rosa@files.test", pdfKey: `reports/${ORG}/informe-1.pdf` },
+    })
+    const morning = new Date("2026-11-16T14:00:00Z")
+    const evening = new Date("2026-11-16T23:00:00Z")
+    const nextDay = new Date("2026-11-17T15:00:00Z")
+    // El rol lo revisa el servicio, no solo la ruta; un id que no es de un cliente es 404.
+    await expect(clientReportContent(ownerDb, support, clientId, 1, morning)).rejects.toMatchObject(
+      { code: "FORBIDDEN" },
+    )
+    await expect(clientReportContent(ownerDb, admin, "abc", 1, morning)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    await expect(clientReportContent(ownerDb, admin, clientId, 2, morning)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    expect(await clientReportContent(ownerDb, admin, clientId, 1, morning)).toEqual({
+      objectKey: `reports/${ORG}/informe-1.pdf`,
+      filename: "informe-1.pdf",
+    })
+    await clientReportContent(ownerDb, admin, clientId, 1, evening)
+    await clientReportContent(ownerDb, admin, clientId, 1, nextDay)
+    const views = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(
+        and(
+          eq(adminAudit.action, "client_report.viewed"),
+          eq(adminAudit.actorUserId, admin.userId),
+          eq(adminAudit.entityId, clientId),
+        ),
+      )
+    expect(views.map((row) => row.metadata)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientId, number: 1, day: limaDate(morning) }),
+        expect.objectContaining({ clientId, number: 1, day: limaDate(nextDay) }),
+      ]),
+    )
+    expect(views).toHaveLength(2)
   })
 })

@@ -313,6 +313,38 @@ describe("WhatsApp", () => {
     expect(response.status).toBe(200)
     const [row] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, outreachId))
     expect(row).toMatchObject({ status: "enviado", externalId: "wamid.respuesta" })
+    // Y anota cuándo llegó al teléfono (ADR 0196); todavía no se leyó.
+    expect(row?.deliveredAt).toBeInstanceOf(Date)
+    expect(row?.readAt).toBeNull()
+
+    // Lo que ya salió y después falla (un archivo que Meta no pudo descargar): sigue enviado,
+    // con cuándo y por qué no llegó, tal como lo dijo Meta.
+    const failed = await post(
+      whatsapp({
+        statuses: [
+          {
+            id: "wamid.respuesta",
+            status: "failed",
+            timestamp: "2",
+            recipient_id: "51987654321",
+            errors: [
+              {
+                code: 131053,
+                title: "Media upload error",
+                error_data: { details: "No se pudo descargar el archivo" },
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    expect(failed.status).toBe(200)
+    const [after] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, outreachId))
+    expect(after).toMatchObject({
+      status: "enviado",
+      failedWhy: "131053: No se pudo descargar el archivo",
+    })
+    expect(after?.failedAt).toBeInstanceOf(Date)
   })
 })
 

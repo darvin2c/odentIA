@@ -236,6 +236,8 @@ export const KAIROS_AI_PURPOSES = [
   "semana",
   "clasificar",
   "vende",
+  /** «Mejorar con Kairós» en el editor de respuesta (ADR 0196). */
+  "mejorar",
 ] as const
 export type KairosAiPurpose = (typeof KAIROS_AI_PURPOSES)[number]
 /** Los mismos valores que la solicitud de la web (`saas_waitlist_request`). */
@@ -710,6 +712,20 @@ export const saasOutreach = adminSchema.table(
     chatId: uuid("chat_id").references((): AnyPgColumn => saasChat.id),
     /** El id que devolvió Meta (`wamid` en WhatsApp): con él llegan después sus estados. */
     externalId: text("external_id"),
+    /**
+     * Cuándo dijo Meta que llegó al teléfono y cuándo que lo leyó (solo WhatsApp informa estados con
+     * nuestro id). Se anotan una vez, de nulo a la fecha, y nunca vuelven atrás (ADR 0196).
+     */
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    /**
+     * Cuándo dijo WhatsApp que no llegó lo que ya había salido (`failed` después de `enviado`: un
+     * archivo por enlace que Meta no pudo descargar), con su motivo corto. El envío sigue
+     * `enviado` (salió hacia el canal; no vuelve atrás), pero la respuesta no cuenta como dada.
+     * Como `delivered_at`, una vez, de nulo a la fecha, y nunca vuelve atrás (ADR 0196).
+     */
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    failedWhy: text("failed_why"),
     /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
     template: text("template"),
     /**
@@ -765,9 +781,19 @@ export const saasOutreach = adminSchema.table(
         AND (${table.references} IS NULL OR length(${table.references}) <= 8000)
         AND (${table.inReplyToEmailId} IS NULL OR ${table.channel} = 'correo')`,
     ),
+    // Un correo lleva hasta 5 adjuntos; en un chat cada archivo sale como su propio mensaje (ADR 0196).
     check(
       "saas_outreach_files_check",
-      sql`cardinality(${table.fileIds}) <= 5 AND (cardinality(${table.fileIds}) = 0 OR ${table.channel} = 'correo')`,
+      sql`cardinality(${table.fileIds}) <= 5 AND (cardinality(${table.fileIds}) = 0 OR ${table.channel} = 'correo'
+        OR (${table.chatId} IS NOT NULL AND cardinality(${table.fileIds}) = 1))`,
+    ),
+    check(
+      "saas_outreach_delivery_check",
+      sql`(${table.deliveredAt} IS NULL AND ${table.readAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.chatId} IS NOT NULL AND ${table.channel} = 'whatsapp')`,
+    ),
+    check(
+      "saas_outreach_failed_check",
+      sql`${table.failedWhy} IS NULL OR (${table.failedAt} IS NOT NULL AND length(${table.failedWhy}) BETWEEN 1 AND 500)`,
     ),
   ],
 )
@@ -1209,18 +1235,61 @@ export const kairosChatTurn = adminSchema.table(
     agent: text("agent").notNull().default("kairos"),
     /** Solo Ariadna: lo que respondió o a quién lo pasó (`ARIADNA_CHAT_REPLIES`). */
     ariadnaReply: text("ariadna_reply"),
+    /**
+     * En qué se basó lo que respondió, en palabras («los precios de la web», «la guía de la Ayuda:
+     * …»), para mostrarlo junto a su respuesta en la Bandeja (ADR 0196). Vacío si no consultó nada.
+     */
+    basis: text("basis").array().notNull().default(sql`'{}'::text[]`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     uniqueIndex("kairos_chat_turn_message_uidx").on(table.messageId),
+    check("kairos_chat_turn_basis_check", sql`cardinality(${table.basis}) <= 8`),
     check("kairos_chat_turn_agent_check", oneOf(table.agent, CHAT_TURN_AGENTS)),
     check(
       "kairos_chat_turn_ariadna_check",
       sql`${table.ariadnaReply} IS NULL OR (${table.agent} = 'ariadna' AND ${table.ariadnaReply} IN ('respuesta','oferta','datos','soporte','administracion','paciente'))`,
     ),
     index("kairos_chat_turn_chat_idx").on(table.chatId, table.createdAt),
+    // La Bandeja pregunta por cada respuesta si fue el aviso con que Kairós pasó la conversación.
+    index("kairos_chat_turn_outreach_idx").on(table.outreachId),
     check("kairos_chat_turn_outcome_check", oneOf(table.outcome, KAIROS_TURN_OUTCOMES)),
     check("kairos_chat_turn_why_check", sql`${table.why} IS NULL OR length(${table.why}) <= 500`),
+  ],
+)
+
+/**
+ * Lo que una persona del equipo marcó en una conversación de la Bandeja (ADR 0196): un chat
+ * (`chat_id`) o el hilo de un correo (`thread_key`, el primer Message-ID de su hilo, con sus `<>`).
+ * La conversación misma no se guarda aparte: se lee de lo que entró y de lo que salió.
+ * «Lo atiendo yo» en un correo es `attended_by` (en un chat lo dice la pausa de Kairós, que ya
+ * existe); «No necesita respuesta» deja `settled_at`: lo que llegó hasta esa hora ya no espera.
+ */
+export const saasConversationMark = adminSchema.table(
+  "saas_conversation_mark",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: uuid("chat_id").references(() => saasChat.id, { onDelete: "cascade" }),
+    threadKey: text("thread_key"),
+    attendedBy: text("attended_by").references(() => user.id, { onDelete: "set null" }),
+    attendedAt: timestamp("attended_at", { withTimezone: true }),
+    settledBy: text("settled_by").references(() => user.id, { onDelete: "set null" }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("saas_conversation_mark_chat_uidx").on(table.chatId),
+    uniqueIndex("saas_conversation_mark_thread_uidx").on(table.threadKey),
+    check(
+      "saas_conversation_mark_key_check",
+      sql`(${table.chatId} IS NULL) <> (${table.threadKey} IS NULL)
+        AND (${table.threadKey} IS NULL OR length(${table.threadKey}) BETWEEN 3 AND 998)`,
+    ),
+    check(
+      "saas_conversation_mark_attended_check",
+      sql`${table.attendedBy} IS NULL OR ${table.attendedAt} IS NOT NULL`,
+    ),
   ],
 )

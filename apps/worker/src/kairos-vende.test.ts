@@ -1,4 +1,9 @@
-import { createKairosSeller, type KairosChatModel, type KairosSeller } from "@odentia/agent"
+import {
+  createKairosSeller,
+  KAIROS_BASIS,
+  type KairosChatModel,
+  type KairosSeller,
+} from "@odentia/agent"
 import type { Db } from "@odentia/db"
 import {
   kairosChatTurn,
@@ -28,7 +33,7 @@ import {
   setStaffHours,
   setStaffMeetingUrl,
 } from "@odentia/services"
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { runKairosSellsTick, toolsFor } from "./kairos-vende.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -204,6 +209,8 @@ describe("Kairós vende en los chats", () => {
       .from(kairosChatTurn)
       .where(eq(kairosChatTurn.chatId, chatId))
     expect(turns.map((turn) => turn.outcome)).toEqual(["respondio"])
+    // En qué se basó, para la Bandeja: las horas que ofreció salen de las horas libres.
+    expect(turns.map((turn) => turn.basis)).toEqual([[KAIROS_BASIS.slots]])
 
     // Con su sí, agenda y la confirmación dice día, hora de Lima, con quién y la sala.
     const yesAt = new Date(now.getTime() + 2 * MIN)
@@ -220,6 +227,13 @@ describe("Kairós vende en los chats", () => {
     const confirmation = (await replies(chatId)).at(-1)?.body ?? ""
     expect(confirmation).toContain("lunes, 9 de noviembre a las 10:30 (hora de Lima) con Ana Pérez")
     expect(confirmation).toContain("https://meet.example.com/ana")
+    const [last] = await ownerDb
+      .select()
+      .from(kairosChatTurn)
+      .where(eq(kairosChatTurn.chatId, chatId))
+      .orderBy(desc(kairosChatTurn.createdAt))
+      .limit(1)
+    expect(last?.basis).toEqual([KAIROS_BASIS.booked])
   })
 
   it("responde lo que escribió en el mismo segundo en que salió su respuesta anterior", async () => {
@@ -628,7 +642,7 @@ describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como
         } catch (error) {
           refused = error
         }
-        return { kind: "respondio", text: "Gracias, ya tengo tu correo.", booked: null }
+        return { kind: "respondio", text: "Gracias, ya tengo tu correo.", booked: null, basis: [] }
       },
     }
     await tick(new Date(at.getTime() + MIN), archiving)
@@ -768,7 +782,7 @@ describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como
       seller: "plantilla",
       answer: async () => {
         called = true
-        return { kind: "respondio", text: "Aquí estoy.", booked: null }
+        return { kind: "respondio", text: "Aquí estoy.", booked: null, basis: [] }
       },
     }
     const now = new Date(at.getTime() + MIN)

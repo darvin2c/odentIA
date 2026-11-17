@@ -323,7 +323,7 @@ describe("chat_sin_cliente", () => {
 })
 
 describe("responder_chat", () => {
-  it("de una clínica con su app lo ve Soporte, también en Hoy; no se aprueba y se cierra al responder", async () => {
+  it("se sigue creando pero se decide en la Bandeja: no sale en Kairós ni en Hoy, y se cierra al responder", async () => {
     const address = phone()
     const luis = await contact(clinic, "Luis Paredes", null)
     const chat = await ingestInboundChat(
@@ -334,7 +334,6 @@ describe("responder_chat", () => {
     await ownerDb.transaction((tx) =>
       assignChat(tx, admin, chat.chatId, { clientId: clinic, contactId: luis }, NOW),
     )
-    // Lo que llega ya siendo de la clínica con su app lo ve Soporte (lo de antes era de la venta).
     await ingestInboundChat(ownerDb, message({ address, body: "¿Me ayudan?" }), NOW)
     await pass()
     const [item] = await waiting(chat.chatId, "responder_chat")
@@ -350,18 +349,34 @@ describe("responder_chat", () => {
       lastBody: "¿Me ayudan?",
       freeUntil: new Date(NOW.getTime() - HOUR + DAY).toISOString(),
     })
-    const listed = await listKairosItems(ownerDb, support, { status: "espera" }, NOW)
-    expect(listed.items.some((row) => row.id === item?.id)).toBe(true)
-    const today = await todayForStaff(ownerDb, support, { who: "todas" }, NOW)
-    expect(today.kairosReady.items.some((row) => row.id === item?.id)).toBe(true)
+    // Lo de las conversaciones no sale en Kairós ni en Hoy (ADR 0196), salvo que se pida.
+    for (const actor of [admin, support]) {
+      const listed = await listKairosItems(ownerDb, actor, { status: "espera" }, NOW)
+      expect(listed.items.some((row) => row.id === item?.id)).toBe(false)
+      const today = await todayForStaff(ownerDb, actor, { who: "todas" }, NOW)
+      expect(today.kairosReady.items.some((row) => row.id === item?.id)).toBe(false)
+    }
+    const asked = await listKairosItems(
+      ownerDb,
+      admin,
+      { status: "espera", conversations: true },
+      NOW,
+    )
+    expect(asked.items.some((row) => row.id === item?.id)).toBe(true)
     // «Responder» abre la conversación: aprobar aquí no hace nada y el ítem sigue.
-    await expect(decide(support, item?.id ?? "", { action: "aprobar" })).rejects.toMatchObject({
+    await expect(decide(admin, item?.id ?? "", { action: "aprobar" })).rejects.toMatchObject({
       code: "KAIROS_ITEM_IN_CHAT",
       status: 409,
     })
     expect(await waiting(chat.chatId, "responder_chat")).toHaveLength(1)
+    // Soporte ya no responde los chats: lo hace Administración.
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareChatReply(tx, support, chat.chatId, { body: "Claro, cuéntanos" }, NOW),
+      ),
+    ).rejects.toMatchObject({ status: 403 })
     const reply = await ownerDb.transaction((tx) =>
-      prepareChatReply(tx, support, chat.chatId, { body: "Claro, cuéntanos" }, NOW),
+      prepareChatReply(tx, admin, chat.chatId, { body: "Claro, cuéntanos" }, NOW),
     )
     expect(await waiting(chat.chatId, "responder_chat")).toHaveLength(0)
     await pass()

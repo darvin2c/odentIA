@@ -139,7 +139,7 @@ describe("lo que Clientes lee de la dirección", () => {
     })
     expect(
       clientsSearchOf({
-        vista: "con_cuenta",
+        vista: "activos",
         producto: "optical",
         responsable: "mio",
         origen: "referido",
@@ -148,7 +148,7 @@ describe("lo que Clientes lee de la dirección", () => {
         pagina: "3",
       }),
     ).toEqual({
-      vista: "con_cuenta",
+      vista: "activos",
       producto: "optical",
       responsable: "mio",
       origen: "referido",
@@ -156,6 +156,11 @@ describe("lo que Clientes lee de la dirección", () => {
       q: "987654321",
       pagina: 3,
     })
+  })
+
+  it("«Con cuenta» de un enlace guardado abre «En alta»", () => {
+    expect(clientsSearchOf({ vista: "con_cuenta" }).vista).toBe("en_alta")
+    expect(clientsSearchOf({ vista: "en_alta" }).vista).toBe("en_alta")
   })
 
   it("la ficha abre en Resumen y Todo sin escribirlos", () => {
@@ -171,6 +176,13 @@ describe("lo que Clientes lee de la dirección", () => {
       tab: undefined,
       historial: undefined,
     })
+    // Los filtros de antes: «Contactos» es Conversaciones; «Cuenta y pagos» se partió y abre Todo.
+    expect(clientSearchOf({ historial: "contactos" }).historial).toBe("conversaciones")
+    expect(clientSearchOf({ historial: "cuenta" }).historial).toBeUndefined()
+    expect(clientSearchOf({ tab: "conversaciones", historial: "plan" })).toEqual({
+      tab: "conversaciones",
+      historial: "plan",
+    })
   })
 
   it("los enlaces de antes abren lo equivalente", () => {
@@ -179,10 +191,11 @@ describe("lo que Clientes lee de la dirección", () => {
         waitlistSearchOf({ etapa: "entro", producto: "medical", q: "Ana" }),
       ),
     ).toMatchObject({
-      vista: "con_cuenta",
+      vista: "en_alta",
       producto: "medical",
       q: "Ana",
     })
+    expect(clientsSearchFromWaitlist(waitlistSearchOf({ etapa: "paga" })).vista).toBe("activos")
     expect(clientsSearchFromWaitlist(waitlistSearchOf({ etapa: "descartada" })).vista).toBe(
       "perdidos",
     )

@@ -974,6 +974,20 @@
       "when": 1794869934460,
       "tag": "0138_estado_oauth_instagram",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794890354307,
+      "tag": "0139_bandeja_de_la_administracion",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794890366095,
+      "tag": "0140_bandeja_de_la_administracion_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,7 @@ import { focusInsideLater } from "../../lib/focus"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { supportDay, supportDayTime } from "../../lib/support-words"
 import { useDemos, useOpenDemo } from "../demos"
+import { CLIENT_PHASE_WORDS } from "./client-model"
 import { PresentationDrawer } from "./presentation-drawer"
 import { ProposalDrawer } from "./proposal-drawer"
 import {
@@ -223,7 +224,12 @@ function StageCard({
     <Card title="La venta" id="venta-etapa">
       <div className="flex flex-col gap-1">
         <p className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{STAGE_WORDS[client.stage]}</Badge>
+          {/* Con cuenta se dice por su fase («En alta» o «Activo»), no «Entró» (ADR 0196). */}
+          <Badge variant="outline">
+            {client.stage === "entro"
+              ? CLIENT_PHASE_WORDS[client.phase]
+              : STAGE_WORDS[client.stage]}
+          </Badge>
           <span className="text-sm text-muted-foreground">{STAGE_FACT[client.stage]}</span>
         </p>
         {decision ? (

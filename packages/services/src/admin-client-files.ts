@@ -33,11 +33,13 @@ import {
   saasInboundEmail,
   saasInboundMessage,
 } from "@odentia/db/schema/admin-arm"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { listProgressReports } from "./clinic-progress-report.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import type { Storage } from "./storage.js"
@@ -446,8 +448,60 @@ async function visibleFile(tx: Db, staff: AdminActor, fileId: string) {
 }
 
 /**
+ * El archivo de un envío de chat que pudo llegar a Meta deja `client_file.sent` a nombre de quien
+ * lo mandó, como `client_file.downloaded` al bajarlo. Lo llama quien saca el envío de pendiente:
+ * al salir (`enviado`), al no saberse si salió (`incierto`, con `uncertain`) o cuando una persona
+ * dice «Salió» de uno que seguía pendiente. Un envío deja pendiente una sola vez, así que queda
+ * una constancia por envío; lo que pasa de incierto a enviado ya la tiene. Sin una persona del
+ * equipo (Kairós, o una cuenta que ya no está), sin actor.
+ */
+export async function noteChatFilesSent(
+  tx: Db,
+  row: {
+    id: string
+    fileIds: string[]
+    createdBy: string | null
+    chatId: string | null
+    channel: string
+  },
+  options: { uncertain?: boolean } = {},
+): Promise<void> {
+  if (row.fileIds.length === 0 || !row.chatId) return
+  const files = await tx
+    .select({ id: saasClientFile.id, clientId: saasClientFile.clientId, kind: saasClientFile.kind })
+    .from(saasClientFile)
+    .where(inArray(saasClientFile.id, row.fileIds))
+  const [staff] = row.createdBy
+    ? await tx
+        .select({ role: adminStaff.role })
+        .from(adminStaff)
+        .where(eq(adminStaff.userId, row.createdBy))
+        .limit(1)
+    : []
+  const actor: AdminActor | null =
+    row.createdBy && staff
+      ? { userId: row.createdBy, role: staff.role as AdminActor["role"] }
+      : null
+  for (const file of files)
+    await writeAdminAudit(tx, actor, {
+      action: "client_file.sent",
+      entityId: file.id,
+      metadata: {
+        clientId: file.clientId,
+        kind: file.kind,
+        chatId: row.chatId,
+        channel: row.channel,
+        outreachId: row.id,
+        ...(options.uncertain ? { uncertain: true } : {}),
+      },
+    })
+}
+
+/**
  * La dirección firmada (15 min) para descargar un documento. Deja auditoría:
- * lo que manda la clínica puede traer datos de pacientes.
+ * lo que manda la clínica puede traer datos de pacientes. Firmada para
+ * guardarse (`attachment`, con su nombre): un PDF o una página que llegó de
+ * fuera no se abre como una página del dominio del almacenamiento.
  */
 export async function clientFileUrl(
   tx: Db,
@@ -463,10 +517,213 @@ export async function clientFileUrl(
     metadata: { clientId: row.clientId, kind: row.kind },
   })
   return {
-    url: await storage.attachmentUrl(row.objectKey, 900),
+    url: await storage.attachmentUrl(row.objectKey, 900, {
+      filename: row.filename,
+      as: "attachment",
+    }),
     filename: row.filename,
     contentType: row.contentType,
   }
+}
+
+/* ---------- Ver sin descargar (ADR 0196) ---------- */
+
+/** Lo que se ve en la ficha sin descargar: las imágenes y el PDF. Nada más se abre aquí. */
+export const CLIENT_FILE_PREVIEW_TYPES: readonly string[] = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+]
+
+/** Lo que pasa por la API para dibujar un PDF en la pantalla: hasta 10 MB. */
+export const CLIENT_FILE_CONTENT_MAX_BYTES = 10 * 1024 * 1024
+
+/** Cuánto vale la dirección para ver un archivo: lo que tarda en cargar la vista. */
+export const CLIENT_FILE_PREVIEW_TTL_SECONDS = 300
+
+/** Qué vista tiene un archivo por su tipo: imagen, PDF o ninguna (se descarga). */
+export function clientFilePreviewKind(contentType: string): "imagen" | "pdf" | null {
+  const type = contentType.trim().toLowerCase()
+  if (!CLIENT_FILE_PREVIEW_TYPES.includes(type)) return null
+  return type === "application/pdf" ? "pdf" : "imagen"
+}
+
+/**
+ * Deja que alguien vio el archivo, una vez por persona, archivo y día de Lima: abrir la vista,
+ * pasar de página o volver a la ficha no llena la auditoría. Lo que manda la clínica puede traer
+ * datos de pacientes. El candado de la transacción hace que dos vistas a la vez dejen una.
+ */
+async function noteClientFileViewed(
+  tx: Db,
+  staff: AdminActor,
+  row: typeof saasClientFile.$inferSelect,
+  now: Date,
+): Promise<void> {
+  const today = limaDate(now)
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`client_file.viewed:${staff.userId}:${row.id}:${today}`}, 0))`,
+  )
+  // El día va en la constancia: es el de quien mira, no el de la hora en que se escribió la fila.
+  const [seen] = await tx
+    .select({ id: adminAudit.id })
+    .from(adminAudit)
+    .where(
+      and(
+        eq(adminAudit.action, "client_file.viewed"),
+        eq(adminAudit.actorUserId, staff.userId),
+        eq(adminAudit.entityId, row.id),
+        sql`${adminAudit.metadata}->>'day' = ${today}`,
+      ),
+    )
+    .limit(1)
+  if (seen) return
+  await writeAdminAudit(tx, staff, {
+    action: "client_file.viewed",
+    entityId: row.id,
+    metadata: { clientId: row.clientId, kind: row.kind, day: today },
+  })
+}
+
+const CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Lo que la API necesita para mostrar el PDF de un informe de la carga tal como salió (en el
+ * historial y en Documentos). Solo Administración, como el registro de la carga
+ * (`requireLoadAdmin`), y del mismo registro que lee Alta (`listProgressReports`). Deja que alguien
+ * lo vio, una vez por persona, informe y día de Lima (`client_report.viewed`, como un documento):
+ * el informe cuenta lo que se cargó de la clínica.
+ */
+export async function clientReportContent(
+  tx: Db,
+  actor: AdminActor | null,
+  clientId: string,
+  number: number,
+  now = new Date(),
+): Promise<{ objectKey: string; filename: string }> {
+  if (actor?.role !== "admin")
+    throw new ServiceError("FORBIDDEN", 403, "Solo Administración ve los informes de la carga")
+  if (!CLIENT_UUID.test(clientId)) throw notFound("Cliente")
+  if (!Number.isInteger(number) || number < 1)
+    throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
+  const [client] = await tx
+    .select({ organizationId: saasClient.organizationId })
+    .from(saasClient)
+    .where(eq(saasClient.id, clientId))
+    .limit(1)
+  if (!client) throw notFound("Cliente")
+  const reports = client.organizationId ? await listProgressReports(tx, client.organizationId) : []
+  const found = reports.find((report) => report.number === number)
+  if (!found?.pdfKey || !client.organizationId)
+    throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+  await noteClientReportViewed(tx, actor, { organizationId: client.organizationId, number }, now)
+  return { objectKey: found.pdfKey, filename: `informe-${number}.pdf` }
+}
+
+/**
+ * Deja que alguien vio el PDF de un informe de la carga, una vez por persona, informe (de esa
+ * cuenta) y día de Lima, por donde sea que lo abrió: el historial del cliente (`/content`) o el
+ * registro de la carga (`/admin/imports/…/pdf`). La entidad es el cliente de la cuenta si lo hay.
+ * El candado de la transacción hace que dos vistas a la vez dejen una.
+ */
+export async function noteClientReportViewed(
+  tx: Db,
+  actor: AdminActor,
+  report: { organizationId: string; number: number },
+  now = new Date(),
+): Promise<void> {
+  const today = limaDate(now)
+  const { organizationId, number } = report
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`client_report.viewed:${actor.userId}:${organizationId}:${number}:${today}`}, 0))`,
+  )
+  const [seen] = await tx
+    .select({ id: adminAudit.id })
+    .from(adminAudit)
+    .where(
+      and(
+        eq(adminAudit.action, "client_report.viewed"),
+        eq(adminAudit.actorUserId, actor.userId),
+        eq(adminAudit.organizationId, organizationId),
+        sql`${adminAudit.metadata}->>'number' = ${String(number)}`,
+        sql`${adminAudit.metadata}->>'day' = ${today}`,
+      ),
+    )
+    .limit(1)
+  if (seen) return
+  const [client] = await tx
+    .select({ id: saasClient.id })
+    .from(saasClient)
+    .where(eq(saasClient.organizationId, organizationId))
+    .limit(1)
+  await writeAdminAudit(tx, actor, {
+    action: "client_report.viewed",
+    organizationId,
+    entityId: client?.id ?? organizationId,
+    metadata: { clientId: client?.id ?? null, number, day: today },
+  })
+}
+
+/** Un archivo que se puede ver: el mismo permiso que descargarlo y un tipo que tiene vista. */
+async function viewableFile(tx: Db, staff: AdminActor, fileId: string, want: "imagen" | "pdf") {
+  const row = await visibleFile(tx, staff, fileId)
+  const kind = clientFilePreviewKind(row.contentType)
+  if (!kind || kind !== want)
+    throw new ServiceError(
+      "PREVIEW_UNSUPPORTED",
+      409,
+      "Este archivo no se puede ver aquí: descárgalo para abrirlo",
+    )
+  return { row, kind }
+}
+
+/**
+ * La dirección firmada (5 min) para ver una imagen sin descargarla: el almacenamiento la sirve
+ * para verse y con el tipo que se revisó al recibirla. Solo imágenes: un PDF se dibuja con sus
+ * bytes desde la API (`clientFileContent`), nunca abierto en el dominio del almacenamiento. El
+ * mismo permiso que descargar (Soporte no ve lo `admin_only`) y su constancia, una vez al día
+ * (`client_file.viewed`).
+ */
+export async function clientFilePreviewUrl(
+  tx: Db,
+  actor: AdminActor | null,
+  storage: Pick<Storage, "attachmentUrl">,
+  fileId: string,
+  now = new Date(),
+): Promise<{ url: string }> {
+  const staff = requireStaff(actor)
+  const { row } = await viewableFile(tx, staff, fileId, "imagen")
+  await noteClientFileViewed(tx, staff, row, now)
+  return {
+    url: await storage.attachmentUrl(row.objectKey, CLIENT_FILE_PREVIEW_TTL_SECONDS, {
+      filename: row.filename,
+      contentType: row.contentType.trim().toLowerCase(),
+    }),
+  }
+}
+
+/**
+ * Lo que la API necesita para pasar los bytes de un PDF a la pantalla (pdf.js lo dibuja: el
+ * almacenamiento no acepta pedidos de la administración desde el navegador). Solo PDF y hasta
+ * 10 MB; el mismo permiso que descargar y su constancia, una vez al día.
+ */
+export async function clientFileContent(
+  tx: Db,
+  actor: AdminActor | null,
+  fileId: string,
+  now = new Date(),
+): Promise<{ objectKey: string; filename: string; sizeBytes: number }> {
+  const staff = requireStaff(actor)
+  const { row } = await viewableFile(tx, staff, fileId, "pdf")
+  if (row.sizeBytes > CLIENT_FILE_CONTENT_MAX_BYTES)
+    throw new ServiceError(
+      "PREVIEW_TOO_LARGE",
+      409,
+      "Este PDF pasa de 10 MB: descárgalo para verlo entero",
+    )
+  await noteClientFileViewed(tx, staff, row, now)
+  return { objectKey: row.objectKey, filename: row.filename, sizeBytes: row.sizeBytes }
 }
 
 /**

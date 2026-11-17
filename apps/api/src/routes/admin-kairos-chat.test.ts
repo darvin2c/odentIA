@@ -369,7 +369,7 @@ describe("el mensaje de Kairós por el WhatsApp de Sallca", () => {
     expect(chat?.clientId).toBeNull()
   })
 
-  it("Soporte no envía por WhatsApp a una clínica sin su cuenta: 409 y sigue en espera", async () => {
+  it("Soporte no envía por el WhatsApp de la administración: 409 y sigue en espera", async () => {
     const phone = "+51900000006"
     const item = await message(await client(phone), phone)
     const res = await decide(app, item, SUPPORT)
