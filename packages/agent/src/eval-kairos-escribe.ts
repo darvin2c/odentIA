@@ -655,6 +655,22 @@ function quotesConversation(c: SummaryCase, sentences: string[]): string[] {
   })
 }
 
+/**
+ * Los datos de la ficha que Kairós también recibe (los mismos en las dos versiones): lo que se
+ * sabe del cliente, si tiene cuenta y sus personas. Sin esto el juez contaba como inventados los
+ * nombres de sus personas y daba notas bajas a las dos versiones (medición del 16 nov).
+ */
+function clientRecord(c: SummaryCase): string {
+  const account = !c.cliente.cuenta
+    ? "Aún no tiene cuenta"
+    : c.cliente.paga
+      ? "Tiene su cuenta abierta y un pago confirmado"
+      : "Tiene su cuenta abierta y aún no tiene un pago confirmado"
+  return [...(c.otros ?? []), account, ...(c.contactos ?? []).map((who) => `Persona: ${who}`)]
+    .map((line) => `- ${line}`)
+    .join("\n")
+}
+
 /** La bitácora completa del caso, con de quién es cada cosa: lo que lee el juez. */
 function logbook(c: SummaryCase): string {
   return [...c.actividades]
@@ -745,12 +761,14 @@ async function runVariant(c: SummaryCase, version: "antes" | "ahora"): Promise<S
     }
   }
   const verdict = await judge<SummaryVerdict & Record<string, unknown>>(
-    `Eres un auditor exigente. Kairós escribió «Lo que hay que saber» de un cliente de Sallca (hace software para clínicas dentales, consultorios médicos y ópticas) para quien lo atiende, solo con los hechos que se le dieron. Abajo está la bitácora del cliente con de quién es cada cosa: lo que anotó el equipo, lo que nos escribió la clínica y lo que le escribimos nosotros. Lo que le escribimos cuenta qué le dijimos o pedimos; no es un hecho de la clínica. De los correos y chats Kairós recibe solo que existieron (quién, por dónde y cuándo, y de lo nuestro el asunto), nunca su texto, porque el resumen lo lee también Soporte: que no diga de qué trataron no es una falta.
+    `Eres un auditor exigente. Kairós escribió «Lo que hay que saber» de un cliente de Sallca (hace software para clínicas dentales, consultorios médicos y ópticas) para quien lo atiende, solo con los hechos que se le dieron. Abajo están los datos de su ficha, que Kairós también recibió (sus personas son de verdad: nombrarlas no es inventar), y la bitácora del cliente con de quién es cada cosa: lo que anotó el equipo, lo que nos escribió la clínica y lo que le escribimos nosotros. Lo que le escribimos cuenta qué le dijimos o pedimos; no es un hecho de la clínica. De los correos y chats Kairós recibe solo que existieron (quién, por dónde y cuándo, y de lo nuestro el asunto), nunca su texto, porque el resumen lo lee también Soporte: que no diga de qué trataron no es una falta.
 
 Califica de 1 a 5 la fidelidad, sin indulgencia: 5 = cada frase es cierta según la bitácora y atribuye bien quién hizo o dijo qué; 1 = afirma cosas falsas o cuenta como de la clínica lo que solo le escribimos nosotros.
 Di también si alguna frase cuenta como hecho de la clínica algo que solo le escribimos nosotros (atribuyeMal).
 
 Cliente: ${c.cliente.nombre}
+Datos de su ficha:
+${clientRecord(c)}
 Bitácora (lo más viejo primero):
 ${logbook(c)}
 
