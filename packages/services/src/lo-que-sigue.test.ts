@@ -257,13 +257,25 @@ it("«Usarla para…» deja la cita sobrante para todo lo que vuelve a hacer, co
   ).resolves.toBeTruthy()
 })
 
+/**
+ * Una hora de hoy en Lima (la zona de la sede de la prueba), cerca de `desde ahora`: «Mis pacientes
+ * de hoy» mira el día de la clínica, y una hora calculada solo desde ahora cae en otro día cerca de
+ * la medianoche (el CI corrió a las 00:47 de Lima y la cita de «hace 3 horas» era de ayer).
+ */
+function todayInLima(fromNowMs: number): Date {
+  const offset = 5 * 60 * 60_000
+  const dayStart = Math.floor((Date.now() - offset) / 86_400_000) * 86_400_000 + offset
+  const target = Date.now() + fromNowMs
+  return new Date(Math.min(Math.max(target, dayStart + 60_000), dayStart + 86_400_000 - 31 * 60_000))
+}
+
 it("B6: la atención que quedó abierta hoy sale en «Mis pacientes de hoy», sin repetir la de su cita ni sumar a «Te espera»", async () => {
   const f = await clinicalFixture()
   // Otra paciente con su cita de hoy y su atención unida: ya sale como «En atención».
   const [carmen] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Carmen Rivas", patientNumber: Math.floor(Math.random() * 1_000_000) })
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}`, timezone: "America/Lima" }).returning()
   const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" }).returning()
-  const startsAt = new Date(Date.now() + 60 * 60_000)
+  const startsAt = todayInLima(60 * 60_000)
   const [visit] = await ownerDb
     .insert(appointment)
     .values({
@@ -292,7 +304,7 @@ it("B6: la atención que quedó abierta hoy sale en «Mis pacientes de hoy», si
 
   // Q11 (Elena): la misma persona tiene además su cita de hoy, que ya pasó y nadie cerró. Una sola
   // fila: la de su cita dice su atención abierta, y la fila aparte no la repite.
-  const earlier = new Date(Date.now() - 3 * 60 * 60_000)
+  const earlier = todayInLima(-3 * 60 * 60_000)
   const [own] = await ownerDb
     .insert(appointment)
     .values({
