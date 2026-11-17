@@ -261,7 +261,7 @@ describe("a quién le llega un correo", () => {
     expect(answer).toMatchObject({ duplicate: false, clientId, matchedBy: "hilo" })
   })
 
-  it("la respuesta a un envío nuestro se liga por el hilo si viene del mismo correo y verificado", async () => {
+  it("la respuesta a un envío nuestro se liga por el hilo si entró en él, como en la Bandeja", async () => {
     const sent = await ownerDb.transaction((tx) =>
       prepareOutreach(tx, admin, clientId, {
         channel: "correo",
@@ -271,21 +271,42 @@ describe("a quién le llega un correo", () => {
       }),
     )
     const { messageId } = await ownerDb.transaction((tx) => outreachEmail(tx, sent.id))
-    const references = `<antes@gmail.com> ${messageId}`
+    // Responde lo nuestro, verificado y desde la dirección a la que le escribimos: entra en el
+    // hilo y se liga por él.
     expect(
       await ingestInboundEmail(
         ownerDb,
-        mail({ from: "otra.direccion@gmail.com", references, mailbox: "contacto" }),
+        mail({
+          from: "otra.direccion@gmail.com",
+          references: messageId,
+          inReplyTo: messageId,
+          mailbox: "contacto",
+        }),
       ),
     ).toMatchObject({ clientId, matchedBy: "hilo" })
+    // Con un hilo que no conocemos delante, es su propia conversación: el hilo no lo liga.
+    expect(
+      await ingestInboundEmail(
+        ownerDb,
+        mail({ from: "otra.direccion@gmail.com", references: `<antes@gmail.com> ${messageId}` }),
+      ),
+    ).toMatchObject({ clientId: null })
     // Otro remitente, o sin verificar: no.
     expect(
-      await ingestInboundEmail(ownerDb, mail({ from: "intruso@gmail.com", references })),
+      await ingestInboundEmail(
+        ownerDb,
+        mail({ from: "intruso@gmail.com", references: messageId, inReplyTo: messageId }),
+      ),
     ).toMatchObject({ clientId: null })
     expect(
       await ingestInboundEmail(
         ownerDb,
-        mail({ from: "otra.direccion@gmail.com", references, senderVerified: false }),
+        mail({
+          from: "otra.direccion@gmail.com",
+          references: messageId,
+          inReplyTo: messageId,
+          senderVerified: false,
+        }),
       ),
     ).toMatchObject({ clientId: null })
   })

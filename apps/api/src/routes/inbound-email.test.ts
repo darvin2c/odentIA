@@ -411,7 +411,7 @@ describe("la dirección de una persona del equipo", () => {
     const reply = await send(
       toPerson("<a-ido-2@test>", "gonzalo.ido", {
         inReplyTo: "<nuestro-1@odentia32.com>",
-        references: "<otro@test> <nuestro-1@odentia32.com>",
+        references: "<nuestro-1@odentia32.com>",
       }),
     )
     expect(reply.status).toBe(201)
@@ -419,13 +419,14 @@ describe("la dirección de una persona del equipo", () => {
       .select()
       .from(saasInboundEmail)
       .where(eq(saasInboundEmail.messageId, "<a-ido-2@test>"))
-    // Responde un envío nuestro a ese mismo correo, con el remitente verificado: se liga por el hilo.
+    // Responde un envío nuestro a ese mismo correo, con el remitente verificado: entra en su hilo
+    // (la regla de la Bandeja) y se liga por él.
     expect(row).toMatchObject({
       staffUserId: "ie-ido",
       clientId,
       matchedBy: "hilo",
       inReplyTo: "<nuestro-1@odentia32.com>",
-      references: "<otro@test> <nuestro-1@odentia32.com>",
+      references: "<nuestro-1@odentia32.com>",
     })
   })
 

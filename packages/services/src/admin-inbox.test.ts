@@ -570,6 +570,8 @@ describe("el hilo de un correo", () => {
       }),
     )
     expect(await keyOf(d1.id)).toBe("<d1.dra@clinica-c.test>")
+    // Tampoco se liga por el hilo: no entró en él (y su correo no es de un contacto).
+    expect(d1.clientId).toBeNull()
     // «Lo atiendo yo» con esa clave, antes de que el hilo la tome.
     await attendEmailThread(ownerDb, admin, d1.id, true, ago(4 * HOUR))
     // Le respondemos: desde ahí ella está en el hilo, con su primer correo y los que siguen.
@@ -595,6 +597,8 @@ describe("el hilo de un correo", () => {
     expect(await keyOf(d1.id)).toBe(o0)
     // La marca puesta con su clave de antes sigue en el hilo.
     expect(thread.attendedBy).toMatchObject({ id: admin.userId })
+    // Ya en el hilo, se liga por él: el cliente de lo que le escribimos a la clínica.
+    expect(d2.clientId).toBe(sales)
 
     // Un colega en copia que responde no estaba: su propia conversación.
     const colleague = await ingestInboundEmail(
@@ -608,6 +612,7 @@ describe("el hilo de un correo", () => {
       }),
     )
     expect(await keyOf(colleague.id)).toBe("<cc.otro@clinica-c.test>")
+    expect(colleague.clientId).toBeNull()
     // Un From de la doctora sin verificar puede ser de cualquiera: tampoco entra.
     const unverified = await ingestInboundEmail(
       ownerDb,
@@ -621,6 +626,7 @@ describe("el hilo de un correo", () => {
       }),
     )
     expect(await keyOf(unverified.id)).toBe("<sinverificar.dra@clinica-c.test>")
+    expect(unverified.clientId).toBeNull()
     // Alguien de fuera con las cabeceras copiadas: aparte, hasta que le respondemos.
     const forged = await ingestInboundEmail(
       ownerDb,
@@ -632,6 +638,8 @@ describe("el hilo de un correo", () => {
       }),
     )
     expect(await keyOf(forged.id)).toBe("<falso.c@malo-c.test>")
+    // Ni la conversación ni el cliente: no se liga por un hilo en el que no entró.
+    expect(forged.clientId).toBeNull()
     expect(
       (await getEmailThread(ownerDb, admin, d2.id, NOW)).entries.map((entry) => entry.id),
     ).not.toContain(forged.id)

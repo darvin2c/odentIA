@@ -43,7 +43,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import {
   cargaDeleteAfter,
@@ -54,6 +54,7 @@ import {
 import { clientByEmail, inboundMailboxWords } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   replySignature,
   replySubject,
@@ -194,28 +195,34 @@ export async function inboundPersonOf(
 }
 
 /**
- * El cliente de una respuesta a un envío nuestro: el del envío más reciente
- * del hilo que salió a ese mismo correo. Solo con el remitente verificado.
+ * El cliente de un correo por su hilo, con la regla de la Bandeja: solo si el correo entró en el
+ * hilo de lo nuestro (`emailThreadKeySql`: remitente verificado que ya está en el hilo), el del
+ * envío nuestro más reciente de ese mismo hilo que el correo nombra en sus cabeceras. Un correo
+ * que no entró (quien copió las cabeceras, un From sin verificar, quien aún no recibió respuesta)
+ * es su propia conversación y solo se liga por su correo exacto (`matchInboundClient`).
  */
 async function clientByThread(
   tx: Db,
-  from: string,
+  emailId: string,
   thread: readonly string[],
 ): Promise<string | null> {
   if (thread.length === 0) return null
-  const [row] = await tx
-    .select({ clientId: saasOutreach.clientId })
-    .from(saasOutreach)
-    .where(
-      and(
-        inArray(saasOutreach.messageId, [...thread]),
-        eq(saasOutreach.toAddress, from),
-        isNotNull(saasOutreach.clientId),
-      ),
-    )
-    .orderBy(desc(saasOutreach.createdAt))
-    .limit(1)
-  return row?.clientId ?? null
+  const [row] = [
+    ...(await tx.execute<{ client_id: string | null }>(
+      sql`select o.client_id::text as client_id
+        from admin.saas_inbound_email e, admin.saas_outreach o
+        where e.id = ${emailId}::uuid and o.channel = 'correo' and o.client_id is not null
+          and o.message_id in (${sql.join(
+            thread.map((id) => sql`${id}`),
+            sql`, `,
+          )})
+          and ${emailThreadKeySql("e")} is distinct from nullif(btrim(e.message_id), '')
+          and ${outreachThreadKeySql("o")} = ${emailThreadKeySql("e")}
+        order by o.created_at desc, o.id desc
+        limit 1`,
+    )),
+  ]
+  return row?.client_id ?? null
 }
 
 /** Recorta y quita lo que no se imprime al final; vacío es nulo. */
@@ -389,8 +396,9 @@ export async function ingestInboundEmail(
       copyTo: person?.copyTo ?? null,
     }
   }
-  // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo.
-  const threadClient = input.senderVerified ? await clientByThread(tx, input.from, thread) : null
+  // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo, si el
+  // correo entró en él (la regla de la Bandeja).
+  const threadClient = input.senderVerified ? await clientByThread(tx, created.id, thread) : null
   const match: { clientId: string; matchedBy: SaasInboundMatch } | null = threadClient
     ? { clientId: threadClient, matchedBy: "hilo" }
     : input.senderVerified
