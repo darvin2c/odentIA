@@ -233,9 +233,6 @@ async function prepareFinding(
       delete ready[key]
   if (missing.length) {
     const asks = [
-      missing.includes("variant")
-        ? `Elige ${(finding.variantName ?? "la variante").toLowerCase()}: la norma de tu país lo pide.`
-        : "",
       missing.includes("quality") ? "¿En buen o mal estado?" : "",
       // Solo con un toque: dicha después, la cara llega como otro hallazgo (su clave lleva las caras).
       missing.includes("surfaces") ? `¿Qué cara de la ${tooth}? Elígela aquí.` : "",
@@ -431,8 +428,8 @@ function pulpFit(service: DictationService, where: Record<string, unknown>, pati
 }
 
 /**
- * Lo que odentIA lee una vez para revisar un tramo: si la norma de su país exige la variante del
- * hallazgo, para qué piezas es cada servicio activo y si es una endodoncia vital o no vital (de la
+ * Lo que odentIA lee una vez para revisar un tramo: si su país nombra la variante del hallazgo
+ * por su sigla (es opcional en todos, ADR 0200), para qué piezas es cada servicio activo y si es una endodoncia vital o no vital (de la
  * biblioteca o, sin ella, de su nombre).
  */
 interface DentalDictationContext {

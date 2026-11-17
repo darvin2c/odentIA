@@ -581,7 +581,8 @@ export const dentalHooks: ProductHooks = {
           type: "odontogram_signed",
           createdAt: row.createdAt,
           title: `Odontograma firmado · ${purpose}`,
-          detail: `${row.examinerName} · ${row.registrationNumber}`,
+          // Firmado al cerrar sin colegiatura (ADR 0200): solo el nombre.
+          detail: [row.examinerName, row.registrationNumber].filter(Boolean).join(" · "),
           toothNumbers: [],
           authorId: row.authorUserId,
           encounterId: row.encounterId ?? null,

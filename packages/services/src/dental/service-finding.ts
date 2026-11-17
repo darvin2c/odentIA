@@ -243,7 +243,7 @@ export async function checkServiceFinding(
 export function libraryServiceFinding(template: { leavesFinding: LeavesFinding | null; scope: string }): LeavesFinding | null {
   const leaves = template.leavesFinding
   if (!leaves) return null
-  // La variante se exige al configurar a mano; aquí basta con que encaje en la pieza.
+  // La variante es opcional (ADR 0200): basta con que encaje en la pieza.
   return validateLeavesFinding(leaves, { scope: template.scope, strictVariants: false }).length === 0
     ? { ...leaves }
     : null

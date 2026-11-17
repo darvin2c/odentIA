@@ -1023,11 +1023,6 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
-            // Una urgencia no ofrece la ficha de una vez por plan (la odontoestomatológica, P11): si el
-            // motivo guardado pasa a decirlo, o deja de decirlo, las fichas ofrecidas se vuelven a pedir.
-            const urgency = (text: string | null | undefined) => (text ?? "").trim().toLowerCase().startsWith("urgencia")
-            if (sendable.includes("reason") && urgency(savedTextRef.current.reason) !== urgency(saved.data.reason))
-              void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
             // Lo que quedó guardado es la nueva base de cada texto enviado, también en la caché:
             // al volver a la atención se parte de lo guardado, no de una copia vieja.
             for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null

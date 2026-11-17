@@ -1,6 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
-import { encounter, orgSpecialty, serviceCatalog, treatmentPlan, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { encounter, orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
 import {
   clinicalFormResponse,
   clinicalFormTemplate,
@@ -16,11 +16,9 @@ import {
   listFormResponses,
 } from "./clinical-forms.js"
 import { notFound } from "./errors.js"
-import { findOpenPlan } from "./plan.js"
 import { findOrgCountry } from "./locale.js"
 import { specialtyForKind } from "./product-catalog.js"
 import { productHooks } from "./products.js"
-import { patientAge } from "./responsibilities.js"
 
 /**
  * Fichas de consulta (ADR 0117): el formulario que llena el equipo en la
