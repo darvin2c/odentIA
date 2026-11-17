@@ -1414,10 +1414,22 @@ function IndicationForm({
   const defaultDiagnosis = defaults?.diagnosisCode ?? ""
   // biome-ignore lint/correctness/useExhaustiveDependencies: lo dispara la pieza elegida, no cada render.
   useEffect(() => {
-    if (editing || defaultTooth == null) return
+    if (editing) return
     const before = startedWith.current
     const now = form.state.values
     const untouched = (now.teeth[0] ?? null) === before.tooth && now.odontogramEntryId === before.finding
+    // La pieza de partida llegó con su hallazgo y dejó de serlo (se anuló: era la equivocada): el
+    // formulario no se queda con ella. Lo que quien indica eligió a mano no se toca, ni la pieza
+    // que se abrió sin hallazgo (QA del 16 nov, Q15).
+    if (defaultTooth == null) {
+      if (!untouched || before.tooth == null || before.finding === "") return
+      startedWith.current = { tooth: null, finding: "" }
+      form.setFieldValue("teeth", [])
+      form.setFieldValue("surfaces", [])
+      form.setFieldValue("odontogramEntryId", "")
+      form.setFieldValue("diagnosisCode", "")
+      return
+    }
     if (!untouched || (defaultTooth === before.tooth && defaultFinding === before.finding)) return
     startedWith.current = { tooth: defaultTooth, finding: defaultFinding }
     form.setFieldValue("scope", "tooth")

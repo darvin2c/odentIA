@@ -102,7 +102,7 @@ import {
   type PatientFull,
 } from "../../lib/patients"
 import type { HealthGap } from "../../lib/encounters"
-import { groupFindings } from "../../lib/site-findings"
+import { groupFindings, toothCorrectedAway } from "../../lib/site-findings"
 import { productUi } from "../../product/product-ui"
 
 /**
@@ -2279,7 +2279,17 @@ export function EncounterEditor({
   // Indicar empieza con la pieza abierta (o marcada) en el arco, su hallazgo y su diagnóstico de
   // hoy; sin pieza elegida, con la del último diagnóstico de hoy (P09: «Indicar» tomaba la 46 de
   // antes con la 36 abierta). latidIA y vistIA no tienen sitio: sin valores de partida.
-  const openTooth = product.site?.teeth.length === 1 ? product.site.teeth[0] : null
+  // La pieza cuyo hallazgo de hoy se anuló (era la equivocada) no se trae, aunque siga marcada en
+  // el arco: indicar ahí era fácil y era justo el error que se acababa de corregir (QA del 16 nov,
+  // Q15). Si le queda un diagnóstico o algo indicado hoy, sigue siendo de la atención y sí.
+  const markedTooth = product.site?.teeth.length === 1 ? (product.site.teeth[0] ?? null) : null
+  const openTooth =
+    markedTooth != null &&
+    toothCorrectedAway(detail.odontogramEntries ?? [], markedTooth) &&
+    !activeDiagnosisRows.some((dx) => dx.toothNumber === markedTooth) &&
+    !liveIndicated.some((item) => item.toothNumber === markedTooth)
+      ? null
+      : markedTooth
   const lastDiagnosis = [...activeDiagnosisRows]
     .reverse()
     .find((dx) => (openTooth != null ? dx.toothNumber === openTooth : dx.toothNumber != null))

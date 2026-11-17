@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findingsOfEncounter, groupFindings } from "./site-findings"
+import { findingsOfEncounter, groupFindings, toothCorrectedAway } from "./site-findings"
 
 const at = "2026-11-08T22:15:00.000Z"
 const finding = (id: string, surface: string | null, createdAt = at, condition = "caries") => ({
@@ -27,6 +27,24 @@ describe("lo registrado en esta atención", () => {
     ])
     // Fuera de una atención (la ficha) no hay nada que anular.
     expect(findingsOfEncounter(entries, undefined)).toEqual([])
+  })
+})
+
+// QA del 16 nov, Q15: la caries de la 38 era de la 37; anulada, «Indicar un tratamiento» seguía
+// trayendo la 38.
+describe("la pieza que se corrigió no es la de partida al indicar", () => {
+  const on = (id: string, toothNumber: number, voidedAt: string | null) => ({ ...finding(id, "occlusal"), toothNumber, voidedAt })
+
+  it("con todo lo suyo de esta atención anulado, la pieza se corrigió", () => {
+    expect(toothCorrectedAway([on("a", 38, at), on("b", 37, null)], 38)).toBe(true)
+  })
+
+  it("si le queda un hallazgo vigente, o nunca se le registró nada aquí, no", () => {
+    const entries = [on("a", 38, at), on("b", 38, null), on("c", 37, null)]
+    expect(toothCorrectedAway(entries, 38)).toBe(false)
+    expect(toothCorrectedAway(entries, 37)).toBe(false)
+    // La pieza abierta sin nada registrado (indicar una corona directo) se sigue trayendo.
+    expect(toothCorrectedAway(entries, 36)).toBe(false)
   })
 })
 
