@@ -1,5 +1,6 @@
 import { cn } from "@odentia/ui"
 import * as React from "react"
+import { useDockedColumnHandle } from "../side-dock.js"
 import { useCloseGuard, useEscapeClose } from "../surface.js"
 import { DetailSurface, type DetailSurfaceProps } from "./detail-surface.js"
 
@@ -46,6 +47,9 @@ export function DetailPanel({
   const descriptionId = React.useId()
 
   useEscapeClose(handleClose)
+  // Al lado de la página le quita ancho a lo que ya estaba (la pieza del odontograma): con un
+  // hallazgo a medias, «Seguir aquí» la cierra (regla 5 de `side-dock`; QA del 16 nov, Q13).
+  useDockedColumnHandle(onClose, isDirty)
 
   return (
     <section

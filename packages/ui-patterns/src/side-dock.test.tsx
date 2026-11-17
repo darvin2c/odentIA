@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { DetailPanel } from "./detail/detail-panel.js"
 import { SideColumn, SideDockProvider, useDockedColumnHandle, useSideColumnWidth, useStaysBeside } from "./side-dock.js"
 
 function setViewport(width: number) {
@@ -154,6 +155,22 @@ describe("useStaysBeside (regla 5)", () => {
     expect(closeColumn).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByText("al lado")).toBeTruthy()
+  })
+
+  it("«Seguir aquí» también cierra un detalle al lado de la página, como Antecedentes", async () => {
+    const onClose = vi.fn()
+    const closeDetail = vi.fn()
+    const page = (fits: boolean, detail: boolean) => (
+      <SideDockProvider>
+        <Page open fits={fits} dirty onClose={onClose} />
+        {detail ? <DetailPanel title="Antecedentes y última atención" onClose={closeDetail}>Alergias</DetailPanel> : null}
+      </SideDockProvider>
+    )
+    const { rerender } = render(page(true, false))
+    rerender(page(false, true))
+    fireEvent.click(await screen.findByRole("button", { name: "Seguir aquí" }))
+    expect(closeDetail).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it("lo que tiene algo escrito en la columna no se cierra por «Seguir aquí»", async () => {
