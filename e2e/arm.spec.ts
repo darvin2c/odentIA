@@ -157,7 +157,7 @@ test("ARM: cliente a mano, anotar con Kairós, tarea, propuesta por el WhatsApp 
   const whose = surface(page, "¿De quién es este WhatsApp?")
   await whose.getByRole("button", { name: new RegExp(`^Es de ${person}`) }).click()
   const chat = surface(page, /^WhatsApp con /)
-  await expect(chat.getByLabel("Respuesta")).toHaveValue(
+  await expect(chat.getByRole("textbox", { name: "Respuesta", exact: true })).toHaveValue(
     new RegExp(`Le preparé la propuesta para ${clinic}`),
   )
   await expect(chat).toContainText("Va como el envío de la propuesta")
