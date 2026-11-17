@@ -17,6 +17,7 @@ const row = (over: Partial<SummaryActivityRow>): SummaryActivityRow => ({
   from_chat: false,
   sent: false,
   sent_subject: null,
+  sent_replied: null,
   contact_name: null,
   ...over,
 })
@@ -35,6 +36,19 @@ describe("los hechos de la bitácora", () => {
         sent_subject: "Meta nos verificó",
       }),
     ).toBe("Le escribimos por correo el 12 de noviembre de 2026: «Meta nos verificó»")
+  })
+
+  it("un correo nuestro que responde uno suyo, sin asunto: sería el «Re: » de lo que ella escribió", () => {
+    expect(
+      fact({
+        kind: "correo",
+        direction: "salio",
+        body: "Re: Mi clave es 4471\n\nTe ayudamos.",
+        sent: true,
+        sent_subject: "Re: Mi clave es 4471",
+        sent_replied: true,
+      }),
+    ).toBe("Le respondimos por correo el 12 de noviembre de 2026")
   })
 
   it("una respuesta nuestra en una conversación cuenta como enviada aunque no se cruce el envío", () => {

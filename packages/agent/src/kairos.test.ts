@@ -949,6 +949,16 @@ describe("Lo que hay que saber: de quién es cada hecho", () => {
         sent: { subject: "Meta nos verificó" },
       }),
     ).toBe("Le escribimos por correo el 12 de noviembre de 2026: «Meta nos verificó»")
+    // Si responde un correo suyo, sin asunto: sería el «Re: » de lo que ella escribió.
+    expect(
+      summaryActivityFact({
+        ...base,
+        kind: "correo",
+        direction: "salio",
+        body: "Re: Mi clave de acceso es 4471\n\nTe ayudamos.",
+        sent: { subject: "Re: Mi clave de acceso es 4471", replied: true },
+      }),
+    ).toBe("Le respondimos por correo el 12 de noviembre de 2026")
     expect(
       summaryActivityFact({
         ...base,

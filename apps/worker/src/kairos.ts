@@ -202,6 +202,8 @@ export type SummaryActivityRow = {
   /** Hay un envío nuestro con el mismo canal y la misma hora en que salió (`sent_at`). */
   sent: boolean
   sent_subject: string | null
+  /** Ese envío responde un correo suyo (`in_reply_to_email_id`): su asunto es el «Re: » del de ella. */
+  sent_replied: boolean | null
   contact_name: string | null
 }
 
@@ -218,7 +220,7 @@ export function summaryActivityEntry(row: SummaryActivityRow): KairosActivityEnt
     outcome: row.outcome,
     body: row.body,
     day: summaryDay(row.day),
-    sent: sent ? { subject: row.sent_subject } : null,
+    sent: sent ? { subject: row.sent_subject, replied: Boolean(row.sent_replied) } : null,
     fromChat: Boolean(row.from_chat),
     contactName: row.contact_name,
   }
@@ -229,7 +231,8 @@ export function summaryActivityEntry(row: SummaryActivityRow): KairosActivityEnt
  * `contacto:<id>`…). Lo ve también Soporte, que no ve las conversaciones
  * (ADR 0196): sin lo que es solo de administración, sin importes, sin el texto
  * de ningún correo ni chat, de ida o de vuelta (de lo que nos escribió, solo
- * quién y por dónde; de lo que le escribimos, el asunto: `summaryActivityFact`;
+ * quién y por dónde; de lo que le escribimos, el asunto, y de lo que le
+ * respondimos, ni eso: `summaryActivityFact`;
  * el chat de una clínica con app no es `admin_only`) y sin nada que parezca de
  * un paciente (`kairosAllowedFact`).
  */
@@ -277,15 +280,17 @@ export async function clientSummaryFacts(
     )
   }
   // Lo que salió de un envío nuestro (`outreachWentOut` y la respuesta de una conversación anotan
-  // la actividad con la hora en que salió): de ahí su asunto, nunca su texto.
+  // la actividad con la hora en que salió): de ahí su asunto, nunca su texto; si responde un
+  // correo suyo, ni el asunto (es el de ella).
   const activities = await ownerDb.execute<SummaryActivityRow>(
     sql`select f.id, f.kind, f.direction, f.outcome, f.body,
         to_char(f.happened_at at time zone 'America/Lima', 'YYYY-MM-DD') as day,
         (f.chat_id is not null) as from_chat, k.name as contact_name,
-        (went.found is not null) as sent, went.subject as sent_subject
+        (went.found is not null) as sent, went.subject as sent_subject, went.replied as sent_replied
       from saas_follow_up f
       left join saas_client_contact k on k.id = f.contact_id
-      left join lateral (select true as found, o.subject from saas_outreach o
+      left join lateral (select true as found, o.subject,
+            (o.in_reply_to_email_id is not null) as replied from saas_outreach o
           where f.direction = 'salio' and o.client_id = f.client_id and o.channel = f.kind
             and o.sent_at = f.happened_at
           order by (o.body = f.body or f.body = left(coalesce(o.subject || E'\\n\\n', '') || o.body, 2000)) desc,

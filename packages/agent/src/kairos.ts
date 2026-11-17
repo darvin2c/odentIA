@@ -358,7 +358,7 @@ Tu tarea ahora: redactar la respuesta a un correo que una clínica (o alguien qu
  * clínica. Va en `SUMMARY_SYSTEM`; `eval:kairos-escribe` lo quita para comparar con lo de antes.
  */
 export const SUMMARY_FACT_KINDS =
-  "- Aquí los hechos son de tres clases: lo que anotó el equipo (llamadas, reuniones, notas, tareas, datos de la ficha), lo que nos escribió la clínica («… nos escribió …») y lo que le escribimos nosotros («Le escribimos …»). Lo que le escribimos dice qué le contamos o pedimos, no algo de la clínica: nunca lo cuentes como un hecho de ella; si hace falta nombrarlo, di que se lo escribimos."
+  "- Aquí los hechos son de tres clases: lo que anotó el equipo (llamadas, reuniones, notas, tareas, datos de la ficha), lo que nos escribió la clínica («… nos escribió …») y lo que le escribimos nosotros («Le escribimos …», «Le respondimos …»). Lo que le escribimos dice qué le contamos o pedimos, no algo de la clínica: nunca lo cuentes como un hecho de ella; si hace falta nombrarlo, di que se lo escribimos."
 
 export const SUMMARY_SYSTEM = `${VOICE}
 
@@ -934,8 +934,9 @@ export interface KairosActivityEntry {
   /**
    * Es un mensaje que le enviamos (un correo o un chat que salió por Sallca, no lo que anotó una
    * persona), con su asunto si es un correo. Su texto es lo que le dijimos, no un hecho de ella.
+   * `replied`: responde un correo suyo (su asunto es «Re: » del de ella, así que no se dice).
    */
-  sent: { subject: string | null } | null
+  sent: { subject: string | null; replied?: boolean } | null
   /** Llegó por una conversación de WhatsApp, Instagram o Messenger (no la anotó una persona). */
   fromChat: boolean
   /** Quién de la clínica escribió, si se sabe. */
@@ -961,7 +962,8 @@ const MESSAGE_KINDS = new Set(["correo", "whatsapp", "instagram", "messenger"])
  * que saber» lo lee todo el equipo, también Soporte, que no ve las conversaciones (ADR 0196): de un
  * correo o un chat, de ida o de vuelta, entra solo que existió, nunca su texto.
  * - lo que le escribimos (un correo o un chat que salió): «Le escribimos por correo el …: «asunto»»,
- *   sin su texto, que es lo que le contamos y no algo de la clínica;
+ *   sin su texto, que es lo que le contamos y no algo de la clínica; si responde un correo suyo,
+ *   «Le respondimos por correo el …» sin asunto (sería el «Re: » del suyo);
  * - lo que nos escribió (un correo o un chat): quién y por dónde, sin su texto («Rosa Quispe nos
  *   escribió por WhatsApp el …»);
  * - lo que anotó el equipo (una llamada, una reunión, una nota, o un WhatsApp anotado a mano): como
@@ -973,6 +975,8 @@ export function summaryActivityFact(entry: KairosActivityEntry): string {
   const outcome = entry.outcome ? ` · quedó en: ${entry.outcome}` : ""
   const who = entry.contactName?.trim() || "La clínica"
   if (MESSAGE_KINDS.has(entry.kind) && entry.direction === "salio" && entry.sent) {
+    if (entry.kind === "correo" && entry.sent.replied)
+      return `Le respondimos por correo el ${entry.day}${outcome}`
     const subject = entry.sent.subject?.trim()
     return `Le escribimos por ${channel} el ${entry.day}${subject ? `: «${subject}»` : ""}${outcome}`
   }

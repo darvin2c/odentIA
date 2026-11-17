@@ -102,6 +102,8 @@ interface Activity {
   direccion?: "salio" | "entro"
   /** Salió por Sallca (un correo o un chat que enviamos): su texto no es un hecho de la clínica. */
   enviado?: boolean
+  /** Lo nuestro que responde un correo suyo: su asunto es el «Re: » del de ella y no se dice. */
+  responde?: boolean
   /** Llegó o salió por una conversación de WhatsApp, Instagram o Messenger. */
   chat?: boolean
   asunto?: string
@@ -536,7 +538,7 @@ function newActivityFact(a: Activity): string {
     outcome: a.resultado ?? null,
     body: storedBody(a),
     day: dayWords(a.dia),
-    sent: a.enviado ? { subject: a.asunto ?? null } : null,
+    sent: a.enviado ? { subject: a.asunto ?? null, replied: Boolean(a.responde) } : null,
     fromChat: Boolean(a.chat),
     contactName: a.contacto ?? null,
   }
@@ -632,9 +634,11 @@ const isConversation = (a: Activity) =>
  * salva: el texto igual está ahí. Por palabras: una aproximación.
  */
 function quotesConversation(c: SummaryCase, sentences: string[]): string[] {
+  // El asunto de lo nuestro sí llega; el de lo que responde un correo suyo es el de ella.
   const withoutSubject = (a: Activity) => {
-    const subject = contentWords(a.asunto ?? "")
-    return new Set([...contentWords(a.texto)].filter((w) => !subject.has(w)))
+    const subject = a.responde ? new Set<string>() : contentWords(a.asunto ?? "")
+    const words = contentWords(a.responde ? `${a.asunto ?? ""} ${a.texto}` : a.texto)
+    return new Set([...words].filter((w) => !subject.has(w)))
   }
   const talks = c.actividades.filter(isConversation).map(withoutSubject)
   const others = [

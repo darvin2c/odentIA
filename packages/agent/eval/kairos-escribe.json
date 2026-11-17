@@ -366,6 +366,7 @@
           "tipo": "correo",
           "direccion": "salio",
           "enviado": true,
+          "responde": true,
           "asunto": "Re: Dudas con la agenda",
           "texto": "Hola, Ana:\n\nPara mover una cita, ábrela en la Agenda y arrástrala a la nueva hora; el paciente recibe el aviso solo. También puedes cambiarla desde su ficha.",
           "dia": "2026-11-14"

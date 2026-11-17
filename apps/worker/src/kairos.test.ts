@@ -279,6 +279,32 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
     status: "enviado",
     sentAt,
   })
+  // Lo que le respondimos a un correo suyo: su asunto es el «Re: » del de ella.
+  const [asked] = await ownerDb
+    .insert(saasInboundEmail)
+    .values({
+      clientId: id,
+      mailbox: "hola",
+      product: "dental",
+      messageId: "<pregunta.anuncio@anuncio.test>",
+      fromAddress: "rosa@anuncio.test",
+      toAddress: "hola@odentia32.com",
+      subject: "Mi clave de Meta es 4471",
+      receivedAt: new Date("2026-11-15T20:00:00Z"),
+    })
+    .returning({ id: saasInboundEmail.id })
+  const repliedAt = new Date("2026-11-15T21:00:00Z")
+  await ownerDb.insert(saasOutreach).values({
+    clientId: id,
+    contactId: rosa?.id ?? null,
+    channel: "correo",
+    toAddress: "rosa@anuncio.test",
+    subject: "Re: Mi clave de Meta es 4471",
+    body: "No nos mandes tu clave.",
+    inReplyToEmailId: asked?.id ?? null,
+    status: "enviado",
+    sentAt: repliedAt,
+  })
   await ownerDb.insert(saasFollowUp).values([
     {
       clientId: id,
@@ -325,6 +351,14 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
       chatId: chat?.id ?? null,
       happenedAt: new Date("2026-11-15T15:05:00Z"),
     },
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "salio",
+      body: "Re: Mi clave de Meta es 4471\n\nNo nos mandes tu clave.",
+      contactId: rosa?.id ?? null,
+      happenedAt: repliedAt,
+    },
   ])
   const facts = await clientSummaryFacts(ownerDb, {
     id,
@@ -348,6 +382,8 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
   )
   expect(texts).toContain("Rosa Anuncio nos escribió por WhatsApp el 15 de noviembre de 2026")
   expect(texts).toContain("Le escribimos por WhatsApp el 15 de noviembre de 2026")
+  // Lo que le respondimos a un correo suyo, sin el asunto (el «Re: » de lo que ella escribió).
+  expect(texts).toContain("Le respondimos por correo el 15 de noviembre de 2026")
   // El texto del anuncio nunca llega como hecho de la clínica, ni el de una conversación.
   expect(JSON.stringify(facts)).not.toContain("Ya puedes conectar")
   expect(JSON.stringify(facts)).not.toContain("4471")
