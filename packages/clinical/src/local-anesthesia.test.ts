@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  epinephrineCapOf,
   isCardiacCondition,
   LOCAL_ANESTHETICS,
   localAnesthesiaWords,
@@ -15,7 +16,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         weightKg: 22,
         anesthetic: "lidocaina-2-epinefrina",
         ageYears: 7,
-        cardiac: false,
+        cardiac: null,
       }),
     ).toEqual({
       dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos",
@@ -51,7 +52,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       weightKg: 80,
       anesthetic: "lidocaina-2-epinefrina",
       ageYears: 40,
-      cardiac: false,
+      cardiac: null,
     })
     expect(words.dose).toBe(
       "Máximo para 80 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 300 mg (el tope), unos 8,3 cartuchos",
@@ -63,7 +64,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       weightKg: 15,
       anesthetic: "articaina-4-epinefrina",
       ageYears: 3,
-      cardiac: false,
+      cardiac: null,
     })
     expect(words.warnings).toEqual(["La articaína no se recomienda en menores de 4 años."])
     expect(words.dose).toContain("105 mg")
@@ -75,7 +76,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         weightKg: null,
         anesthetic: "lidocaina-2-epinefrina",
         ageYears: 45,
-        cardiac: false,
+        cardiac: null,
       }),
     ).toEqual({
       dose: null,
@@ -84,24 +85,42 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
   })
 
   it("en un cardiópata avisa el tope de epinefrina, y sin vasoconstrictor no", () => {
+    const cardiac = epinephrineCapOf({ cardiacCondition: true, asaClass: "II" })
     expect(
       localAnesthesiaWords({
         weightKg: 70,
         anesthetic: "lidocaina-2-epinefrina",
         ageYears: 60,
-        cardiac: true,
+        cardiac,
       }).warnings,
     ).toEqual([
-      "Con su corazón, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
+      "Por su enfermedad cardiovascular registrada, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
     ])
     expect(
       localAnesthesiaWords({
         weightKg: 70,
         anesthetic: "mepivacaina-3",
         ageYears: 60,
-        cardiac: true,
+        cardiac,
       }).warnings,
     ).toEqual([])
+  })
+
+  // QA del 16 nov, Q10 (Gloria): ASA III puesta por el odontólogo y ninguna enfermedad registrada.
+  // El aviso decía «Con su corazón…»: un motivo que la ficha no tiene.
+  it("el tope de epinefrina dice su motivo verdadero: la ASA, la enfermedad registrada o las dos", () => {
+    const warn = (cardiac: ReturnType<typeof epinephrineCapOf>) =>
+      localAnesthesiaWords({ weightKg: 62, anesthetic: "lidocaina-2-epinefrina", ageYears: 62, cardiac }).warnings
+    expect(warn(epinephrineCapOf({ cardiacCondition: false, asaClass: "III" }))).toEqual([
+      "Por su ASA III, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
+    ])
+    expect(warn(epinephrineCapOf({ cardiacCondition: true, asaClass: "IV" }))).toEqual([
+      "Por su enfermedad cardiovascular registrada y su ASA IV, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
+    ])
+    // Sin cardiopatía y con ASA I o II, o sin clasificar: no hay tope que avisar.
+    expect(epinephrineCapOf({ cardiacCondition: false, asaClass: "II" })).toBeNull()
+    expect(epinephrineCapOf({ cardiacCondition: false, asaClass: null })).toBeNull()
+    expect(warn(null)).toEqual([])
   })
 
   it("cada anestésico tiene su tope y su dosis por kilo", () => {

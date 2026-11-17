@@ -114,6 +114,27 @@ const number = (value: number) =>
   value.toLocaleString("es", { maximumFractionDigits: 1, minimumFractionDigits: 0 })
 
 /**
+ * Por qué se limita la epinefrina, como lo dice la ficha: una enfermedad del corazón o de la
+ * presión registrada con su código, la ASA III o IV, o las dos. El aviso nombra el motivo
+ * verdadero (QA del 16 nov, Q10: decía «Con su corazón…» a una paciente con ASA III y sin ninguna
+ * cardiopatía registrada).
+ */
+export interface EpinephrineCap {
+  condition: boolean
+  /** La ASA que lo pide (III o más); nula si es solo por la enfermedad registrada. */
+  asaClass: string | null
+}
+
+/** El tope de epinefrina de esa persona, o nulo si nada de su ficha lo pide. */
+export function epinephrineCapOf(input: {
+  cardiacCondition: boolean
+  asaClass: string | null | undefined
+}): EpinephrineCap | null {
+  const asaClass = isSevereAsa(input.asaClass) ? (input.asaClass ?? null) : null
+  return input.cardiacCondition || asaClass ? { condition: input.cardiacCondition, asaClass } : null
+}
+
+/**
  * La línea del máximo y sus avisos: «Máximo para 22 kg con lidocaína 2 % con epinefrina
  * (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos». Sin peso no inventa un máximo (`dose`
  * nulo): la pantalla pide anotarlo en los signos vitales.
@@ -122,8 +143,8 @@ export function localAnesthesiaWords(input: {
   weightKg: number | null | undefined
   anesthetic: LocalAnestheticKey | string
   ageYears: number | null | undefined
-  /** Cardiopatía registrada o ASA III o IV: el tope de epinefrina. */
-  cardiac: boolean
+  /** Cardiopatía registrada o ASA III o IV: el tope de epinefrina, con su motivo (`epinephrineCapOf`). */
+  cardiac: EpinephrineCap | null
 }): { dose: string | null; warnings: string[] } {
   const anesthetic = localAnestheticOf(input.anesthetic)
   if (!anesthetic) return { dose: null, warnings: [] }
@@ -140,8 +161,14 @@ export function localAnesthesiaWords(input: {
     )
   if (input.cardiac && anesthetic.epinephrineMgPerMl) {
     const perCartridge = anesthetic.epinephrineMgPerMl * CARTRIDGE_ML
+    const why = [
+      input.cardiac.condition ? "su enfermedad cardiovascular registrada" : null,
+      input.cardiac.asaClass ? `su ASA ${input.cardiac.asaClass}` : null,
+    ]
+      .filter(Boolean)
+      .join(" y ")
     warnings.push(
-      `Con su corazón, la epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por sesión: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos de este anestésico.`,
+      `Por ${why}, la epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por sesión: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos de este anestésico.`,
     )
   }
   const weight = input.weightKg

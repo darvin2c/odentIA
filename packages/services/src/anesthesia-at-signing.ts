@@ -7,8 +7,8 @@
 import {
   type AnesthesiaAtSigning,
   ageInYears,
+  epinephrineCapOf,
   isCardiacCondition,
-  isSevereAsa,
   localAnesthesiaWords,
   localAnestheticOf,
   type Vitals,
@@ -112,9 +112,10 @@ export async function anesthesiaAtSigningOf(
         eq(patientCondition.status, "activa"),
       ),
     )
-  const cardiac =
-    isSevereAsa(header?.asaClass) ||
-    conditions.some((row) => isCardiacCondition(row.system, row.code))
+  const cardiac = epinephrineCapOf({
+    cardiacCondition: conditions.some((row) => isCardiacCondition(row.system, row.code)),
+    asaClass: header?.asaClass,
+  })
   const anesthetic = localAnestheticOf(input.anesthetic)
   const weightKg = input.vitals?.peso ?? null
   const words = anesthetic

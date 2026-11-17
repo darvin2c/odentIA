@@ -1,8 +1,9 @@
 import {
   type AnesthesiaAtSigning,
+  type EpinephrineCap,
+  epinephrineCapOf,
   isCardiacCondition,
   isCurrentMedication,
-  isSevereAsa,
   LOCAL_ANESTHETICS,
   type LocalAnestheticKey,
   localAnesthesiaWords,
@@ -67,16 +68,15 @@ export function anesthesiaHealthWords(
   return parts.join(" ")
 }
 
-/** Cardiopatía registrada con su código, o ASA III o más: el tope de epinefrina. */
-export function cardiacOf(health: Pick<PatientHealth, "conditions" | "asaClass"> | null): boolean {
-  if (!health) return false
-  return (
-    isSevereAsa(health.asaClass) ||
-    health.conditions.some(
-      (row) =>
-        row.status === "activa" && isCardiacCondition(row.diagnosisSystem, row.diagnosisCode),
-    )
-  )
+/** Cardiopatía registrada con su código, o ASA III o más: el tope de epinefrina, con su motivo. */
+export function cardiacOf(health: Pick<PatientHealth, "conditions" | "asaClass"> | null): EpinephrineCap | null {
+  if (!health) return null
+  return epinephrineCapOf({
+    cardiacCondition: health.conditions.some(
+      (row) => row.status === "activa" && isCardiacCondition(row.diagnosisSystem, row.diagnosisCode),
+    ),
+    asaClass: health.asaClass,
+  })
 }
 
 /**
