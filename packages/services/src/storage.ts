@@ -57,13 +57,15 @@ export interface Storage {
     ext: string
   }): Promise<AttachmentRef>
   /**
-   * URL firmada de lectura para un adjunto (por defecto 15 min). Con `inline`, el almacenamiento
-   * lo sirve para verse (no para guardarse) y con ese tipo, el que se revisó al recibirlo.
+   * URL firmada de lectura para un adjunto (por defecto 15 min). Con `serve`, el almacenamiento lo
+   * sirve con ese nombre: para verse (`as: "inline"`, lo de siempre, con el tipo que se revisó al
+   * recibirlo) o para guardarse (`as: "attachment"`: el navegador lo descarga y no lo abre como
+   * una página del almacenamiento).
    */
   attachmentUrl(
     objectKey: string,
     ttlSeconds?: number,
-    inline?: { filename: string; contentType: string },
+    serve?: { filename: string; contentType?: string; as?: "inline" | "attachment" },
   ): Promise<string>
   /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
   deleteAttachment(objectKey: string): Promise<void>
@@ -182,7 +184,7 @@ export function createStorage(env: StorageEnv): Storage {
         size: bytes.byteLength,
       }
     },
-    async attachmentUrl(objectKey, ttlSeconds = 900, inline) {
+    async attachmentUrl(objectKey, ttlSeconds = 900, serve) {
       // Soporte mirando la clínica: el archivo pasa por la API, que comprueba el permiso
       // en cada pedido; una URL firmada seguiría sirviendo después de quitarlo.
       const proxy = fileProxy.getStore()
@@ -192,11 +194,12 @@ export function createStorage(env: StorageEnv): Storage {
         new GetObjectCommand({
           Bucket: env.attachmentsBucket,
           Key: objectKey,
-          // Para verse: el nombre en RFC 5987 (acentos y espacios) y el tipo que se revisó.
-          ...(inline
+          // Para verse o para guardarse: el nombre en RFC 5987 (acentos y espacios) y, si se
+          // dice, el tipo que se revisó.
+          ...(serve
             ? {
-                ResponseContentDisposition: `inline; filename*=UTF-8''${rfc5987(inline.filename)}`,
-                ResponseContentType: inline.contentType,
+                ResponseContentDisposition: `${serve.as ?? "inline"}; filename*=UTF-8''${rfc5987(serve.filename)}`,
+                ...(serve.contentType ? { ResponseContentType: serve.contentType } : {}),
               }
             : {}),
         }),

@@ -448,7 +448,9 @@ async function visibleFile(tx: Db, staff: AdminActor, fileId: string) {
 
 /**
  * La dirección firmada (15 min) para descargar un documento. Deja auditoría:
- * lo que manda la clínica puede traer datos de pacientes.
+ * lo que manda la clínica puede traer datos de pacientes. Firmada para
+ * guardarse (`attachment`, con su nombre): un PDF o una página que llegó de
+ * fuera no se abre como una página del dominio del almacenamiento.
  */
 export async function clientFileUrl(
   tx: Db,
@@ -464,7 +466,10 @@ export async function clientFileUrl(
     metadata: { clientId: row.clientId, kind: row.kind },
   })
   return {
-    url: await storage.attachmentUrl(row.objectKey, 900),
+    url: await storage.attachmentUrl(row.objectKey, 900, {
+      filename: row.filename,
+      as: "attachment",
+    }),
     filename: row.filename,
     contentType: row.contentType,
   }
@@ -535,11 +540,11 @@ async function viewableFile(
   tx: Db,
   staff: AdminActor,
   fileId: string,
-  want: "imagen" | "pdf" | "cualquiera",
+  want: "imagen" | "pdf",
 ) {
   const row = await visibleFile(tx, staff, fileId)
   const kind = clientFilePreviewKind(row.contentType)
-  if (!kind || (want !== "cualquiera" && kind !== want))
+  if (!kind || kind !== want)
     throw new ServiceError(
       "PREVIEW_UNSUPPORTED",
       409,
@@ -549,9 +554,11 @@ async function viewableFile(
 }
 
 /**
- * La dirección firmada (5 min) para ver una imagen o un PDF sin descargarlo: el almacenamiento
- * lo sirve para verse y con el tipo que se revisó al recibirlo. El mismo permiso que descargar
- * (Soporte no ve lo `admin_only`) y su constancia, una vez al día (`client_file.viewed`).
+ * La dirección firmada (5 min) para ver una imagen sin descargarla: el almacenamiento la sirve
+ * para verse y con el tipo que se revisó al recibirla. Solo imágenes: un PDF se dibuja con sus
+ * bytes desde la API (`clientFileContent`), nunca abierto en el dominio del almacenamiento. El
+ * mismo permiso que descargar (Soporte no ve lo `admin_only`) y su constancia, una vez al día
+ * (`client_file.viewed`).
  */
 export async function clientFilePreviewUrl(
   tx: Db,
@@ -561,7 +568,7 @@ export async function clientFilePreviewUrl(
   now = new Date(),
 ): Promise<{ url: string }> {
   const staff = requireStaff(actor)
-  const { row } = await viewableFile(tx, staff, fileId, "cualquiera")
+  const { row } = await viewableFile(tx, staff, fileId, "imagen")
   await noteClientFileViewed(tx, staff, row, now)
   return {
     url: await storage.attachmentUrl(row.objectKey, CLIENT_FILE_PREVIEW_TTL_SECONDS, {

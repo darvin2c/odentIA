@@ -41,9 +41,13 @@ let otherClientId: string
 /** Un almacenamiento de prueba que recuerda lo que borró y puede fallar con una clave. */
 function fakeStorage(failOn?: string) {
   const deleted: string[] = []
+  const served: unknown[] = []
   return {
     deleted,
-    async attachmentUrl(key: string) {
+    /** Con qué nombre y para qué se firmó cada dirección (`serve`). */
+    served,
+    async attachmentUrl(key: string, _ttl?: number, serve?: unknown) {
+      served.push(serve)
       return `https://bucket.test/${key}?firma=1`
     },
     async deleteAttachment(key: string) {
@@ -171,6 +175,8 @@ describe("listar, descargar y borrar", () => {
     const { url, filename } = await clientFileUrl(ownerDb, admin, storage, secret.id)
     expect(url).toContain(`clients/${clientId}/`)
     expect(filename).toBe("agenda exportada.xlsx")
+    // Se firma para guardarse: lo que llegó de fuera no se abre como página del almacenamiento.
+    expect(storage.served.at(-1)).toEqual({ filename: "agenda exportada.xlsx", as: "attachment" })
     const audits = await ownerDb
       .select({ actor: adminAudit.actorUserId })
       .from(adminAudit)
@@ -556,7 +562,7 @@ describe("lo que puede ser la carga", () => {
 })
 
 describe("ver sin descargar (ADR 0196)", () => {
-  it("imágenes y PDF se ven con una dirección de 5 minutos y se anotan una vez al día; lo demás se descarga", async () => {
+  it("una imagen se ve con una dirección de 5 minutos, un PDF con sus bytes; una constancia al día; lo demás se descarga", async () => {
     const asked: Array<{ key: string; ttl?: number; inline?: unknown }> = []
     const storage = {
       async attachmentUrl(key: string, ttl?: number, inline?: unknown) {
@@ -610,9 +616,14 @@ describe("ver sin descargar (ADR 0196)", () => {
       filename: "contrato.pdf",
       objectKey: expect.stringContaining(`clients/${clientId}/`),
     })
+    // Un PDF no sale por la dirección del almacenamiento: se dibuja con sus bytes desde la API.
+    const signed = asked.length
+    await expect(
+      clientFilePreviewUrl(ownerDb, admin, storage, pdf.id, evening),
+    ).rejects.toMatchObject({ code: "PREVIEW_UNSUPPORTED" })
+    expect(asked).toHaveLength(signed)
     // Una constancia por persona, archivo y día de Lima, por más que se mire.
     await clientFileContent(ownerDb, admin, pdf.id, evening)
-    await clientFilePreviewUrl(ownerDb, admin, storage, pdf.id, evening)
     await clientFilePreviewUrl(ownerDb, support, storage, photo.id, evening)
     await clientFileContent(ownerDb, admin, pdf.id, nextDay)
     const views = await ownerDb

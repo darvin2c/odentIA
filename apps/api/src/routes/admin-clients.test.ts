@@ -906,7 +906,7 @@ describe("documentos", () => {
     expect(objects.has(row?.objectKey ?? "")).toBe(false)
   })
 
-  it("se ve sin descargar: imagen por enlace de 5 minutos, PDF por la API y aislado; lo demás no", async () => {
+  it("se ve sin descargar: el PDF solo por la API, aislado y sin guardarse; lo demás no", async () => {
     const clientId = await newClient("Odontología Tambopata Visor (ficticia)", "vista@andes.test")
     const uploaded = await call(
       "POST",
@@ -920,16 +920,15 @@ describe("documentos", () => {
     csv.set("file", new File(["nombre\nRosa\n"], "lista.csv", { type: "text/csv" }))
     const sheet = (await json(await call("POST", `/${clientId}/files`, ADMIN, csv))).data
 
-    const preview = await call("GET", `/files/${pdf.id}/preview`, ADMIN)
-    await expectStatus(preview, 302)
-    expect(preview.headers.get("location")).toContain(`clients/${clientId}/`)
+    // Un PDF no sale por un enlace del almacenamiento (eso es solo para imágenes): por la API.
+    await expectStatus(await call("GET", `/files/${pdf.id}/preview`, ADMIN), 409)
     const content = await call("GET", `/files/${pdf.id}/content`, ADMIN)
     await expectStatus(content, 200)
     expect(content.headers.get("content-type")).toBe("application/pdf")
     expect(content.headers.get("content-disposition")).toMatch(/^inline; filename\*=UTF-8''/)
     expect(content.headers.get("x-content-type-options")).toBe("nosniff")
     expect(content.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
-    expect(content.headers.get("cache-control")).toBe("private, max-age=300")
+    expect(content.headers.get("cache-control")).toBe("no-store")
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(pdfBytes)
     // Un CSV no tiene vista: se descarga.
     await expectStatus(await call("GET", `/files/${sheet.id}/preview`, ADMIN), 409)

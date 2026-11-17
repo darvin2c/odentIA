@@ -536,8 +536,9 @@ async function pdfBody(
 
 /**
  * Un PDF para verse dentro de la ficha (pdf.js lo dibuja): `inline`, sin que el navegador adivine
- * otro tipo y, si alguien lo abriera como página, aislado y sin poder cargar nada. Se guarda en el
- * navegador de quien mira 5 minutos, lo que dura la vista.
+ * otro tipo y, si alguien lo abriera como página, aislado y sin poder cargar nada. No se guarda en
+ * el navegador (`no-store`, como el PDF de la propuesta): lo que manda la clínica puede traer datos
+ * de pacientes, y la vista vuelve a pedirlo con su permiso y su constancia.
  */
 async function pdfResponse(c: Context, storage: Storage, objectKey: string, filename: string) {
   const body = await pdfBody(storage, objectKey)
@@ -551,8 +552,7 @@ async function pdfResponse(c: Context, storage: Storage, objectKey: string, file
   c.header("Content-Disposition", `inline; filename*=UTF-8''${rfc5987(filename)}`)
   c.header("X-Content-Type-Options", "nosniff")
   c.header("Content-Security-Policy", "sandbox; default-src 'none'")
-  // Reemplaza el `no-store` de toda la administración: la vista pide sus páginas al pasar.
-  c.header("Cache-Control", "private, max-age=300")
+  c.header("Cache-Control", "no-store")
   return c.body(body instanceof Uint8Array ? body.slice() : body, 200)
 }
 
