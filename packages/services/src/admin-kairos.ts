@@ -1091,6 +1091,9 @@ const KEEPS_WAITING = new Set([
   "CHAT_ADMIN_ONLY",
   // «Pasar a…» a alguien que ya no está libre a esa hora: se elige a otra persona.
   "STAFF_BUSY",
+  // El borrador de un correo que ya no es el último de su hilo: se responde en la Bandeja, y la
+  // próxima pasada lo retira (`ruleReplyEmails`).
+  "NEWER_EMAIL",
 ])
 
 /** Lo que cada tipo deja cambiar antes de aprobar. */
@@ -2528,6 +2531,21 @@ const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
  */
 async function ruleReplyEmails(pass: Pass): Promise<void> {
   const { tx } = pass
+  // El borrador de un correo que ya no es el último de su hilo contesta lo de antes: se retira,
+  // y así el del correo nuevo puede prepararse en esta misma pasada (uno en espera por remitente).
+  const behind = await rows<{ id: string }>(
+    tx,
+    sql`select k.id from kairos_item k
+      join saas_inbound_email d on d.id::text = k.payload ->> 'emailId'
+    where k.kind = 'responder_correo' and k.status = 'espera'
+      and exists (select 1 from saas_inbound_email n
+        where n.id <> d.id and (n.received_at, n.id) > (d.received_at, d.id)
+          and ${emailThreadKeySql("n")} = ${emailThreadKeySql("d")})`,
+  )
+  await pass.closeItems(
+    { ids: behind.map((row) => row.id) },
+    "llegó otro correo después en este hilo",
+  )
   const fresh = await rows<{
     id: string
     client_id: string | null
@@ -2551,7 +2569,7 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
       -- Solo el último correo de su hilo (la regla de la Bandeja), y si nadie respondió el hilo
       -- después de que llegó: un borrador de un correo anterior no contesta lo último.
       and not exists (select 1 from saas_inbound_email n
-        where n.received_at > e.received_at and n.id <> e.id
+        where n.id <> e.id and (n.received_at, n.id) > (e.received_at, e.id)
           and ${emailThreadKeySql("n")} = ${emailThreadKeySql("e")})
       and not exists (select 1 from saas_outreach t
         where t.channel = 'correo' and t.created_at >= e.received_at

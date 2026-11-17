@@ -2646,6 +2646,23 @@ export async function prepareEmailReply(
         409,
         "Alguien ya respondió este correo: revisa su respuesta en el correo antes de enviar otra",
       )
+    // Y contesta lo último solo si su correo es el último que llegó del hilo (la regla de la
+    // Bandeja); si llegó otro después, este borrador responde lo de antes.
+    const [newer] = [
+      ...(await tx.execute<{ id: string }>(
+        sql`select n.id from admin.saas_inbound_email te, admin.saas_inbound_email n
+          where te.id = ${email.id}::uuid and n.id <> te.id
+            and (n.received_at, n.id) > (te.received_at, te.id)
+            and ${emailThreadKeySql("n")} = ${emailThreadKeySql("te")}
+          limit 1`,
+      )),
+    ]
+    if (newer)
+      throw new ServiceError(
+        "NEWER_EMAIL",
+        409,
+        "Llegó otro correo después en este hilo: respóndelo desde la Bandeja.",
+      )
     kairosItemId = item.id
   }
   const [contact] = client

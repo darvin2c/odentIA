@@ -50,7 +50,12 @@ import {
   threadKeyOf,
   unsettleConversation,
 } from "./admin-inbox.js"
-import { KAIROS_TEMPLATE_NOTE, listKairosItems } from "./admin-kairos.js"
+import {
+  decideKairosItem,
+  KAIROS_TEMPLATE_NOTE,
+  kairosRulesPass,
+  listKairosItems,
+} from "./admin-kairos.js"
 import { markOutreachSent, prepareEmailReply } from "./admin-sales.js"
 import { kairosImproveContext } from "./kairos-improve.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -705,6 +710,88 @@ describe("el hilo de un correo", () => {
         NOW,
       ),
     ).rejects.toMatchObject({ code: "ALREADY_REPLIED" })
+  })
+
+  it("si llega otro correo del hilo, el borrador del anterior no se aprueba y la pasada lo cambia por el nuevo", async () => {
+    const sender = "tres.borradores@nadie.test"
+    const draftsOf = (emailId: string) =>
+      ownerDb
+        .select()
+        .from(kairosItem)
+        .where(
+          and(
+            eq(kairosItem.kind, "responder_correo"),
+            sql`${kairosItem.payload} ->> 'emailId' = ${emailId}`,
+          ),
+        )
+    const first = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<p1.pasada@nadie.test>",
+        from: sender,
+        subject: "Precios",
+        receivedAt: ago(3 * HOUR),
+      }),
+    )
+    await ownerDb.transaction((tx) => kairosRulesPass(tx as Db, NOW))
+    const [stale] = await draftsOf(first.id)
+    expect(stale).toMatchObject({ status: "espera" })
+    const second = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<p2.pasada@nadie.test>",
+        from: sender,
+        subject: "Re: Precios",
+        inReplyTo: "<p1.pasada@nadie.test>",
+        references: "<p1.pasada@nadie.test>",
+        receivedAt: ago(HOUR),
+      }),
+    )
+    // Aprobarlo ya no contesta lo último: 409, y sigue en espera hasta la pasada.
+    const unused = () => {
+      throw new Error("no se ejecuta")
+    }
+    const executors = {
+      prepareOutreach: unused,
+      updateClient: unused,
+      linkContactToUser: unused,
+      assignInboundEmail: unused,
+      assignChat: unused,
+      recordPresentation: unused,
+      createProposal: unused,
+      markClientFileCarga: unused,
+      reassignPresentation: unused,
+      prepareEmailReply: (
+        tx: Db,
+        actor: AdminActor,
+        emailId: string,
+        input: { body: string; kairosItemId: string },
+      ) => prepareEmailReply(tx, actor, emailId, input, NOW),
+    }
+    await expect(
+      ownerDb.transaction((tx) =>
+        decideKairosItem(
+          tx as Db,
+          admin,
+          stale?.id ?? "",
+          { action: "aprobar", edited: { body: "Hola, el plan cuesta lo que te conté." } },
+          executors,
+          NOW,
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: "NEWER_EMAIL",
+      status: 409,
+      message: "Llegó otro correo después en este hilo: respóndelo desde la Bandeja.",
+    })
+    expect((await draftsOf(first.id))[0]?.status).toBe("espera")
+    // La pasada lo retira con su porqué y prepara el del correo nuevo.
+    await ownerDb.transaction((tx) => kairosRulesPass(tx as Db, later(MIN)))
+    expect((await draftsOf(first.id))[0]).toMatchObject({
+      status: "vencida",
+      error: "Ya no hace falta: llegó otro correo después en este hilo",
+    })
+    expect((await draftsOf(second.id))[0]).toMatchObject({ status: "espera" })
   })
 
   it("de cada adjunto guardado dice lo que diría «¿Es la carga de datos?», como el correo", async () => {
