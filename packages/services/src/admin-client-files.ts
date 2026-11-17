@@ -33,7 +33,7 @@ import {
   saasInboundEmail,
   saasInboundMessage,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, type SQL, sql } from "drizzle-orm"
@@ -448,6 +448,56 @@ async function visibleFile(tx: Db, staff: AdminActor, fileId: string) {
 }
 
 /**
+ * El archivo de un envío de chat que pudo llegar a Meta deja `client_file.sent` a nombre de quien
+ * lo mandó, como `client_file.downloaded` al bajarlo. Lo llama quien saca el envío de pendiente:
+ * al salir (`enviado`), al no saberse si salió (`incierto`, con `uncertain`) o cuando una persona
+ * dice «Salió» de uno que seguía pendiente. Un envío deja pendiente una sola vez, así que queda
+ * una constancia por envío; lo que pasa de incierto a enviado ya la tiene. Sin una persona del
+ * equipo (Kairós, o una cuenta que ya no está), sin actor.
+ */
+export async function noteChatFilesSent(
+  tx: Db,
+  row: {
+    id: string
+    fileIds: string[]
+    createdBy: string | null
+    chatId: string | null
+    channel: string
+  },
+  options: { uncertain?: boolean } = {},
+): Promise<void> {
+  if (row.fileIds.length === 0 || !row.chatId) return
+  const files = await tx
+    .select({ id: saasClientFile.id, clientId: saasClientFile.clientId, kind: saasClientFile.kind })
+    .from(saasClientFile)
+    .where(inArray(saasClientFile.id, row.fileIds))
+  const [staff] = row.createdBy
+    ? await tx
+        .select({ role: adminStaff.role })
+        .from(adminStaff)
+        .where(eq(adminStaff.userId, row.createdBy))
+        .limit(1)
+    : []
+  const actor: AdminActor | null =
+    row.createdBy && staff
+      ? { userId: row.createdBy, role: staff.role as AdminActor["role"] }
+      : null
+  for (const file of files)
+    await writeAdminAudit(tx, actor, {
+      action: "client_file.sent",
+      entityId: file.id,
+      metadata: {
+        clientId: file.clientId,
+        kind: file.kind,
+        chatId: row.chatId,
+        channel: row.channel,
+        outreachId: row.id,
+        ...(options.uncertain ? { uncertain: true } : {}),
+      },
+    })
+}
+
+/**
  * La dirección firmada (15 min) para descargar un documento. Deja auditoría:
  * lo que manda la clínica puede traer datos de pacientes. Firmada para
  * guardarse (`attachment`, con su nombre): un PDF o una página que llegó de
@@ -595,12 +645,7 @@ export async function clientReportContent(
 }
 
 /** Un archivo que se puede ver: el mismo permiso que descargarlo y un tipo que tiene vista. */
-async function viewableFile(
-  tx: Db,
-  staff: AdminActor,
-  fileId: string,
-  want: "imagen" | "pdf",
-) {
+async function viewableFile(tx: Db, staff: AdminActor, fileId: string, want: "imagen" | "pdf") {
   const row = await visibleFile(tx, staff, fileId)
   const kind = clientFilePreviewKind(row.contentType)
   if (!kind || kind !== want)

@@ -56,7 +56,7 @@ import {
   kairosRulesPass,
   listKairosItems,
 } from "./admin-kairos.js"
-import { markOutreachSent, prepareEmailReply } from "./admin-sales.js"
+import { markOutreachSent, prepareEmailReply, resolveOutreach } from "./admin-sales.js"
 import { kairosImproveContext } from "./kairos-improve.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -1406,6 +1406,61 @@ describe("responder un chat con archivos", () => {
       later(MIN),
     )
     expect(filesOnly.parts.map((part) => part.kind)).toEqual(["archivo"])
+  })
+
+  it("cada envío con archivo que pudo llegar a Meta deja su constancia una vez, también al decir «Salió» a mano", async () => {
+    const ig = await wrote({
+      channel: "instagram",
+      address: `ig-${crypto.randomUUID().slice(0, 8)}`,
+    })
+    await assignChat(ownerDb, admin, ig.chatId, { clientId: sales }, NOW)
+    const photo = await file(sales, "foto-ig.png", "image/png")
+    const outreachOf = (rows: Awaited<ReturnType<typeof audits>>, outreachId: string) =>
+      rows.filter(
+        (row) => (row.metadata as { outreachId?: string } | null)?.outreachId === outreachId,
+      )
+    // Instagram no avisa estados: la parte del archivo quedó pendiente y una persona dice que salió.
+    const reply = await prepareChatReply(
+      ownerDb,
+      admin,
+      ig.chatId,
+      { body: "Te mando la foto", fileIds: [photo.id] },
+      NOW,
+    )
+    const pendingPart = reply.parts[1]?.outreachId ?? ""
+    await resolveOutreach(ownerDb, admin, pendingPart, "salio", later(11 * MIN))
+    const resolved = outreachOf(await audits("client_file.sent", photo.id), pendingPart)
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]).toMatchObject({
+      actorUserId: admin.userId,
+      metadata: expect.objectContaining({ channel: "instagram", chatId: ig.chatId }),
+    })
+    // No se sabe si salió: queda anotado como incierto, y decir «Salió» después no lo repite.
+    const again = await prepareChatReply(
+      ownerDb,
+      admin,
+      ig.chatId,
+      { body: "Otra vez la foto", fileIds: [photo.id] },
+      later(12 * MIN),
+    )
+    const unsurePart = again.parts[1]?.outreachId ?? ""
+    await markChatOutreachUncertain(ownerDb, unsurePart, later(12 * MIN))
+    const unsure = outreachOf(await audits("client_file.sent", photo.id), unsurePart)
+    expect(unsure).toHaveLength(1)
+    expect(unsure[0]?.metadata).toMatchObject({ uncertain: true })
+    await resolveOutreach(ownerDb, admin, unsurePart, "salio", later(13 * MIN))
+    expect(outreachOf(await audits("client_file.sent", photo.id), unsurePart)).toHaveLength(1)
+    // Lo que no salió no se dio a Meta: sin constancia.
+    const failed = await prepareChatReply(
+      ownerDb,
+      admin,
+      ig.chatId,
+      { body: "Y otra", fileIds: [photo.id] },
+      later(14 * MIN),
+    )
+    const failedPart = failed.parts[1]?.outreachId ?? ""
+    await resolveOutreach(ownerDb, admin, failedPart, "no_salio", later(25 * MIN))
+    expect(outreachOf(await audits("client_file.sent", photo.id), failedPart)).toHaveLength(0)
   })
 
   it("sin cliente, 409; un archivo ajeno o borrado, 400; lo que el canal no acepta, con su nombre", async () => {

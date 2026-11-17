@@ -84,7 +84,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm"
-import { filenameForType } from "./admin-client-files.js"
+import { filenameForType, noteChatFilesSent } from "./admin-client-files.js"
 import {
   type ClientSignal,
   clientSignals,
@@ -3068,6 +3068,8 @@ export async function resolveOutreach(
     .returning()
   if (!updated) throw notFound("Envío")
   if (outcome === "salio") await outreachWentOut(tx, actor, updated, row.adminOnly, now)
+  // El archivo de un chat que seguía pendiente y salió: su constancia (uno incierto ya la tiene).
+  if (outcome === "salio" && row.status === "pendiente") await noteChatFilesSent(tx, updated)
   await writeAdminAudit(tx, actor, {
     action: outcome === "salio" ? "arm.outreach_resolved_sent" : "arm.outreach_resolved_failed",
     entityId: row.clientId ?? row.inReplyToEmailId,

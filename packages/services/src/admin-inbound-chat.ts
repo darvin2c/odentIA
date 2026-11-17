@@ -50,7 +50,6 @@ import {
   saasOutreach,
   saasProposal,
 } from "@odentia/db/schema/admin-arm"
-import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { mailBrandName } from "@odentia/mail"
@@ -65,7 +64,12 @@ import {
   channelTextProblem,
   textForChannel,
 } from "./admin-channel-rules.js"
-import { cargaDeleteAfter, cleanFilename, registerClientFile } from "./admin-client-files.js"
+import {
+  cargaDeleteAfter,
+  cleanFilename,
+  noteChatFilesSent,
+  registerClientFile,
+} from "./admin-client-files.js"
 import { type ClientPhase, clientPhaseSql, outreachAdminOnlySql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { chatConversationState, type InboxState } from "./admin-inbox.js"
@@ -1863,10 +1867,11 @@ async function settleChatOutreach(
     .where(eq(saasOutreach.id, row.id))
     .returning()
   if (!updated) throw notFound("Envío")
-  if (status === "enviado") {
-    await recordReplyActivity(tx, updated, now)
-    await noteFilesSent(tx, updated)
-  }
+  if (status === "enviado") await recordReplyActivity(tx, updated, now)
+  // Al dejar de estar pendiente pudo llegar a Meta: su archivo queda anotado una vez (lo que
+  // pasa de incierto a enviado ya lo tiene).
+  if (row.status === "pendiente" && (status === "enviado" || status === "incierto"))
+    await noteChatFilesSent(tx, updated, { uncertain: status === "incierto" })
   await writeAdminAudit(tx, null, {
     action:
       status === "enviado"
@@ -1886,43 +1891,6 @@ async function settleChatOutreach(
   if (status !== "enviado" && updated.byKairos && updated.purpose === "respuesta")
     await handOverKairosReply(tx, updated, status, now, extra.why ?? null)
   return updated
-}
-
-/**
- * Un archivo que salió por un chat deja `client_file.sent` a nombre de quien lo mandó, como
- * `client_file.downloaded` al bajarlo: Meta ya tiene una copia. Solo cuando la parte sale (la
- * reserva no lo dice: lo que no salió no se le dio a Meta) y una sola vez, porque `enviado` se
- * anota una vez. Sin una persona del equipo (Kairós, o una cuenta que ya no está), sin actor.
- */
-async function noteFilesSent(tx: Db, row: OutreachRecord): Promise<void> {
-  if (row.fileIds.length === 0) return
-  const files = await tx
-    .select({ id: saasClientFile.id, clientId: saasClientFile.clientId, kind: saasClientFile.kind })
-    .from(saasClientFile)
-    .where(inArray(saasClientFile.id, row.fileIds))
-  const [staff] = row.createdBy
-    ? await tx
-        .select({ role: adminStaff.role })
-        .from(adminStaff)
-        .where(eq(adminStaff.userId, row.createdBy))
-        .limit(1)
-    : []
-  const actor: AdminActor | null =
-    row.createdBy && staff
-      ? { userId: row.createdBy, role: staff.role as AdminActor["role"] }
-      : null
-  for (const file of files)
-    await writeAdminAudit(tx, actor, {
-      action: "client_file.sent",
-      entityId: file.id,
-      metadata: {
-        clientId: file.clientId,
-        kind: file.kind,
-        chatId: row.chatId,
-        channel: row.channel,
-        outreachId: row.id,
-      },
-    })
 }
 
 /**
