@@ -1408,7 +1408,10 @@ function IndicationForm({
   })
   // Con el formulario abierto, abrir otra pieza en el arco la trae aquí con su hallazgo y su
   // diagnóstico, mientras quien indica no haya cambiado a mano la pieza de partida (P09).
-  const startedWith = useRef({ tooth: initial.teeth[0] ?? null, finding: initial.odontogramEntryId })
+  const startedWith = useRef<{ tooth: number | null; finding: string }>({
+    tooth: initial.teeth[0] ?? null,
+    finding: initial.odontogramEntryId,
+  })
   const defaultTooth = defaults?.teeth?.[0] ?? null
   const defaultFinding = defaults?.odontogramEntryId ?? ""
   const defaultDiagnosis = defaults?.diagnosisCode ?? ""
