@@ -92,6 +92,7 @@ import {
 import { discardableHere } from "../../lib/encounter-discard"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { focusesReasonOnOpen } from "../../lib/opening-focus"
 import { useOrgProfile } from "../../lib/org"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { untilWritten } from "../../lib/write-barrier"
@@ -707,12 +708,12 @@ export function EncounterEditor({
   // lee y, para continuarla, toma el relevo.
   const attending = encounter.professionalUserId === myUserId
   // Al abrir la atención, el foco va al motivo (P10): quedaba en `body` y el primer Tab volvía al
-  // principio de la página. Solo si nada más lo tomó (la pieza pedida por enlace, un aviso).
+  // principio de la página. Solo si nada más lo tomó (la pieza pedida por enlace, un aviso) y
+  // con teclado: en el teléfono subiría el teclado (`focusesReasonOnOpen`).
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir la atención.
   useEffect(() => {
     if (!canWrite || !attending) return
-    const active = document.activeElement
-    if (active !== null && active !== document.body) return
+    if (!focusesReasonOnOpen()) return
     document.getElementById(`${uid}-reason`)?.focus({ preventScroll: true })
   }, [encounterId])
   // «Falta otra sesión» cambia lo que el cierre anuncia (el odontograma que se firma): se vuelve a pedir.
