@@ -236,9 +236,6 @@ it("una ficha del producto dice «sin mirar» hasta que alguien de la clínica l
     )
   const before = await marks()
   expect([...before.values()].every((row) => row.fromProduct && !row.looked)).toBe(true)
-  // La lista dice también cuál se ofrece por la edad: la pantalla no lo calcula.
-  expect(before.get("ficha-de-odontopediatria")?.offeredUnderYears).toBe(12)
-  expect(before.get("ficha-de-ortodoncia")?.offeredUnderYears).toBeNull()
 
   // Abrirla deja una sola constancia, aunque se abra dos veces.
   const orthodontics = before.get("ficha-de-ortodoncia")!
@@ -285,7 +282,6 @@ it("la ficha se ofrece sola por la especialidad del servicio de la cita, y solo 
     title: "Ficha de ortodoncia",
     why: "cita",
     specialtyName: "Ortodoncia y Ortopedia Maxilar",
-    underYears: null,
     today: null,
     previous: null,
   })
@@ -301,7 +297,9 @@ it("la ficha se ofrece sola por la especialidad del servicio de la cita, y solo 
   expect((await c.offers(session.id)).map((offer) => offer.title)).toEqual(["Control de ortodoncia", "Ficha de ortodoncia"])
 })
 
-it("a un menor de 12 años se le ofrecen las de odontopediatría por su edad, y sin servicio en la cita, las de quien atiende", async () => {
+// Nunca se decide por el profesional (17 nov): la edad no ofrece ni esconde fichas. A un niño se le
+// ofrecen las de la cita o las de quien atiende, como a cualquiera; las demás, en «Otra ficha…».
+it("la edad no ofrece fichas: a un niño de 6 años, sin servicio en la cita, se le ofrecen las de quien atiende", async () => {
   const c = await clinic()
   await c.run((tx) =>
     setProfessionalSpecialties(tx, c.orgId, c.actor, c.actor, [c.specialties.get("endodoncia")!.id]),
@@ -310,25 +308,12 @@ it("a un menor de 12 años se le ofrecen las de odontopediatría por su edad, y 
   // La cita no dice de qué es.
   const session = await c.attention({ service: false })
   const offers = await c.offers(session.id)
-  expect(offers.map((offer) => [offer.key, offer.why])).toEqual([
-    ["ficha-de-odontopediatria", "edad"],
-    ["evaluacion-de-endodoncia", "profesional"],
-  ])
-  expect(offers[0]).toMatchObject({ underYears: 12, specialtyName: "Odontopediatría" })
-  expect(offers[1]).toMatchObject({ underYears: null, specialtyName: "Endodoncia" })
+  expect(offers.map((offer) => [offer.key, offer.why])).toEqual([["evaluacion-de-endodoncia", "profesional"]])
+  expect(offers[0]).toMatchObject({ specialtyName: "Endodoncia" })
 
-  // El día que cumple 12 deja de ofrecerse por edad; la víspera todavía.
-  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12) })
-  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["profesional"])
-  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12, true) })
-  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["edad", "profesional"])
-
-  // Con una cita de ortodoncia: la de la cita primero, la de su edad después, y ya no la de quien atiende.
+  // Con una cita de ortodoncia: la de la cita, y ya no la de quien atiende; la edad no suma ninguna.
   const orthodontic = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
-  expect((await c.offers(orthodontic.id)).map((offer) => [offer.key, offer.why])).toEqual([
-    ["ficha-de-ortodoncia", "cita"],
-    ["ficha-de-odontopediatria", "edad"],
-  ])
+  expect((await c.offers(orthodontic.id)).map((offer) => [offer.key, offer.why])).toEqual([["ficha-de-ortodoncia", "cita"]])
 })
 
 it("sin fecha de nacimiento, sin cita y sin especialidades de quien atiende no se ofrece ninguna; y otra clínica no ve esta atención", async () => {
@@ -625,20 +610,20 @@ it("copiar las fichas del producto no crea especialidades: sin la suya activa, l
   expect(still?.isActive).toBe(false)
 })
 
-// Estudio de la atención (16 nov, P11, D7, ADR 0199): la odontoestomatológica es de la evaluación,
-// no de cada sesión. Se ofrece mientras el plan de ahora no tenga una, nunca en una urgencia, y el
-// control de ortodoncia (que sí se repite) sigue como antes.
-it("la odontoestomatológica se ofrece mientras el plan no tenga una: no en la urgencia ni en la sesión siguiente", async () => {
+// Nunca se decide por el profesional (17 nov, deja sin efecto la D7 del 16 nov): la odontoestomatológica
+// se ofrece como las demás, también en una urgencia y en la sesión siguiente; la que ya llenó dice
+// la anterior, con su día, y el profesional decide si la abre.
+it("la odontoestomatológica se ofrece siempre que toca: en la urgencia y en la sesión siguiente, con la anterior a la vista", async () => {
   const c = await clinic()
   await c.run((tx) =>
     setProfessionalSpecialties(tx, c.orgId, c.actor, c.actor, [c.specialties.get("odontologia_general")!.id]),
   )
   const stomatologic = async (id: string) =>
     (await c.offers(id)).find((offer) => offer.key === "ficha-odontoestomatologica") ?? null
-  // Entra por una urgencia: no se le ofrece.
+  // Entra por una urgencia: se le ofrece igual; abrirla o no lo decide quien atiende.
   const urgency = await c.attention()
   await ownerDb.update(encounter).set({ reason: "Urgencia: dolor en la 36" }).where(eq(encounter.id, urgency.id))
-  expect(await stomatologic(urgency.id)).toBeNull()
+  expect(await stomatologic(urgency.id)).toMatchObject({ why: "profesional", today: null })
   // A la semana, su primera consulta: sí, y se llena.
   const first = await c.attention()
   expect(await stomatologic(first.id)).toMatchObject({ why: "profesional", today: null })
@@ -656,7 +641,11 @@ it("la odontoestomatológica se ofrece mientras el plan no tenga una: no en la u
   // Empezada en esta atención, se sigue ofreciendo en ella.
   expect(await stomatologic(first.id)).toMatchObject({ today: { responseId: filled.id, status: "borrador" } })
   await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, filled.id))
-  // La sesión siguiente del mismo plan: ya no, ni como «ya la tiene».
+  // La sesión siguiente del mismo plan: se ofrece igual, y dice la anterior con su día.
   const second = await c.attention()
-  expect(await stomatologic(second.id)).toBeNull()
+  expect(await stomatologic(second.id)).toMatchObject({
+    why: "profesional",
+    today: null,
+    previous: { responseId: filled.id, unfinished: false },
+  })
 })

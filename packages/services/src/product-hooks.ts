@@ -191,7 +191,8 @@ export interface DiagnosisQuery {
 export interface EncounterSigner {
   name: string
   title: string
-  registration: string
+  /** Null si firmó sin colegiatura en su perfil (17 nov: no bloquea, se escribe el motivo). */
+  registration: string | null
 }
 
 /** Una sección de la copia de la historia que agrega el producto. */
@@ -479,18 +480,6 @@ export interface ProductForms {
   /** Con las que nace cada clínica (odentIA: endodoncia, ortodoncia, odontopediatría y la de la norma). */
   suggestions: readonly SuggestedFormTemplate[]
   /**
-   * Las que se ofrecen por la edad: a quien tiene menos de `underYears` años, las de la
-   * especialidad que recibe `kind` (odentIA: odontopediatría a menores de 12). null: no ofrece por edad.
-   */
-  byAge: { underYears: number; kind: string } | null
-  /**
-   * Las fichas (por su clave) que se llenan una vez por plan, no en cada atención (odentIA: la
-   * odontoestomatológica de la norma, ADR 0199): se ofrecen mientras el plan de ahora no tenga una,
-   * no en una urgencia, y otra vez cuando el paciente regresa con un plan nuevo. Las demás se
-   * ofrecen como siempre (el control de ortodoncia se repite).
-   */
-  oncePerPlan?: readonly string[]
-  /**
    * Las opciones de sus fichas que son un diagnóstico, como se escriben en la ficha, con su código de
    * la CIE-10 (OMS): la respuesta dictada va también a Diagnóstico si Clío no lo propuso (prueba con
    * voz del 15 nov, c5; `withFormDiagnoses`). odentIA: el diagnóstico pulpar y el apical de la AAE.
@@ -505,7 +494,7 @@ export interface ProductForms {
 }
 
 /** Un producto que no trae fichas ni ofrece por edad. */
-export const NO_FORMS: ProductForms = { suggestions: [], byAge: null }
+export const NO_FORMS: ProductForms = { suggestions: [] }
 
 export interface ProductHooks {
   /** El «dónde» del producto. */

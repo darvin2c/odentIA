@@ -229,13 +229,11 @@ export async function markFormTemplateLooked(
 export type FormOfferWhy =
   /** Por la especialidad del servicio de su cita. */
   | "cita"
-  /** Por la edad del paciente (odentIA: menor de 12 años). */
-  | "edad"
   /** Sin especialidad que venga de la cita: por la de quien atiende. */
   | "profesional"
   /**
    * El paciente ya tiene esta ficha de una atención anterior (el control de ortodoncia), aunque
-   * no venga por la cita, la edad ni quien atiende (revisión final del 15 nov, propuesta 5).
+   * no venga por la cita ni por quien atiende (revisión final del 15 nov, propuesta 5).
    */
   | "tiene"
   /** Se empezó en esta atención con «Otra ficha…»: se sigue desde aquí, como las demás. */
@@ -249,8 +247,6 @@ export interface FormOffer {
   why: FormOfferWhy
   /** La especialidad por la que aparece, con el nombre que le dio la clínica; vacía si aparece por otra cosa. */
   specialtyName: string
-  /** Con «edad»: el tope de años que la ofrece. */
-  underYears: number | null
   /** La de esta atención, si ya se empezó. */
   today: { responseId: string; status: "borrador" | "finalizado" } | null
   /** La anterior del mismo tipo que ya está en su historia, para verla al lado. */
@@ -269,25 +265,6 @@ async function specialtyIdsOfKind(tx: Db, orgId: string, kind: string): Promise<
     .from(orgSpecialty)
     .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.key, keys), eq(orgSpecialty.isActive, true)))
   return rows.map((row) => row.id)
-}
-
-/**
- * Las especialidades cuyas fichas el producto ofrece por la edad, y hasta qué
- * edad; null si no ofrece por edad. Lo usan la atención y la lista de
- * Configuración («…y de cualquier menor de 12 años»).
- */
-export async function ageOfferedSpecialties(
-  tx: Db,
-  orgId: string,
-): Promise<{ underYears: number; specialtyIds: string[] } | null> {
-  const { byAge } = (await productHooks(tx, orgId)).forms
-  if (!byAge) return null
-  return { underYears: byAge.underYears, specialtyIds: await specialtyIdsOfKind(tx, orgId, byAge.kind) }
-}
-
-/** Los años cumplidos el día `today` (AAAA-MM-DD). */
-function yearsOn(birthDate: string, today: string): number {
-  return Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4)) - (today.slice(5) < birthDate.slice(5) ? 1 : 0)
 }
 
 /** Una ficha finalizada del paciente, con la clave de su plantilla. */
@@ -391,56 +368,16 @@ function firstOf(
   return earlier.length > 1 ? (earlier[earlier.length - 1] ?? null) : null
 }
 
-/** Una urgencia se escribe así en el motivo («Es una urgencia» de la atención lo deja puesto). */
-const URGENCY_REASON = /^\s*urgencia\b/i
-
-/**
- * Desde cuándo cuenta «el plan de ahora» para una ficha de una vez por plan: el abierto, desde
- * la atención en que nació; sin plan abierto (terminó el anterior), desde que terminó, para que
- * quien regresa la vuelva a tener (la norma pide evaluar otra vez al reingreso); sin ningún plan,
- * null: cuenta cualquiera de antes.
- */
-async function planPeriodStart(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
-  const open = await findOpenPlan(tx, orgId, patientId)
-  if (open) {
-    if (!open.originEncounterId) return open.createdAt
-    const [origin] = await tx
-      .select({ startedAt: encounter.startedAt, createdAt: encounter.createdAt })
-      .from(encounter)
-      .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, open.originEncounterId)))
-      .limit(1)
-    return origin?.startedAt ?? origin?.createdAt ?? open.createdAt
-  }
-  const [last] = await tx
-    .select({ endedAt: sql<string | null>`max(${treatmentPlanItem.updatedAt})` })
-    .from(treatmentPlanItem)
-    .innerJoin(
-      treatmentPlan,
-      and(eq(treatmentPlan.organizationId, treatmentPlanItem.organizationId), eq(treatmentPlan.id, treatmentPlanItem.planId)),
-    )
-    .where(
-      and(
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlan.isLegacy, false),
-      ),
-    )
-  return last?.endedAt ? new Date(last.endedAt) : null
-}
-
 /**
  * Las fichas que la atención ofrece solas, con su motivo:
  * 1. las de la especialidad del servicio de su cita;
- * 2. las que el producto ofrece por la edad (odentIA: odontopediatría a menores de 12);
- * 3. si de la cita no sale una especialidad (no tiene servicio, o es una atención sin
+ * 2. si de la cita no sale una especialidad (no tiene servicio, o es una atención sin
  *    cita), las de las especialidades de quien atiende;
- * 4. la que el paciente ya tiene de antes, con respuestas (el control de ortodoncia);
- * 5. la que se empezó aquí con «Otra ficha…».
+ * 3. la que el paciente ya tiene de antes, con respuestas (el control de ortodoncia);
+ * 4. la que se empezó aquí con «Otra ficha…».
  * Una ficha sale una vez, con el primer motivo. «Otra ficha…» sigue ofreciendo todas.
- * La que el producto llena una vez por plan (odentIA: la odontoestomatológica, ADR 0199) no
- * sale por 3 ni por 4 si el plan de ahora ya tiene una, ni en una urgencia: sale en la primera
- * atención que no es urgencia, mientras no se llene, y otra vez cuando el paciente regresa.
- * Empezada aquí, siempre.
+ * Ofrecer no es decidir (17 nov): ninguna se esconde por la edad, por «una vez por plan» ni por
+ * una urgencia; la que ya llenó dice la anterior, con su día, y el profesional decide.
  * Ofrecer por servicio queda fuera: con dos fichas de la misma especialidad salen las dos.
  */
 export async function getEncounterFormOffers(
@@ -455,7 +392,6 @@ export async function getEncounterFormOffers(
       professionalUserId: encounter.professionalUserId,
       appointmentId: encounter.appointmentId,
       status: encounter.status,
-      reason: encounter.reason,
     })
     .from(encounter)
     .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
@@ -507,13 +443,6 @@ export async function getEncounterFormOffers(
     : []
   const visitSpecialty = visit?.specialtyId ?? null
 
-  const byAge = await ageOfferedSpecialties(tx, orgId)
-  let ageSpecialties: string[] = []
-  if (byAge) {
-    const age = await patientAge(tx, orgId, patientId)
-    if (age.birthDate && yearsOn(age.birthDate, age.today) < byAge.underYears) ageSpecialties = byAge.specialtyIds
-  }
-
   // Solo si de la cita no sale una especialidad: las de quien atiende.
   const ownSpecialties = visitSpecialty
     ? []
@@ -532,7 +461,6 @@ export async function getEncounterFormOffers(
   const whyOf = (specialtyId: string | null): FormOfferWhy | null => {
     if (!specialtyId) return null
     if (specialtyId === visitSpecialty) return "cita"
-    if (ageSpecialties.includes(specialtyId)) return "edad"
     if (ownSpecialties.includes(specialtyId)) return "profesional"
     return null
   }
@@ -559,22 +487,11 @@ export async function getEncounterFormOffers(
   // La que el paciente ya tiene de otra atención, y la que se empezó en esta.
   const had = new Set(finals.filter((form) => form.encounterId !== encounterId).map((form) => form.key))
   const started = new Set(inEncounter.map((row) => row.key))
-  // Las de una vez por plan: fuera si el plan de ahora ya tiene una o si es una urgencia.
-  const oncePerPlan = new Set((await productHooks(tx, orgId)).forms.oncePerPlan ?? [])
-  const since = oncePerPlan.size > 0 ? await planPeriodStart(tx, orgId, patientId) : null
-  const urgent = URGENCY_REASON.test(session.reason ?? "")
-  const notThisTime = (key: string): boolean =>
-    oncePerPlan.has(key) &&
-    !started.has(key) &&
-    (urgent ||
-      finals.some(
-        (form) => form.key === key && form.encounterId !== encounterId && (since === null || form.finalizedAt >= since),
-      ))
-
-  const ORDER: Record<FormOfferWhy, number> = { cita: 0, edad: 1, profesional: 2, tiene: 3, empezada: 4 }
+  // Nunca se decide por el profesional (17 nov): ninguna ficha se esconde por la edad, por «una
+  // vez por plan» ni por una urgencia. La que ya llenó se ofrece igual y dice la anterior, con su día.
+  const ORDER: Record<FormOfferWhy, number> = { cita: 0, profesional: 1, tiene: 2, empezada: 3 }
   const offered = templates
     .flatMap((template) => {
-      if (notThisTime(template.key)) return []
       const why = whyOf(template.specialtyId) ?? (had.has(template.key) ? "tiene" : started.has(template.key) ? "empezada" : null)
       return why ? [{ ...template, specialtyName: template.specialtyName ?? "", why }] : []
     })
@@ -595,7 +512,6 @@ export async function getEncounterFormOffers(
       title: template.title,
       why: template.why,
       specialtyName: template.specialtyName,
-      underYears: template.why === "edad" ? (byAge?.underYears ?? null) : null,
       today: today ? { responseId: today.id, status: today.status === "finalizado" ? "finalizado" : "borrador" } : null,
       previous: previous
         ? { responseId: previous.id, finalizedAt: previous.finalizedAt, professionalUserId: previous.professionalUserId, unfinished: previous.unfinished }

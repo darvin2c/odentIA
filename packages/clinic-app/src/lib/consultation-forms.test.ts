@@ -52,27 +52,23 @@ describe("fichas de consulta en Configuración", () => {
     expect(unlooked(template({ fromProduct: false, looked: false }))).toBe(false)
   })
 
-  it("dice dónde aparece sola: su especialidad, la edad, o que se elige en «Otra ficha…»", () => {
-    expect(appearsWords({ specialtyId: "s", offeredUnderYears: 12 }, "Odontopediatría")).toBe(
-      "Aparece en la atención de: Odontopediatría, y de cualquier menor de 12 años",
-    )
-    expect(appearsWords({ specialtyId: "s", offeredUnderYears: null }, "Ortodoncia")).toBe("Aparece en la atención de: Ortodoncia")
+  // Nunca se decide por el profesional (17 nov): la edad ya no ofrece fichas.
+  it("dice dónde aparece sola: su especialidad, o que se elige en «Otra ficha…»", () => {
+    expect(appearsWords({ specialtyId: "s" }, "Odontopediatría")).toBe("Aparece en la atención de: Odontopediatría")
+    expect(appearsWords({ specialtyId: "s" }, "Ortodoncia")).toBe("Aparece en la atención de: Ortodoncia")
     expect(appearsWords({ specialtyId: null }, null)).toBe("No aparece sola: se elige en «Otra ficha…»")
   })
 })
 
 describe("fichas ofrecidas en la atención", () => {
   it("cada una dice por qué aparece", () => {
-    expect(offerWhyWords({ why: "cita", specialtyName: "Ortodoncia", underYears: null })).toBe(
-      "Por la especialidad de su cita: Ortodoncia",
-    )
-    expect(offerWhyWords({ why: "edad", specialtyName: "Odontopediatría", underYears: 12 })).toBe("Por su edad: menor de 12 años")
-    expect(offerWhyWords({ why: "profesional", specialtyName: "Endodoncia", underYears: null })).toBe(
+    expect(offerWhyWords({ why: "cita", specialtyName: "Ortodoncia" })).toBe("Por la especialidad de su cita: Ortodoncia")
+    expect(offerWhyWords({ why: "profesional", specialtyName: "Endodoncia" })).toBe(
       "Por la especialidad de quien atiende: Endodoncia",
     )
     // La que ya tiene y la que se empezó aquí también se ofrecen (revisión final del 15 nov).
-    expect(offerWhyWords({ why: "tiene", specialtyName: "", underYears: null })).toBe("Ya la tiene de una atención anterior")
-    expect(offerWhyWords({ why: "empezada", specialtyName: "", underYears: null })).toBe("La empezaste en esta atención")
+    expect(offerWhyWords({ why: "tiene", specialtyName: "" })).toBe("Ya la tiene de una atención anterior")
+    expect(offerWhyWords({ why: "empezada", specialtyName: "" })).toBe("La empezaste en esta atención")
   })
 
   it("sin ninguna ofrecida no hay tarjeta: «Otra ficha…» sigue en Documentos › Nuevo", () => {
@@ -162,8 +158,8 @@ it("«Miraste N de 4» no cambia de total con una apagada, y la que falta mirar 
 // QA del 14 nov (UX, teclado): el lector anunciaba «Empezar la de hoy: Ficha…» sin el porqué.
 it("el botón de una ficha ofrecida dice qué hace, de cuál es y por qué aparece", () => {
   expect(
-    offerButtonName({ title: "Ficha de odontopediatría", today: null, why: "edad", specialtyName: "Odontopediatría", underYears: 12 }),
-  ).toBe("Empezar la de hoy: Ficha de odontopediatría. Por su edad: menor de 12 años")
+    offerButtonName({ title: "Ficha de odontopediatría", today: null, why: "cita", specialtyName: "Odontopediatría" }),
+  ).toBe("Empezar la de hoy: Ficha de odontopediatría. Por la especialidad de su cita: Odontopediatría")
 })
 
 // QA del 14 nov (UX U9): desde Documentos la ficha nacía «Sin asignar» aunque quien la empezaba atiende.
@@ -178,7 +174,7 @@ it("«Nuevo › Ficha» trae como responsable a quien la empieza, si atiende", (
 
 // Verificación del 14 nov: una ficha apagada decía «se elige en «Otra ficha…»», y «Otra ficha…» decía «Empezar» al abrir la que estaba a medias.
 it("una ficha apagada dice que está sin usar y cómo volver a usarla", () => {
-  expect(appearsWords({ specialtyId: "s", offeredUnderYears: null, inUse: false }, "Ortodoncia")).toBe(
+  expect(appearsWords({ specialtyId: "s", inUse: false }, "Ortodoncia")).toBe(
     "Sin usar: no aparece en la atención. Para volver a usarla, enciende su interruptor «En uso»",
   )
   expect(appearsWords({ specialtyId: null, inUse: false }, null)).not.toContain("Otra ficha")
