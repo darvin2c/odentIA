@@ -169,7 +169,7 @@ export const AGENDA_EQUIPO: readonly HelpMore[] = [
       {
         id: "equipo-colegiatura",
         q: "¿Dónde pongo el número de colegiatura de un profesional?",
-        a: "En Configuración › Equipo, en su «…», «Perfil profesional» (en tu fila, «Mi perfil profesional»): título, colegio, número de colegiatura y registro de especialista, y se guarda con «Guardar perfil». El número es obligatorio para firmar el cierre de una atención. La columna «Colegiatura» dice «Sin registrar» a quien atiende y aún no lo tiene.",
+        a: "En Configuración › Equipo, en su «…», «Perfil profesional» (en tu fila, «Mi perfil profesional»): título, colegio, número de colegiatura y registro de especialista, y se guarda con «Guardar perfil». El número es obligatorio para firmar el cierre de una atención y lleva solo números: las siglas del colegio van en «Colegio». La columna «Colegiatura» dice «Sin registrar» a quien atiende y aún no lo tiene.",
         forms: ["registrar la colegiatura", "a quien le falta la colegiatura", "cambiar el titulo profesional"],
       },
       {

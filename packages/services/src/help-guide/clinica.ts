@@ -102,7 +102,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-firmar-falta-colegiatura",
         q: "¿Qué hago si al firmar dice que falta mi colegiatura?",
-        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». Se escribe una vez y sirve para todas tus atenciones.",
+        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». Se escribe una vez y sirve para todas tus atenciones.",
         forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "inicio me pide mi colegiatura", "falta tu colegiatura en te espera", "por que me pide mi colegiatura para cerrar la atencion"],
         area: "clinica",
         needs: "clinical.write",

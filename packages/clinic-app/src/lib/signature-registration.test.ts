@@ -5,12 +5,19 @@ const ok = { professionalTitle: "Cirujano dentista", registrationBody: "COP", re
 
 it("la colegiatura del cierre pide título, colegio y un número válido, como el servidor, cada uno en su campo", () => {
   expect(signatureRegistrationErrors(ok)).toEqual({})
-  expect(signatureRegistrationErrors({ ...ok, registrationNumber: " CMP-0987 " })).toEqual({})
+  expect(signatureRegistrationErrors({ ...ok, registrationNumber: " 045678 " })).toEqual({})
+  // QA del 16 nov, Q8: «abc» quedó como «COP abc» en un consentimiento firmado.
+  for (const wrong of ["abc", "CMP-0987", "12-345"])
+    expect(signatureRegistrationErrors({ ...ok, registrationNumber: wrong })).toEqual({
+      registrationNumber:
+        "El número de colegiatura lleva solo números, sin letras, espacios ni guiones. Las siglas del colegio van en «Colegio».",
+    })
   expect(signatureRegistrationErrors({ ...ok, registrationNumber: "  " })).toEqual({
     registrationNumber: "Escribe tu número de colegiatura",
   })
   expect(signatureRegistrationErrors({ ...ok, registrationNumber: "12 345" })).toEqual({
-    registrationNumber: "La colegiatura lleva solo letras, números y guiones (hasta 20)",
+    registrationNumber:
+      "El número de colegiatura lleva solo números, sin letras, espacios ni guiones. Las siglas del colegio van en «Colegio».",
   })
   expect(signatureRegistrationErrors({ ...ok, registrationBody: "" })).toEqual({
     registrationBody: "Escribe tu colegio profesional",

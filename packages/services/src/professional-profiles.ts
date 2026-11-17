@@ -6,7 +6,7 @@
  * papel: no acredita nada más que los datos del perfil y no es firma digital.
  */
 import { ATTENDING_ROLES } from "@odentia/auth/permissions"
-import type { SignatureStrokes } from "@odentia/clinical"
+import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS, type SignatureStrokes } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalDrawnSignature, professionalProfile } from "@odentia/db/schema/clinical-forms"
@@ -56,8 +56,7 @@ export interface ProfessionalSignature {
 
 // Título y colegio dependen del país y de la profesión: no hay valor por
 // defecto, los escribe cada profesional (o quien administra) en su perfil.
-/** Colegiatura: letras, dígitos y guion; sin espacios ni símbolos. */
-const REGISTRATION_RE = /^[A-Za-z0-9-]{1,20}$/
+// El número de colegiatura son solo dígitos (`isRegistrationNumber`, la misma regla de la pantalla).
 
 /** `key`: el nombre del dato en el cuerpo, para decir el error junto a su campo. */
 function clean(value: string | null | undefined, key: string, field: string, max: number): string | null {
@@ -247,8 +246,13 @@ export async function setProfessionalProfile(
     input.registrationNumber === undefined
       ? current.registrationNumber
       : clean(input.registrationNumber, "registrationNumber", "La colegiatura", 20)
-  if (registrationNumber && !REGISTRATION_RE.test(registrationNumber))
-    throw invalidField("registrationNumber", "La colegiatura admite solo letras, dígitos y guion, sin espacios")
+  // Solo al escribirlo o cambiarlo: el que ya estaba guardado no impide guardar lo demás del perfil.
+  if (
+    registrationNumber &&
+    registrationNumber !== current.registrationNumber &&
+    !isRegistrationNumber(registrationNumber)
+  )
+    throw invalidField("registrationNumber", REGISTRATION_NUMBER_WORDS)
   const signatureName =
     input.signatureName === undefined
       ? current.signatureName

@@ -3,7 +3,7 @@ import { visitReasonForEncounter } from "@odentia/clinical"
 import { member, user } from "@odentia/db/schema/auth"
 import { appointment } from "@odentia/db/schema/agenda"
 import { encounter, patient, patientCharge } from "@odentia/db/schema/clinical"
-import { appointmentVisitAnswer, clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import { appointmentVisitAnswer, clinicalOrder, consentDocument, consentEvent, medicalLeave, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { crmTask } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
@@ -620,10 +620,30 @@ it("el perfil profesional no trae título ni colegio por defecto: los escribe la
     setProfessionalProfile(tx, "org_a", f.actor, newcomer, {
       professionalTitle: "Odontóloga",
       registrationBody: "COEM",
-      registrationNumber: "28-001",
+      registrationNumber: "28001",
     }),
   )
   expect(saved).toMatchObject({ professionalTitle: "Odontóloga", registrationBody: "COEM", complete: true })
+  // QA del 16 nov, Q8: el número son solo dígitos; «abc» quedó como «COP abc» en un consentimiento firmado.
+  for (const wrong of ["abc", "COEM-28001", "28-001"])
+    await expect(
+      f.run((tx) => setProfessionalProfile(tx, "org_a", f.actor, newcomer, { registrationNumber: wrong })),
+    ).rejects.toMatchObject({
+      status: 400,
+      fields: {
+        registrationNumber:
+          "El número de colegiatura lleva solo números, sin letras, espacios ni guiones. Las siglas del colegio van en «Colegio».",
+      },
+    })
+  // El que ya estaba guardado de antes, con otro formato, no impide guardar lo demás del perfil.
+  await ownerDb
+    .update(professionalProfile)
+    .set({ registrationNumber: "28-001" })
+    .where(and(eq(professionalProfile.organizationId, "org_a"), eq(professionalProfile.userId, newcomer)))
+  const kept = await f.run((tx) =>
+    setProfessionalProfile(tx, "org_a", f.actor, newcomer, { registrationNumber: "28-001", signatureName: "Dra. Sin Perfil" }),
+  )
+  expect(kept).toMatchObject({ registrationNumber: "28-001", signatureName: "Dra. Sin Perfil" })
 })
 
 it("anular la atención anula su descanso, sus órdenes y sus consentimientos sin firmar; el firmado no cambia", async () => {

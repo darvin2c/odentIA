@@ -3,6 +3,7 @@
  * requisitos, anulación con motivo, relevo, diagnósticos CIE-10 como entidad
  * y perfil profesional con el que se firma.
  */
+import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { ConsentNeed } from "./encounter-documents"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -619,8 +620,7 @@ export function signatureRegistrationErrors(
   else if (body.length > 40) errors.registrationBody = "El colegio profesional admite hasta 40 caracteres"
   const number = values.registrationNumber.trim()
   if (!number) errors.registrationNumber = "Escribe tu número de colegiatura"
-  else if (!/^[A-Za-z0-9-]{1,20}$/.test(number))
-    errors.registrationNumber = "La colegiatura lleva solo letras, números y guiones (hasta 20)"
+  else if (!isRegistrationNumber(number)) errors.registrationNumber = REGISTRATION_NUMBER_WORDS
   return errors
 }
 
