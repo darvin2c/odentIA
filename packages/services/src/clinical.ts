@@ -845,7 +845,14 @@ export async function getPatientHealth(
     latestAnamnesis: latest,
   }
   const authorship = await healthAuthorshipOf(tx, orgId, patientId)
-  const reviewPending = healthReviewPending(health, authorship)
+  // La ASA la pone quien atiende: avanza la revisión (para que Antecedentes abierto en otra pantalla
+  // recargue en vez de pisarla), pero no es algo que la persona dijo. Sin nada más, no hay nada
+  // «sin revisar» (QA del 16 nov, Q9: la ficha decía «Lo que dijo de su salud, sin revisar» sin que
+  // nadie dijera nada).
+  const reviewPending = healthReviewPending(
+    { ...health, revision: Math.max(0, health.revision - authorship.asaClassifications) },
+    authorship,
+  )
   const declarations = await healthDeclarationsOf(tx, orgId, patientId, opts.allDeclarations ? null : 50)
   const today = await clinicToday(tx, orgId)
   // Lo guardado antes sin fecha toma la del día en que se anotó ese «sí»: sale de las versiones de la
@@ -1296,6 +1303,8 @@ interface HealthAuthorshipDetail extends HealthAuthorship {
   staffSavedAt: Date | null
   /** Los grupos que un clínico negó en la atención («Niega enfermedades»). */
   deniedGroups: string[]
+  /** Cuántas veces se puso la ASA de un toque: cada una avanzó la revisión sin que nadie dijera nada. */
+  asaClassifications: number
 }
 
 /**
@@ -1313,7 +1322,14 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "patient"),
         eq(auditEvent.entityId, patientId),
-        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved", "health.reviewed"]),
+        inArray(auditEvent.action, [
+          "health.declared",
+          "health.allergies_declared",
+          "health.denied",
+          "health.saved",
+          "health.reviewed",
+          "patient.asa_classified",
+        ]),
       ),
     )
   const latest = (actions: string[]): Date | null =>
@@ -1335,6 +1351,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         }),
       ),
     ],
+    asaClassifications: rows.filter((row) => row.action === "patient.asa_classified").length,
   }
 }
 

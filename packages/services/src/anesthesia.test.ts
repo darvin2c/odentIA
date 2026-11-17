@@ -15,7 +15,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { setPatientAsa } from "./clinical.js"
+import { getPatientHealth, setPatientAsa } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
@@ -226,6 +226,21 @@ it("sin nada de hoy con anestesia, la atención firmada no guarda anestesia", as
   await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
   const [signed] = await ownerDb.select().from(encounter).where(eq(encounter.id, f.encounter.id))
   expect(signed?.anesthesiaAtSigning).toBeNull()
+})
+
+// QA del 16 nov, Q9: paciente nuevo sin antecedentes; al poner la ASA de un toque la ficha pasaba a
+// decir «Lo que dijo de su salud, sin revisar» sin que nadie dijera nada.
+it("Q9: poner la ASA no deja la salud «sin revisar»: nadie dijo nada", async () => {
+  const f = await clinicalFixture()
+  const before = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  expect(before).toMatchObject({ reviewPending: false, declared: [] })
+  await f.run((tx) => setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "II", encounterId: f.encounter.id }))
+  const after = await f.run((tx) =>
+    setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "III", encounterId: f.encounter.id }),
+  )
+  expect(after).toMatchObject({ asaClass: "III", reviewPending: false, declared: [] })
+  // La revisión sí avanza: Antecedentes abierto en otra pantalla recarga en vez de pisar la ASA.
+  expect(after.revision).toBe(before.revision + 2)
 })
 
 // Revisión del 16 nov (R13): la ASA no se anota contra una atención que no es un borrador de este paciente.
