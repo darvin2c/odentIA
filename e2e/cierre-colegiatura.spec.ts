@@ -27,7 +27,8 @@ test("odentIA: sin colegiatura, el cierre la pide, la guarda y firma", async ({ 
   await call(page, "PATCH", path, org.slug, { evolution: "Caries de la dentina en la 36; se indica resina." })
 
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  await expect(page.getByText("Listo para firmar · falta tu colegiatura, se pide al firmar")).toBeVisible()
+  // El pie dice todo lo que falta (P10): la colegiatura también, sin «Listo para firmar».
+  await expect(page.getByText("Falta 1: tu colegiatura")).toBeVisible()
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const firma = page.getByRole("dialog", { name: "Finalizar y firmar" })
   await expect(firma.getByText("Falta tu colegiatura para firmar")).toBeVisible()

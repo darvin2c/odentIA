@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode } from "@odentia/ui-patterns"
+import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -89,6 +89,13 @@ function useContainerWide(): {
     return () => observer.disconnect()
   }, [])
   return { ref, wide, narrow }
+}
+
+/** Lo que se pierde si la pieza abierta se cierra con un hallazgo a medias. */
+function selectedToothLost(selection: readonly number[]): string {
+  return selection.length === 1
+    ? `No se registró el hallazgo de la ${selection[0]}. Si cierras la pieza, se pierde.`
+    : "No se registró el hallazgo de las piezas elegidas. Si las cierras, se pierde."
 }
 
 /** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
@@ -156,13 +163,17 @@ function StudioBody({
   const queryClient = useQueryClient()
   const id = useId()
   const { ref: containerRef, wide, narrow } = useContainerWide()
+  const mouthRef = useRef<HTMLElement>(null)
   /** En el celular, qué arcada se ve. */
   const [arch, setArch] = useState<"upper" | "lower">("upper")
   const detailMode = useDetailMode()
   const dirty = useRef(false)
+  // Lo mismo, para pintar: con un hallazgo a medias, cerrar la pieza al perder el ancho pregunta.
+  const [panelDirty, setPanelDirty] = useState(false)
   const handleDirtyChange = useCallback(
     (value: boolean) => {
       dirty.current = value
+      setPanelDirty(value)
       onDirtyChange?.(value)
     },
     [onDirtyChange],
@@ -309,12 +320,22 @@ function StudioBody({
   const pendingReview = state.history.filter(
     (entry) => entry.needsReview && entry.status !== "voided",
   ).length
-  // En la atención, sin pieza elegida, no hay columna a la derecha: la evolución anterior es
+  // En la atención, sin pieza abierta, no hay columna a la derecha: la evolución anterior es
   // una sola fila plegada bajo el arco y, si no hay nada anterior, nada (segundo repaso del 9
-  // nov: quedaba «▶ ODONTOGRAMA / Evolución» vacío al lado, a 1464 px y a 390 px).
-  const compactRow = compact && selection.length === 0
-  const twoColumns = wide && !compactRow
-  const showInlinePanel = detailMode === "panel" && twoColumns && selection.length > 0 && drawerOpen
+  // nov: quedaba «▶ ODONTOGRAMA / Evolución» vacío al lado, a 1464 px y a 390 px). La pieza que
+  // se cerró al perder el ancho sigue marcada en el arco: un toque la vuelve a abrir.
+  const panelOpen = selection.length > 0 && drawerOpen
+  const compactRow = compact && (selection.length === 0 || (!drawerOpen && !multiple))
+  // La pieza al lado nunca salta encima como ventana porque se abrió otra cosa («Anotar su
+  // respuesta», el dictado): se cierra y queda marcada; a medias, pregunta (regla 5 de `side-dock`).
+  const { beside: showInlinePanel, confirmDialog: besideDialog } = useStaysBeside({
+    open: panelOpen,
+    fits: detailMode === "panel" && wide,
+    dirty: panelDirty,
+    lost: selectedToothLost(selection),
+    onClose: () => setDrawerOpen(false),
+  })
+  const twoColumns = !compactRow && (wide || showInlinePanel)
   const earlier = compactRow
     ? visibleHistory.filter((entry) => !encounterId || entry.encounterId !== encounterId)
     : []
@@ -449,11 +470,16 @@ function StudioBody({
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
-        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
+        // El arco no baja de 18rem: más angosto no se lee (QA del 16 nov, Q13: quedaba en 137 px con
+        // los números encimados). Sin `overflow` aquí: el arco y el panel se pegan a la ventana.
+        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(18rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
       >
         <section
+          ref={mouthRef}
           aria-label="Boca dental"
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-4 self-start" : ""}`}
+          // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
+          // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -479,14 +505,22 @@ function StudioBody({
               ))}
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {dentition === suggested
-              ? birthDate
-                ? "Dentición sugerida por la edad del paciente."
-                : "Dentición por defecto: no hay fecha de nacimiento registrada."
-              : "Vista cambiada a mano."}
-            {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
-          </p>
+          {/* En la atención, tres frases decían cómo usar el arco: queda una, la del bloque vacío
+              («Toca una pieza…»). Lo que hace falta para leer la mixta se dice siempre (estándar E2). */}
+          {compact ? (
+            dentition === "mixed" ? (
+              <p className="text-xs text-muted-foreground">Arco exterior: permanentes. Arco interior: temporales.</p>
+            ) : null
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {dentition === suggested
+                ? birthDate
+                  ? "Dentición sugerida por la edad del paciente."
+                  : "Dentición por defecto: no hay fecha de nacimiento registrada."
+                : "Vista cambiada a mano."}
+              {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               <Button
@@ -628,11 +662,13 @@ function StudioBody({
               onToggle={toggle}
             />
           </div>
-          <p className="text-xs text-muted-foreground">
-            {multiple
-              ? "Marca las piezas y abre la selección para editarlas juntas."
-              : "Haz clic en una pieza para abrir su registro clínico."}
-          </p>
+          {multiple || !compact ? (
+            <p className="text-xs text-muted-foreground">
+              {multiple
+                ? "Marca las piezas y abre la selección para editarlas juntas."
+                : "Haz clic en una pieza para abrir su registro clínico."}
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-red-600" />
@@ -656,10 +692,12 @@ function StudioBody({
         </section>
         {compactRow ? null : (
           <section
+            data-tooth-panel=""
             aria-label="Registro clínico dental"
             className={
               showInlinePanel
-                ? "h-[calc(100dvh-3rem)] min-h-0 min-w-0 self-start overflow-hidden sticky top-4"
+                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, a la vista.
+                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
                 : "min-w-0 self-start rounded-sm bg-card"
             }
           >
@@ -671,7 +709,16 @@ function StudioBody({
                 open={drawerOpen}
                 onOpenChange={(next) => {
                   setDrawerOpen(next)
-                  if (!next) setSelection([])
+                  if (next) return
+                  // Cerrada con × o Escape, el foco vuelve a su pieza en el arco: con el teclado se
+                  // sigue de ahí, con las flechas, sin volver a empezar desde arriba.
+                  const closed = selection[0]
+                  setSelection([])
+                  const active = document.activeElement
+                  if (closed != null && (active === null || active === document.body || active.closest("[data-tooth-panel]")))
+                    requestAnimationFrame(() =>
+                      mouthRef.current?.querySelector<HTMLElement>(`[data-tooth="${closed}"]`)?.focus({ preventScroll: true }),
+                    )
                 }}
                 patientId={patientId}
                 teeth={selection}
@@ -737,6 +784,7 @@ function StudioBody({
           </Link>
         </div>
       ) : null}
+      {besideDialog}
       {official ? (
         <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
           <DialogContent

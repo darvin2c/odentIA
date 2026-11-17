@@ -203,7 +203,12 @@ function PatientRow({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-semibold">{detailOf([item.patientName, what])}</span>
           <span className="truncate text-[13px]">
-            {later ? (
+            {item.openEncounter ? (
+              // Su atención ya está abierta, sin unir a esta cita: una sola fila, con «Continuar».
+              <span className="text-primary">
+                Atención abierta desde las {formatClock(item.openEncounter.openedAt, locale, timezone)} · falta firmar
+              </span>
+            ) : later ? (
               <span className={statusTextClass(visitState(item.visit))}>{visitName(item.visit)}</span>
             ) : item.visit === "en_atencion" && item.encounter ? (
               <span className="text-primary">En atención desde {formatClock(item.encounter.startedAt, locale, timezone)}</span>
@@ -273,9 +278,29 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     </span>
   )
   const attended = today.summary.attended
-  const people = new Set(today.appointments.filter((item) => item.visit !== "no_vino").map((item) => item.patientId)).size
+  // Lo que dejó abierto hoy sin una de sus citas (la atención interrumpida por una llamada): una fila
+  // con «Continuar», sin repetir la cita ni sumar a las cifras del día.
+  const open = today.openEncounters ?? []
+  const people = new Set([
+    ...today.appointments.filter((item) => item.visit !== "no_vino").map((item) => item.patientId),
+    ...open.map((item) => item.patientId),
+  ]).size
+  /** Quien ya tiene su atención abierta hoy la continúa: «Atender» o «Registrar la atención» chocarían con ella. */
+  const continueLink = (item: WorkspaceAppointment) =>
+    item.openEncounter ? (
+      <Link
+        to="/patients/$patientId/encounters/$encounterId"
+        params={{ patientId: item.patientId, encounterId: item.openEncounter.id }}
+        aria-label={`Continuar la atención: ${item.patientName}`}
+        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
+      >
+        Continuar
+      </Link>
+    ) : null
   const attendButton = (item: WorkspaceAppointment) =>
-    canAttend ? (
+    item.openEncounter ? (
+      continueLink(item)
+    ) : canAttend ? (
       <SubmitButton
         size="sm"
         className="min-h-11 shrink-0 sm:min-h-8"
@@ -303,7 +328,38 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     <section aria-labelledby={headingId} className={CARD}>
       {/* Personas, no citas: quien viene dos veces hoy es un paciente. */}
       <CardHeader id={headingId} title="Mis pacientes de hoy" count={people} />
-      {today.summary.total === 0 ? (
+      {open.length > 0 ? (
+        <ul aria-label="Atenciones abiertas hoy" className="flex flex-col divide-y">
+          {open.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 py-0.5">
+              <Link to="/patients/$patientId" params={{ patientId: item.patientId }} className={cn(buttonVariants({ variant: "ghost" }), ROW)}>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-semibold">{item.patientName}</span>
+                  <span className="text-[13px] text-primary">
+                    Atención abierta desde las {formatClock(item.openedAt, locale, today.timezone)} · falta firmar
+                  </span>
+                </span>
+              </Link>
+              <Link
+                to="/patients/$patientId/encounters/$encounterId"
+                params={{ patientId: item.patientId, encounterId: item.id }}
+                aria-label={`Continuar la atención: ${item.patientName}`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
+              >
+                Continuar
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {today.summary.total === 0 && open.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] text-muted-foreground">Hoy no tienes citas.</p>
+          <Link to="/agenda" search={mine} className={MORE}>
+            Ver mi agenda
+          </Link>
+        </div>
+      ) : today.summary.total === 0 ? (
         <EmptyState
           icon={CalendarDays}
           className="p-5"
@@ -329,8 +385,10 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
             ) : null,
           )}
           {/* Si nadie espera ni se está atendiendo, la siguiente se atiende desde aquí: «Atender» marca la llegada. */}
-          {group("Más tarde", later, (item, index) => (index === 0 && waiting.length === 0 && attending.length === 0 ? attendButton(item) : null))}
-          {group("Sin cerrar", missed, missedActions)}
+          {group("Más tarde", later, (item, index) =>
+            item.openEncounter || (index === 0 && waiting.length === 0 && attending.length === 0) ? attendButton(item) : null,
+          )}
+          {group("Sin cerrar", missed, (item) => continueLink(item) ?? missedActions(item))}
           {attended > 0 ? (
             <p className="text-[13px] text-muted-foreground">
               {attended === 1 ? "1 paciente atendido hoy" : `${attended} pacientes atendidos hoy`}

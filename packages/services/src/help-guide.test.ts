@@ -290,3 +290,105 @@ describe("dentro de una persona", () => {
     expect(describeHelpScreen("/people").title).toBe("Pacientes")
   })
 })
+
+// Estudio de la atención del 16 nov (C9, C22 y las palabras de la novata): la Ayuda le explicaba
+// «Nuevo paciente» al odontólogo, que no lo tiene, y no contestaba qué ve recepción de la atención.
+describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atención", () => {
+  const faqOf = (question: string, role: string) => {
+    const option = exactHelpOption(question, helpGuideForRole(HELP_TOPICS, role))
+    return option?.kind === "faq" ? option.faq.id : null
+  }
+
+  it("«Nuevo paciente» solo a quien lo tiene; al odontólogo, a quién pedírselo", () => {
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "reception")).toBe("registro-paciente-nuevo")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "owner")).toBe("registro-paciente-nuevo")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "clinician")).toBe("registro-paciente-nuevo-lo-pide")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "cashier")).toBe("registro-paciente-nuevo-lo-pide")
+    const asked = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((faq) => faq.id === "registro-paciente-nuevo-lo-pide")
+    expect(asked?.a).toContain("recepción")
+    expect(asked?.a).not.toContain("«Nuevo paciente»")
+  })
+
+  it("recepción tiene su respuesta sobre la atención, y quien lee la historia no la recibe", () => {
+    expect(faqOf("¿Puedo ver la atención de un paciente?", "reception")).toBe("recepcion-ver-atencion")
+    expect(faqOf("¿Puedo ver la atención de un paciente?", "clinician")).toBeNull()
+  })
+
+  it.each([
+    ["¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?", "pacientes-reservar-lo-aceptado"],
+    ["¿Para qué sirve «Completar» en «Realizado hoy»?", "pacientes-realizado-hoy-completar"],
+    ["Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?", "pacientes-ficha-endodoncia-propone-diagnostico"],
+  ])("«%s» tiene su respuesta propia", (question, id) => {
+    expect(faqOf(question, "owner")).toBe(id)
+  })
+
+  const WORDS = [
+    "palabras-siglas-caries",
+    "palabras-nts-188",
+    "palabras-cie-10",
+    "palabras-asa",
+    "palabras-adenda",
+    "palabras-inmutable",
+    "palabras-liberarla",
+    "palabras-lo-piensa",
+    "palabras-indicado-hoy",
+    "palabras-deshacer-quitar",
+    "palabras-acto-libre",
+    "palabras-presuntivo-definitivo",
+  ]
+  it("cada palabra de la atención se dice en una línea", () => {
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    for (const id of WORDS) {
+      const faq = faqs.find((item) => item.id === id)
+      expect(faq, id).toBeDefined()
+      expect(faq!.a.length, id).toBeLessThanOrEqual(260)
+    }
+  })
+
+  // QA final del 16 nov (Q20): lo que el auditor y la novata preguntaron con el modelo real y la
+  // Ayuda no reconoció («no está en la guía», «no estoy segura»).
+  it.each([
+    ["¿Cuánta anestesia le puedo poner a un niño de 22 kg?", "pacientes-anestesia-dosis-maxima"],
+    ["¿Puedo usar articaína en un niño de 3 años?", "pacientes-anestesia-articaina-ninos"],
+    // «Hacerla hoy» y «Por decidir» se responden con lo que ya las explicaba: no otra respuesta suelta.
+    ["¿Qué es Hacerla hoy?", "atencion-donde-hacerla-hoy"],
+    ["¿Qué significa Por decidir?", "palabras-lo-piensa"],
+    ["¿Qué pasa si quito un tratamiento y le doy Deshacer?", "palabras-deshacer-quitar"],
+    ["¿Qué significa inmutable?", "palabras-inmutable"],
+    ["¿Qué es un acto libre?", "palabras-acto-libre"],
+    ["¿Qué es Presuntivo y Definitivo?", "palabras-presuntivo-definitivo"],
+    ["Acabo de atender a una paciente y quiero cerrar la atención, ¿cómo se hace?", "atencion-cerrar-finalizar"],
+  ])("«%s» ya tiene respuesta", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+
+  it("a recepción y a caja no se les manda a la atención firmada ni se les explica un botón que no tienen", () => {
+    const next = "Terminé y no sé si ya le reservaron la siguiente, ¿dónde lo veo?"
+    expect(faqOf(next, "clinician")).toBe("termine-ya-reservaron-siguiente")
+    expect(faqOf(next, "owner")).toBe("termine-ya-reservaron-siguiente")
+    for (const role of ["reception", "cashier"]) {
+      expect(faqOf(next, role), role).toBe("termine-ya-reservaron-siguiente-sin-atencion")
+      // El «Completar» que tienen es el de los datos que faltan; el de «Realizado hoy» no está en su guía.
+      const ids = helpGuideForRole(HELP_TOPICS, role).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
+      expect(ids, role).toContain("pacientes-completar-datos")
+      expect(ids, role).not.toContain("pacientes-realizado-hoy-completar")
+      expect(faqOf("¿Para qué sirve «Completar» junto a «Faltan datos»?", role), role).toBe("pacientes-completar-datos")
+      expect(faqOf("¿Para qué sirve «Completar» en «Realizado hoy»?", role), role).toBeNull()
+    }
+    expect(faqOf("para que sirve completar", "clinician")).toBe("pacientes-realizado-hoy-completar")
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    const reception = faqs.find((faq) => faq.id === "termine-ya-reservaron-siguiente-sin-atencion")
+    expect(reception?.a).toMatch(/^En su página, en «Qué sigue»/)
+    // La pantalla dice «Realizado hoy»: la guía y los avisos ya no dicen «Hecho hoy».
+    expect(faqs.filter((faq) => faq.a.includes("«Hecho hoy»")).map((faq) => faq.id)).toEqual([])
+  })
+
+  it.each([
+    ["¿Qué es CDP?", "palabras-siglas-caries"],
+    ["que es cdp", "palabras-siglas-caries"],
+    ["¿Qué es la ASA?", "palabras-asa"],
+    ["que es una adenda", "palabras-adenda"],
+  ])("«%s» la responde la palabra, no una pantalla", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+})

@@ -87,6 +87,7 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import {
+  diagnosisFinding,
   odontogramAssessment,
   odontogramEntry,
   periodontalChart,
@@ -396,6 +397,20 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     .where(inArray(message.organizationId, orgs))
   // Un concepto vendido apunta a su producto (ADR 0067): se suelta antes de borrar
   // los productos; el concepto se borra después con los cobros.
+  // Las ventas de mostrador (sin paciente) no pueden soltar su producto (`patient_charge_counter_check`):
+  // se borran aquí con sus aplicaciones, antes que los productos (revisión R7: sin esto la segunda corrida
+  // de la semilla fallaba).
+  await db.execute(
+    sql`delete from patient_payment_application where organization_id in (${orgList})
+      and charge_id in (select id from patient_charge where organization_id in (${orgList}) and patient_id is null)`,
+  )
+  await db.execute(
+    sql`delete from stock_movement where organization_id in (${orgList})
+      and charge_id in (select id from patient_charge where organization_id in (${orgList}) and patient_id is null)`,
+  )
+  await db.execute(
+    sql`delete from patient_charge where organization_id in (${orgList}) and patient_id is null`,
+  )
   await db.execute(
     sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
       where organization_id in (${orgList}) and product_id is not null`,
@@ -548,6 +563,9 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, orgs))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, orgs))
   await db.delete(encounterSite).where(inArray(encounterSite.organizationId, orgs))
+  // Los vínculos diagnóstico-hallazgo referencian a ambos (FK sin cascada): van antes de los dos
+  // (revisión R7: sin esto la segunda corrida de la semilla fallaba).
+  await db.delete(diagnosisFinding).where(inArray(diagnosisFinding.organizationId, orgs))
   // Los diagnósticos migrados desde notas antiguas las referencian (`legacy_note_id`): van antes.
   await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, orgs))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, orgs))
@@ -2200,6 +2218,11 @@ const seedOffers: Array<{
   usualSessions?: number
   /** Cómo dice el precio el agente: la semilla muestra las tres formas (ADR 0021). */
   priceDisclosure: "exacto" | "desde" | "evaluacion"
+  /**
+   * «Usa anestesia local» de un servicio propio (QA del 16 nov): los de la biblioteca (endodoncias
+   * y pulpectomías) ya la traen marcada; la exodoncia propia la marca la clínica.
+   */
+  localAnesthesia?: boolean
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
   leavesFinding?: { condition: string; variant?: string }
   /** En Perú cada servicio lleva su código CPMS, también el propio (ADR 0069). */
@@ -2361,6 +2384,7 @@ const seedOffers: Array<{
     priceCents: 15000,
     durationMin: 45,
     priceDisclosure: "desde",
+    localAnesthesia: true,
     // La causa (DEX o DAO) se deduce al completarla, por lo que la motivó.
     leavesFinding: { condition: "missing_tooth" },
   },
@@ -2405,6 +2429,7 @@ catalogA.push(
     priceCents: 250000,
     durationMin: 90,
     priceDisclosure: "evaluacion",
+    localAnesthesia: true,
   }),
 )
 const serviceIdA = (code: string): string => {
@@ -2501,6 +2526,23 @@ await createService(db, ORG_B, CORA_ID, {
   priceCents: 18000,
   durationMin: 45,
 })
+// La resina posterior de dos superficies, su hermana: con las dos, la resina de un molar (también
+// de leche) tiene a qué servicio ir y Clío no la confunde con una carilla (QA del 16 nov, C27).
+const [resina2Template] = await db
+  .select()
+  .from(treatmentTemplate)
+  .where(eq(treatmentTemplate.key, "resina-fotocurable-2-superficies-posterior"))
+  .limit(1)
+if (!resina2Template)
+  throw new Error("Falta la resina posterior de dos superficies de la biblioteca: ejecuta seed:procedures")
+catalogA.push(
+  await createService(db, ORG_A, ANA_ID, {
+    templateId: resina2Template.id,
+    code: "RESINA-2-CPMS",
+    priceCents: 24000,
+    durationMin: 60,
+  }),
+)
 // Consultas de la biblioteca en el tarifario: la consulta también es una
 // prestación con tarifa (CPMS D0140); el control postoperatorio va incluido
 // (CPMS D0171 a S/ 0).
@@ -4471,8 +4513,9 @@ await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   professionalUserId: ROJAS_ID,
   rules: [2, 4].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
 })
-// San Isidro, la segunda sede con historia: dos unidades dentales y el Dr. Salas
-// de lunes a sábado (Miraflores le dio horario a todos sus profesionales; él no atiende ahí).
+// San Isidro, la segunda sede con historia: dos unidades dentales y el Dr. Salas en las mañanas
+// de lunes a sábado. En las tardes atiende en Miraflores (QA del 16 nov: el novato no podía
+// atender desde su agenda porque ahí no tenía horario ni citas).
 const sanIsidro = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede San Isidro")),
 })
@@ -4485,15 +4528,12 @@ const roomsSanIsidro = await Promise.all(
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: miraflores.id,
   professionalUserId: SALAS_ID,
-  rules: [],
+  rules: [1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
 })
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: sanIsidro.id,
   professionalUserId: SALAS_ID,
-  rules: [1, 2, 3, 4, 5, 6].flatMap((weekday) => [
-    { weekday, startMin: 9 * 60, endMin: 13 * 60 },
-    ...(weekday === 6 ? [] : [{ weekday, startMin: 14 * 60, endMin: 18 * 60 }]),
-  ]),
+  rules: [1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
 })
 const roomA = (index: number): string => {
   const room = roomsMiraflores[index]
@@ -5184,6 +5224,30 @@ for (const seed of [
     notice: false,
   })
   await createEncounter(db, ORG_A, ANA_ID, thiago.id, { appointmentId: thiagoToday.id })
+
+  // Gloria, 62 años, viene hoy en la tarde con el Dr. Salas a Miraflores para la exodoncia de la 48
+  // (QA del 16 nov, B4): sin atención abierta, para empezarla desde su agenda y anotar su presión.
+  const gloria = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Gloria Huamán Rivas",
+    givenNames: "Gloria",
+    familyName: "Huamán Rivas",
+    birthDate: "1964-03-08",
+    phone: "+51987650733",
+    registeredBranchId: miraflores.id,
+  })
+  await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: gloria.id,
+    professionalUserId: SALAS_ID,
+    serviceId: serviceIdA("EXODONCIA"),
+    startsAt: lima(0, "15:00"),
+    endsAt: lima(0, "15:45"),
+    status: "confirmada",
+    reason: "Extracción de la muela del juicio de abajo (48)",
+    outsideSchedule: true,
+    overrideBusy: true,
+    notice: false,
+  })
 
   const mateo = await createPatient(db, ORG_A, ANA_ID, {
     displayName: "Mateo Flores Guzmán",

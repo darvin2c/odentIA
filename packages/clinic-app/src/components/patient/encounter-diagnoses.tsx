@@ -15,10 +15,12 @@ import { useStore } from "@tanstack/react-form"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { z } from "zod"
+import { PLAN_QUERY_KEYS } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
-import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
+import { addDiagnosisApi, correctApi, type EncounterDiagnosis } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
+import { CORRECTION_NOT_READY, CorrectionChoices, useCorrection } from "./correction-choices"
 import {
   areaWords,
   DiagnosisPicker,
@@ -282,17 +284,37 @@ export function EncounterDiagnoses({
   const description = useStore(form.store, (state) => state.values.description)
   const area = useStore(form.store, (state) => (state.values.site.toothNumber == null ? areaWords(state.values.area ?? {}) : null))
 
+  // Anular el diagnóstico trae, marcado, el hallazgo con que nació y lo indicado hoy desde él
+  // (QA del 16 nov, E2): un motivo y una sola operación en el servidor.
   const voidForm = useAppForm({
     defaultValues: { reason: "" },
     validators: { onSubmit: reasonSchema },
     onSubmit: async ({ value }) => {
       if (!voiding) return
-      await write(() => voidDiagnosisApi(patientId, encounter.id, voiding.id, value.reason.trim()))
+      // Sin la lista de lo que cae no se anula: saldría sin lo que nació con él (QA del 16 nov, Q2).
+      if (!correction.ready) throw new Error(CORRECTION_NOT_READY)
+      await write(() =>
+        correctApi(patientId, encounter.id, {
+          start: { diagnosisId: voiding.id },
+          reason: value.reason.trim(),
+          ...correction.marks,
+        }),
+      )
+      // Lo que cayó con él: el odontograma, el plan y su presupuesto.
+      await Promise.all(
+        ["odontogram", ...PLAN_QUERY_KEYS].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
       setVoiding(null)
     },
   })
   const voidSubmitting = useStore(voidForm.store, (state) => state.isSubmitting)
   const voidError = useFormSubmitError(voidForm)
+  const correction = useCorrection(
+    patientId,
+    encounter.id,
+    voiding ? { diagnosisId: voiding.id } : null,
+    voidSubmitting,
+  )
 
   const busy = disabled || surface.isSubmitting || voidSubmitting
 
@@ -324,7 +346,8 @@ export function EncounterDiagnoses({
         <h2 id={`${typeGroupId}-title`} className="font-heading text-base font-medium">
           Diagnóstico ({active.length})
         </h2>
-        {editable ? (
+        {/* La regla, solo con el bloque vacío (estándar E2); la Ayuda la sigue contestando. */}
+        {editable && active.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             Al menos uno para cerrar la atención; «Presuntivo» basta.
           </p>
@@ -537,12 +560,24 @@ export function EncounterDiagnoses({
         description={`${voiding ? diagnosisCodeLabel(voiding.diagnosisSystem, voiding.diagnosisCode) : ""}${voiding ? diagnosisSiteSuffix(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
         confirmLabel="Anular diagnóstico"
         pending={voidSubmitting}
+        confirmDisabled={!correction.ready}
         error={voidError}
         onConfirm={() => void submitForm(voidForm)}
         onClose={() => {
           if (!voidSubmitting) setVoiding(null)
         }}
       >
+        <CorrectionChoices
+          preview={correction.preview}
+          marks={correction.marks}
+          onMarksChange={correction.setMarks}
+          disabled={voidSubmitting}
+          idPrefix={`${typeGroupId}-anular`}
+          loading={correction.loading}
+          failed={correction.failed}
+          error={correction.error}
+          onRetry={correction.retry}
+        />
         <voidForm.AppField name="reason">
           {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_TEXT} aria-required />}
         </voidForm.AppField>

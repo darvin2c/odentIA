@@ -373,6 +373,9 @@ it("con anestesia y sin sus antecedentes, el cierre lo dice; «niega» lo deja d
     gaps: ["allergies", "conditions", "medications", "asa"],
     anesthetics: ["Lidocaína 2 % con epinefrina"],
     risks: [],
+    // El servicio propio no está marcado «Usa anestesia local»: la anestesia sale de sus materiales.
+    uses: [],
+    asksAsa: true,
   })
 
   // «Niega enfermedades» desde la atención: quién y cuándo en la auditoría, sin tocar lo demás

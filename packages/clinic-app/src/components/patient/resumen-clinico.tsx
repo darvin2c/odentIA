@@ -8,6 +8,7 @@ import {
   allergiesSaidUnknown,
   changedHistoryOf,
   declaredGroupOf,
+  noAllergiesWords,
   pregnancyGroupOf,
   pregnancyWords,
   saidByWords,
@@ -264,14 +265,9 @@ export function ClinicalAlertsCard({
         ) : null}
         {health && allergies.length === 0 ? (
           <li className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
+            {/* La misma frase que la franja y la atención (estudio de la atención del 16 nov, E10a). */}
             <span className="text-sm font-medium">
-              {saidNo("allergies")
-                ? `Alergias: ${saidNo("allergies")} · sin revisar`
-                : allergyState === "none"
-                  ? "Alergias: niega"
-                  : saidUnknown
-                    ? `Alergias: ${saidWords(saidUnknown, "no sabe")}`
-                    : "Alergias: no preguntado"}
+              {noAllergiesWords({ review: allergyState, saidNo: saidNoGroupOf(groups, "allergies"), saidUnknown }, sex)}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />

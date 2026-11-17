@@ -31,6 +31,11 @@ export interface ServiceCatalogItem {
   /** Los controles al terminar de la clínica; null = los de la guía (`libraryFinishControls`). */
   ownFinishControls?: FinishControl[] | null
   libraryFinishControls?: FinishControl[] | null
+  /** Si usa anestesia local: lo de la clínica o, si no lo cambió, lo de la biblioteca. */
+  localAnesthesia?: boolean
+  /** Lo que puso la clínica; null = lo de la biblioteca (`libraryLocalAnesthesia`). */
+  ownLocalAnesthesia?: boolean | null
+  libraryLocalAnesthesia?: boolean | null
   /** Cómo dice el precio el agente; caja y presupuesto usan siempre la tarifa. */
   priceDisclosure: PriceDisclosure
   /** La evaluación que ofrece el agente cuando el precio no es exacto. */
@@ -300,6 +305,8 @@ export interface UpdateServiceBody {
   sessionGapDays?: number | null
   /** Controles al terminar (`[]` = ninguno); null vuelve a los de la guía. */
   finishControls?: FinishControl[] | null
+  /** «Usa anestesia local»; null vuelve a lo de la biblioteca. */
+  localAnesthesia?: boolean | null
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null

@@ -1,3 +1,4 @@
+import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS } from "@odentia/clinical"
 import { Button, buttonVariants, cn, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -696,6 +697,10 @@ export function EncounterPanel({
                 setError("Escribe tu número de colegiatura.")
                 return
               }
+              if (!isRegistrationNumber(number.trim())) {
+                setError(REGISTRATION_NUMBER_WORDS)
+                return
+              }
               save.mutate()
             }}
           >
@@ -706,6 +711,7 @@ export function EncounterPanel({
                   id="panel-colegiatura"
                   value={number}
                   maxLength={20}
+                  inputMode="numeric"
                   autoComplete="off"
                   placeholder="N.º de colegiatura"
                   aria-invalid={error ? true : undefined}

@@ -9,7 +9,7 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
+import { budgetAnswerLine, budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -37,13 +37,15 @@ import {
   commonPlanItemIds,
   fetchBudgetDetail,
   fetchTreatmentPlans,
+  ASSEMBLED_QUERY_KEYS,
+  INDICATED_QUERY_KEYS,
   PLAN_QUERY_KEYS,
   planDecisionLabel,
   totalsOf,
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
-import { removeIndicatedApi } from "../../lib/encounters"
+import { bringTreatmentApi, removeIndicatedApi, restoreIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
 import {
@@ -186,6 +188,7 @@ export function EncounterPlanPanel({
   onPendingChange,
   patientName,
   removableIds,
+  broughtIds = new Set<string>(),
   indicationDefaults,
   showControls = true,
 }: {
@@ -193,6 +196,8 @@ export function EncounterPlanPanel({
   encounterId: string
   /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
   removableIds: ReadonlySet<string>
+  /** Lo que ya se trajo a esta atención («Hacerla hoy» o su cita): su fila no lo ofrece otra vez. */
+  broughtIds?: ReadonlySet<string>
   /** Al indicar, la pieza y el diagnóstico del último hallazgo de hoy. */
   indicationDefaults?: Partial<IndicationValues>
   /**
@@ -266,32 +271,16 @@ export function EncounterPlanPanel({
     await onChanged()
   }
   /**
-   * «Deshacer» de «Quitar» (QA del 10 nov, B12): quitar no se deshace en el servidor (lo quitado
-   * queda cancelado en la auditoría), así que se vuelve a indicar con lo mismo, por la misma
-   * operación de «Indicar»: servicio, sitio, hallazgo, diagnóstico, detalle y sesiones. Vuelve
-   * con el precio de la tarifa y sin la opción del presupuesto en que estaba.
+   * «Deshacer» de «Quitar» (QA del 10 nov, B12): el servidor devuelve el mismo tratamiento, a
+   * su opción del presupuesto, con su precio y en su orden (QA del 16 nov, B1e). Antes se
+   * volvía a indicar: entraba con la tarifa, fuera de su opción, y lo de la otra opción pasaba
+   * a «va después» de él.
    */
-  const indicateAgain = async (item: PlanItem) => {
-    if (!item.serviceId) return
-    const body: Record<string, unknown> = {
-      serviceId: item.serviceId,
-      sourceEncounterId: encounterId,
-      detail: item.detail,
-      diagnosisCode: item.diagnosisCode ?? null,
-      odontogramEntryId: item.odontogramEntryId ?? null,
-      ...(item.plannedSessions != null ? { plannedSessions: item.plannedSessions } : {}),
-    }
-    if (item.toothNumber != null) body.toothNumber = item.toothNumber
-    if (item.toothNumber != null && item.surfaces.length > 0) body.surfaces = item.surfaces
-    if (item.quadrant != null) body.quadrant = item.quadrant
-    if (item.arch) body.arch = item.arch
+  const restore = async (item: PlanItem) => {
     onPendingChange(true)
     try {
       await beforeWrite()
-      await apiFetch(`/api/patients/${patientId}/plan/items`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      })
+      await restoreIndicatedApi(patientId, encounterId, item.id)
       await refreshPlan()
       toast.success(`${item.title} vuelve a estar indicado`)
     } catch (err) {
@@ -313,9 +302,7 @@ export function EncounterPlanPanel({
       await refreshPlan()
       // Un clic lo quitaba sin vuelta atrás: el aviso ofrece «Deshacer», como al quitar una alergia.
       toast.success(removed ? `Quitado: ${removed.title}` : "Quitado", {
-        ...(removed?.serviceId
-          ? { action: { label: "Deshacer", onClick: () => void indicateAgain(removed) } }
-          : {}),
+        ...(removed ? { action: { label: "Deshacer", onClick: () => void restore(removed) } } : {}),
       })
     } catch (err) {
       setRowError({ itemId, message: submitErrorMessage(err) })
@@ -324,6 +311,52 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
+  // «Hacerla hoy» de lo indicado y aceptado hoy (P11, D6): está en su fila, no en «Hoy viene a…», y
+  // trae el tratamiento a la atención con la misma operación, para que su consentimiento se pida
+  // antes del acto. Nunca en lo que «va después» de otro (la corona tras la endodoncia): no toca hoy.
+  const [bringing, setBringing] = useState<string | null>(null)
+  const bringToday = async (item: PlanItem) => {
+    if (bringing) return
+    setBringing(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await bringTreatmentApi(patientId, encounterId, item.id)
+      await refreshPlan()
+    } catch (err) {
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
+    } finally {
+      setBringing(null)
+      onPendingChange(false)
+    }
+  }
+  const bringAction = (item: PlanItem) =>
+    canWrite &&
+    !disabled &&
+    today.has(item.id) &&
+    !broughtIds.has(item.id) &&
+    !item.waitsFor &&
+    item.decisionStatus === "aceptado" &&
+    ["pendiente", "programado", "en_curso"].includes(item.status) ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        aria-label={`Hacerla hoy: ${item.title}`}
+        disabled={bringing !== null || removing !== null}
+        onClick={() => void bringToday(item)}
+      >
+        {bringing === item.id ? "Preparando…" : "Hacerla hoy"}
+      </Button>
+    ) : null
+  /** Lo que se hace con un renglón: traerlo a hoy y corregirlo. */
+  const actionsOf = (item: PlanItem) => (
+    <>
+      {bringAction(item)}
+      {rowActions(item)}
+    </>
+  )
   /**
    * Las acciones de un renglón indicado hoy, mientras se pueda corregir. Lo ya respondido y abierto
    * se cambia aquí mismo con la misma revisión de la ficha («Revisar indicación»), con su motivo
@@ -599,7 +632,7 @@ export function EncounterPlanPanel({
                         {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
                           <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
                         )}
-                        {rowActions(item)}
+                        {actionsOf(item)}
                       </span>
                       <ExtractionRisks lines={item.extractionRisks} />
                       {fitNotice(item)}
@@ -646,7 +679,7 @@ export function EncounterPlanPanel({
                       : null
                 }
                 onPlace={placeIn}
-                rowActions={rowActions}
+                rowActions={actionsOf}
                 changeForm={changeForm}
                 fitNotice={fitNotice}
               />
@@ -659,10 +692,18 @@ export function EncounterPlanPanel({
           encounterId={encounterId}
           patientName={patientName}
           beforeWrite={beforeWrite}
-          // Lo indicado hoy que aún no está en ningún presupuesto: entra al firmar.
+          // Lo indicado hoy que aún no está en ningún presupuesto: entra al firmar. Lo de una pieza con
+          // caminos espera «¿En qué opción va…?» en su fila: no se repite aquí.
           unquoted={indicatedItems.filter(
-            (item) => !item.budgetId && item.status === "pendiente" && item.decisionStatus === "pendiente" && item.priceCents != null,
+            (item) =>
+              !item.budgetId &&
+              item.status === "pendiente" &&
+              item.decisionStatus === "pendiente" &&
+              item.priceCents != null &&
+              !pathGroups.some((group) => group.toothNumber != null && group.toothNumber === item.toothNumber),
           )}
+          // Los presupuestos de lo indicado hoy: el que ya se entregó o respondió sigue a la vista.
+          budgetIds={[...new Set(indicatedItems.map((item) => item.budgetId).filter((id): id is string => !!id))]}
         />
         {canWrite ? (
           <Collapsible
@@ -723,8 +764,9 @@ type PathQuestion =
 /**
  * Si lo indicado hoy compite con otro de la misma pieza (endodoncia o
  * exodoncia de la 46), se pregunta en su fila. No es obligatorio: sin respuesta,
- * va en todas las opciones, como hasta ahora, y no traba firmar. El servidor
- * vuelve a comprobarlo todo.
+ * va en todas las opciones al firmar y no traba firmar. En una pieza que ya tiene
+ * caminos, lo nuevo no entra solo al presupuesto (un perno no va con la
+ * exodoncia): espera esta respuesta. El servidor vuelve a comprobarlo todo.
  */
 function pathQuestion(
   item: PlanItem,
@@ -808,7 +850,8 @@ function PathQuestionRow({
             {path.title || budgetOptionLabel(path.position)}
           </Button>
         ))}
-        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>
+        {/* En las dos: entra ya en todas las opciones, no solo deja de preguntar (QA del 16 nov, E3). */}
+        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => onPlace("todos")}>
           {inAllPathsLabel(group.pathCount)}
         </Button>
       </div>
@@ -878,9 +921,35 @@ function PathsBox({
     // Sin un precio en alguna línea, el total no es una cifra: se dice así.
     return moneyTotalsText(totalsOf(option, detail.currency), (cents, unit) => formatMoney(cents, unit, locale), "") || "por definir"
   }
-  // El total suma también lo que va en todas (la limpieza): se dice, para que cuadre con lo que se ve.
-  const withShared = detail ? commonPlanItemIds(detail.items, detail.options.length).size > 0 : false
-  const totalWords = withShared ? `Total con lo que va en ${group.pathCount === 2 ? "las dos" : "todas"}` : "Total de la opción"
+  // El total suma también lo que va en todas (la limpieza): se dice de dónde sale, para que cuadre
+  // con lo que se ve: «S/ 1,550.00 de la opción + S/ 480.00 de lo común» (QA del 16 nov, H6).
+  const shared = detail ? commonPlanItemIds(detail.items, detail.options.length) : new Set<string>()
+  const withShared = shared.size > 0
+  const totalWords = withShared ? "Total" : "Total de la opción"
+  const partsOf = (position: number): string | null => {
+    const option = detail?.options.find((candidate) => candidate.position === position)
+    if (!detail || !option || !locale || !withShared) return null
+    const lines = detail.items.filter((line) => line.optionId === option.id)
+    const sum = (rows: typeof lines) => {
+      const currencies = [...new Set(rows.map((row) => row.currency))].sort()
+      return moneyTotalsText(
+        currencies.map((currency) => {
+          const own = rows.filter((row) => row.currency === currency)
+          return {
+            currency,
+            totalCents: own.some((row) => row.lineTotalCents == null)
+              ? null
+              : own.reduce((total, row) => total + (row.lineTotalCents ?? 0), 0),
+          }
+        }),
+        (cents, unit) => formatMoney(cents, unit, locale),
+        "",
+      )
+    }
+    const own = sum(lines.filter((line) => !shared.has(line.planItemId)))
+    const common = sum(lines.filter((line) => shared.has(line.planItemId)))
+    return own && common ? `${own} de la opción + ${common} de lo común` : null
+  }
   const heading = group.site
     ? `${group.site} · ${count} opciones: ${chooser} elegirá una`
     : `${count.charAt(0).toUpperCase()}${count.slice(1)} opciones: ${chooser} elegirá una`
@@ -908,6 +977,9 @@ function PathsBox({
                   <span className="text-sm tabular-nums">
                     {totalWords}: {total}
                   </span>
+                ) : null}
+                {partsOf(path.position) ? (
+                  <span className="text-xs text-muted-foreground tabular-nums">{partsOf(path.position)}</span>
                 ) : null}
               </div>
               {path.items.length === 0 ? (
@@ -1010,6 +1082,7 @@ export function EncounterBudgetSend({
   patientName,
   beforeWrite,
   unquoted = [],
+  budgetIds = [],
 }: {
   patientId: string
   encounterId?: string
@@ -1017,37 +1090,48 @@ export function EncounterBudgetSend({
   beforeWrite: () => Promise<void>
   /** Lo indicado hoy fuera de todo presupuesto: se dice y se puede armar ya. */
   unquoted?: PlanItem[]
+  /** Los presupuestos de lo indicado en esta atención (del servidor: siguen al recargar). */
+  budgetIds?: string[]
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const canQuote = usePermission("budgets.write")
   const queryClient = useQueryClient()
+  const orgLocale = useOrgProfile().data?.locale
   const [assembling, setAssembling] = useState(false)
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
   // El presupuesto que se ofreció en esta atención: si se envía o se anota su respuesta, la
-  // línea no desaparece sin rastro, queda qué eligió (QA del 8 nov). Se recuerda por paciente
-  // fuera del componente; al recargar la página se olvida (el Plan lo sigue diciendo).
+  // línea no desaparece sin rastro, queda qué eligió y qué aceptó (QA del 8 nov). Sale de lo
+  // indicado hoy, que lo dice el servidor: sigue al recargar (QA del 16 nov, E3; antes vivía en
+  // memoria y se perdía).
   const offeredNow = step?.kind === "enviar" ? (step.action?.budgetId ?? null) : null
-  const [offered, setOffered] = useState<string | null>(() => OFFERED_BUDGET.get(patientId) ?? null)
-  useEffect(() => {
-    if (!offeredNow) return
-    OFFERED_BUDGET.set(patientId, offeredNow)
-    setOffered(offeredNow)
-  }, [offeredNow, patientId])
-  // Lo indicado hoy que aún no entra en un presupuesto (una indicación sola, después de otro
-  // presupuesto ya ofrecido): se dice y se arma ya, sin esperar a firmar (QA del 9 nov).
+  const answered = budgetIds.filter((id) => id !== offeredNow)
+  // Lo indicado hoy que no entró en el presupuesto, siempre a la vista (también al mostrarlo): con
+  // uno ya entregado o respondido, nace al firmar en otro aparte; sin ninguno, al firmar.
+  const pendingWords =
+    unquoted.length > 0
+      ? `${unquoted
+          .map((item) =>
+            [
+              item.title,
+              treatmentSiteLabel(item),
+              item.priceCents != null && orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          )
+          .join(", ")} · entra al firmar${answered.length > 0 ? ", en un presupuesto aparte" : ""}`
+      : null
   const pendingLine =
-    canSend && canQuote && encounterId && !offeredNow && unquoted.length > 0 ? (
+    canSend && encounterId && pendingWords ? (
       <section
         aria-label="Presupuesto por armar"
         className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-dashed bg-background px-3 py-2"
       >
         <p className="min-w-0 flex-1 basis-60 text-sm">
           <span className="font-medium">Presupuesto</span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {unquoted.map((item) => item.title).join(", ")}: entra al firmar
-          </span>
+          <span className="text-muted-foreground"> · {pendingWords}</span>
         </p>
+        {canQuote && !offeredNow ? (
         <Button
           type="button"
           size="sm"
@@ -1065,8 +1149,11 @@ export function EncounterBudgetSend({
               // Nada se pudo presupuestar (sin precio o sin código): se dice, en vez de no hacer nada.
               if (!assembled.data)
                 toast.warning("No se pudo armar: a lo indicado le falta el precio o el código. Revísalo en el plan.")
+              // También el detalle de la atención: de ahí sale lo indicado hoy con su presupuesto. Sin
+              // volver a leerlo, esta línea seguía diciendo «entra al firmar» de lo que ya entró (QA del
+              // 16 nov, Q3).
               await Promise.all(
-                [...PLAN_QUERY_KEYS, "plan-items", "next-steps"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+                ASSEMBLED_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
               )
             } catch (cause) {
               toast.error(submitErrorMessage(cause))
@@ -1077,18 +1164,23 @@ export function EncounterBudgetSend({
         >
           Armarlo ahora
         </Button>
+        ) : null}
       </section>
     ) : null
-  if (canSend && !offeredNow && offered)
+  const after = canSend
+    ? answered.map((id) => <EncounterBudgetAfter key={id} patientId={patientId} budgetId={id} />)
+    : null
+  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId)
     return (
       <>
-        <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
+        {after}
         {pendingLine}
       </>
     )
-  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return pendingLine
   const budgetId = step.action.budgetId
   return (
+    <>
+    {after}
     <section
       aria-label="Presupuesto"
       className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border bg-background px-3 py-2"
@@ -1115,21 +1207,22 @@ export function EncounterBudgetSend({
           patientName={patientName}
           beforeWrite={beforeWrite}
           menu
+          note={pendingWords ? `No está en este presupuesto: ${pendingWords}` : null}
         />
       </div>
       {/* «Imprimir y entregar» y «Anotar su respuesta» no pasan por «Revisar antes»: la marca se dice aquí. */}
       <RecommendedLine patientId={patientId} budgetId={budgetId} />
     </section>
+    {pendingLine}
+    </>
   )
 }
 
-/** El presupuesto que se ofreció en la atención abierta de cada paciente (ver `EncounterBudgetSend`). */
-const OFFERED_BUDGET = new Map<string, string>()
-
 /**
- * Lo que quedó del presupuesto ofrecido en esta atención: su número y qué
- * eligió, con el total de esa opción («Eligió la opción A · S/ 1,350»; nunca
- * «Aceptó todo» si eligió una), y quién lo anotó. Es constancia: se cambia en el Plan.
+ * Lo que quedó del presupuesto ofrecido en esta atención: su número, qué eligió y
+ * qué aceptó («Eligió la opción A · aceptó S/ 950 · lo piensa: Corona cerámica ·
+ * S/ 900»; la misma frase del Plan y de lo que leen Sofi y Argos), y quién lo
+ * anotó. Es constancia: se cambia en el Plan.
  */
 function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budgetId: string }): React.JSX.Element | null {
   const format = useBudgetFormat()
@@ -1138,16 +1231,10 @@ function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budg
     queryKey: ["budget", patientId, budgetId],
     queryFn: () => fetchBudgetDetail(patientId, budgetId),
   }).data?.data
-  if (!budget || budget.status === "borrador") return null
-  const chosen =
-    budget.options.length > 1
-      ? budget.options.find((option) => option.decision === "elegida")
-      : undefined
+  if (!budget || budget.status === "borrador" || budget.status === "cancelado") return null
   const money = (cents: number, currency: string) =>
     orgLocale ? formatMoney(cents, currency, orgLocale) : "…"
-  const state = chosen
-    ? `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${moneyTotalsText(totalsOf(chosen, budget.currency), money, "precio por definir")}`
-    : budget.stateText
+  const state = budgetAnswerLine(budget, money) ?? budget.stateText
   return (
     <div className="flex w-full flex-col gap-0.5 rounded-lg border bg-background px-3 py-2" role="status">
       <span className="text-sm">
@@ -1298,10 +1385,10 @@ function IndicationForm({
           method: "POST",
           body: JSON.stringify(body),
         })
+        // Lo indicado entra solo al borrador: el presupuesto también cambió, y la tarjeta de cada
+        // opción lee su detalle. Sin volver a pedirlo decía el total de antes (QA del 16 nov, Q4).
         await Promise.all(
-          ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next"].map(
-            (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-          ),
+          INDICATED_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         await onChanged()
         // Se conserva el ámbito, el sitio y el hallazgo para indicar el siguiente de la misma pieza
@@ -1319,6 +1406,41 @@ function IndicationForm({
       }
     },
   })
+  // Con el formulario abierto, abrir otra pieza en el arco la trae aquí con su hallazgo y su
+  // diagnóstico, mientras quien indica no haya cambiado a mano la pieza de partida (P09).
+  const startedWith = useRef<{ tooth: number | null; finding: string }>({
+    tooth: initial.teeth[0] ?? null,
+    finding: initial.odontogramEntryId,
+  })
+  const defaultTooth = defaults?.teeth?.[0] ?? null
+  const defaultFinding = defaults?.odontogramEntryId ?? ""
+  const defaultDiagnosis = defaults?.diagnosisCode ?? ""
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lo dispara la pieza elegida, no cada render.
+  useEffect(() => {
+    if (editing) return
+    const before = startedWith.current
+    const now = form.state.values
+    const untouched = (now.teeth[0] ?? null) === before.tooth && now.odontogramEntryId === before.finding
+    // La pieza de partida llegó con su hallazgo y dejó de serlo (se anuló: era la equivocada): el
+    // formulario no se queda con ella. Lo que quien indica eligió a mano no se toca, ni la pieza
+    // que se abrió sin hallazgo (QA del 16 nov, Q15).
+    if (defaultTooth == null) {
+      if (!untouched || before.tooth == null || before.finding === "") return
+      startedWith.current = { tooth: null, finding: "" }
+      form.setFieldValue("teeth", [])
+      form.setFieldValue("surfaces", [])
+      form.setFieldValue("odontogramEntryId", "")
+      form.setFieldValue("diagnosisCode", "")
+      return
+    }
+    if (!untouched || (defaultTooth === before.tooth && defaultFinding === before.finding)) return
+    startedWith.current = { tooth: defaultTooth, finding: defaultFinding }
+    form.setFieldValue("scope", "tooth")
+    form.setFieldValue("teeth", [defaultTooth])
+    form.setFieldValue("surfaces", [])
+    form.setFieldValue("odontogramEntryId", defaultFinding)
+    form.setFieldValue("diagnosisCode", defaultDiagnosis)
+  }, [defaultTooth, defaultFinding])
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const scope = useStore(form.store, (state) => state.values.scope)

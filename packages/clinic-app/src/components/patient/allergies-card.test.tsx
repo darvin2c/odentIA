@@ -140,11 +140,12 @@ describe("su «No sé» a las alergias, en Antecedentes", () => {
         },
       ]),
     )
-    expect(html).toContain("Su madre dijo que no sabe si tiene alergias (13 nov).")
-    expect(html).not.toContain("Aún no se le preguntó")
+    expect(html).toContain("Alergias: su madre dijo que no sabe (13 nov).")
+    expect(html).not.toContain("no se le preguntó")
     expect(html).toContain("No tiene alergias")
   })
   it("sin ningún «No sé», sigue diciendo que no se le preguntó", () => {
-    expect(render(dontKnow([]))).toContain("Aún no se le preguntó si tiene alergias.")
+    // La misma frase que la franja, la ficha y la atención (estudio de la atención del 16 nov, E10a).
+    expect(render(dontKnow([]))).toContain("Alergias: no se le preguntó.")
   })
 })

@@ -352,10 +352,10 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
   await expect(page.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
-  await expect(page.getByText("Faltan 2 para cerrar: diagnóstico y evolución")).toBeVisible()
+  await expect(page.getByText("Faltan 2: diagnóstico y evolución")).toBeVisible()
   // Lo escrito se guarda solo y el cierre deja de pedirlo, sin recargar.
   await page.getByLabel("Evolución", { exact: true }).fill("Endodoncia de la pieza 36 sin complicaciones.")
-  await expect(page.getByText("Falta 1 para cerrar: diagnóstico")).toBeVisible()
+  await expect(page.getByText("Falta 1: diagnóstico")).toBeVisible()
   const encounterId = page.url().split("/encounters/")[1]?.split(/[?#]/)[0] ?? ""
   const apiPath = `/api/patients/${ids.patientId}/encounters/${encounterId}`
   await call(page, "POST", `${apiPath}/diagnoses`, owner.org.slug, {

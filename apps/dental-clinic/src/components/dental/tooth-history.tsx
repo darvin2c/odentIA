@@ -58,6 +58,37 @@ function title(event: ToothEvent) {
   return event.title
 }
 
+/** Lo que tiene la pieza, para pedirlo una vez: la línea plegada y la historia lo comparten. */
+export function useToothHistory(patientId: string, toothNumber: number) {
+  return useQuery({
+    queryKey: ["tooth-history", patientId, toothNumber],
+    queryFn: () =>
+      apiFetch<{ data: ToothEvent[] }>(`/api/patients/${patientId}/odontogram/teeth/${toothNumber}/history`),
+  })
+}
+
+/** «1 hallazgo», «2 procedimientos»: sin «(s)» ni ceros. */
+function counted(count: number, one: string, many: string): string | null {
+  return count === 0 ? null : `${count} ${count === 1 ? one : many}`
+}
+
+/**
+ * La historia de la pieza en una línea, para tenerla plegada debajo de lo que se viene a hacer:
+ * «Historia de la 46 · 1 hallazgo · 1 procedimiento». Lo anulado no cuenta.
+ */
+export function toothHistoryWords(toothNumber: number, events: readonly ToothEvent[] | undefined): string {
+  const head = `Historia de la ${toothNumber}`
+  if (!events) return head
+  const live = events.filter((event) => event.status !== "anulado")
+  const of = (kind: ToothEvent["kind"]) => live.filter((event) => event.kind === kind).length
+  const parts = [
+    counted(of("hallazgo"), "hallazgo", "hallazgos"),
+    counted(of("procedimiento"), "procedimiento", "procedimientos"),
+    counted(of("documento"), "imagen o documento", "imágenes o documentos"),
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? `${head} · ${parts.join(" · ")}` : `${head} · sin registros`
+}
+
 /**
  * Historia de la pieza: todo lo que le pasó, del hecho más reciente al más
  * antiguo, con su profesional y su atención. No es un registro nuevo: se arma
@@ -70,13 +101,7 @@ export function ToothHistory({
   patientId: string
   toothNumber: number
 }): React.JSX.Element {
-  const query = useQuery({
-    queryKey: ["tooth-history", patientId, toothNumber],
-    queryFn: () =>
-      apiFetch<{ data: ToothEvent[] }>(
-        `/api/patients/${patientId}/odontogram/teeth/${toothNumber}/history`,
-      ),
-  })
+  const query = useToothHistory(patientId, toothNumber)
   const events = query.data?.data ?? []
   const count = (kind: ToothEvent["kind"], status?: string) =>
     events.filter(

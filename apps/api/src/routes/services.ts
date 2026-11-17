@@ -143,6 +143,8 @@ const createInput = z
       .array(z.object({ afterDays: z.number().int(), title: z.string().max(200) }).strict())
       .max(20)
       .nullish(),
+    // «Usa anestesia local»: null vuelve a lo de la biblioteca.
+    localAnesthesia: z.boolean().nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -174,6 +176,7 @@ const patchInput = z
       .array(z.object({ afterDays: z.number().int(), title: z.string().max(200) }).strict())
       .max(20)
       .nullish(),
+    localAnesthesia: z.boolean().nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
     evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
@@ -579,6 +582,7 @@ export function createServicesRoute(deps: CrmDeps) {
           usualSessions: parsed.data.usualSessions,
           sessionGapDays: parsed.data.sessionGapDays,
           finishControls: parsed.data.finishControls,
+          localAnesthesia: parsed.data.localAnesthesia,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,
@@ -614,6 +618,7 @@ export function createServicesRoute(deps: CrmDeps) {
           usualSessions: parsed.data.usualSessions,
           sessionGapDays: parsed.data.sessionGapDays,
           finishControls: parsed.data.finishControls,
+          localAnesthesia: parsed.data.localAnesthesia,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
           leavesFinding: parsed.data.leavesFinding,

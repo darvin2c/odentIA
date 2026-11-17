@@ -192,13 +192,12 @@ export async function encounterVisitOf(
         order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_today
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
-      ${
-        // Donde lo indicado nace aceptado (latidIA), lo indicado hoy es para otro día: no es «a qué viene».
-        budgetRequired
-          ? sql``
-          : sql`and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept
-        where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))`
-      }
+      -- «Hoy viene a…» lleva solo lo que viene de antes (P11, decisión D6 del estudio de la atención,
+      -- ADR 0199): lo indicado en esta misma atención no es «a qué viene», en ningún producto. Su
+      -- «Hacerla hoy» está en su fila del Plan, para que el consentimiento se pida antes del acto;
+      -- lo que ya se trajo con él (o con su cita) sigue aquí.
+      and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept
+        where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
   // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
   const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)

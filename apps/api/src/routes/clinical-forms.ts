@@ -354,6 +354,8 @@ const consentPrepare = z
     patientId: uuid,
     encounterId: uuid,
     templateKeys: z.array(z.string().trim().min(2).max(40)).max(20).optional(),
+    /** Solo los de ese tratamiento, aunque aún no esté en la atención: se consiente antes del acto. */
+    planItemId: uuid.optional(),
   })
   .strict()
 
@@ -1070,10 +1072,10 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     const parsed = consentPrepare.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { patientId, encounterId, templateKeys } = parsed.data
+    const { patientId, encounterId, templateKeys, planItemId } = parsed.data
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        prepareEncounterConsents(tx, orgId, userId, patientId, encounterId, templateKeys),
+        prepareEncounterConsents(tx, orgId, userId, patientId, encounterId, templateKeys, planItemId),
       ),
     )
   })

@@ -322,7 +322,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
     ),
   ).rejects.toMatchObject({ code: "ITEM_NOT_ACCEPTED" })
   // Con la cita puesta, lo que sigue es la respuesta que falta (lo que piensa).
-  expect((await nextStep()).text).toBe("Lo está pensando")
+  expect((await nextStep()).text).toBe("Lo piensa")
   // La atención de esa cita trae el tratamiento.
   const attention = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: cita.id }))
   const brought = await ownerDb

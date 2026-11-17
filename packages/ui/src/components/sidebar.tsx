@@ -69,6 +69,12 @@ type SidebarContextProps = {
   overlay: boolean
   toggleSidebar: () => void
   mobileTriggerRef: React.RefObject<HTMLElement | null>
+  /**
+   * Pliega el menú en íconos mientras dure lo que lo pide (la atención), sin tocar la
+   * preferencia de la persona: al soltarlo vuelve como estaba. Si la persona lo abre o lo
+   * cierra mientras tanto, gana lo suyo. Devuelve cómo soltarlo.
+   */
+  holdCollapsed: () => () => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -124,11 +130,15 @@ function SidebarProvider({
   React.useEffect(() => {
     if (isTablet) _setOpen(false)
   }, [isTablet])
-  const open = openProp ?? _open
+  // Quienes piden el menú en íconos por un rato (`holdCollapsed`): mientras haya alguno, se ve plegado.
+  const [holds, setHolds] = React.useState(0)
+  const open = (openProp ?? _open) && holds === 0
   const overlay = isTablet && open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value
+      // Lo decide la persona: deja de estar plegado a la fuerza y lo suyo es la preferencia.
+      setHolds(0)
       if (setOpenProp) {
         setOpenProp(openState)
       } else {
@@ -140,6 +150,16 @@ function SidebarProvider({
     },
     [setOpenProp, open]
   )
+
+  const holdCollapsed = React.useCallback(() => {
+    setHolds((count) => count + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      setHolds((count) => Math.max(0, count - 1))
+    }
+  }, [])
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
@@ -181,8 +201,9 @@ function SidebarProvider({
       setOpenMobile,
       toggleSidebar,
       mobileTriggerRef,
+      holdCollapsed,
     }),
-    [state, open, setOpen, isMobile, overlay, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, overlay, openMobile, setOpenMobile, toggleSidebar, holdCollapsed]
   )
 
   return (

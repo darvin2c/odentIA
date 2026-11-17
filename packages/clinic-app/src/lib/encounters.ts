@@ -3,6 +3,7 @@
  * requisitos, anulación con motivo, relevo, diagnósticos CIE-10 como entidad
  * y perfil profesional con el que se firma.
  */
+import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { ConsentNeed } from "./encounter-documents"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -30,6 +31,11 @@ export interface ClosingCheck {
   /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */
   periodontal: ClosingPeriodontal | null
   /**
+   * odentIA: caras con caries y restauración a la vez, alguna registrada hoy. Un aviso suave:
+   * suele ser caries bajo la restauración. Los demás productos no lo traen.
+   */
+  sameFace?: Array<{ toothNumber: number; surface: string }>
+  /**
    * Lo que se descontará al firmar (los materiales de sus servicios), con la
    * sede de la que sale. Informa, no pide confirmar; null si la atención no
    * tiene sede o no hay nada que descontar (ADR 0067).
@@ -41,7 +47,11 @@ export interface ClosingCheck {
    * anestesia y algo por saber, el cierre lo avisa. No bloquea.
    */
   /** `risks`: lo que dijo del corazón y de la anestesia que cambia una anestesia. */
-  health?: { gaps: HealthGap[]; anesthetics: string[]; risks?: string[] }
+  /**
+   * Lo que falta saber de su salud y la anestesia de hoy: `anesthetics`, los de sus materiales;
+   * `uses`, lo de hoy cuyo servicio usa anestesia local; `asksAsa`, si el producto pide la ASA.
+   */
+  health?: { gaps: HealthGap[]; anesthetics: string[]; risks?: string[]; uses?: string[]; asksAsa?: boolean }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**
@@ -55,8 +65,16 @@ export interface ClosingCheck {
     finishing: ClosingSession[]
     continuing: ClosingSession[]
     notRegistered?: ClosingSession[]
-    /** Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso (la corona tras la endodoncia). */
+    /**
+     * Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso: primero lo de la misma pieza
+     * (la corona tras la endodoncia) y después lo del mismo plan (la resina 15 y la limpieza).
+     */
     accepted?: ClosingSession[]
+    /**
+     * Lo que iba después de lo que hoy termina y no tiene cita (la corona tras la endodoncia):
+     * el cierre propone un control a 30 días.
+     */
+    afterUnbooked?: ClosingSession[]
   }
   /**
    * Los diagnósticos activos que resuelve un tratamiento de hoy si queda
@@ -100,6 +118,8 @@ export interface ClosingSession {
   place?: string
   /** La cita por venir que ya lleva su próxima sesión; sin cita, no viene. */
   booked?: BookedSession
+  /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
+  before?: { planItemId: string; title: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
@@ -512,6 +532,43 @@ export function voidDiagnosisApi(
   )
 }
 
+/** Desde dónde se corrige: las filas de un hallazgo o un diagnóstico de esta atención. */
+export type CorrectionStart = { findingIds: string[] } | { diagnosisId: string }
+
+/** Algo que cae con la anulación: marcable si se puede; si no, `note` dice por qué no. */
+export interface CorrectionChoice {
+  ids: string[]
+  label: string
+  offered: boolean
+  note: string | null
+}
+
+/** Lo que cae con un hallazgo o un diagnóstico (lo calcula el servidor; la pantalla solo marca). */
+export interface CorrectionPreview {
+  target: { kind: "finding" | "diagnosis"; ids: string[]; label: string }
+  findings: CorrectionChoice[]
+  diagnoses: CorrectionChoice[]
+  planItems: CorrectionChoice[]
+  notices: string[]
+}
+
+export function fetchCorrectionPreview(patientId: string, encounterId: string, start: CorrectionStart) {
+  const query =
+    "diagnosisId" in start
+      ? `diagnosisId=${encodeURIComponent(start.diagnosisId)}`
+      : `findingIds=${start.findingIds.map(encodeURIComponent).join(",")}`
+  return apiFetch<{ data: CorrectionPreview }>(`${base(patientId)}/encounters/${encounterId}/correction?${query}`)
+}
+
+/** Anula lo pedido y lo marcado, con un solo motivo y en una sola operación. */
+export function correctApi(
+  patientId: string,
+  encounterId: string,
+  body: { start: CorrectionStart; reason: string; findingIds: string[]; diagnosisIds: string[]; planItemIds: string[] },
+) {
+  return post<unknown>(`${base(patientId)}/encounters/${encounterId}/correction`, body)
+}
+
 export function fetchPatientDiagnoses(patientId: string, status?: "activo" | "resuelto") {
   const query = status ? `?status=${status}` : ""
   return apiFetch<{ data: PatientDiagnosis[] }>(`${base(patientId)}/diagnoses${query}`)
@@ -563,8 +620,7 @@ export function signatureRegistrationErrors(
   else if (body.length > 40) errors.registrationBody = "El colegio profesional admite hasta 40 caracteres"
   const number = values.registrationNumber.trim()
   if (!number) errors.registrationNumber = "Escribe tu número de colegiatura"
-  else if (!/^[A-Za-z0-9-]{1,20}$/.test(number))
-    errors.registrationNumber = "La colegiatura lleva solo letras, números y guiones (hasta 20)"
+  else if (!isRegistrationNumber(number)) errors.registrationNumber = REGISTRATION_NUMBER_WORDS
   return errors
 }
 
@@ -611,5 +667,13 @@ export function chooseVisitControlApi(
 export function removeIndicatedApi(patientId: string, encounterId: string, planItemId: string) {
   return apiFetch(`${base(patientId)}/encounters/${encounterId}/indicated/${planItemId}`, {
     method: "DELETE",
+  })
+}
+
+/** «Deshacer» de «Quitar»: el mismo tratamiento vuelve a su opción, con su precio y su orden. */
+export function restoreIndicatedApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/indicated/${planItemId}/restore`, {
+    method: "POST",
+    body: "{}",
   })
 }

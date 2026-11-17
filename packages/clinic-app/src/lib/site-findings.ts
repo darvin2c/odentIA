@@ -10,6 +10,29 @@ export interface FindingGroup<T extends SiteFinding = SiteFinding> {
 }
 
 /**
+ * La pieza se corrigió en esta atención: todo lo que se le registró aquí está anulado. Era la
+ * pieza equivocada, así que «Indicar un tratamiento» no la trae de partida (QA del 16 nov, Q15:
+ * tras anular la caries de la 38, el formulario seguía con «1 pieza seleccionada», la 38).
+ */
+export function toothCorrectedAway(entries: readonly SiteFinding[], toothNumber: number): boolean {
+  const own = entries.filter((entry) => entry.toothNumber === toothNumber)
+  return own.length > 0 && own.every((entry) => !!entry.voidedAt)
+}
+
+/**
+ * Lo registrado en esta atención, como hallazgos (cada uno con sus caras): es lo que se puede
+ * anular aquí. La pieza lo muestra arriba, a la vista, con su «Anular» (QA del 16 nov, Q14: quedaba
+ * dentro del pliegue «Historia de la 36 · sin registros»).
+ */
+export function findingsOfEncounter<T extends SiteFinding & { encounterId?: string | null }>(
+  entries: readonly T[],
+  encounterId: string | null | undefined,
+): FindingGroup<T>[] {
+  if (!encounterId) return []
+  return groupFindings(entries.filter((entry) => entry.encounterId === encounterId))
+}
+
+/**
  * Junta las caras de un mismo registro (QA de la atención del 8 nov: «una caries
  * DO quedó como 2 hallazgos»). Se guarda una fila por cara y las de un registro
  * comparten pieza, condición, estado, diagnóstico y el instante en que se

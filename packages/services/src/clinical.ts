@@ -280,6 +280,9 @@ export interface PatientHealth {
   revision: number
   bloodGroup: BloodGroup | null
   asaClass: string | null
+  /** Quién clasificó la ASA y cuándo (QA del 16 nov); nulos si no consta. */
+  asaClassSetAt: Date | null
+  asaClassSetBy: string | null
   familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
   reviewedAt: Date | null
   reviewedBy: string | null
@@ -759,6 +762,8 @@ export async function getPatientHealth(
       reviewStatus: patient.healthReviewStatus,
       bloodGroup: patient.bloodGroup,
       asaClass: patient.asaClass,
+      asaClassSetAt: patient.asaClassSetAt,
+      asaClassSetBy: patient.asaClassSetBy,
       reviewedAt: patient.healthReviewedAt,
       reviewedBy: patient.healthReviewedBy,
       allergiesReviewedAt: patient.allergiesReviewedAt,
@@ -821,6 +826,8 @@ export async function getPatientHealth(
     revision: header.revision,
     bloodGroup: header.bloodGroup,
     asaClass: header.asaClass,
+    asaClassSetAt: header.asaClassSetAt,
+    asaClassSetBy: header.asaClassSetBy,
     familyHistory,
     reviewedAt: header.reviewedAt,
     reviewedBy: header.reviewedBy,
@@ -838,7 +845,14 @@ export async function getPatientHealth(
     latestAnamnesis: latest,
   }
   const authorship = await healthAuthorshipOf(tx, orgId, patientId)
-  const reviewPending = healthReviewPending(health, authorship)
+  // La ASA la pone quien atiende: avanza la revisión (para que Antecedentes abierto en otra pantalla
+  // recargue en vez de pisarla), pero no es algo que la persona dijo. Sin nada más, no hay nada
+  // «sin revisar» (QA del 16 nov, Q9: la ficha decía «Lo que dijo de su salud, sin revisar» sin que
+  // nadie dijera nada).
+  const reviewPending = healthReviewPending(
+    { ...health, revision: Math.max(0, health.revision - authorship.asaClassifications) },
+    authorship,
+  )
   const declarations = await healthDeclarationsOf(tx, orgId, patientId, opts.allDeclarations ? null : 50)
   const today = await clinicToday(tx, orgId)
   // Lo guardado antes sin fecha toma la del día en que se anotó ese «sí»: sale de las versiones de la
@@ -1289,6 +1303,8 @@ interface HealthAuthorshipDetail extends HealthAuthorship {
   staffSavedAt: Date | null
   /** Los grupos que un clínico negó en la atención («Niega enfermedades»). */
   deniedGroups: string[]
+  /** Cuántas veces se puso la ASA de un toque: cada una avanzó la revisión sin que nadie dijera nada. */
+  asaClassifications: number
 }
 
 /**
@@ -1306,7 +1322,14 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "patient"),
         eq(auditEvent.entityId, patientId),
-        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved", "health.reviewed"]),
+        inArray(auditEvent.action, [
+          "health.declared",
+          "health.allergies_declared",
+          "health.denied",
+          "health.saved",
+          "health.reviewed",
+          "patient.asa_classified",
+        ]),
       ),
     )
   const latest = (actions: string[]): Date | null =>
@@ -1328,6 +1351,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         }),
       ),
     ],
+    asaClassifications: rows.filter((row) => row.action === "patient.asa_classified").length,
   }
 }
 
@@ -2056,6 +2080,7 @@ async function persistPatientHealth(
     .select({
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
+      asaClass: patient.asaClass,
     })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -2429,10 +2454,13 @@ async function persistPatientHealth(
   }
   if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
     throw invalidField("asaClass", "Elige la clasificación ASA de la lista")
+  // La ASA que cambia queda con quién y cuándo, y la de antes en la auditoría (QA del 16 nov).
+  const asaChanged = input.asaClass !== undefined && (input.asaClass ?? null) !== (locked.asaClass ?? null)
   await tx
     .update(patient)
     .set({
       ...(input.asaClass !== undefined ? { asaClass: input.asaClass } : {}),
+      ...(asaChanged ? { asaClassSetAt: new Date(), asaClassSetBy: context.userId } : {}),
       healthRevision: locked.revision + 1,
       healthReviewStatus: reviewStatus,
       healthReviewedAt: context.kind === "staff" ? new Date() : null,
@@ -2457,8 +2485,69 @@ async function persistPatientHealth(
         medications: medications.length,
       },
       newInterviewVersion: newVersion,
+      ...(asaChanged ? { asa: { before: locked.asaClass ?? null, after: input.asaClass ?? null } } : {}),
     },
   )
+  return getPatientHealth(tx, orgId, patientId)
+}
+
+/**
+ * La ASA de un toque, antes de anestesiar (QA del 16 nov, E5b): solo la clasificación, sin rearmar
+ * los antecedentes. Queda con quién y cuándo en la ficha, y la de antes en la auditoría
+ * (`patient.asa_classified`, con la atención donde se puso). Avanza la revisión, así una edición
+ * abierta de Antecedentes recarga en vez de pisarla. Avisa y no frena: nada exige ponerla.
+ */
+export async function setPatientAsa(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: { asaClass: string | null; encounterId?: string | null },
+): Promise<PatientHealth> {
+  if (input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
+    throw invalidField("asaClass", "Elige la clasificación ASA de la lista")
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, asaClass: patient.asaClass })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  // Un doble toque o lo mismo otra vez no deja otra marca.
+  if ((locked.asaClass ?? null) === input.asaClass) return getPatientHealth(tx, orgId, patientId)
+  await tx
+    .update(patient)
+    .set({
+      asaClass: input.asaClass,
+      asaClassSetAt: new Date(),
+      asaClassSetBy: actorUserId,
+      healthRevision: locked.revision + 1,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // La atención que manda la pantalla se anota solo si es un borrador de este paciente: la firma lee
+  // esta marca para «la de antes» y no puede tomar la de otra atención (revisión del 16 nov, R13).
+  const [own] = input.encounterId
+    ? await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(
+          and(
+            eq(encounter.organizationId, orgId),
+            eq(encounter.patientId, patientId),
+            eq(encounter.id, input.encounterId),
+            eq(encounter.status, "borrador"),
+          ),
+        )
+        .limit(1)
+    : []
+  await audit(tx, orgId, actorUserId, "patient.asa_classified", "patient", patientId, {
+    before: locked.asaClass ?? null,
+    after: input.asaClass,
+    encounterId: own?.id ?? null,
+    revision: { before: locked.revision, after: locked.revision + 1 },
+  })
   return getPatientHealth(tx, orgId, patientId)
 }
 

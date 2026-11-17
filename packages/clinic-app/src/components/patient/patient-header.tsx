@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { changedHistoryOf, declaredMarkWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
+import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -111,6 +111,82 @@ export function clinicalAlerts(
   })
   const marked = medications.filter((m) => m.tone === "warning")
   return [...severe, ...marked, ...other, ...conditions, ...medications.filter((m) => m.tone !== "warning")]
+}
+
+/**
+ * Las alertas en una línea, por riesgo (P12, la voz clínica): la alergia grave; que no se le
+ * preguntó por alergias; las demás alergias; el anticoagulante o la medicina para los huesos; las
+ * intolerancias; el embarazo; las enfermedades; lo demás que toma; y al final «Niega alergias».
+ * Toda alergia va antes que el anticoagulante (QA del 16 nov, Q6): en el teléfono la alergia a
+ * penicilinas quedaba detrás de «+1», justo al recetar. Con pocas a la vista, nunca queda «Niega
+ * alergias» con el anticoagulante escondido en «+N».
+ * Son las mismas que la franja de arriba (`clinicalAlerts`): no es otra fuente. `short` es el
+ * rótulo del teléfono, donde caben dos: «Alergia: penicilinas» y «Warfarina».
+ */
+export function alertsByRisk(
+  detail: Pick<
+    PatientFull,
+    "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidUnknown"
+  >,
+  health: Pick<PatientHealth, "pregnancy"> | null | undefined,
+  sex?: string | null,
+): Array<{ id: string; label: string; short: string; tone: "destructive" | "warning" | "secondary" }> {
+  const allergyOf = new Map(detail.activeAllergies.map((row) => [row.id, row]))
+  const medicationOf = new Map(detail.currentMedications.map((row) => [row.id, row]))
+  const alerts = clinicalAlerts(detail).map((alert) => {
+    const allergy = allergyOf.get(alert.id)
+    const medication = medicationOf.get(alert.id)
+    const short = allergy
+      ? `${allergy.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(allergy)}`
+      : // El grupo y la dosis se leen al tocar «+N» o arriba: en el teléfono, el nombre.
+        medication && alert.tone === "warning"
+        ? medication.name
+        : alert.label
+    return { ...alert, short }
+  })
+  const allergyIds = new Set(detail.activeAllergies.map((row) => row.id))
+  const intoleranceIds = new Set(
+    detail.activeAllergies.filter((row) => row.kind === "intolerancia").map((row) => row.id),
+  )
+  const medicationIds = new Set(detail.currentMedications.map((row) => row.id))
+  const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
+  const unasked =
+    noAllergies && detail.allergyReview === "unknown"
+      ? [
+          {
+            id: "alergias",
+            // La misma frase que la franja, la ficha y la atención (revisión del 16 nov, R14).
+            label: noAllergiesWords({ review: "unknown", saidUnknown: detail.allergySaidUnknown }, sex),
+            tone: "warning" as const,
+          },
+        ].map((alert) => ({ ...alert, short: alert.label }))
+      : []
+  const denies =
+    noAllergies && detail.allergyReview === "none"
+      ? [{ id: "alergias", label: "Niega alergias", short: "Niega alergias", tone: "secondary" as const }]
+      : []
+  const pregnancy = health?.pregnancy
+    ? [
+        {
+          id: "embarazo",
+          label: pregnancyChip(health.pregnancy),
+          short: pregnancyChip(health.pregnancy),
+          tone: health.pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
+        },
+      ]
+    : []
+  const mildAllergy = (alert: (typeof alerts)[number]) => allergyIds.has(alert.id) && alert.tone !== "destructive"
+  return [
+    ...alerts.filter((alert) => alert.tone === "destructive"),
+    ...unasked,
+    ...alerts.filter((alert) => mildAllergy(alert) && !intoleranceIds.has(alert.id)),
+    ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone === "warning"),
+    ...alerts.filter((alert) => mildAllergy(alert) && intoleranceIds.has(alert.id)),
+    ...pregnancy,
+    ...alerts.filter((alert) => !allergyIds.has(alert.id) && !medicationIds.has(alert.id)),
+    ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone !== "warning"),
+    ...denies,
+  ]
 }
 
 /** «No se le preguntó» no es «dijo que no»: lo que se sabe de cada clase, en la atención. */
@@ -314,15 +390,12 @@ export function PatientClinicalStrip({
   const isShown = (alert: (typeof alerts)[number]) => shownIds.has(alert.id)
   const hidden = ordered.length - shownIds.size
   const unchanged = health?.unchanged ?? null
+  // La misma frase en la franja, la ficha, la atención y lo que ve recepción (estudio de la atención del
+  // 16 nov, E10a). Su «No sé» no es «no se le preguntó» (QA del 15 nov, K16); su «No» va en su caja.
   const allergyWord =
-    saidNoAllergies !== null
-      ? null
-      : noAllergies && detail.allergyReview === "none"
-        ? "Niega alergias"
-        : noAllergies && detail.allergyReview === "unknown"
-          ? // Su «No sé» no es «no preguntado», como el del anticoagulante (QA del 15 nov, K16).
-            `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`
-          : null
+    saidNoAllergies === null && noAllergies && (detail.allergyReview === "none" || detail.allergyReview === "unknown")
+      ? noAllergiesWords({ review: detail.allergyReview, saidUnknown: detail.allergySaidUnknown }, sex)
+      : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null

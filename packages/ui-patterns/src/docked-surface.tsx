@@ -5,6 +5,7 @@ import {
   SideColumn,
   type SideColumnWidth,
   SideDockPortal,
+  useDockedColumnHandle,
   sidePanelWidthKey,
   useDraftKeptInPage,
   useSideColumnWidth,
@@ -185,6 +186,8 @@ export interface DockedSurfaceProps {
   draft?: DraftSavedScope
   /** La frase propia de «¿Salir sin guardar?» al salir por el menú (la misma que su cierre, `useCloseGuard`). */
   unsavedDescription?: string
+  /** Cerrarla: lo usa la página a la que le quitó el ancho, con «Seguir aquí» (regla 5 de `side-dock`). */
+  onClose?: () => void
   children: React.ReactNode
 }
 
@@ -200,11 +203,12 @@ export function DockedSurface({
   fallback,
   draft,
   unsavedDescription,
+  onClose,
   children,
 }: DockedSurfaceProps) {
   return (
     <SideDockPortal fallback={fallback}>
-      <DockedColumn bounds={bounds} dirty={dirty} draft={draft} unsavedDescription={unsavedDescription}>
+      <DockedColumn bounds={bounds} dirty={dirty} draft={draft} unsavedDescription={unsavedDescription} onClose={onClose}>
         {children}
       </DockedColumn>
     </SideDockPortal>
@@ -216,8 +220,9 @@ function DockedColumn({
   dirty,
   draft: given,
   unsavedDescription,
+  onClose,
   children,
-}: Pick<DockedSurfaceProps, "bounds" | "children" | "draft" | "unsavedDescription"> & { dirty: boolean }) {
+}: Pick<DockedSurfaceProps, "bounds" | "children" | "draft" | "unsavedDescription" | "onClose"> & { dirty: boolean }) {
   const [width, resize] = useSideColumnWidth(sidePanelWidthKey(bounds), bounds)
   const DraftGuard = useSideDockDraftGuard()
   const keptInPage = useDraftKeptInPage()
@@ -277,6 +282,7 @@ function DockedColumn({
   }, [opener])
 
   const typed = armed && (dirty || touched)
+  useDockedColumnHandle(onClose, draft.unsaved || typed)
   return (
     <SideColumn
       ref={ref}

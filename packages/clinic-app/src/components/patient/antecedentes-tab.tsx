@@ -771,6 +771,7 @@ export function AntecedentesTab({
         />
       ) : (
         <AntecedentesSummary
+          memberName={memberName}
           saved={saved}
           pendingReview={pendingReview}
           groups={health.declared}
@@ -1200,16 +1201,19 @@ export function AntecedentesSummary({
   health,
   pregnancy,
   sex,
+  memberName,
 }: {
   saved: HealthFormValues
   pendingReview: boolean
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
   /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
-  health?: Pick<PatientHealth, "changed" | "medications">
+  health?: Pick<PatientHealth, "changed" | "medications" | "asaClassSetAt" | "asaClassSetBy">
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
+  /** El nombre de quien clasificó la ASA (sin él no se dice quién). */
+  memberName?: (userId: string) => string
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
   // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca tres anticoagulantes vigentes
@@ -1228,6 +1232,11 @@ export function AntecedentesSummary({
   // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
   // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
   const asa = asaLabel(asaClass)
+  // Con quién la clasificó y cuándo (QA del 16 nov: la ASA de un toque antes de anestesiar).
+  const asaWho =
+    asa && memberName && health?.asaClassSetBy && health.asaClassSetAt
+      ? ` · la clasificó ${memberName(health.asaClassSetBy)} el ${shortDay(health.asaClassSetAt)}`
+      : ""
   // Lo que dijo y nadie revisó se dice igual que en la franja: «lo dijo ella · sin revisar», y su
   // «No» como «dijo que no», nunca como el «niega» que anota quien se lo pregunta.
   const capital = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
@@ -1260,7 +1269,7 @@ export function AntecedentesSummary({
       state: review.conditions,
       said: saidWord("conditions", activeCon.flatMap((row) => (row.id ? [row.id] : []))),
       lead:
-        asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
+        asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}${asaWho}` : undefined,
       detail:
         activeCon.length > 0 || beforeCon.length > 0
           ? [

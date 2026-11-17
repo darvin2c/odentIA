@@ -167,7 +167,7 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         id: "inventario-por-vencer-dar-de-baja",
         q: "¿Cómo veo qué está por vencer y doy de baja lo vencido?",
         a: "En Inventario › Productos, «Por vencer» muestra lo que vence en los próximos 30 días y «Hacen falta», lo que está bajo su mínimo. Lo ya vencido trae «Dar de baja» en su fila, para propietario y administrador: queda en Movimientos como «Dado de baja: venció». Al abrir un producto ves sus lotes, con «Venció» o «Por vencer».",
-        forms: ["que esta por vencer", "dar de baja lo vencido", "tengo un producto vencido"],
+        forms: ["como saco del inventario un producto vencido", "que productos estan por acabarse", "que esta por vencer", "dar de baja lo vencido", "tengo un producto vencido"],
         needs: "inventory.write",
       },
       {
@@ -241,6 +241,14 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         q: "¿Cómo cambio el precio de un servicio?",
         a: "En Servicios y precios, en el menú de su fila, «Ver y editar»: cambia el precio y guarda; usa 0 si no tiene costo. Ahí mismo se cambian su nombre, su duración por sesión y lo demás. El precio nuevo vale para lo que se indique desde entonces: lo ya indicado, presupuestado o cobrado conserva el suyo.",
         forms: ["subir el precio de un servicio", "actualizar mi tarifario", "editar un servicio"],
+      },
+      {
+        id: "servicios-anestesia-local",
+        q: "¿Cómo marco que un servicio usa anestesia?",
+        a: "En Servicios y precios, en el menú de su fila, «Ver y editar»: «Usa anestesia local», junto a «Sesiones habituales». Lo de la biblioteca ya viene marcado si casi siempre se anestesia (cirugías y exodoncias, endodoncias y pulpectomías, periodoncia quirúrgica, raspado radicular e implantes); una resina o un servicio propio, no: márcalo si en tu clínica se anestesia, o desmárcalo si no. Con la marca, la atención muestra antes de anestesiar sus alergias, su medicación, la ASA y, con su peso, la dosis máxima. Cambiarla no toca las atenciones ya firmadas.",
+        forms: ["usa anestesia local", "marcar que un servicio lleva anestesia", "la limpieza no lleva anestesia", "por que me pide la asa en este servicio"],
+        needs: "settings.write",
+        own: true,
       },
       {
         id: "servicios-desactivar",

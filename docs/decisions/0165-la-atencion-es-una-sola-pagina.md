@@ -1,6 +1,6 @@
 # 0165 · La atención es una sola página que sabe a qué viene la persona
 
-Fecha: 2026-11-09 · Estado: aceptada · Sustituye, de ADR 0033, que la atención en borrador se edite por bloques que se abren en un cajón con «Listo», y que el consentimiento se pida por lo indicado
+Fecha: 2026-11-09 · Estado: aceptada; revisada en parte por [ADR 0199](0199-la-atencion-mas-liviana.md) (16 nov): «Hoy viene a…» lleva solo lo que viene de antes y el «Hacerla hoy» de lo indicado hoy está en su fila del Plan · Sustituye, de ADR 0033, que la atención en borrador se edite por bloques que se abren en un cajón con «Listo», y que el consentimiento se pida por lo indicado
 
 ## Problema
 

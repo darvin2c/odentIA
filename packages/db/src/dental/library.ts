@@ -10,10 +10,12 @@ import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
 import {
   type CatalogLibrary,
+  libraryAnesthesia,
   libraryFollowUpRules,
   librarySessions,
   type ProcedureLists,
   seedFollowUpRules,
+  seedLocalAnesthesia,
   seedProcedureCodes,
   splitHead,
   strictLines,
@@ -112,6 +114,7 @@ export const dentalLibrary: CatalogLibrary = {
     const scopeKeys = templates.map((t) => t.key)
     const sessions = librarySessions("biblioteca_sesiones.csv", templateKeys)
     const followUpRules = libraryFollowUpRules("biblioteca_controles.csv", templateKeys)
+    const anesthesia = libraryAnesthesia("biblioteca_anestesia.csv", templateKeys)
     const anatomy = libraryAnatomy(
       "biblioteca_piezas.csv",
       new Map(templates.map((t) => [t.key, t.scope])),
@@ -207,6 +210,7 @@ export const dentalLibrary: CatalogLibrary = {
           throw new Error(`Conciliación falló (templates): ${active?.count} frente a ${templates.length}`)
         }
         await seedFollowUpRules(tx, "dental", followUpRules)
+        await seedLocalAnesthesia(tx, "dental", anesthesia)
       },
     }
   },

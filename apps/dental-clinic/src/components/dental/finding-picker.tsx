@@ -2,7 +2,7 @@ import { FINDINGS } from "@odentia/dental"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@odentia/ui"
 import { common, EmptyState, normalizeSearchText } from "@odentia/ui-patterns"
 import { Search, SearchX, X } from "lucide-react"
-import { useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useOdontogramNotation } from "./odontogram-notation"
 import { ToothSVG } from "./tooth-svg"
 
@@ -39,12 +39,20 @@ export function FindingPicker({
   value,
   onChange,
   disabled = false,
+  autoFocus = false,
 }: {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
+  /** Al aparecer, el foco va al buscador (la pieza abierta al lado de la página). */
+  autoFocus?: boolean
 }) {
   const id = useId()
+  const searchRef = useRef<HTMLInputElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al aparecer, no en cada cambio.
+  useEffect(() => {
+    if (autoFocus) searchRef.current?.focus({ preventScroll: true })
+  }, [])
   const official = useOdontogramNotation()
   const [search, setSearch] = useState("")
   const query = normalizeSearchText(search.trim())
@@ -66,6 +74,7 @@ export function FindingPicker({
           <Search aria-hidden />
         </InputGroupAddon>
         <InputGroupInput
+          ref={searchRef}
           id={id}
           type="search"
           value={search}

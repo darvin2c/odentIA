@@ -3,10 +3,12 @@ import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
 import {
   type CatalogLibrary,
+  libraryAnesthesia,
   libraryFollowUpRules,
   librarySessions,
   type ProcedureLists,
   seedFollowUpRules,
+  seedLocalAnesthesia,
   splitHead,
   strictLines,
 } from "../procedure-codes.js"
@@ -78,6 +80,7 @@ export const medicalLibrary: CatalogLibrary = {
     const ownKeys = templates.map((t) => t.key)
     const sessions = librarySessions("biblioteca_medica_sesiones.csv", keys)
     const followUpRules = libraryFollowUpRules("biblioteca_medica_controles.csv", keys)
+    const anesthesia = libraryAnesthesia("biblioteca_medica_anestesia.csv", keys)
     const ours = eq(treatmentTemplate.product, "medical")
     return {
       keys: ownKeys,
@@ -141,6 +144,7 @@ export const medicalLibrary: CatalogLibrary = {
           )
         }
         await seedFollowUpRules(tx, "medical", followUpRules)
+        await seedLocalAnesthesia(tx, "medical", anesthesia)
       },
     }
   },

@@ -22,6 +22,8 @@ import {
   sumAcceptedByCurrency,
 } from "@odentia/clinical"
 import {
+  Alert,
+  AlertDescription,
   Badge,
   Button,
   ButtonGroup,
@@ -52,7 +54,7 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, Lock } from "lucide-react"
-import { useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useReceptionName } from "../../../lib/agent-names"
 import { ApiError, apiFetch } from "../../../lib/api"
@@ -69,10 +71,12 @@ import {
   decideBudgetApi,
   lineAwaitsAnswer,
   optionLines,
+  syncAnswerMarks,
 } from "../../../lib/budgets"
 import { fetchResponsibilities } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
-import { hcLabel, type PatientFull } from "../../../lib/patients"
+import { hcLabel, type PatientFull, type PlanItem } from "../../../lib/patients"
+import { lowerFirst } from "./plan-paths"
 import { ChoiceSelect } from "../../ui/choice-select"
 import {
   acceptedWords,
@@ -88,9 +92,14 @@ import { type BudgetSignRow, BudgetSigningScreen } from "./budget-signing"
 
 type Answer = "aceptado" | "pospuesto" | "rechazado"
 
+/**
+ * Una sola palabra para lo que espera (QA del 16 nov, E3): «Lo piensa», la misma del Plan, la ficha,
+ * Sofi y Argos; cuenta como «espera respuesta». Lo que la clínica hará después de otro tratamiento
+ * (la corona tras la endodoncia) es «Acepta»: el orden lo pone «va después».
+ */
 const ANSWER_OPTIONS: ReadonlyArray<{ value: Answer; label: string }> = [
   { value: "aceptado", label: "Acepta" },
-  { value: "pospuesto", label: "Para después" },
+  { value: "pospuesto", label: "Lo piensa" },
   { value: "rechazado", label: "No" },
 ]
 
@@ -176,6 +185,13 @@ interface ResponseValues {
   decisions: Array<{ planItemId: string; decision: Answer | "" }>
   decisionNote: string
 }
+
+/**
+ * El presupuesto cambió con el panel abierto (otra persona, otra pestaña o lo que se acaba de
+ * indicar): el panel se pone al día y lo dice, en vez de un rechazo del servidor (QA del 16 nov, Q1).
+ */
+export const BUDGET_CHANGED_NOTICE =
+  "El presupuesto cambió mientras anotabas la respuesta. Ya está al día: revisa cada tratamiento y guarda otra vez."
 
 /** El esquema del envío; `needsPath` dice si falta marcar el camino. */
 function responseSchema(needsPath: () => boolean) {
@@ -494,6 +510,15 @@ export function BudgetResponse({
     queryFn: () => fetchResponsibilities(patientId),
     enabled: active && canPatients,
   })
+  // Lo que va después de otro (la corona tras la endodoncia): se acepta y el orden ya está.
+  const canClinical = usePermission("clinical.read")
+  const planQuery = useQuery({
+    queryKey: ["plan-items", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: active && canClinical,
+  })
+  const afterOf = (planItemId: string) =>
+    planQuery.data?.data.find((item) => item.id === planItemId)?.waitsFor?.title ?? null
 
   const chosenOption = budget.options.find((option) => option.decision === "elegida") ?? null
   const several = budget.options.length > 1
@@ -522,6 +547,8 @@ export function BudgetResponse({
   /** Se abrió con «Acepta todo» y falta el camino: el panel lo dice. */
   const [acceptAllIntent, setAcceptAllIntent] = useState(false)
   const [confirming, setConfirming] = useState<"aceptado" | "rechazado" | null>(null)
+  /** El presupuesto cambió con el panel abierto y la respuesta a medias: se dice arriba. */
+  const [changedUnder, setChangedUnder] = useState(false)
   /**
    * Qué se guarda: una misma respuesta para lo pendiente (los botones y su
    * confirmación) o lo marcado en el panel, con su nota.
@@ -604,7 +631,13 @@ export function BudgetResponse({
         { decision: entry.decision as Answer, field: `decisions[${index}].decision` },
       ]),
     )
-    const fromForm = (line: BudgetLine) => ({ planItemId: line.planItemId, ...marked.get(line.planItemId)! })
+    // Cada línea que se responde sale del presupuesto de ahora. Si una no tiene marca (entró con el
+    // panel abierto y aún no llegó aquí), no viaja sin respuesta: se dice y se guarda otra vez.
+    const fromForm = (line: BudgetLine) => {
+      const mark = marked.get(line.planItemId)
+      if (!mark || !mark.decision) throw new Error(BUDGET_CHANGED_NOTICE)
+      return { planItemId: line.planItemId, ...mark }
+    }
     const answer = mode.current
     if (answer !== "panel") {
       // Lo mismo para todo lo que espera; con caminos sin elegir, sin elegir ninguno.
@@ -652,15 +685,27 @@ export function BudgetResponse({
         ...(draftInPerson ? { inPerson: true } : {}),
         ...(signedStrokes.current ? { signature: { strokes: signedStrokes.current } } : {}),
       }
-      if (runWrite) {
-        await runWrite(() => decideBudgetApi(patientId, budget.id, body))
-      } else {
-        await decideBudgetApi(patientId, budget.id, body)
-        await Promise.all(
-          ["budgets", "budget", "plan-next", "plan-items", "treatment-coordination"].map((key) =>
-            queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-          ),
-        )
+      try {
+        if (runWrite) {
+          await runWrite(() => decideBudgetApi(patientId, budget.id, body))
+        } else {
+          await decideBudgetApi(patientId, budget.id, body)
+          await Promise.all(
+            ["budgets", "budget", "plan-next", "plan-items", "treatment-coordination"].map((key) =>
+              queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+            ),
+          )
+        }
+      } catch (error) {
+        // «Debe decidir cada línea…»: lo enviado ya no coincide con el presupuesto (cambió por debajo
+        // y la pantalla aún no lo sabía). Se vuelve a leer y se dice qué pasó, sin el texto del servidor.
+        if (error instanceof ApiError && error.status === 400 && error.shape.fields?.decisions) {
+          await Promise.all(
+            ["budgets", "budget"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+          )
+          throw new Error(BUDGET_CHANGED_NOTICE)
+        }
+        throw error
       }
       // Desde cualquier lugar (el cajón, el Plan sobre la atención): la atención abierta se pone al día.
       void Promise.all(
@@ -669,12 +714,35 @@ export function BudgetResponse({
       setChangingDecider(false)
       setConfirming(null)
       setSigning(false)
+      setChangedUnder(false)
       signedStrokes.current = null
       wantsSign.current = false
       setDrawerOpen(false)
       if (direct) onClose?.()
     },
   })
+
+  /**
+   * El panel se abre con el presupuesto que tenía la pantalla. Si después entra o sale un
+   * tratamiento, las marcas se ponen al día con las líneas de ahora: lo ya marcado se conserva y lo
+   * nuevo queda por marcar, con sus botones. Si la persona ya había marcado algo, se le dice.
+   */
+  const wantedMarks = panelDecisions(acceptAllIntent ? "aceptado" : null)
+  const wantedKey = wantedMarks.map((entry) => entry.planItemId).join(" ")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambian las líneas que esperan respuesta.
+  useEffect(() => {
+    const current = form.state.values.decisions
+    const synced = syncAnswerMarks(current, wantedMarks)
+    if (!synced.changed) return
+    const started =
+      form.state.values.optionId !== "" ||
+      current.some(
+        (entry) =>
+          entry.decision !== (defaults.decisions.find((first) => first.planItemId === entry.planItemId)?.decision ?? ""),
+      )
+    form.setFieldValue("decisions", synced.marks)
+    if (drawerOpen && started) setChangedUnder(true)
+  }, [wantedKey])
   const saving = useStore(form.store, (state) => state.isSubmitting)
   const pickedPath = useStore(form.store, (state) => state.values.optionId)
   const chosenDeciderId = useStore(form.store, (state) => state.values.decidedByContactId)
@@ -723,6 +791,7 @@ export function BudgetResponse({
     }
     mode.current = "panel"
     setAcceptAllIntent(intent === "todo")
+    setChangedUnder(false)
     setDefaults(values)
     form.reset(values)
     setDrawerOpen(true)
@@ -833,9 +902,17 @@ export function BudgetResponse({
             {finalAnswerText(line, budget.status)}
           </p>
         ) : index >= 0 && withButtons ? (
-          <form.AppField name={`decisions[${index}].decision`}>
-            {() => <AnswerButtons title={line.title} disabled={saving} />}
-          </form.AppField>
+          <>
+            <form.AppField name={`decisions[${index}].decision`}>
+              {() => <AnswerButtons title={line.title} disabled={saving} />}
+            </form.AppField>
+            {afterOf(line.planItemId) ? (
+              <p className="text-xs text-muted-foreground">
+                Si la hará después: «Acepta» · va después de {lowerFirst(afterOf(line.planItemId) ?? "")}. «Lo piensa» es
+                si aún no decide.
+              </p>
+            ) : null}
+          </>
         ) : null}
       </li>
     )
@@ -986,6 +1063,11 @@ export function BudgetResponse({
             void responsibilitiesQuery.refetch()
           }}
         />
+      ) : null}
+      {changedUnder && formError !== BUDGET_CHANGED_NOTICE ? (
+        <Alert role="status">
+          <AlertDescription>{BUDGET_CHANGED_NOTICE}</AlertDescription>
+        </Alert>
       ) : null}
       {paths ? (
         <>

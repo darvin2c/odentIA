@@ -164,7 +164,16 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         )
         .replace("(lo aceptado, o lo que indicaste hoy)", "(lo que indicaste hoy o antes)")
         .replace("tiene algo aceptado sin empezar", "tiene algo indicado sin empezar")
-        .replace("Lo aceptado se reserva sin esperar al control", "Lo indicado se reserva sin esperar al control"),
+        .replace("Lo aceptado se reserva sin esperar al control", "Lo indicado se reserva sin esperar al control")
+        // Sin piezas ni «va después» en la óptica: lo del mismo plan es lo indicado.
+        .replace(
+          "primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento",
+          "lo indicado del mismo plan en los últimos 6 meses",
+        )
+        .replace(
+          " Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar.",
+          "",
+        ),
     },
   ],
   // Una sola fase: el plan no habla de fases.
@@ -202,7 +211,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
     withoutForms(
       {
         ...faq,
-        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca «Acepta», «Lo piensa» o «No»; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
       },
       "lo piensa con la muela",
     ),
@@ -250,10 +259,13 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
             "la diabetes, la presión alta, un medicamento o un embarazo cambian lo que se revisa en el ojo y lo que se indica",
           )
           .replace(
-            " Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales.",
+            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar.",
             "",
           )
-          .replace(" La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».", ""),
+          .replace(
+            " La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)», o con un toque en «Anestesia local».",
+            "",
+          ),
       },
       "asa antes de la anestesia",
       "donde pongo la clasificacion asa",
@@ -571,6 +583,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).
+  "indique-despues-presupuesto-incluida": () => [],
   // «De pequeño» es de odentIA (pediatría dental); en una óptica, solo lo común de quien cuida a un niño.
   "que-le-preguntan-a-la-mama-de-un-nino": (faq) => [
     {
@@ -613,7 +627,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       ...faq,
       a: swap(
         faq.a,
-        "«Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción.",
+        "«Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa).",
         "«Aceptó todo» o «Aceptó 2 de 3»; con dos opciones, dice cuál eligió.",
       ),
     },
@@ -662,6 +676,16 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
 /** Lo que solo tiene una óptica en las pantallas de siempre, por tema; lo del pedido va en su tema (`OPTICAL_ONLY_TOPICS`). */
 const OWN_FAQS: Record<string, Faq[]> = {
   pacientes: [
+    {
+      // Estudio de la atención del 16 nov (C22): la Ayuda no contestaba cómo reservar lo que sigue. En
+      // odentIA es «Reservar lo aceptado»; aquí lo indicado ya queda aceptado al indicarlo.
+      id: "pacientes-reservar-lo-indicado",
+      q: "¿Cómo le reservo lo indicado?",
+      a: "En su página, en «Qué sigue»: «Reservar lo indicado» abre «Nueva cita» con lo indicado ya marcado en «Para esta cita»; eliges con quién y cuándo.",
+      forms: ["como le reservo lo indicado", "como le saco cita para lo indicado", "que es reservar lo indicado"],
+      area: "plan",
+      needs: "appointments.write",
+    },
     {
       id: "pacientes-recetas-lentes-quien",
       q: "¿Quién ve las recetas de lentes y quién puede transcribir o anular una?",

@@ -30,6 +30,7 @@ import {
   type PeriodontalToothRecord,
   pendingProbingWords,
   phaseForKind,
+  type SameFaceFinding,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
   TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
@@ -52,6 +53,12 @@ import {
   signClosingOdontogram,
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
+import {
+  correctionFindings,
+  planItemLostItsFinding,
+  sameFaceFindings,
+  voidCorrectionFindings,
+} from "./finding-correction.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { lesionRowsOf, treatedByItem } from "./lesion.js"
 import { dentalProductSite, dentalSiteOfRow, siteColumns, surfaceWords } from "./site.js"
@@ -179,6 +186,8 @@ async function resolveTreatedFindings(
 export interface DentalClosingParts {
   odontogram: ClosingOdontogram | null
   periodontal: ClosingPeriodontal | null
+  /** Caras con caries y restauración a la vez, alguna de hoy: un aviso suave (C41). */
+  sameFace: SameFaceFinding[]
 }
 
 /** Lo que odentIA agrega a lo que informa el cierre: el odontograma que firmó. */
@@ -214,6 +223,7 @@ export const dentalHooks: ProductHooks = {
       odontogram: await closingOdontogramOf(tx, orgId, patientId, encounterId, finishingPlanItemIds),
       // A medias no bloquea: se firma como parcial (ADR 0054).
       periodontal: await closingPeriodontalOf(tx, orgId, encounterId),
+      sameFace: await sameFaceFindings(tx, orgId, patientId, encounterId),
     }
     return { ...parts }
   },
@@ -246,6 +256,12 @@ export const dentalHooks: ProductHooks = {
       signer,
     )
     return { odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null }
+  },
+
+  correction: {
+    findings: correctionFindings,
+    voidFindings: voidCorrectionFindings,
+    itemLostItsFinding: planItemLostItsFinding,
   },
 
   async encounterVoided(tx, { orgId, actorUserId, patientId, encounterId, at, reason }) {

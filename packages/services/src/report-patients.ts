@@ -46,6 +46,7 @@ import {
   spansSql,
 } from "./report-scope.js"
 import { controlTotals, firstVisitSql, newPatientsMany, type ReportListRow } from "./reports.js"
+import { visitRowsSql } from "./report-visits.js"
 
 /** Los pasos del embudo, en orden: cada uno cuenta a quien llegó a él o a uno posterior. */
 export const FUNNEL_STEPS = ["sought", "booked", "came", "budget", "accepted", "paid"] as const
@@ -285,15 +286,19 @@ export async function referralMany(
   )
 }
 
-/** Citas atendidas, de la sede si se eligió una: la base de activos, volvieron y sin venir. */
+/**
+ * Las visitas (`visitRowsSql`: una cita atendida o una atención firmada sin cita), de la sede si se
+ * eligió una: la base de activos, volvieron y sin venir.
+ */
 function attendedSql(orgId: string, branchId: string | undefined): SQL {
   return sql`attended as (
-      select a.id, a.patient_id, a.starts_at, a.branch_id, a.service_name, a.professional_user_id from appointment a
-      where a.organization_id = ${orgId} and a.status = 'atendida' ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
+      select v.id, v.patient_id, v.starts_at, v.branch_id, v.service_name, v.professional_user_id, v.appointment_id
+      from (${visitRowsSql(orgId)}) v
+      ${branchId ? sql`where v.branch_id = ${branchId}` : sql``}
     )`
 }
 
-/** Pacientes activos en cada momento: con una cita atendida en los `ACTIVE_MONTHS` meses anteriores. */
+/** Pacientes activos en cada momento: con una visita en los `ACTIVE_MONTHS` meses anteriores. */
 export async function activePatientsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch" | "timezone">, moments: Date[]): Promise<number[]> {
   const spans = moments.map((moment) => ({ start: moment, end: moment }))
   const rows = await tx.execute<{ idx: number; count: number }>(sql`
@@ -306,8 +311,8 @@ export async function activePatientsMany(tx: Db, orgId: string, scope: Pick<Repo
 }
 
 /**
- * Volvieron en el año, en cada momento: de los pacientes con una cita
- * atendida hace 12 a 24 meses, cuántos tuvieron otra en los últimos 12.
+ * Volvieron en el año, en cada momento: de los pacientes con una visita
+ * hace 12 a 24 meses, cuántos tuvieron otra en los últimos 12.
  */
 export async function returnedMany(
   tx: Db,
@@ -333,13 +338,13 @@ export async function returnedMany(
 
 /**
  * Sin venir hace más de `months` meses (los del producto), a hoy (la misma regla que
- * tendrá «Invitar a volver», #139): personas sin archivar cuya última cita
- * atendida fue antes de eso y que hoy no tienen cita por venir, presupuesto
- * que espere respuesta (`budgetAwaitsAnswerSql`) ni un control pendiente o
- * reservado de esos mismos meses: un control olvidado más viejo ya no la
- * saca de la lista (ADR 0152). Da
- * `lapsed(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`
- * con su última cita atendida.
+ * «Invitar a volver», #139): personas sin archivar cuya última visita (una cita
+ * atendida o una atención firmada sin cita, `visitRowsSql`) fue antes de eso y que
+ * hoy no tienen cita por venir, presupuesto que espere respuesta
+ * (`budgetAwaitsAnswerSql`) ni un control pendiente o reservado de esos mismos
+ * meses: un control olvidado más viejo ya no la saca de la lista (ADR 0152). Da
+ * `lapsed(id, patient_id, starts_at, branch_id, service_name, professional_user_id, appointment_id)`
+ * con su última visita: `id` es el de la visita y `appointment_id`, nulo si vino sin cita.
  */
 export function lapsedSql(
   orgId: string,
@@ -374,10 +379,13 @@ export async function lapsedCount(tx: Db, orgId: string, scope: ReportScope): Pr
 /**
  * «Volvieron tras la invitación» (#139): los pacientes invitados a volver en
  * el tramo, por el agente o con «Ya la invité» (`INVITED_TO_RETURN_ACTION`,
- * contado desde su primera invitación del tramo), y su primera cita atendida
- * después de esa invitación, a hoy. Da
- * `invited(patient_id, invited_at, returned_id, returned_at)`; `returned_id`
- * es nulo si todavía no volvió. Las invitaciones no son de una sede.
+ * contado desde su primera invitación del tramo), y su primera visita después
+ * de esa invitación, a hoy: la cita atendida o la atención firmada sin cita
+ * (`visitRowsSql`, la misma regla que «Invitar a volver»; revisión del 16 nov,
+ * R6). Da `invited(patient_id, invited_at, returned_id, returned_at,
+ * returned_branch_id, returned_service, returned_professional)`; `returned_id`
+ * (la cita o la atención) es nulo si todavía no volvió. Las invitaciones no
+ * son de una sede.
  */
 function invitedSql(orgId: string, span: Pick<Span, "start" | "end">): SQL {
   return sql`first_invite as (
@@ -386,12 +394,14 @@ function invitedSql(orgId: string, span: Pick<Span, "start" | "end">): SQL {
         and ae.created_at >= ${at(span.start)} and ae.created_at < ${at(span.end)}
       group by ae.entity_id
     ), invited as (
-      select i.patient_id, i.invited_at, back.id as returned_id, back.starts_at as returned_at
+      select i.patient_id, i.invited_at, back.id as returned_id, back.starts_at as returned_at,
+        back.branch_id as returned_branch_id, back.service_name as returned_service,
+        back.professional_user_id as returned_professional
       from first_invite i
       left join lateral (
-        select a.id, a.starts_at from appointment a
-        where a.organization_id = ${orgId} and a.patient_id::text = i.patient_id and a.status = 'atendida' and a.starts_at > i.invited_at
-        order by a.starts_at, a.id limit 1
+        select v.id, v.starts_at, v.branch_id, v.service_name, v.professional_user_id from (${visitRowsSql(orgId)}) v
+        where v.patient_id::text = i.patient_id and v.starts_at > i.invited_at
+        order by v.starts_at, v.id limit 1
       ) back on true
     )`
 }
@@ -586,19 +596,20 @@ export async function getPatientReportList(
         order by v.starts_at, v.patient_id limit ${limit}`)),
     ]
   } else if (query.list === "invited_returned") {
-    // Los invitados del periodo que ya volvieron, con la cita en que volvieron.
+    // Los invitados del periodo que ya volvieron, con la visita en que volvieron (su cita, o la
+    // atención firmada sin cita).
     rows = [
       ...(await tx.execute<Row>(sql`
         with ${invitedSql(orgId, window)}
-        select a.id::text as id, i.returned_at as at, p.id as "patientId", pp.id as "personId", pp.display_name as "personName",
-          a.service_name as title, u.name as "professionalName", br.name as "branchName",
+        select i.returned_id::text as id, i.returned_at as at, p.id as "patientId", pp.id as "personId", pp.display_name as "personName",
+          i.returned_service as title, u.name as "professionalName", br.name as "branchName",
           false as "hasNextAppointment", null::text as cents, null::text as currency, null::uuid as "conversationId", count(*) over()::int as total
         from invited i
-        join appointment a on a.id = i.returned_id and a.organization_id = ${orgId}
-        join patient p on p.id = a.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-        left join branch br on br.id = a.branch_id and br.organization_id = ${orgId}
-        left join "user" u on u.id = a.professional_user_id
-        order by i.returned_at desc, a.id limit ${limit}`)),
+        join patient p on p.id::text = i.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        left join branch br on br.id = i.returned_branch_id and br.organization_id = ${orgId}
+        left join "user" u on u.id = i.returned_professional
+        where i.returned_id is not null
+        order by i.returned_at desc, i.returned_id limit ${limit}`)),
     ]
   } else {
     const { budgetRequired } = await productHooks(tx, orgId)

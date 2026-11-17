@@ -32,6 +32,16 @@ function encounterWhen(start: string, end: string | null): string {
   return end && sameDay ? `${day}, ${clock(start)} a ${clock(end)}` : `${day}, ${clock(start)}`
 }
 
+/**
+ * El título de la atención firmada: lo que se hizo, con su sesión, y cuántas cosas más; sin
+ * procedimientos (una consulta), el motivo. Vacío si no hay ninguno de los dos.
+ */
+function signedTitle(detail: Pick<EncounterDetail, "doneLines" | "encounter">): string {
+  const [first, ...rest] = detail.doneLines ?? []
+  if (first) return rest.length > 0 ? `${first} y ${rest.length} más` : first
+  return detail.encounter.reason?.trim() ?? ""
+}
+
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   pendingComponent: EncounterLoading,
   component: EncounterPage,
@@ -147,9 +157,10 @@ function EncounterPage() {
   }
   return (
     <PageShell className="flex flex-col gap-6">
-      {/* El título es lo que se hizo; el estado, cuándo y quién van debajo. */}
+      {/* El título es lo que se hizo, con su sesión («Endodoncia posterior vital · Pieza 36 · sesión 1
+          de 2»); sin procedimientos, el motivo. El estado, cuándo y quién van debajo (P10). */}
       <PageHeader
-        title={detail.encounter.reason?.trim() || `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
+        title={signedTitle(detail) || `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
         subtitle={
           <>
                 <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
@@ -167,7 +178,7 @@ function EncounterPage() {
         }
       />
       {detail.encounter.status === "finalizada" ? (
-        <EncounterHandoff patientId={patientId} detail={detail} />
+        <EncounterHandoff patientId={patientId} patientName={patient.patient.displayName} detail={detail} />
       ) : null}
       <EncounterDetailView patientId={patientId} detail={detail} showDocuments={false} />
       {/* Anulada, no queda nada por trabajar en ella: sus papeles anulados siguen en Documentos de la persona. */}

@@ -1112,6 +1112,7 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     order by 1
   `)) as unknown as { tabla: string }[]
   expect(dental.map((r) => r.tabla)).toEqual([
+    "diagnosis_finding",
     "odontogram_assessment",
     "odontogram_entry",
     "periodontal_chart",

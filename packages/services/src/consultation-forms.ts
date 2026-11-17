@@ -1,6 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
-import { encounter, orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, orgSpecialty, serviceCatalog, treatmentPlan, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import {
   clinicalFormResponse,
   clinicalFormTemplate,
@@ -16,6 +16,7 @@ import {
   listFormResponses,
 } from "./clinical-forms.js"
 import { notFound } from "./errors.js"
+import { findOpenPlan } from "./plan.js"
 import { findOrgCountry } from "./locale.js"
 import { specialtyForKind } from "./product-catalog.js"
 import { productHooks } from "./products.js"
@@ -390,6 +391,43 @@ function firstOf(
   return earlier.length > 1 ? (earlier[earlier.length - 1] ?? null) : null
 }
 
+/** Una urgencia se escribe así en el motivo («Es una urgencia» de la atención lo deja puesto). */
+const URGENCY_REASON = /^\s*urgencia\b/i
+
+/**
+ * Desde cuándo cuenta «el plan de ahora» para una ficha de una vez por plan: el abierto, desde
+ * la atención en que nació; sin plan abierto (terminó el anterior), desde que terminó, para que
+ * quien regresa la vuelva a tener (la norma pide evaluar otra vez al reingreso); sin ningún plan,
+ * null: cuenta cualquiera de antes.
+ */
+async function planPeriodStart(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
+  const open = await findOpenPlan(tx, orgId, patientId)
+  if (open) {
+    if (!open.originEncounterId) return open.createdAt
+    const [origin] = await tx
+      .select({ startedAt: encounter.startedAt, createdAt: encounter.createdAt })
+      .from(encounter)
+      .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, open.originEncounterId)))
+      .limit(1)
+    return origin?.startedAt ?? origin?.createdAt ?? open.createdAt
+  }
+  const [last] = await tx
+    .select({ endedAt: sql<string | null>`max(${treatmentPlanItem.updatedAt})` })
+    .from(treatmentPlanItem)
+    .innerJoin(
+      treatmentPlan,
+      and(eq(treatmentPlan.organizationId, treatmentPlanItem.organizationId), eq(treatmentPlan.id, treatmentPlanItem.planId)),
+    )
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlan.isLegacy, false),
+      ),
+    )
+  return last?.endedAt ? new Date(last.endedAt) : null
+}
+
 /**
  * Las fichas que la atención ofrece solas, con su motivo:
  * 1. las de la especialidad del servicio de su cita;
@@ -399,6 +437,10 @@ function firstOf(
  * 4. la que el paciente ya tiene de antes, con respuestas (el control de ortodoncia);
  * 5. la que se empezó aquí con «Otra ficha…».
  * Una ficha sale una vez, con el primer motivo. «Otra ficha…» sigue ofreciendo todas.
+ * La que el producto llena una vez por plan (odentIA: la odontoestomatológica, ADR 0199) no
+ * sale por 3 ni por 4 si el plan de ahora ya tiene una, ni en una urgencia: sale en la primera
+ * atención que no es urgencia, mientras no se llene, y otra vez cuando el paciente regresa.
+ * Empezada aquí, siempre.
  * Ofrecer por servicio queda fuera: con dos fichas de la misma especialidad salen las dos.
  */
 export async function getEncounterFormOffers(
@@ -413,6 +455,7 @@ export async function getEncounterFormOffers(
       professionalUserId: encounter.professionalUserId,
       appointmentId: encounter.appointmentId,
       status: encounter.status,
+      reason: encounter.reason,
     })
     .from(encounter)
     .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
@@ -516,10 +559,22 @@ export async function getEncounterFormOffers(
   // La que el paciente ya tiene de otra atención, y la que se empezó en esta.
   const had = new Set(finals.filter((form) => form.encounterId !== encounterId).map((form) => form.key))
   const started = new Set(inEncounter.map((row) => row.key))
+  // Las de una vez por plan: fuera si el plan de ahora ya tiene una o si es una urgencia.
+  const oncePerPlan = new Set((await productHooks(tx, orgId)).forms.oncePerPlan ?? [])
+  const since = oncePerPlan.size > 0 ? await planPeriodStart(tx, orgId, patientId) : null
+  const urgent = URGENCY_REASON.test(session.reason ?? "")
+  const notThisTime = (key: string): boolean =>
+    oncePerPlan.has(key) &&
+    !started.has(key) &&
+    (urgent ||
+      finals.some(
+        (form) => form.key === key && form.encounterId !== encounterId && (since === null || form.finalizedAt >= since),
+      ))
 
   const ORDER: Record<FormOfferWhy, number> = { cita: 0, edad: 1, profesional: 2, tiene: 3, empezada: 4 }
   const offered = templates
     .flatMap((template) => {
+      if (notThisTime(template.key)) return []
       const why = whyOf(template.specialtyId) ?? (had.has(template.key) ? "tiene" : started.has(template.key) ? "empezada" : null)
       return why ? [{ ...template, specialtyName: template.specialtyName ?? "", why }] : []
     })

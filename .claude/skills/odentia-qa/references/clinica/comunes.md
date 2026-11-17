@@ -50,6 +50,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 **Ya falló:** «¿Vino?» abría «Por confirmar» (PR 551); la grilla no mostraba qué unidad estaba libre (8 nov).
 **Fuentes:** ADR 0002, 0032, 0081, 0113, 0121 y 0128.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Al terminar antes la sesión de una cita, el cierre ofrece usar esa cita para lo aceptado que sigue, además de liberarla.
+- [ ] «¿Cuándo vuelve?» ofrece lo aceptado sin empezar del mismo plan.
+
 ## P-COM-04 El paciente en su enlace y su portal
 
 **Dónde:** `R/public/portal.tsx` (el portal), «Su enlace» (ADR 0037), `R/public/registro.tsx`, la firma por enlace y el cuestionario antes de la cita (`S/portal-questionnaire.ts`). Las tablas `portal_link`, `portal_session` y `portal_access_log`.
@@ -89,6 +93,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] Al anular una atención, el diálogo nombra lo que cae en ese producto (la receta de lentes en vistIA; descansos solo donde se emiten) y lo que lo usa (un pedido).
 
 **Fuentes:** ADR 0115, 0132 y 0133.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La hoja de atención no lista la opción no elegida como «tratamiento sugerido».
+- [ ] La Historia dice la pieza y el tipo de cada diagnóstico, sin fundir dos de piezas distintas.
 
 ## P-COM-06 Datos personales, historia bloqueada y copia de la historia
 
@@ -178,6 +186,9 @@ No tiene camino en el código.
 
 **Fuentes:** Ley 29414 y su reglamento.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Lo piensa» o «No» de un tratamiento clínicamente necesario (la corona sobre una endodoncia, la exodoncia de una pieza infectada) deja constancia de que se le explicó el riesgo. El seguimiento lo dice como riesgo clínico, no como venta.
+
 ## P-COM-14 Tratamiento interrumpido
 
 **Dónde:** el estado `suspendido` del plan (`S/plan.ts`), `S/treatment-journey.ts` y «Invitar a volver» (`S/return-invites.ts`).
@@ -221,6 +232,11 @@ No tiene camino en el código.
 
 **Caso:** gestante de 24 semanas, alérgica a penicilina, con aspirina, registrada sola. Atención con evaluación de endodoncia, adenda, cuestionario del enlace corregido con motivo y revisado, una atención anulada con su ficha, y la copia. En la copia se distingue lo dicho, lo revisado, lo corregido y lo anulado.
 **Fuentes:** NTS 139-MINSA/2018/DGAIN (5.3.3: nada se elimina, la corrección es un registro nuevo con su motivo); HL7 FHIR R4 `Questionnaire` y `QuestionnaireResponse`, y SDC para la extracción a `AllergyIntolerance`, `Condition` y `MedicationStatement`; formulario de historia de salud de la ADA (actualizar en cada visita).
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La ficha de la especialidad toma la pieza de la atención y no la pide en otro odontograma.
+- [ ] Llenada a mano, la ficha que dice un diagnóstico (odentIA: la de endodoncia) lo propone para la atención con «Usar», sin registrarlo sola; la Historia dice su término junto al código.
+- [ ] (odentIA) La ficha odontoestomatológica se ofrece en la primera consulta del plan que no es urgencia, como «Riesgo y alta» al culminarlo y al reingresar; nunca en cada sesión.
 
 ## P-COM-18 Sospecha de violencia o maltrato
 

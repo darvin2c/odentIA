@@ -1,3 +1,4 @@
+import { isRegistrationNumber, REGISTRATION_NUMBER_WORDS } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -13,11 +14,9 @@ import { useOrgProfile } from "../lib/org"
 import { productUi } from "../product/product-ui"
 import { FirmaPad, FirmaView } from "./patient/firma-pad"
 
-/** Colegiatura: letras, dígitos y guion, sin espacios (como `REGISTRATION_RE` del servicio). */
-const REGISTRATION_RE = /^[A-Za-z0-9-]{1,20}$/
-
-// Los mismos topes que `profileInput` de la API.
-const profileSchema = z.object({
+// Los mismos topes que `profileInput` de la API. El número, solo dígitos (`isRegistrationNumber`,
+// la regla del servidor); el que ya estaba guardado (`saved`) no impide guardar lo demás.
+const profileSchema = (saved: string | null) => z.object({
   signatureName: z.string().max(200, "El nombre de firma admite hasta 200 caracteres."),
   professionalTitle: z
     .string()
@@ -32,7 +31,7 @@ const profileSchema = z.object({
   registrationNumber: z
     .string()
     .trim()
-    .refine((value) => !value || REGISTRATION_RE.test(value), "Solo letras, dígitos y guion, sin espacios."),
+    .refine((value) => !value || value === saved || isRegistrationNumber(value), REGISTRATION_NUMBER_WORDS),
   specialtyRegistration: z.string().max(40, "El registro de especialista admite hasta 40 caracteres."),
   // Sin el dato no cambia; nulo es que la quita; con trazos, la nueva.
   signatureStrokes: z.custom<number[][][] | null | undefined>(),
@@ -174,7 +173,7 @@ export function ProfessionalProfileDrawer({
       specialtyRegistration: profile?.specialtyRegistration ?? "",
       signatureStrokes: undefined as number[][][] | null | undefined,
     },
-    validators: { onSubmit: profileSchema },
+    validators: { onSubmit: profileSchema(profile?.registrationNumber ?? null) },
     onSubmit: async ({ value }) => {
       const result = await save.mutateAsync({
         signatureName: value.signatureName.trim() || null,
@@ -283,7 +282,7 @@ export function ProfessionalProfileDrawer({
               label="Número de colegiatura"
               description="Obligatorio para firmar el cierre de una atención."
               maxLength={20}
-              inputMode="text"
+              inputMode="numeric"
             />
           )}
         </form.AppField>

@@ -1105,7 +1105,28 @@ export async function addPlanItem(
     priceCents: service.priceCents,
     currency: service.currency,
   })
-  return { ...(await withPlanItemParts(tx, orgId, row)), decision: row.decisionStatus as PlanItemDecision }
+  // Entra ya al presupuesto en borrador, si lo hay: lo que la persona ve es lo que queda (E3).
+  await quoteNow(tx, orgId, actorUserId, patientId, encounterId, [row.id])
+  const [current] = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, row.id)))
+    .limit(1)
+  const item = current ?? row
+  return { ...(await withPlanItemParts(tx, orgId, item)), decision: item.decisionStatus as PlanItemDecision }
+}
+
+/** `quoteIndicatedNow` sin el ciclo de imports con los presupuestos (que leen el plan). */
+async function quoteNow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  itemIds: string[],
+): Promise<void> {
+  const { quoteIndicatedNow } = await import("./budgets.js")
+  await quoteIndicatedNow(tx, orgId, actorUserId, patientId, encounterId, itemIds)
 }
 
 export interface AddPlanItemsBatchInput {
@@ -1204,7 +1225,17 @@ export async function addPlanItemsBatch(
       count: rows.length,
     },
   )
-  return rows.map((row) => ({ ...row, decision: row.decisionStatus as PlanItemDecision }))
+  // Entran ya al presupuesto en borrador, si lo hay (E3), como al indicar una sola pieza.
+  await quoteNow(tx, orgId, actorUserId, patientId, input.sourceEncounterId.trim(), rows.map((row) => row.id))
+  const quoted = new Map(
+    (
+      await tx
+        .select({ id: treatmentPlanItem.id, budgetId: treatmentPlanItem.budgetId })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, rows.map((row) => row.id))))
+    ).map((row) => [row.id, row.budgetId]),
+  )
+  return rows.map((row) => ({ ...row, budgetId: quoted.get(row.id) ?? row.budgetId, decision: row.decisionStatus as PlanItemDecision }))
 }
 
 export async function updatePlanItem(

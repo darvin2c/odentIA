@@ -1417,7 +1417,8 @@ export async function assembleEncounterBudget(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  opts: { onRequest?: boolean } = {},
+  /** `itemIds`: solo esos de lo indicado en ella (lo recién indicado, `quoteIndicatedNow`). */
+  opts: { onRequest?: boolean; itemIds?: readonly string[] } = {},
 ): Promise<AssembledBudget | null> {
   const required = (await productHooks(tx, orgId)).budgetRequired
   if (!required && !opts.onRequest) return null
@@ -1440,6 +1441,7 @@ export async function assembleEncounterBudget(
         isNull(treatmentPlanItem.budgetId),
         eq(treatmentPlanItem.status, "pendiente"),
         eq(treatmentPlanItem.decisionStatus, required ? "pendiente" : "aceptado"),
+        ...(opts.itemIds ? [inArray(treatmentPlanItem.id, [...opts.itemIds])] : []),
       ),
     )
     .orderBy(
@@ -1495,7 +1497,74 @@ export async function assembleEncounterBudget(
       }
     }
   }
+  // Lo indicado aquí ya entró al borrador al indicarlo (`quoteIndicatedNow`): no queda nada nuevo
+  // que agregar, pero el cierre igual lo ofrece para enviar («Presupuesto listo · ¿Enviárselo
+  // ahora?»), como cuando entraba al firmar (revisión del 16 nov, R3). Lo de otras atenciones solo,
+  // sin nada de esta, no lo ofrece. «Armarlo ahora» sigue diciendo que no pudo agregar nada.
+  if (draft && !opts.itemIds && !opts.onRequest) {
+    const [mine] = await tx.execute<{ n: number }>(sql`
+      select count(*)::int as n from treatment_plan_item
+      where organization_id = ${orgId} and patient_id = ${patientId}::uuid and budget_id = ${draft.id}::uuid
+        and source_encounter_id = ${encounterId}::uuid and status <> 'cancelado'`)
+    if (mine && mine.n > 0) {
+      const full = await loadBudget(tx, orgId, patientId, draft)
+      const value = valueOptionOf(full.options)
+      return {
+        id: full.id,
+        budgetNumber: full.budgetNumber,
+        itemCount: value?.lineCount ?? full.items.length,
+        totals: full.totals,
+        totalCents: full.totalCents,
+        currency: full.currency,
+        added: mine.n,
+      }
+    }
+  }
   return null
+}
+
+/**
+ * Lo recién indicado entra ya al presupuesto en borrador (QA del 16 nov, E3): con la misma
+ * operación que lo arma al firmar (`assembleEncounterBudget`), así el total, cada opción y el PDF
+ * que ve la persona traen todo lo indicado hasta ese momento. Pasa también sin opciones, con un
+ * borrador de ayer sin enviar. Solo si hay un borrador: sin él, nace al firmar o con «Armarlo
+ * ahora», y lo indicado después de entregarlo nace al firmar en uno aparte. Lo de otra pieza entra
+ * como común a las opciones; lo de una pieza que ya tiene caminos no entra solo, porque un perno
+ * en la 36 no va con la exodoncia de la 36: la atención pregunta a qué opción va
+ * (`placeBudgetPath`). Lo que no se puede cotizar (sin precio, de otro plan) no entra ni frena.
+ */
+export async function quoteIndicatedNow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  itemIds: readonly string[],
+): Promise<void> {
+  if (itemIds.length === 0 || !(await productHooks(tx, orgId)).budgetRequired) return
+  const draft = await findDraftBudget(tx, orgId, patientId)
+  if (!draft) return
+  let ids = [...itemIds]
+  const options = await listOptions(tx, orgId, [draft.id])
+  if (options.length > 1) {
+    const lines = await listBudgetLines(tx, orgId, patientId, draft.id)
+    const common = commonPlanItems(lines, options.length)
+    const siteOf = (row: { siteSystem: string | null; siteCode: string | null }) =>
+      row.siteSystem && row.siteCode ? `${row.siteSystem}:${row.siteCode}` : null
+    const contested = new Set(
+      lines.filter((line) => !common.has(line.planItemId)).map(siteOf).filter((key): key is string => key !== null),
+    )
+    const items = await tx
+      .select({ id: treatmentPlanItem.id, siteSystem: treatmentPlanItem.siteSystem, siteCode: treatmentPlanItem.siteCode })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, ids)))
+    ids = items.filter((item) => {
+      const key = siteOf(item)
+      return !key || !contested.has(key)
+    }).map((item) => item.id)
+  }
+  if (ids.length === 0) return
+  await assembleEncounterBudget(tx, orgId, actorUserId, patientId, encounterId, { itemIds: ids })
 }
 
 export async function updateBudgetDraft(
@@ -1960,6 +2029,182 @@ export async function removeBudgetOption(
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, current)
+}
+
+// ------------------------------------------------- «Quitar» y «Deshacer» ---
+
+/** Una opción del borrador tal como estaba, para devolverla igual. */
+export interface BudgetOptionSnapshot {
+  id: string
+  position: number
+  isRecommended: boolean
+  name: string | null
+  pros: string | null
+  cons: string | null
+}
+
+/** Una línea del borrador tal como estaba: su opción y lo acordado en ella (precio, motivo, promoción). */
+export type BudgetLineSnapshot = Omit<
+  typeof treatmentBudgetItem.$inferSelect,
+  "organizationId" | "patientId" | "createdAt" | "updatedAt"
+> & { createdAt: string }
+
+/**
+ * Lo que «Quitar» sacó de un borrador (QA del 16 nov, B1e): sus opciones de antes y las
+ * líneas que salieron, con su precio. Queda en la auditoría del «Quitar», y «Deshacer» lo
+ * devuelve igual: a su opción, en su orden y con su precio, no como una indicación nueva.
+ */
+export interface BudgetRemovalSnapshot {
+  budgetId: string
+  options: BudgetOptionSnapshot[]
+  lines: BudgetLineSnapshot[]
+  /**
+   * Las opciones que se fueron con este «Quitar» (revisión del 16 nov, R8). «Deshacer» devuelve
+   * solo esas: una que se fue con otro «Quitar» posterior no vuelve vacía. Sin este dato (un
+   * «Quitar» anterior a él), vuelven las de la foto que ya no están.
+   */
+  removedOptionIds?: string[]
+}
+
+/** Las opciones y líneas de un borrador, para guardar lo que se va a quitar. */
+export async function draftBudgetSnapshot(
+  tx: Db,
+  orgId: string,
+  budgetId: string,
+): Promise<Omit<BudgetRemovalSnapshot, "budgetId">> {
+  const options = await listOptions(tx, orgId, [budgetId])
+  const lines = await tx
+    .select()
+    .from(treatmentBudgetItem)
+    .where(
+      and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, budgetId)),
+    )
+  return {
+    options: options.map((option) => ({
+      id: option.id,
+      position: option.position,
+      isRecommended: option.isRecommended,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+    })),
+    lines: lines.map(({ organizationId: _org, patientId: _patient, updatedAt: _updated, createdAt, ...line }) => ({
+      ...line,
+      createdAt: createdAt.toISOString(),
+    })),
+  }
+}
+
+/**
+ * «Deshacer» de «Quitar»: devuelve al borrador lo que salió, tal como estaba. Las opciones
+ * que se fueron vuelven a su lugar (A sigue siendo A), con su nombre y la recomendada de
+ * antes, y cada línea a su opción con su precio. Si el borrador ya no es el mismo (se
+ * entregó, o tiene otra opción), no adivina: lo dice, y lo quitado sigue quitado.
+ */
+export async function restoreDraftBudget(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  snapshot: BudgetRemovalSnapshot,
+  opts: BudgetActorOpts = {},
+): Promise<void> {
+  await requirePatient(tx, orgId, patientId)
+  const current = await lockForWrite(tx, orgId, patientId, snapshot.budgetId)
+  // Quien lo quitó puede deshacerlo aunque «Quitar» se llevara su única línea (R9): el
+  // borrador pudo ser de otro. Se mira lo que vuelve, no el borrador de ahora.
+  const returning = [...new Set(snapshot.lines.map((line) => line.planItemId))]
+  const owners =
+    returning.length === 0
+      ? []
+      : await tx
+          .select({ createdBy: treatmentPlanItem.createdBy })
+          .from(treatmentPlanItem)
+          .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, returning)))
+  // La misma regla de «propio» (alguna línea suya), pero sobre lo que vuelve.
+  const returnsOwn = owners.some((row) => row.createdBy === actorUserId)
+  if (!returnsOwn) await assertOwnBudget(tx, orgId, current.id, actorUserId, opts.memberRole)
+  if (current.status !== "borrador" || current.supersedesBudgetId) {
+    throw conflict("UNDO_BUDGET_GONE", "Su presupuesto ya se entregó: vuelve a indicarlo")
+  }
+  const options = await listOptions(tx, orgId, [current.id])
+  const before = new Map(snapshot.options.map((option) => [option.id, option]))
+  if (options.some((option) => !before.has(option.id))) {
+    throw conflict("UNDO_BUDGET_CHANGED", "El presupuesto cambió desde que lo quitaste: vuelve a indicarlo")
+  }
+  // Las que quedaron vuelven a su posición, de la última a la primera: cada una sube a un
+  // lugar ya libre (quitar solo las corrió hacia arriba) y el índice único no choca.
+  const moves = options
+    .map((option) => ({ id: option.id, from: option.position, to: before.get(option.id)!.position }))
+    .sort((a, b) => b.to - a.to)
+  for (const move of moves) {
+    if (move.from === move.to) continue
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ position: move.to, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, move.id)))
+  }
+  const kept = new Set(options.map((option) => option.id))
+  const removedHere = snapshot.removedOptionIds ? new Set(snapshot.removedOptionIds) : null
+  const comeBack = snapshot.options.filter((row) => !kept.has(row.id) && (!removedHere || removedHere.has(row.id)))
+  const present = new Set([...kept, ...comeBack.map((row) => row.id)])
+  for (const option of comeBack) {
+    await tx.insert(treatmentBudgetOption).values({
+      id: option.id,
+      organizationId: orgId,
+      patientId,
+      budgetId: current.id,
+      position: option.position,
+      isRecommended: false,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+      createdBy: actorUserId,
+    })
+  }
+  // La recomendada de antes (quitar la había pasado a la primera que quedó).
+  const recommended = snapshot.options.find((option) => option.isRecommended)
+  if (recommended) {
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: false, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, current.id)))
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: true, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, recommended.id)))
+  }
+  // Una línea cuya opción se fue después con otro «Quitar» ya no tiene dónde volver.
+  const lines = snapshot.lines.filter((line) => present.has(line.optionId))
+  for (const { createdAt, ...line } of lines) {
+    await tx.insert(treatmentBudgetItem).values({
+      ...line,
+      organizationId: orgId,
+      patientId,
+      budgetId: current.id,
+      createdAt: new Date(createdAt),
+    })
+  }
+  const itemIds = [...new Set(lines.map((line) => line.planItemId))]
+  if (itemIds.length > 0) {
+    await tx
+      .update(treatmentPlanItem)
+      .set({ budgetId: current.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          inArray(treatmentPlanItem.id, itemIds),
+        ),
+      )
+  }
+  await audit(tx, orgId, actorUserId, "budget.items_restored", current.id, {
+    patientId,
+    itemIds,
+    lineCount: lines.length,
+    options: comeBack.map((row) => row.position),
+  })
+  await notifyBudget(tx, orgId)
 }
 
 // ---------------------------------------------------------------- entregar ---
@@ -3918,7 +4163,7 @@ function decisionWordsOf(
     aceptado: "Aceptó",
     parcial: "Aceptó una parte",
     rechazado: "No aceptó",
-    pospuesto: "Lo dejó para después",
+    pospuesto: "Lo piensa",
   }
   const said = verb[budget.status] ?? "Respondió"
   // La firma dice lo de su momento: si respondió algo después, eso se dice con su canal.

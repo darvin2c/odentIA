@@ -18,7 +18,6 @@ import { professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
-  addBudgetItems,
   addPlanItem,
   AGENT_ROLES,
   createBudget,
@@ -229,11 +228,13 @@ async function budgetOf(patientId: string, options: { deliver: boolean; crown?: 
   let budget = await inOrg((tx) => createBudget(tx, ORG, clinic.actor, patientId, { itemIds: Object.values(tooth) }))
   let crown: string | null = null
   if (options.crown) {
+    // La corona indicada con el borrador a la vista entra ya en él (QA del 16 nov, E3): la opción B
+    // es la copia con la corona en vez de la resina de la 36, y la A se queda sin la corona.
     crown = (await inOrg((tx) => addPlanItem(tx, ORG, clinic.actor, patientId, { serviceId: clinic.corona, sourceEncounterId: session!.id, toothNumber: 36 }))).id
     budget = await inOrg((tx) => duplicateBudgetOption(tx, ORG, clinic.actor, patientId, budget.id, budget.options[0]!.id))
-    const optionB = budget.options[1]!.id
+    const [optionA, optionB] = [budget.options[0]!.id, budget.options[1]!.id]
     await inOrg((tx) => removeBudgetItems(tx, ORG, clinic.actor, patientId, budget.id, { itemIds: [tooth[36]!], optionId: optionB }))
-    budget = await inOrg((tx) => addBudgetItems(tx, ORG, clinic.actor, patientId, budget.id, { itemIds: [crown!], optionId: optionB }))
+    budget = await inOrg((tx) => removeBudgetItems(tx, ORG, clinic.actor, patientId, budget.id, { itemIds: [crown!], optionId: optionA }))
   }
   if (options.deliver) await inOrg((tx) => deliverBudget(tx, ORG, clinic.actor, patientId, budget.id))
   return { budgetId: budget.id, tooth, crown, options: budget.options.map((option) => option.id), encounterId: session!.id }

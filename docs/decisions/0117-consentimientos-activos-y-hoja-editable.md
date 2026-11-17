@@ -1,7 +1,7 @@
 # 0117. Consentimientos activos desde el inicio y editados sobre su hoja
 
 - **Fecha:** 2026-10-31
-- **Estado:** aceptada.
+- **Estado:** aceptada; el punto 2 del cambio del 13 nov, revisado por [ADR 0199](0199-la-atencion-mas-liviana.md) (16 nov): la ficha que el producto llena una vez por plan (odentIA: la odontoestomatológica) no se ofrece en cada atención ni en una urgencia.
 
 ## Problema
 

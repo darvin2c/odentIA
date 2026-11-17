@@ -9,7 +9,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { eq } from "drizzle-orm"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { placeBudgetPath } from "./budget-paths.js"
 import { previewBudgetSend } from "./budget-send.js"
 import {
@@ -32,7 +32,8 @@ import {
   setConsentTemplateServices,
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { addEncounterProcedure, getEncounterClosing, getEncounterDetail } from "./encounters.js"
+import { getAttentionSheetPrint } from "./attention-sheet.js"
+import { addEncounterProcedure, finalizeEncounter, getEncounterClosing, getEncounterDetail } from "./encounters.js"
 import { bringTreatmentToEncounter } from "./encounter-visit.js"
 import { getTreatmentCoordination } from "./treatment-coordination.js"
 import { getPatientSummary } from "./patient-history.js"
@@ -457,4 +458,70 @@ it("el consentimiento preparado para lo que se reemplazó no cubre al que lo ree
   expect(rest).toEqual([])
   expect(need).toMatchObject({ title: "Exodoncia", status: "sin_preparar", documentId: null })
   expect(need!.procedureRef).toContain("47")
+})
+
+describe("la hoja de atención para el seguro dice lo que eligió (QA del 16 nov, B1)", () => {
+  /** Firma la atención de Ana y lee su hoja: cada grupo con lo que lleva. */
+  async function sheet(f: Awaited<ReturnType<typeof ana>>["f"]) {
+    await f.ready(f.encounter.id)
+    await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
+    const print = await f.run((tx) => getAttentionSheetPrint(tx, "org_a", f.patient.id, f.encounter.id))
+    return print.treatments.map((group) => [group.heading, group.items.map((item) => item.split(" · ")[0]).sort()])
+  }
+
+  it("eligió conservar: la endodoncia y la corona bajo «Opción A (elegida)», sin la exodoncia", async () => {
+    const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
+    const draft = await f.run((tx) =>
+      placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }),
+    )
+    await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+    await f.run((tx) =>
+      decideBudget(tx, ...f.args, draft.id, {
+        optionId: draft.options[0]!.id,
+        decisions: [resina, profilaxis, endodoncia, corona].map((item) => ({
+          planItemId: item.id,
+          decision: "aceptado" as const,
+        })),
+      }),
+    )
+    expect(await sheet(f)).toEqual([
+      ["Tratamiento sugerido", ["Profilaxis", "Resina"]],
+      ["Tratamiento sugerido · Opción A (elegida)", ["Corona", "Endodoncia"]],
+    ])
+  })
+
+  it("sin elegir todavía, cada opción va con su nombre y «a elegir», no todo junto", async () => {
+    const { f, exodoncia } = await ana()
+    const draft = await f.run((tx) =>
+      placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }),
+    )
+    await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+    expect(await sheet(f)).toEqual([
+      ["Tratamiento sugerido", ["Profilaxis", "Resina"]],
+      ["Tratamiento sugerido · Opción A (a elegir)", ["Corona", "Endodoncia"]],
+      ["Tratamiento sugerido · Opción B (a elegir)", ["Exodoncia"]],
+    ])
+  })
+
+  it("si rechaza todo el presupuesto, la hoja no sugiere nada", async () => {
+    const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
+    const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id, profilaxis.id, endodoncia.id, corona.id, exodoncia.id] }))
+    await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+    await f.run((tx) =>
+      decideBudget(tx, ...f.args, draft.id, {
+        decisions: [resina, profilaxis, endodoncia, corona, exodoncia].map((item) => ({
+          planItemId: item.id,
+          decision: "rechazado" as const,
+        })),
+      }),
+    )
+    expect(await sheet(f)).toEqual([])
+  })
+
+  it("sin opciones, la hoja queda como antes: todo bajo «Tratamiento sugerido»", async () => {
+    const { f } = await ana()
+    expect(await sheet(f)).toEqual([
+      ["Tratamiento sugerido", ["Corona", "Endodoncia", "Exodoncia", "Profilaxis", "Resina"]],
+    ])
+  })
 })

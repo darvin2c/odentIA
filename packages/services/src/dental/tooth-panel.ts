@@ -15,6 +15,7 @@ import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { invalidField } from "../errors.js"
 import { addPlanItem } from "../plan.js"
 import { requireServiceForIndication } from "../service-catalog.js"
+import { linkDiagnosisFinding } from "./finding-correction.js"
 import { addOdontogramEntries } from "./odontogram.js"
 
 export interface RegisterToothFindingInput {
@@ -140,15 +141,22 @@ export async function registerToothFinding(
     )
     entries.push(...rows)
     if (input.diagnosis) {
-      diagnoses.push(
-        await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, input.encounterId, {
-          diagnosisCode: input.diagnosis.diagnosisCode,
-          diagnosisSystem: input.diagnosis.diagnosisSystem ?? null,
-          diagnosisType: input.diagnosis.diagnosisType,
-          toothNumber,
-          surfaces: diagnosisSurfaces,
-        }),
-      )
+      const diagnosis = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, input.encounterId, {
+        diagnosisCode: input.diagnosis.diagnosisCode,
+        diagnosisSystem: input.diagnosis.diagnosisSystem ?? null,
+        diagnosisType: input.diagnosis.diagnosisType,
+        toothNumber,
+        surfaces: diagnosisSurfaces,
+      })
+      diagnoses.push(diagnosis)
+      // Nacieron juntos: anular el hallazgo ofrece anular este diagnóstico, y solo este. Si ya
+      // estaba (la segunda caries con el mismo código), queda unido a los dos hallazgos.
+      await linkDiagnosisFinding(tx, {
+        orgId,
+        patientId,
+        diagnosisId: diagnosis.id,
+        entryIds: rows.map((row) => row.id),
+      })
     }
     if (service) {
       planItems.push(

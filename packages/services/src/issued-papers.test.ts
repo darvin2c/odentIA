@@ -432,7 +432,7 @@ it("la hoja de atención sale de la atención firmada, con lo que piden los segu
   // Solo lo que se manda a hacer: ni una derivación ni lo cancelado.
   expect(print.exams).toEqual(["Orden de laboratorio: Hemograma"])
   // Lo ya hecho va en procedimientos: el seguro no debe leerlo como pendiente.
-  expect(print.treatments.join()).not.toContain("Tratamiento propio")
+  expect(JSON.stringify(print.treatments)).not.toContain("Tratamiento propio")
   expect(print.encounter.signerRegistration).toBe("COP 12345")
 
   const text = vi.spyOn(DocumentKit.prototype, "text")

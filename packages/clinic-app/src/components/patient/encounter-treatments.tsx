@@ -32,10 +32,19 @@ export function EncounterTreatments({
   items,
   sessionItemIds,
   onRegisterSession,
+  leavableIds,
+  onLeave,
   disabled = false,
   beforeWrite,
   onChanged,
 }: {
+  /**
+   * Lo traído a hoy con «Hacerla hoy» que se indicó en esta misma atención: su «Hoy no» va en su
+   * fila, porque «Hoy viene a…» no lo repite (QA del 16 nov, Q17).
+   */
+  leavableIds?: ReadonlySet<string>
+  /** «Hoy no»: lo saca de esta atención; sigue en el Plan para otro día. */
+  onLeave?: (itemId: string) => Promise<void>
   patientId: string
   encounterId: string
   items: PlanItem[]
@@ -51,6 +60,21 @@ export function EncounterTreatments({
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [completingId, setCompletingId] = useState<string | null>(null)
+  const [leavingId, setLeavingId] = useState<string | null>(null)
+  const leave = async (itemId: string) => {
+    if (!onLeave || leavingId) return
+    setError(null)
+    setLeavingId(itemId)
+    try {
+      if (beforeWrite) await beforeWrite()
+      await onLeave(itemId)
+      onChanged?.()
+    } catch (caught) {
+      setError(submitErrorMessage(caught))
+    } finally {
+      setLeavingId(null)
+    }
+  }
   const completeMutation = useMutation({
     mutationFn: (itemId: string) => completeTreatmentApi(patientId, itemId, { encounterId }),
     onSuccess: () => {
@@ -92,10 +116,8 @@ export function EncounterTreatments({
   if (items.length === 0) return <>{null}</>
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-sm text-muted-foreground">
-        Lo que con la sesión de hoy llega a sus sesiones previstas queda realizado al firmar;
-        «Completar» lo termina antes.
-      </p>
+      {/* Qué hace «Completar» y cuándo queda realizado lo dice la Ayuda: con contenido, el bloque
+          no repite su regla (estándar E2). */}
       {
         <ul className="flex flex-col divide-y" aria-label="Tratamientos de esta atención">
           {items.map((item) => {
@@ -168,6 +190,18 @@ export function EncounterTreatments({
                   {canWrite && !disabled && open && !hasSession ? (
                     <Button type="button" size="sm" onClick={() => onRegisterSession(item.id)}>
                       Registrar la sesión
+                    </Button>
+                  ) : null}
+                  {canWrite && !disabled && onLeave && !hasSession && leavableIds?.has(item.id) ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={leavingId != null}
+                      aria-label={`Hoy no: ${item.title}`}
+                      onClick={() => void leave(item.id)}
+                    >
+                      Hoy no
                     </Button>
                   ) : null}
                 </div>

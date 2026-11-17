@@ -40,6 +40,7 @@ import {
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
 import { DeclaredResponse } from "./declared-response"
+import { FormDiagnosisProposals } from "./form-diagnosis-proposals"
 import { X } from "lucide-react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ChoiceButtons } from "../choice-buttons"
@@ -451,10 +452,13 @@ function StaffResponseDetail({
   // Un solo guardado a la vez: el siguiente sale con la base que dejó el anterior.
   const inFlight = useRef<Promise<void> | null>(null)
   /** Lo guardado deja al día la lista: al reabrir el formulario se parte de lo último. */
-  const remember = (updated: FormResponse) =>
+  const remember = (updated: FormResponse) => {
     queryClient.setQueryData<{ data: FormResponse[] }>(["form-responses", response.patientId], (old) =>
       old ? { ...old, data: old.data.map((row) => (row.id === updated.id ? { ...row, ...updated, clioAccepted: marksKept(row, updated) } : row)) } : old,
     )
+    // Lo que la ficha propone para el diagnóstico sale de lo guardado: se lee otra vez (E10b).
+    if (updated.encounterId) void queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", response.patientId] })
+  }
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Si el último guardado falló: el autoguardado corre con el estado de su render, que
   // ya dice «pendiente» por el cambio que lo disparó, así que el fallo se recuerda aquí.
@@ -1215,6 +1219,16 @@ function StaffResponseDetail({
             })}
                 </div>
                 <SectionTotal words={sectionTotal(section, answers)} />
+                {/* Llenada a mano, la ficha propone el diagnóstico de la atención con «Usar» (E10b). */}
+                {editable && inAttention && response.encounterId ? (
+                  <FormDiagnosisProposals
+                    patientId={response.patientId}
+                    encounterId={response.encounterId}
+                    responseId={response.id}
+                    fieldIds={section.fields.map((field) => field.id)}
+                    beforeUse={persist}
+                  />
+                ) : null}
               </FieldSet>
             </Fragment>
           )

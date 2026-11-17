@@ -295,6 +295,33 @@ export function budgetPaths(budget: Pick<BudgetWithTotals, "items" | "options">)
   }
 }
 
+/** La respuesta marcada de un tratamiento en «¿Qué respondió?»: vacía mientras no se marca. */
+export interface AnswerMark {
+  planItemId: string
+  decision: "aceptado" | "pospuesto" | "rechazado" | ""
+}
+
+/**
+ * Las marcas del panel puestas al día con el presupuesto de ahora (QA del 16 nov, Q1). El panel se
+ * abre con el presupuesto que tenía la pantalla; si después entra un tratamiento (lo indicado
+ * entra solo al borrador) o sale otro, lo marcado se conserva, lo nuevo llega con su marca de
+ * partida y lo que ya no está se va. Sin esto la línea nueva viajaba sin respuesta y el servidor
+ * rechazaba el guardado.
+ */
+export function syncAnswerMarks(
+  marked: readonly AnswerMark[],
+  wanted: readonly AnswerMark[],
+): { marks: AnswerMark[]; added: string[]; changed: boolean } {
+  const before = new Map(marked.map((entry) => [entry.planItemId, entry]))
+  const added = wanted.filter((entry) => !before.has(entry.planItemId)).map((entry) => entry.planItemId)
+  const marks = wanted.map((entry) => before.get(entry.planItemId) ?? entry)
+  const changed =
+    added.length > 0 ||
+    marks.length !== marked.length ||
+    marks.some((entry, index) => entry.planItemId !== marked[index]?.planItemId)
+  return { marks, added, changed }
+}
+
 /** Lo que lleva una revisión, en el orden en que se muestra. */
 export interface RevisionScope {
   /** Cada tratamiento una vez: es lo que se manda (`itemIds`). */
@@ -389,7 +416,7 @@ export function budgetStatusLabel(status: string): string {
     case "presentado":
       return "Entregado · espera respuesta"
     case "pospuesto":
-      return "Lo está pensando"
+      return "Lo piensa"
     case "aceptado":
       return "Aceptó todo"
     case "parcial":
@@ -783,6 +810,11 @@ export function fetchPlanNextSteps(patientId: string): Promise<{ data: PlanNextS
   return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/next-steps`)
 }
 
+/** La misma lista, con lo de una atención primero: «Lo que sigue» de la atención firmada. */
+export function fetchEncounterNextSteps(patientId: string, encounterId: string): Promise<{ data: PlanNextStep[] }> {
+  return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/encounters/${encounterId}/next-steps`)
+}
+
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */
 export const PLAN_QUERY_KEYS = [
   "budgets",
@@ -801,3 +833,16 @@ export const PLAN_QUERY_KEYS = [
  * aceptó o no eligió deja de pedir consentimiento y de contar por ejecutar.
  */
 export const ANSWER_ENCOUNTER_KEYS = ["encounter", "consent-needs", "encounter-closing"] as const
+
+/**
+ * Lo que se vuelve a leer al indicar un tratamiento en la atención. Lo indicado entra solo al
+ * borrador, así que el presupuesto también cambió: la tarjeta de cada opción lee su detalle
+ * (`budget`) y sin esto decía el total de antes (QA del 16 nov, Q4).
+ */
+export const INDICATED_QUERY_KEYS: readonly string[] = PLAN_QUERY_KEYS
+
+/**
+ * Lo que se vuelve a leer tras «Armarlo ahora»: el plan, «Qué sigue» y el detalle de la atención,
+ * de donde sale lo indicado hoy con su presupuesto (QA del 16 nov, Q3).
+ */
+export const ASSEMBLED_QUERY_KEYS: readonly string[] = [...PLAN_QUERY_KEYS, "next-steps", ...ANSWER_ENCOUNTER_KEYS]

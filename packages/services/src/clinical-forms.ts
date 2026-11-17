@@ -24,6 +24,7 @@ import {
   encounterDiagnosis,
   encounterDictationSuggestion,
   encounterProcedure,
+  encounterSite,
   imagingStudy,
   patient,
   patientContact,
@@ -1681,6 +1682,25 @@ export async function createFormResponse(
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
   }
+  const site = await siteOf(tx, orgId)
+  // La ficha de una especialidad empezada en la atención toma la pieza de la atención, sin pedirla
+  // en otro odontograma (P09), solo si la atención tiene una sola: con la 36 y la 46, adivinar
+  // sería un error. Lo que la persona mandó escrito gana; queda como respuesta editable.
+  const given = input.answers ?? {}
+  // Lo que no es un objeto de respuestas lo rechaza `assertAnswers` tal como llegó.
+  const startAnswers: unknown =
+    typeof given === "object" && given !== null && !Array.isArray(given) ? { ...(given as Record<string, unknown>) } : given
+  const askedSite = schema.sections.flatMap((section) => section.fields).filter((field) => field.type === "pieza")
+  const open = (answers: unknown): answers is Record<string, unknown> =>
+    typeof answers === "object" && answers !== null && !Array.isArray(answers)
+  if (encounterId && site.system && open(startAnswers) && askedSite.some((field) => startAnswers[field.id] == null)) {
+    const sites = await tx
+      .select({ siteCode: encounterSite.siteCode })
+      .from(encounterSite)
+      .where(and(eq(encounterSite.organizationId, orgId), eq(encounterSite.encounterId, encounterId)))
+    const only = sites.length === 1 ? site.value(sites[0]?.siteCode) : null
+    if (only !== null) for (const field of askedSite) if (startAnswers[field.id] == null) startAnswers[field.id] = only
+  }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
     await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
@@ -1689,7 +1709,7 @@ export async function createFormResponse(
     // Desde la atención, el responsable por defecto es quien atiende.
     professionalUserId = attendingUserId
   }
-  const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false, site: await siteOf(tx, orgId) })
+  const answers = assertAnswers(schema, startAnswers, { requireAll: false, site })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
   // Dos «Empezar» seguidos (o a la vez) de la misma persona, del mismo formulario, para el mismo
   // paciente y la misma atención, son el mismo borrador: se devuelve el que acaba de nacer, tal
@@ -4212,12 +4232,17 @@ const NEED_RANK: Record<ConsentNeedStatus, number> = {
  * se hace (QA de la atención del 8 nov; ADR 0165). Uno firmado para el mismo tratamiento en otra
  * visita también lo cubre. Una sola definición para el bloque Documentos, el
  * cierre y la API.
+ *
+ * `doingNow`: lo que se va a hacer ahora sin estar en la atención (lo indicado hoy que aún
+ * espera su respuesta y se acepta al hacerlo): cuenta como traído, para preparar su
+ * consentimiento antes del acto (revisión del 16 nov, R2).
  */
 export async function getEncounterConsentNeeds(
   tx: Db,
   orgId: string,
   patientId: string,
   encounterId: string,
+  doingNow: readonly string[] = [],
 ): Promise<ConsentNeed[]> {
   await requireVisibleEncounter(tx, orgId, patientId, encounterId)
   const site = await siteOf(tx, orgId)
@@ -4263,8 +4288,11 @@ export async function getEncounterConsentNeeds(
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
-        sql`exists (select 1 from encounter_plan_item today where today.organization_id = ${treatmentPlanItem.organizationId}
-          and today.plan_item_id = ${treatmentPlanItem.id} and today.encounter_id = ${encounterId})`,
+        or(
+          sql`exists (select 1 from encounter_plan_item today where today.organization_id = ${treatmentPlanItem.organizationId}
+            and today.plan_item_id = ${treatmentPlanItem.id} and today.encounter_id = ${encounterId})`,
+          doingNow.length > 0 ? inArray(treatmentPlanItem.id, [...doingNow]) : undefined,
+        ),
         sql`${treatmentPlanItem.status} <> 'cancelado'`,
       ),
     )
@@ -4471,6 +4499,10 @@ export async function getEncounterConsentNeeds(
  * «Preparar»: genera los consentimientos que la atención pide y aún no
  * existen, llenos con lo de la atención (procedimiento, pieza, diagnóstico y
  * tratamiento). Sin `templateKeys`, todos los que faltan. Nunca duplica.
+ *
+ * Con `planItemId`, solo los de ese tratamiento, aunque no esté en la atención: lo indicado hoy
+ * que aún espera su respuesta se consiente antes del acto, sin aceptarlo ni traerlo (se acepta al
+ * registrarlo, `acceptWhenDone`; revisión del 16 nov, R2).
  */
 export async function prepareEncounterConsents(
   tx: Db,
@@ -4479,15 +4511,54 @@ export async function prepareEncounterConsents(
   patientId: string,
   encounterId: string,
   templateKeys?: string[],
+  planItemId?: string,
 ): Promise<{ created: ConsentDocumentRow[]; needs: ConsentNeed[] }> {
   const visible = await requireVisibleEncounter(tx, orgId, patientId, encounterId)
   if (visible.status !== "borrador")
     throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: prepara el consentimiento desde Documentos")
   // Dos «Preparar» a la vez no generan dos documentos.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('consent-prepare:' || ${encounterId}))`)
-  const needs = await getEncounterConsentNeeds(tx, orgId, patientId, encounterId)
+  let itemKeys: Set<string> | null = null
+  if (planItemId) {
+    const [item] = await tx
+      .select({
+        serviceId: treatmentPlanItem.serviceId,
+        status: treatmentPlanItem.status,
+        decisionStatus: treatmentPlanItem.decisionStatus,
+      })
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.id, planItemId),
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+        ),
+      )
+      .limit(1)
+    if (!item) throw notFound("Ítem del plan")
+    // Lo que no se hará (cerrado, o que la persona dejó fuera) no se consiente.
+    if (!["pendiente", "programado", "en_curso"].includes(item.status) || isLeftOut(item.decisionStatus))
+      throw conflict("ITEM_NOT_READY", "Ese tratamiento ya no se hace: no pide consentimiento")
+    const links = item.serviceId
+      ? await tx
+          .select({ templateKey: consentTemplateService.templateKey })
+          .from(consentTemplateService)
+          .where(
+            and(
+              eq(consentTemplateService.organizationId, orgId),
+              eq(consentTemplateService.serviceId, item.serviceId),
+            ),
+          )
+      : []
+    itemKeys = new Set(links.map((link) => link.templateKey))
+  }
+  const doingNow = planItemId ? [planItemId] : []
+  const needs = await getEncounterConsentNeeds(tx, orgId, patientId, encounterId, doingNow)
   const wanted = needs.filter(
-    (need) => need.status === "sin_preparar" && (!templateKeys || templateKeys.includes(need.templateKey)),
+    (need) =>
+      need.status === "sin_preparar" &&
+      (!templateKeys || templateKeys.includes(need.templateKey)) &&
+      (!itemKeys || itemKeys.has(need.templateKey)),
   )
   if (templateKeys) {
     const unpublished = needs.find(
@@ -4515,7 +4586,7 @@ export async function prepareEncounterConsents(
   }
   return {
     created,
-    needs: created.length ? await getEncounterConsentNeeds(tx, orgId, patientId, encounterId) : needs,
+    needs: created.length ? await getEncounterConsentNeeds(tx, orgId, patientId, encounterId, doingNow) : needs,
   }
 }
 

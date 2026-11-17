@@ -57,6 +57,23 @@ export interface EncounterMoment {
   encounterId: string
 }
 
+/**
+ * Un hallazgo del producto registrado en esta atención y vigente, con lo que nació con él
+ * (odentIA: el hallazgo del odontograma, su diagnóstico de la atención y lo indicado desde él).
+ * Lo lee la corrección conjunta (`encounter-correction.ts`).
+ */
+export interface CorrectionFinding {
+  id: string
+  /** Los que se corrigen juntos: las caras de una caries son filas de un solo hallazgo. */
+  group: string
+  /** «Lesión de caries dental · Oclusal · 47». */
+  label: string
+  siteSystem: string | null
+  siteCode: string | null
+  diagnosisIds: string[]
+  planItemIds: string[]
+}
+
 /** Dónde, como lo guardan las tablas comunes: sistema, código y calificadores (bodySite de FHIR). */
 export interface SiteColumns {
   siteSystem: string | null
@@ -467,11 +484,24 @@ export interface ProductForms {
    */
   byAge: { underYears: number; kind: string } | null
   /**
+   * Las fichas (por su clave) que se llenan una vez por plan, no en cada atención (odentIA: la
+   * odontoestomatológica de la norma, ADR 0199): se ofrecen mientras el plan de ahora no tenga una,
+   * no en una urgencia, y otra vez cuando el paciente regresa con un plan nuevo. Las demás se
+   * ofrecen como siempre (el control de ortodoncia se repite).
+   */
+  oncePerPlan?: readonly string[]
+  /**
    * Las opciones de sus fichas que son un diagnóstico, como se escriben en la ficha, con su código de
    * la CIE-10 (OMS): la respuesta dictada va también a Diagnóstico si Clío no lo propuso (prueba con
    * voz del 15 nov, c5; `withFormDiagnoses`). odentIA: el diagnóstico pulpar y el apical de la AAE.
+   * Llenada a mano, la ficha también lo propone para la atención, con «Usar» (`formDiagnosesOf`).
    */
   diagnoses?: Readonly<Record<string, string>>
+  /**
+   * Lo que una de esas opciones le suma al nombre de su código, para la Historia: «irreversible
+   * sintomática» de K04.0. Se lee de la ficha; el diagnóstico no lo guarda.
+   */
+  qualifiers?: Readonly<Record<string, string>>
 }
 
 /** Un producto que no trae fichas ni ofrece por edad. */
@@ -542,6 +572,24 @@ export interface ProductHooks {
   ): Promise<ProductParts>
   /** Al anular la atención: lo que el producto registró en ella también se anula. */
   encounterVoided(tx: Db, moment: EncounterMoment & { at: Date; reason: string }): Promise<void>
+  /**
+   * Lo que se corrige junto (QA del 16 nov, E2): los hallazgos vigentes de esta atención con su
+   * diagnóstico y lo indicado desde ellos, y cómo anularlos con su motivo. Sin él (latidIA,
+   * vistIA), anular un diagnóstico no trae nada más.
+   */
+  correction?: {
+    findings(tx: Db, scope: Omit<EncounterMoment, "actorUserId">): Promise<CorrectionFinding[]>
+    /** `voidingDiagnosisIds`: los diagnósticos que caen en la misma corrección, que no se tocan aquí. */
+    voidFindings(
+      tx: Db,
+      moment: EncounterMoment & { ids: string[]; reason: string; voidingDiagnosisIds?: readonly string[] },
+    ): Promise<void>
+    /**
+     * El tratamiento nació de un hallazgo y todos los suyos están anulados: «Deshacer» no lo
+     * devuelve, porque volvería con una pieza y un diagnóstico que ya no son de la atención.
+     */
+    itemLostItsFinding(tx: Db, scope: { orgId: string; patientId: string; planItemId: string }): Promise<boolean>
+  }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>
   /** Un tratamiento dejó de estar realizado porque se anuló su procedimiento. */

@@ -14,7 +14,6 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   ScrollArea,
 } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
@@ -268,6 +267,12 @@ export function visitWhenSaid(iso: string): string {
   return whenSaid(iso, timeZone, zonedDateOf(new Date().toISOString(), timeZone))
 }
 
+/** «Resina · 15», «Resina · 15 y Limpieza», «Corona · 36, Resina · 15 y Limpieza»; vacío sin nada. */
+export function listSaid(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
+}
+
 /** «Endodoncia · 46 · sesión 2 de 2»; uno de una sola sesión, solo su nombre. */
 export function sessionLine(label: string, n: number, m: number): string {
   return showsSession(n, m) ? `${label} · ${sessionWords(n, m)}` : label
@@ -458,6 +463,7 @@ export function ClosingNextVisit({
   busy,
   continuing = [],
   canBook = true,
+  afterUnbooked = [],
 }: {
   form: ClosingForm
   controls: ClosingControls | null | undefined
@@ -468,19 +474,40 @@ export function ClosingNextVisit({
   continuing?: ContinuingVisit[]
   /** Quien firma puede reservar la cita: se le dice que la reserva al firmar. */
   canBook?: boolean
+  /**
+   * Lo que iba después de lo que hoy termina y aún no tiene cita («Corona · 36»): se propone un
+   * control a 30 días, sin marcarlo (estudio de la atención, 16 nov).
+   */
+  afterUnbooked?: string[]
 }): React.JSX.Element | null {
   const ids = useId()
   const values = useStore(form.store, (state) => state.values)
   if (!controls) return null
   const known = knownReturn(values, controls, dictated)
-  const sessionsLines = continuing.map((visit) => {
-    if (visit.booked)
-      return `Vuelve ${visitWhenSaid(visit.booked.startsAt)} para ${sessionLine(visit.label, visit.booked.n, visit.booked.m)}, con su cita.`
-    const line = sessionLine(visit.label, visit.n, visit.m)
-    return canBook
-      ? `Vuelve para ${line}: al firmar puedes reservar su cita aquí mismo.`
-      : `Vuelve para ${line}: recepción la verá en «Qué sigue» para reservarla.`
-  })
+  const booked = continuing.flatMap((visit) =>
+    visit.booked
+      ? [`Vuelve ${visitWhenSaid(visit.booked.startsAt)} para ${sessionLine(visit.label, visit.booked.n, visit.booked.m)}, con su cita.`]
+      : [],
+  )
+  // Lo que no tiene cita va en una sola frase: «Vuelve para Resina · 15 y Limpieza».
+  const unbooked = continuing.filter((visit) => !visit.booked)
+  const unbookedWhat = listSaid(unbooked.map((visit) => sessionLine(visit.label, visit.n, visit.m)))
+  // Las mismas palabras en los tres productos: en latidIA y vistIA lo indicado ya queda aceptado.
+  const unbookedLine = !unbookedWhat
+    ? null
+    : canBook
+      ? `Vuelve para ${unbookedWhat}: al firmar puedes reservar su cita aquí mismo.`
+      : `Vuelve para ${unbookedWhat}: recepción la verá en «Qué sigue» para reservarla.`
+  const sessionsLines = [...booked, ...(unbookedLine ? [unbookedLine] : [])]
+  // El control corto que se propone, sin marcarlo: quien firma decide.
+  const proposal =
+    afterUnbooked.length > 0 && !known && values.nextControl !== "month"
+      ? `${listSaid(afterUnbooked)} ${afterUnbooked.length === 1 ? "va después de lo que hoy termina y aún no tiene cita" : "van después de lo que hoy termina y aún no tienen cita"}: conviene un control en 1 mes.`
+      : null
+  const proposeMonth = () => {
+    set("askControl", true)
+    set("nextControl", "month")
+  }
   const recall = controls.recallMonths
   const options: Array<{ value: Exclude<NextControlChoice, "" | "none">; label: string }> = [
     { value: "week", label: "En 1 semana" },
@@ -539,7 +566,21 @@ export function ClosingNextVisit({
             {line}
           </p>
         ))}
-        {sessionsLines.length > 0 && !known && !values.askControl ? (
+        {sessionsLines.length > 0 && !known && !values.askControl && proposal ? (
+          <p className="text-xs text-muted-foreground">
+            {proposal}{" "}
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto p-0 text-xs"
+              disabled={busy}
+              onClick={proposeMonth}
+            >
+              Indicar el control en 1 mes
+            </Button>
+          </p>
+        ) : sessionsLines.length > 0 && !known && !values.askControl ? (
           <p className="text-xs text-muted-foreground">
             {/* Lo de hoy terminó (la endodoncia): su control se indica ahora, si hace falta (segunda mesa del 9 nov). */}
             {continuing.every((visit) => visit.accepted)
@@ -575,6 +616,21 @@ export function ClosingNextVisit({
             {beside ? (
               <p id={`${ids}-control`} className="text-sm font-medium">
                 {beside.title}
+              </p>
+            ) : null}
+            {proposal ? (
+              <p className="text-sm">
+                {proposal}{" "}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="h-auto p-0"
+                  disabled={busy}
+                  onClick={proposeMonth}
+                >
+                  Indicar el control en 1 mes
+                </Button>
               </p>
             ) : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -839,7 +895,14 @@ export function ClosingSessions({
   resolvable = [],
   keepDiagnoses,
   onKeepDiagnosis,
+  part = "all",
 }: {
+  /**
+   * En el diálogo de firmar, lo que se decide va primero y lo que solo se lee, después (QA del 16
+   * nov, Q18): `decide` son «¿Terminaste?», lo que no se registró y lo que queda resuelto; `read`,
+   * «Sigue en curso…». Sin decirlo, todo junto.
+   */
+  part?: "all" | "decide" | "read"
   sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
   labelOf: (session: ClosingSession) => string
   answers: SessionAnswers
@@ -853,9 +916,13 @@ export function ClosingSessions({
   onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
 }): React.JSX.Element | null {
   const ids = useId()
-  const notRegistered = sessions.notRegistered ?? []
-  const resolving = resolvingOnSign(resolvable, sessions, answers)
-  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
+  const reads = part !== "decide"
+  const decides = part !== "read"
+  const finishing = decides ? sessions.finishing : []
+  const continuing = reads ? sessions.continuing : []
+  const notRegistered = decides ? (sessions.notRegistered ?? []) : []
+  const resolving = decides ? resolvingOnSign(resolvable, sessions, answers) : []
+  if (finishing.length === 0 && continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
     return null
   // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
   const line = (session: ClosingSession) =>
@@ -869,8 +936,11 @@ export function ClosingSessions({
     { value: "otra", label: "Falta otra sesión" },
   ] as const
   return (
-    <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
-      {sessions.finishing.map((session, index) => {
+    <ul
+      aria-label={part === "read" ? "Tratamientos que siguen en curso" : "Tratamientos de hoy"}
+      className="flex flex-col gap-2 rounded-lg border p-3"
+    >
+      {finishing.map((session, index) => {
         const answer = answers[session.planItemId] ?? "terminar"
         const labelId = `${ids}-terminaste-${index}`
         return (
@@ -905,7 +975,7 @@ export function ClosingSessions({
           </li>
         )
       })}
-      {sessions.continuing.map((session) => (
+      {continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
           {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
           Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Realizado hoy».
@@ -1062,49 +1132,6 @@ function listWords(words: readonly string[]): string {
 /** «sus alergias, sus enfermedades y su medicación»: lo que se le pregunta (la ASA no se pregunta, se clasifica). */
 export function healthGapWords(gaps: readonly HealthGap[]): string {
   return listWords(gaps.flatMap((gap) => (gap === "asa" ? [] : [HEALTH_GAP_WORDS[gap]])))
-}
-
-/**
- * Con anestesia y algo por saber de su salud, el cierre lo dice junto a los
- * materiales (QA del 8 nov, A2): avisa y deja firmar; la firma guarda lo que
- * faltaba. Sin anestesia, lo que falta va en «Sin registrar».
- */
-export function AnesthesiaHealthLine({
-  anesthetics,
-  gaps,
-  risks = [],
-  onComplete,
-  disabled = false,
-}: {
-  anesthetics: readonly string[]
-  gaps: readonly HealthGap[]
-  /** Lo que dijo del corazón y de la anestesia que cambia una anestesia (QA del 14 nov, causa raíz). */
-  risks?: readonly string[]
-  /** «Completar en Antecedentes»: los abre encima de la atención. */
-  onComplete?: () => void
-  disabled?: boolean
-}): React.JSX.Element | null {
-  if (anesthetics.length === 0 || (gaps.length === 0 && risks.length === 0)) return null
-  const asked = healthGapWords(gaps)
-  const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
-    .filter(Boolean)
-    .join("; ")
-  return (
-    <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">{missing ? "Anestesia con su salud por completar" : "Anestesia: revisa lo que dijo"}</span>
-        <span className="text-xs text-muted-foreground">
-          Se usa {listWords(anesthetics)}.{risks.length > 0 ? ` Dijo que ${listWords([...risks])}.` : ""}
-          {missing ? ` Falta ${missing}.` : ""} Puedes firmar igual{missing ? ": queda anotado lo que faltaba" : ""}.
-        </span>
-      </div>
-      {onComplete ? (
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
-          Completar en Antecedentes
-        </Button>
-      ) : null}
-    </div>
-  )
 }
 
 /**
@@ -1272,8 +1299,7 @@ export function EncounterClosingDialog({
   children,
   nextVisit = null,
   mayCharge = true,
-  healthGaps = [],
-  onCompleteHealth,
+  safety = null,
   onCompleteForm,
   signForms = [],
   finishingForms,
@@ -1328,17 +1354,18 @@ export function EncounterClosingDialog({
   onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
-  /** «¿Cuándo vuelve?», justo encima de firmar. */
+  /** «¿Cuándo vuelve?», con lo que se decide, después de «¿Terminaste?». */
   nextVisit?: React.ReactNode
   /**
    * Si algo de hoy puede cargarse a su cuenta al firmar (un procedimiento con precio o de su
    * plan). Sin eso, el cierre no promete «lo que se cargó hoy» (entrega 11).
    */
   mayCharge?: boolean
-  /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
-  healthGaps?: HealthGap[]
-  /** «Completar en Antecedentes» desde la línea de anestesia. */
-  onCompleteHealth?: () => void
+  /**
+   * Lo que avisa la seguridad del paciente antes de firmar, sin frenar (QA del 16 nov): la presión
+   * alta y la línea de anestesia (ASA y máximo por peso), las mismas de la atención.
+   */
+  safety?: React.ReactNode
   /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
   onCompleteForm?: (formId: string) => void
   /** Las fichas a medias de la atención, un bloque por ficha (`signFormsOf`). */
@@ -1362,6 +1389,31 @@ export function EncounterClosingDialog({
   const submitting = useStore(form.store, (state) => state.isSubmitting)
   const busy = pending || submitting
   const toRegister = missing.filter((requirement) => requirement !== "signature")
+  // «Hora de fin» se decide: va con lo que se decide, antes de lo que solo se lee (QA del 16 nov, Q18).
+  const endTime = (
+    <form.AppField name="endTime">
+      {(field) => (
+        <field.Control label="Hora de fin">
+          {(control) => (
+            <TimeSelect
+              id={control.id}
+              invalid={control.invalid}
+              aria-describedby={control.describedBy}
+              className="w-44"
+              min={bounds.min}
+              max={bounds.max}
+              emptyLabel={bounds.past ? "La de su cita" : `Ahora (${bounds.max})`}
+              value={field.state.value}
+              onChange={(value) => {
+                field.handleChange(value)
+                field.handleBlur()
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
   return (
     <Dialog
       open={open}
@@ -1385,13 +1437,9 @@ export function EncounterClosingDialog({
           </DialogHeader>
           <ScrollArea className="-mx-6 flex min-h-0 flex-1 flex-col">
             <div className="flex flex-col gap-4 px-6 text-sm">
-              {registration ?? (
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
-                  {signatureHint}
-                </div>
-              )}
+              {/* Primero lo que se decide (P10): lo que falta, la colegiatura si no la tiene, el
+                  consentimiento, «¿Terminaste?» y «¿Cuándo vuelve?»; después lo que solo se lee. */}
+              {registration}
               {toRegister.length > 0 ? (
                 <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
                   {toRegister.map((requirement) => (
@@ -1413,44 +1461,8 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
-              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
-              {closing?.sessions && onSessionAnswer ? (
-                <ClosingSessions
-                  sessions={closing.sessions}
-                  labelOf={sessionLabel}
-                  answers={sessionAnswers}
-                  onAnswer={onSessionAnswer}
-                  disabled={busy}
-                  resolvable={closing.resolvable}
-                  keepDiagnoses={keepDiagnoses}
-                  onKeepDiagnosis={onKeepDiagnosis}
-                />
-              ) : null}
-              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
-              {materials && materials.items.length > 0 ? (
-                <p className="rounded-lg border p-3">
-                  <span className="font-medium">Materiales</span>
-                  {" · "}
-                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
-                </p>
-              ) : null}
-              <AnesthesiaHealthLine
-                anesthetics={closing?.health?.anesthetics ?? []}
-                gaps={healthGaps}
-                risks={closing?.health?.risks ?? []}
-                onComplete={onCompleteHealth}
-                disabled={busy}
-              />
-              {dictated}
-              <FormsAtSign
-                id={`${ids}-forms`}
-                forms={signForms}
-                finishing={finishingForms ?? []}
-                onComplete={onCompleteForm}
-                proposals={formProposals}
-                {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
-                disabled={busy}
-              />
+              {/* La presión y la anestesia avisan antes del consentimiento: son de lo que se decide (ADR 0197). */}
+              {safety}
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (
@@ -1479,29 +1491,60 @@ export function EncounterClosingDialog({
                 )
               })}
               {needsReason ? <ConsentSkipReason form={form} disabled={busy} /> : null}
-              <form.AppField name="endTime">
-                {(field) => (
-                  <field.Control label="Hora de fin">
-                    {(control) => (
-                      <TimeSelect
-                        id={control.id}
-                        invalid={control.invalid}
-                        aria-describedby={control.describedBy}
-                        className="w-44"
-                        min={bounds.min}
-                        max={bounds.max}
-                        emptyLabel={bounds.past ? "La de su cita" : `Ahora (${bounds.max})`}
-                        value={field.state.value}
-                        onChange={(value) => {
-                          field.handleChange(value)
-                          field.handleBlur()
-                        }}
-                      />
-                    )}
-                  </field.Control>
-                )}
-              </form.AppField>
+              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
+              {closing?.sessions && onSessionAnswer ? (
+                <ClosingSessions
+                  sessions={closing.sessions}
+                  labelOf={sessionLabel}
+                  answers={sessionAnswers}
+                  onAnswer={onSessionAnswer}
+                  disabled={busy}
+                  resolvable={closing.resolvable}
+                  keepDiagnoses={keepDiagnoses}
+                  onKeepDiagnosis={onKeepDiagnosis}
+                  part="decide"
+                />
+              ) : null}
+              {nextVisit}
+              {endTime}
+              {/* Desde aquí, lo que solo se lee: lo que sigue en curso y lo que firma el producto (NTS 188). */}
+              {closing?.sessions && onSessionAnswer ? (
+                <ClosingSessions
+                  sessions={closing.sessions}
+                  labelOf={sessionLabel}
+                  answers={sessionAnswers}
+                  onAnswer={onSessionAnswer}
+                  disabled={busy}
+                  part="read"
+                />
+              ) : null}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {materials && materials.items.length > 0 ? (
+                <p className="rounded-lg border p-3">
+                  <span className="font-medium">Materiales</span>
+                  {" · "}
+                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
+                </p>
+              ) : null}
+              {dictated}
+              <FormsAtSign
+                id={`${ids}-forms`}
+                forms={signForms}
+                finishing={finishingForms ?? []}
+                onComplete={onCompleteForm}
+                proposals={formProposals}
+                {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
+                disabled={busy}
+              />
               {children}
+              {/* Leído, no decidido: de quién es la firma (sin colegiatura, sus campos van arriba). */}
+              {registration ? null : (
+                <div className="rounded-lg border p-3">
+                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+                  {signatureHint}
+                </div>
+              )}
               {blockedReason ? (
                 <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
                   {blockedReason}
@@ -1517,7 +1560,6 @@ export function EncounterClosingDialog({
                       : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
                 </p>
               ) : null}
-              {nextVisit}
             </div>
           </ScrollArea>
           {formError ? (
@@ -1543,68 +1585,5 @@ export function EncounterClosingDialog({
   )
 }
 
-/**
- * Sin colegiatura no se firma (ADR 0003: nombre y colegiatura en cada
- * atención): se pide en el mismo cierre, sin salir de la atención, y se
- * guarda en el perfil profesional para las siguientes. El título solo se pide
- * si el perfil no lo tiene; el colegio viene propuesto por el país del
- * producto (COP en odentIA, CMP en latidIA) y se puede cambiar. Cada falta se
- * dice en su campo.
- */
-export function SignatureRegistrationFields({
-  form,
-  signAs,
-  askTitle,
-  disabled,
-  numberRef,
-}: {
-  form: ClosingForm
-  /** El nombre con que firma, de su cuenta o su perfil. */
-  signAs: string | null
-  askTitle: boolean
-  disabled: boolean
-  /** El número es lo que falta escribir: ahí empieza el foco. */
-  numberRef?: React.Ref<HTMLInputElement>
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex flex-col">
-        <p className="font-medium">Falta tu colegiatura para firmar</p>
-        <p className="text-xs text-muted-foreground">
-          {signAs ? `Firmarás como ${signAs}. ` : ""}La historia clínica pide nombre y colegiatura.
-        </p>
-      </div>
-      {askTitle ? (
-        <form.AppField name="professionalTitle">
-          {(field) => <field.TextField label="Título profesional" maxLength={120} disabled={disabled} />}
-        </form.AppField>
-      ) : null}
-      <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3">
-        <form.AppField name="registrationBody">
-          {(field) => <field.TextField label="Colegio" maxLength={40} disabled={disabled} />}
-        </form.AppField>
-        <form.AppField name="registrationNumber">
-          {(field) => (
-            <field.Control
-              label="Número de colegiatura"
-              description="Se guarda en tu perfil profesional: no la volverá a pedir."
-            >
-              {(control) => (
-                <Input
-                  {...control.props}
-                  ref={numberRef}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  maxLength={20}
-                  disabled={disabled}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              )}
-            </field.Control>
-          )}
-        </form.AppField>
-      </div>
-    </div>
-  )
-}
+/** El bloque de la colegiatura vive aparte: también lo usa el consentimiento en la tablet. */
+export { SignatureRegistrationFields } from "./signature-registration-fields"

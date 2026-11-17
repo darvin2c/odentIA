@@ -1,9 +1,15 @@
+import {
+  CORRECTION_NOT_READY,
+  CorrectionChoices,
+  useCorrection,
+} from "@odentia/clinic-app/components/patient/correction-choices"
 import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
 import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
 import { takenAt } from "@odentia/clinic-app/components/patient/document-labels"
 import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
-import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { fetchTreatmentPlans, PLAN_QUERY_KEYS, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { correctApi } from "@odentia/clinic-app/lib/encounters"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
 import { useDiagnosisSystem, useOrgProfile } from "@odentia/clinic-app/lib/org"
 import {
@@ -11,10 +17,9 @@ import {
   type PatientDocument,
   type PlanItem,
   planStatusLabel,
-  toothTypeLabel,
 } from "@odentia/clinic-app/lib/patients"
 import { fetchService, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
-import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
+import { findingsOfEncounter, groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel, formatMoney, isLeftOut, pulpDiagnosisChoices } from "@odentia/clinical"
 import {
   surfaceLabel as clinicalSurfaceLabel,
@@ -30,12 +35,12 @@ import {
   surfacesForTooth,
   toothGroupOf,
   toothNameOf,
-  toothTypeOf,
 } from "@odentia/dental"
 import { Badge, Button, Checkbox, Field, FieldLabel } from "@odentia/ui"
 import {
   FormDrawer,
   FormPanel,
+  RadioChips,
   submitErrorMessage,
   useAppForm,
   useFormSurface,
@@ -48,7 +53,7 @@ import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
 import { ToothFitNotice } from "./tooth-fit-notice"
-import { ToothHistory } from "./tooth-history"
+import { ToothHistory, toothHistoryWords, useToothHistory } from "./tooth-history"
 import { ToothSVG } from "./tooth-svg"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
@@ -510,6 +515,8 @@ export function ToothDrawer({
             "encounter-closing",
             // El diagnóstico registrado con el hallazgo deja de proponerse.
             "diagnosis-suggestions",
+            // La línea «Historia de la 36 · 1 hallazgo» cuenta lo recién registrado.
+            "tooth-history",
           ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         setChoosingFinding(true)
@@ -552,34 +559,35 @@ export function ToothDrawer({
     }
   }
 
+  // Anular el hallazgo trae, marcados, su diagnóstico de esta atención y lo indicado hoy desde
+  // él (QA del 16 nov, E2): un motivo y una sola operación en el servidor, todo o nada.
   const voidForm = useAppForm({
     defaultValues: EMPTY_VOID,
     validators: { onSubmit: voidSchema },
     onSubmit: async ({ value }) => {
-      if (!voiding) return
+      if (!voiding || !encounterId) return
+      // Sin la lista de lo que cae no se anula: saldría sin su diagnóstico ni lo indicado desde él
+      // (QA del 16 nov, Q2).
+      if (!correction.ready) throw new Error(CORRECTION_NOT_READY)
       onPendingChange?.(true)
       try {
         await beforeWrite?.()
-        // Una caries de dos caras se anula entera: cada cara es su fila. Una cara ya anulada
-        // (un intento anterior que se cortó a medias) se salta, y el odontograma se vuelve a
-        // pedir aunque una falle: así se ve lo que quedó y se reintenta lo que falta.
+        // Una caries de dos caras se anula entera: cada cara es su fila, y van todas juntas.
         try {
-          for (const id of voiding.ids) {
-            try {
-              await apiFetch(`/api/patients/${patientId}/odontogram/entries/${id}/void`, {
-                method: "POST",
-                body: JSON.stringify({ reason: value.reason.trim() }),
-              })
-            } catch (error) {
-              if (!(error instanceof ApiError && error.shape.code === "ALREADY_VOIDED")) throw error
-            }
-          }
+          await correctApi(patientId, encounterId, {
+            start: { findingIds: voiding.ids },
+            reason: value.reason.trim(),
+            ...correction.marks,
+          })
         } catch (error) {
-          await onChanged()
-          throw error
+          // Ya anulado (un doble clic, otra pestaña): se toma como hecho y se vuelve a leer.
+          if (!(error instanceof ApiError && error.shape.code === "ALREADY_VOIDED")) throw error
         }
         setVoiding(null)
         voidForm.reset(EMPTY_VOID)
+        await Promise.all(
+          [...PLAN_QUERY_KEYS, "tooth-history"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+        )
         await onChanged()
       } finally {
         onPendingChange?.(false)
@@ -587,6 +595,12 @@ export function ToothDrawer({
     },
   })
   const voidSurface = useFormSurface(voidForm)
+  const correction = useCorrection(
+    patientId,
+    encounterId ?? "",
+    voiding && encounterId ? { findingIds: voiding.ids } : null,
+    voidSurface.isSubmitting,
+  )
 
   const busy = surface.isSubmitting || voidSurface.isSubmitting
   const fieldDisabled = !canMutate || disabled || busy
@@ -815,8 +829,11 @@ export function ToothDrawer({
       <Badge variant="outline">Solo lectura · estado histórico</Badge>
     </div>
   ) : null
+  // Lo que se viene a hacer va primero («¿Qué observas?»); la historia de cada pieza, debajo y
+  // plegada en una línea («Historia de la 46 · 1 hallazgo · 1 procedimiento»). Se abre sola si
+  // solo se consulta, o si tiene algo registrado en esta atención que se pueda anular.
   const toothContexts = (
-    <div className="flex flex-col gap-3 pt-2">
+    <div className="flex flex-col gap-3">
       {teeth.map((toothNumber) => (
         <ToothContext
           key={toothNumber}
@@ -827,21 +844,55 @@ export function ToothDrawer({
           planQuery={planQuery}
           docsQuery={docsQuery}
           encounterId={encounterId}
-          canMutate={canMutate && !disabled && !busy}
-          voidPending={voidSurface.isSubmitting}
-          defaultOpen
-          onVoid={(ids, label) => {
-            voidForm.reset(EMPTY_VOID)
-            setVoiding({ ids, label })
-          }}
+          // Lo registrado hoy ya está arriba con su «Anular»: la historia se abre sola solo al consultar.
+          defaultOpen={!canMutate}
         />
       ))}
     </div>
   )
-  // Al elegir una sola pieza, primero su estado (hallazgos, plan, imágenes,
-  // historial) y después el registro. Mientras se edita, el contexto baja y se
-  // pliega para no competir con el formulario.
-  const contextFirst = !multi && !draftDirty && (!canMutate || choosingFinding)
+  // Lo registrado en esta atención, a la vista y con su «Anular»: fuera del pliegue de la historia
+  // (QA del 16 nov, Q14: para anular lo recién registrado había que abrir «Historia… sin registros»).
+  const todayFindings = teeth.flatMap((toothNumber) =>
+    findingsOfEncounter(entriesOf(toothNumber), encounterId).map((group) => ({ toothNumber, ...group })),
+  )
+  const today =
+    todayFindings.length > 0 ? (
+      <section aria-label="Registrado hoy" className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium">Registrado hoy</h3>
+        <ul className="flex flex-col gap-1.5">
+          {todayFindings.map(({ toothNumber, first: entry, ids, surfaces }) => {
+            const words = findingWords(official, entry)
+            return (
+              <li
+                key={ids.join(",")}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  {teeth.length > 1 ? `Pieza ${toothNumber} · ` : ""}
+                  {words}
+                  {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
+                  {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
+                </span>
+                {canMutate && !disabled ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={busy}
+                    onClick={() => {
+                      voidForm.reset(EMPTY_VOID)
+                      setVoiding({ ids, label: `pieza ${toothNumber} (${words})` })
+                    }}
+                  >
+                    Anular
+                  </Button>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+    ) : null
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -849,7 +900,7 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
-      {contextFirst ? toothContexts : null}
+      {today}
 
       {!canMutate ? (
         historical || readOnly || !canWrite ? (
@@ -866,7 +917,9 @@ export function ToothDrawer({
           </div>
         )
       ) : choosingFinding ? (
-        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} />
+        // Al lado de la página, el foco va al buscador al abrir la pieza (con Enter, sin 4 Tab de por
+        // medio). En el cajón de la tablet no: abriría el teclado encima de la pieza.
+        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} autoFocus={inline} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <section aria-labelledby={`${uid}-hallazgo`} className="flex flex-col gap-4 sm:col-span-2">
@@ -892,36 +945,65 @@ export function ToothDrawer({
             {previewContent}
           </section>
 
+          {/* Pocas opciones cortas, todas a la vista y de un toque (estándar E4): la sigla en la
+              pastilla y, debajo de la elegida, su nombre entero: «CDP» no lo entiende todo el que empieza. */}
           {def?.variants?.length ? (
             <form.AppField name="variant">
-              {(field) => (
-                <field.SelectField
-                  id={`${uid}-variant`}
-                  label={variantFieldLabel(official, condition)}
-                  options={(def.variants ?? []).map((v) => ({
-                    value: v.value,
-                    label: official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label,
-                  }))}
-                  placeholder="Elige…"
-                  disabled={fieldDisabled}
-                  // La profundidad elegida se lee entera («…de la dentina / compromiso de la pulpa»).
-                  triggerClassName="h-auto min-h-11 whitespace-normal text-left *:data-[slot=select-value]:line-clamp-3"
-                />
-              )}
+              {(field) => {
+                const legend = variantFieldLabel(official, condition)
+                const chosen = def.variants?.find((v) => v.value === field.state.value)
+                const sigla = (v: { label: string; abbreviation: string }) =>
+                  official && v.abbreviation ? v.abbreviation : v.label
+                const longName = chosen && sigla(chosen) !== chosen.label ? chosen.label : null
+                return (
+                  <field.Group legend={legend} className="flex flex-col gap-2 sm:col-span-2">
+                    {(control) => (
+                      <>
+                        <RadioChips
+                          id={control.id}
+                          aria-label={legend}
+                          aria-describedby={
+                            [control.describedBy, longName ? `${uid}-variant-long` : null].filter(Boolean).join(" ") ||
+                            undefined
+                          }
+                          invalid={control.invalid}
+                          disabled={fieldDisabled}
+                          value={field.state.value || null}
+                          options={(def.variants ?? []).map((v) => ({ value: v.value, label: sigla(v) }))}
+                          onChange={(value) => field.handleChange(value)}
+                          // Sin norma que la pida, la variante se puede dejar sin responder.
+                          onClear={official?.strictVariants ? undefined : () => field.handleChange("")}
+                        />
+                        {longName ? (
+                          <p id={`${uid}-variant-long`} className="text-xs text-muted-foreground">
+                            {longName}
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </field.Group>
+                )
+              }}
             </form.AppField>
           ) : null}
 
           {def?.color === "quality" ? (
             <form.AppField name="quality">
               {(field) => (
-                <field.SelectField
-                  id={`${uid}-quality`}
-                  label="Estado"
-                  options={QUALITY_OPTIONS}
-                  placeholder="Elige el estado…"
-                  disabled={fieldDisabled}
-                  triggerClassName="min-h-11"
-                />
+                <field.Group legend="Estado" className="flex flex-col gap-2">
+                  {(control) => (
+                    <RadioChips
+                      id={control.id}
+                      aria-label="Estado"
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      disabled={fieldDisabled}
+                      value={field.state.value || null}
+                      options={QUALITY_OPTIONS}
+                      onChange={(value) => field.handleChange(value)}
+                    />
+                  )}
+                </field.Group>
               )}
             </form.AppField>
           ) : null}
@@ -929,14 +1011,20 @@ export function ToothDrawer({
           {showDirection && (
             <form.AppField name="direction">
               {(field) => (
-                <field.SelectField
-                  id={`${uid}-direction`}
-                  label="Dirección de rotación"
-                  options={DIRECTION_OPTIONS}
-                  placeholder="Selecciona la dirección…"
-                  disabled={fieldDisabled}
-                  triggerClassName="min-h-11"
-                />
+                <field.Group legend="Dirección de rotación" className="flex flex-col gap-2">
+                  {(control) => (
+                    <RadioChips
+                      id={control.id}
+                      aria-label="Dirección de rotación"
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      disabled={fieldDisabled}
+                      value={field.state.value || null}
+                      options={DIRECTION_OPTIONS}
+                      onChange={(value) => field.handleChange(value)}
+                    />
+                  )}
+                </field.Group>
               )}
             </form.AppField>
           )}
@@ -1164,14 +1252,20 @@ export function ToothDrawer({
               </form.AppField>
               <form.AppField name="diagnosisType">
                 {(field) => (
-                  <field.SelectField
-                    id={`${uid}-dx-type`}
-                    label="Tipo"
-                    options={DIAGNOSIS_TYPE_OPTIONS}
-                    placeholder="Elige…"
-                    disabled={fieldDisabled || !draft.diagnosisCode}
-                    triggerClassName="min-h-11"
-                  />
+                  <field.Group legend="Tipo" className="flex min-w-0 flex-col gap-2">
+                    {(control) => (
+                      <RadioChips
+                        id={control.id}
+                        aria-label="Tipo del diagnóstico"
+                        aria-describedby={control.describedBy}
+                        invalid={control.invalid}
+                        disabled={fieldDisabled || !draft.diagnosisCode}
+                        value={field.state.value || null}
+                        options={DIAGNOSIS_TYPE_OPTIONS}
+                        onChange={(value) => field.handleChange(value)}
+                      />
+                    )}
+                  </field.Group>
                 )}
               </form.AppField>
             </div>
@@ -1345,14 +1439,7 @@ export function ToothDrawer({
           </form.AppField>
         </div>
       )}
-      {contextFirst ? null : (
-        <details>
-          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-            Estado y contexto de las piezas
-          </summary>
-          {toothContexts}
-        </details>
-      )}
+      {toothContexts}
     </div>
   )
   const hideSubmit = !canMutate || teeth.length === 0 || choosingFinding
@@ -1408,8 +1495,19 @@ export function ToothDrawer({
         }
         submitLabel="Confirmar anulación"
         cancelLabel="Volver al registro"
-        submitDisabled={!canMutate || disabled}
+        submitDisabled={!canMutate || disabled || !correction.ready}
       >
+        <CorrectionChoices
+          preview={correction.preview}
+          marks={correction.marks}
+          onMarksChange={correction.setMarks}
+          disabled={voidSurface.isSubmitting}
+          idPrefix={`${uid}-void`}
+          loading={correction.loading}
+          failed={correction.failed}
+          error={correction.error}
+          onRetry={correction.retry}
+        />
         <voidForm.AppField name="reason">
           {(field) => (
             <field.TextareaField
@@ -1429,7 +1527,7 @@ export function ToothDrawer({
 
 /**
  * Lo que tiene la pieza: su estado actual (lo registrado en esta atención se
- * anula aquí con motivo), su plan, su historia y sus imágenes. La evolución del
+ * anula arriba del panel, en «Registrado hoy»), su plan, su historia y sus imágenes. La evolución del
  * odontograma, con lo anulado, es una sola y vive junto al gráfico.
  */
 function ToothContext({
@@ -1440,10 +1538,7 @@ function ToothContext({
   planQuery,
   docsQuery,
   encounterId,
-  canMutate,
-  voidPending,
   defaultOpen,
-  onVoid,
 }: {
   patientId: string
   toothNumber: number
@@ -1452,10 +1547,7 @@ function ToothContext({
   planQuery: PlanQueryState
   docsQuery: DocsQueryState
   encounterId?: string
-  canMutate: boolean
-  voidPending: boolean
   defaultOpen: boolean
-  onVoid: (ids: string[], label: string) => void
 }): React.JSX.Element {
   const official = useOdontogramNotation()
   const needsReview = entries.filter((e) => e.needsReview)
@@ -1473,13 +1565,13 @@ function ToothContext({
     (d) => d.category !== "radiografia" && d.category !== "foto_clinica",
   )
 
+  const historyQuery = useToothHistory(patientId, toothNumber)
+
   return (
     <details className="flex flex-col gap-2 rounded-lg border px-4 py-3" open={defaultOpen}>
-      <summary className="cursor-pointer text-sm font-semibold">
-        Pieza {toothNumber} — {toothNameOf(toothNumber)}{" "}
-        <span className="font-normal text-muted-foreground">
-          ({toothTypeLabel(toothTypeOf(toothNumber))})
-        </span>
+      {/* El nombre de la pieza ya está en el título del panel: aquí, cuánto tiene. */}
+      <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
+        {toothHistoryWords(toothNumber, historyQuery.data?.data)}
       </summary>
 
       <div className="flex flex-col gap-3 pt-2">
@@ -1495,8 +1587,9 @@ function ToothContext({
               {/* Una caries de dos caras es un hallazgo: una fila con sus caras (QA del 9 nov). */}
               {groupFindings(entries).map(({ first: entry, ids, surfaces }) => {
                 const words = findingWords(official, entry)
-                // Solo lo registrado en la atención en curso se corrige aquí.
-                const ownedHere = canMutate && !!encounterId && entry.encounterId === encounterId
+                // Lo registrado en la atención en curso se anula arriba, en «Registrado hoy»: aquí
+                // solo se dice, sin otro «Anular» igual.
+                const ownedHere = !!encounterId && entry.encounterId === encounterId
                 return (
                   <li
                     key={ids.join(",")}
@@ -1512,17 +1605,7 @@ function ToothContext({
                     {entry.createdAt ? (
                       <span className="text-xs text-muted-foreground">{timeAgo(entry.createdAt)}</span>
                     ) : null}
-                    {ownedHere ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        disabled={voidPending}
-                        onClick={() => onVoid(ids, `pieza ${toothNumber} (${findingWords(official, entry)})`)}
-                      >
-                        Anular
-                      </Button>
-                    ) : null}
+                    {ownedHere ? <Badge variant="outline">Hoy</Badge> : null}
                     {entry.note ? <p className="w-full text-muted-foreground">{entry.note}</p> : null}
                     {entry.needsReview && originalLegacyText(entry) ? (
                       <p className="w-full text-xs text-muted-foreground">{originalLegacyText(entry)}.</p>

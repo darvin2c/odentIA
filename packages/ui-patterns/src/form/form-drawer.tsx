@@ -166,6 +166,7 @@ export function FormDrawer({
         fallback={drawer(true)}
         draft={draft}
         unsavedDescription={unsavedDescription}
+        onClose={onClose}
       >
         <FormPanel
           title={title}

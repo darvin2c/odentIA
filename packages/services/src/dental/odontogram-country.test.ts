@@ -296,6 +296,68 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   expect(active).toEqual(["definitive_restoration"])
 })
 
+// Revisión del 16 nov (R4): la caries O de la 16 y la resina O indicada y hecha hoy son la caries y
+// su tratamiento, no caries bajo una restauración. La caries se resuelve al firmar, pero la resina ya
+// dibujó su restauración: el cierre no avisa «caries y restauración en la misma cara». Una caries en
+// la cara de una restauración que no es de lo tratado hoy, sí.
+it("la caries tratada hoy no avisa caries y restauración en la misma cara; una caries sobre otra restauración, sí", async () => {
+  const f = await attending("org_a")
+  const draft = await f.open()
+  await seedOdentiaCatalog(ownerDb)
+  const resin = await f.run(async (tx) =>
+    createService(tx, f.orgId, f.actor, {
+      name: "Resina compuesta",
+      officialCode: "D2391",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["restauradora"])).get("restauradora")!,
+      scope: "surfaces",
+      priceCents: 18000,
+      leavesFinding: { condition: "definitive_restoration", variant: "resin" },
+    }),
+  )
+  const [caries] = await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, { ...caries16, details: { variant: "dentin" }, encounterId: draft }),
+  )
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, {
+      serviceId: resin.id,
+      sourceEncounterId: draft,
+      toothNumber: 16,
+      surfaces: ["occlusal"],
+      odontogramEntryId: caries!.id,
+    }),
+  )
+  // Indicada y hecha hoy: se acepta al hacerla y, de una sesión, ya dibuja su restauración.
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, draft, { planItemId: item.id, acceptWhenDone: true }))
+  const drawn = await ownerDb
+    .select()
+    .from(odontogramEntry)
+    .where(and(eq(odontogramEntry.leftByPlanItemId, item.id), isNull(odontogramEntry.voidedAt)))
+  expect(drawn.map((entry) => [entry.toothNumber, entry.surface])).toEqual([[16, "occlusal"]])
+  const sameFace = async () =>
+    ((await f.run((tx) => getEncounterClosing(tx, ...f.args, draft))) as { sameFace?: unknown }).sameFace
+  expect(await sameFace()).toEqual([])
+  // La 26 tiene una restauración y hoy se ve caries en esa misma cara: eso sí se avisa.
+  await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, {
+      toothNumber: 26,
+      condition: "definitive_restoration",
+      surfaces: ["occlusal"],
+      details: { variant: "resin", quality: "good" },
+      encounterId: draft,
+    }),
+  )
+  await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, {
+      toothNumber: 26,
+      condition: "caries",
+      surfaces: ["occlusal"],
+      details: { variant: "dentin" },
+      encounterId: draft,
+    }),
+  )
+  expect(await sameFace()).toEqual([{ toothNumber: 26, surface: "occlusal" }])
+})
+
 it("firmar sin responder «¿Terminaste?» termina la resina de una sesión y el odontograma firmado la trae", async () => {
   const f = await attending("org_a")
   await seedOdentiaCatalog(ownerDb)

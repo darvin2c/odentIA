@@ -417,9 +417,10 @@ it("su «No sé» a las alergias dice «no sabe», no «no preguntado»", () => 
   const unknown: Detail = { activeAllergies: [], activeConditions: [], currentMedications: [], allergyReview: "unknown" }
   const said = { by: { kind: "patient" as const, name: null, relation: null }, at: "2026-11-13T19:27:00.000Z" }
   const page = text(<PatientClinicalStrip detail={{ ...unknown, allergySaidUnknown: said }} sex="F" />)
-  expect(page).toContain("Alergias: no sabe")
-  expect(page).not.toContain("no preguntado")
-  expect(text(<PatientClinicalStrip detail={unknown} sex="F" />)).toContain("Alergias: no preguntado")
+  expect(page).toContain("Alergias: dijo que no sabe (13 nov)")
+  expect(page).not.toContain("no se le preguntó")
+  // La misma frase que la ficha y la atención (estudio de la atención del 16 nov, E10a).
+  expect(text(<PatientClinicalStrip detail={unknown} sex="F" />)).toContain("Alergias: no se le preguntó")
 })
 
 // QA de formularios del 15 nov (A12 del auditor): «Saltar» en «Tus medicinas» se leía «no se le preguntó».

@@ -58,7 +58,7 @@ export function budgetStateText(budget: {
       // Impreso, enviado o mostrado en consulta: «Entregado» no supone un canal.
       return "Entregado · espera respuesta"
     case "pospuesto":
-      return "Lo está pensando"
+      return "Lo piensa"
     case "aceptado": {
       // Con varios caminos, aceptar es elegir uno: «Aceptó todo» junto a «Exodoncia · No
       // elegida» se leía como si hubiera aceptado las dos (QA del 9 nov).
@@ -97,7 +97,7 @@ export function budgetAnswerText(decision: string | null | undefined): string {
     case "aceptado":
       return "Aceptado"
     case "pospuesto":
-      return "Lo está pensando"
+      return "Lo piensa"
     case "rechazado":
       return "No aceptó"
     case "no_elegida":
@@ -122,7 +122,7 @@ const PLAN_STATE_WORDS: Record<string, string> = {
 
 /**
  * Una sola etiqueta por tratamiento (U8 de la QA de la ficha): mientras no
- * empieza, su decisión («Aceptado», «Lo está pensando»); después, su estado.
+ * empieza, su decisión («Aceptado», «Lo piensa»); después, su estado.
  * La usan la tarjeta de la Historia y el detalle de la atención, para que lo
  * plegado y lo abierto digan lo mismo (tercer repaso del 9 nov, E9).
  */
@@ -158,4 +158,62 @@ export const BUDGET_SIGN_DECLARATION =
 /** «Opción A» → «opción A», para decirla dentro de una frase. */
 function inSentence(label: string): string {
   return label.charAt(0).toLowerCase() + label.slice(1)
+}
+
+/** Lo mínimo de una línea con su importe para decir lo respondido. */
+interface AnswerLine extends WordLine {
+  title: string
+  lineTotalCents: number | null
+  currency: string
+}
+
+/**
+ * Lo respondido en una línea, igual en la atención, el Plan y lo que leen Sofi y Argos (QA del 16
+ * nov, E3): «Eligió la opción A · aceptó S/ 950.00 · lo piensa: Corona cerámica · S/ 900.00». Lo
+ * aceptado es lo que se aceptó, no el total de la opción; «Lo piensa» es la única palabra de lo
+ * que sigue esperando (cuenta como «espera respuesta»). Sin respuesta todavía, null.
+ */
+export function budgetAnswerLine(
+  budget: { status: string; items: readonly AnswerLine[]; options?: readonly WordOption[] },
+  format: (cents: number, currency: string) => string,
+): string | null {
+  if (!["aceptado", "parcial", "pospuesto", "rechazado"].includes(budget.status)) return null
+  const chosen = budget.options && budget.options.length > 1 ? budget.options.find((option) => option.decision === "elegida") : undefined
+  const lines = decidedLines(budget.items, budget.options) as AnswerLine[]
+  const sum = (rows: readonly AnswerLine[]) => {
+    const currencies = [...new Set(rows.map((row) => row.currency))].sort()
+    const parts: string[] = []
+    for (const currency of currencies) {
+      const own = rows.filter((row) => row.currency === currency)
+      if (own.some((row) => row.lineTotalCents == null)) return "falta algún precio"
+      parts.push(format(own.reduce((total, row) => total + (row.lineTotalCents ?? 0), 0), currency))
+    }
+    return parts.join(" + ")
+  }
+  const titles = (rows: readonly AnswerLine[]) => [...new Set(rows.map((row) => row.title))].join(", ")
+  const of = (decision: string) => lines.filter((line) => line.decision === decision)
+  const accepted = of("aceptado")
+  const thinking = of("pospuesto")
+  const asked = of("pendiente")
+  const refused = of("rechazado")
+  const all = lines.length > 0 && accepted.length === lines.length
+  const head = chosen
+    ? chosen.position
+      ? `Eligió la ${inSentence(budgetOptionLabel(chosen.position))}`
+      : "Eligió una opción"
+    : all
+      ? "Aceptó todo"
+      : choosingPath(budget.options) && (thinking.length > 0 || asked.length > 0)
+        ? "Falta elegir el camino"
+        : null
+  return [
+    head,
+    accepted.length > 0 ? (all && !chosen ? sum(accepted) : `aceptó ${sum(accepted)}`) : null,
+    thinking.length > 0 ? `lo piensa: ${titles(thinking)} · ${sum(thinking)}` : null,
+    asked.length > 0 ? `por responder: ${titles(asked)} · ${sum(asked)}` : null,
+    refused.length > 0 ? `no aceptó: ${titles(refused)}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ")
+    .replace(/^./, (first) => first.toUpperCase())
 }

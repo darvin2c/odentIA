@@ -624,3 +624,39 @@ it("copiar las fichas del producto no crea especialidades: sin la suya activa, l
   const [still] = await ownerDb.select().from(orgSpecialty).where(eq(orgSpecialty.id, pediatric.id))
   expect(still?.isActive).toBe(false)
 })
+
+// Estudio de la atención (16 nov, P11, D7, ADR 0199): la odontoestomatológica es de la evaluación,
+// no de cada sesión. Se ofrece mientras el plan de ahora no tenga una, nunca en una urgencia, y el
+// control de ortodoncia (que sí se repite) sigue como antes.
+it("la odontoestomatológica se ofrece mientras el plan no tenga una: no en la urgencia ni en la sesión siguiente", async () => {
+  const c = await clinic()
+  await c.run((tx) =>
+    setProfessionalSpecialties(tx, c.orgId, c.actor, c.actor, [c.specialties.get("odontologia_general")!.id]),
+  )
+  const stomatologic = async (id: string) =>
+    (await c.offers(id)).find((offer) => offer.key === "ficha-odontoestomatologica") ?? null
+  // Entra por una urgencia: no se le ofrece.
+  const urgency = await c.attention()
+  await ownerDb.update(encounter).set({ reason: "Urgencia: dolor en la 36" }).where(eq(encounter.id, urgency.id))
+  expect(await stomatologic(urgency.id)).toBeNull()
+  // A la semana, su primera consulta: sí, y se llena.
+  const first = await c.attention()
+  expect(await stomatologic(first.id)).toMatchObject({ why: "profesional", today: null })
+  const template = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find(
+    (row) => row.key === "ficha-odontoestomatologica",
+  )!
+  const filled = await c.run((tx) =>
+    createFormResponse(tx, c.orgId, c.actor, {
+      templateId: template.id,
+      patientId: c.patient.id,
+      encounterId: first.id,
+      answers: { riesgo: "Bajo" },
+    }),
+  )
+  // Empezada en esta atención, se sigue ofreciendo en ella.
+  expect(await stomatologic(first.id)).toMatchObject({ today: { responseId: filled.id, status: "borrador" } })
+  await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, filled.id))
+  // La sesión siguiente del mismo plan: ya no, ni como «ya la tiene».
+  const second = await c.attention()
+  expect(await stomatologic(second.id)).toBeNull()
+})

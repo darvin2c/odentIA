@@ -52,8 +52,8 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
 
   // En la atención de hoy: el presupuesto por enviar ofrece anotar su respuesta.
   const visit = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { reason: "Revisión del plan" }, 201)
-  // Lo que indica hoy hace visible el plan de la atención; se suma al presupuesto al firmar.
-  const second = await call<{ id: string }>(page, "POST", `${apiPath}/plan/items`, slug, {
+  // Lo que indica hoy entra ya al presupuesto por enviar: lo que se responde es todo lo que hay.
+  await call(page, "POST", `${apiPath}/plan/items`, slug, {
     serviceId: ids.serviceId,
     sourceEncounterId: visit.id,
     toothNumber: 26,
@@ -65,12 +65,15 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   await shot("atencion-franja")
   await anotar.click()
 
-  // Un solo cajón: el tratamiento con sus tres respuestas y quién decide.
+  // Un solo cajón: cada tratamiento con sus tres respuestas y quién decide.
   const drawer = surface(page, { name: /^¿Qué respondió / })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText("Decide", { exact: true })).toBeVisible()
   await expect(drawer.getByText(/Al guardar queda entregado, sin enviarle nada/)).toBeVisible()
-  await drawer.getByRole("group", { name: /^Respuesta para / }).getByRole("button", { name: "Acepta", exact: true }).click()
+  const answers = drawer.getByRole("group", { name: /^Respuesta para / })
+  await expect(answers).toHaveCount(2)
+  await answers.nth(0).getByRole("button", { name: "Acepta", exact: true }).click()
+  await answers.nth(1).getByRole("button", { name: "Acepta", exact: true }).click()
   await expect(drawer.getByText(/Quedará como «Aceptó todo», anotado por ti/)).toBeVisible()
   await shot("cajon-acepta")
   await page.setViewportSize({ width: 820, height: 1180 })
@@ -79,7 +82,7 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
   await drawer.getByRole("button", { name: "Que lo firme en la tablet", exact: true }).click()
   const tablet = page.getByRole("dialog", { name: /^Firma de Lucía/ })
   await expect(tablet.getByRole("heading", { name: "Su decisión" })).toBeVisible()
-  await expect(tablet.getByText("Aceptado", { exact: true })).toBeVisible()
+  await expect(tablet.getByText("Aceptado", { exact: true })).toHaveCount(2)
   await expect(tablet.getByText(/Acepto los tratamientos que dicen «Aceptado»/)).toBeVisible()
   // «Listo» sin firma no avanza: lo dice junto al recuadro.
   await tablet.getByRole("button", { name: "Listo", exact: true }).click()
@@ -112,8 +115,14 @@ test("en la atención se anota qué respondió sin imprimir ni enviar, y lo que 
 
   // Otro presupuesto, desde el Plan en el teléfono y sin firma: 3 toques (anotar, acepta, guardar).
   await page.setViewportSize({ width: 390, height: 844 })
+  // Con el primero ya aceptado, lo que se indica después va en otro presupuesto.
+  const third = await call<{ id: string }>(page, "POST", `${apiPath}/plan/items`, slug, {
+    serviceId: ids.serviceId,
+    sourceEncounterId: visit.id,
+    toothNumber: 16,
+  }, 201)
   const draft = await call<{ id: string }>(page, "POST", `${apiPath}/budgets`, slug, {
-    itemIds: [second.id],
+    itemIds: [third.id],
     title: "Segunda propuesta",
   }, 201)
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan&planId=${ids.planId}&budgetId=${draft.id}`))

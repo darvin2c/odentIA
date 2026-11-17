@@ -36,9 +36,11 @@ import {
   patientCondition,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
+import { formDiagnosesOf } from "./form-diagnoses.js"
 import type { DiagnosisCandidate, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 
@@ -277,23 +279,42 @@ export async function searchDiagnosisCodes(
 
 /**
  * Un diagnóstico propuesto, con lo que lo propone y su sitio como lo dice el
- * producto: un hallazgo de la atención (odentIA: el odontograma) o un
- * tratamiento que la atención continúa.
+ * producto: un hallazgo de la atención (odentIA: el odontograma), un
+ * tratamiento que la atención continúa o una ficha de la atención llenada a
+ * mano (odentIA: el diagnóstico pulpar y apical de la de endodoncia).
  */
 export type ProposedDiagnosis = DiagnosisCodeOption & {
-  /** Qué lo propone: un hallazgo o un tratamiento. */
-  source: "hallazgo" | "tratamiento"
+  /** Qué lo propone: un hallazgo, un tratamiento o una ficha. */
+  source: "hallazgo" | "tratamiento" | "ficha"
   /**
-   * Lo que lo propone, en palabras: el hallazgo («Lesión de caries dental») o
-   * el tratamiento con su pieza («Endodoncia posterior vital · 46»).
+   * Lo que lo propone, en palabras: el hallazgo («Lesión de caries dental»),
+   * el tratamiento con su pieza («Endodoncia posterior vital · 46») o la
+   * respuesta de la ficha («Pulpitis irreversible sintomática»).
    */
   finding: string
   /**
    * El tipo con que se registró la última vez ese código para la persona
    * (FHIR verificationStatus); null si nunca se registró o si lo propone un
-   * hallazgo, que es una observación nueva.
+   * hallazgo, que es una observación nueva. Lo de una ficha es definitivo:
+   * es lo que concluyó quien la llenó.
    */
   diagnosisType: string | null
+} & SiteFields
+
+/**
+ * Lo que una ficha de la atención dice que es un diagnóstico (estudio de la
+ * atención, E10b), esté o no en Diagnóstico: la ficha muestra cada uno con
+ * «Usar» o con «Ya está en Diagnóstico».
+ */
+export type FormProposedDiagnosis = DiagnosisCodeOption & {
+  responseId: string
+  fieldId: string
+  /** La respuesta de la ficha: «Pulpitis irreversible sintomática». */
+  term: string
+  /** Lo que el término le suma al nombre del código («irreversible sintomática»), o null. */
+  qualifier: string | null
+  /** Ya hay un diagnóstico vigente con ese código en ese sitio en esta atención. */
+  registered: boolean
 } & SiteFields
 
 export interface DiagnosisSuggestions {
@@ -302,6 +323,8 @@ export interface DiagnosisSuggestions {
   systemTitle: string
   proposed: ProposedDiagnosis[]
   mostUsed: DiagnosisCodeOption[]
+  /** Lo que dicen las fichas de la atención, con lo ya registrado (vacío sin atención o sin fichas que digan uno). */
+  fromForms: FormProposedDiagnosis[]
 }
 
 async function codesIn(tx: Db, system: DiagnosisSystemKey, codes: string[]) {
@@ -492,14 +515,49 @@ export async function getDiagnosisSuggestions(
     input.patientId && treatments.length > 0
       ? await lastTypes(tx, orgId, input.patientId, system, treatments.map((candidate) => candidate.code))
       : new Map<string, string>()
+  // Lo que dicen las fichas de la atención llenadas a mano (odentIA: el diagnóstico pulpar y apical de
+  // la de endodoncia, estudio de la atención E10b). Sus códigos son de la CIE-10, como en el dictado:
+  // con la CIE-11 no se propone ninguno. Con su pieza; lo que no la tiene se propone sin ella.
+  const said =
+    input.patientId && input.encounterId && hooks.forms.diagnoses && (system === "ICD-10" || system === "ICD-10-PE")
+      ? formDiagnosesOf(
+          await tx
+            .select({
+              id: clinicalFormResponse.id,
+              encounterId: clinicalFormResponse.encounterId,
+              templateSnapshot: clinicalFormResponse.templateSnapshot,
+              answers: clinicalFormResponse.answers,
+            })
+            .from(clinicalFormResponse)
+            .where(
+              and(
+                eq(clinicalFormResponse.organizationId, orgId),
+                eq(clinicalFormResponse.patientId, input.patientId),
+                eq(clinicalFormResponse.encounterId, input.encounterId),
+                ne(clinicalFormResponse.status, "descartado"),
+              ),
+            )
+            .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
+          hooks.forms,
+        ).flatMap((item) => {
+          // Una pieza que el producto no acepta no se propone en ella.
+          try {
+            return [{ item, site: hooks.site.columns(item.toothNumber === null ? {} : { toothNumber: item.toothNumber }) }]
+          } catch {
+            return []
+          }
+        })
+      : []
   // Primero lo de los tratamientos: si un hallazgo propone lo mismo en el mismo sitio,
   // queda la propuesta del tratamiento, que trae el tipo de la última vez y se usa desde la tarjeta.
+  // Después lo de la ficha, definitivo: es lo que concluyó quien la llenó.
   const candidates = [
     ...treatments.map((candidate) => ({
       ...candidate,
       source: "tratamiento" as const,
       diagnosisType: types.get(placeKey(candidate.code, candidate.site)) ?? null,
     })),
+    ...said.map(({ item, site }) => ({ code: item.code, finding: item.term, site, source: "ficha" as const, diagnosisType: "confirmed" })),
     ...found.map((candidate) => ({ ...candidate, source: "hallazgo" as const, diagnosisType: null })),
   ]
   const already = new Set<string>()
@@ -541,6 +599,25 @@ export async function getDiagnosisSuggestions(
       ...hooks.site.fields(candidate.site),
     })
   }
+  // En la ficha, cada uno con «Usar» o con «Ya está en Diagnóstico»: proponer no es registrar.
+  const fromForms: FormProposedDiagnosis[] = said.flatMap(({ item, site }) => {
+    const row = known.get(item.code)
+    if (!row || row.isCategory) return []
+    return [
+      {
+        system,
+        code: item.code,
+        description: row.title,
+        isCategory: false,
+        responseId: item.responseId,
+        fieldId: item.fieldId,
+        term: item.term,
+        qualifier: item.qualifier,
+        registered: already.has(placeKey(item.code, site)),
+        ...hooks.site.fields(site),
+      },
+    ]
+  })
   const usage = count()
   const used = await tx
     .select({ code: encounterDiagnosis.diagnosisCode, title: diagnosisCatalog.title, uses: usage })
@@ -573,6 +650,7 @@ export async function getDiagnosisSuggestions(
       description: row.title,
       isCategory: false,
     })),
+    fromForms,
   }
 }
 

@@ -8,10 +8,10 @@ import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   allergiesSaidUnknown,
-  allergiesUnknownWords,
   changedHistoryOf,
   declaredMarkWords,
   type HealthDeclarant,
+  noAllergiesWords,
   pregnancyWords,
   saidNoWords,
   shortDay,
@@ -379,8 +379,9 @@ export function HealthReviewNotice({
                 {health.allergiesReviewedAt
                   ? `Última revisión ${sinceWords(health.allergiesReviewedAt)}${health.allergiesReviewedBy ? `, por ${memberName(health.allergiesReviewedBy)}` : ""}.`
                   : // Su «No sé» es lo que dijo, no que nadie le preguntó (revisión final del 15 nov, K16).
-                    saidUnknownAllergies
-                    ? allergiesUnknownWords(saidUnknownAllergies, sex)
+                    // Con la misma frase que la franja y la ficha (estudio de la atención del 16 nov, E10a).
+                    saidUnknownAllergies || (health.reviewStatus.allergies === "unknown" && active.length === 0)
+                    ? `${noAllergiesWords({ review: "unknown", saidUnknown: saidUnknownAllergies }, sex)}.`
                     : "Sin revisar con el paciente."}
               </p>
               {active.length > 0 ? (

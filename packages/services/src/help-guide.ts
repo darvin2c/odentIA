@@ -668,6 +668,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo registro un paciente nuevo?",
         a: "En Pacientes, «Nuevo paciente»: pide nombres, apellidos y celular, te muestra quién coincide para no duplicar y eliges quién completa lo demás (el paciente en su celular, con su código QR, o tú en la misma ventana). Si ya escribió, abre su página y pulsa «Registrar»: trae lo que se sabe de ella. También puedes «Escribirle con su enlace»: abre su conversación con el enlace listo para enviar, y ahí elige su cita y deja sus datos.",
         forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
+        // Solo quien tiene «Nuevo paciente»: al odontólogo le explicaba un botón que no tiene (estudio de la
+        // atención del 16 nov, C9). Quien no lo tiene recibe la suya, que le dice a quién pedírselo.
+        needs: "patients.write",
+        notFor: { lacks: "patients.write" },
+      },
+      {
+        id: "registro-paciente-nuevo-lo-pide",
+        q: "¿Cómo registro un paciente nuevo?",
+        a: "Tu rol no registra pacientes: lo hacen recepción, el propietario y el administrador. Pídeselo con su nombre, apellidos y celular, y que lo registre antes de atenderlo. Si ya está registrado, búscalo por su nombre y, en su página, «Atender» abre su atención.",
+        forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
+        notFor: { has: "patients.write" },
+        // Dice lo que su rol no hace: no lleva a una pantalla ni depende de poder abrirla.
+        general: true,
       },
       {
         id: "registrar-menor-madre-padre-trae-documento",
@@ -754,7 +767,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "alergias-toca-ultima-atencion",
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "Su próxima cita está arriba de su página, en todas las pestañas (si ya llegó, dice que está en la sala de espera). En el Resumen, «Qué sigue» dice en una sola lista todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo (si tiene más, dice cuántos controles más tiene: están todos en Controles). Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles, y donde falta reservar una cita dice que la reserva recepción.",
+        a: "Su próxima cita está arriba de su página, en todas las pestañas (si ya llegó, dice que está en la sala de espera). En el Resumen, «Qué sigue» dice en una sola lista todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo (si tiene más, dice cuántos controles más tiene: están todos en Controles). Lo aceptado va primero, salvo el control de un tratamiento, que va antes porque dice si el tratamiento funcionó; la limpieza o el control que también falta reservar va en la misma fila que lo aceptado, con «Reservar lo aceptado y el control», que abre una sola cita con los dos marcados. Si una cita suya de otro día quedó sin cerrar, va primero con «¿Vino?», que abre la cita para registrar la atención o marcar que no vino; y si una cita que llevaba lo aceptado se atendió sin registrar lo que se hizo, la fila de lo aceptado lo dice, para preguntarle a quien atendió antes de reservar. El Plan muestra la misma lista y la lista de Pacientes dice su primera fila. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias, enfermedades, medicación y ASA («niega» si lo negó; «no se le preguntó» o «no preguntado» si nadie lo preguntó) y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles, y donde falta reservar una cita dice que la reserva recepción.",
         area: "plan",
       },
       {
@@ -834,6 +847,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "hoja-seguro-opcion-no-elegida",
+        q: "¿La hoja para el seguro lleva lo que el paciente no eligió?",
+        a: "No. La «Hoja de atención» sugiere solo lo que sigue en pie: nunca lo de la opción que no eligió ni lo que rechazó. Si le ofreciste opciones, lo de la que eligió va con su nombre y dice que es la elegida (Opción A, elegida), y lo común a todas va aparte, como tratamiento sugerido. Si todavía no elige, cada opción va con su nombre y dice que está por elegir, nunca todo junto. Si rechazó todo, la hoja no lleva tratamiento sugerido. Lo que ya se hizo va en procedimientos realizados.",
+        forms: ["la hoja del seguro sale con la exodoncia que no eligio", "hoja de atencion con dos opciones", "que dice la hoja para el seguro si le ofreci dos opciones", "la hoja sugiere lo que rechazo"],
+        area: "clinica",
+        own: true,
+      },
+      {
         id: "pongo-firma-papeles",
         q: "¿Cómo pongo mi firma en los papeles?",
         a: "Dibújala una vez en tu perfil profesional: al finalizar una atención, con «Agregar mi firma», o en Configuración › Equipo › «Mi perfil profesional» si puedes entrar ahí. Sale sola en los papeles que emites, junto a un sello con tu nombre, tu título y tu colegiatura, y cambiarla no toca lo ya emitido. Sin ella, el papel lleva una línea para firmar a mano. Solo tú puedes guardarla. Es el dibujo que se ve, no una firma digital certificada: el papel sigue diciendo «Firmado electrónicamente».",
@@ -853,21 +874,45 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "atencion-donde-hacerla-hoy",
+        q: "¿Por qué lo que indiqué hoy no sale en «Hoy viene a…»?",
+        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Tampoco vuelve arriba después de «Hacerla hoy»: su fila de «Realizado hoy» trae «Registrar la sesión» y, si al final no la haces, «Hoy no», que lo saca de la atención y lo deja en el Plan para otro día. Lo indicado hoy que «va después» de otro tratamiento que aún no termina no trae «Hacerla hoy»: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice qué consentimiento pide, con «Preparar y firmar»; puedes registrarlo igual.",
+        forms: ["lo que indique hoy no aparece arriba", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento", "que es hacerla hoy", "que hace hacerla hoy", "para que sirve hacerla hoy"],
+        area: "clinica",
+      },
+      {
         id: "atencion-dice-necesita-consentimiento",
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
-        a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy») para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma antes de hacerlo (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Al firmar la atención, solo avisa de lo que hiciste hoy sin consentimiento firmado: elige «Urgencia», «Firmado en papel» (con la foto de la hoja) u «Otro motivo»; la constancia queda en la atención y, si después lo firma, se agrega con su fecha. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy», de «Hoy viene a…» o de su fila del Plan) para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma antes de hacerlo (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Al firmar la atención, solo avisa de lo que hiciste hoy sin consentimiento firmado: elige «Urgencia», «Firmado en papel» (con la foto de la hoja) u «Otro motivo»; la constancia queda en la atención y, si después lo firma, se agrega con su fecha. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
         area: "clinica",
       },
       {
         id: "dejo-dicho-vuelve",
         q: "¿Cómo dejo dicho cuándo vuelve?",
-        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso y «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte; «Indicar también un control» lo pide igual. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita.",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso: primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento; lo aceptado hace más tiempo no cambia el cierre. «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte, y si la sesión de hoy tenía una cita por venir, «Usarla para…» la deja para todo eso; «Indicar también un control» lo pide igual. Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita.",
         area: "plan",
+      },
+      {
+        id: "termine-ya-reservaron-siguiente",
+        q: "Terminé y no sé si ya le reservaron la siguiente, ¿dónde lo veo?",
+        a: "En la atención firmada, en «Lo que sigue»: es la misma lista de «Qué sigue» de su ficha, con lo de esta atención primero. Si su próxima sesión aún no tiene cita dice «Falta la cita de la próxima sesión» con «Reservar la sesión 2», que la reserva ahí mismo; si ya la tiene, dice el día y la hora. Debajo van el consentimiento que falta recabar y, si ves la caja, lo que debe.",
+        forms: ["ya le reservaron la siguiente sesion", "donde veo si tiene cita para la sesion 2", "firme la atencion y no se si tiene su proxima cita", "que sigue despues de firmar la atencion"],
+        area: "plan",
+        // A recepción y a caja, que no abren la atención, les responde la suya: en la ficha, «Qué sigue» (Q20).
+        notFor: { lacks: "clinical.read" },
+      },
+      {
+        id: "deje-atencion-a-medias",
+        q: "Dejé una atención a medias, ¿dónde la encuentro?",
+        a: "Hoy, en Inicio, en «Mis pacientes de hoy»: «Atención abierta desde las…» con la hora en que la abriste y «falta firmar», con «Continuar», que la abre como la dejaste. No cuenta como una cita más ni sale en «Te espera». Si esa persona tiene además una cita tuya hoy que todavía espera, es una sola fila: la de su cita dice «Atención abierta desde las…» y trae «Continuar», no «Atender» ni «Registrar la atención». Si queda sin firmar hasta mañana, pasa a «Te espera» con lo que le falta para cerrarse. También la abres desde su ficha.",
+        forms: ["deje una atencion abierta", "me interrumpieron y deje la atencion sin terminar", "donde esta la atencion que no firme", "como vuelvo a la atencion que deje"],
+        area: "clinica",
       },
       {
         id: "tratamiento-va-despues-de-otro",
         q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
-        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, «Hacerla hoy» y «Reservar» siguen ahí.",
+        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, en una visita siguiente «Hoy viene a…» la ofrece con «Hacerla hoy», que la pasa a «Realizado hoy» sin registrarla ni dar por terminado lo que va antes, y «Reservar» sigue ahí. Lo indicado hoy que va después de otro no se ofrece para hoy: su fila del Plan no trae «Hacerla hoy».",
+        forms: ["puedo hacer la corona antes de terminar la endodoncia", "que pasa si hago hoy lo que va despues de otro tratamiento"],
         area: "plan",
       },
       {
@@ -945,15 +990,23 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "anoto-acepto-parte-otro-esta-pensando",
         q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
-        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca «Acepta», «Lo piensa» o «No»; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que la clínica hará después de otro tratamiento (la corona tras la endodoncia) se marca «Acepta»: el orden ya lo dice «va después de…», y así no queda esperando respuesta. Lo que ya respondió no se vuelve a preguntar.",
         forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
         area: "plan",
       },
       {
         id: "anoto-dijo-consulta-sin-imprimir-ni",
         q: "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?",
-        a: "En la atención, el presupuesto por enviar tiene «Anotar su respuesta», también al mostrárselo en pantalla y en su Plan. Abre un solo cajón: con caminos, eliges el camino, «Lo piensa» o «No acepta»; sin caminos, «Acepta todo», «Lo piensa» o «No acepta», y si acepta solo una parte cambias cada tratamiento. Al guardar queda entregado y con su respuesta, sin enviarle nada. Si acepta algo, «Que lo firme en la tablet» es opcional: quien decide (la persona o, si es menor, su representante legal) lee su decisión en pantalla completa y firma con el dedo, y después tú guardas. Con firma, su presupuesto dice que aceptó y firmó en la clínica, con su firma; sin firma, quién decide y quién lo anotó. Lo aceptado no se cambia ahí: se corrige con una revisión, que se entrega primero y después se anota su respuesta.",
+        a: "En la atención, el presupuesto por enviar tiene «Anotar su respuesta», también al mostrárselo en pantalla y en su Plan. Abre un solo cajón: con caminos, eliges el camino, «Lo piensa» o «No acepta»; sin caminos, «Acepta todo», «Lo piensa» o «No acepta», y si acepta solo una parte cambias cada tratamiento. Al guardar queda entregado y con su respuesta, sin enviarle nada. Lo que va en todas las opciones se responde ahí mismo y se suma a lo que acepta. Si el presupuesto cambia mientras lo anotas (alguien indicó otro tratamiento), el cajón se pone al día y te lo dice: revisas lo nuevo y guardas. Si acepta algo, «Que lo firme en la tablet» es opcional: quien decide (la persona o, si es menor, su representante legal) lee su decisión en pantalla completa y firma con el dedo, y después tú guardas. Con firma, su presupuesto dice que aceptó y firmó en la clínica, con su firma; sin firma, quién decide y quién lo anotó. Lo aceptado no se cambia ahí: se corrige con una revisión, que se entrega primero y después se anota su respuesta.",
         forms: ["dijo que si en la consulta", "acepto en el sillon", "firmar el presupuesto", "firma del presupuesto en la tablet", "anotar la respuesta sin imprimir"],
+        area: "plan",
+      },
+      {
+        id: "indique-despues-presupuesto-incluida",
+        // «darle» (como en «darle cita») llevaba a Pacientes la pregunta de un profesional que no aparece en la agenda; «entregarle» dice lo mismo (medición de la Ayuda del 16 nov).
+        q: "Indiqué otra cosa después de entregarle el presupuesto, ¿ya está incluida?",
+        a: "Si el presupuesto sigue por enviar, sí: lo que indicas en la atención entra en él al momento, con los totales y el PDF al día. Si es de otra pieza, entra en todas las opciones; si es de la pieza que ya tiene opciones (un perno en la 36), la atención te pregunta «¿En qué opción va…?» y entra cuando eliges. Si ya se lo entregaste o ya respondió, lo que tiene no cambia: la línea del presupuesto dice que «entra al firmar» y va «en un presupuesto aparte», que nace al firmar. Lo que no tiene precio no entra. Si quitas algo con «Quitar», «Deshacer» lo devuelve a su opción, con su precio.",
+        forms: ["indique algo despues del presupuesto", "el presupuesto no tiene lo nuevo", "agregue un tratamiento y no esta en el presupuesto", "la resina nueva no sale en el total", "deshacer quitar en el presupuesto"],
         area: "plan",
       },
       {
@@ -980,7 +1033,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quiere-decir-cada-estado-presupuesto",
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo piensa»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa). «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
         area: "plan",
       },
       {
@@ -989,6 +1042,15 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Sí. Al tocar «Anular esta atención…» te dice antes de confirmar qué pasa con su presupuesto. Si no se le entregó, se anula con ella; si además lleva tratamientos de otras atenciones, solo se le quita lo de esta. Si ya se le entregó, aunque lo haya aceptado, el botón dice «Anular atención y presupuesto» y lo hace en el mismo paso; si tenía una cita para eso, sigue en la agenda y le avisas a recepción. Si en ella cambiaste un tratamiento por otro («Cambiar» o «Revisar indicación»), se deshace el cambio: el anterior vuelve como estaba, con su respuesta y su consentimiento, y el diálogo lo dice. No se puede si caja ya cobró algo de ese presupuesto (primero se anula el cobro), si algo ya se hizo en otra atención, si quien decide firmó que lo acepta o si ya respondió y lleva otros tratamientos: te dice por qué y, cuando hay dónde, te lleva a resolverlo.",
         forms: ["anular atencion con presupuesto", "no me deja anular la atencion", "anular borrador con presupuesto enviado"],
         area: "clinica",
+      },
+      {
+        id: "descartar-atencion-vacia",
+        q: "¿Por qué ya no me sale «Descartar esta atención»?",
+        a: "Porque ya no está vacía. «Descartar esta atención» solo aparece mientras no tiene nada: nada escrito, aunque aún no se haya guardado (también el motivo), y nada indicado, registrado ni firmado. La borra de un toque, sin motivo ni rastro en la Historia. En cuanto escribes o indicas algo, abajo queda «Anular esta atención…», que pide el motivo y deja constancia.",
+        forms: ["no aparece descartar atencion", "como borro una atencion que abri por error", "descartar atencion con motivo escrito", "me dio error al descartar la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
       },
       {
         id: "guarda-escribo-atencion",
@@ -1011,14 +1073,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "atiendo-paciente",
         q: "¿Cómo atiendo a un paciente?",
-        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice «Cierre de la atención», cada cosa con «Registrar»; cuando no falta nada, dice «Lista para firmar». Solo lo ve quien escribe en la historia clínica.",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic, con el cursor en el motivo, y si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice el pie fijo de abajo, todo junto (también tu colegiatura y la firma de la paciente), y cada cosa lleva a su lugar; cuando no falta nada, dice «Listo para firmar». Si es una urgencia, «Es una urgencia» está junto al título de Consulta. Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
         area: "clinica",
       },
       {
         id: "atencion-pide-enfermedades-medicacion",
         q: "¿Por qué la atención me pide sus enfermedades y su medicación?",
-        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. Si tiene representante, como un niño, dice a quién preguntarle: a su padre, a su madre o a quien lo represente, con su nombre. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. Si tiene representante, como un niño, dice a quién preguntarle: a su padre, a su madre o a quien lo represente, con su nombre. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)», o con un toque en «Anestesia local».",
         forms: [
           "por que me pide antecedentes",
           "aviso de enfermedades y medicacion",
@@ -1150,13 +1212,15 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // Junto a la de quien atiende: es la misma pregunta, y cada rol encuentra la suya en la misma parte.
         area: "clinica",
         a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Si declaró algo de su salud que nadie revisó todavía, dice «Declaró datos de su salud» con el día, también sin cita por venir: lo revisa quien lo atiende, y tú no ves qué. Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
+        // «donde veo si toma anticoagulantes» va primero: Jev lee solo los primeros 240 caracteres y al final
+        // quedaba cortada, así que elegía la de caja, que sí la mostraba (medición de la Ayuda del 16 nov).
         forms: [
+          "donde veo si toma anticoagulantes",
           "ya respondio lo de antes de su cita",
           "como se si el paciente respondio",
           "puedo ver lo que contesto el paciente",
           "recepcion ve las respuestas",
           "sabe si respondio antes de venir",
-          "donde veo si toma anticoagulantes",
         ],
       },
       {
@@ -1428,6 +1492,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "sofi-escribio-persona",
         q: "¿Por qué Sofi no le escribió a una persona?",
         a: "En Agente › Argos, abre la línea y mira «Qué pasó, persona por persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo. Además, sale como mucho un mensaje al día por persona y, al llegar al presupuesto del mes, se pausan los mensajes para recuperar pacientes.",
+        forms: ["por que no les llega el recordatorio a los pacientes"],
       },
       {
         id: "hora-escriben-mensajes-argos",
@@ -1681,6 +1746,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "elijo-precio-dice-sofi",
         q: "¿Cómo elijo qué precio dice Sofi?",
         a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
+        forms: ["que sofi no diga el precio de un servicio"],
       },
       {
         id: "son-espera-entre-sesiones-controles-terminar",
@@ -2337,7 +2403,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-por-que-aparece",
         q: "¿Por qué me aparece esta ficha?",
-        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Una ficha que se llena una vez por plan no aparece en cada sesión ni en una urgencia: aparece mientras el plan no tenga una. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
         forms: [
           "por que me sale esta ficha en la atencion",
           "de donde sale la ficha que aparece sola",

@@ -33,6 +33,15 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 **Ya falló:** una pantalla en blanco que no sabía a qué venía el paciente; cajones apilados para cada dato; «Hoy viene a…» con doble punto tras la hora («… p. m..», 13 nov).
 **Patrones:** `PageNotice` y `NoticeStrip` (`UP/`) para el aviso con su botón; `Field` (`UI/field.tsx`).
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+**Medida (1440):** 46 acciones (8 campos) hasta lista para firmar; recorrido vertical entre objetivos de 11 871 px. Alto de la página: vacía 3527 px; cargada 3777 px a 1440, 3857 a 820 y 5002 a 390. Controles: 74 (42 sin las piezas). Textos de ayuda: 20. «Endodoncia posterior vital» aparece 7 veces. La distancia al paciente al escribir la evolución: 2474 px.
+- [ ] Con una pieza abierta, «Anotar su respuesta», «Registrar lo de hoy», «Dictar» o «Antecedentes» no hacen saltar la pieza encima como ventana.
+- [ ] En el panel de la pieza, «¿Qué observas?» es lo primero; la historia va plegada.
+- [ ] Al escribir la evolución se ven el nombre y las alertas.
+- [ ] Un tratamiento aparece una vez por bloque como máximo, y nunca en «Hoy viene a…» si se indicó en esta misma atención.
+
+**Ya falló:** «Anotar su respuesta» y «Registrar lo de hoy» abrieron la pieza 46 o la 36 como ventana encima (16 nov, 4 veces entre dos voces).
+
 ### M-ATE-02 La sesión que sigue («Continuar hoy»)
 **Quién:** odontólogo; varias veces al día (supuesto).
 **Dónde:** `CA/patient/encounter-visit.tsx`, `encounter-procedures.tsx`.
@@ -45,6 +54,9 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] Si la sesión se hace antes de su cita, la cita que queda sin objeto se decide antes de salir y no se pierde con «Listo».
 **Ya falló:** volver a escribir el diagnóstico de la sesión anterior; «sesión 1 de 2» haciendo la 2; la cita huérfana que nadie decide.
 **Patrones:** la fila de `CA/patient/next-up.tsx`; `freed-appointments.tsx`.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+**Recorrido (1440):** 5169 px entre objetivos para 9 toques. **A mejorar:** «Continuar hoy», «Registrar la sesión» y la evolución están a 2600 px uno del otro.
 
 ### M-ATE-03 Cerrar y firmar
 **Quién:** odontólogo; una vez por atención (supuesto).
@@ -60,6 +72,11 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] Una atención abierta ayer no dice «hoy» ni propone una hora de fin de hoy.
 **Ya falló:** tres listas con tres fuentes distintas en el mismo cierre; una decisión que vive en un aviso que se cierra.
 **Patrones:** `ConfirmDialog` (`UP/confirm-dialog.tsx`); `CA/choice-buttons.tsx`; `DatePickerButton` (`UP/`).
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Confirmar un consentimiento sin colegiatura en el perfil pide la colegiatura ahí mismo, como el cierre, y no pierde lo que firmó la paciente.
+
+**Ya falló:** 409 y «Registra tu colegiatura en tu perfil profesional para firmar», sin campo; «Volver» perdía la firma de la paciente (16 nov).
 
 ### M-ATE-04 Corregir: quitar, cambiar o anular
 **Quién:** odontólogo; alguna vez al día (supuesto).
@@ -85,6 +102,28 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] A 390 px la cabecera no tapa la acción principal.
 **Ya falló:** un «sin antecedentes» que nadie había preguntado.
 **Patrones:** `NoticeStrip` (`UP/notice-strip.tsx`); `DetailList` de `UP/detail/detail-rows.tsx`.
+
+### M-ATE-06 Corregir la pieza equivocada de un hallazgo
+**Quién:** odontólogo; alguna vez a la semana (supuesto).
+**Dónde:** `apps/dental-clinic/src/components/dental/tooth-drawer.tsx` (anular), `CA/patient/encounter-diagnoses.tsx`.
+**Medida (1440, 16 nov 2026):** 7 acciones y 2 motivos para deshacer (el hallazgo y su diagnóstico, en lugares a 2100 px), más 10 para registrarlo en la pieza correcta: 17. **A mejorar.**
+- [ ] Anular el hallazgo ofrece anular, en el mismo paso y con un solo motivo, el diagnóstico y lo indicado que nacieron de él.
+- [ ] Al terminar, el Diagnóstico y «Última atención» de la ficha no nombran la pieza equivocada.
+
+**Ya falló:** la caries anulada en la 47 dejó «K02.5 · 47 · Definitivo» en el Diagnóstico (16 nov).
+
+### M-ATE-07 Volver a la atención que dejé a medias hoy
+**Quién:** odontólogo; varias veces al día cuando hay interrupciones (supuesto).
+**Dónde:** `CA/home/today.tsx`, `packages/services/src/workspace.ts` (`waitingStaleEncounters`).
+**Medida (1440, 16 nov 2026):** 4 acciones y recordar el nombre (Ctrl+K, nombre, Enter, «Continuar la atención»); Inicio y Tareas no la muestran. **A mejorar.**
+- [ ] La atención abierta hoy está en «Mis pacientes de hoy» con «Continuar».
+- [ ] Al volver, lo escrito sigue ahí.
+
+**Giras que se suman (estudio de la atención, 16 nov 2026):**
+- **Del sillón (tablet a 820):** registrar un hallazgo en una pieza con historia sin perder de vista el odontograma. Se mide a qué altura queda «¿Qué observas?» dentro del panel y si el arco se ve.
+- **Del profesional nuevo:** un odontólogo sin colegiatura en su perfil hace firmar un consentimiento en la tablet y firma la atención.
+
+**Teclado de la atención (1440, 16 nov 2026):** de la ficha a «Atender», 20 Tab; al abrir, el foco queda en `body`; hasta el primer antecedente, 9; del motivo al arco, 9; de la pieza al buscador, 4; de la lesión a «Registrar hallazgo», unas 34; de la evolución a «Finalizar y firmar», 12.
 
 ## Ficha
 

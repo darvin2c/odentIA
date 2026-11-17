@@ -42,6 +42,55 @@ export const CLINICA: readonly HelpMore[] = [
         own: true,
       },
       {
+        id: "pacientes-presion-alta",
+        q: "¿Qué hago si la presión sale muy alta?",
+        a: "La app te avisa y la decisión es tuya. Si en «Examen clínico» anotas una presión de 180/110 o más (sistólica de 180 o más, o diastólica de 110 o más), debajo de los signos vitales sale «Aviso: … Repite la toma. Con 180/110 o más, lo electivo se suele diferir. Con dolor de pecho, dolor de cabeza fuerte o falta de aire, es una urgencia». Repite la toma después de unos minutos sentada: si baja, el aviso se va. Sale también al firmar y queda junto a la presión en la atención firmada. No frena nada: decides si atiendes hoy, lo difieres o lo derivas. Vale desde los 13 años; en un niño menor la presión se juzga por percentiles y no se avisa.",
+        forms: ["la presion salio muy alta", "presion 185 con 115", "que hago con la presion alta", "por que me avisa la presion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
+        id: "pacientes-anestesia-dosis-maxima",
+        q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
+        a: "En la atención, en «Realizado hoy», en cuanto algo de hoy usa anestesia local (al «Hacerla hoy», al «Continuar» o al registrar lo de hoy) sale «Anestesia local» con sus alergias, su medicación y lo que dijo del corazón. La ASA se pone ahí con un toque (I a IV) y queda en su ficha con tu nombre y la fecha. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo, para no pasar el máximo). Con mepivacaína al 3 % el mismo niño son 1,7 cartuchos. Sin peso no calcula nada: pide anotarlo. Cuando la ASA ya está puesta y no hay nada que avisar (niega alergias, enfermedades y medicación), «Anestesia local» queda en dos líneas con la ASA y el máximo, y «Cambiar» abre todo otra vez; con una alergia, una enfermedad, un medicamento o un aviso, va siempre entera. Avisa si eliges articaína en un menor de 4 años y el tope de epinefrina (0,04 mg por sesión) si tiene registrada una enfermedad del corazón o de la presión, o ASA III o IV, y dice por cuál de las dos. Se repite al firmar, y la atención firmada guarda la ASA, el peso y el máximo, solo de lo que quedó registrado: si anulas el procedimiento porque no se hizo, «Anestesia local» se va y la atención firmada no la nombra. Avisa y no frena: la dosis la decides tú.",
+        forms: [
+          "dosis maxima de anestesia",
+          "maximo de lidocaina por kilo",
+          "donde pongo la asa",
+          "clasificar la asa",
+          // QA del 16 nov (Q20): la dosis por peso es lo central y la Ayuda decía «no está en la guía».
+          "cuanta anestesia le puedo poner a un niño de 22 kg",
+          "cuanta anestesia le puedo poner si pesa 22 kg",
+          "dosis de anestesia por peso",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
+        id: "pacientes-anestesia-articaina-ninos",
+        q: "¿Desde qué edad se puede usar la articaína?",
+        a: "No se recomienda en menores de 4 años. Si la eliges en un niño de 3, «Anestesia local» lo avisa («La articaína no se recomienda en menores de 4 años») junto a su máximo por peso, y no frena: la decisión es tuya. Con otro anestésico de la lista (lidocaína 2 % con epinefrina o mepivacaína 3 %) dice el máximo para su peso en miligramos y en cartuchos.",
+        forms: ["puedo usar articaina", "puedo usar articaina en un niño de 3 años"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
+        id: "atencion-cerrar-finalizar",
+        q: "¿Cómo cierro la atención cuando termino de atender?",
+        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta, respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura. Después ya no se edita: lo que falte se agrega con una adenda.",
+        forms: [
+          "como cierro la atencion",
+          "quiero cerrar la atencion",
+          "como finalizo la atencion",
+          "acabo de atender a una paciente y quiero cerrar la atencion como se hace",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-diagnostico-registrar-anular",
         q: "¿Cómo agrego o quito un diagnóstico de la atención?",
         a: "En la atención, en el bloque «Diagnóstico», «Registrar diagnóstico»: lo eliges de la lista de la clínica con su tipo y, si quieres, los hallazgos que lo sustentan. Los que el sistema ya propone se usan con un toque. Para quitar uno, «Anular…» en su fila, con el motivo: queda en la historia como anulado. Hace falta al menos uno para cerrar.",
@@ -84,8 +133,16 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-firmar-falta-colegiatura",
         q: "¿Qué hago si al firmar dice que falta mi colegiatura?",
-        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». Se escribe una vez y sirve para todas tus atenciones.",
+        a: "Complétala ahí mismo: «Finalizar y firmar» muestra «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y firmar». La receta también la pide para firmarse, sin perder lo escrito. Si te la pide una atención de otro día que quedó sin firmar, en «Te espera» de Inicio, «Revisar» muestra «Falta tu colegiatura»: escribe el número y «Guardar». El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». Se escribe una vez y sirve para todas tus atenciones.",
         forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "inicio me pide mi colegiatura", "falta tu colegiatura en te espera", "por que me pide mi colegiatura para cerrar la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-consentimiento-colegiatura-al-confirmar",
+        q: "Soy nuevo y la paciente ya firmó, ¿dónde pongo mi colegiatura?",
+        a: "En el mismo paso «Confirma que informaste», después de que firma en la tablet: si a tu perfil le falta la colegiatura, ahí mismo sale «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y confirmar». Se guarda en tu perfil profesional y no la vuelve a pedir. Su firma no se pierde: si te equivocas o tocas «Volver», su hoja sigue firmada y no tiene que firmar otra vez. «Firmado en papel» la pide igual. Con la colegiatura ya puesta, el paso dice «Firmas como…» con tu nombre, tu título y tu colegiatura.",
+        forms: ["me pide la colegiatura al confirmar el consentimiento", "la paciente firmo y me falta la colegiatura", "por que me pide la colegiatura en el consentimiento", "se perdio la firma de la paciente"],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -100,7 +157,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha",
         q: "¿Clío puede llenar la ficha de consulta mientras dicto?",
-        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención», u «Otra ficha…» si no se te ofrece) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia solo: si dictas otra cosa para una pregunta ya respondida, Clío lo propone en esa pregunta con «Cambiar a…», fuera de «Confirmar las N». Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar», en el bloque de su ficha (lo que cambia lo ya escrito viene desmarcado). Dicta, confirma y llena la ficha quien lleva la atención o toma el relevo.",
+        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención» o, si no se te ofrece, «Nuevo» › «Ficha» en Documentos) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia solo: si dictas otra cosa para una pregunta ya respondida, Clío lo propone en esa pregunta con «Cambiar a…», fuera de «Confirmar las N». Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar», en el bloque de su ficha (lo que cambia lo ya escrito viene desmarcado). Dicta, confirma y llena la ficha quien lleva la atención o toma el relevo.",
         forms: ["clio puede llenar la ficha", "dictar la ficha de ortodoncia", "llenar la ficha con el dictado", "que significa clio propone en la ficha"],
         area: "clinica",
         needs: "clinical.write",
@@ -238,6 +295,25 @@ export const CLINICA: readonly HelpMore[] = [
 
       // ---------- Odontograma ----------
       {
+        id: "pacientes-odontograma-caries-tablet",
+        q: "¿Cómo registro una caries en la tablet?",
+        a: "Dentro de la atención, toca la pieza: arriba está «¿Qué observas?» con el buscador; escribe «caries» y elígela. Toca las caras en el dibujo de la pieza (o márcalas en «Superficies comprometidas»), elige la profundidad con un toque y, si pones el diagnóstico, su tipo, «Presuntivo» o «Definitivo». «Registrar hallazgo» la deja en el odontograma. Lo que ya tiene la pieza queda abajo, plegado en una línea que dice cuántos hallazgos y procedimientos tiene: tócala para verlo. Con la pieza abierta, «Indicar un tratamiento» empieza con esa pieza y su hallazgo.",
+        forms: ["registrar una caries en el ipad", "marcar caries en la tablet", "como pongo la profundidad de la caries", "donde esta la historia de la pieza"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      // «¿Qué es CDP?» la responde una sola palabra: «palabras-siglas-caries», más abajo.
+      {
+        id: "pacientes-odontograma-pieza-se-cierra",
+        q: "¿Por qué se cerró la pieza al abrir la respuesta?",
+        a: "La pieza abierta al lado del odontograma nunca salta encima como ventana. Si abres algo que necesita ese espacio («Anotar su respuesta», «Registrar lo de hoy» o el dictado), la pieza se cierra y queda marcada en el arco: tócala para volver a abrirla. Si tenías un hallazgo a medias, antes te pregunta: «Seguir aquí» la deja abierta y «Descartar y salir» la cierra sin registrarlo. Mientras atiendes, el menú de la izquierda queda en íconos para dejarle sitio a la pieza; Ctrl+B lo abre y, al salir de la atención, vuelve como lo tenías. Escape cierra la pieza y el foco vuelve a ella en el arco.",
+        forms: ["se me cerro la pieza", "desaparecio el panel de la pieza", "la pieza se abre encima como ventana", "por que el menu se achico en la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-odontograma-denticion-varias-piezas",
         q: "¿Cómo veo los dientes de leche o registro lo mismo en varias piezas?",
         a: "Arriba del odontograma eliges «Permanente (32)», «Mixta» o «Temporal (20)»; viene sugerida por la edad del paciente. Para registrar lo mismo en varias piezas, dentro de la atención, «Seleccionar varias» y tócalas, o usa «Arcada superior» o «Arcada inferior».",
@@ -248,9 +324,9 @@ export const CLINICA: readonly HelpMore[] = [
       },
       {
         id: "pacientes-odontograma-anular-hallazgo",
-        q: "¿Cómo quito un hallazgo que marqué en la pieza equivocada?",
-        a: "Dentro de la misma atención en que lo registraste, toca la pieza y, en «Estado actual», «Anular» junto al hallazgo: pide el motivo y «Confirmar anulación». No se borra: el registro original y el motivo quedan en el historial. En el mismo panel están el «Plan de la pieza», sus «Imágenes asociadas» y la «Historia de la pieza».",
-        forms: ["como borro un hallazgo del odontograma", "marque una caries en la pieza equivocada", "anular un registro del odontograma", "donde veo todo lo de una pieza"],
+        q: "Marqué la pieza equivocada, ¿cómo lo corrijo?",
+        a: "Dentro de la misma atención en que lo registraste, toca la pieza: arriba de su panel, en «Registrado hoy», está el hallazgo con «Anular» al lado, sin abrir nada. Vienen marcados lo que nació con él: «También anular su diagnóstico de esta atención» y, si lo indicaste ahí, «Y el tratamiento indicado hoy»; desmarca lo que sí era de esa pieza. Escribe el motivo una vez y «Confirmar anulación»: todo se anula junto, y la pieza deja de ser de la atención si ya no le queda nada. Si la lista de lo que cae tarda en llegar, «Confirmar anulación» la espera; si no se pudo saber, lo dice con «Reintentar» y no anula nada. Si otro hallazgo usa el mismo diagnóstico (dos caries de la misma pieza), el diagnóstico sigue y pasa a decir solo la cara de la caries que queda (el que decía la cara anulada queda entre los anulados, con su motivo). Lo que no se deshace se avisa: un consentimiento ya firmado se revoca aparte, y lo hecho hoy se anula en «Realizado hoy». Desde Diagnóstico es igual, al revés: anular el diagnóstico trae su hallazgo. El tratamiento que cayó con su hallazgo no vuelve con «Deshacer»: se indica otra vez, en la pieza correcta. Nada se borra: lo anulado y el motivo quedan en el historial. En el mismo panel están el «Plan de la pieza», sus «Imágenes asociadas» y la «Historia de la pieza».",
+        forms: ["como borro un hallazgo del odontograma", "marque una caries en la pieza equivocada", "anular un registro del odontograma", "donde veo todo lo de una pieza", "como quito un hallazgo que marque en la pieza equivocada", "anule la caries pero el diagnostico sigue", "me equivoque de diente"],
         area: "clinica",
         needs: "clinical.write",
         own: true,
@@ -306,6 +382,26 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        id: "pacientes-ficha-odontoestomatologica-cuando",
+        q: "¿Cuándo lleno la ficha odontoestomatológica?",
+        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
+        // Responde también por qué aparece y si hay que llenarla para firmar: la de «¿Por qué me aparece
+        // esta ficha?» (Fichas de consulta) explica la regla de cualquier ficha y ya no nombra a esta, para
+        // que no se respondan lo mismo (medición de la Ayuda del 16 nov). Las formas que Jev tiene que leer
+        // van primero: solo ve los primeros 240 caracteres.
+        forms: [
+          "tengo que llenar la ficha odontoestomatologica para firmar",
+          "por que me aparece la ficha odontoestomatologica",
+          "por que no me ofrece la ficha odontoestomatologica",
+          "cuando se llena la ficha odontoestomatologica",
+          "la ficha odontoestomatologica sale en cada sesion",
+          "ficha de la norma en la urgencia",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo una ficha de consulta?",
         a: "En la atención, las de su especialidad aparecen solas en «Fichas para esta atención»: «Empezar la de hoy». En el control también aparece la que ya tiene de antes, con «Usar lo de la anterior» para copiar lo de la última con respuestas. Cualquier otra, en «Otra ficha…» o en «Nuevo» › «Ficha», eliges cuál y «Empezar»: se guarda sola mientras la llenas. En una atención en curso se finaliza al firmar la atención («Finalizarla al firmar» viene marcada si tiene respuestas); suelta o después de firmar, con «Finalizar…». La llena quien lleva la atención o toma el relevo; queda con quién la finalizó. Finalizada ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», al pie de la ficha, con su motivo. Si la agregaste por error, en su fila de «Fichas para esta atención»: vacía, «Quitar» la saca sin preguntar y «Deshacer» la vuelve a poner; con algo escrito, «Descartar…» pide el motivo. Las dos quedan registradas. Lo que contó el paciente antes de venir no se llena aquí: está en «Hoy viene a…» de su atención.",
@@ -320,6 +416,21 @@ export const CLINICA: readonly HelpMore[] = [
         forms: ["firme la atencion y quedo un formulario a medias", "terminar un formulario despues de firmar", "desde donde termino el formulario que deje a medias"],
         area: "clinica",
         needs: "clinical.write",
+      },
+      {
+        // Estudio de la atención del 16 nov (E10b): llenada a mano, la ficha no proponía nada y la periodontitis
+        // apical quedaba fuera de Diagnóstico.
+        id: "pacientes-ficha-endodoncia-propone-diagnostico",
+        q: "Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?",
+        a: "No lo escribes otra vez: debajo de su «Diagnóstico», la ficha muestra «Lo que propone la ficha para el diagnóstico de la atención», con su código y su pieza (por ejemplo, K04.0 Pulpitis · irreversible sintomática · 36). «Usar» lo registra en Diagnóstico como definitivo; nada entra solo. Si ya estaba, dice «Ya está en Diagnóstico». Lo que la ficha le suma al código (irreversible sintomática) no lo cambia: la Historia lo dice junto a él.",
+        forms: [
+          "llene la ficha de endodoncia tengo que poner el diagnostico",
+          "la ficha de endodoncia no pasa al diagnostico",
+          "periodontitis apical de la ficha no esta en diagnostico",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
       },
       {
         id: "pacientes-cuestionario-respondio-antes-de-venir",
@@ -536,6 +647,175 @@ export const CLINICA: readonly HelpMore[] = [
         forms: ["no contesta el telefono por su presupuesto", "recordarme volver a llamar por el presupuesto", "no contesto la llamada del presupuesto"],
         area: "plan",
         needs: "tasks.write",
+      },
+
+      // ---------- Lo de cada rol y cada botón (estudio de la atención del 16 nov, C22) ----------
+      // La Ayuda no contestaba «¿cómo le reservo lo que aceptó?», ni para qué sirve «Completar», ni qué ve
+      // recepción de una atención: estaban dentro de respuestas largas o en ninguna.
+      {
+        id: "pacientes-reservar-lo-aceptado",
+        q: "¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?",
+        a: "En su página, en «Qué sigue»: «Reservar lo aceptado» abre «Nueva cita» con lo que aceptó ya marcado en «Para esta cita»; eliges con quién y cuándo. Si tiene un tratamiento en curso, va primero «Reservar la sesión» con su número. Lo que va después de otro tratamiento (la corona después de la endodoncia) lo dice la fila, y la hora se busca desde después de esa sesión. La misma fila está en la lista de Pacientes.",
+        forms: [
+          "como le reservo la corona que acepto",
+          "como le reservo lo que acepto",
+          "reservar lo que acepto el paciente",
+          "como le saco cita para el tratamiento que acepto",
+          "como agendo lo aceptado",
+          "como le reservo la cita de la corona que acepto",
+        ],
+        area: "plan",
+        needs: "appointments.write",
+        // En latidIA y vistIA lo indicado ya queda aceptado: su botón es «Reservar lo indicado» (sus `OWN_FAQS`).
+        own: true,
+      },
+      {
+        id: "pacientes-realizado-hoy-completar",
+        q: "¿Para qué sirve «Completar» en «Realizado hoy»?",
+        a: "Da por terminado hoy un tratamiento de varias sesiones aunque falten sesiones de las previstas (lo que terminaste en menos sesiones de las que pensabas): queda realizado al firmar y deja de pedir su siguiente sesión. Sale cuando ya registraste su sesión de hoy; si no, el botón es «Registrar la sesión». Si con la de hoy llega a sus sesiones previstas, no hace falta: al firmar te pregunta «¿Terminaste?» con «Sí, terminar» ya elegido.",
+        forms: ["para que sirve completar", "que hace completar", "que pasa si le doy completar", "boton completar en realizado hoy"],
+        area: "clinica",
+        needs: "clinical.write",
+        // Es un botón de quien atiende: a recepción y a caja se les explica el «Completar» que sí tienen (Q20).
+        notFor: { lacks: "clinical.write" },
+      },
+      {
+        id: "pacientes-completar-datos",
+        q: "¿Para qué sirve «Completar» junto a «Faltan datos»?",
+        a: "Abre los datos que le faltan a la persona para atenderse (nombres, apellidos, fecha de nacimiento y un teléfono o correo): sale junto a «Faltan datos…» en su página y en su cita. Los llenas ahí y quedan en su ficha. El «Completar» que termina un tratamiento está dentro de la atención y es de quien atiende.",
+        forms: ["para que sirve completar junto a faltan datos", "que hace completar en su pagina", "completar los datos que le faltan"],
+        notFor: { has: "clinical.write" },
+        // Dice cuál de los dos botones es el suyo: no depende de poder abrir la atención.
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "termine-ya-reservaron-siguiente-sin-atencion",
+        q: "Terminé y no sé si ya le reservaron la siguiente, ¿dónde lo veo?",
+        a: "En su página, en «Qué sigue»: si su próxima sesión aún no tiene cita dice «Falta la cita de la próxima sesión» con «Reservar la sesión», que abre «Nueva cita» con eso ya marcado; si ya la tiene, dice el día y la hora. La misma fila está en la lista de Pacientes. La atención firmada la abren quienes atienden.",
+        forms: ["ya le reservaron la siguiente sesion", "donde veo si tiene cita para la sesion 2", "donde veo si ya tiene su proxima cita"],
+        // Quien lee la historia tiene la suya, que lleva a la atención firmada.
+        notFor: { has: "clinical.read" },
+        general: true,
+        area: "plan",
+      },
+      {
+        id: "recepcion-ver-atencion",
+        q: "¿Puedo ver la atención de un paciente?",
+        a: "No: la atención es parte de la historia clínica y la abren quienes atienden. Recepción ve en su página «Qué sigue», con lo que falta reservar (la sesión que sigue, lo aceptado o su control), y sus alergias; caja ve en Inicio, en «Caja de hoy», lo que dejó por cobrar.",
+        forms: ["puedo ver la atencion", "recepcion ve la atencion", "que ve recepcion de la atencion", "puedo ver lo que el doctor hizo en la atencion"],
+        // Quien lee la historia tiene la suya: «¿Cómo veo completa una atención anterior?».
+        notFor: { has: "clinical.read" },
+        // Dice lo que su rol no ve: no lleva a una pantalla ni depende de poder abrirla.
+        general: true,
+        area: "clinica",
+      },
+
+      // ---------- Palabras de la atención (estudio de la atención del 16 nov, novata) ----------
+      // Cada una en una línea y con palabras simples: la odontóloga nueva no entendió ninguna de estas.
+      {
+        id: "palabras-siglas-caries",
+        q: "¿Qué significan MB, CE, CD y CDP?",
+        a: "Son las siglas de la caries en el odontograma, según hasta dónde llega: MB, mancha blanca; CE, caries del esmalte; CD, caries de la dentina; y CDP, caries de la dentina que ya compromete la pulpa. Al elegir una, debajo se lee su nombre entero.",
+        // Una sola respuesta para las dos formas de preguntar: la sigla suelta y todas juntas.
+        forms: ["¿Qué es CDP?", "que es cdp", "que significa cdp", "que quiere decir cdp en la caries", "que es mb", "que es cd en el odontograma", "que es ce en el odontograma", "que es ce cd mb en el odontograma", "siglas de la caries"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-nts-188",
+        q: "¿Qué es la NTS 188?",
+        a: "Es la norma del Ministerio de Salud del Perú para el odontograma (NTS 188-MINSA/DGIESP-2022): dice cómo se dibuja cada hallazgo, de qué color y con qué sigla.",
+        forms: ["que es la nts", "que es nts 188", "que norma sigue el odontograma", "que es la sigla de la nts"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-cie-10",
+        q: "¿Qué es la CIE-10?",
+        a: "Es la lista de diagnósticos de la Organización Mundial de la Salud (Clasificación Internacional de Enfermedades): cada diagnóstico lleva su código, como K02.1 para la caries de la dentina.",
+        forms: ["que es cie 10", "que es el codigo del diagnostico", "que significa k02"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-asa",
+        q: "¿Qué es la ASA?",
+        a: "Es cómo está de salud la persona antes de anestesiarla, según la Sociedad Americana de Anestesiólogos: ASA I, sana; ASA II, una enfermedad leve y controlada; ASA III, una enfermedad grave; ASA IV, una que amenaza su vida.",
+        forms: ["que es asa", "que significa asa", "que es la clasificacion asa", "que es el riesgo asa"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-adenda",
+        q: "¿Qué es una adenda?",
+        a: "Es una corrección que se agrega a algo ya firmado (una atención o una ficha): lo firmado no cambia y la corrección queda debajo, con tu nombre, el día y la hora.",
+        forms: ["que es adenda", "que significa adenda", "que es una adenda"],
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "palabras-inmutable",
+        q: "¿Qué quiere decir que queda inmutable?",
+        a: "Que ya no se puede editar ni borrar: la atención firmada queda como se firmó, y si algo estaba mal se corrige con una adenda.",
+        forms: ["que significa inmutable", "que es inmutable", "que quiere decir inmutable", "por que no puedo editar la atencion firmada"],
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "palabras-liberarla",
+        q: "¿Qué hace «Liberarla» en una cita?",
+        a: "En una cita que ya no tiene para qué (lo que traía ya se terminó), la cancela y deja esa hora libre para otra persona; solo le avisa si marcas «Avisarle». Si le queda algo aceptado por hacer, «Usarla para…» la aprovecha en vez de cancelarla.",
+        forms: ["que es liberarla", "que pasa si libero la cita", "liberar la cita borra al paciente"],
+        general: true,
+        area: "plan",
+      },
+      {
+        id: "palabras-lo-piensa",
+        q: "¿Qué quiere decir «Lo piensa»?",
+        a: "Que todavía no decide ese tratamiento: su respuesta sigue pendiente y se le puede volver a preguntar. No es un rechazo. «Por decidir», en el Plan, es la etiqueta (no un botón) de lo que aún no tiene ninguna respuesta.",
+        // «Por decidir» se pregunta aparte y es la misma idea: una sola respuesta para las dos (Q20).
+        forms: ["que significa lo piensa", "lo piensa es una respuesta", "que es lo piensa", "que significa por decidir", "que es por decidir", "por decidir es un boton"],
+        general: true,
+        area: "plan",
+      },
+      {
+        id: "palabras-indicado-hoy",
+        q: "¿Qué quiere decir «Indicado hoy»?",
+        a: "Que lo indicaste en esta atención: es lo que propones hacer y todavía no está hecho. Lo que haces hoy se registra aparte, con su procedimiento.",
+        forms: ["que significa indicado hoy", "indicado hoy es que ya lo hice"],
+        general: true,
+        area: "plan",
+      },
+      // QA final del 16 nov (Q20): palabras y botones nuevos de la atención que la Ayuda no reconocía.
+      {
+        id: "palabras-deshacer-quitar",
+        q: "¿Qué pasa si quito un tratamiento y le doy «Deshacer»?",
+        a: "Vuelve el mismo tratamiento, por decidir, a su opción del presupuesto y con su precio. «Deshacer» sale en el aviso de «Quitar», unos segundos. Si lo que se anuló fue su hallazgo, no vuelve: se indica otra vez en la pieza correcta.",
+        forms: ["que pasa si quito un tratamiento y le doy deshacer", "que hace deshacer despues de quitar un tratamiento"],
+        general: true,
+        area: "plan",
+        own: true,
+      },
+      {
+        id: "palabras-acto-libre",
+        q: "¿Qué es un acto libre?",
+        a: "Algo que hiciste hoy y no está en la lista de servicios de tu clínica: lo escribes con tus palabras en «Registrar lo de hoy», queda en la historia y no se cobra. Si debe cobrarse, tiene que estar en Servicios y precios.",
+        forms: ["que es un acto libre", "que es acto libre", "que significa acto libre"],
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "palabras-presuntivo-definitivo",
+        q: "¿Qué es «Presuntivo» y «Definitivo»?",
+        a: "Es el tipo del diagnóstico. Presuntivo: es lo que sospechas y falta confirmarlo, por ejemplo con un examen. Definitivo: ya está confirmado. Se elige al registrar el diagnóstico, y para firmar la atención basta uno de cualquiera de los dos tipos.",
+        forms: ["que es presuntivo y definitivo", "que es presuntivo", "diferencia entre presuntivo y definitivo"],
+        general: true,
+        area: "clinica",
       },
     ],
   },

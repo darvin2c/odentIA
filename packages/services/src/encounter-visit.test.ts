@@ -274,6 +274,84 @@ it("el consentimiento es de lo que se hace hoy: lo indicado para otro día no lo
   expect(await needs()).toEqual([])
 })
 
+// Revisión del 16 nov (R2): la exodoncia de la 48 se indica y se hace hoy. Aún espera su respuesta
+// (se acepta al registrarla), así que no se trae como lo aceptado; su consentimiento se prepara por el
+// tratamiento y se firma antes del acto, sin aceptarla.
+it("lo indicado hoy sin respuesta se consiente antes de hacerlo, sin aceptarlo ni traerlo", async () => {
+  const f = await clinicalFixture()
+  const template = await f.run((tx) =>
+    createConsentTemplate(tx, "org_a", f.actor, {
+      key: `t-${randomUUID().slice(0, 8)}`,
+      title: "Exodoncia",
+      sections: {
+        procedure: "La extracción con anestesia local.",
+        benefits: ["Quitar el dolor"],
+        risks: ["Sangrado"],
+        alternatives: ["Otro tratamiento"],
+        consequences: "Puede avanzar.",
+      },
+    }),
+  )
+  await f.run((tx) => publishConsentTemplate(tx, "org_a", f.actor, template.id))
+  await f.run((tx) => setConsentTemplateServices(tx, "org_a", f.actor, template.id, [f.service.id]))
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const needs = () =>
+    f.run((tx) => getEncounterConsentNeeds(tx, "org_a", f.patient.id, f.encounter.id))
+  const prepare = () =>
+    f.run((tx) => prepareEncounterConsents(tx, ...f.args, f.encounter.id, undefined, item.id))
+  // Traerla como lo aceptado no se puede: es lo que hacía fallar «Preparar y firmar».
+  await expect(
+    f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id)),
+  ).rejects.toMatchObject({ code: "ITEM_NOT_ACCEPTED" })
+  const { created } = await prepare()
+  expect(created.map((doc) => [doc.planItemId, doc.encounterId, doc.status])).toEqual([
+    [item.id, f.encounter.id, "pendiente"],
+  ])
+  // Sigue esperando su respuesta, y «Registrar lo de hoy» ya dice que falta firmarlo, no prepararlo.
+  const listed = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)
+  expect(listed).toMatchObject({ decisionStatus: "pendiente", consent: "sin_firmar" })
+  // Mientras no se haga no falta al cerrar, y prepararlo otra vez no lo duplica.
+  expect(await needs()).toEqual([])
+  expect((await prepare()).created).toEqual([])
+  // Hecha hoy (se acepta al hacerla): el cierre la pide con el consentimiento que ya se preparó.
+  await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id, acceptWhenDone: true }),
+  )
+  expect((await needs()).map((need) => [need.status, need.documentId, need.doneToday])).toEqual([
+    ["pendiente", created[0]!.id, true],
+  ])
+})
+
+it("lo que la persona dejó fuera no se prepara por el tratamiento", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f, 1)
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ decisionStatus: "rechazado" })
+    .where(eq(treatmentPlanItem.id, item.id))
+  await expect(
+    f.run((tx) => prepareEncounterConsents(tx, ...f.args, f.encounter.id, undefined, item.id)),
+  ).rejects.toMatchObject({ code: "ITEM_NOT_READY" })
+})
+
+// Estudio de la atención (16 nov, P11, D6): «Hoy viene a…» lleva solo lo de antes. Lo indicado y
+// aceptado en esta misma atención no se repite ahí (su «Hacerla hoy» está en su fila del Plan); traído
+// a hoy, sí, con su «Hoy no». En la sesión siguiente vuelve a ser «de antes».
+it("lo indicado en esta misma atención no se repite en «Hoy viene a…»; traído a hoy, sí; en la siguiente, también", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f, 2)
+  const visitOf = async (id: string) =>
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map((row) => row.planItemId)
+  expect(await visitOf(f.encounter.id)).toEqual([])
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id))
+  expect(await visitOf(f.encounter.id)).toEqual([item.id])
+  await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, f.encounter.id, item.id))
+  const today = await secondVisit(f)
+  expect(await visitOf(today)).toEqual([item.id])
+})
+
 it("«Quitar» lo indicado hoy sin respuesta: sale del plan y del presupuesto en borrador; lo ya respondido no", async () => {
   const f = await clinicalFixture()
   const indicated = await f.run((tx) =>

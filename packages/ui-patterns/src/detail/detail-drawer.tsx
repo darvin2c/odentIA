@@ -102,7 +102,7 @@ export function DetailDrawer({
   // Con columna lateral y ventana ancha, el detalle va ahí (ver `FormDrawer`).
   if (open && dockBounds) {
     return (
-      <DockedSurface bounds={dockBounds} dirty={isDirty && !isSubmitting} fallback={drawer(true)} draft={draft}>
+      <DockedSurface bounds={dockBounds} dirty={isDirty && !isSubmitting} fallback={drawer(true)} draft={draft} onClose={onClose}>
         <DetailPanel
           {...surface}
           onClose={onClose}

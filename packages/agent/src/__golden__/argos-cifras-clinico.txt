@@ -6,7 +6,7 @@
 - volvieron: Volvieron en el año. De los pacientes atendidos hace 12 a 24 meses, qué parte volvió en los últimos 12 (retención). (en un periodo; una sola cifra)
 - reactivados: Pacientes reactivados. Pacientes que volvieron tras más de 6 meses sin venir: su cita atendida del periodo llegó más de 6 meses después de la anterior. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, sede, profesional)
 - dias_entre_visitas: Cada cuánto vuelven. Cuántos días pasan entre una cita atendida y la siguiente del mismo paciente (la mediana), con las dos en el periodo. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, sede, profesional)
-- sin_venir: Sin venir hace más de 6 meses. Pacientes que dejaron de venir: más de 6 meses sin una cita atendida y sin cita, presupuesto ni control pendiente, hoy. (a hoy, sin periodo; una sola cifra)
+- sin_venir: Sin venir hace más de 6 meses. Pacientes que dejaron de venir: más de 6 meses sin venir (ni una cita atendida ni una atención firmada sin cita) y sin cita, presupuesto ni control pendiente, hoy. (a hoy, sin periodo; una sola cifra)
 - controles: Vinieron a su control. De los controles que vencían en el periodo, qué parte se hizo. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana)
 - aceptaron: Aceptaron su presupuesto. De los presupuestos entregados en el periodo, qué parte se aceptó (entero o en parte). (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, profesional)
 - aceptaron_tratamiento: Aceptaron el tratamiento. De las veces que se presupuestó cada tratamiento, qué parte se aceptó; por tratamiento. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, servicio)

@@ -22,6 +22,11 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** un id con un carácter de más dio error del servidor en citas, cierres de caja y gastos; formularios: un id con un carácter de más dio 500 en finalizar, guardar, publicar, adendas y la lista (mesa del 13 nov); guardar una pantalla de configuración devolvió a su valor anterior lo que otra pestaña acababa de cambiar; una pantalla usó UTC cuando la sede no tenía zona y desde la tarde mostraba lo de pasado mañana; el error de una transición salió con el texto interno; la semilla de un producto falló por una regla que la del otro no tocaba.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Una lista o una frase que el servidor ya calcula («Qué sigue», la línea de lo elegido, los cargos al firmar) no se vuelve a armar en la pantalla.
+
+**Ya falló:** la vista firmada armó su propio «Lo que sigue» y no dijo «Reservar la sesión 2» (16 nov).
+
 ## O-GEN-02 Lo que la pantalla recuerda en el navegador
 
 **Dónde:** `packages/ui-patterns/src/side-dock.tsx` (`useSideColumnWidth`, `SideColumn`), `docked-surface.tsx`, `master-detail.tsx`; lo mismo vale para filtros y vistas guardadas.
@@ -66,6 +71,11 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Cambiar, confirmar o cancelar desde el enlace dice sobre qué cita actúa y toca solo esa: repetir la llamada no toca otra cita de la persona. El hilo dice quién lo hizo de verdad.
 
 **Ya falló:** citas pasadas seguían «Por confirmar» y Reportes decía que nadie faltó; una sesión hecha antes de su cita dejó la cita en pie con un tratamiento ya terminado; «Reservar otra» cambió cuál era «Tu cita» en el enlace; el hilo decía «Sofi movió» lo que hizo la paciente o recepción; desde el enlace, la segunda llamada a «Cancelar» canceló la cita siguiente; una cita estirada hasta una hora pasada se marcó «Vino» y quedó atendida con una llegada inventada, sin deshacer; «Editar detalles» alargó la cita una hora fuera del turno sin avisar; una cita cancelada volvió a «Confirmada» a mano.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Última visita», los activos, «sin venir» e «Invitar a volver» cuentan la cita atendida y la atención firmada sin cita, con una sola regla en el código y en SQL. Cambiarla dice a quién le empieza o le deja de llegar la invitación.
+
+**Ya falló:** atendida dos veces sin cita, salía «Última visita —» y Reportes no la contaba (16 nov).
 
 ## O-AGE-03 Horarios y ausencias
 
@@ -128,6 +138,10 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** «Finalizar y firmar» no cerraba y marcaba en rojo una presión válida; «Firmar con lo dictado» se frenó por un consentimiento y la receta dictada ya se había descartado; el odontograma firmado «a pedido» congeló hallazgos del borrador; firmando pasada la medianoche, «En 6 meses» nació con otro tipo y título; el doble clic en «Finalizar y firmar» no abría el cierre.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] El aviso de anestesia sale de lo clínico (el servicio usa anestesia local) y no solo de los materiales cargados.
+- [ ] La dosis máxima lee un solo peso, el de los signos vitales.
+
 ## O-ATE-03 Anular una atención
 
 **Dónde:** `S/encounters.ts` (la vista previa y anular), `S/encounter-void-budgets.ts` (lo que pasa con su presupuesto).
@@ -154,6 +168,19 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** la Agenda dijo «Sus controles quedaron hechos» con el control recién indicado; «Completar control» aceptó la misma atención que lo indicó y dejó su cita en pie; ya tenía la cita del control y le llegó «te buscamos un horario»; de noche no se pudo indicar un control para hoy; la API aceptó una fecha imposible al cambiar un control; «Programar control» reservó siempre en la primera sede.
 
+## O-ATE-05 Anular un hallazgo y lo que nació de él
+
+**Dónde:** `S/dental/odontogram.ts` (anular), `S/dental/tooth-panel.ts` (lo que nace junto), `S/encounter-diagnoses.ts`, `S/encounter-plan-remove.ts`.
+
+- [ ] Anular el hallazgo ofrece, en la misma operación y con un solo motivo, anular su diagnóstico de esta atención y quitar lo indicado que nació de él; todo o nada.
+- [ ] Un diagnóstico que usa otro hallazgo vigente (dos caries de la misma pieza con el mismo código) no se anula.
+- [ ] Lo que ya tiene respuesta o se entregó no se toca: se dice y se cambia en el Plan.
+- [ ] La pieza sin nada vigente deja de ser «pieza de esta atención».
+- [ ] Lo de una atención firmada no se anula desde otra: va como adenda.
+
+**Ya falló:** la caries anulada en la 47 dejó «K02.5 · 47 · Definitivo», que se firmaba (16 nov).
+**Caso:** CO29 · caries O y M de la 47 con K02.5 y la endodoncia indicada desde la O, en un presupuesto en borrador; se anula la O. El K02.5 sigue (lo usa la M), la endodoncia sale del borrador y la 47 sigue en la atención.
+
 ## O-PRE-01 Armar, enviar y revisar un presupuesto
 
 **Dónde:** `S/budgets.ts` (armar y revisar), `S/budget-paths.ts` (los caminos), `S/budget-send.ts` (enviar), `S/budget-awaiting.ts` («espera respuesta»).
@@ -168,6 +195,11 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** la revisión de un presupuesto con dos caminos sin elegir borró el segundo; «Imprimir» lo dio por entregado y la ficha dijo «Enviado · espera respuesta»; la revisión de un precio dejó «por responder» lo ya hecho y cobrado; quedó un presupuesto vacío «por enviar» con su botón activo; «sin respuesta» dio una cifra en Pacientes y otra en Inicio.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Lo indicado mientras hay un borrador a la vista entra a él, o la pantalla dice por qué no (sin precio, otro plan, ya entregado); el total y el PDF que ve la persona traen todo lo indicado hasta ese momento.
+
+**Ya falló:** la resina indicada después de «Es otro camino» no estaba en el total ni en el PDF, y la línea «entra al firmar» estaba escondida (16 nov).
+
 ## O-PRE-02 Responder un presupuesto
 
 **Dónde:** `S/budgets.ts` (la respuesta), `S/portal.ts` (la respuesta de la persona, para portal, enlace y chat), `S/agent-operations.ts`, `S/budget-callback.ts` («No contesta»).
@@ -181,6 +213,11 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Lo aceptado con una promoción se cobra a ese precio aunque la promoción termine.
 
 **Ya falló:** con dos opciones, anotar una respuesta parcial obligó a elegir una y la otra quedó «No elegida»; aceptó, tocó «Después» y ya no encontró cómo elegir la hora; «Lo piensa» dejó abierta la tarea «No contestó»; la ficha decía «Ganada» y el plan «Por decidir».
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Cada respuesta tiene una sola palabra en el diálogo, el Plan, la ficha, la Bandeja y Argos, y esa palabra dice lo mismo que la regla de «espera respuesta».
+
+**Ya falló:** el diálogo decía «Para después» y todo lo demás «Lo está pensando», que cuenta como sin respuesta (16 nov).
 
 ## O-COB-01 Cobrar
 
@@ -237,6 +274,11 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Sin consentimiento, el cierre avisa y deja constancia. El profesional decide.
 
 **Ya falló:** al firmar pidió el consentimiento de la extracción que no se eligió; se pidió por los dos caminos en una consulta sin ningún acto, y no al abrir la sesión que lo hacía; la declaración no se veía en el enlace y faltaba la pieza; el enlace de firma abrió el consentimiento más antiguo, no el que se envió.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Si quien informa no puede confirmar (le falta la colegiatura), se le pide ahí mismo y lo que firmó la persona no se pierde.
+
+**Ya falló:** 409 sin campo, y «Volver» perdía la firma de la paciente (16 nov).
 
 ## O-ENV-01 Enviar un documento
 

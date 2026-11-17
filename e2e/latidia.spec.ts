@@ -941,11 +941,11 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${walkIn.body.data.id}`))
   await page.getByRole("button", { name: "Atender", exact: true }).first().click()
   await expect(page).toHaveURL(/\/encounters\//)
-  // Dictar es un botón de la cabecera; el motivo se escribe en la página, sin tomar el cursor.
+  // Dictar es un botón de la cabecera; el motivo se escribe en la página y, con teclado, el cursor empieza ahí.
   await expect(page.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
   await expect(page.getByRole("region", { name: "Dictado de la atención" })).toHaveCount(0)
   await expect(page.getByLabel("Motivo de consulta", { exact: true })).toBeVisible()
-  await expect(page.getByLabel("Motivo de consulta", { exact: true })).not.toBeFocused()
+  await expect(page.getByLabel("Motivo de consulta", { exact: true })).toBeFocused()
   await shot("clio-atender-sin-motivo")
 
   // En la atención: lo dictado va a cada bloque, también al examen físico y a los documentos.

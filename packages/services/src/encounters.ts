@@ -1,10 +1,12 @@
 import { canAttend } from "@odentia/auth/permissions"
 import {
   budgetStateText,
+  doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
   parseVitals,
   sumByCurrency,
+  type Vitals,
   vitalsErrors,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -80,6 +82,7 @@ import {
   listEncounterDocuments,
   type PatientDocumentWithContext,
 } from "./clinical.js"
+import { anesthesiaAtSigningOf, anesthesiaUsesOf } from "./anesthesia-at-signing.js"
 import { healthAtSigningOf } from "./health-at-signing.js"
 import {
   type ConsentNeed,
@@ -140,6 +143,7 @@ import {
   undoRevisionsOf,
   updatePlanItemPlanning,
 } from "./plan.js"
+import { RETURN_ACCEPTED_MONTHS, type ReturnCandidate, type ReturnChoice, returnChoiceOf, scheduledItems } from "./plan-next.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import {
   type ProductParts,
@@ -165,6 +169,8 @@ import {
   controlWindowOpenSql,
   controlWindowStart,
   dayKeyIn,
+  encounterSessionKey,
+  encounterSessionsOf,
   goesBeforeSql,
   LIVE_APPOINTMENT_STATUSES,
   pairsWithAccepted,
@@ -292,6 +298,12 @@ export interface EncounterDetailBase {
   teeth: number[]
   /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
   procedures: EncounterProcedureRow[]
+  /**
+   * Lo que se hizo, una línea por procedimiento vigente con su sitio y su sesión
+   * («Endodoncia posterior vital · Pieza 36 · sesión 1 de 2»), con la misma regla que la
+   * Historia (`encounterSessionsOf`): la atención firmada se titula con esto (P10).
+   */
+  doneLines: string[]
   /**
    * Diagnósticos de la atención (lista y código), anulados incluidos, con su
    * nombre en el catálogo: quien atiende lee «Caries dental», no solo DA08.0.
@@ -1304,10 +1316,21 @@ export async function getEncounterDetail(
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
   ).length
+  const liveProcedures = procedures.filter((procedure) => procedure.voidedAt === null)
+  const sessions = liveProcedures.some((procedure) => procedure.planItemId)
+    ? await encounterSessionsOf(tx, orgId, [encounterId])
+    : new Map()
+  const doneLines = liveProcedures.map((procedure) => {
+    const session = procedure.planItemId ? sessions.get(encounterSessionKey(encounterId, procedure.planItemId)) : undefined
+    return [procedure.description, site.words(procedure, "full"), session ? doneSessionWords(session.n, session.m, session.finished) : null]
+      .filter(Boolean)
+      .join(" · ")
+  })
   return {
     encounter: row,
     teeth: teethRows.map((r) => site.value(r.siteCode)).filter((tooth): tooth is number => tooth != null),
     procedures: procedures.map((row) => withSite(site, row)),
+    doneLines,
     diagnoses: diagnoses.map((row) => withSite(site, row)),
     notes: notes.map((row) => withSite(site, row)),
     // Lo del producto (odentIA: los hallazgos del odontograma de la atención).
@@ -2270,8 +2293,13 @@ export interface ClosingCheckBase {
    * anestesia y algo por saber, el cierre lo avisa junto a los materiales. No
    * bloquea; la firma deja constancia de que se firmó así.
    */
-  /** `risks`: lo que dijo del corazón y la anestesia que cambia una anestesia (`anesthesiaRisksOf`). */
-  health: { gaps: HealthGap[]; anesthetics: string[]; risks: string[] }
+  /**
+   * `risks`: lo que dijo del corazón y la anestesia que cambia una anestesia (`anesthesiaRisksOf`).
+   * `uses`: lo de hoy cuyo servicio usa anestesia local (`anesthesiaUsesOf`, QA del 16 nov); con
+   * eso o con un anestésico en sus materiales, la atención muestra la línea de anestesia antes de
+   * anestesiar y la repite al firmar. `asksAsa`: si el producto pide la ASA (odentIA).
+   */
+  health: { gaps: HealthGap[]; anesthetics: string[]; risks: string[]; uses: string[]; asksAsa: boolean }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
   controls: ClosingControls
   /**
@@ -2286,8 +2314,19 @@ export interface ClosingCheckBase {
     finishing: ClosingSession[]
     continuing: ClosingSession[]
     notRegistered: ClosingSession[]
-    /** Lo aceptado sin empezar, a lo que vuelve (`n` = 0: aún no tiene ninguna sesión). */
+    /**
+     * Lo aceptado sin empezar, a lo que vuelve (`n` = 0: aún no tiene ninguna sesión): primero lo
+     * de la misma pieza y después lo del mismo plan, con lo que la firma termina ya terminado
+     * (`returnChoiceOf`, la regla de «va después» de «Qué sigue»).
+     */
     accepted: ClosingSession[]
+    /** Lo aceptado de la misma pieza que todavía espera a lo de hoy que sigue en curso (la corona tras la sesión 2). */
+    waiting: ClosingSession[]
+    /**
+     * Lo que iba después de lo que hoy termina y no tiene cita, aceptado o por decidir (la corona
+     * tras la endodoncia): el cierre propone un control a 30 días (estudio de la atención, 16 nov).
+     */
+    afterUnbooked: ClosingSession[]
   }
   /**
    * Los diagnósticos activos que resuelve un tratamiento trabajado hoy si queda
@@ -2315,6 +2354,8 @@ export interface ClosingSession {
    * lun 9, 10:45» (QA del 8 nov, X11). Sin cita, no viene.
    */
   booked?: BookedSession
+  /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
+  before?: { planItemId: string; title: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
@@ -2558,53 +2599,121 @@ async function closingSessionsOf(
       n: Number(row.done) + 1,
       m: Number(row.m),
     })
-  // Lo aceptado que aún no empieza en la misma pieza que lo que hoy se trabajó (la corona tras
-  // la endodoncia de la 46): es a lo que vuelve. «¿Cuándo vuelve?» lo dice y «Atención finalizada»
-  // lo reserva, en vez de un control genérico que pedía otra cita (QA del 9 nov). No si otro
-  // tratamiento sigue en curso sin su sesión de hoy (la sesión 2 de otra endodoncia va primero), ni
-  // lo de otra pieza o sin pieza (un blanqueamiento aceptado hace un año no cambia cada cierre).
+  // A qué vuelve (estudio de la atención, entrega 7; antes, QA del 9 nov): lo aceptado sin empezar,
+  // primero lo de la misma pieza que lo trabajado hoy (la corona tras la endodoncia de la 46) y
+  // después lo del mismo plan aceptado en los últimos meses (la resina 15 y la limpieza), con la
+  // regla de «va después» de «Qué sigue» y lo que la firma termina ya terminado. Un blanqueamiento
+  // aceptado hace un año no cambia cada cierre, y nada si otro tratamiento sigue en curso sin su
+  // sesión de hoy (esa sesión va primero). «Atención finalizada» lo reserva y «Usarla para…» lo usa.
+  const choice = await returnChoiceFor(tx, orgId, encounterId, finishing.map((session) => session.planItemId))
   // Los de hoy y los que trae la cita ya están arriba.
   const taken = new Set([...finishing, ...continuing, ...notRegistered].map((session) => session.planItemId))
-  const pendingRows = await tx.execute<{
-    id: string
-    title: string
-    m: number
-    site_system: string | null
-    site_code: string | null
-    site_qualifiers: string[] | null
-  }>(sql`
-    select waiting.id, waiting.title, waiting.planned_sessions as m,
-      waiting.site_system, waiting.site_code, waiting.site_qualifiers
-    from treatment_plan_item waiting
-    join encounter here on here.organization_id = waiting.organization_id and here.id = ${encounterId}
-    where waiting.organization_id = ${orgId} and waiting.patient_id = here.patient_id
-      and waiting.decision_status = 'aceptado' and waiting.status in ('pendiente', 'programado')
-      and waiting.site_code is not null
-      and not exists (select 1 from encounter_procedure done
-        where done.organization_id = waiting.organization_id and done.plan_item_id = waiting.id and done.voided_at is null)
-      and exists (select 1 from encounter_procedure today
-        join treatment_plan_item worked on worked.organization_id = today.organization_id and worked.id = today.plan_item_id
-        where today.organization_id = waiting.organization_id and today.encounter_id = here.id and today.voided_at is null
-          and worked.site_system is not distinct from waiting.site_system and worked.site_code = waiting.site_code)
-      and not exists (select 1 from treatment_plan_item other
-        where other.organization_id = waiting.organization_id and other.patient_id = waiting.patient_id
-          and other.status = 'en_curso'
-          and not exists (select 1 from encounter_procedure other_today
-            where other_today.organization_id = other.organization_id and other_today.plan_item_id = other.id
-              and other_today.encounter_id = here.id and other_today.voided_at is null))
-    order by waiting.sort_order, waiting.created_at, waiting.id
-    limit 6`)
   const site = await siteOf(tx, orgId)
-  const pendingIds = pendingRows.filter((row) => !taken.has(row.id)).slice(0, 3)
-  const bookedPending = new Map(
-    (await nextSessionsOf(tx, orgId, pendingIds.map((row) => row.id), appointmentId)).map((session) => [session.planItemId, session.booked]),
+  const toSession = ({ item, before }: { item: ReturnRow; before: ReturnRow | null }, booked?: BookedSession): ClosingSession => {
+    const place = site.words({ siteSystem: item.siteSystem, siteCode: item.siteCode, siteQualifiers: item.siteQualifiers ?? [] }, "short")
+    return {
+      planItemId: item.id,
+      title: item.title,
+      n: 0,
+      m: item.plannedSessions,
+      ...(place ? { place } : {}),
+      ...(booked ? { booked } : {}),
+      ...(before ? { before: { planItemId: before.id, title: before.title } } : {}),
+    }
+  }
+  const readyRows = choice.ready.filter((row) => !taken.has(row.item.id)).slice(0, 3)
+  const waitingRows = choice.waiting.filter((row) => !taken.has(row.item.id)).slice(0, 3)
+  const booked = new Map(
+    (
+      await nextSessionsOf(
+        tx,
+        orgId,
+        [...readyRows, ...waitingRows].map((row) => row.item.id),
+        appointmentId,
+      )
+    ).map((session) => [session.planItemId, session.booked]),
   )
-  const accepted: ClosingSession[] = pendingIds.map((row) => {
-    const booked = bookedPending.get(row.id)
-    const place = site.words({ siteSystem: row.site_system, siteCode: row.site_code, siteQualifiers: row.site_qualifiers ?? [] }, "short")
-    return { planItemId: row.id, title: row.title, n: 0, m: Number(row.m), ...(place ? { place } : {}), ...(booked ? { booked } : {}) }
-  })
-  return { finishing, continuing, notRegistered, accepted }
+  const accepted = readyRows.map((row) => toSession(row, booked.get(row.item.id) ?? undefined))
+  const waiting = waitingRows.map((row) => toSession(row, booked.get(row.item.id) ?? undefined))
+  // Lo que iba después de lo que hoy termina y no tiene ninguna cita por venir: el control a 30 días.
+  const withAppointment = await scheduledItems(
+    tx,
+    orgId,
+    choice.patientId,
+    choice.afterFinishing.map((row) => row.item.id),
+  )
+  const afterUnbooked = choice.afterFinishing
+    .filter((row) => !withAppointment.has(row.item.id))
+    .slice(0, 3)
+    .map((row) => toSession(row))
+  return { finishing, continuing, notRegistered, accepted, waiting, afterUnbooked }
+}
+
+/** Un tratamiento de la persona, con lo que pide la elección de «¿Cuándo vuelve?». */
+type ReturnRow = ReturnCandidate & {
+  title: string
+  siteQualifiers: string[] | null
+  plannedSessions: number
+}
+
+/**
+ * La elección de «¿Cuándo vuelve?» de esta atención (`returnChoiceOf`), con los tratamientos de
+ * la persona en el orden del plan: lo trabajado hoy es lo que tiene un procedimiento vigente en
+ * ella, y `finishingIds`, lo que la firma termina.
+ */
+async function returnChoiceFor(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+  finishingIds: readonly string[],
+): Promise<ReturnChoice<ReturnRow> & { patientId: string }> {
+  const [here] = await tx
+    .select({ patientId: encounter.patientId })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId)))
+    .limit(1)
+  if (!here) return { patientId: "", ready: [], waiting: [], afterFinishing: [] }
+  const items: ReturnRow[] = await tx
+    .select({
+      id: treatmentPlanItem.id,
+      title: treatmentPlanItem.title,
+      status: treatmentPlanItem.status,
+      decisionStatus: treatmentPlanItem.decisionStatus,
+      phase: treatmentPlanItem.phase,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
+      siteQualifiers: treatmentPlanItem.siteQualifiers,
+      planId: treatmentPlanItem.planId,
+      createdAt: treatmentPlanItem.createdAt,
+      decidedAt: treatmentPlanItem.decidedAt,
+      plannedSessions: treatmentPlanItem.plannedSessions,
+    })
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, here.patientId)))
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  const worked = await tx
+    .selectDistinct({ planItemId: encounterProcedure.planItemId })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+        isNull(encounterProcedure.voidedAt),
+        isNotNull(encounterProcedure.planItemId),
+      ),
+    )
+  const since = new Date()
+  since.setUTCMonth(since.getUTCMonth() - RETURN_ACCEPTED_MONTHS)
+  const { planPhases } = await productHooks(tx, orgId)
+  return {
+    patientId: here.patientId,
+    ...returnChoiceOf(items, {
+      worked: new Set(worked.flatMap((row) => (row.planItemId ? [row.planItemId] : []))),
+      finishing: new Set(finishingIds),
+      phases: planPhases ?? [],
+      since,
+    }),
+  }
 }
 
 /** Un control pendiente cuya ventana ya abrió: esta visita lo cumple al firmar (ADR 0152). */
@@ -2734,6 +2843,8 @@ export async function checkEncounterClosing(
     gaps: await healthGapsOf(tx, orgId, row.patientId),
     anesthetics: (materials?.items ?? []).filter((item) => isLocalAnestheticName(item.name)).map((item) => item.name),
     risks: await anesthesiaRisksOf(tx, orgId, row.patientId),
+    uses: await anesthesiaUsesOf(tx, orgId, row.id),
+    asksAsa: (await productHooks(tx, orgId)).asksAsa,
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
@@ -3115,6 +3226,11 @@ export interface FinalizeEncounterInput {
    * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
    */
   finishControlChanges?: FinishingControlChange[]
+  /**
+   * El anestésico elegido en la línea de anestesia (`LOCAL_ANESTHETICS`), solo para el máximo que
+   * guarda la atención firmada; sin él, el máximo no se guarda.
+   */
+  anesthetic?: string | null
 }
 
 /**
@@ -3317,6 +3433,18 @@ export async function finalizeEncounter(
         sex: person.sex,
         today: dayKeyIn(now, timezone),
         interview: hooks.interview,
+      }),
+      // La anestesia de ese día: la ASA con quién la puso, el peso y el máximo (QA del 16 nov).
+      anesthesiaAtSigning: await anesthesiaAtSigningOf(tx, orgId, {
+        patientId,
+        encounterId,
+        // Solo lo que quedó registrado sin anular: lo traído y no hecho no deja anestesia en la firmada.
+        uses: [...new Set([...(await anesthesiaUsesOf(tx, orgId, encounterId, { done: true })), ...closing.health.anesthetics])],
+        vitals: (locked.vitals as Vitals | null) ?? null,
+        birthDate: person.birthDate ?? null,
+        today: dayKeyIn(locked.startedAt, timezone),
+        anesthetic: input.anesthetic ?? null,
+        asksAsa: hooks.asksAsa,
       }),
       updatedAt: now,
     })
@@ -3661,15 +3789,23 @@ export async function finalizeEncounter(
         (session) => session.planItemId,
       ),
     ),
+    // Lo de la misma pieza que espera a lo que sigue en curso (también a lo que se dejó con «Falta
+    // otra sesión»): va después, con lo que va antes.
     waitingAfter:
       continuingNext.length > 0
-        ? closing.sessions.accepted
-            .filter((session) => !session.booked && !bookedAfter.some((row) => row.planItemId === session.planItemId))
+        ? [...closing.sessions.waiting, ...closing.sessions.accepted]
+            .filter(
+              (session) =>
+                !!session.before &&
+                continuingNext.some((next) => next.planItemId === session.before?.planItemId) &&
+                !session.booked &&
+                !bookedAfter.some((row) => row.planItemId === session.planItemId),
+            )
             .map((session) => ({
               planItemId: session.planItemId,
               title: session.title,
               ...(session.place ? { place: session.place } : {}),
-              beforeTitle: continuingNext[0]!.title,
+              beforeTitle: session.before!.title,
             }))
         : [],
     nextSessions,

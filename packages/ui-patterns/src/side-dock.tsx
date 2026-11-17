@@ -2,6 +2,7 @@ import { cn, useSidebarOptional } from "@odentia/ui"
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { common } from "./common.js"
+import { UnsavedDialog } from "./confirm-dialog.js"
 import type { KeptInPage } from "./draft-blocker.js"
 
 /**
@@ -30,7 +31,20 @@ import type { KeptInPage } from "./draft-blocker.js"
  *    remontaría el formulario.
  * 4. Los Avisos no son un formulario: ceden la columna si alguien la
  *    pide y se abre como cajón si ya está ocupada (lo decide la app).
+ * 5. Lo que una página pone al lado de sí misma, en su propia rejilla (la
+ *    pieza junto al odontograma), nunca pasa a ventana porque se abrió otra
+ *    cosa y le quitó el ancho: se cierra, y la página deja marcado lo que
+ *    tenía abierto para reabrirlo con un toque. Si tenía algo escrito,
+ *    pregunta antes, como un borrador (`useStaysBeside`): «Seguir aquí»
+ *    cierra lo que se abrió en la columna (si no tiene nada escrito) y deja
+ *    la página como estaba.
  */
+
+/** Lo que hay ahora en la columna: cómo cerrarlo y si tiene algo escrito. */
+interface DockedColumnHandle {
+  close: (() => void) | null
+  dirty: boolean
+}
 
 interface SideDockState {
   slot: HTMLElement | null
@@ -39,6 +53,8 @@ interface SideDockState {
   owners: readonly string[]
   claim: (id: string) => () => void
   draftGuard: DraftGuardComponent | null
+  /** La superficie montada en la columna, si dijo cómo cerrarse (`useDockedColumnHandle`). */
+  column: React.RefObject<DockedColumnHandle | null>
 }
 
 /**
@@ -119,11 +135,32 @@ export function SideDockProvider({
     setOwners((current) => (current.includes(id) ? current : [...current, id]))
     return () => setOwners((current) => current.filter((owner) => owner !== id))
   }, [])
+  const column = React.useRef<DockedColumnHandle | null>(null)
   const value = React.useMemo(
-    () => ({ slot, setSlot, owners, claim, draftGuard }),
+    () => ({ slot, setSlot, owners, claim, draftGuard, column }),
     [slot, owners, claim, draftGuard],
   )
   return <SideDockContext.Provider value={value}>{children}</SideDockContext.Provider>
+}
+
+/**
+ * La superficie que está en la columna dice cómo cerrarse y si tiene algo escrito, para que la
+ * página a la que le quitó el ancho pueda cerrarla con «Seguir aquí» (regla 5). Solo mientras viva.
+ */
+export function useDockedColumnHandle(close: (() => void) | undefined, dirty: boolean): void {
+  const dock = React.useContext(SideDockContext)
+  const column = dock?.column
+  const handle = React.useRef<DockedColumnHandle>({ close: close ?? null, dirty })
+  handle.current.close = close ?? null
+  handle.current.dirty = dirty
+  React.useEffect(() => {
+    if (!column) return
+    const own = handle.current
+    column.current = own
+    return () => {
+      if (column.current === own) column.current = null
+    }
+  }, [column])
 }
 
 /**
@@ -185,6 +222,83 @@ export function SideDockPortal({
   // Sin columna en el layout (o sin su hueco montado) no hay dónde ir.
   if (!dock?.slot || decision === "fallback") return fallback
   return decision === "column" ? createPortal(children, dock.slot) : null
+}
+
+export interface StaysBesideOptions {
+  /** La página tiene la superficie abierta. */
+  open: boolean
+  /** Hoy cabe al lado (el ancho de su contenedor y `useDetailMode()` lo permiten). */
+  fits: boolean
+  /** Tiene algo escrito que se perdería al cerrarla. */
+  dirty: boolean
+  /** Qué se pierde, dicho para quien decide; sin él, la frase común. */
+  lost?: string | null
+  /** Cerrarla: la página la deja marcada (la selección sigue) para reabrirla con un toque. */
+  onClose: () => void
+}
+
+/**
+ * Regla 5: una superficie que la página pone al lado de sí misma (no en la
+ * columna del layout) se decide al abrir, como en la regla 3: al lado si cabe,
+ * en cajón si no; si después hay sitio, pasa al lado. Una vez al lado, perder
+ * el ancho porque se abrió otra cosa (la columna, el dictado) nunca la vuelve
+ * ventana encima: se cierra. Si tenía algo escrito, se pregunta como al salir
+ * sin guardar: «Seguir aquí» cierra lo que se abrió en la columna y le quitó el
+ * ancho (si no tiene nada escrito), que es quedarse como estaba, y «Descartar y
+ * salir» la cierra (WCAG 3.2.2: nada cambia de contexto sin que la persona lo
+ * pida). Si lo que quita el ancho no se puede cerrar desde aquí (el dictado, una
+ * ventana más angosta), queda al lado aunque justa solo mientras siga con algo
+ * escrito: al guardarse o al volver el ancho deja de retenerse (QA del 16 nov,
+ * Q13: se quedaba aplastada hasta cerrar algo a mano).
+ *
+ * `beside` es lo que la página pinta: al lado o en cajón. `confirmDialog` va
+ * montado junto a la superficie.
+ */
+export function useStaysBeside({ open, fits, dirty, lost = null, onClose }: StaysBesideOptions): {
+  beside: boolean
+  confirmDialog: React.ReactNode
+} {
+  const dock = React.useContext(SideDockContext)
+  const [placed, setPlaced] = React.useState<"beside" | "drawer" | null>(null)
+  const [held, setHeld] = React.useState(false)
+  const [asking, setAsking] = React.useState(false)
+  // Retenida solo mientras haga falta: con el ancho de vuelta o ya sin nada escrito, se suelta.
+  if (held && (fits || !dirty)) setHeld(false)
+  // Lo que corresponde ahora, decidido al pintar (sin un cuadro intermedio en cajón).
+  let current = placed
+  if (!open) current = null
+  else if (placed === null || (placed === "drawer" && fits)) current = fits ? "beside" : "drawer"
+  if (current !== placed) setPlaced(current)
+  if (!open && (held || asking)) {
+    setHeld(false)
+    setAsking(false)
+  }
+  const close = React.useRef(onClose)
+  close.current = onClose
+  const squeezed = open && current === "beside" && !fits && !held
+  React.useEffect(() => {
+    if (!squeezed || asking) return
+    if (dirty) setAsking(true)
+    else close.current()
+  }, [squeezed, asking, dirty])
+  const confirmDialog = (
+    <UnsavedDialog
+      open={asking}
+      lost={lost}
+      onStay={() => {
+        setAsking(false)
+        setHeld(true)
+        // Lo que se abrió en la columna se cierra: «Seguir aquí» es quedarse como estaba.
+        const column = dock?.column.current
+        if (column?.close && !column.dirty) column.close()
+      }}
+      onDiscard={() => {
+        setAsking(false)
+        close.current()
+      }}
+    />
+  )
+  return { beside: open && current === "beside", confirmDialog }
 }
 
 /**
