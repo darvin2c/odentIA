@@ -19,7 +19,7 @@ import {
   planStatusLabel,
 } from "@odentia/clinic-app/lib/patients"
 import { fetchService, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
-import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
+import { findingsOfEncounter, groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel, formatMoney, isLeftOut, pulpDiagnosisChoices } from "@odentia/clinical"
 import {
   surfaceLabel as clinicalSurfaceLabel,
@@ -515,6 +515,8 @@ export function ToothDrawer({
             "encounter-closing",
             // El diagnóstico registrado con el hallazgo deja de proponerse.
             "diagnosis-suggestions",
+            // La línea «Historia de la 36 · 1 hallazgo» cuenta lo recién registrado.
+            "tooth-history",
           ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         setChoosingFinding(true)
@@ -584,7 +586,7 @@ export function ToothDrawer({
         setVoiding(null)
         voidForm.reset(EMPTY_VOID)
         await Promise.all(
-          PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+          [...PLAN_QUERY_KEYS, "tooth-history"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         await onChanged()
       } finally {
@@ -842,19 +844,55 @@ export function ToothDrawer({
           planQuery={planQuery}
           docsQuery={docsQuery}
           encounterId={encounterId}
-          canMutate={canMutate && !disabled && !busy}
-          voidPending={voidSurface.isSubmitting}
-          defaultOpen={
-            !canMutate || entriesOf(toothNumber).some((entry) => !!encounterId && entry.encounterId === encounterId)
-          }
-          onVoid={(ids, label) => {
-            voidForm.reset(EMPTY_VOID)
-            setVoiding({ ids, label })
-          }}
+          // Lo registrado hoy ya está arriba con su «Anular»: la historia se abre sola solo al consultar.
+          defaultOpen={!canMutate}
         />
       ))}
     </div>
   )
+  // Lo registrado en esta atención, a la vista y con su «Anular»: fuera del pliegue de la historia
+  // (QA del 16 nov, Q14: para anular lo recién registrado había que abrir «Historia… sin registros»).
+  const todayFindings = teeth.flatMap((toothNumber) =>
+    findingsOfEncounter(entriesOf(toothNumber), encounterId).map((group) => ({ toothNumber, ...group })),
+  )
+  const today =
+    todayFindings.length > 0 ? (
+      <section aria-label="Registrado hoy" className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium">Registrado hoy</h3>
+        <ul className="flex flex-col gap-1.5">
+          {todayFindings.map(({ toothNumber, first: entry, ids, surfaces }) => {
+            const words = findingWords(official, entry)
+            return (
+              <li
+                key={ids.join(",")}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  {teeth.length > 1 ? `Pieza ${toothNumber} · ` : ""}
+                  {words}
+                  {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
+                  {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
+                </span>
+                {canMutate && !disabled ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={busy}
+                    onClick={() => {
+                      voidForm.reset(EMPTY_VOID)
+                      setVoiding({ ids, label: `pieza ${toothNumber} (${words})` })
+                    }}
+                  >
+                    Anular
+                  </Button>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+    ) : null
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -862,6 +900,7 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
+      {today}
 
       {!canMutate ? (
         historical || readOnly || !canWrite ? (
@@ -1488,7 +1527,7 @@ export function ToothDrawer({
 
 /**
  * Lo que tiene la pieza: su estado actual (lo registrado en esta atención se
- * anula aquí con motivo), su plan, su historia y sus imágenes. La evolución del
+ * anula arriba del panel, en «Registrado hoy»), su plan, su historia y sus imágenes. La evolución del
  * odontograma, con lo anulado, es una sola y vive junto al gráfico.
  */
 function ToothContext({
@@ -1499,10 +1538,7 @@ function ToothContext({
   planQuery,
   docsQuery,
   encounterId,
-  canMutate,
-  voidPending,
   defaultOpen,
-  onVoid,
 }: {
   patientId: string
   toothNumber: number
@@ -1511,10 +1547,7 @@ function ToothContext({
   planQuery: PlanQueryState
   docsQuery: DocsQueryState
   encounterId?: string
-  canMutate: boolean
-  voidPending: boolean
   defaultOpen: boolean
-  onVoid: (ids: string[], label: string) => void
 }): React.JSX.Element {
   const official = useOdontogramNotation()
   const needsReview = entries.filter((e) => e.needsReview)
@@ -1554,8 +1587,9 @@ function ToothContext({
               {/* Una caries de dos caras es un hallazgo: una fila con sus caras (QA del 9 nov). */}
               {groupFindings(entries).map(({ first: entry, ids, surfaces }) => {
                 const words = findingWords(official, entry)
-                // Solo lo registrado en la atención en curso se corrige aquí.
-                const ownedHere = canMutate && !!encounterId && entry.encounterId === encounterId
+                // Lo registrado en la atención en curso se anula arriba, en «Registrado hoy»: aquí
+                // solo se dice, sin otro «Anular» igual.
+                const ownedHere = !!encounterId && entry.encounterId === encounterId
                 return (
                   <li
                     key={ids.join(",")}
@@ -1571,17 +1605,7 @@ function ToothContext({
                     {entry.createdAt ? (
                       <span className="text-xs text-muted-foreground">{timeAgo(entry.createdAt)}</span>
                     ) : null}
-                    {ownedHere ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        disabled={voidPending}
-                        onClick={() => onVoid(ids, `pieza ${toothNumber} (${findingWords(official, entry)})`)}
-                      >
-                        Anular
-                      </Button>
-                    ) : null}
+                    {ownedHere ? <Badge variant="outline">Hoy</Badge> : null}
                     {entry.note ? <p className="w-full text-muted-foreground">{entry.note}</p> : null}
                     {entry.needsReview && originalLegacyText(entry) ? (
                       <p className="w-full text-xs text-muted-foreground">{originalLegacyText(entry)}.</p>
