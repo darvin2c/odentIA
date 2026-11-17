@@ -1373,9 +1373,16 @@ export interface ChatReply {
 }
 
 /**
+ * Lo que mandó la clínica para la carga (`archivo_clinica`) no sale por un chat: Meta guardaría
+ * una copia fuera de lo que se borra a los 30 días (lo que promete el contrato).
+ */
+export const CHAT_CARGA_FILE_MESSAGE =
+  "Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días"
+
+/**
  * Los documentos que salen en una respuesta, en el orden en que se eligieron: del cliente de la
- * conversación, sin borrar y que el canal acepta (`channelFileProblem`, con el nombre de cada uno
- * que no). Sin cliente no hay de dónde: 409.
+ * conversación, sin borrar, que no son la carga (`CHAT_CARGA_FILE_MESSAGE`) y que el canal acepta
+ * (`channelFileProblem`, con el nombre de cada uno que no). Sin cliente no hay de dónde: 409.
  */
 async function chatReplyFiles(
   tx: Db,
@@ -1394,6 +1401,7 @@ async function chatReplyFiles(
   const rows = await tx
     .select({
       id: saasClientFile.id,
+      kind: saasClientFile.kind,
       filename: saasClientFile.filename,
       contentType: saasClientFile.contentType,
       sizeBytes: saasClientFile.sizeBytes,
@@ -1413,6 +1421,13 @@ async function chatReplyFiles(
   })
   if (files.length !== ids.length)
     throw invalidField("fileIds", "Un archivo ya no está o no es de este cliente")
+  // La carga no sale por chat: dicho junto a cada archivo que lo es.
+  const carga: Record<string, string> = {}
+  files.forEach((file, index) => {
+    if (file.kind === "archivo_clinica") carga[`fileIds[${index}]`] = CHAT_CARGA_FILE_MESSAGE
+  })
+  if (Object.keys(carga).length > 0)
+    throw validation(CHAT_CARGA_FILE_MESSAGE, { fileIds: CHAT_CARGA_FILE_MESSAGE, ...carga })
   // Cada archivo que el canal no acepta, con su nombre: ninguno se calla por el primero.
   const problems: Record<string, string> = {}
   files.forEach((file, index) => {

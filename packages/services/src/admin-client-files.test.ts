@@ -15,6 +15,7 @@ import {
   clientFilePreviewKind,
   clientFilePreviewUrl,
   clientFileUrl,
+  clientReportContent,
   deleteClientFile,
   dueClientFileDeletions,
   isLikelyCarga,
@@ -635,5 +636,51 @@ describe("ver sin descargar (ADR 0196)", () => {
     expect(count(admin, pdf.id)).toBe(2)
     expect(count(admin, photo.id)).toBe(1)
     expect(count(support, photo.id)).toBe(1)
+  })
+
+  it("el PDF de un informe de la carga: solo Administración, del registro, con su constancia una vez al día", async () => {
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: admin.userId,
+      action: "org.progress_report_sent",
+      organizationId: ORG,
+      entityId: "informe-1",
+      metadata: { to: "rosa@files.test", pdfKey: `reports/${ORG}/informe-1.pdf` },
+    })
+    const morning = new Date("2026-11-16T14:00:00Z")
+    const evening = new Date("2026-11-16T23:00:00Z")
+    const nextDay = new Date("2026-11-17T15:00:00Z")
+    // El rol lo revisa el servicio, no solo la ruta; un id que no es de un cliente es 404.
+    await expect(clientReportContent(ownerDb, support, clientId, 1, morning)).rejects.toMatchObject(
+      { code: "FORBIDDEN" },
+    )
+    await expect(clientReportContent(ownerDb, admin, "abc", 1, morning)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    await expect(clientReportContent(ownerDb, admin, clientId, 2, morning)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    expect(await clientReportContent(ownerDb, admin, clientId, 1, morning)).toEqual({
+      objectKey: `reports/${ORG}/informe-1.pdf`,
+      filename: "informe-1.pdf",
+    })
+    await clientReportContent(ownerDb, admin, clientId, 1, evening)
+    await clientReportContent(ownerDb, admin, clientId, 1, nextDay)
+    const views = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(
+        and(
+          eq(adminAudit.action, "client_report.viewed"),
+          eq(adminAudit.actorUserId, admin.userId),
+          eq(adminAudit.entityId, clientId),
+        ),
+      )
+    expect(views.map((row) => row.metadata)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientId, number: 1, day: limaDate(morning) }),
+        expect.objectContaining({ clientId, number: 1, day: limaDate(nextDay) }),
+      ]),
+    )
+    expect(views).toHaveLength(2)
   })
 })

@@ -3492,11 +3492,8 @@ export async function clientTimeline(
 
   // Los cambios del plan, de las dos auditorías (`listSaasPlanChanges`): se leen en Plan y pagos.
   if (orgId && wants("plan")) {
-    const changes = await listSaasPlanChanges(tx, orgId, {
-      before,
-      limit: many,
-      forSupport: !admin,
-    })
+    // Quién mira decide el detalle: Soporte lee lo suyo (sin planes, importes ni motivos).
+    const changes = await listSaasPlanChanges(tx, staff, orgId, { before, limit: many })
     for (const change of changes) {
       push({
         id: `plan:${change.id}`,

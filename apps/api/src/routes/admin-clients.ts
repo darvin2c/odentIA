@@ -48,6 +48,7 @@ import {
   clientFileKey,
   clientFilePreviewUrl,
   clientFileUrl,
+  clientReportContent,
   clientPatchSchema,
   clientTimeline,
   completeClientTask,
@@ -74,7 +75,6 @@ import {
   listClientFiles,
   listClients,
   listClientTasks,
-  listProgressReports,
   listSaasProposals,
   markClientFileCarga,
   markInvitationSent,
@@ -1471,31 +1471,16 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   )
 
   /**
-   * El PDF de un informe de la carga tal como salió, para verlo en el historial y en Documentos
-   * (solo Administración, como el registro de la carga). Del mismo registro que lee Alta.
+   * El PDF de un informe de la carga tal como salió, para verlo en el historial y en Documentos.
+   * Quién lo ve, el registro y su constancia los decide el servicio (`clientReportContent`).
    */
   app.get(`/${ID}/reports/:number/content`, async (c) => {
     try {
-      adminOf(c)
-      const number = Number(c.req.param("number"))
-      if (!Number.isInteger(number) || number < 1)
-        throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
-      const pdfKey = await owner(async (tx) => {
-        const [client] = await tx
-          .select({ organizationId: saasClient.organizationId })
-          .from(saasClient)
-          .where(eq(saasClient.id, c.req.param("id")))
-          .limit(1)
-        if (!client) throw new ServiceError("NOT_FOUND", 404, "Cliente no encontrado")
-        const reports = client.organizationId
-          ? await listProgressReports(tx, client.organizationId)
-          : []
-        const found = reports.find((report) => report.number === number)
-        if (!found?.pdfKey)
-          throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
-        return found.pdfKey
-      })
-      return await pdfResponse(c, deps.storage, pdfKey, `informe-${number}.pdf`)
+      const actor = staffOf(c)
+      const report = await owner((tx) =>
+        clientReportContent(tx, actor, c.req.param("id"), Number(c.req.param("number"))),
+      )
+      return await pdfResponse(c, deps.storage, report.objectKey, report.filename)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }

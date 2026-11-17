@@ -945,6 +945,8 @@ describe("documentos", () => {
     await expectStatus(await call("GET", `/${clientId}/reports/1/content`, SUPPORT), 403)
     await expectStatus(await call("GET", `/${clientId}/reports/1/content`, ADMIN), 404)
     await expectStatus(await call("GET", `/${clientId}/reports/cero/content`, ADMIN), 404)
+    // Un id que no es de un cliente no llega a la base como error: 404.
+    await expectStatus(await call("GET", "/abc/reports/1/content", ADMIN), 404)
   })
 
   it("acepta lo mismo que llega por correo y lo adjunta a una respuesta, que sale con él", async () => {

@@ -422,15 +422,17 @@ export const SAAS_PLAN_CHANGE_ACTIONS: readonly string[] = Object.keys(PLAN_CHAN
 /**
  * Los cambios del plan de una clínica, del más nuevo al más viejo, con quién los hizo: de las
  * dos auditorías, sin repetir lo que quedó en ambas. `before` y `limit` paginan como el
- * historial; `forSupport` deja solo lo que Soporte lee, sin nombres de plan ni motivos. Solo
- * lee; con owner.
+ * historial. Lo que ve depende de quién mira (`actor`): con todo su detalle solo Administración;
+ * cualquier otro (Soporte, o sin decir quién) lee lo de Soporte, sin nombres de plan, importes ni
+ * motivos: lo seguro es lo que sale si se olvida decirlo. Solo lee; con owner.
  */
 export async function listSaasPlanChanges(
   tx: Db,
+  actor: Pick<AdminActor, "role"> | null,
   orgId: string,
-  options: { before?: Date | null; limit?: number; forSupport?: boolean } = {},
+  options: { before?: Date | null; limit?: number } = {},
 ): Promise<SaasPlanChange[]> {
-  const forSupport = options.forSupport === true
+  const forSupport = actor?.role !== "admin"
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
   const before = options.before ?? null
   const events = await tx

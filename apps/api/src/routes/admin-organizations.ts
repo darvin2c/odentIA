@@ -503,7 +503,8 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
   // O2: cobro y consumo de la clínica (ADR 0031). Precio y prueba son de la administración: soporte no ve importes (ADR 0094).
   // Con «Pasar a Fundadores» cuando la clínica entró sin la invitación y sigue en prueba (ADR 0192).
   app.get("/:id/billing", async (c) => {
-    const denied = forbidUnlessManager(c, adminContextOf(c))
+    const actor = adminContextOf(c)
+    const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
     const id = c.req.param("id")
     return runService(c, 200, () =>
@@ -511,7 +512,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         const terms = await getOrganizationBillingTerms(tx, id)
         // «Cambios del plan»: de las dos auditorías, del más nuevo al más viejo (ADR 0196).
         return terms
-          ? { ...terms, founders: await getFoundersMove(tx, id), changes: await listSaasPlanChanges(tx, id) }
+          ? { ...terms, founders: await getFoundersMove(tx, id), changes: await listSaasPlanChanges(tx, actor, id) }
           : null
       }),
     )

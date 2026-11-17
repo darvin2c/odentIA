@@ -1060,6 +1060,25 @@ describe("responder un chat con archivos", () => {
     await expect(
       prepareChatReply(ownerDb, admin, chat.chatId, { fileIds: [gone.id] }, NOW),
     ).rejects.toMatchObject({ code: "VALIDATION", fields: { fileIds: expect.any(String) } })
+    // Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días.
+    const carga = await registerClientFile(ownerDb, admin, {
+      clientId: sales,
+      kind: "archivo_clinica",
+      filename: "pacientes.pdf",
+      objectKey: clientFileKey(sales, "pdf"),
+      contentType: "application/pdf",
+      sizeBytes: MB,
+      adminOnly: true,
+    })
+    const cargaWords = "Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días"
+    await expect(
+      prepareChatReply(ownerDb, admin, chat.chatId, { body: "Va", fileIds: [ours.id, carga.id] }, NOW),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      status: 400,
+      message: cargaWords,
+      fields: { fileIds: cargaWords, "fileIds[1]": cargaWords },
+    })
     const big = await file(sales, "foto.png", "image/png", 6 * MB)
     const gif = await file(sales, "animado.gif", "image/gif")
     const failure = await prepareChatReply(
