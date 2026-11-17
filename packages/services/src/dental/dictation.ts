@@ -213,7 +213,6 @@ async function prepareFinding(
   // Un hallazgo por cara dicho sin cara (una caries en la 36): la cara se elige con un
   // toque. Lo que además admite el dibujo de su forma se dibuja tocando la pieza.
   const missing = [
-    ...(finding.variants && !variant && strictVariants ? ["variant"] : []),
     ...(finding.color === "quality" && !quality ? ["quality"] : []),
     ...(finding.scope === "surface" && surfaces.length === 0 ? ["surfaces"] : []),
   ]

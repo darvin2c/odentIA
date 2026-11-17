@@ -75,7 +75,7 @@ export interface FindingDetails {
 /**
  * Lo que cambia con el país de la clínica al validar un hallazgo
  * (`dentalProfileFor(...).odontogram`): con odontograma oficial (Perú) la
- * variante es obligatoria como en la norma; sin él, opcional.
+ * variante se nombra por su sigla. En todos los países es opcional (17 nov).
  */
 export interface ValidateFindingOptions {
   strictVariants: boolean

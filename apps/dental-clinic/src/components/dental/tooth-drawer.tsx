@@ -950,7 +950,7 @@ export function ToothDrawer({
           {def?.variants?.length ? (
             <form.AppField name="variant">
               {(field) => {
-                const legend = variantFieldLabel(official, condition)
+                const legend = variantFieldLabel(condition)
                 const chosen = def.variants?.find((v) => v.value === field.state.value)
                 const sigla = (v: { label: string; abbreviation: string }) =>
                   official && v.abbreviation ? v.abbreviation : v.label
@@ -971,8 +971,8 @@ export function ToothDrawer({
                           value={field.state.value || null}
                           options={(def.variants ?? []).map((v) => ({ value: v.value, label: sigla(v) }))}
                           onChange={(value) => field.handleChange(value)}
-                          // Sin norma que la pida, la variante se puede dejar sin responder.
-                          onClear={official?.strictVariants ? undefined : () => field.handleChange("")}
+                          // La variante es opcional en todos los países (17 nov): se puede dejar sin responder.
+                          onClear={() => field.handleChange("")}
                         />
                         {longName ? (
                           <p id={`${uid}-variant-long`} className="text-xs text-muted-foreground">

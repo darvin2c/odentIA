@@ -57,7 +57,6 @@ import { productHooksFor } from "../products.js"
 import { createService } from "../service-catalog.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
-import { orgStrictVariants } from "./odontogram.js"
 import { dentalSiteOfRow } from "./site.js"
 
 /** Asistente clínico: lo dictado queda como sugerencia y solo entra a la historia cuando el odontólogo confirma. */
@@ -80,10 +79,9 @@ async function openSession(serviceName: string, scope = "tooth") {
 }
 
 describe("odontograma por voz (issue 109)", () => {
-  it("un hallazgo dictado pide lo que exige la norma, se completa y entra como al tocar la pieza, con su diagnóstico", async () => {
+  it("un hallazgo dictado pide lo que le falta para dibujarse, se completa y entra como al tocar la pieza, con su diagnóstico", async () => {
     await enable(true)
     const fx = await openSession("Obturación de prueba")
-    const strict = await fx.run((tx) => orgStrictVariants(tx, ORG))
     const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
     const saved = await segment({
       drafts: [
@@ -101,8 +99,8 @@ describe("odontograma por voz (issue 109)", () => {
       payload: { condition: "caries", variant: "dentin", surfaces: ["occlusal"], diagnosisCode: "K02.1" },
       summary: "Pieza 36 · Lesión de caries a nivel de la dentina · cara oclusal\nCon el diagnóstico presuntivo K02.1 Caries de la dentina",
     })
-    // La corona siempre pide su estado; en Perú, además, el material.
-    expect(crown).toMatchObject({ status: "por_revisar", payload: { missing: strict ? ["variant", "quality"] : ["quality"] } })
+    // La corona pide su estado para dibujarse; el material es opcional en todos los países (ADR 0200).
+    expect(crown).toMatchObject({ status: "por_revisar", payload: { missing: ["quality"] } })
     expect(implant).toMatchObject({ status: "por_revisar" })
     expect(nineteen?.note).toContain("no existe")
 

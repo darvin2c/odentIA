@@ -47,9 +47,9 @@ export function isTreatmentResultCondition(value: unknown): value is TreatmentRe
 /**
  * Comprueba lo que un servicio dice que deja en la pieza. `scope` es el ámbito
  * del servicio: lo que se dibuja en las caras necesita un servicio por
- * superficies y lo de una pieza, uno por pieza o por superficies. Con
- * odontograma oficial (Perú) la variante va siempre, salvo en la ausencia,
- * cuya causa se deduce al completar el tratamiento.
+ * superficies y lo de una pieza, uno por pieza o por superficies. La variante
+ * es opcional en todos los países (17 nov); la causa de una ausencia se deduce
+ * al completar el tratamiento con odontograma oficial.
  */
 export function validateLeavesFinding(
   leaves: unknown,
@@ -90,8 +90,6 @@ export function leavesFindingIssues(
           ? `«${name}» no corresponde a «${def.label}»: elígela de la lista.`
           : `«${def.label}» no lleva variante.`,
       })
-  } else if (options.strictVariants && def.variants && condition !== "missing_tooth") {
-    issues.push({ field: "variant", message: `Falta «${name}»: en Perú se registra con su sigla.` })
   }
   if (def.scope === "surface" && options.scope !== "surfaces")
     issues.push({
@@ -113,7 +111,7 @@ export interface TreatedSite {
 }
 
 export interface TreatedContext {
-  /** Con odontograma oficial (Perú) la variante es obligatoria. */
+  /** Con odontograma oficial (Perú): la causa de una ausencia se deduce y la variante se dice por su sigla. */
   strictVariants: boolean
   /** Hallazgo que motivó el tratamiento (su código), si lo hay. */
   originCondition?: string | null
