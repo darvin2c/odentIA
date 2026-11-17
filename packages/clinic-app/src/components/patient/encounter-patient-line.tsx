@@ -46,16 +46,27 @@ export function usePastHeader(marker: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
+ * El alto de la línea fija, en una sola variable (QA del 16 nov, Q12). La usan la línea, el foco
+ * (`scroll-padding-top`) y todo lo que se pega arriba dentro de la atención (el arco y el panel de
+ * la pieza): se pegan debajo de la línea, no detrás. Fuera de la atención no existe y vale 0.
+ */
+export const PATIENT_LINE_HEIGHT_VAR = "--patient-line-h"
+const PATIENT_LINE_HEIGHT = "2.75rem"
+
+/**
  * Mientras la atención está abierta, lo que se enfoca al bajar con Tab (o al saltar a un campo)
- * no queda debajo de la línea: la ventana reserva su alto arriba. Al salir vuelve como estaba.
+ * no queda debajo de la línea, y lo que se pega arriba lo hace debajo de ella: la ventana reserva
+ * su alto. Al salir vuelve como estaba.
  */
 export function useReservedTop(): void {
   useEffect(() => {
     const root = document.documentElement
     const before = root.style.scrollPaddingTop
-    root.style.scrollPaddingTop = "calc(var(--notice-strip-h, 0px) + 3.5rem)"
+    root.style.setProperty(PATIENT_LINE_HEIGHT_VAR, PATIENT_LINE_HEIGHT)
+    root.style.scrollPaddingTop = `calc(var(--notice-strip-h, 0px) + var(${PATIENT_LINE_HEIGHT_VAR}) + 0.75rem)`
     return () => {
       root.style.scrollPaddingTop = before
+      root.style.removeProperty(PATIENT_LINE_HEIGHT_VAR)
     }
   }, [])
 }
@@ -125,7 +136,7 @@ export function EncounterPatientLine({
   return (
     <section
       aria-label="Paciente en atención"
-      className="sticky top-[var(--notice-strip-h,0px)] z-20 -mx-4 -mb-[3.75rem] flex h-11 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur sm:mx-0 sm:rounded-xl sm:border"
+      className="sticky top-[var(--notice-strip-h,0px)] z-20 -mx-4 -mb-[3.75rem] flex h-[var(--patient-line-h,2.75rem)] items-center gap-2 border-b bg-background/95 px-4 backdrop-blur sm:mx-0 sm:rounded-xl sm:border"
     >
       <p className="flex min-w-0 shrink items-baseline gap-1 text-sm font-medium">
         <span className="truncate max-sm:hidden">{displayName}</span>

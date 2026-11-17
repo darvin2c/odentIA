@@ -475,7 +475,9 @@ function StudioBody({
         <section
           ref={mouthRef}
           aria-label="Boca dental"
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-4 self-start" : ""}`}
+          // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
+          // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -692,7 +694,8 @@ function StudioBody({
             aria-label="Registro clínico dental"
             className={
               showInlinePanel
-                ? "h-[calc(100dvh-3rem)] min-h-0 min-w-0 self-start overflow-hidden sticky top-4"
+                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, a la vista.
+                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
                 : "min-w-0 self-start rounded-sm bg-card"
             }
           >
