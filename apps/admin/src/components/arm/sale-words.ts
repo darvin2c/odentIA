@@ -13,12 +13,17 @@ import { supportDay, supportTime } from "../../lib/support-words"
 export const CLIENT_STAGES = CLIENT_STAGE_NAMES
 export type ClientStage = ClientStageName
 
+/**
+ * La etapa en la venta. Con cuenta («entro») se dice por su fase (ADR 0196): «En alta» o, ya
+ * pagando, «Activo» (`stageWords` de `client-model.ts`); nunca «Entró» ni «Con cuenta». El servidor
+ * conserva «Entró» en `CLIENT_STAGE_WORDS` para lo que lee Kairós.
+ */
 export const STAGE_WORDS: Record<ClientStage, string> = {
   contacto: "Contacto",
   presentacion_agendada: "Presentación agendada",
   presentacion_hecha: "Presentación hecha",
   propuesta: "Propuesta",
-  entro: "Entró",
+  entro: "En alta",
   no_por_ahora: "No por ahora",
   perdido: "Perdido",
 }

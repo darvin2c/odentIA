@@ -1,4 +1,4 @@
-# 0196 · La atención más liviana: lo de antes arriba, lo repetido fuera y el paciente a la vista
+# 0199 · La atención más liviana: lo de antes arriba, lo repetido fuera y el paciente a la vista
 
 Fecha: 2026-11-16 · Estado: aceptada · Revisa, de ADR 0165, que lo indicado hoy salga en «Hoy viene a…» con «Hacerla hoy»; y, de ADR 0117 (cambio del 13 nov, punto 2), que la ficha odontoestomatológica se ofrezca en cada atención
 

@@ -437,7 +437,7 @@ async function planPeriodStart(tx: Db, orgId: string, patientId: string): Promis
  * 4. la que el paciente ya tiene de antes, con respuestas (el control de ortodoncia);
  * 5. la que se empezó aquí con «Otra ficha…».
  * Una ficha sale una vez, con el primer motivo. «Otra ficha…» sigue ofreciendo todas.
- * La que el producto llena una vez por plan (odentIA: la odontoestomatológica, ADR 0196) no
+ * La que el producto llena una vez por plan (odentIA: la odontoestomatológica, ADR 0199) no
  * sale por 3 ni por 4 si el plan de ahora ya tiene una, ni en una urgencia: sale en la primera
  * atención que no es urgencia, mientras no se llene, y otra vez cuando el paciente regresa.
  * Empezada aquí, siempre.

@@ -27,6 +27,12 @@ function Inline({ nodes }: { nodes: readonly MarkdownInline[] }): ReactNode {
           <Inline nodes={node.children} />
         </em>
       )
+    if (node.kind === "strike")
+      return (
+        <s key={key}>
+          <Inline nodes={node.children} />
+        </s>
+      )
     return (
       <a
         key={key}
@@ -89,8 +95,20 @@ export interface Edit {
   selectionEnd: number
 }
 
-/** Envuelve lo seleccionado con `mark`, o lo quita si ya lo tenía; sin selección, deja el cursor en medio. */
-export function wrapSelection(value: string, start: number, end: number, mark: string): Edit {
+/**
+ * Envuelve lo seleccionado con `mark`, o lo quita si ya lo tenía; sin selección, deja el cursor en
+ * medio. Los espacios de las orillas quedan fuera de las marcas: el doble clic de Windows toma
+ * «doctora » con su espacio, y `*doctora *` no sería negrita en ninguna parte.
+ */
+export function wrapSelection(value: string, rawStart: number, rawEnd: number, mark: string): Edit {
+  let start = rawStart
+  let end = rawEnd
+  while (start < end && /\s/.test(value[start] ?? "")) start++
+  while (end > start && /\s/.test(value[end - 1] ?? "")) end--
+  if (start === end && rawStart !== rawEnd) {
+    start = rawStart
+    end = rawStart
+  }
   const before = value.slice(0, start)
   const selected = value.slice(start, end)
   const after = value.slice(end)
@@ -159,8 +177,8 @@ export function FormatTools({
           size="icon"
           variant="ghost"
           aria-label="Negrita"
-          title="Negrita: **texto**"
-          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "**"))}
+          title="Negrita: *texto*"
+          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "*"))}
         >
           <Bold aria-hidden />
         </Button>
@@ -169,8 +187,8 @@ export function FormatTools({
           size="icon"
           variant="ghost"
           aria-label="Cursiva"
-          title="Cursiva: *texto*"
-          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "*"))}
+          title="Cursiva: _texto_"
+          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "_"))}
         >
           <Italic aria-hidden />
         </Button>
@@ -212,4 +230,4 @@ export function FormatTools({
 
 /** La ayuda del campo: qué formato acepta. */
 export const FORMAT_HINT =
-  "Puedes usar **negrita**, *cursiva*, [enlaces](https://…) y listas con «- » o «1. »."
+  "Se escribe como en WhatsApp: *negrita*, _cursiva_, ~tachado~, [enlaces](https://…) y listas con «- » o «1. »."

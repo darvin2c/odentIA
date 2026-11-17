@@ -36,8 +36,22 @@ import { invitation, member, organization, session, user } from "@odentia/db/sch
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { and, asc, count, desc, eq, gte, inArray, min, ne, type SQL, sql } from "drizzle-orm"
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  min,
+  ne,
+  type SQL,
+  sql,
+} from "drizzle-orm"
 import { enteredAtSql, notDemoOrg } from "./admin-alta-sql.js"
+import { cargaDeleteAfter } from "./admin-client-files.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import type { PipelineFilter } from "./admin-sales.js"
 import { listClinicLoads, listProgressReports } from "./clinic-progress-report.js"
@@ -90,7 +104,28 @@ export interface OnboardingStep {
   /** Lo único que hace retroceder un paso alcanzado. */
   lost?: { at: Date; reason: SaasMilestoneLostReason }
   action?: OnboardingAction
+  /**
+   * Solo en «Datos recibidos» mientras falta, y solo para Administración: lo que llegó por correo
+   * o por un chat en los últimos 30 días y nadie marcó como la carga (`markClientFileCarga`).
+   */
+  candidates?: OnboardingCargaCandidate[]
 }
+
+/** Un archivo que puede ser la carga de datos: lo marca una persona, nunca el sistema. */
+export interface OnboardingCargaCandidate {
+  fileId: string
+  filename: string
+  receivedAt: Date
+  /** Por dónde llegó: el correo o el canal del chat. */
+  via: "correo" | "whatsapp" | "instagram" | "messenger"
+  /** El día de Lima en que se borraría si se marca ahora (el de `cargaDeleteAfter`). */
+  cargaDeleteAfter: string
+  /** Marcarlo ahora lo borra en el acto. */
+  cargaDueNow: boolean
+}
+
+/** Desde cuántos días atrás se ofrece lo que llegó como posible carga. */
+export const CARGA_CANDIDATE_DAYS = 30
 
 /** Lo que se calcula sin quien lee: lo usan la ficha, la pasada de Kairós y el Embudo. */
 export interface OnboardingComputed {
@@ -927,6 +962,12 @@ export async function onboardingSteps(
   if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
   const client = await clientOf(tx, clientId)
   const computed = await computeOnboarding(tx, client, now, options)
+  const received = computed.steps.find((item) => item.key === "archivos")
+  // Lo que llegó y puede ser la carga: solo Administración la marca (y solo ella ve esos archivos).
+  const candidates =
+    actor.role === "admin" && received?.state === "falta"
+      ? await cargaCandidates(tx, clientId, now)
+      : []
   const steps = computed.steps.map((item): OnboardingStep => {
     const { action, ...rest } = item
     const canMarkNotApplicable =
@@ -939,11 +980,59 @@ export async function onboardingSteps(
       canMarkNotApplicable && item.state === "falta" && isNaStep(item.key)
         ? { suggestedReason: NOT_APPLICABLE_SUGGESTED[item.key] }
         : {}
+    const offered = item.key === "archivos" && candidates.length ? { candidates } : {}
     return visible
-      ? { ...rest, canMarkNotApplicable, ...suggested, action: visible }
-      : { ...rest, canMarkNotApplicable, ...suggested }
+      ? { ...rest, canMarkNotApplicable, ...suggested, ...offered, action: visible }
+      : { ...rest, canMarkNotApplicable, ...suggested, ...offered }
   })
   return { ...computed, steps }
+}
+
+/**
+ * Lo que mandó la clínica por correo o por un chat en los últimos 30 días y todavía no se marcó
+ * como la carga, lo más nuevo primero: de ahí sale «Es la carga de datos» en «Datos recibidos».
+ * Solo lo ofrece; lo marca una persona con `markClientFileCarga`.
+ */
+async function cargaCandidates(
+  tx: Db,
+  clientId: string,
+  now: Date,
+): Promise<OnboardingCargaCandidate[]> {
+  const since = new Date(now.getTime() - CARGA_CANDIDATE_DAYS * DAY_MS)
+  const rows = await tx
+    .select({
+      id: saasClientFile.id,
+      filename: saasClientFile.filename,
+      receivedAt: saasClientFile.receivedAt,
+      source: saasClientFile.source,
+    })
+    .from(saasClientFile)
+    .where(
+      and(
+        eq(saasClientFile.clientId, clientId),
+        eq(saasClientFile.kind, "correo"),
+        isNull(saasClientFile.deletedAt),
+        gte(saasClientFile.receivedAt, since),
+      ),
+    )
+    .orderBy(desc(saasClientFile.receivedAt), desc(saasClientFile.id))
+    .limit(10)
+  const today = limaDate(now)
+  return rows.map((row) => {
+    const deleteOn = cargaDeleteAfter(row.receivedAt, now)
+    const via =
+      row.source === "whatsapp" || row.source === "instagram" || row.source === "messenger"
+        ? row.source
+        : "correo"
+    return {
+      fileId: row.id,
+      filename: row.filename,
+      receivedAt: row.receivedAt,
+      via,
+      cargaDeleteAfter: deleteOn,
+      cargaDueNow: deleteOn <= today,
+    }
+  })
 }
 
 async function clientOf(tx: Db, clientId: string) {

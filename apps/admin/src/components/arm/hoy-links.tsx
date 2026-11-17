@@ -72,6 +72,8 @@ export function OpenClientButton({
  * del menú van debajo de esa clave) e Inicio de antes.
  */
 export function invalidateArm(queryClient: QueryClient, clientId?: string | null): void {
+  // Responder, ligar o marcar algo cambia lo que espera en la Bandeja.
+  void queryClient.invalidateQueries({ queryKey: ["admin", "inbox"] })
   if (clientId) {
     invalidateClient(queryClient, clientId)
     return

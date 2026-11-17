@@ -18,7 +18,8 @@ import { z } from "zod"
 import { useIsAdmin } from "../../lib/session"
 import { openChatOutcome, openChatWith, useChatsConfig } from "./chat-api"
 import { ChatDrawer } from "./chat-drawer"
-import { FORMAT_HINT, FormatTools } from "./formatted-body"
+import { FORMAT_HINT } from "./formatted-body"
+import { type ChannelRules, ReplyEditor } from "./reply-editor"
 import {
   resolveOutreach,
   type SaleContact,
@@ -28,6 +29,28 @@ import {
   useInvalidateClient,
 } from "./sale-api"
 import { writesThroughChat } from "./whatsapp-write"
+
+/** Lo que acepta cada canal al escribir por primera vez (el servidor lo vuelve a revisar al enviar). */
+const WRITE_RULES: Record<"correo" | "whatsapp", ChannelRules> = {
+  correo: {
+    channel: "correo",
+    maxChars: 5000,
+    maxBytes: null,
+    maxFiles: 5,
+    maxTotalBytes: 10 * 1024 * 1024,
+    files: [],
+    formatting: "markdown",
+  },
+  whatsapp: {
+    channel: "whatsapp",
+    maxChars: 4096,
+    maxBytes: null,
+    maxFiles: 0,
+    maxTotalBytes: null,
+    files: [],
+    formatting: "whatsapp",
+  },
+}
 
 /**
  * «Escribir» a un cliente (lienzo de la ficha). Correo: sale con el nombre y
@@ -366,7 +389,7 @@ function WriteForm({
         <form.AppField name="body">
           {(field) => (
             <div className="flex flex-col gap-1.5">
-              <field.TextareaField
+              <field.Control
                 id="escribir-texto"
                 label="Mensaje"
                 description={
@@ -376,16 +399,19 @@ function WriteForm({
                       ? "Se abre su conversación con este texto puesto: lo revisas y sale desde el número de Sallca."
                       : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
                 }
-                rows={7}
-                maxLength={5000}
-              />
-              {values.channel === "correo" ? (
-                <FormatTools
-                  textareaId="escribir-texto"
-                  value={field.state.value}
-                  onChange={field.handleChange}
-                />
-              ) : null}
+              >
+                {(control) => (
+                  <ReplyEditor
+                    control={control.props}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    channel={values.channel === "correo" ? "correo" : "whatsapp"}
+                    rules={values.channel === "correo" ? WRITE_RULES.correo : WRITE_RULES.whatsapp}
+                    rows={7}
+                    improve={isAdmin ? {} : null}
+                  />
+                )}
+              </field.Control>
               <div>
                 <SpeechInput
                   lang="es-PE"

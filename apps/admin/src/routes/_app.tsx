@@ -20,6 +20,7 @@ import {
   Columns3,
   CreditCard,
   Home,
+  Inbox,
   Presentation,
   ShieldCheck,
   UserRound,
@@ -28,6 +29,7 @@ import {
 import type { ComponentType, ReactNode } from "react"
 import { z } from "zod"
 import { AdminBrand, AdminMark, ProductLogos } from "../components/admin-brand"
+import { useInboxCount } from "../components/arm/inbox-api"
 import { api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
@@ -92,6 +94,8 @@ function AdminLayout() {
   })
   // Lo que Kairós dejó y espera un sí, de lo que esta persona puede ver (Soporte no cuenta lo de
   // Administración). Decidir algo invalida `["admin", "kairos"]` y el número se pone al día.
+  // Lo que te toca responder en la Bandeja (solo Administración: Soporte no la tiene).
+  const inbox = useInboxCount({ enabled: adminSession.actor.role === "admin" })
   const kairos = useQuery({
     queryKey: ["admin", "kairos", "count"],
     queryFn: async () => z.object({ waiting: z.number().int().nonnegative() }).parse(await api<unknown>("/api/admin/kairos/count")),
@@ -101,6 +105,7 @@ function AdminLayout() {
     <AdminFrame
       session={{ role: adminSession.actor.role, user: adminSession.user }}
       kairos={kairos.data?.waiting}
+      inbox={inbox.data?.teToca}
       support={queues.data?.support}
       complaints={complaints.data?.pending}
     >
@@ -112,12 +117,14 @@ function AdminLayout() {
 function AdminFrame({
   session,
   kairos,
+  inbox,
   support,
   complaints,
   children,
 }: {
   session: SeenSession
   kairos?: number
+  inbox?: number
   support?: number
   complaints?: number
   children: ReactNode
@@ -129,6 +136,10 @@ function AdminFrame({
   const admin = session.role === "admin"
   const items: AppShellNavEntry[] = [
     { label: "Hoy", to: "/", icon: Home },
+    // La Bandeja (ADR 0196): lo que nos escriben desde fuera de la app; solo Administración.
+    ...(admin
+      ? [{ label: "Bandeja", to: "/inbox", icon: Inbox, badge: inbox || undefined, badgeLabel: "te toca responder" }]
+      : []),
     { label: "Clientes", to: "/clients", icon: Building2 },
     { label: "Embudo", to: "/pipeline", icon: Columns3 },
     { label: "Kairós", to: "/kairos", icon: Bot, badge: kairos || undefined, badgeLabel: "esperan tu sí" },

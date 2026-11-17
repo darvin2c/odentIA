@@ -1,13 +1,23 @@
 /**
- * La ficha del cliente (tablero 3 del lienzo del ARM, ADR 0185): una sola
- * ficha antes y después de tener cuenta. Arriba, quién es y su próximo paso;
- * «Anotar», «Escribir» y «Nueva tarea» a la mano, y lo que decide
+ * La ficha del cliente (tablero 3 del lienzo del ARM, ADR 0185 y 0196): una sola
+ * ficha antes y después de tener cuenta. Arriba, quién es, su fase y su próximo
+ * paso; «Anotar», «Escribir» y «Nueva tarea» a la mano, y lo que decide
  * Administración (Invitar, Dar de alta, No por ahora, Perdido). Las pestañas
- * viven en la dirección (`?tab=`): Resumen, Historial, Contactos, Venta y
- * Documentos siempre; Alta, Plan y pagos (solo Administración), Uso y Soporte
- * cuando tiene cuenta. Cada pestaña pide sus propios datos.
+ * van por su fase (`clientTabsFor`) y viven en la dirección (`?tab=`): Resumen,
+ * Conversaciones, Historial, la de su fase, Plan y pagos, Soporte con casos
+ * abiertos y Documentos; lo demás que aplica, en «Más». `?tab=contactos` abre el
+ * Resumen con sus personas al lado. Cada pestaña pide sus propios datos.
  */
-import { Tabs, TabsTrigger, toast } from "@odentia/ui"
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Tabs,
+  TabsTrigger,
+  toast,
+} from "@odentia/ui"
 import {
   EmptyState,
   ErrorState,
@@ -19,11 +29,12 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { ListPlus, MessageSquareText, NotebookPen } from "lucide-react"
+import { ChevronDown, ListPlus, MessageSquareText, NotebookPen } from "lucide-react"
 import * as React from "react"
 import { AnnotateDrawer } from "../../components/arm/annotate-drawer"
 import { ClientBillingTab } from "../../components/arm/client-billing-tab"
-import { ClientContactsTab } from "../../components/arm/client-contacts-tab"
+import { ClientPeopleDrawer } from "../../components/arm/client-contacts-tab"
+import { ClientConversationsTab } from "../../components/arm/client-conversations-tab"
 import { ClientFilesTab } from "../../components/arm/client-files-tab"
 import { ClientHeaderFacts, ClientNextStep } from "../../components/arm/client-header"
 import { ClientHistoryTab } from "../../components/arm/client-history-tab"
@@ -33,8 +44,17 @@ import { useClientDetail } from "../../components/arm/client-queries"
 import { ClientSaleTab } from "../../components/arm/client-sale-tab"
 import { ClientSummaryTab } from "../../components/arm/client-summary-tab"
 import { ClientSupportTab } from "../../components/arm/client-support-tab"
-import { CLIENT_TAB_NAMES, clientTabsFor, openClientTab } from "../../components/arm/client-tabs"
+import {
+  CLIENT_TAB_NAMES,
+  clientTabsFor,
+  openClientTab,
+  shownClientTabs,
+} from "../../components/arm/client-tabs"
 import { ClientUsageTab } from "../../components/arm/client-usage-tab"
+import {
+  type ConversationTarget,
+  ConversationDrawer,
+} from "../../components/arm/conversation-drawer"
 import { DecideDrawer, type SaleDecision } from "../../components/arm/decide-drawer"
 import { PresentationDrawer } from "../../components/arm/presentation-drawer"
 import { TaskDrawer } from "../../components/arm/task-drawer"
@@ -67,6 +87,7 @@ type Surface =
   | { kind: "escribir" }
   | { kind: "presentacion"; taskId: string }
   | { kind: "decidir"; decision: SaleDecision }
+  | { kind: "conversacion"; target: ConversationTarget }
 
 function ClientPage() {
   const { clientId } = Route.useParams()
@@ -147,9 +168,16 @@ function ClientPage() {
     )
 
   const client = detail.data
-  const rules = { hasAccount: client.organization !== null, isAdmin }
-  const tabs = clientTabsFor(rules)
+  const rules = {
+    phase: client.phase,
+    hasAccount: client.organization !== null,
+    isAdmin,
+    openSupportCases: client.openSupportCases,
+  }
   const tab = openClientTab(search.tab, rules)
+  const { tabs, more } = shownClientTabs(clientTabsFor(rules), tab)
+  // Sus personas se abren al lado del Resumen: «Ver todas» y los enlaces de antes a Contactos.
+  const peopleOpen = search.tab === "contactos"
   const goTab = (next: ClientTab) =>
     void navigate({
       search: (prev) => ({ ...prev, tab: next === "resumen" ? undefined : next }),
@@ -204,28 +232,57 @@ function ClientPage() {
           onTask: () => setSurface({ kind: "tarea" }),
           onDecide: (decision) => setSurface({ kind: "decidir", decision }),
           onReopen: () => reopen.mutate(),
+          onConversation: (target) => setSurface({ kind: "conversacion", target }),
+          onAlta: () => goTab("alta"),
           donePending: done.isPending,
           reopenPending: reopen.isPending,
         }}
       />
 
-      <Tabs
-        value={tab}
-        onValueChange={(next) => goTab(next as ClientTab)}
-        className="min-w-0 max-w-full"
-      >
-        <ScrollingTabsList aria-label="Secciones del cliente">
-          {tabs.map((item) => (
-            <TabsTrigger key={item} value={item} className="min-h-11 shrink-0 sm:min-h-9">
-              {CLIENT_TAB_NAMES[item]}
-            </TabsTrigger>
-          ))}
-        </ScrollingTabsList>
-      </Tabs>
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <Tabs
+          value={tab}
+          onValueChange={(next) => goTab(next as ClientTab)}
+          className="min-w-0 flex-1"
+        >
+          <ScrollingTabsList aria-label="Secciones del cliente">
+            {tabs.map((item) => (
+              <TabsTrigger key={item} value={item} className="min-h-11 shrink-0 sm:min-h-9">
+                {CLIENT_TAB_NAMES[item]}
+              </TabsTrigger>
+            ))}
+          </ScrollingTabsList>
+        </Tabs>
+        {more.length ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 shrink-0 sm:min-h-9"
+                  aria-label="Más secciones del cliente"
+                >
+                  Más
+                  <ChevronDown aria-hidden />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              {more.map((item) => (
+                <DropdownMenuItem key={item} onClick={() => goTab(item)}>
+                  {CLIENT_TAB_NAMES[item]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
 
       {tab === "resumen" ? <ClientSummaryTab {...tabProps} /> : null}
+      {tab === "conversaciones" ? <ClientConversationsTab clientId={client.id} /> : null}
       {tab === "historial" ? <ClientHistoryTab {...tabProps} /> : null}
-      {tab === "contactos" ? <ClientContactsTab {...tabProps} /> : null}
       {tab === "venta" ? <ClientSaleTab {...tabProps} /> : null}
       {tab === "alta" ? <ClientOnboardingTab {...tabProps} /> : null}
       {tab === "pagos" ? <ClientBillingTab {...tabProps} /> : null}
@@ -233,6 +290,13 @@ function ClientPage() {
       {tab === "soporte" ? <ClientSupportTab {...tabProps} /> : null}
       {tab === "documentos" ? <ClientFilesTab {...tabProps} /> : null}
 
+      <ClientPeopleDrawer
+        clientId={client.id}
+        organizationId={tabProps.organizationId}
+        isAdmin={isAdmin}
+        open={peopleOpen}
+        onClose={() => goTab("resumen")}
+      />
       <AnnotateDrawer clientId={client.id} open={surface?.kind === "anotar"} onClose={close} />
       <TaskDrawer
         clientId={client.id}
@@ -250,6 +314,11 @@ function ClientPage() {
       {surface?.kind === "decidir" ? (
         <DecideDrawer clientId={client.id} open decision={surface.decision} onClose={close} />
       ) : null}
+      <ConversationDrawer
+        target={surface?.kind === "conversacion" ? surface.target : null}
+        open={surface?.kind === "conversacion"}
+        onClose={close}
+      />
     </PageShell>
   )
 }

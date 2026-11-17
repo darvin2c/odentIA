@@ -3,10 +3,12 @@ import {
   kairosAiUsage,
   kairosItem,
   kairosWeekly,
+  saasChat,
   saasClient,
   saasClientContact,
   saasClientFile,
   saasInboundEmail,
+  saasOutreach,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
@@ -15,7 +17,7 @@ import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { kairosUseRecorder, runKairosTick } from "./kairos.js"
+import { clientSummaryFacts, kairosUseRecorder, runKairosTick } from "./kairos.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -58,6 +60,10 @@ function countingWriter(overrides: Partial<KairosWriter> = {}) {
     weeklySummary: async (input) => {
       calls.push("semana")
       return (overrides.weeklySummary ?? fakeKairosWriter.weeklySummary)(input)
+    },
+    improveText: async (input) => {
+      calls.push("mejorar")
+      return fakeKairosWriter.improveText(input)
     },
   }
   return { writer, calls }
@@ -244,6 +250,144 @@ describe("runKairosTick", () => {
     const [client] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, clientId))
     expect(client?.summaryAt?.toISOString()).toBe(monday.toISOString())
   })
+})
+
+it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a mano sigue como nota", async () => {
+  const [client] = await ownerDb
+    .insert(saasClient)
+    .values({ name: "Clínica Anuncio (ficticia)", product: "dental", origin: "web" })
+    .returning()
+  const id = client?.id ?? ""
+  const [rosa] = await ownerDb
+    .insert(saasClientContact)
+    .values({ clientId: id, name: "Rosa Anuncio", email: "rosa@anuncio.test", isPrimary: true })
+    .returning()
+  const sentAt = new Date("2026-11-12T15:00:00Z")
+  // Su WhatsApp: el chat de una clínica con app no es solo de Administración (`admin_only` falso).
+  const [chat] = await ownerDb
+    .insert(saasChat)
+    .values({ channel: "whatsapp", address: "+51987650001", clientId: id, contactId: rosa?.id })
+    .returning()
+  // El anuncio que salió por correo y su actividad, como la deja `outreachWentOut`.
+  await ownerDb.insert(saasOutreach).values({
+    clientId: id,
+    contactId: rosa?.id ?? null,
+    channel: "correo",
+    toAddress: "rosa@anuncio.test",
+    subject: "Meta nos verificó",
+    body: "Ya puedes conectar tu WhatsApp desde la app.",
+    status: "enviado",
+    sentAt,
+  })
+  // Lo que le respondimos a un correo suyo: su asunto es el «Re: » del de ella.
+  const [asked] = await ownerDb
+    .insert(saasInboundEmail)
+    .values({
+      clientId: id,
+      mailbox: "hola",
+      product: "dental",
+      messageId: "<pregunta.anuncio@anuncio.test>",
+      fromAddress: "rosa@anuncio.test",
+      toAddress: "hola@odentia32.com",
+      subject: "Mi clave de Meta es 4471",
+      receivedAt: new Date("2026-11-15T20:00:00Z"),
+    })
+    .returning({ id: saasInboundEmail.id })
+  const repliedAt = new Date("2026-11-15T21:00:00Z")
+  await ownerDb.insert(saasOutreach).values({
+    clientId: id,
+    contactId: rosa?.id ?? null,
+    channel: "correo",
+    toAddress: "rosa@anuncio.test",
+    subject: "Re: Mi clave de Meta es 4471",
+    body: "No nos mandes tu clave.",
+    inReplyToEmailId: asked?.id ?? null,
+    status: "enviado",
+    sentAt: repliedAt,
+  })
+  await ownerDb.insert(saasFollowUp).values([
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "salio",
+      body: "Meta nos verificó\n\nYa puedes conectar tu WhatsApp desde la app.",
+      contactId: rosa?.id ?? null,
+      happenedAt: sentAt,
+    },
+    // Lo que escribió la clínica: sin su texto, con quién lo escribió.
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "entro",
+      body: "Escribió a hola@: ¿Y ahora qué hago?",
+      contactId: rosa?.id ?? null,
+      happenedAt: new Date("2026-11-13T15:00:00Z"),
+    },
+    // Un WhatsApp anotado a mano (sin envío nuestro con su hora): es una nota del equipo.
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "salio",
+      body: "Le escribí para coordinar la demo",
+      outcome: "Quedó en avisar",
+      happenedAt: new Date("2026-11-14T15:00:00Z"),
+    },
+    // Lo que escribió por su WhatsApp y lo que le respondimos ahí: Soporte lee el resumen y no
+    // ve las conversaciones (ADR 0196), así que de ninguno de los dos llega el texto.
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "entro",
+      body: "Mi clave de Meta es 4471-ROSA, ¿la conecto así?",
+      contactId: rosa?.id ?? null,
+      chatId: chat?.id ?? null,
+      happenedAt: new Date("2026-11-15T15:00:00Z"),
+    },
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "salio",
+      body: "No nos mandes tu clave por aquí.",
+      chatId: chat?.id ?? null,
+      happenedAt: new Date("2026-11-15T15:05:00Z"),
+    },
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "salio",
+      body: "Re: Mi clave de Meta es 4471\n\nNo nos mandes tu clave.",
+      contactId: rosa?.id ?? null,
+      happenedAt: repliedAt,
+    },
+  ])
+  const facts = await clientSummaryFacts(ownerDb, {
+    id,
+    name: "Clínica Anuncio (ficticia)",
+    product: "dental",
+    city: null,
+    professionals: null,
+    current_tool: null,
+    origin: "web",
+    organization_id: null,
+    stage: "contacto",
+    paid: false,
+  })
+  const texts = facts.map((fact) => fact.text)
+  expect(texts).toContain(
+    "Le escribimos por correo el 12 de noviembre de 2026: «Meta nos verificó»",
+  )
+  expect(texts).toContain("Rosa Anuncio nos escribió por correo el 13 de noviembre de 2026")
+  expect(texts).toContain(
+    "WhatsApp del 14 de noviembre de 2026: Le escribí para coordinar la demo · quedó en: Quedó en avisar",
+  )
+  expect(texts).toContain("Rosa Anuncio nos escribió por WhatsApp el 15 de noviembre de 2026")
+  expect(texts).toContain("Le escribimos por WhatsApp el 15 de noviembre de 2026")
+  // Lo que le respondimos a un correo suyo, sin el asunto (el «Re: » de lo que ella escribió).
+  expect(texts).toContain("Le respondimos por correo el 15 de noviembre de 2026")
+  // El texto del anuncio nunca llega como hecho de la clínica, ni el de una conversación.
+  expect(JSON.stringify(facts)).not.toContain("Ya puedes conectar")
+  expect(JSON.stringify(facts)).not.toContain("4471")
+  expect(JSON.stringify(facts)).not.toContain("No nos mandes")
 })
 
 it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () => {

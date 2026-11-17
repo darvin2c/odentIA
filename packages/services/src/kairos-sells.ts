@@ -263,7 +263,33 @@ export async function claimKairosTurn(
   return row?.id ?? null
 }
 
-/** Cómo terminó el turno. Si lo pasó o falló, la conversación queda pausada sin persona. */
+/** Cuántas cosas dice «En qué se basó» como mucho, y lo más largo de cada una (`kairos_chat_turn.basis`). */
+export const KAIROS_BASIS_MAX = 8
+export const KAIROS_BASIS_CHARS = 200
+
+/**
+ * «En qué se basó» como se guarda: cada cosa una vez, sin vacíos, corta a 200
+ * caracteres y como mucho ocho (la base no acepta más).
+ */
+export function kairosBasisOf(basis: readonly string[] | null | undefined): string[] {
+  const out: string[] = []
+  for (const raw of basis ?? []) {
+    const clean = raw.replace(/\s+/g, " ").trim()
+    if (!clean) continue
+    const text =
+      clean.length > KAIROS_BASIS_CHARS ? `${clean.slice(0, KAIROS_BASIS_CHARS - 1)}…` : clean
+    if (!out.includes(text)) out.push(text)
+    if (out.length === KAIROS_BASIS_MAX) break
+  }
+  return out
+}
+
+/**
+ * Cómo terminó el turno. Si lo pasó o falló, la conversación queda pausada sin
+ * persona. `basis` es en qué se basó lo que respondió (lo que consultó: la guía
+ * de la Ayuda, las horas libres, los precios de la web), para mostrarlo junto a
+ * la respuesta en la Bandeja (ADR 0196).
+ */
 export async function finishKairosTurn(
   tx: Db,
   turnId: string,
@@ -271,6 +297,7 @@ export async function finishKairosTurn(
     outcome: Exclude<KairosTurnOutcome, "en_curso">
     why?: string | null
     outreachId?: string | null
+    basis?: readonly string[] | null
   },
   now = new Date(),
 ): Promise<void> {
@@ -280,6 +307,7 @@ export async function finishKairosTurn(
       outcome: result.outcome,
       why: result.why ? result.why.slice(0, 500) : null,
       outreachId: result.outreachId ?? null,
+      basis: kairosBasisOf(result.basis),
       updatedAt: now,
     })
     .where(eq(kairosChatTurn.id, turnId))

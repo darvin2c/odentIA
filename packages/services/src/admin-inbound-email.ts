@@ -25,6 +25,9 @@
  * buzón al que llegó. Los adjuntos de un correo sin cliente se guardan hasta
  * que se liga y se marca. Nadie ni nada abre los adjuntos ni los manda al
  * modelo.
+ *
+ * Leerlos, ligarlos y responderlos es de Administración, también lo que llegó a
+ * soporte@ (ADR 0196): Soporte trabaja en la Ayuda de la app y recibe 403.
  */
 
 import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
@@ -40,7 +43,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { z } from "zod"
 import {
   cargaDeleteAfter,
@@ -48,9 +51,10 @@ import {
   registerClientFile,
   type StoredInboundAttachment,
 } from "./admin-client-files.js"
-import { clientByEmail, inboundMailboxWords, outreachAdminOnlySql } from "./admin-clients.js"
+import { clientByEmail, inboundMailboxWords } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   replySignature,
   replySubject,
@@ -191,28 +195,34 @@ export async function inboundPersonOf(
 }
 
 /**
- * El cliente de una respuesta a un envío nuestro: el del envío más reciente
- * del hilo que salió a ese mismo correo. Solo con el remitente verificado.
+ * El cliente de un correo por su hilo, con la regla de la Bandeja: solo si el correo entró en el
+ * hilo de lo nuestro (`emailThreadKeySql`: remitente verificado que ya está en el hilo), el del
+ * envío nuestro más reciente de ese mismo hilo que el correo nombra en sus cabeceras. Un correo
+ * que no entró (quien copió las cabeceras, un From sin verificar, quien aún no recibió respuesta)
+ * es su propia conversación y solo se liga por su correo exacto (`matchInboundClient`).
  */
 async function clientByThread(
   tx: Db,
-  from: string,
+  emailId: string,
   thread: readonly string[],
 ): Promise<string | null> {
   if (thread.length === 0) return null
-  const [row] = await tx
-    .select({ clientId: saasOutreach.clientId })
-    .from(saasOutreach)
-    .where(
-      and(
-        inArray(saasOutreach.messageId, [...thread]),
-        eq(saasOutreach.toAddress, from),
-        isNotNull(saasOutreach.clientId),
-      ),
-    )
-    .orderBy(desc(saasOutreach.createdAt))
-    .limit(1)
-  return row?.clientId ?? null
+  const [row] = [
+    ...(await tx.execute<{ client_id: string | null }>(
+      sql`select o.client_id::text as client_id
+        from admin.saas_inbound_email e, admin.saas_outreach o
+        where e.id = ${emailId}::uuid and o.channel = 'correo' and o.client_id is not null
+          and o.message_id in (${sql.join(
+            thread.map((id) => sql`${id}`),
+            sql`, `,
+          )})
+          and ${emailThreadKeySql("e")} is distinct from nullif(btrim(e.message_id), '')
+          and ${outreachThreadKeySql("o")} = ${emailThreadKeySql("e")}
+        order by o.created_at desc, o.id desc
+        limit 1`,
+    )),
+  ]
+  return row?.client_id ?? null
 }
 
 /** Recorta y quita lo que no se imprime al final; vacío es nulo. */
@@ -386,8 +396,9 @@ export async function ingestInboundEmail(
       copyTo: person?.copyTo ?? null,
     }
   }
-  // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo.
-  const threadClient = input.senderVerified ? await clientByThread(tx, input.from, thread) : null
+  // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo, si el
+  // correo entró en él (la regla de la Bandeja).
+  const threadClient = input.senderVerified ? await clientByThread(tx, created.id, thread) : null
   const match: { clientId: string; matchedBy: SaasInboundMatch } | null = threadClient
     ? { clientId: threadClient, matchedBy: "hilo" }
     : input.senderVerified
@@ -445,19 +456,28 @@ export async function ingestInboundEmail(
   }
 }
 
+/** Los correos son de Administración (ADR 0196): Soporte, 403. */
+function requireAdmin(actor: AdminActor | null): AdminActor {
+  if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
+  if (actor.role !== "admin")
+    throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración puede hacer esto")
+  return actor
+}
+
 /**
- * Una persona dice de qué cliente es un correo que quedó sin cliente (o lo
- * aprueba desde lo que propuso Kairós). Sus adjuntos pasan a ser documentos
- * del cliente y queda la actividad. Uno ya asignado no cambia de cliente.
+ * Una persona de Administración dice de qué cliente es un correo que quedó sin
+ * cliente (o lo aprueba desde lo que propuso Kairós). Sus adjuntos pasan a ser
+ * documentos del cliente y queda la actividad. Uno ya asignado no cambia de
+ * cliente.
  */
 export async function assignInboundEmail(
   tx: Db,
-  actor: AdminActor | null,
+  staff: AdminActor | null,
   emailId: string,
   clientId: string,
   now = new Date(),
 ): Promise<{ id: string; clientId: string; fileIds: string[] }> {
-  if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
+  const actor = requireAdmin(staff)
   if (!/^[0-9a-f-]{36}$/i.test(emailId)) throw notFound("Correo")
   const [email] = await tx
     .select()
@@ -465,8 +485,7 @@ export async function assignInboundEmail(
     .where(eq(saasInboundEmail.id, emailId))
     .for("update")
     .limit(1)
-  // Lo que no llegó a soporte@ es comercial: para Soporte no existe (como al leerlo).
-  if (!email || (actor.role !== "admin" && email.mailbox !== "soporte")) throw notFound("Correo")
+  if (!email) throw notFound("Correo")
   if (email.clientId === clientId) return { id: email.id, clientId, fileIds: [] }
   if (email.clientId) throw new ServiceError("CONFLICT", 409, "Ese correo ya es de otro cliente")
   const [client] = await tx
@@ -478,10 +497,9 @@ export async function assignInboundEmail(
     throw new ServiceError("VALIDATION", 400, "Cliente no encontrado", {
       clientId: "Cliente no encontrado",
     })
-  // Soporte asigna el correo, pero los adjuntos son de Administración: los registra el sistema.
   const attached = await attachToClient(
     tx,
-    actor.role === "admin" ? actor : null,
+    actor,
     clientId,
     email.id,
     email.attachments as StoredInboundAttachment[],
@@ -551,7 +569,7 @@ export interface InboundEmailDetail {
   /** A quién del equipo le escribieron, si fue a su dirección. */
   staff: { userId: string; name: string } | null
   attachments: number
-  /** Si quien mira puede responderlo: Soporte, solo lo de soporte@. */
+  /** Si quien mira puede responderlo: Administración, siempre (solo ella lo lee). */
   canReply: boolean
   /**
    * Quién firmaría la respuesta de quien mira («Desde»), con la misma regla
@@ -563,11 +581,7 @@ export interface InboundEmailDetail {
   /** El asunto con que saldría la respuesta («Re: …»). */
   replySubject: string
   replies: InboundEmailReply[]
-  /**
-   * Sus adjuntos como documentos del cliente, uno por uno. Solo para
-   * Administración (Soporte recibe `[]`: son solo de Administración y su
-   * nombre puede traer datos de pacientes). Sin cliente, `[]`.
-   */
+  /** Sus adjuntos como documentos del cliente, uno por uno. Sin cliente, `[]`. */
   files: InboundEmailFile[]
 }
 
@@ -588,16 +602,35 @@ export interface InboundEmailFile {
 }
 
 /**
- * Un correo que llegó, para leerlo y responderlo, con sus respuestas. Soporte
- * solo ve lo que llegó a soporte@ (lo comercial puede hablar de precios): lo
- * demás no existe para él (404).
+ * Lo que diría «¿Es la carga de datos?» de un adjunto ya guardado: el día de Lima en que se
+ * borraría si se marca ahora y si marcarlo lo borra en el acto (llegó hace 30 días o más). Nulo y
+ * falso si ya es la carga o si se borró. La misma regla para el correo y su hilo.
+ */
+export function inboundFileCarga(
+  file: { kind: string; receivedAt: Date; deletedAt: Date | null },
+  now: Date,
+): { cargaDeleteAfter: string | null; cargaDueNow: boolean } {
+  const ifMarked =
+    file.kind === "archivo_clinica" || file.deletedAt
+      ? null
+      : cargaDeleteAfter(file.receivedAt, now)
+  return {
+    cargaDeleteAfter: ifMarked,
+    cargaDueNow: ifMarked !== null && ifMarked <= limaDate(now),
+  }
+}
+
+/**
+ * Un correo que llegó, para leerlo y responderlo, con sus respuestas. Solo
+ * Administración (ADR 0196); el hilo entero lo arma `getEmailThread`.
  */
 export async function getInboundEmail(
   tx: Db,
-  actor: AdminActor,
+  staff: AdminActor,
   emailId: string,
   now = new Date(),
 ): Promise<InboundEmailDetail> {
+  const actor = requireAdmin(staff)
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(emailId))
     throw notFound("Correo")
   const [email] = await tx
@@ -610,34 +643,21 @@ export async function getInboundEmail(
     .from(saasInboundEmail)
     .where(eq(saasInboundEmail.id, emailId))
     .limit(1)
-  if (!email || (actor.role !== "admin" && email.row.mailbox !== "soporte"))
-    throw notFound("Correo")
+  if (!email) throw notFound("Correo")
   const { row } = email
-  // Soporte no ve las respuestas solo de Administración (con propuesta o de un ítem de Kairós suyo).
   const replies = await tx
     .select()
     .from(saasOutreach)
-    .where(
-      and(
-        eq(saasOutreach.inReplyToEmailId, row.id),
-        actor.role === "admin" ? undefined : sql`not ${outreachAdminOnlySql(`"saas_outreach"`)}`,
-      ),
-    )
+    .where(eq(saasOutreach.inReplyToEmailId, row.id))
     .orderBy(desc(saasOutreach.createdAt))
   const replyFileIds = [...new Set(replies.flatMap((reply) => reply.fileIds))]
   const replyFileRows = replyFileIds.length
     ? await tx
         .select({ id: saasClientFile.id, filename: saasClientFile.filename })
         .from(saasClientFile)
-        .where(
-          and(
-            inArray(saasClientFile.id, replyFileIds),
-            actor.role === "admin" ? undefined : eq(saasClientFile.adminOnly, false),
-          ),
-        )
+        .where(inArray(saasClientFile.id, replyFileIds))
     : []
   const fileName = new Map(replyFileRows.map((file) => [file.id, file.filename]))
-  const canReply = actor.role === "admin" || row.mailbox === "soporte"
   // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
   const [client] = row.clientId
     ? await tx
@@ -649,37 +669,30 @@ export async function getInboundEmail(
   const product = [client?.product, row.product].find(
     (value): value is (typeof CLINICAL_PRODUCTS)[number] => !!value && isClinicalProduct(value),
   )
-  const sender =
-    canReply && product
-      ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
-      : null
-  const today = limaDate(now)
-  const files: InboundEmailFile[] =
-    actor.role === "admin"
-      ? (
-          await tx
-            .select()
-            .from(saasClientFile)
-            .where(eq(saasClientFile.inboundEmailId, row.id))
-            .orderBy(asc(saasClientFile.createdAt), asc(saasClientFile.id))
-        )
-          .filter((file) => file.kind === "correo" || file.kind === "archivo_clinica")
-          .map((file): InboundEmailFile => {
-            const carga = file.kind === "archivo_clinica"
-            const ifMarked = carga ? null : cargaDeleteAfter(file.receivedAt, now)
-            return {
-              fileId: file.id,
-              filename: file.filename,
-              contentType: file.contentType,
-              size: file.sizeBytes,
-              kind: carga ? "archivo_clinica" : "correo",
-              deleteAfter: carga ? file.deleteAfter : null,
-              deleted: file.deletedAt !== null,
-              cargaDeleteAfter: file.deletedAt ? null : ifMarked,
-              cargaDueNow: !file.deletedAt && ifMarked !== null && ifMarked <= today,
-            }
-          })
-      : []
+  const sender = product
+    ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
+    : null
+  const files: InboundEmailFile[] = (
+    await tx
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.inboundEmailId, row.id))
+      .orderBy(asc(saasClientFile.createdAt), asc(saasClientFile.id))
+  )
+    .filter((file) => file.kind === "correo" || file.kind === "archivo_clinica")
+    .map((file): InboundEmailFile => {
+      const carga = file.kind === "archivo_clinica"
+      return {
+        fileId: file.id,
+        filename: file.filename,
+        contentType: file.contentType,
+        size: file.sizeBytes,
+        kind: carga ? "archivo_clinica" : "correo",
+        deleteAfter: carga ? file.deleteAfter : null,
+        deleted: file.deletedAt !== null,
+        ...inboundFileCarga(file, now),
+      }
+    })
   return {
     id: row.id,
     mailbox: row.mailbox as SaasInboundMailbox,
@@ -700,7 +713,7 @@ export async function getInboundEmail(
         ? { userId: row.staffUserId, name: email.staffName }
         : null,
     attachments: row.attachments.length,
-    canReply,
+    canReply: true,
     replyFrom: sender ? { name: sender.name, address: sender.address } : null,
     replySignature: sender && product ? replySignature(sender, product) : null,
     replySubject: replySubject(row.subject),

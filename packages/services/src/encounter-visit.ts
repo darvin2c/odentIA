@@ -193,7 +193,7 @@ export async function encounterVisitOf(
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
       -- «Hoy viene a…» lleva solo lo que viene de antes (P11, decisión D6 del estudio de la atención,
-      -- ADR 0196): lo indicado en esta misma atención no es «a qué viene», en ningún producto. Su
+      -- ADR 0199): lo indicado en esta misma atención no es «a qué viene», en ningún producto. Su
       -- «Hacerla hoy» está en su fila del Plan, para que el consentimiento se pida antes del acto;
       -- lo que ya se trajo con él (o con su cita) sigue aquí.
       and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept

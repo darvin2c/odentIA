@@ -26,6 +26,7 @@
     "@tanstack/react-table": "^8.21.3",
     "better-auth": "1.7.4",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "6.4.299",
     "qrcode": "1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

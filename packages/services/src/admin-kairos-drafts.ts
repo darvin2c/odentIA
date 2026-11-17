@@ -11,14 +11,19 @@ import {
   saasClient,
   saasClientContact,
   saasInboundEmail,
+  saasOutreach,
 } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
 import {
+  CLIENT_PHASE_WORDS,
   CLIENT_STAGE_WORDS,
+  CLIENT_STAGES,
   type ClientStage,
+  clientPaidSql,
+  clientPhaseOf,
   clientStageSql,
   inboundMailboxWords,
 } from "./admin-clients.js"
@@ -138,12 +143,17 @@ const TOOL_WORDS: Record<SaasClientTool, string> = {
 const ACTIVITY_WORDS: Record<string, string> = {
   llamada: "Llamada",
   whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
   correo: "Correo",
   reunion: "Reunión",
   presentacion: "Presentación",
   propuesta: "Propuesta",
   nota: "Nota",
 }
+
+/** Los mensajes: lo que salió por Sallca es lo que le contamos, no un hecho de la clínica. */
+const MESSAGE_KINDS = new Set(["correo", "whatsapp", "instagram", "messenger"])
 
 /* ---------- Lo que puede ver el modelo ---------- */
 
@@ -233,6 +243,32 @@ export interface KairosDraftJob {
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null
 
+/**
+ * Dónde está la clínica, en palabras, para Kairós: con cuenta, su fase (ADR
+ * 0196: «En alta» hasta su primer pago confirmado, «Activo» después), no
+ * «Entró», que juntaba a la que recién se da de alta con la que ya paga; sin
+ * cuenta, la etapa de la venta, que dice más para escribirle. La regla de la
+ * fase es la de siempre (`clientPhaseOf`).
+ */
+export function kairosStageWords(input: {
+  stage: unknown
+  hasAccount: boolean
+  paid: boolean
+}): string {
+  if (!(CLIENT_STAGES as readonly unknown[]).includes(input.stage)) return String(input.stage)
+  const stage = input.stage as ClientStage
+  const phase = clientPhaseOf({ stage, hasAccount: input.hasAccount, paid: input.paid })
+  return phase === "en_alta" || phase === "activo"
+    ? CLIENT_PHASE_WORDS[phase]
+    : CLIENT_STAGE_WORDS[stage]
+}
+
+/** Si tiene cuenta y si ya pagó, para `kairosStageWords`, en la consulta de `saas_client`. */
+const phaseFacts = {
+  hasAccount: sql<boolean>`(${saasClient.organizationId} is not null)`,
+  paid: clientPaidSql(),
+}
+
 /** Los datos de la clínica que ve el modelo, en palabras. */
 function clientFactsOf(
   client: {
@@ -242,7 +278,7 @@ function clientFactsOf(
     currentTool: string | null
   },
   product: ClinicalProduct,
-  stage: unknown,
+  where: { stage: unknown; hasAccount: boolean; paid: boolean },
 ): KairosDraftClientFacts {
   return {
     name: client.name,
@@ -254,7 +290,7 @@ function clientFactsOf(
     currentTool: client.currentTool
       ? (TOOL_WORDS[client.currentTool as SaasClientTool] ?? null)
       : null,
-    stage: CLIENT_STAGE_WORDS[stage as ClientStage] ?? String(stage),
+    stage: kairosStageWords(where),
   }
 }
 
@@ -271,6 +307,7 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
       outcome: saasFollowUp.outcome,
       body: saasFollowUp.body,
       happenedAt: saasFollowUp.happenedAt,
+      chatId: saasFollowUp.chatId,
     })
     .from(saasFollowUp)
     .where(
@@ -282,6 +319,22 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
     )
     .orderBy(desc(saasFollowUp.happenedAt))
     .limit(RECENT_ACTIVITIES)
+  // Lo que salió por Sallca (`outreachWentOut` anota la actividad con la hora en que salió el envío;
+  // la respuesta de una conversación, con su `chat_id`): de ahí el asunto, nunca el texto. Lo
+  // mismo que lee «Lo que hay que saber» (ADR 0196): un aviso nuestro no es un hecho de la clínica.
+  const sentAt = recent
+    .filter((entry) => entry.direction === "salio" && MESSAGE_KINDS.has(entry.kind))
+    .map((entry) => entry.happenedAt)
+  const sent = sentAt.length
+    ? await tx
+        .select({ channel: saasOutreach.channel, sentAt: saasOutreach.sentAt, subject: saasOutreach.subject })
+        .from(saasOutreach)
+        .where(and(eq(saasOutreach.clientId, clientId), inArray(saasOutreach.sentAt, sentAt)))
+    : []
+  const sentOf = (entry: (typeof recent)[number]) =>
+    sent.find(
+      (row) => row.channel === entry.kind && row.sentAt?.getTime() === entry.happenedAt.getTime(),
+    )
   const told = (text: string) => kairosAllowedFact(text, { adminOnly })
   const facts: string[] = []
   for (const entry of recent) {
@@ -291,6 +344,14 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
     const day = dayWords(entry.happenedAt, ZONE)
     if (entry.kind === "correo" && entry.direction === "entro") {
       facts.push(`${label} de la clínica el ${day}`)
+      continue
+    }
+    const ours = entry.direction === "salio" && MESSAGE_KINDS.has(entry.kind) && (entry.chatId || sentOf(entry))
+    if (ours) {
+      const raw = sentOf(entry)?.subject?.trim()
+      const subject = raw ? told(raw) : null
+      const channel = entry.kind === "correo" ? "correo" : label
+      facts.push(`Le escribimos por ${channel} el ${day}${subject ? `: «${subject}»` : ""}`)
       continue
     }
     const body = told(entry.body)
@@ -327,6 +388,7 @@ export async function pendingKairosDraftJobs(
         ownerUserId: saasClient.ownerUserId,
       },
       stage: clientStageSql(now),
+      ...phaseFacts,
     })
     .from(kairosItem)
     .innerJoin(saasClient, eq(saasClient.id, kairosItem.clientId))
@@ -343,7 +405,7 @@ export async function pendingKairosDraftJobs(
     .limit(limit)
 
   const jobs: KairosDraftJob[] = []
-  for (const { item, client, stage } of pending) {
+  for (const { item, client, stage, hasAccount, paid } of pending) {
     const clientId = item.clientId
     if (!clientId) continue
     const payload = item.payload
@@ -396,7 +458,11 @@ export async function pendingKairosDraftJobs(
         channel && (SAAS_WRITE_CHANNELS as readonly string[]).includes(channel)
           ? (channel as SaasOutreachChannel)
           : null,
-      client: clientFactsOf(client, product, stage),
+      client: clientFactsOf(client, product, {
+        stage,
+        hasAccount: Boolean(hasAccount),
+        paid: Boolean(paid),
+      }),
       contact: contact ? { name: contact.name, title: contact.title } : null,
       senderName: sender?.name?.trim() || `El equipo de ${productWords(product).name}`,
       demo: demo ? { name: demo.name } : null,
@@ -469,6 +535,7 @@ export async function pendingKairosReplyJobs(
             name: saasClient.name,
             product: saasClient.product,
             stage: clientStageSql(now),
+            ...phaseFacts,
           })
           .from(saasClient)
           .where(eq(saasClient.id, email.clientId))
@@ -488,7 +555,11 @@ export async function pendingKairosReplyJobs(
           ? clientFactsOf(
               { name: client.name, city: null, professionals: null, currentTool: null },
               product,
-              client.stage,
+              {
+                stage: client.stage,
+                hasAccount: Boolean(client.hasAccount),
+                paid: Boolean(client.paid),
+              },
             )
           : null,
         from: {

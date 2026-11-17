@@ -261,7 +261,7 @@ describe("a quién le llega un correo", () => {
     expect(answer).toMatchObject({ duplicate: false, clientId, matchedBy: "hilo" })
   })
 
-  it("la respuesta a un envío nuestro se liga por el hilo si viene del mismo correo y verificado", async () => {
+  it("la respuesta a un envío nuestro se liga por el hilo si entró en él, como en la Bandeja", async () => {
     const sent = await ownerDb.transaction((tx) =>
       prepareOutreach(tx, admin, clientId, {
         channel: "correo",
@@ -271,21 +271,42 @@ describe("a quién le llega un correo", () => {
       }),
     )
     const { messageId } = await ownerDb.transaction((tx) => outreachEmail(tx, sent.id))
-    const references = `<antes@gmail.com> ${messageId}`
+    // Responde lo nuestro, verificado y desde la dirección a la que le escribimos: entra en el
+    // hilo y se liga por él.
     expect(
       await ingestInboundEmail(
         ownerDb,
-        mail({ from: "otra.direccion@gmail.com", references, mailbox: "contacto" }),
+        mail({
+          from: "otra.direccion@gmail.com",
+          references: messageId,
+          inReplyTo: messageId,
+          mailbox: "contacto",
+        }),
       ),
     ).toMatchObject({ clientId, matchedBy: "hilo" })
+    // Con un hilo que no conocemos delante, es su propia conversación: el hilo no lo liga.
+    expect(
+      await ingestInboundEmail(
+        ownerDb,
+        mail({ from: "otra.direccion@gmail.com", references: `<antes@gmail.com> ${messageId}` }),
+      ),
+    ).toMatchObject({ clientId: null })
     // Otro remitente, o sin verificar: no.
     expect(
-      await ingestInboundEmail(ownerDb, mail({ from: "intruso@gmail.com", references })),
+      await ingestInboundEmail(
+        ownerDb,
+        mail({ from: "intruso@gmail.com", references: messageId, inReplyTo: messageId }),
+      ),
     ).toMatchObject({ clientId: null })
     expect(
       await ingestInboundEmail(
         ownerDb,
-        mail({ from: "otra.direccion@gmail.com", references, senderVerified: false }),
+        mail({
+          from: "otra.direccion@gmail.com",
+          references: messageId,
+          inReplyTo: messageId,
+          senderVerified: false,
+        }),
       ),
     ).toMatchObject({ clientId: null })
   })
@@ -367,28 +388,30 @@ describe("responder un correo", () => {
     expect(entries).toContainEqual({ body: "Re: Precios\n\nHola, le cuento.", direction: "salio" })
   })
 
-  it("lo de soporte@ sale desde soporte@ y lo responde Soporte; lo demás, solo Administración", async () => {
+  it("lo de soporte@ sale desde soporte@; los correos los responde Administración", async () => {
     const toSupport = await ingestInboundEmail(
       ownerDb,
       mail({ mailbox: "soporte", to: "soporte@odentia32.com", subject: "No entra" }),
     )
     const reply = await ownerDb.transaction((tx) =>
-      prepareEmailReply(tx, support, toSupport.id, { body: "Ya lo vemos." }),
+      prepareEmailReply(tx, admin, toSupport.id, { body: "Ya lo vemos." }),
     )
     const email = await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))
     expect(email.from).toEqual({ name: "Soporte · odentIA", address: "soporte@odentia32.com" })
     expect(email.replyTo).toBe("soporte@odentia32.com")
-    // Soporte no responde lo comercial, ni ve ni resuelve sus envíos.
+    // Soporte no responde ningún correo (ADR 0196), ni ve ni resuelve sus respuestas.
     const toHola = await ingestInboundEmail(ownerDb, mail({ mailbox: "hola" }))
-    await expect(
-      ownerDb.transaction((tx) => prepareEmailReply(tx, support, toHola.id, { body: "Hola" })),
-    ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 })
+    for (const id of [toSupport.id, toHola.id])
+      await expect(
+        ownerDb.transaction((tx) => prepareEmailReply(tx, support, id, { body: "Hola" })),
+      ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 })
     const commercial = await ownerDb.transaction((tx) =>
       prepareEmailReply(tx, admin, toHola.id, { body: "Hola" }),
     )
-    await expect(
-      ownerDb.transaction((tx) => resolveOutreach(tx, support, commercial.id, "salio")),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    for (const id of [reply.id, commercial.id])
+      await expect(
+        ownerDb.transaction((tx) => resolveOutreach(tx, support, id, "salio")),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" })
     // Cada respuesta con su propio Message-ID.
     const [a, b] = await Promise.all(
       [reply.id, commercial.id].map((id) => ownerDb.transaction((tx) => outreachEmail(tx, id))),
@@ -419,7 +442,7 @@ describe("formato y adjuntos de la respuesta", () => {
     )
   })
 
-  it("adjunta documentos del cliente, hasta 10 MB juntos; Soporte, solo lo que puede ver", async () => {
+  it("adjunta documentos del cliente, hasta 10 MB juntos; Soporte no responde correos", async () => {
     const file = (filename: string, sizeBytes: number, adminOnly: boolean) =>
       registerClientFile(ownerDb, admin, {
         clientId,
@@ -472,12 +495,12 @@ describe("formato y adjuntos de la respuesta", () => {
     )
     await expect(
       ownerDb.transaction((tx) =>
-        prepareEmailReply(tx, support, toSupport.id, { body: "Va", fileIds: [contract.id] }),
+        prepareEmailReply(tx, support, toSupport.id, { body: "Va", fileIds: [logo.id] }),
       ),
-    ).rejects.toMatchObject({ code: "VALIDATION" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 })
     await expect(
       ownerDb.transaction((tx) =>
-        prepareEmailReply(tx, support, toSupport.id, { body: "Va", fileIds: [logo.id] }),
+        prepareEmailReply(tx, admin, toSupport.id, { body: "Va", fileIds: [logo.id] }),
       ),
     ).resolves.toMatchObject({ inReplyToEmailId: toSupport.id })
   })
@@ -550,10 +573,10 @@ describe("leer un correo y su historial", () => {
     expect(
       (await ownerDb.transaction((tx) => getInboundEmail(tx, gone, inbound.id))).replyFrom,
     ).toBeNull()
-    // Lo comercial no existe para Soporte.
+    // Los correos son de Administración: Soporte no los abre.
     await expect(
       ownerDb.transaction((tx) => getInboundEmail(tx, support, inbound.id)),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 })
 
     const reply = await ownerDb.transaction((tx) =>
       prepareEmailReply(tx, admin, inbound.id, { body: "Sí, la tenemos." }),
@@ -643,20 +666,21 @@ describe("lo que corrigió la revisión", () => {
     // La dirección de la persona, no «persona@».
     expect(await titles(admin)).toContain("Nos escribió a beto@")
     expect((await titles(support)).some((title) => title.startsWith("Nos escribió a"))).toBe(false)
-    // Asignar lo comercial: para Soporte no existe.
+    // Ligar un correo es de Administración, también lo de soporte@ (ADR 0196).
     const orphan = await ingestInboundEmail(
       ownerDb,
       mail({ from: "nadie.revision@gmail.com", mailbox: "contacto" }),
     )
-    await expect(assignInboundEmail(ownerDb, support, orphan.id, clientId)).rejects.toMatchObject({
-      code: "NOT_FOUND",
-      status: 404,
-    })
     const orphanSupport = await ingestInboundEmail(
       ownerDb,
       mail({ from: "nadie.revision@gmail.com", mailbox: "soporte", to: "soporte@odentia32.com" }),
     )
-    expect(await assignInboundEmail(ownerDb, support, orphanSupport.id, clientId)).toMatchObject({
+    for (const id of [orphan.id, orphanSupport.id])
+      await expect(assignInboundEmail(ownerDb, support, id, clientId)).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        status: 403,
+      })
+    expect(await assignInboundEmail(ownerDb, admin, orphanSupport.id, clientId)).toMatchObject({
       clientId,
     })
     // Lo comercial que asigna Administración queda solo suyo.
@@ -683,7 +707,7 @@ describe("lo que corrigió la revisión", () => {
     expect((await mailLocalOf(support.userId))?.firstSentAt).toBeNull()
   })
 
-  it("el cajón no le muestra a Soporte las respuestas solo de Administración", async () => {
+  it("el cajón lo abre Administración, con todas sus respuestas; Soporte no lo abre", async () => {
     const inbound = await ingestInboundEmail(
       ownerDb,
       mail({ mailbox: "soporte", to: "soporte@odentia32.com", from: "otra.cosa@gmail.com" }),
@@ -697,7 +721,7 @@ describe("lo que corrigió la revisión", () => {
         (reply) => reply.id,
       )
     expect(await shown(admin)).toEqual([reserved.id])
-    expect(await shown(support)).toEqual([])
+    await expect(shown(support)).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 })
   })
 
   it("la respuesta va al Reply-To; el cliente se liga por el From verificado", async () => {
@@ -754,7 +778,8 @@ describe("lo que corrigió la revisión", () => {
     const once = await signed(admin, "hola", "Hola.\n\nAda Lovelace · odentIA")
     expect(once.split("Ada Lovelace · odentIA")).toHaveLength(2)
     expect(await signed(plain, "hola", "Hola.")).toMatch(/Hola\.\s+El equipo de odentIA/)
-    expect(await signed(support, "soporte", "Ya lo vemos.")).toMatch(
+    // Lo de soporte@ lo responde Administración, pero sale firmado desde soporte@.
+    expect(await signed(admin, "soporte", "Ya lo vemos.")).toMatch(
       /Ya lo vemos\.\s+Soporte · odentIA/,
     )
   })

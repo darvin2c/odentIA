@@ -485,7 +485,7 @@ export interface ProductForms {
   byAge: { underYears: number; kind: string } | null
   /**
    * Las fichas (por su clave) que se llenan una vez por plan, no en cada atención (odentIA: la
-   * odontoestomatológica de la norma, ADR 0196): se ofrecen mientras el plan de ahora no tenga una,
+   * odontoestomatológica de la norma, ADR 0199): se ofrecen mientras el plan de ahora no tenga una,
    * no en una urgencia, y otra vez cuando el paciente regresa con un plan nuevo. Las demás se
    * ofrecen como siempre (el control de ortodoncia se repite).
    */

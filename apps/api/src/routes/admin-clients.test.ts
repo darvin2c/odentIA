@@ -337,6 +337,14 @@ describe("clientes", () => {
     expect((await call("GET", `/${clientId}/timeline?filter=todo&limit=20`, SUPPORT)).status).toBe(
       200,
     )
+    // Las vistas por fase y los nombres de antes, que llegan en enlaces guardados (ADR 0196).
+    for (const view of ["en_alta", "activos", "con_cuenta"])
+      await expectStatus(await call("GET", `/?view=${view}`, SUPPORT), 200)
+    await expectStatus(await call("GET", "/?view=cuentas", SUPPORT), 400)
+    for (const filter of ["conversaciones", "alta", "plan", "contactos", "cuenta"])
+      await expectStatus(await call("GET", `/${clientId}/timeline?filter=${filter}`, ADMIN), 200)
+    const detail = (await json(await call("GET", `/${clientId}`, ADMIN))).data
+    expect(detail).toMatchObject({ phase: "por_vender", alta: null, openSupportCases: 0 })
     expect((await call("GET", `/${clientId}/contacts`, SUPPORT)).status).toBe(200)
     expect((await call("GET", `/${clientId}/onboarding`, SUPPORT)).status).toBe(200)
     expect((await call("GET", "/tasks?who=todas", SUPPORT)).status).toBe(200)
@@ -643,9 +651,21 @@ describe("responder un correo", () => {
     return result.id
   }
 
-  it("Soporte responde lo de soporte@ desde soporte@; lo demás le responde 403", async () => {
+  it("lo de soporte@ sale desde soporte@ y lo responde Administración; a Soporte, 403", async () => {
     const support = await arrived("soporte", "<r-soporte@gmail.test>")
-    const response = await call("POST", `/inbound/${support}/reply`, SUPPORT, {
+    // Los correos son de Administración (ADR 0196): Soporte no los lee ni los responde.
+    await expectStatus(
+      await call("POST", `/inbound/${support}/reply`, SUPPORT, { body: "Ya lo revisamos." }),
+      403,
+    )
+    await expectStatus(await call("GET", `/inbound/${support}`, SUPPORT), 403)
+    await expectStatus(
+      await call("POST", `/inbound/${support}/assign`, SUPPORT, {
+        clientId: "5e1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f",
+      }),
+      403,
+    )
+    const response = await call("POST", `/inbound/${support}/reply`, ADMIN, {
       body: "Ya lo revisamos.",
     })
     await expectStatus(response, 201)
@@ -668,9 +688,8 @@ describe("responder un correo", () => {
       await call("POST", `/inbound/${commercial}/reply`, SUPPORT, { body: "Hola" }),
       403,
     )
-    // Tampoco lo lee: para Soporte no existe.
-    await expectStatus(await call("GET", `/inbound/${commercial}`, SUPPORT), 404)
-    const read = await call("GET", `/inbound/${support}`, SUPPORT)
+    await expectStatus(await call("GET", `/inbound/${commercial}`, SUPPORT), 403)
+    const read = await call("GET", `/inbound/${support}`, ADMIN)
     await expectStatus(read, 200)
     expect((await json(read)).data).toMatchObject({
       id: support,
@@ -887,6 +906,49 @@ describe("documentos", () => {
     expect(objects.has(row?.objectKey ?? "")).toBe(false)
   })
 
+  it("se ve sin descargar: el PDF solo por la API, aislado y sin guardarse; lo demás no", async () => {
+    const clientId = await newClient("Odontología Tambopata Visor (ficticia)", "vista@andes.test")
+    const uploaded = await call(
+      "POST",
+      `/${clientId}/files`,
+      ADMIN,
+      form(pdfBytes, "application/pdf"),
+    )
+    await expectStatus(uploaded, 201)
+    const pdf = (await json(uploaded)).data
+    const csv = new FormData()
+    csv.set("file", new File(["nombre\nRosa\n"], "lista.csv", { type: "text/csv" }))
+    const sheet = (await json(await call("POST", `/${clientId}/files`, ADMIN, csv))).data
+
+    // Un PDF no sale por un enlace del almacenamiento (eso es solo para imágenes): por la API.
+    await expectStatus(await call("GET", `/files/${pdf.id}/preview`, ADMIN), 409)
+    const content = await call("GET", `/files/${pdf.id}/content`, ADMIN)
+    await expectStatus(content, 200)
+    expect(content.headers.get("content-type")).toBe("application/pdf")
+    expect(content.headers.get("content-disposition")).toMatch(/^inline; filename\*=UTF-8''/)
+    expect(content.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(content.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
+    expect(content.headers.get("cache-control")).toBe("no-store")
+    expect(new Uint8Array(await content.arrayBuffer())).toEqual(pdfBytes)
+    // Un CSV no tiene vista: se descarga.
+    await expectStatus(await call("GET", `/files/${sheet.id}/preview`, ADMIN), 409)
+    await expectStatus(await call("GET", `/files/${sheet.id}/content`, ADMIN), 409)
+    // Lo de Administración no existe para Soporte, tampoco para verlo.
+    await expectStatus(await call("GET", `/files/${pdf.id}/content`, SUPPORT), 404)
+    await expectStatus(await call("GET", `/files/${pdf.id}/preview`, SUPPORT), 404)
+    // Lo que dice ser un PDF y no lo es, no sale.
+    const [row] = await ownerDb.select().from(saasClientFile).where(eq(saasClientFile.id, pdf.id))
+    objects.set(row?.objectKey ?? "", new TextEncoder().encode("<html>no</html>"))
+    await expectStatus(await call("GET", `/files/${pdf.id}/content`, ADMIN), 409)
+
+    // El informe de la carga: solo Administración y solo el que tiene su PDF guardado.
+    await expectStatus(await call("GET", `/${clientId}/reports/1/content`, SUPPORT), 403)
+    await expectStatus(await call("GET", `/${clientId}/reports/1/content`, ADMIN), 404)
+    await expectStatus(await call("GET", `/${clientId}/reports/cero/content`, ADMIN), 404)
+    // Un id que no es de un cliente no llega a la base como error: 404.
+    await expectStatus(await call("GET", "/abc/reports/1/content", ADMIN), 404)
+  })
+
   it("acepta lo mismo que llega por correo y lo adjunta a una respuesta, que sale con él", async () => {
     const clientId = await newClient("Clínica Adjuntos (ficticia)", "adjuntos@andes.test")
     const csv = new FormData()
@@ -995,10 +1057,8 @@ describe("documentos", () => {
     expect(email.files).toEqual([
       expect.objectContaining({ fileId: old.fileId, kind: "archivo_clinica", deleted: true }),
     ])
-    // Soporte no recibe la lista de adjuntos.
-    expect((await json(await call("GET", `/inbound/${old.emailId}`, SUPPORT))).data.files).toEqual(
-      [],
-    )
+    // Soporte no abre los correos.
+    expect((await call("GET", `/inbound/${old.emailId}`, SUPPORT)).status).toBe(403)
     // Lo ya borrado, o lo que no existe, no está.
     expect((await call("POST", `/files/${old.fileId}/carga`, ADMIN)).status).toBe(404)
     expect(

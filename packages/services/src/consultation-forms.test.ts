@@ -625,7 +625,7 @@ it("copiar las fichas del producto no crea especialidades: sin la suya activa, l
   expect(still?.isActive).toBe(false)
 })
 
-// Estudio de la atención (16 nov, P11, D7, ADR 0196): la odontoestomatológica es de la evaluación,
+// Estudio de la atención (16 nov, P11, D7, ADR 0199): la odontoestomatológica es de la evaluación,
 // no de cada sesión. Se ofrece mientras el plan de ahora no tenga una, nunca en una urgencia, y el
 // control de ortodoncia (que sí se repite) sigue como antes.
 it("la odontoestomatológica se ofrece mientras el plan no tenga una: no en la urgencia ni en la sesión siguiente", async () => {

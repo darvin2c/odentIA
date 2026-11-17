@@ -56,8 +56,17 @@ export interface Storage {
     contentType: string
     ext: string
   }): Promise<AttachmentRef>
-  /** URL firmada de lectura para un adjunto (por defecto 15 min). */
-  attachmentUrl(objectKey: string, ttlSeconds?: number): Promise<string>
+  /**
+   * URL firmada de lectura para un adjunto (por defecto 15 min). Con `serve`, el almacenamiento lo
+   * sirve con ese nombre: para verse (`as: "inline"`, lo de siempre, con el tipo que se revisó al
+   * recibirlo) o para guardarse (`as: "attachment"`: el navegador lo descarga y no lo abre como
+   * una página del almacenamiento).
+   */
+  attachmentUrl(
+    objectKey: string,
+    ttlSeconds?: number,
+    serve?: { filename: string; contentType?: string; as?: "inline" | "attachment" },
+  ): Promise<string>
   /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
   deleteAttachment(objectKey: string): Promise<void>
   /**
@@ -106,6 +115,17 @@ export interface Storage {
     contentType: string
     ext: string
   }): Promise<AttachmentRef>
+}
+
+/**
+ * Un nombre de archivo para `filename*` (RFC 5987): `encodeURIComponent` deja `'()*` sin
+ * escapar, y la comilla es el separador del juego de caracteres.
+ */
+export function rfc5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
 }
 
 /**
@@ -164,14 +184,25 @@ export function createStorage(env: StorageEnv): Storage {
         size: bytes.byteLength,
       }
     },
-    async attachmentUrl(objectKey, ttlSeconds = 900) {
+    async attachmentUrl(objectKey, ttlSeconds = 900, serve) {
       // Soporte mirando la clínica: el archivo pasa por la API, que comprueba el permiso
       // en cada pedido; una URL firmada seguiría sirviendo después de quitarlo.
       const proxy = fileProxy.getStore()
       if (proxy) return proxy(objectKey)
       return getSignedUrl(
         client,
-        new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }),
+        new GetObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          // Para verse o para guardarse: el nombre en RFC 5987 (acentos y espacios) y, si se
+          // dice, el tipo que se revisó.
+          ...(serve
+            ? {
+                ResponseContentDisposition: `${serve.as ?? "inline"}; filename*=UTF-8''${rfc5987(serve.filename)}`,
+                ...(serve.contentType ? { ResponseContentType: serve.contentType } : {}),
+              }
+            : {}),
+        }),
         {
           expiresIn: ttlSeconds,
         },

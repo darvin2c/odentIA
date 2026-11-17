@@ -18,10 +18,13 @@ import { UnknownReportActions } from "./unknown-report-actions"
 const recordSchema = z.object({
   loads: z.array(
     z.object({
+      /** La primera fila de la carga en la auditoría: con ella la abre el historial. */
+      id: z.string().optional(),
       kind: z.enum(["configuracion", "pacientes"]),
       at: z.string(),
       by: z.string().nullable(),
       summary: z.string(),
+      errors: z.number().optional(),
     }),
   ),
   reports: z.array(
@@ -38,12 +41,27 @@ const recordSchema = z.object({
     }),
   ),
 })
-type Report = z.infer<typeof recordSchema>["reports"][number]
+export type OrgLoadRecordData = z.infer<typeof recordSchema>
+export type Report = OrgLoadRecordData["reports"][number]
+export type ClinicLoad = OrgLoadRecordData["loads"][number]
 
-const LOAD_WORDS = { configuracion: "Configuración", pacientes: "Pacientes" } as const
+export const LOAD_WORDS = { configuracion: "Configuración", pacientes: "Pacientes" } as const
+
+/**
+ * El registro de la carga de una clínica (solo Administración): lo leen Alta, Documentos (los
+ * informes que salieron) y los cajones del historial. Sin cuenta, no pide nada.
+ */
+export function useOrgLoadRecord(organizationId: string | null) {
+  return useQuery({
+    queryKey: ["admin", "org-load-record", organizationId ?? ""],
+    enabled: organizationId !== null,
+    queryFn: async () =>
+      recordSchema.parse(await api<unknown>(`/api/admin/imports/${organizationId}/record`)),
+  })
+}
 
 /** Lo que pasó con un informe, sin decir más de lo que se sabe: salió no es que lo leyó. */
-function reportLine(report: Report): string {
+export function reportLine(report: Report): string {
   const to = report.to ? ` a ${report.to}` : ""
   if (report.registeredLater)
     return `Salió el ${supportDay(report.at)}${to} · por correo aparte; se registró después`
@@ -56,11 +74,7 @@ function reportLine(report: Report): string {
 
 export function OrgLoadRecord({ organizationId }: { organizationId: string }) {
   const [openError, setOpenError] = useState<string | null>(null)
-  const record = useQuery({
-    queryKey: ["admin", "org-load-record", organizationId],
-    queryFn: async () =>
-      recordSchema.parse(await api<unknown>(`/api/admin/imports/${organizationId}/record`)),
-  })
+  const record = useOrgLoadRecord(organizationId)
 
   // El enlace vence a los 5 minutos: se pide al tocar, nunca antes.
   async function openPdf(number: number) {

@@ -978,15 +978,29 @@
     {
       "idx": 139,
       "version": "7",
-      "when": 1794869935460,
-      "tag": "0139_anestesia_del_servicio",
+      "when": 1794890354307,
+      "tag": "0139_bandeja_de_la_administracion",
       "breakpoints": true
     },
     {
       "idx": 140,
       "version": "7",
-      "when": 1794869936460,
-      "tag": "0140_hallazgo_y_su_diagnostico",
+      "when": 1794890366095,
+      "tag": "0140_bandeja_de_la_administracion_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794890367095,
+      "tag": "0141_anestesia_del_servicio",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794890368095,
+      "tag": "0142_hallazgo_y_su_diagnostico",
       "breakpoints": true
     }
   ]

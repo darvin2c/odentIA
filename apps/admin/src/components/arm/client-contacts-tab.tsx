@@ -1,5 +1,6 @@
 /**
- * Contactos de la ficha del cliente: sus personas, cada una con sus papeles
+ * Las personas de la ficha del cliente (en el Resumen, «Ver todas» las abre en un cajón; ADR
+ * 0196, también con `?tab=contactos`): sus personas, cada una con sus papeles
  * (decide, la usa, paga), la principal primero, y, si tiene cuenta, los
  * miembros de su equipo que aún no son una persona del cliente, como filas de
  * solo lectura (se leen de la cuenta, no se copian). Ligar una persona a su
@@ -9,6 +10,7 @@
 import { Badge, Button, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
+  DetailDrawer,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -34,7 +36,32 @@ import { WhatsAppWrite } from "./whatsapp-write"
 
 const enc = encodeURIComponent
 
-export function ClientContactsTab({ clientId, organizationId, isAdmin }: ClientTabProps) {
+/** Todas sus personas en un cajón, desde «Ver todas» del Resumen. */
+export function ClientPeopleDrawer({
+  open,
+  onClose,
+  ...props
+}: Pick<ClientTabProps, "clientId" | "organizationId" | "isAdmin"> & {
+  open: boolean
+  onClose: () => void
+}) {
+  if (!open) return null
+  return (
+    <DetailDrawer open onClose={onClose} size="lg" title="Personas">
+      <ClientContactsTab {...props} inDrawer />
+    </DetailDrawer>
+  )
+}
+
+export function ClientContactsTab({
+  clientId,
+  organizationId,
+  isAdmin,
+  inDrawer = false,
+}: Pick<ClientTabProps, "clientId" | "organizationId" | "isAdmin"> & {
+  /** Dentro del cajón: el título lo pone el cajón. */
+  inDrawer?: boolean
+}) {
   const queryClient = useQueryClient()
   const contacts = useClientContacts(clientId)
   const [editing, setEditing] = React.useState<{
@@ -81,7 +108,7 @@ export function ClientContactsTab({ clientId, organizationId, isAdmin }: ClientT
   return (
     <section aria-labelledby="contactos-titulo" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="contactos-titulo" className="text-base font-semibold">
+        <h2 id="contactos-titulo" className={inDrawer ? "sr-only" : "text-base font-semibold"}>
           Personas
         </h2>
         <Button
@@ -194,7 +221,7 @@ export function ClientContactsTab({ clientId, organizationId, isAdmin }: ClientT
                   {member.user?.roleLabel ? ` · ${member.user.roleLabel}` : ""} · {member.email}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  Se lee de su cuenta: aún no es una persona de este cliente.
+                  Está en su cuenta: aún no es una persona de este cliente.
                 </span>
               </div>
               <Button

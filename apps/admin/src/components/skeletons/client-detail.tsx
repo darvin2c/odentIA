@@ -1,20 +1,25 @@
 /**
  * La ficha de un cliente (`routes/_app/clients_.$clientId.tsx`): cabecera,
- * próximo paso, pestañas y el Resumen. Las pestañas de siempre van con su
- * nombre; las que dependen de que tenga cuenta (Alta, Plan y pagos, Uso,
- * Soporte) aún no se saben y van como huecos sin nombre.
+ * próximo paso, pestañas y el Resumen. Las pestañas que no dependen del cliente
+ * van con su nombre (Resumen, Conversaciones para Administración, Historial y
+ * Documentos); las de su fase (Venta, Alta o Uso, y Plan y pagos) aún no se
+ * saben y van como huecos sin nombre.
  */
 import { cn, Skeleton } from "@odentia/ui"
 import { PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useSearch } from "@tanstack/react-router"
 import type { JSX } from "react"
+import { useIsAdmin } from "../../lib/session"
 import { CLIENT_TAB_NAMES } from "../arm/client-tabs"
 import { ControlSkeleton, TextBase, TextSm, TextXs } from "./page-loading"
 
 const tab = "inline-flex min-h-11 shrink-0 items-center px-3 text-sm font-medium sm:min-h-9"
 
 function TabsSkeleton({ active }: { active: string }) {
-  const named = ["resumen", "historial", "contactos", "venta"] as const
+  const isAdmin = useIsAdmin()
+  const named = isAdmin
+    ? (["resumen", "conversaciones", "historial"] as const)
+    : (["resumen", "historial"] as const)
   return (
     <div
       aria-hidden

@@ -14,14 +14,20 @@
  * Kairós (con «Kairós responde solo en los chats» prendido): mientras atiende
  * la conversación lo dice arriba y la respuesta a mano espera a «Lo atiendo
  * yo», que lo pausa solo aquí; «Devolver a Kairós» lo reanuda. Lo que escribió
- * va con su nombre, y si se la pasó al equipo se dice por qué.
+ * va con su nombre y con en qué se basó, y si se la pasó al equipo se dice por qué.
+ *
+ * La misma conversación se ve en un cajón (`layout="drawer"`) y en el panel de
+ * la Bandeja (`layout="pane"`), con el editor de respuesta de toda la
+ * administración: el formato, el largo de cada canal y los archivos de
+ * Documentos (cada uno sale como su propio mensaje). Es solo de Administración.
  */
-import { Badge, Button, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   AgentMark,
   common,
   ErrorState,
   FormDrawer,
+  FormPanel,
   LoadingState,
   PageNotice,
   SubmitButton,
@@ -31,7 +37,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { supportTime } from "../../lib/support-words"
@@ -51,10 +57,10 @@ import {
   isUnsettled,
   kairosChatState,
   openChatOutcome,
-  pauseKairos,
-  resumeKairos,
   openChatWith,
+  pauseKairos,
   replyHelpWords,
+  resumeKairos,
   sendChatReply,
   sendChatRetomar,
   sentLineWords,
@@ -64,6 +70,14 @@ import {
 import { ChatOwnerDrawer, useNotClinic } from "./chat-owner-drawer"
 import { useMarkCarga } from "./client-files-tab"
 import { ClientName, invalidateArm } from "./hoy-links"
+import {
+  CLIENT_PHASE_WORDS,
+  type ClientPhase,
+  settleConversation,
+  unsettleConversation,
+} from "./inbox-api"
+import { ReplyEditor, replyTextProblem } from "./reply-editor"
+import { ReplyFiles } from "./reply-files"
 import { resolveOutreach, useClientSale } from "./sale-api"
 import { WriteDrawer } from "./write-drawer"
 
@@ -83,11 +97,37 @@ export interface ChatDrawerProps {
    * celular ya escribió sin decir de quién es (409 `CHAT_UNASSIGNED`).
    */
   decide?: boolean
+  /** En un cajón (lo de siempre) o en el panel de la Bandeja. */
+  layout?: "drawer" | "pane"
+  /** El panel dice si tiene algo escrito sin enviar (la Bandeja pregunta antes de cambiar). */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function ChatDrawer(props: ChatDrawerProps) {
   if (!props.open) return null
   return <ChatSurface key={props.chatId} {...props} />
+}
+
+/** La conversación en el panel de la Bandeja: la misma del cajón, en su lugar. */
+export function ChatPane({
+  chatId,
+  onClose,
+  onDirtyChange,
+}: {
+  chatId: string
+  onClose: () => void
+  onDirtyChange?: (dirty: boolean) => void
+}) {
+  return (
+    <ChatSurface
+      key={chatId}
+      chatId={chatId}
+      open
+      onClose={onClose}
+      layout="pane"
+      onDirtyChange={onDirtyChange}
+    />
+  )
 }
 
 type Aside =
@@ -103,6 +143,8 @@ function ChatSurface({
   draft = "",
   proposalId = null,
   decide = false,
+  layout = "drawer",
+  onDirtyChange,
 }: ChatDrawerProps) {
   const queryClient = useQueryClient()
   const chat = useChat(chatId)
@@ -114,6 +156,26 @@ function ChatSurface({
     if (clientId) invalidateArm(queryClient, null)
   }
 
+  if (!chat.data && layout === "pane") {
+    return (
+      <div className="flex flex-col gap-3">
+        <div>
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+            Volver a la lista
+          </Button>
+        </div>
+        {chat.isError ? (
+          <ErrorState
+            title="No pude abrir la conversación"
+            error={chat.error}
+            onRetry={() => void chat.refetch()}
+          />
+        ) : (
+          <LoadingState message="Abriendo la conversación…" />
+        )}
+      </div>
+    )
+  }
   if (!chat.data) {
     return (
       <FormDrawer
@@ -149,8 +211,8 @@ function ChatSurface({
         onClose={onClose}
       />
     )
-  if (aside.kind === "correo")
-    return (
+  const asideDrawer =
+    aside.kind === "correo" ? (
       <WriteDrawer
         open
         clientId={aside.clientId}
@@ -158,9 +220,7 @@ function ChatSurface({
         contactId={aside.contactId}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
-  if (aside.kind === "mover" || aside.kind === "decidir")
-    return (
+    ) : aside.kind === "mover" || aside.kind === "decidir" ? (
       <ChatOwnerDrawer
         mode={aside.kind === "mover" ? "mover" : "decidir"}
         currentClientId={data.client?.id ?? null}
@@ -181,16 +241,24 @@ function ChatSurface({
         }}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
+    ) : null
+  // En un cajón, lo de al lado lo reemplaza (un cajón a la vez); en el panel de la Bandeja se abre
+  // junto a la conversación, que sigue montada con lo que se estaba escribiendo.
+  if (asideDrawer && layout === "drawer") return asideDrawer
   return (
-    <Conversation
-      chat={data}
-      draft={draft}
-      proposalId={proposalId}
-      onClose={onClose}
-      onAside={setAside}
-      onChanged={() => refresh(data.client?.id)}
-    />
+    <>
+      <Conversation
+        chat={data}
+        draft={draft}
+        proposalId={proposalId}
+        layout={layout}
+        onClose={onClose}
+        onAside={setAside}
+        onChanged={() => refresh(data.client?.id)}
+        onDirtyChange={onDirtyChange}
+      />
+      {asideDrawer}
+    </>
   )
 }
 
@@ -199,18 +267,10 @@ const lastInbound = (chat: ChatDetail) =>
     | Extract<ChatEntry, { kind: "entro" }>
     | undefined
 
-const replySchema = z.object({
-  body: z
-    .string()
-    .trim()
-    .min(1, "Escribe la respuesta")
-    .max(4000, "Usa como máximo 4000 caracteres"),
-  adminOnly: z.boolean(),
-})
-
 /** El resultado de un envío dicho en un aviso: salió, no salió o no se sabe. */
-function announceSent(status: string, channel: string) {
-  if (status === "enviado") toast.success(`Salió por ${channel}`)
+function announceSent(status: string, channel: string, files = 0) {
+  const extra = files ? (files === 1 ? " con su archivo" : ` con sus ${files} archivos`) : ""
+  if (status === "enviado") toast.success(`Salió por ${channel}${extra}`)
   else toast.warning(`No se sabe si salió por ${channel}: no se reintenta. Revísalo y di si salió.`)
 }
 
@@ -218,16 +278,20 @@ function Conversation({
   chat,
   draft,
   proposalId,
+  layout,
   onClose,
   onAside,
   onChanged,
+  onDirtyChange,
 }: {
   chat: ChatDetail
   draft: string
   proposalId: string | null
+  layout: "drawer" | "pane"
   onClose: () => void
   onAside: (aside: Aside) => void
   onChanged: () => void
+  onDirtyChange?: ((dirty: boolean) => void) | undefined
 }) {
   const isAdmin = useIsAdmin()
   const myUserId = useAdminUserId()
@@ -239,41 +303,87 @@ function Conversation({
     onSuccess: (_data, mine) =>
       toast.success(
         mine
-          ? "Lo atiendes tú: Kairós no responde solo en esta conversación"
+          ? kairos
+            ? "Lo atiendes tú: Kairós no responde solo en esta conversación"
+            : "Lo atiendes tú"
           : "Kairós vuelve a responder aquí lo que siga sin respuesta y lo que llegue",
       ),
     onError: (error) => toast.error(submitErrorMessage(error)),
     onSettled: onChanged,
   })
+  const settle = useMutation({
+    mutationFn: (on: boolean) =>
+      on ? settleConversation("chat", chat.id) : unsettleConversation("chat", chat.id),
+    onSuccess: (_data, on) =>
+      toast.success(on ? "Listo: ya no espera respuesta" : "Vuelve a esperar respuesta"),
+    onError: (error) => toast.error(submitErrorMessage(error)),
+    onSettled: onChanged,
+  })
   // Escribir a mano también es «Lo atiendo yo»: al enviar, el servidor pausa a Kairós aquí.
   const canWrite = chat.canReplyFreely
-  // «Solo administración» solo tiene sentido si Soporte ve la conversación (clínica con su app).
-  const canHide = isAdmin && Boolean(chat.client?.hasAccount)
   // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
   const [proposal, setProposal] = useState(proposalId)
+  const schema = z
+    .object({
+      body: z.string(),
+      fileIds: z.array(z.string()).max(5, "Adjunta como máximo 5 archivos"),
+    })
+    .superRefine((value, ctx) => {
+      if (!value.body.trim() && value.fileIds.length === 0)
+        ctx.addIssue({
+          code: "custom",
+          path: ["body"],
+          message: "Escribe la respuesta o adjunta un archivo",
+        })
+      const problem = replyTextProblem(value.body, chat.channel, chat.rules)
+      if (problem) ctx.addIssue({ code: "custom", path: ["body"], message: problem })
+    })
   const form = useAppForm({
-    defaultValues: { body: draft, adminOnly: false },
-    validators: { onSubmit: replySchema },
+    defaultValues: { body: draft, fileIds: [] as string[] },
+    validators: { onSubmit: schema },
     onSubmit: async ({ value, formApi }) => {
-      const empty = { body: "", adminOnly: false }
+      const empty = { body: "", fileIds: [] as string[] }
       try {
         const sent = await sendChatReply(chat.id, {
-          body: value.body.trim(),
-          ...(canHide ? { adminOnly: value.adminOnly } : {}),
+          ...(value.body.trim() ? { body: value.body.trim() } : {}),
+          ...(value.fileIds.length ? { fileIds: value.fileIds } : {}),
           ...(proposal ? { proposalId: proposal } : {}),
         })
-        announceSent(sent.status, channel)
+        const notOut = sent.parts.filter((part) => part.status !== "enviado")
+        if (notOut.length > 0)
+          toast.warning(
+            `No se sabe si salió ${notOut.map((part) => (part.kind === "texto" ? "el texto" : `«${part.filename ?? "un archivo"}»`)).join(", ")}: no se reintenta. Revísalo y di si salió.`,
+          )
+        else announceSent(sent.status, channel, value.fileIds.length)
         setProposal(null)
         formApi.reset(empty)
       } catch (error) {
-        if (error instanceof ChatSendError && error.outcome === "incierto") {
-          // Quedó guardado como «No se sabe si salió»: no se vuelve a enviar.
-          setProposal(null)
-          formApi.reset(empty)
-          toast.warning(error.message)
-          return
+        if (error instanceof ChatSendError) {
+          // Lo que salió (o no se sabe si salió) no se vuelve a enviar: queda en el formulario solo
+          // lo que no salió. El texto va primero y después cada archivo, en el orden elegido.
+          const parts = error.parts
+          const textPart = parts.find((part) => part.kind === "texto")
+          const fileParts = parts.filter((part) => part.kind === "archivo")
+          const somethingLeft = parts.some((part) => part.status !== "no_salio")
+          if (error.outcome === "incierto" || somethingLeft) {
+            const left = parts.length
+              ? {
+                  body: !textPart || textPart.status === "no_salio" ? value.body : "",
+                  fileIds: value.fileIds.filter(
+                    (_id, index) => !fileParts[index] || fileParts[index]?.status === "no_salio",
+                  ),
+                }
+              : empty
+            setProposal(null)
+            formApi.reset(left)
+            const pending = left.body.trim() || left.fileIds.length > 0
+            const words = `${error.message}${pending ? " Lo que no salió quedó aquí para enviarlo de nuevo." : ""}`
+            if (error.outcome === "incierto") toast.warning(words)
+            else toast.error(words)
+            return
+          }
         }
-        // No salió (o pasaron las 24 h): el texto queda para cambiarlo o enviarlo de otra forma.
+        // No salió nada (o pasaron las 24 h): el texto queda para cambiarlo o enviarlo de otra forma.
         throw error
       } finally {
         onChanged()
@@ -281,6 +391,10 @@ function Conversation({
     },
   })
   const surface = useFormSurface(form)
+  useEffect(() => {
+    onDirtyChange?.(surface.isDirty)
+  }, [surface.isDirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const retomar = useMutation({
     mutationFn: () => sendChatRetomar(chat.id),
     onSuccess: (sent) => announceSent(sent.status, channel),
@@ -314,33 +428,68 @@ function Conversation({
   const sale = useClientSale(chat.client?.id ?? "", Boolean(chat.client) && !chat.canReplyFreely)
   const person = sale.data?.contacts.find((row) => row.id && row.id === chat.contact?.id)
   const unsettled = chat.entries.filter((entry) => isUnsettled(entry, new Date())).length
+  const attendedByMe = chat.attendedBy?.id === myUserId
+  const settled = chat.state === "respondida" && Boolean(chat.settledAt)
 
-  return (
-    <FormDrawer
-      {...surface}
-      open
-      onClose={onClose}
-      title={chatTitle(chat)}
-      description={chatSubtitle(chat)}
-      hideSubmit={!canWrite}
-      submitLabel={`Enviar por ${channel}`}
-      cancelLabel={common.actions.close}
-    >
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {chat.client ? (
-            <ClientName clientId={chat.client.id} tab="historial">
-              Ver la ficha de {chat.client.name}
-            </ClientName>
-          ) : (
-            <span className="text-muted-foreground">Sin cliente todavía</span>
-          )}
+  const content = (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {/* Sin cliente no se repite aquí: el subtítulo ya dice «sin cliente todavía». */}
+        {chat.client ? (
+          <ClientName clientId={chat.client.id} tab="historial">
+            Ver la ficha de {chat.client.name}
+          </ClientName>
+        ) : null}
+        {chat.client?.phase && chat.client.phase in CLIENT_PHASE_WORDS ? (
+          <span className="text-muted-foreground">
+            · {CLIENT_PHASE_WORDS[chat.client.phase as ClientPhase]}
+          </span>
+        ) : null}
+        {chat.attendedBy && !kairos ? (
+          <span className="text-muted-foreground">
+            {attendedByMe
+              ? "· Lo atiendes tú"
+              : `· Lo atiende ${chat.attendedBy.name.trim().split(/\s+/)[0]}`}
+          </span>
+        ) : null}
+        <div className="ml-auto flex flex-wrap gap-2">
+          {!kairos && !attendedByMe ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={takeOver.isPending}
+              onClick={() => takeOver.mutate(true)}
+            >
+              Lo atiendo yo
+            </Button>
+          ) : null}
+          {chat.state === "te_toca" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={settle.isPending}
+              onClick={() => settle.mutate(true)}
+            >
+              No necesita respuesta
+            </Button>
+          ) : settled ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={settle.isPending}
+              onClick={() => settle.mutate(false)}
+            >
+              Volver a «Te toca»
+            </Button>
+          ) : null}
           {isAdmin && chat.client ? (
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="ml-auto"
               onClick={() => onAside({ kind: "mover" })}
             >
               Mover a otra clínica
@@ -351,196 +500,256 @@ function Conversation({
               type="button"
               size="sm"
               variant="outline"
-              className="ml-auto"
               onClick={() => onAside({ kind: "decidir" })}
             >
               ¿De quién es?
             </Button>
           ) : null}
         </div>
+      </div>
 
-        {chat.notClinicAt ? (
-          <PageNotice
-            tone="aviso"
-            label="No es una clínica"
-            action={
-              isAdmin ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={undo.isPending}
-                  onClick={() => undo.mutate(chat.id)}
-                >
-                  Deshacer
-                </Button>
-              ) : null
-            }
-          >
-            Se marcó como «No es una clínica»: sus mensajes siguen llegando aquí, pero no vuelven a
-            Hoy.
-          </PageNotice>
-        ) : null}
+      {chat.client?.phase === "activo" ? (
+        <p className="text-sm text-muted-foreground">
+          Ya usa su app: si es una consulta de uso, la ayuda va por Soporte, dentro de su app.
+        </p>
+      ) : null}
 
-        {kairos ? (
-          <PageNotice
-            tone={kairos.kind === "paso" ? "alarma" : "aviso"}
-            label={
-              kairos.kind === "kairos"
-                ? "Kairós atiende esta conversación"
-                : kairos.kind === "paso"
-                  ? "Kairós se la pasó al equipo"
-                  : "Kairós está en pausa aquí"
-            }
-            action={
-              kairos.kind === "kairos" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={takeOver.isPending}
-                  onClick={() => takeOver.mutate(true)}
-                >
-                  Lo atiendo yo
-                </Button>
-              ) : kairos.canReturn ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={takeOver.isPending}
-                  onClick={() => takeOver.mutate(false)}
-                >
-                  Devolver a Kairós
-                </Button>
-              ) : null
-            }
-          >
-            {kairos.kind === "kairos"
-              ? "Responde lo de las webs y los precios, y agenda presentaciones. Nunca ofrece descuentos. Si escribes tú, deja de responder aquí."
+      {chat.notClinicAt ? (
+        <PageNotice
+          tone="aviso"
+          label="No es una clínica"
+          action={
+            isAdmin ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={undo.isPending}
+                onClick={() => undo.mutate(chat.id)}
+              >
+                Deshacer
+              </Button>
+            ) : null
+          }
+        >
+          Se marcó como «No es una clínica»: sus mensajes siguen llegando aquí, pero no esperan
+          respuesta.
+        </PageNotice>
+      ) : null}
+
+      {kairos ? (
+        <PageNotice
+          tone={kairos.kind === "paso" ? "alarma" : "aviso"}
+          label={
+            kairos.kind === "kairos"
+              ? "Kairós atiende esta conversación"
               : kairos.kind === "paso"
-                ? `${kairos.why ? `${kairos.why}. ` : ""}Respóndele tú; Kairós no vuelve a escribir aquí hasta que lo devuelvas.`
-                : kairos.words}
-          </PageNotice>
+                ? "Kairós se la pasó al equipo"
+                : "Kairós está en pausa aquí"
+          }
+          action={
+            kairos.kind === "kairos" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={takeOver.isPending}
+                onClick={() => takeOver.mutate(true)}
+              >
+                Lo atiendo yo
+              </Button>
+            ) : kairos.canReturn ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={takeOver.isPending}
+                onClick={() => takeOver.mutate(false)}
+              >
+                Devolver a Kairós
+              </Button>
+            ) : null
+          }
+        >
+          {kairos.kind === "kairos"
+            ? "Responde lo de las webs y los precios, y agenda presentaciones. Nunca ofrece descuentos. Si escribes tú, deja de responder aquí."
+            : kairos.kind === "paso"
+              ? `${kairos.why ? `${kairos.why}. ` : ""}Respóndele tú; Kairós no vuelve a escribir aquí hasta que lo devuelvas.`
+              : kairos.words}
+        </PageNotice>
+      ) : null}
+
+      <Messages chat={chat} onChanged={onChanged} />
+
+      {isAdmin && chat.files.length > 0 ? <ChatFiles chat={chat} onChanged={onChanged} /> : null}
+
+      {unsettled > 0 ? (
+        <PageNotice tone="alarma" label="Antes de enviar otro">
+          {unsettled === 1
+            ? "Hay un mensaje del que no se sabe si salió. Revísalo arriba y di si salió antes de escribir otra vez."
+            : `Hay ${unsettled} mensajes de los que no se sabe si salieron. Revísalos arriba antes de escribir otra vez.`}
+        </PageNotice>
+      ) : null}
+
+      <section
+        aria-labelledby={`chat-responder-${chat.id}`}
+        className="flex flex-col gap-3 border-t pt-4"
+      >
+        <h3 id={`chat-responder-${chat.id}`} className="text-sm font-semibold">
+          Responder por {channel}
+        </h3>
+        <p className="text-sm text-muted-foreground">{freeWindowWords(chat)}</p>
+        {kairos?.kind === "kairos" ? (
+          <p className="text-sm text-muted-foreground">
+            Kairós está respondiendo aquí. Si envías tú, lo atiendes tú y Kairós deja de responder.
+          </p>
         ) : null}
-
-        <Messages chat={chat} onChanged={onChanged} />
-
-        {isAdmin && chat.files.length > 0 ? <ChatFiles chat={chat} onChanged={onChanged} /> : null}
-
-        {unsettled > 0 ? (
-          <PageNotice tone="alarma" label="Antes de enviar otro">
-            {unsettled === 1
-              ? "Hay un mensaje del que no se sabe si salió. Revísalo arriba y di si salió antes de escribir otra vez."
-              : `Hay ${unsettled} mensajes de los que no se sabe si salieron. Revísalos arriba antes de escribir otra vez.`}
-          </PageNotice>
-        ) : null}
-
-        <section aria-labelledby="chat-responder" className="flex flex-col gap-3 border-t pt-4">
-          <h3 id="chat-responder" className="text-sm font-semibold">
-            Responder
-          </h3>
-          <p className="text-sm text-muted-foreground">{freeWindowWords(chat)}</p>
-          {kairos?.kind === "kairos" ? (
-            <p className="text-sm text-muted-foreground">
-              Kairós está respondiendo aquí. Si envías tú, lo atiendes tú y Kairós deja de responder.
-            </p>
-          ) : null}
-          {chat.canReplyFreely ? (
-            <>
-              <form.AppField name="body">
-                {(field) => (
-                  <field.TextareaField
-                    id="chat-respuesta"
-                    label="Respuesta"
-                    description={replyHelpWords(chat)}
-                    rows={5}
-                    maxLength={4000}
-                  />
-                )}
-              </form.AppField>
-              {proposal ? (
-                <p className="text-xs text-muted-foreground">
-                  Va como el envío de la propuesta: queda enviada cuando salga. Por WhatsApp no va
-                  el PDF: si hace falta, envíalo por correo.
-                </p>
-              ) : null}
-              {canHide ? (
-                <form.AppField name="adminOnly">
-                  {(field) => (
-                    <field.CheckboxField
-                      id="chat-solo-admin"
-                      label="Solo administración"
-                      description="Soporte ve esta conversación; lo que marques así, no (por ejemplo, lo de cobros)."
+        {chat.canReplyFreely ? (
+          <>
+            <form.AppField name="body">
+              {(field) => (
+                <field.Control label="Respuesta" hideLabel description={replyHelpWords(chat)}>
+                  {(control) => (
+                    <ReplyEditor
+                      control={control.props}
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      channel={chat.channel}
+                      rules={chat.rules}
+                      improve={{ chatId: chat.id }}
+                      appended={chat.replySignature}
+                      autoFocus={layout === "drawer" && Boolean(draft)}
+                      below={
+                        chat.client ? (
+                          <form.Field name="fileIds">
+                            {(files) => (
+                              <ReplyFiles
+                                clientId={chat.client?.id ?? ""}
+                                isAdmin={isAdmin}
+                                rules={chat.rules}
+                                channelWords={channel}
+                                value={files.state.value}
+                                onChange={files.handleChange}
+                                error={
+                                  files.state.meta.errors
+                                    .map((issue) =>
+                                      typeof issue === "string" ? issue : issue?.message,
+                                    )
+                                    .find(Boolean) ?? null
+                                }
+                              />
+                            )}
+                          </form.Field>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Para mandar archivos, primero di de quién es: los archivos salen de sus
+                            Documentos.
+                          </p>
+                        )
+                      }
                     />
                   )}
-                </form.AppField>
-              ) : null}
-            </>
-          ) : chat.channel === "whatsapp" ? (
-            <div className="flex flex-col gap-2">
-              <div>
-                <SubmitButton
-                  type="button"
-                  pending={retomar.isPending}
-                  disabled={retomar.isPending}
-                  onClick={() => retomar.mutate()}
-                >
-                  Retomar con la plantilla
-                </SubmitButton>
-              </div>
+                </field.Control>
+              )}
+            </form.AppField>
+            {proposal ? (
               <p className="text-xs text-muted-foreground">
-                Sale la plantilla aprobada por WhatsApp, con tu nombre. Cuando responda, vuelve a
-                poder escribirse con texto libre.
+                Va como el envío de la propuesta: queda enviada cuando salga. Por WhatsApp no va el
+                PDF: si hace falta, envíalo por correo.
               </p>
+            ) : null}
+          </>
+        ) : chat.channel === "whatsapp" ? (
+          <div className="flex flex-col gap-2">
+            <div>
+              <SubmitButton
+                type="button"
+                pending={retomar.isPending}
+                disabled={retomar.isPending}
+                onClick={() => retomar.mutate()}
+              >
+                Retomar con la plantilla
+              </SubmitButton>
             </div>
-          ) : chat.client ? (
-            <div className="flex flex-wrap gap-2">
-              {person?.email ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    chat.client &&
-                    onAside({
-                      kind: "correo",
-                      clientId: chat.client.id,
-                      contactId: person.id ?? null,
-                    })
-                  }
-                >
-                  Escribir un correo
-                </Button>
-              ) : null}
-              {person?.phone && person.id ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={openWhatsApp.isPending}
-                  onClick={() =>
-                    chat.client &&
-                    person.id &&
-                    openWhatsApp.mutate({ clientId: chat.client.id, contactId: person.id })
-                  }
-                >
-                  Escribir por WhatsApp
-                </Button>
-              ) : null}
-              {!person?.email && !person?.phone ? (
-                <p className="text-sm text-muted-foreground">
-                  {sale.isPending
-                    ? "Buscando su correo y su celular…"
-                    : "No tenemos su correo ni su celular: agrégalos en Contactos de la ficha."}
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Sin cliente no tenemos otra forma de escribirle: primero di de quién es.
+            <p className="text-xs text-muted-foreground">
+              Sale la plantilla aprobada por WhatsApp, con tu nombre. Cuando responda, vuelve a
+              poder escribirse con texto libre.
             </p>
-          )}
-        </section>
-      </div>
+          </div>
+        ) : chat.client ? (
+          <div className="flex flex-wrap gap-2">
+            {person?.email ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  chat.client &&
+                  onAside({
+                    kind: "correo",
+                    clientId: chat.client.id,
+                    contactId: person.id ?? null,
+                  })
+                }
+              >
+                Escribir un correo
+              </Button>
+            ) : null}
+            {person?.phone && person.id ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={openWhatsApp.isPending}
+                onClick={() =>
+                  chat.client &&
+                  person.id &&
+                  openWhatsApp.mutate({ clientId: chat.client.id, contactId: person.id })
+                }
+              >
+                Escribir por WhatsApp
+              </Button>
+            ) : null}
+            {!person?.email && !person?.phone ? (
+              <p className="text-sm text-muted-foreground">
+                {sale.isPending
+                  ? "Buscando su correo y su celular…"
+                  : "No tenemos su correo ni su celular: agrégalos en las personas de la ficha."}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Sin cliente no tenemos otra forma de escribirle: primero di de quién es.
+          </p>
+        )}
+      </section>
+    </div>
+  )
+
+  return layout === "pane" ? (
+    <FormPanel
+      {...surface}
+      onClose={onClose}
+      title={chatTitle(chat)}
+      description={chatSubtitle(chat)}
+      hideSubmit={!canWrite}
+      submitLabel={`Enviar por ${channel}`}
+      cancelLabel={common.actions.close}
+      className="h-full"
+    >
+      {content}
+    </FormPanel>
+  ) : (
+    <FormDrawer
+      {...surface}
+      open
+      onClose={onClose}
+      title={chatTitle(chat)}
+      description={chatSubtitle(chat)}
+      hideSubmit={!canWrite}
+      submitLabel={`Enviar por ${channel}`}
+      cancelLabel={common.actions.close}
+    >
+      {content}
     </FormDrawer>
   )
 }
@@ -560,13 +769,7 @@ function Messages({ chat, onChanged }: { chat: ChatDetail; onChanged: () => void
               entry.kind === "entro" ? (
                 <Inbound key={entry.id} entry={entry} />
               ) : (
-                <Outbound
-                  key={entry.id}
-                  entry={entry}
-                  // En una venta todo es solo de Administración: decirlo solo donde Soporte también mira.
-                  marked={entry.adminOnly && Boolean(chat.client?.hasAccount)}
-                  onChanged={onChanged}
-                />
+                <Outbound key={entry.id} entry={entry} onChanged={onChanged} />
               ),
             )}
           </ol>
@@ -603,11 +806,9 @@ function Inbound({ entry }: { entry: Extract<ChatEntry, { kind: "entro" }> }) {
 
 function Outbound({
   entry,
-  marked,
   onChanged,
 }: {
   entry: Extract<ChatEntry, { kind: "salio" }>
-  marked: boolean
   onChanged: () => void
 }) {
   const resolve = useMutation({
@@ -624,12 +825,29 @@ function Outbound({
       {entry.template ? (
         <p className="text-xs font-medium text-muted-foreground">Plantilla para retomar</p>
       ) : null}
-      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{entry.body}</p>
+      {entry.files.length > 0 ? (
+        <p className="flex flex-wrap items-center gap-1.5 [overflow-wrap:anywhere]">
+          <Paperclip aria-hidden className="size-3.5 text-muted-foreground" />
+          {entry.files.map((file) => file.filename).join(" · ")}
+        </p>
+      ) : (
+        <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{entry.body}</p>
+      )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         {entry.byKairos ? <AgentMark size="sm" className="size-4" /> : null}
         <span>{sentLineWords(entry)}</span>
-        {marked ? <Badge variant="outline">Solo administración</Badge> : null}
       </div>
+      {entry.status === "enviado" && entry.failedAt ? (
+        <p className="text-xs text-destructive">
+          WhatsApp dijo que no le llegó{entry.failedWhy ? `: ${entry.failedWhy}` : ""}. Vuelve a «Te
+          toca».
+        </p>
+      ) : null}
+      {entry.byKairos && entry.basis.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium">En qué se basó:</span> {entry.basis.join(" · ")}
+        </p>
+      ) : null}
       {unsettled ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground">¿Salió?</span>

@@ -39,6 +39,7 @@ import { supportDay } from "../../lib/support-words"
 import { OrgLoadRecord } from "../org-load-record"
 import { ClientOnboardingSkeleton, ONBOARDING_GRID } from "../skeletons/client-account"
 import type { ClientTabProps } from "./account-tabs"
+import { ARRIVED_BY_WORDS, type CargaCandidate, useMarkCarga } from "./client-file-model"
 import { type ClientFileKind, ClientFileUploadDrawer } from "./client-files-tab"
 import { invalidateClient } from "./client-model"
 import { KairosItemCard, kairosItemsSchema } from "./kairos-items"
@@ -59,6 +60,19 @@ const stepSchema = z.object({
   lost: z.object({ at: z.string(), reason: z.string() }).optional(),
   // El código se lee como texto: uno nuevo del servidor no rompe la pestaña, solo no tiene botón.
   action: z.object({ code: z.string(), label: z.string(), adminOnly: z.boolean() }).optional(),
+  /** «Datos recibidos» mientras falta (solo Administración): lo que llegó y puede ser la carga. */
+  candidates: z
+    .array(
+      z.object({
+        fileId: z.string(),
+        filename: z.string(),
+        receivedAt: z.string(),
+        via: z.string(),
+        cargaDeleteAfter: z.string().nullable().default(null),
+        cargaDueNow: z.boolean().default(false),
+      }),
+    )
+    .optional(),
 })
 export type OnboardingStepRow = z.infer<typeof stepSchema>
 type Step = OnboardingStepRow
@@ -131,6 +145,8 @@ export function ClientOnboardingTab({ clientId, organizationId, isAdmin }: Clien
       ),
   })
   const account = useOrganizationAccount(organizationId)
+  // «Es la carga de datos» desde «Datos recibidos»: la misma operación de Documentos y del correo.
+  const carga = useMarkCarga(clientId)
   const refresh = () => {
     invalidateClient(queryClient, clientId)
     if (organizationId)
@@ -254,6 +270,7 @@ export function ClientOnboardingTab({ clientId, organizationId, isAdmin }: Clien
                 onNotApplicable={() => openNotApplicable(step)}
                 onClearNotApplicable={() => clearNa.mutate(step.key)}
                 clearing={clearNa.isPending && clearNa.variables === step.key}
+                onCarga={isAdmin ? carga.ask : undefined}
               />
             ))}
           </ol>
@@ -288,6 +305,7 @@ export function ClientOnboardingTab({ clientId, organizationId, isAdmin }: Clien
         <KairosProposes items={kairos} isAdmin={isAdmin} />
       </div>
 
+      {carga.dialog}
       {upload ? (
         <ClientFileUploadDrawer
           clientId={clientId}
@@ -366,6 +384,7 @@ function StepRow({
   onNotApplicable,
   onClearNotApplicable,
   clearing,
+  onCarga,
 }: {
   step: Step
   isNext: boolean
@@ -374,6 +393,8 @@ function StepRow({
   onNotApplicable: () => void
   onClearNotApplicable: () => void
   clearing: boolean
+  /** Marcar como la carga lo que llegó (solo Administración); sin él, no se ofrece. */
+  onCarga?: (file: CargaCandidate) => void
 }) {
   const done = step.state === "hecho"
   const notApplicable = step.state === "no_aplica"
@@ -405,6 +426,42 @@ function StepRow({
           {done && step.doneAt ? `${supportDay(step.doneAt)} · ` : ""}
           {stepDetailWords(step)}
         </p>
+        {onCarga && !done && step.candidates?.length ? (
+          <div className="flex flex-col gap-1.5 rounded-md border bg-muted/30 p-2">
+            <p className="text-xs font-medium">Llegó y puede ser la carga:</p>
+            <ul className="flex flex-col gap-1.5">
+              {step.candidates.map((candidate) => (
+                <li
+                  key={candidate.fileId}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+                >
+                  <span className="min-w-0 flex-1 basis-40 [overflow-wrap:anywhere]">
+                    <span className="font-medium">{candidate.filename}</span> · llegó{" "}
+                    {ARRIVED_BY_WORDS[candidate.via as keyof typeof ARRIVED_BY_WORDS] ??
+                      ARRIVED_BY_WORDS.correo}{" "}
+                    el {supportDay(candidate.receivedAt)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Es la carga de datos: ${candidate.filename}`}
+                    onClick={() =>
+                      onCarga({
+                        fileId: candidate.fileId,
+                        filename: candidate.filename,
+                        cargaDeleteAfter: candidate.cargaDeleteAfter,
+                        cargaDueNow: candidate.cargaDueNow,
+                      })
+                    }
+                  >
+                    Es la carga de datos
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {showAction || showNa ? (
           <div className="flex flex-wrap gap-2">
             {showAction ? (

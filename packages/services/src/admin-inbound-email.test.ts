@@ -301,14 +301,18 @@ describe("assignInboundEmail", () => {
         ],
       }),
     )
-    // Soporte también asigna; los adjuntos los registra el sistema porque son de Administración.
-    const result = await assignInboundEmail(ownerDb, support, id, lonely)
+    // Ligar un correo es de Administración (ADR 0196): Soporte no lo hace.
+    await expect(assignInboundEmail(ownerDb, support, id, lonely)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+    })
+    const result = await assignInboundEmail(ownerDb, admin, id, lonely)
     expect(result.fileIds).toHaveLength(1)
     const [row] = await ownerDb.select().from(saasInboundEmail).where(eq(saasInboundEmail.id, id))
     expect(row).toMatchObject({
       clientId: lonely,
       matchedBy: "persona",
-      matchedByUser: support.userId,
+      matchedByUser: admin.userId,
     })
     const [file] = await ownerDb
       .select()
@@ -321,7 +325,7 @@ describe("assignInboundEmail", () => {
     expect(file).toMatchObject({
       clientId: lonely,
       adminOnly: true,
-      createdBy: null,
+      createdBy: admin.userId,
       source: "correo",
       kind: "correo",
       deleteAfter: null,
@@ -385,7 +389,7 @@ describe("getInboundEmail: sus adjuntos", () => {
         cargaDueNow: false,
       }),
     ])
-    expect((await getInboundEmail(ownerDb, support, id)).files).toEqual([])
+    await expect(getInboundEmail(ownerDb, support, id)).rejects.toMatchObject({ status: 403 })
     const orphan = await ingestInboundEmail(
       ownerDb,
       mail({

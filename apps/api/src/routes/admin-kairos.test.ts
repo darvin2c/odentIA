@@ -6,9 +6,12 @@ import {
   kairosAiUsage,
   kairosItem,
   kairosWeekly,
+  saasChat,
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasInboundEmail,
+  saasInboundMessage,
   saasOpportunity,
   saasOutreach,
 } from "@odentia/db/schema/admin-arm"
@@ -19,6 +22,8 @@ import type { MailMessage } from "@odentia/mail"
 import {
   KAIROS_TEMPLATE_NOTE,
   type KairosDraftWriter,
+  type KairosImproveAsk,
+  type KairosImproveWriter,
   type KairosWeeklyWriter,
   ServiceError,
 } from "@odentia/services"
@@ -63,8 +68,11 @@ function idOf(key: string): string {
   return id
 }
 
+/** Lo que recibió «Mejorar con Kairós» en cada pedido. */
+const improveAsks: KairosImproveAsk[] = []
+
 /** El escritor de Kairós: plantillas sin modelo. */
-const writer: KairosDraftWriter & KairosWeeklyWriter = {
+const writer: KairosDraftWriter & KairosWeeklyWriter & KairosImproveWriter = {
   async draftMessage(input) {
     return { subject: `Para ${input.client.name}`, body: `Hola ${input.contact?.name ?? ""}` }
   },
@@ -76,6 +84,13 @@ const writer: KairosDraftWriter & KairosWeeklyWriter = {
   },
   async weeklySummary(input) {
     return { text: `Semana con ${input.figures.length} cifras` }
+  },
+  async improveText(input) {
+    improveAsks.push(input)
+    return {
+      ok: true,
+      text: `${input.text.charAt(0).toLocaleUpperCase("es")}${input.text.slice(1)}`,
+    }
   },
 }
 
@@ -547,5 +562,163 @@ describe("Hoy, lo que hizo y la pasada", () => {
     expect(body.data.items[0]).toMatchObject({ words: expect.any(String) })
     const bad = await call("/done?before=ayer", ADMIN)
     expect(bad.status).toBe(400)
+  })
+})
+
+describe("Mejorar con Kairós", () => {
+  it("lee lo último de la conversación, ya filtrado, y no envía ni guarda nada", async () => {
+    const { clientId } = await client("mejorar", { phone: "+51911111111" })
+    const [chat] = await ownerDb
+      .insert(saasChat)
+      .values({ channel: "whatsapp", address: "+51911111111", clientId })
+      .returning({ id: saasChat.id })
+    if (!chat) throw new Error("sin conversación")
+    await ownerDb.insert(saasInboundMessage).values([
+      {
+        chatId: chat.id,
+        externalId: "wamid.mejorar-1",
+        body: "Hola, ¿a qué hora es la presentación?",
+        receivedAt: new Date("2026-11-16T14:00:00Z"),
+      },
+      {
+        chatId: chat.id,
+        externalId: "wamid.mejorar-2",
+        body: "Mi paciente con DNI 44556677 no puede ir",
+        receivedAt: new Date("2026-11-16T14:05:00Z"),
+      },
+    ])
+    await ownerDb.insert(saasOutreach).values({
+      clientId,
+      chatId: chat.id,
+      channel: "whatsapp",
+      toAddress: "+51911111111",
+      body: "Es el lunes a las 10:00.\n— Ada · odentIA",
+      status: "enviado",
+      createdAt: new Date("2026-11-16T14:02:00Z"),
+    })
+    const outreach = (await ownerDb.select().from(saasOutreach)).length
+    const items = (await ownerDb.select().from(kairosItem)).length
+    const res = await post("/improve", ADMIN, {
+      text: "si, te confirmo el lunes",
+      channel: "whatsapp",
+      chatId: chat.id,
+    })
+    expect(res.status).toBe(200)
+    expect((await read(res)).data).toEqual({
+      text: "Si, te confirmo el lunes",
+      changed: true,
+      drafter: "modelo",
+    })
+    // Lo de un paciente no viaja; la firma de lo nuestro tampoco.
+    expect(improveAsks.at(-1)).toEqual({
+      text: "si, te confirmo el lunes",
+      channel: "whatsapp",
+      context: {
+        conversation: [
+          { who: "ellos", text: "Hola, ¿a qué hora es la presentación?" },
+          { who: "nosotros", text: "Es el lunes a las 10:00." },
+        ],
+        clientName: "Clínica mejorar (ficticia)",
+        product: "dental",
+      },
+    })
+    expect(JSON.stringify(improveAsks.at(-1))).not.toContain("44556677")
+    expect((await ownerDb.select().from(saasOutreach)).length).toBe(outreach)
+    expect((await ownerDb.select().from(kairosItem)).length).toBe(items)
+  })
+
+  it("con un correo lee su hilo: lo que escribió y lo que le respondimos, sin lo citado", async () => {
+    const [first] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<mejorar-hilo-1@example.test>",
+        fromAddress: "olga@example.test",
+        toAddress: "hola@odentia32.com",
+        subject: "Precios",
+        textBody: "¿Cuánto cuesta para 3 doctores?",
+        senderVerified: true,
+        receivedAt: new Date("2026-11-15T15:00:00Z"),
+      })
+      .returning({ id: saasInboundEmail.id })
+    await ownerDb.insert(saasOutreach).values({
+      channel: "correo",
+      toAddress: "olga@example.test",
+      subject: "Re: Precios",
+      body: "El plan Clínica cuesta USD 49 al mes.",
+      status: "enviado",
+      inReplyToEmailId: first?.id ?? null,
+      messageId: "<mejorar-resp-1@odentia32.com>",
+      references: "<mejorar-hilo-1@example.test>",
+      createdAt: new Date("2026-11-15T16:00:00Z"),
+    })
+    const [second] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<mejorar-hilo-2@example.test>",
+        fromAddress: "olga@example.test",
+        toAddress: "hola@odentia32.com",
+        subject: "Re: Precios",
+        textBody:
+          "Gracias. ¿Y el de Fundadores?\n\nEl 15 nov escribió:\n> El plan Clínica cuesta USD 49",
+        inReplyTo: "<mejorar-resp-1@odentia32.com>",
+        references: "<mejorar-hilo-1@example.test> <mejorar-resp-1@odentia32.com>",
+        senderVerified: true,
+        receivedAt: new Date("2026-11-16T15:00:00Z"),
+      })
+      .returning({ id: saasInboundEmail.id })
+    // Otro hilo de la misma persona no entra.
+    await ownerDb.insert(saasInboundEmail).values({
+      mailbox: "hola",
+      product: "dental",
+      messageId: "<mejorar-otro@example.test>",
+      fromAddress: "olga@example.test",
+      toAddress: "hola@odentia32.com",
+      subject: "Otra cosa",
+      textBody: "Esto es de otro hilo.",
+      senderVerified: true,
+      receivedAt: new Date("2026-11-16T15:30:00Z"),
+    })
+    const res = await post("/improve", ADMIN, {
+      text: "hola olga, fundadores no paga cuota",
+      channel: "correo",
+      emailId: second?.id,
+    })
+    expect(res.status).toBe(200)
+    expect(improveAsks.at(-1)?.context).toEqual({
+      conversation: [
+        { who: "ellos", text: "Asunto: Precios. ¿Cuánto cuesta para 3 doctores?" },
+        { who: "nosotros", text: "El plan Clínica cuesta USD 49 al mes." },
+        { who: "ellos", text: "Gracias. ¿Y el de Fundadores?" },
+      ],
+      product: "dental",
+    })
+  })
+
+  it("solo Administración, con un cuerpo válido y una conversación que existe", async () => {
+    const asks = improveAsks.length
+    const support = await post("/improve", SUPPORT, { text: "hola", channel: "whatsapp" })
+    expect(support.status).toBe(403)
+    const empty = await post("/improve", ADMIN, { text: "   ", channel: "whatsapp" })
+    expect(empty.status).toBe(400)
+    expect((await read(empty)).error.fields).toMatchObject({ text: "Escribe el mensaje" })
+    const both = await post("/improve", ADMIN, {
+      text: "hola",
+      channel: "correo",
+      chatId: "0b6a1c1e-1f3e-4a9b-8c2d-3e4f5a6b7c8d",
+      emailId: "1c7b2d2f-2a4f-4b8c-9d3e-4f5a6b7c8d9e",
+    })
+    expect(both.status).toBe(400)
+    const missing = await post("/improve", ADMIN, {
+      text: "hola",
+      channel: "whatsapp",
+      chatId: "0b6a1c1e-1f3e-4a9b-8c2d-3e4f5a6b7c8d",
+    })
+    expect(missing.status).toBe(404)
+    // Nada de eso llegó a Kairós.
+    expect(improveAsks.length).toBe(asks)
   })
 })
