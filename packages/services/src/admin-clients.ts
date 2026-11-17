@@ -25,6 +25,7 @@ import {
   saasClientFile,
   saasClientMilestone,
   saasInboundEmail,
+  saasInboundMessage,
   saasOpportunity,
   saasOutreach,
   saasProposal,
@@ -3692,9 +3693,33 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasClientFile.createdAt))
       .limit(many)
+    // Lo que llegó por un chat lo mandó quien escribió (su persona, el nombre que dio el canal o
+    // su dirección), no quien lo guardó en Documentos al ligar la conversación.
+    const messageIds = rows.flatMap((f) => (f.inboundMessageId ? [f.inboundMessageId] : []))
+    const senderOf = new Map(
+      messageIds.length
+        ? (
+            await tx
+              .select({
+                id: saasInboundMessage.id,
+                name: sql<string>`coalesce(nullif(trim(${saasClientContact.name}), ''), nullif(trim(${saasChat.displayName}), ''), ${saasChat.address})`,
+              })
+              .from(saasInboundMessage)
+              .innerJoin(saasChat, eq(saasChat.id, saasInboundMessage.chatId))
+              .leftJoin(saasClientContact, eq(saasClientContact.id, saasChat.contactId))
+              .where(inArray(saasInboundMessage.id, messageIds))
+          ).map((row) => [row.id, row.name] as const)
+        : [],
+    )
     for (const f of rows) {
       const category = fileCategory(f)
-      const who: Pending["who"] = f.source === "kairos" ? kairos : byUser(f.createdBy)
+      const sender = f.inboundMessageId ? senderOf.get(f.inboundMessageId) : undefined
+      const who: Pending["who"] =
+        f.source === "kairos"
+          ? kairos
+          : sender
+            ? { kind: "clinica", name: sender }
+            : byUser(f.createdBy)
       const link = { kind: "archivo" as const, id: f.id }
       push({
         id: `archivo:${f.id}:subido`,

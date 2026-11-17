@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto"
 import {
+  saasChat,
   saasClient,
   saasClientContact,
   saasClientFile,
   saasClientMilestone,
   saasInboundEmail,
+  saasInboundMessage,
   saasOpportunity,
   saasOutreach,
   saasProposal,
@@ -1334,6 +1336,40 @@ describe("el historial", () => {
       openedBy: userId,
       createdAt: at(4),
     })
+    // Un archivo que mandó Rosa por WhatsApp y quedó en Documentos cuando Administración ligó el
+    // chat: lo mandó ella, no quien lo ligó.
+    const digits = () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0")
+    const [rosa] = await ownerDb
+      .insert(saasClientContact)
+      .values({ clientId: id, name: "Rosa Quispe", phone: `+51954${digits()}` })
+      .returning({ id: saasClientContact.id })
+    const [chat] = await ownerDb
+      .insert(saasChat)
+      .values({
+        channel: "whatsapp",
+        address: `+51955${digits()}`,
+        displayName: "Rosa",
+        clientId: id,
+        contactId: rosa?.id,
+        lastInboundAt: at(3),
+      })
+      .returning({ id: saasChat.id })
+    const [message] = await ownerDb
+      .insert(saasInboundMessage)
+      .values({ chatId: chat?.id ?? "", externalId: `wamid.h2-${tag}`, receivedAt: at(3) })
+      .returning({ id: saasInboundMessage.id })
+    await ownerDb.insert(saasClientFile).values({
+      clientId: id,
+      kind: "correo",
+      source: "whatsapp",
+      filename: `pacientes-${tag}.csv`,
+      objectKey: `admin/clients/${id}/pacientes-${tag}.csv`,
+      contentType: "text/csv",
+      sizeBytes: 10,
+      createdBy: admin.userId,
+      inboundMessageId: message?.id,
+      createdAt: at(2),
+    })
 
     const forAdmin = await clientTimeline(ownerDb, admin, id, { limit: 100 })
     const byTitle = (title: string) => forAdmin.items.find((i) => i.title === title)
@@ -1383,6 +1419,11 @@ describe("el historial", () => {
     expect(byTitle("Abrió un caso de soporte")).toMatchObject({
       category: "soporte",
       link: { kind: "soporte" },
+    })
+    expect(byTitle(`Llegó por WhatsApp: pacientes-${tag}.csv`)).toMatchObject({
+      who: { kind: "clinica", name: "Rosa Quispe" },
+      category: "conversaciones",
+      link: { kind: "archivo" },
     })
     // Toda fila abre algo.
     expect(forAdmin.items.every((i) => Boolean(i.link?.kind))).toBe(true)
