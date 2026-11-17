@@ -39,6 +39,7 @@ import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { listProgressReports } from "./clinic-progress-report.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import type { Storage } from "./storage.js"
@@ -448,7 +449,9 @@ async function visibleFile(tx: Db, staff: AdminActor, fileId: string) {
 
 /**
  * La dirección firmada (15 min) para descargar un documento. Deja auditoría:
- * lo que manda la clínica puede traer datos de pacientes.
+ * lo que manda la clínica puede traer datos de pacientes. Firmada para
+ * guardarse (`attachment`, con su nombre): un PDF o una página que llegó de
+ * fuera no se abre como una página del dominio del almacenamiento.
  */
 export async function clientFileUrl(
   tx: Db,
@@ -464,7 +467,10 @@ export async function clientFileUrl(
     metadata: { clientId: row.clientId, kind: row.kind },
   })
   return {
-    url: await storage.attachmentUrl(row.objectKey, 900),
+    url: await storage.attachmentUrl(row.objectKey, 900, {
+      filename: row.filename,
+      as: "attachment",
+    }),
     filename: row.filename,
     contentType: row.contentType,
   }
@@ -530,16 +536,74 @@ async function noteClientFileViewed(
   })
 }
 
+const CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Lo que la API necesita para mostrar el PDF de un informe de la carga tal como salió (en el
+ * historial y en Documentos). Solo Administración, como el registro de la carga
+ * (`requireLoadAdmin`), y del mismo registro que lee Alta (`listProgressReports`). Deja que alguien
+ * lo vio, una vez por persona, informe y día de Lima (`client_report.viewed`, como un documento):
+ * el informe cuenta lo que se cargó de la clínica.
+ */
+export async function clientReportContent(
+  tx: Db,
+  actor: AdminActor | null,
+  clientId: string,
+  number: number,
+  now = new Date(),
+): Promise<{ objectKey: string; filename: string }> {
+  if (actor?.role !== "admin")
+    throw new ServiceError("FORBIDDEN", 403, "Solo Administración ve los informes de la carga")
+  if (!CLIENT_UUID.test(clientId)) throw notFound("Cliente")
+  if (!Number.isInteger(number) || number < 1)
+    throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
+  const [client] = await tx
+    .select({ organizationId: saasClient.organizationId })
+    .from(saasClient)
+    .where(eq(saasClient.id, clientId))
+    .limit(1)
+  if (!client) throw notFound("Cliente")
+  const reports = client.organizationId ? await listProgressReports(tx, client.organizationId) : []
+  const found = reports.find((report) => report.number === number)
+  if (!found?.pdfKey)
+    throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+  const today = limaDate(now)
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`client_report.viewed:${actor.userId}:${clientId}:${number}:${today}`}, 0))`,
+  )
+  const [seen] = await tx
+    .select({ id: adminAudit.id })
+    .from(adminAudit)
+    .where(
+      and(
+        eq(adminAudit.action, "client_report.viewed"),
+        eq(adminAudit.actorUserId, actor.userId),
+        eq(adminAudit.entityId, clientId),
+        sql`${adminAudit.metadata}->>'number' = ${String(number)}`,
+        sql`${adminAudit.metadata}->>'day' = ${today}`,
+      ),
+    )
+    .limit(1)
+  if (!seen)
+    await writeAdminAudit(tx, actor, {
+      action: "client_report.viewed",
+      organizationId: client.organizationId,
+      entityId: clientId,
+      metadata: { clientId, number, day: today },
+    })
+  return { objectKey: found.pdfKey, filename: `informe-${number}.pdf` }
+}
+
 /** Un archivo que se puede ver: el mismo permiso que descargarlo y un tipo que tiene vista. */
 async function viewableFile(
   tx: Db,
   staff: AdminActor,
   fileId: string,
-  want: "imagen" | "pdf" | "cualquiera",
+  want: "imagen" | "pdf",
 ) {
   const row = await visibleFile(tx, staff, fileId)
   const kind = clientFilePreviewKind(row.contentType)
-  if (!kind || (want !== "cualquiera" && kind !== want))
+  if (!kind || kind !== want)
     throw new ServiceError(
       "PREVIEW_UNSUPPORTED",
       409,
@@ -549,9 +613,11 @@ async function viewableFile(
 }
 
 /**
- * La dirección firmada (5 min) para ver una imagen o un PDF sin descargarlo: el almacenamiento
- * lo sirve para verse y con el tipo que se revisó al recibirlo. El mismo permiso que descargar
- * (Soporte no ve lo `admin_only`) y su constancia, una vez al día (`client_file.viewed`).
+ * La dirección firmada (5 min) para ver una imagen sin descargarla: el almacenamiento la sirve
+ * para verse y con el tipo que se revisó al recibirla. Solo imágenes: un PDF se dibuja con sus
+ * bytes desde la API (`clientFileContent`), nunca abierto en el dominio del almacenamiento. El
+ * mismo permiso que descargar (Soporte no ve lo `admin_only`) y su constancia, una vez al día
+ * (`client_file.viewed`).
  */
 export async function clientFilePreviewUrl(
   tx: Db,
@@ -561,7 +627,7 @@ export async function clientFilePreviewUrl(
   now = new Date(),
 ): Promise<{ url: string }> {
   const staff = requireStaff(actor)
-  const { row } = await viewableFile(tx, staff, fileId, "cualquiera")
+  const { row } = await viewableFile(tx, staff, fileId, "imagen")
   await noteClientFileViewed(tx, staff, row, now)
   return {
     url: await storage.attachmentUrl(row.objectKey, CLIENT_FILE_PREVIEW_TTL_SECONDS, {

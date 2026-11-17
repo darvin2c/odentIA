@@ -31,6 +31,7 @@ import {
   prepareChatReply,
   undoChatNotClinic,
 } from "./admin-inbound-chat.js"
+import { chatConversationState } from "./admin-inbox.js"
 import { resolveOutreach } from "./admin-sales.js"
 import { createSaasPlan } from "./saas-billing.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -503,13 +504,43 @@ describe("prepareChatReply y su resultado", () => {
     expect(await activitiesOfChat(chatId)).toHaveLength(2)
   })
 
-  it("«failed» después de salir no cambia nada; antes, no salió y es final", async () => {
+  it("«failed» después de salir dice que no llegó (una vez) y la respuesta no cuenta; antes, no salió y es final", async () => {
     const { chatId } = await ingestInboundChat(ownerDb, message({ address: phone() }))
     const sent = await prepareChatReply(ownerDb, admin, chatId, { body: "Uno" })
     await markChatOutreachSent(ownerDb, sent.outreachId, "wamid.uno")
+    expect(await chatConversationState(ownerDb, chatId)).toMatchObject({ state: "respondida" })
+    // Un archivo por enlace que Meta no pudo descargar: salió, pero no llegó.
     expect(
-      await applyChatStatus(ownerDb, { externalId: "wamid.uno", status: "failed" }),
+      await applyChatStatus(ownerDb, {
+        externalId: "wamid.uno",
+        status: "failed",
+        why: "131053: no se pudo descargar el archivo",
+      }),
+    ).toMatchObject({ status: "enviado", changed: true })
+    expect(await outreachOf(sent.outreachId)).toMatchObject({
+      status: "enviado",
+      failedAt: expect.any(Date),
+      failedWhy: "131053: no se pudo descargar el archivo",
+    })
+    // No cuenta como respuesta: te toca, y el chat lo dice.
+    expect(await chatConversationState(ownerDb, chatId)).toMatchObject({
+      state: "te_toca",
+      stateWhy: "No llegó tu respuesta",
+    })
+    const detail = await getChat(ownerDb, admin, chatId)
+    expect(detail.entries.find((entry) => entry.id === sent.outreachId)).toMatchObject({
+      kind: "salio",
+      status: "enviado",
+      failedAt: expect.any(Date),
+      failedWhy: "131053: no se pudo descargar el archivo",
+    })
+    // Una sola vez.
+    expect(
+      await applyChatStatus(ownerDb, { externalId: "wamid.uno", status: "failed", why: "otra" }),
     ).toMatchObject({ status: "enviado", changed: false })
+    expect((await outreachOf(sent.outreachId)).failedWhy).toBe(
+      "131053: no se pudo descargar el archivo",
+    )
 
     const pending = await prepareChatReply(ownerDb, admin, chatId, { body: "Dos" })
     expect(

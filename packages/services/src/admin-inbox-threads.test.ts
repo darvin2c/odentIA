@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   firstMessageId,
+  headerThreadKeyOf,
   inboxPreview,
   outreachThreadKeyOf,
   type ThreadHeaders,
@@ -12,15 +13,44 @@ import {
  * `emailThreadKeySql` (la prueba con base está en `admin-inbox.test.ts`).
  */
 
+/** Quién está en cada hilo, como lo diría `threadAddressSql`. */
+const members =
+  (byKey: Record<string, string[]>) =>
+  (key: string): readonly string[] =>
+    byKey[key] ?? []
+
 describe("threadKeyOf", () => {
   it("el primer Message-ID de su References, tal como viene (sin minúsculas ni espacios)", () => {
     expect(
-      threadKeyOf({
-        references: "  <Raiz@Clinica.test>   <hijo@x.test>\n <nieto@x.test>",
-        inReplyTo: "<nieto@x.test>",
-        messageId: "<propio@x.test>",
-      }),
+      threadKeyOf(
+        {
+          references: "  <Raiz@Clinica.test>   <hijo@x.test>\n <nieto@x.test>",
+          inReplyTo: "<nieto@x.test>",
+          messageId: "<propio@x.test>",
+          fromAddress: "Rosa@Clinica.test",
+        },
+        undefined,
+        members({ "<Raiz@Clinica.test>": ["rosa@clinica.test"] }),
+      ),
     ).toBe("<Raiz@Clinica.test>")
+  })
+
+  it("quien no está en el hilo no entra aunque traiga su Message-ID: es su propia conversación", () => {
+    const spoofed = {
+      references: "<raiz@clinica.test> <nuestro@odentia32.com>",
+      inReplyTo: "<nuestro@odentia32.com>",
+      messageId: "<falso@otro.test>",
+      fromAddress: "alguien@otro.test",
+    }
+    const inThread = members({ "<raiz@clinica.test>": ["rosa@clinica.test"] })
+    expect(threadKeyOf(spoofed, undefined, inThread)).toBe("<falso@otro.test>")
+    // Sin saber quién está en el hilo, tampoco entra; sus cabeceras igual apuntan ahí.
+    expect(threadKeyOf(spoofed)).toBe("<falso@otro.test>")
+    expect(headerThreadKeyOf(spoofed)).toBe("<raiz@clinica.test>")
+    // Quien sí está entra, con o sin mayúsculas.
+    expect(
+      threadKeyOf({ ...spoofed, fromAddress: " ROSA@clinica.test " }, undefined, inThread),
+    ).toBe("<raiz@clinica.test>")
   })
 
   it("sin References: la clave de su padre, que se lee de sus propias cabeceras", () => {
@@ -38,25 +68,59 @@ describe("threadKeyOf", () => {
       },
     }
     const parentOf = (id: string) => known[id]
+    const inThread = members({
+      "<raiz@clinica.test>": ["r@x.test"],
+      "<abuelo@clinica.test>": ["r@x.test"],
+    })
     expect(
       threadKeyOf(
-        { references: null, inReplyTo: "<nuestro@odentia32.com>", messageId: "<r@x.test>" },
+        {
+          references: null,
+          inReplyTo: "<nuestro@odentia32.com>",
+          messageId: "<r@x.test>",
+          fromAddress: "r@x.test",
+        },
         parentOf,
+        inThread,
       ),
     ).toBe("<raiz@clinica.test>")
     expect(
       threadKeyOf(
-        { references: null, inReplyTo: "<padre@clinica.test>", messageId: "<r@x.test>" },
+        {
+          references: null,
+          inReplyTo: "<padre@clinica.test>",
+          messageId: "<r@x.test>",
+          fromAddress: "r@x.test",
+        },
         parentOf,
+        inThread,
       ),
     ).toBe("<abuelo@clinica.test>")
   })
 
-  it("un In-Reply-To que no conocemos es la clave: dos respuestas a ese correo van juntas", () => {
-    const one = threadKeyOf({ inReplyTo: "<ajeno@x.test>", messageId: "<a@x.test>" }, () => null)
-    const two = threadKeyOf({ inReplyTo: "<ajeno@x.test>", messageId: "<b@x.test>" })
+  it("un In-Reply-To que no conocemos es la clave: dos respuestas suyas a ese correo van juntas", () => {
+    // Del hilo de un correo que no conocemos es quien escribió primero apuntándole.
+    const inThread = members({ "<ajeno@x.test>": ["ana@x.test"] })
+    const one = threadKeyOf(
+      { inReplyTo: "<ajeno@x.test>", messageId: "<a@x.test>", fromAddress: "ana@x.test" },
+      () => null,
+      inThread,
+    )
+    const two = threadKeyOf(
+      { inReplyTo: "<ajeno@x.test>", messageId: "<b@x.test>", fromAddress: "ana@x.test" },
+      undefined,
+      inThread,
+    )
     expect(one).toBe("<ajeno@x.test>")
     expect(two).toBe(one)
+    // Otra persona que responde lo mismo queda en su propia conversación.
+    expect(
+      threadKeyOf(
+        { inReplyTo: "<ajeno@x.test>", messageId: "<c@y.test>", fromAddress: "otro@y.test" },
+        undefined,
+        inThread,
+      ),
+    ).toBe("<c@y.test>")
   })
 
   it("sin cabeceras del hilo: su propio Message-ID", () => {

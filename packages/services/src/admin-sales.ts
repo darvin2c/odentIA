@@ -80,6 +80,7 @@ import {
   isNull,
   lte,
   max,
+  ne,
   type SQL,
   sql,
 } from "drizzle-orm"
@@ -101,6 +102,7 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   brandMailbox,
   type MailSender,
@@ -2626,12 +2628,18 @@ export async function prepareEmailReply(
       .limit(1)
     if (!item || item.emailId !== email.id)
       throw invalidField("kairosItemId", "Ese borrador de Kairós no es de este correo")
-    // El borrador se preparó cuando nadie había respondido: si alguien respondió, no sale.
-    const [answered] = await tx
-      .select({ id: saasOutreach.id })
-      .from(saasOutreach)
-      .where(eq(saasOutreach.inReplyToEmailId, email.id))
-      .limit(1)
+    // El borrador se preparó cuando nadie había respondido: si alguien respondió este correo, u
+    // otro de su hilo después de que llegó (la regla de la Bandeja), no sale una segunda respuesta.
+    const [answered] = [
+      ...(await tx.execute<{ id: string }>(
+        sql`select o.id from admin.saas_outreach o
+          where o.channel = 'correo' and (o.in_reply_to_email_id = ${email.id}::uuid
+            or (o.created_at >= ${email.receivedAt.toISOString()}::timestamptz
+              and ${outreachThreadKeySql("o")} = (select ${emailThreadKeySql("te")}
+                from admin.saas_inbound_email te where te.id = ${email.id}::uuid)))
+          limit 1`,
+      )),
+    ]
     if (answered)
       throw new ServiceError(
         "ALREADY_REPLIED",
@@ -2695,7 +2703,8 @@ export async function prepareEmailReply(
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar la respuesta")
   if (sender.staffUserId) await markStaffMailUsed(tx, sender.staffUserId, now)
-  if (!kairosItemId) await closeKairosReplyDrafts(tx, actor, email.id, client, now)
+  // Con esta respuesta, ningún otro borrador del hilo contesta ya lo último.
+  await closeKairosReplyDrafts(tx, actor, email.id, client, now, kairosItemId)
   await writeAdminAudit(tx, actor, {
     action: "arm.reply_prepared",
     organizationId: client?.organizationId ?? null,
@@ -2713,11 +2722,12 @@ export async function prepareEmailReply(
 }
 
 /**
- * Una respuesta a mano deja sin efecto el borrador de Kairós de ese correo
- * (`responder_correo` en espera): queda `vencida` con su motivo, como lo que
- * ya no vale (`markStale` de Kairós), y su clave queda libre. No envía nada;
- * Kairós no lo vuelve a preparar porque el correo ya tiene respuesta
- * (`ruleReplyEmails`). «Lo que hizo» lo cuenta (`kairos.item_closed`).
+ * Una respuesta a un correo (a mano o con el borrador `approved`) deja sin efecto los borradores
+ * de Kairós de todo su hilo (`responder_correo` en espera, la regla de hilo de la Bandeja): uno de
+ * un correo anterior saldría como segunda respuesta. Quedan `vencida` con su motivo, como lo que
+ * ya no vale (`markStale` de Kairós), y su clave queda libre. No envía nada; Kairós no los vuelve
+ * a preparar porque el hilo ya tiene respuesta (`ruleReplyEmails`). «Lo que hizo» lo cuenta
+ * (`kairos.item_closed`).
  */
 async function closeKairosReplyDrafts(
   tx: Db,
@@ -2725,6 +2735,7 @@ async function closeKairosReplyDrafts(
   emailId: string,
   client: { organizationId: string | null } | null,
   now: Date,
+  approved: string | null = null,
 ): Promise<void> {
   const open = await tx
     .select({ id: kairosItem.id })
@@ -2733,7 +2744,10 @@ async function closeKairosReplyDrafts(
       and(
         eq(kairosItem.kind, "responder_correo"),
         eq(kairosItem.status, "espera"),
-        sql`${kairosItem.payload} ->> 'emailId' = ${emailId}`,
+        approved ? ne(kairosItem.id, approved) : undefined,
+        sql`exists (select 1 from admin.saas_inbound_email de, admin.saas_inbound_email re
+          where de.id::text = ${kairosItem.payload} ->> 'emailId' and re.id = ${emailId}::uuid
+            and (de.id = re.id or ${emailThreadKeySql("de")} = ${emailThreadKeySql("re")}))`,
       ),
     )
     .for("update")
@@ -2744,11 +2758,12 @@ async function closeKairosReplyDrafts(
     .where(eq(user.id, actor.userId))
     .limit(1)
   const who = staffShortName(person?.name ?? "") || "Alguien del equipo"
+  const how = approved ? "respondió este hilo con otro borrador" : "lo respondió a mano"
   const closed = await tx
     .update(kairosItem)
     .set({
       status: "vencida",
-      error: `${who} lo respondió a mano: este borrador no sale`,
+      error: `${who} ${how}: este borrador no sale`,
       idempotencyKey: sql`'vencida:' || ${kairosItem.id}::text || ':' || ${kairosItem.idempotencyKey}`,
       updatedAt: now,
     })
@@ -2773,7 +2788,9 @@ async function closeKairosReplyDrafts(
         clientId: item.clientId,
         itemId: item.id,
         title: item.title,
-        why: `${who} respondió el correo a mano`,
+        why: approved
+          ? `${who} respondió el hilo con otro borrador`
+          : `${who} respondió el correo a mano`,
         adminOnly: item.adminOnly,
       },
     })

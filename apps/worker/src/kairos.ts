@@ -226,11 +226,12 @@ export function summaryActivityEntry(row: SummaryActivityRow): KairosActivityEnt
 
 /**
  * Los hechos de un cliente, cada uno con su fuente (`actividad:<id>`,
- * `contacto:<id>`…). Lo ve también Soporte: sin lo que es solo de
- * administración, sin importes, sin el cuerpo de un correo que llegó, sin el
- * texto de lo que le escribimos (es lo que le contamos, no algo de la clínica:
- * `summaryActivityFact`) y sin nada que parezca de un paciente
- * (`kairosAllowedFact`).
+ * `contacto:<id>`…). Lo ve también Soporte, que no ve las conversaciones
+ * (ADR 0196): sin lo que es solo de administración, sin importes, sin el texto
+ * de ningún correo ni chat, de ida o de vuelta (de lo que nos escribió, solo
+ * quién y por dónde; de lo que le escribimos, el asunto: `summaryActivityFact`;
+ * el chat de una clínica con app no es `admin_only`) y sin nada que parezca de
+ * un paciente (`kairosAllowedFact`).
  */
 export async function clientSummaryFacts(
   ownerDb: Db,

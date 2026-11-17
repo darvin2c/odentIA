@@ -14,7 +14,6 @@ import {
 import { inArray } from "drizzle-orm"
 import { CHANNEL_RULES } from "./admin-channel-rules.js"
 import type { AdminChannels } from "./admin-channels.js"
-import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import {
   type ChatReply,
   type ChatReplyPart,
@@ -203,24 +202,20 @@ export interface ChatOutboundPart extends ChatOutbound {
 /**
  * Lo que sale de una respuesta, en orden, listo para `sendChatOutreach`: el texto tal cual y cada
  * archivo con la dirección firmada por una hora de su documento (Meta la descarga al enviarlo).
- * Cada archivo deja `client_file.sent` con quien lo manda, como `client_file.downloaded` al
- * bajarlo. Va en la misma transacción que la reserva: si no se puede firmar, no queda nada
- * pendiente.
+ * Va en la misma transacción que la reserva: si no se puede firmar, no queda nada pendiente. La
+ * constancia de cada archivo (`client_file.sent`, a nombre de quien lo manda) la deja la parte
+ * cuando de verdad sale (`settleChatOutreach`), no la reserva: lo que no salió no se dio a Meta.
  */
 export async function chatReplyOutbound(
   tx: Db,
-  actor: AdminActor,
   storage: Pick<Storage, "attachmentUrl"> | undefined,
   reply: ChatReply,
-  channel: SaasChatChannel,
 ): Promise<ChatOutboundPart[]> {
   const fileIds = reply.parts.flatMap((part) => (part.fileId ? [part.fileId] : []))
   const files = fileIds.length
     ? await tx
         .select({
           id: saasClientFile.id,
-          clientId: saasClientFile.clientId,
-          kind: saasClientFile.kind,
           objectKey: saasClientFile.objectKey,
           contentType: saasClientFile.contentType,
           filename: saasClientFile.filename,
@@ -248,17 +243,6 @@ export async function chatReplyOutbound(
     if (!file || !storage)
       throw new ServiceError("FILE_GONE", 409, "Un archivo ya no está: vuelve a elegirlos")
     const url = await storage.attachmentUrl(file.objectKey, CHAT_FILE_URL_SECONDS)
-    await writeAdminAudit(tx, actor, {
-      action: "client_file.sent",
-      entityId: file.id,
-      metadata: {
-        clientId: file.clientId,
-        kind: file.kind,
-        chatId: reply.chatId,
-        channel,
-        outreachId: part.outreachId,
-      },
-    })
     out.push({
       ...base,
       media: { url, mimeType: file.contentType, filename: file.filename },

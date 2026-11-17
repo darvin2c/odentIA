@@ -233,7 +233,7 @@ describe("cambios del plan (ADR 0196)", () => {
       createdAt: new Date(Date.now() + 120_000),
     })
 
-    const changes = await listSaasPlanChanges(ownerDb, orgId)
+    const changes = await listSaasPlanChanges(ownerDb, admin, orgId)
     expect(changes.map((change) => change.words)).toEqual([
       "Terminaron sus condiciones de Fundadora; ahora rige Plan odentIA",
       "Se pausó su plan: Vacaciones de la clínica",
@@ -242,12 +242,14 @@ describe("cambios del plan (ADR 0196)", () => {
     ])
     expect(changes[0]?.by).toBeNull()
     expect(changes[1]?.by).toEqual({ userId: admin.userId, name: "Administración" })
-    expect((await listSaasPlanChanges(ownerDb, orgId, { before: paused })).map((c) => c.action)).toEqual([
+    expect((await listSaasPlanChanges(ownerDb, admin, orgId, { before: paused })).map((c) => c.action)).toEqual([
       "saas.spend_cap_set",
       "saas.discount_set",
     ])
     // Soporte: sin precios, presupuestos ni el motivo de la pausa.
-    const forSupport = await listSaasPlanChanges(ownerDb, orgId, { forSupport: true })
+    const forSupport = await listSaasPlanChanges(ownerDb, { role: "support" }, orgId)
     expect(forSupport.map((change) => change.words)).toEqual(["Se pausó su plan"])
+    // Sin decir quién mira, lo seguro: lo mismo que Soporte.
+    expect((await listSaasPlanChanges(ownerDb, null, orgId)).map((change) => change.words)).toEqual(["Se pausó su plan"])
   })
 })

@@ -3,6 +3,7 @@ import {
   kairosAiUsage,
   kairosItem,
   kairosWeekly,
+  saasChat,
   saasClient,
   saasClientContact,
   saasClientFile,
@@ -262,6 +263,11 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
     .values({ clientId: id, name: "Rosa Anuncio", email: "rosa@anuncio.test", isPrimary: true })
     .returning()
   const sentAt = new Date("2026-11-12T15:00:00Z")
+  // Su WhatsApp: el chat de una clínica con app no es solo de Administración (`admin_only` falso).
+  const [chat] = await ownerDb
+    .insert(saasChat)
+    .values({ channel: "whatsapp", address: "+51987650001", clientId: id, contactId: rosa?.id })
+    .returning()
   // El anuncio que salió por correo y su actividad, como la deja `outreachWentOut`.
   await ownerDb.insert(saasOutreach).values({
     clientId: id,
@@ -300,6 +306,25 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
       outcome: "Quedó en avisar",
       happenedAt: new Date("2026-11-14T15:00:00Z"),
     },
+    // Lo que escribió por su WhatsApp y lo que le respondimos ahí: Soporte lee el resumen y no
+    // ve las conversaciones (ADR 0196), así que de ninguno de los dos llega el texto.
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "entro",
+      body: "Mi clave de Meta es 4471-ROSA, ¿la conecto así?",
+      contactId: rosa?.id ?? null,
+      chatId: chat?.id ?? null,
+      happenedAt: new Date("2026-11-15T15:00:00Z"),
+    },
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "salio",
+      body: "No nos mandes tu clave por aquí.",
+      chatId: chat?.id ?? null,
+      happenedAt: new Date("2026-11-15T15:05:00Z"),
+    },
   ])
   const facts = await clientSummaryFacts(ownerDb, {
     id,
@@ -321,8 +346,12 @@ it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a
   expect(texts).toContain(
     "WhatsApp del 14 de noviembre de 2026: Le escribí para coordinar la demo · quedó en: Quedó en avisar",
   )
-  // El texto del anuncio nunca llega como hecho de la clínica.
+  expect(texts).toContain("Rosa Anuncio nos escribió por WhatsApp el 15 de noviembre de 2026")
+  expect(texts).toContain("Le escribimos por WhatsApp el 15 de noviembre de 2026")
+  // El texto del anuncio nunca llega como hecho de la clínica, ni el de una conversación.
   expect(JSON.stringify(facts)).not.toContain("Ya puedes conectar")
+  expect(JSON.stringify(facts)).not.toContain("4471")
+  expect(JSON.stringify(facts)).not.toContain("No nos mandes")
 })
 
 it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () => {

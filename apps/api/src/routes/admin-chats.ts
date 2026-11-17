@@ -200,7 +200,7 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
         .limit(1)
       const chatChannel = (chat?.channel ?? "whatsapp") as SaasChatChannel
       if (!chatSenderOf(deps.channels, chatChannel)) throw chatChannelOff(chatChannel)
-      const parts = await chatReplyOutbound(tx, actor, deps.storage, prepared, chatChannel)
+      const parts = await chatReplyOutbound(tx, deps.storage, prepared)
       return { reply: prepared, channel: chatChannel, outbound: parts }
     })
     return send(c, reply, channel, outbound)

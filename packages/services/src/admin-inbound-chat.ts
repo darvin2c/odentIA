@@ -50,6 +50,7 @@ import {
   saasOutreach,
   saasProposal,
 } from "@odentia/db/schema/admin-arm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { mailBrandName } from "@odentia/mail"
@@ -998,6 +999,12 @@ export type ChatEntry =
       /** Cuándo dijo WhatsApp que llegó al teléfono y que lo leyó (los otros canales no lo dicen). */
       deliveredAt: Date | null
       readAt: Date | null
+      /**
+       * Cuándo dijo WhatsApp que no llegó lo que ya había salido, y por qué: sigue `enviado`, pero
+       * no cuenta como respuesta («No llegó tu respuesta»).
+       */
+      failedAt: Date | null
+      failedWhy: string | null
       /** En qué se basó Kairós para responder («los precios de la web»); vacío si no lo escribió él. */
       basis: string[]
       /** El archivo que salió en este mensaje (uno por mensaje); vacío si es texto. */
@@ -1195,6 +1202,8 @@ export async function getChat(
         byKairos: row.byKairos,
         deliveredAt: row.deliveredAt,
         readAt: row.readAt,
+        failedAt: row.failedAt,
+        failedWhy: row.failedWhy,
         basis: basisOf.get(row.id) ?? [],
         files: row.fileIds.flatMap((id) => {
           const file = sentFileOf.get(id)
@@ -1373,9 +1382,16 @@ export interface ChatReply {
 }
 
 /**
+ * Lo que mandó la clínica para la carga (`archivo_clinica`) no sale por un chat: Meta guardaría
+ * una copia fuera de lo que se borra a los 30 días (lo que promete el contrato).
+ */
+export const CHAT_CARGA_FILE_MESSAGE =
+  "Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días"
+
+/**
  * Los documentos que salen en una respuesta, en el orden en que se eligieron: del cliente de la
- * conversación, sin borrar y que el canal acepta (`channelFileProblem`, con el nombre de cada uno
- * que no). Sin cliente no hay de dónde: 409.
+ * conversación, sin borrar, que no son la carga (`CHAT_CARGA_FILE_MESSAGE`) y que el canal acepta
+ * (`channelFileProblem`, con el nombre de cada uno que no). Sin cliente no hay de dónde: 409.
  */
 async function chatReplyFiles(
   tx: Db,
@@ -1394,6 +1410,7 @@ async function chatReplyFiles(
   const rows = await tx
     .select({
       id: saasClientFile.id,
+      kind: saasClientFile.kind,
       filename: saasClientFile.filename,
       contentType: saasClientFile.contentType,
       sizeBytes: saasClientFile.sizeBytes,
@@ -1413,6 +1430,13 @@ async function chatReplyFiles(
   })
   if (files.length !== ids.length)
     throw invalidField("fileIds", "Un archivo ya no está o no es de este cliente")
+  // La carga no sale por chat: dicho junto a cada archivo que lo es.
+  const carga: Record<string, string> = {}
+  files.forEach((file, index) => {
+    if (file.kind === "archivo_clinica") carga[`fileIds[${index}]`] = CHAT_CARGA_FILE_MESSAGE
+  })
+  if (Object.keys(carga).length > 0)
+    throw validation(CHAT_CARGA_FILE_MESSAGE, { fileIds: CHAT_CARGA_FILE_MESSAGE, ...carga })
   // Cada archivo que el canal no acepta, con su nombre: ninguno se calla por el primero.
   const problems: Record<string, string> = {}
   files.forEach((file, index) => {
@@ -1839,7 +1863,10 @@ async function settleChatOutreach(
     .where(eq(saasOutreach.id, row.id))
     .returning()
   if (!updated) throw notFound("Envío")
-  if (status === "enviado") await recordReplyActivity(tx, updated, now)
+  if (status === "enviado") {
+    await recordReplyActivity(tx, updated, now)
+    await noteFilesSent(tx, updated)
+  }
   await writeAdminAudit(tx, null, {
     action:
       status === "enviado"
@@ -1859,6 +1886,43 @@ async function settleChatOutreach(
   if (status !== "enviado" && updated.byKairos && updated.purpose === "respuesta")
     await handOverKairosReply(tx, updated, status, now, extra.why ?? null)
   return updated
+}
+
+/**
+ * Un archivo que salió por un chat deja `client_file.sent` a nombre de quien lo mandó, como
+ * `client_file.downloaded` al bajarlo: Meta ya tiene una copia. Solo cuando la parte sale (la
+ * reserva no lo dice: lo que no salió no se le dio a Meta) y una sola vez, porque `enviado` se
+ * anota una vez. Sin una persona del equipo (Kairós, o una cuenta que ya no está), sin actor.
+ */
+async function noteFilesSent(tx: Db, row: OutreachRecord): Promise<void> {
+  if (row.fileIds.length === 0) return
+  const files = await tx
+    .select({ id: saasClientFile.id, clientId: saasClientFile.clientId, kind: saasClientFile.kind })
+    .from(saasClientFile)
+    .where(inArray(saasClientFile.id, row.fileIds))
+  const [staff] = row.createdBy
+    ? await tx
+        .select({ role: adminStaff.role })
+        .from(adminStaff)
+        .where(eq(adminStaff.userId, row.createdBy))
+        .limit(1)
+    : []
+  const actor: AdminActor | null =
+    row.createdBy && staff
+      ? { userId: row.createdBy, role: staff.role as AdminActor["role"] }
+      : null
+  for (const file of files)
+    await writeAdminAudit(tx, actor, {
+      action: "client_file.sent",
+      entityId: file.id,
+      metadata: {
+        clientId: file.clientId,
+        kind: file.kind,
+        chatId: row.chatId,
+        channel: row.channel,
+        outreachId: row.id,
+      },
+    })
 }
 
 /**
@@ -1960,17 +2024,25 @@ export type ChatMetaStatus = (typeof CHAT_META_STATUSES)[number]
  * Un estado que llegó por el webhook de WhatsApp, por el `wamid` del envío o
  * por su id (`biz_opaque_callback_data`). Solo WhatsApp: Instagram y Messenger
  * no mandan estados con nuestro id (su incierto lo resuelve una persona). `sent`, `delivered` o `read` dicen que
- * salió: lo pendiente o incierto pasa a enviado. `failed` solo cambia lo
- * pendiente o incierto (a no salió): lo que ya salió no vuelve atrás. Lo que no
- * es de una conversación, o no se reconoce, se ignora (nulo).
+ * salió: lo pendiente o incierto pasa a enviado. `failed` de lo pendiente o
+ * incierto es «no salió»; lo que ya salió no vuelve atrás. Lo que no es de una
+ * conversación, o no se reconoce, se ignora (nulo).
  *
- * De lo que salió, `delivered` anota cuándo llegó al teléfono (`delivered_at`) y `read` cuándo
- * lo leyó (`read_at`): cada uno la primera vez que Meta lo dice, y no vuelve atrás (lo cuida
- * `saas_outreach_guard`). Lo que no salió es final: no se le anota nada.
+ * De lo que salió, `delivered` anota cuándo llegó al teléfono (`delivered_at`), `read` cuándo
+ * lo leyó (`read_at`) y `failed` cuándo dijo Meta que no llegó (`failed_at`, con su motivo en
+ * `why`: un archivo por enlace que no pudo descargar): cada uno la primera vez que Meta lo dice,
+ * y no vuelve atrás (lo cuida `saas_outreach_guard`). Con `failed_at` la respuesta no cuenta como
+ * dada y la conversación vuelve a «Te toca». Lo que no salió es final: no se le anota nada.
  */
 export async function applyChatStatus(
   tx: Db,
-  input: { externalId?: string | null; outreachId?: string | null; status: ChatMetaStatus },
+  input: {
+    externalId?: string | null
+    outreachId?: string | null
+    status: ChatMetaStatus
+    /** Con `failed`: lo que dijo Meta («131053: …»), corto. */
+    why?: string | null
+  },
   now = new Date(),
 ): Promise<ChatOutreachResult | null> {
   if (!(CHAT_META_STATUSES as readonly string[]).includes(input.status)) return null
@@ -1986,9 +2058,34 @@ export async function applyChatStatus(
       row,
       input.status === "failed" ? "no_salio" : "enviado",
       now,
-      { externalId: input.externalId ?? null, metaStatus: input.status },
+      {
+        externalId: input.externalId ?? null,
+        metaStatus: input.status,
+        why: input.status === "failed" ? (input.why ?? null) : null,
+      },
     )
     changed = true
+  } else if (input.status === "failed" && row.status === "enviado" && row.failedAt === null) {
+    // Salió, pero no llegó: sigue enviado y se anota una vez, con su motivo.
+    const why = input.why?.trim().slice(0, 500) || null
+    const [marked] = await tx
+      .update(saasOutreach)
+      .set({ failedAt: now, failedWhy: why, updatedAt: now })
+      .where(and(eq(saasOutreach.id, row.id), isNull(saasOutreach.failedAt)))
+      .returning()
+    if (marked) {
+      current = marked
+      changed = true
+      await writeAdminAudit(tx, null, {
+        action: "arm.outreach_undelivered",
+        entityId: row.clientId ?? row.chatId,
+        metadata: {
+          outreachId: row.id,
+          chatId: row.chatId,
+          ...(why ? { why } : {}),
+        },
+      })
+    }
   }
   const column =
     input.status === "delivered" ? "deliveredAt" : input.status === "read" ? "readAt" : null

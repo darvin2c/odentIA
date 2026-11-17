@@ -59,7 +59,7 @@ describe("los hechos de la bitácora", () => {
     ).toBe("Correo del 12 de noviembre de 2026: Le mandé el contrato · quedó en: Lo revisa")
   })
 
-  it("lo que nos escribió dice quién: un correo sin su texto, un chat con lo que escribió", () => {
+  it("lo que nos escribió dice quién y por dónde, sin su texto, sea correo o chat", () => {
     expect(
       fact({
         kind: "correo",
@@ -68,9 +68,10 @@ describe("los hechos de la bitácora", () => {
         contact_name: "Rosa",
       }),
     ).toBe("Rosa nos escribió por correo el 12 de noviembre de 2026")
+    // El chat de una clínica con app no es solo de Administración, y Soporte lee el resumen.
     expect(
       fact({ kind: "messenger", direction: "entro", body: "¿Tienen demo?", from_chat: true }),
-    ).toBe("La clínica nos escribió por Messenger el 12 de noviembre de 2026: «¿Tienen demo?»")
+    ).toBe("La clínica nos escribió por Messenger el 12 de noviembre de 2026")
   })
 
   it("el día va en palabras", () => {

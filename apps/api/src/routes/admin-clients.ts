@@ -48,6 +48,7 @@ import {
   clientFileKey,
   clientFilePreviewUrl,
   clientFileUrl,
+  clientReportContent,
   clientPatchSchema,
   clientTimeline,
   completeClientTask,
@@ -74,7 +75,6 @@ import {
   listClientFiles,
   listClients,
   listClientTasks,
-  listProgressReports,
   listSaasProposals,
   markClientFileCarga,
   markInvitationSent,
@@ -536,8 +536,9 @@ async function pdfBody(
 
 /**
  * Un PDF para verse dentro de la ficha (pdf.js lo dibuja): `inline`, sin que el navegador adivine
- * otro tipo y, si alguien lo abriera como página, aislado y sin poder cargar nada. Se guarda en el
- * navegador de quien mira 5 minutos, lo que dura la vista.
+ * otro tipo y, si alguien lo abriera como página, aislado y sin poder cargar nada. No se guarda en
+ * el navegador (`no-store`, como el PDF de la propuesta): lo que manda la clínica puede traer datos
+ * de pacientes, y la vista vuelve a pedirlo con su permiso y su constancia.
  */
 async function pdfResponse(c: Context, storage: Storage, objectKey: string, filename: string) {
   const body = await pdfBody(storage, objectKey)
@@ -551,8 +552,7 @@ async function pdfResponse(c: Context, storage: Storage, objectKey: string, file
   c.header("Content-Disposition", `inline; filename*=UTF-8''${rfc5987(filename)}`)
   c.header("X-Content-Type-Options", "nosniff")
   c.header("Content-Security-Policy", "sandbox; default-src 'none'")
-  // Reemplaza el `no-store` de toda la administración: la vista pide sus páginas al pasar.
-  c.header("Cache-Control", "private, max-age=300")
+  c.header("Cache-Control", "no-store")
   return c.body(body instanceof Uint8Array ? body.slice() : body, 200)
 }
 
@@ -1471,31 +1471,16 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   )
 
   /**
-   * El PDF de un informe de la carga tal como salió, para verlo en el historial y en Documentos
-   * (solo Administración, como el registro de la carga). Del mismo registro que lee Alta.
+   * El PDF de un informe de la carga tal como salió, para verlo en el historial y en Documentos.
+   * Quién lo ve, el registro y su constancia los decide el servicio (`clientReportContent`).
    */
   app.get(`/${ID}/reports/:number/content`, async (c) => {
     try {
-      adminOf(c)
-      const number = Number(c.req.param("number"))
-      if (!Number.isInteger(number) || number < 1)
-        throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
-      const pdfKey = await owner(async (tx) => {
-        const [client] = await tx
-          .select({ organizationId: saasClient.organizationId })
-          .from(saasClient)
-          .where(eq(saasClient.id, c.req.param("id")))
-          .limit(1)
-        if (!client) throw new ServiceError("NOT_FOUND", 404, "Cliente no encontrado")
-        const reports = client.organizationId
-          ? await listProgressReports(tx, client.organizationId)
-          : []
-        const found = reports.find((report) => report.number === number)
-        if (!found?.pdfKey)
-          throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
-        return found.pdfKey
-      })
-      return await pdfResponse(c, deps.storage, pdfKey, `informe-${number}.pdf`)
+      const actor = staffOf(c)
+      const report = await owner((tx) =>
+        clientReportContent(tx, actor, c.req.param("id"), Number(c.req.param("number"))),
+      )
+      return await pdfResponse(c, deps.storage, report.objectKey, report.filename)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
