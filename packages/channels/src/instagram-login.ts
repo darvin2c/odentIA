@@ -94,9 +94,20 @@ export async function completeInstagramLoginCode(
   const shortToken = field(shortBody, "access_token")
   if (first.status >= 400 || typeof shortToken !== "string" || !shortToken) throw failure("canjear", first)
   const long = new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: app.appSecret, access_token: shortToken })
-  const second = await call("canjear", `${IG_GRAPH}/access_token?${long.toString()}`, { method: "GET" }, deps)
+  // La guía la muestra sin versión; si Instagram no la acepta así, con la versión del Graph.
+  let second = await call("canjear", `${IG_GRAPH}/access_token?${long.toString()}`, { method: "GET" }, deps)
+  if (second.status >= 400) {
+    // Sin la clave: solo su tipo (las primeras letras) y lo que respondió Instagram.
+    console.warn(
+      `[instagram] la clave larga no salió sin versión (clave corta ${shortToken.slice(0, 4)}…, ${second.status}): ${second.raw.slice(0, 300)}`,
+    )
+    second = await call("canjear", `${IG_GRAPH}/${app.graphVersion}/access_token?${long.toString()}`, { method: "GET" }, deps)
+  }
   const longToken = field(second.json, "access_token")
-  if (second.status >= 400 || typeof longToken !== "string" || !longToken) throw failure("canjear", second)
+  if (second.status >= 400 || typeof longToken !== "string" || !longToken) {
+    console.warn(`[instagram] la clave larga tampoco salió con versión (${second.status}): ${second.raw.slice(0, 300)}`)
+    throw failure("canjear", second)
+  }
   const expires = field(second.json, "expires_in")
   const me = await call(
     "leer",

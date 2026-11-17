@@ -4,7 +4,6 @@
 // guarded porque la vuelta llega sin el contexto de la clínica.
 import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import {
   beginInstagramLogin,
   beginMetaPagesLogin,
@@ -16,11 +15,11 @@ import {
   type MetaPagesApp,
   ServiceError,
 } from "@odentia/services"
-import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { clinicReturnBase, orgOfOauthState } from "../lib/clinic-return.js"
 import { runService, validationError } from "./helpers.js"
 
 export interface MetaPagesDeps {
@@ -144,17 +143,16 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
   // de un solo uso; la sesión tiene que ser la misma que lo empezó.
   app.get("/callback", async (c) => {
     const params = new URL(c.req.url).searchParams
-    const back = (slug: string | null, query: string): Response => {
-      const org = slug ? `org=${encodeURIComponent(slug)}&` : ""
-      return c.redirect(`${webBase}/settings/integrations?${org}${query}`, 302)
-    }
     const state = params.get("state") ?? ""
     const code = params.get("code") ?? ""
-    if (params.get("error") || !state || !code) return back(null, "facebook=cancelado")
-    if (!deps.app) return back(null, "facebook=fallo")
+    // La clínica se lee del state antes de usarlo: también se vuelve a ella si algo falla.
+    const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
+    const back = (query: string, page = "/settings/integrations"): Response => c.redirect(`${base}${page}?${query}`, 302)
+    if (params.get("error") || !state || !code) return back("facebook=cancelado")
+    if (!deps.app) return back("facebook=fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
     const userId = session?.user.id
-    if (!userId) return back(null, "facebook=sin-sesion")
+    if (!userId) return back("facebook=sin-sesion")
     try {
       const done = await completeMetaPagesLogin(
         deps.ownerDb,
@@ -164,12 +162,8 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
         { fetch: httpFetch },
         { state, code, userId },
       )
-      const slug = await slugOf(done.orgId)
       // Varias páginas marcadas: se elige una en la página de Messenger.
-      if (done.kind === "choose") {
-        const org = slug ? `org=${encodeURIComponent(slug)}&` : ""
-        return c.redirect(`${webBase}/settings/integrations/messenger?${org}facebook=elegir&pick=${done.pick}`, 302)
-      }
+      if (done.kind === "choose") return back(`facebook=elegir&pick=${done.pick}`, "/settings/integrations/messenger")
       // Solo cuántas: los nombres se ven en la lista al volver.
       const query = new URLSearchParams({
         facebook: "ok",
@@ -178,29 +172,27 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
         sinig: String(done.withoutInstagram.length),
         otra: String(done.elsewhere.length),
       })
-      return back(slug, query.toString())
+      return back(query.toString())
     } catch (error) {
       // Sin detalle de Meta en la dirección: queda en el registro del servidor.
       console.warn("[meta-pages] la vuelta de Facebook falló", error)
       const reason = error instanceof ServiceError && error.code === "NO_PAGES" ? "sin-paginas" : "fallo"
-      return back(null, `facebook=${reason}`)
+      return back(`facebook=${reason}`)
     }
   })
 
   // La vuelta de Instagram: como la de Facebook, a la página de Instagram.
   app.get("/instagram/callback", async (c) => {
     const params = new URL(c.req.url).searchParams
-    const back = (slug: string | null, result: string): Response => {
-      const org = slug ? `org=${encodeURIComponent(slug)}&` : ""
-      return c.redirect(`${webBase}/settings/integrations/instagram?${org}conectado=${result}`, 302)
-    }
     const state = params.get("state") ?? ""
     const code = params.get("code") ?? ""
-    if (params.get("error") || !state || !code) return back(null, "cancelado")
-    if (!deps.instagram) return back(null, "fallo")
+    const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
+    const back = (result: string): Response => c.redirect(`${base}/settings/integrations/instagram?conectado=${result}`, 302)
+    if (params.get("error") || !state || !code) return back("cancelado")
+    if (!deps.instagram) return back("fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
     const userId = session?.user.id
-    if (!userId) return back(null, "sin-sesion")
+    if (!userId) return back("sin-sesion")
     try {
       const done = await completeInstagramLogin(
         deps.ownerDb,
@@ -210,17 +202,12 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
         { fetch: httpFetch },
         { state, code, userId },
       )
-      return back(await slugOf(done.orgId), done.elsewhere ? "otra" : "ok")
+      return back(done.elsewhere ? "otra" : "ok")
     } catch (error) {
       console.warn("[meta-pages] la vuelta de Instagram falló", error)
-      return back(null, "fallo")
+      return back("fallo")
     }
   })
-
-  async function slugOf(orgId: string): Promise<string | null> {
-    const [org] = await deps.ownerDb.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-    return org?.slug ?? null
-  }
 
   app.route("/", authed)
   return app

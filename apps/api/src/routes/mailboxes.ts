@@ -8,8 +8,6 @@
 // para conversar); conectar/probar/desconectar con settings.write.
 import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
-import { channelConnection } from "@odentia/db/schema/crm"
 import {
   beginMailboxOAuth,
   completeMailboxOAuth,
@@ -21,11 +19,11 @@ import {
   ServiceError,
   testMailboxConnection,
 } from "@odentia/services"
-import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { clinicReturnBase, orgOfOauthState } from "../lib/clinic-return.js"
 import { runService, validationError } from "./helpers.js"
 
 export interface MailboxesDeps {
@@ -99,18 +97,18 @@ export function createMailboxesRoute(deps: MailboxesDeps) {
     const providerError = params.get("error")
     const state = params.get("state") ?? ""
     const code = params.get("code") ?? ""
-    const back = (orgSlug: string | null, query: string): Response => {
-      const org = orgSlug ? `?org=${encodeURIComponent(orgSlug)}&${query}` : `?${query}`
-      return c.redirect(`${webBase}/settings/mail${org}`, 302)
-    }
+    // A la clínica, en el dominio de su producto: el panel no tiene Configuración.
+    // Se lee del state antes de usarlo, para volver a ella también si algo falla.
+    const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
+    const back = (query: string): Response => c.redirect(`${base}/settings/integrations?${query}`, 302)
     if (providerError || !state || !code) {
-      return back(null, "error=oauth-denegado")
+      return back("error=oauth-denegado")
     }
     const session = await deps.auth.api
       .getSession({ headers: c.req.raw.headers })
       .catch(() => null)
     const userId = session?.user.id
-    if (!userId) return back(null, "error=oauth-sin-sesion")
+    if (!userId) return back("error=oauth-sin-sesion")
     try {
       const done = await completeMailboxOAuth(
         deps.ownerDb,
@@ -120,30 +118,13 @@ export function createMailboxesRoute(deps: MailboxesDeps) {
         { fetch: httpFetch },
         { state, code, userId },
       )
-      return back(await slugOfConnection(done.connectionId), `buzon=${done.provider}&ok=1`)
+      return back(`buzon=${done.provider}&ok=1`)
     } catch {
       // Sin volcar detalle del proveedor: la UI muestra el motivo genérico y
       // el reintento. El error queda en el log del servidor (onError).
-      return back(null, "error=oauth-fallo")
+      return back("error=oauth-fallo")
     }
   })
-
-  async function slugOfConnection(connectionId: string): Promise<string | null> {
-    const [conn] = await deps.ownerDb
-      .select({ organizationId: channelConnection.organizationId })
-      .from(channelConnection)
-      .where(eq(channelConnection.id, connectionId))
-      .limit(1)
-      .catch(() => [])
-    if (!conn) return null
-    const [org] = await deps.ownerDb
-      .select({ slug: organization.slug })
-      .from(organization)
-      .where(eq(organization.id, conn.organizationId))
-      .limit(1)
-      .catch(() => [])
-    return org?.slug ?? null
-  }
 
   authed.post("/:id/test", async (c) => {
     const denied = forbid(c, "settings.write")
