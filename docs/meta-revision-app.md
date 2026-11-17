@@ -10,9 +10,12 @@ inglés: los textos van en inglés, listos para pegar.
   términos `https://odentia32.com/terminos`, ícono, categoría, verificación del negocio.
 - Borrado de datos: cambiar a `https://odentia32.com/privacidad#meta` (sección que lo explica).
 - En «Configuración del inicio de sesión del negocio» de Instagram: quitar la dirección de
-  prueba `https://odentia32.com/prueba-instagram`; dejar solo
-  `https://api.odentia32.com/api/meta-pages/instagram/callback`. Completar ahí también
-  «autorización cancelada» y «eliminación de datos» con `https://odentia32.com/privacidad#meta`.
+  prueba (hecho el 17 nov); dejar solo
+  `https://api.odentia32.com/api/meta-pages/instagram/callback`. Completar ahí y en
+  Facebook Login for Business › Configuración: «autorización cancelada» =
+  `https://api.odentia32.com/api/meta-pages/deauthorize` y «eliminación de datos» =
+  `https://api.odentia32.com/api/meta-pages/data-deletion` (responden firmados; el borrado
+  abre un caso en Soporte con su código).
 - Una cuenta de prueba para el revisor: una clínica de demostración en odentIA con su
   correo y contraseña. El revisor entra, va a Configuración › Integraciones y conecta.
 

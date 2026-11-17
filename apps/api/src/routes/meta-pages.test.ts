@@ -441,3 +441,26 @@ describe("a dónde vuelve", () => {
     }
   })
 })
+
+describe("lo que Meta llama al quitar el permiso o pedir el borrado", () => {
+  const sign = (secret: string, data: Record<string, unknown>) => {
+    const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", ...data })).toString("base64url")
+    return `${createHmac("sha256", secret).update(payload).digest("base64url")}.${payload}`
+  }
+  const call = (path: string, signedRequest: string) =>
+    createMetaPagesRoute({ auth: fakeAuth(null), db: appDb, ownerDb, secretsKey: KEY, webUrl: "https://app.odentia32.com", app: META, fetch })
+      .request(path, { method: "POST", body: new URLSearchParams({ signed_request: signedRequest }), headers: { "content-type": "application/x-www-form-urlencoded" } })
+
+  it("el borrado responde el código y dónde se explica, y abre un caso en Soporte; sin la firma de la app, no", async () => {
+    const res = await call("/data-deletion", sign(META.appSecret, { user_id: "123" }))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { url: string; confirmation_code: string }
+    expect(body.confirmation_code).toMatch(/^[0-9A-F]{12}$/)
+    expect(body.url).toBe(`https://odentia32.com/privacidad?borrado=${body.confirmation_code}#meta`)
+    const [found] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from support_case where dedupe_key = ${`meta-borrado-${body.confirmation_code}`}`)
+    expect(found?.n).toBe(1)
+    expect((await call("/data-deletion", sign("otra-clave", { user_id: "123" }))).status).toBe(401)
+    expect((await call("/deauthorize", sign(META.appSecret, { user_id: "123" }))).status).toBe(200)
+    expect((await call("/deauthorize", "no.firmado")).status).toBe(401)
+  })
+})
