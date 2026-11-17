@@ -215,8 +215,8 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
   // Llegan firmados con la clave de la app de Facebook o de la de Instagram.
   const metaSecrets = () => [deps.app?.appSecret ?? "", deps.instagram?.appSecret ?? ""]
   const signedRequestOf = async (c: { req: { parseBody: () => Promise<Record<string, unknown>> } }) => {
-    const body = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>)
-    const raw = typeof body["signed_request"] === "string" ? body["signed_request"] : ""
+    const body: { signed_request?: unknown } = await c.req.parseBody().catch(() => ({}))
+    const raw = typeof body.signed_request === "string" ? body.signed_request : ""
     return parseMetaSignedRequest(raw, metaSecrets())
   }
 
