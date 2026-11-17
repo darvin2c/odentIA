@@ -80,6 +80,34 @@ export function cardiacOf(health: Pick<PatientHealth, "conditions" | "asaClass">
 }
 
 /**
+ * La anestesia ya está contestada y no hay nada que avisar: la ASA puesta (si el producto la pide),
+ * nada por preguntarle, sin alergias, enfermedades ni medicación vigentes, sin nada dicho del
+ * corazón y sin avisos del anestésico. Entonces el bloque va en dos líneas, con «Cambiar» (QA del
+ * 16 nov, Q18: ocupaba unos 260 px en la página y otra vez en el diálogo de firmar). Con cualquier
+ * aviso clínico el bloque va entero: una alergia o un anticoagulante no se pliegan nunca.
+ */
+export function anesthesiaAnswered(input: {
+  asksAsa: boolean
+  health: Pick<PatientHealth, "allergies" | "conditions" | "medications" | "asaClass"> | null
+  gaps: readonly HealthGap[]
+  risks: readonly string[]
+  warnings: readonly string[]
+  today: string
+}): boolean {
+  const { health } = input
+  if (!health) return false
+  if (input.asksAsa && !health.asaClass) return false
+  // La ASA recién puesta puede seguir un instante en lo que falta: ya no falta.
+  if (input.gaps.some((gap) => gap !== "asa")) return false
+  if (input.risks.length > 0 || input.warnings.length > 0) return false
+  return (
+    !health.allergies.some((row) => row.isActive) &&
+    !health.conditions.some((row) => row.status === "activa") &&
+    !health.medications.some((row) => isCurrentMedication(row, input.today))
+  )
+}
+
+/**
  * La línea de anestesia (QA del 16 nov, E5b y E5c): aparece en cuanto algo de hoy usa anestesia
  * local («Hacerla hoy», «Continuar» o lo registrado hoy), antes de anestesiar, y se repite al
  * firmar. Dice sus alergias, su medicación y lo que dijo; pide la ASA con un toque donde el
@@ -126,6 +154,8 @@ export function EncounterAnesthesiaLine({
   const queryClient = useQueryClient()
   const memberName = useMemberName()
   const [saving, setSaving] = useState(false)
+  /** «Cambiar» en la línea corta: abre el bloque entero. */
+  const [expanded, setExpanded] = useState(false)
   if (uses.length === 0) return null
   const today = clinicToday()
   const asa = health?.asaClass ?? null
@@ -153,6 +183,42 @@ export function EncounterAnesthesiaLine({
   }
   const setBy = health?.asaClassSetBy ? memberName(health.asaClassSetBy) : null
   const setAt = health?.asaClassSetAt ? shortDay(health.asaClassSetAt) : null
+  // Contestada y sin nada que avisar: dos líneas, sin el color de aviso, con «Cambiar».
+  if (!expanded && anesthesiaAnswered({ asksAsa, health, gaps, risks, warnings: words.warnings, today }))
+    return (
+      <section
+        aria-labelledby={`${ids}-title`}
+        className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-lg border p-3 text-sm"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p id={`${ids}-title`} className="font-medium">
+            Anestesia local · {listWords([...uses])}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {[
+              asksAsa && asa ? `ASA ${asa}` : null,
+              said.replace(/\.$/, "") || null,
+              words.dose ?? "Sin peso anotado: sin dosis máxima",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            .
+          </p>
+        </div>
+        {canWrite ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={disabled}
+            aria-label="Cambiar la anestesia: la ASA o el anestésico"
+            onClick={() => setExpanded(true)}
+          >
+            Cambiar
+          </Button>
+        ) : null}
+      </section>
+    )
   return (
     <section
       aria-labelledby={`${ids}-title`}

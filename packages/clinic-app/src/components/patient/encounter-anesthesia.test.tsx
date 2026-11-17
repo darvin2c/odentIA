@@ -19,7 +19,7 @@ vi.mock("../../lib/patients", async (original) => ({
   setPatientAsaApi: setAsa,
 }))
 
-const { anesthesiaHealthWords, EncounterAnesthesiaLine } = await import("./encounter-anesthesia")
+const { anesthesiaAnswered, anesthesiaHealthWords, EncounterAnesthesiaLine } = await import("./encounter-anesthesia")
 
 beforeAll(() => {
   setOrgLocale("es-PE", "America/Lima")
@@ -89,6 +89,80 @@ it("sin peso no inventa un máximo: pide anotarlo", () => {
     screen.getByText("Anota su peso en los signos vitales para ver la dosis máxima."),
   ).toBeTruthy()
   expect(screen.queryByText(/Máximo para/)).toBeNull()
+})
+
+// QA del 16 nov, Q18: el bloque entero (ASA, anestésico, dosis) ocupaba unos 260 px en la página y
+// otra vez en el diálogo de firmar, aunque ya estuviera contestado.
+it("contestada y sin nada que avisar va en dos líneas, con «Cambiar» que abre el bloque entero", () => {
+  const client = new QueryClient()
+  const healthy = {
+    ...mateo,
+    reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+    asaClass: "I",
+  } as unknown as PatientHealth
+  const view = (health: PatientHealth, gaps: Array<"asa" | "allergies">) => (
+    <QueryClientProvider client={client}>
+      <EncounterAnesthesiaLine
+        patientId="p-raul"
+        encounterId="e-1"
+        uses={["Endodoncia posterior vital"]}
+        asksAsa
+        gaps={gaps}
+        risks={[]}
+        health={health}
+        vitals={{ peso: 78 }}
+        ageYears={41}
+        anesthetic="lidocaina-2-epinefrina"
+        onAnestheticChange={() => {}}
+        canWrite
+      />
+    </QueryClientProvider>
+  )
+  const page = render(view(healthy, []))
+  // Lo mismo dicho en corto: la ASA, lo que niega y el máximo. Ningún control más que «Cambiar».
+  expect(screen.getByText("Anestesia local · Endodoncia posterior vital")).toBeTruthy()
+  expect(
+    screen.getByText(/^ASA I · Niega alergias, enfermedades y medicación · Máximo para 78 kg .* 300 mg \(el tope\), unos 8,3 cartuchos\.$/),
+  ).toBeTruthy()
+  expect(screen.queryAllByRole("radio")).toHaveLength(0)
+  expect(screen.queryByLabelText("Anestésico")).toBeNull()
+  expect(page.container.querySelectorAll("button, select, input")).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: /Cambiar/ }))
+  expect(screen.getAllByRole("radio")).toHaveLength(4)
+  expect(screen.getByLabelText("Anestésico")).toBeTruthy()
+  cleanup()
+  // Con algo por preguntarle, el bloque va entero desde el principio: un aviso no se pliega.
+  render(view(healthy, ["allergies"]))
+  expect(screen.getAllByRole("radio")).toHaveLength(4)
+})
+
+it("una alergia, una enfermedad, lo que toma o lo que dijo del corazón dejan el bloque entero", () => {
+  const base = {
+    asksAsa: true,
+    gaps: [],
+    risks: [],
+    warnings: [],
+    today: "2026-11-16",
+  }
+  const healthy = { allergies: [], conditions: [], medications: [], asaClass: "II" } as unknown as PatientHealth
+  expect(anesthesiaAnswered({ ...base, health: healthy })).toBe(true)
+  expect(anesthesiaAnswered({ ...base, health: { ...healthy, asaClass: null } })).toBe(false)
+  expect(
+    anesthesiaAnswered({
+      ...base,
+      health: { ...healthy, allergies: [{ id: "a", substance: "Penicilina", isActive: true }] } as unknown as PatientHealth,
+    }),
+  ).toBe(false)
+  expect(
+    anesthesiaAnswered({
+      ...base,
+      health: { ...healthy, conditions: [{ id: "c", name: "Hipertensión", status: "activa" }] } as unknown as PatientHealth,
+    }),
+  ).toBe(false)
+  expect(anesthesiaAnswered({ ...base, health: healthy, risks: ["tiene una válvula"] })).toBe(false)
+  expect(anesthesiaAnswered({ ...base, health: healthy, warnings: ["Por su ASA III, la epinefrina…"] })).toBe(false)
+  // Sin leer su salud todavía, no se da nada por contestado.
+  expect(anesthesiaAnswered({ ...base, health: null })).toBe(false)
 })
 
 it("sin nada de hoy con anestesia, no hay línea", () => {

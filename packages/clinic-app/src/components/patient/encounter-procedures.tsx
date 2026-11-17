@@ -271,7 +271,13 @@ export function EncounterProcedures({
   prefillPlanItemId = null,
   onPrefillUsed,
   onConsentFirst,
+  filled = false,
 }: {
+  /**
+   * «Realizado hoy» ya tiene algo a la vista (un tratamiento por registrar, la anestesia): no se
+   * dice «Sin procedimientos registrados» debajo (QA del 16 nov, Q18; estándar E2).
+   */
+  filled?: boolean
   patientId: string
   detail: EncounterDetail
   /**
@@ -550,7 +556,9 @@ export function EncounterProcedures({
       <div className="flex flex-col gap-3">
         <section aria-label="Procedimientos registrados">
           {detail.procedures.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
+            filled ? null : (
+              <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
+            )
           ) : (
             <ul className="flex flex-col gap-2">
               {detail.procedures.map((proc) => {

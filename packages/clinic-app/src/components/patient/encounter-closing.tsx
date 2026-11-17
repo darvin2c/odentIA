@@ -895,7 +895,14 @@ export function ClosingSessions({
   resolvable = [],
   keepDiagnoses,
   onKeepDiagnosis,
+  part = "all",
 }: {
+  /**
+   * En el diálogo de firmar, lo que se decide va primero y lo que solo se lee, después (QA del 16
+   * nov, Q18): `decide` son «¿Terminaste?», lo que no se registró y lo que queda resuelto; `read`,
+   * «Sigue en curso…». Sin decirlo, todo junto.
+   */
+  part?: "all" | "decide" | "read"
   sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
   labelOf: (session: ClosingSession) => string
   answers: SessionAnswers
@@ -909,9 +916,13 @@ export function ClosingSessions({
   onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
 }): React.JSX.Element | null {
   const ids = useId()
-  const notRegistered = sessions.notRegistered ?? []
-  const resolving = resolvingOnSign(resolvable, sessions, answers)
-  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
+  const reads = part !== "decide"
+  const decides = part !== "read"
+  const finishing = decides ? sessions.finishing : []
+  const continuing = reads ? sessions.continuing : []
+  const notRegistered = decides ? (sessions.notRegistered ?? []) : []
+  const resolving = decides ? resolvingOnSign(resolvable, sessions, answers) : []
+  if (finishing.length === 0 && continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
     return null
   // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
   const line = (session: ClosingSession) =>
@@ -925,8 +936,11 @@ export function ClosingSessions({
     { value: "otra", label: "Falta otra sesión" },
   ] as const
   return (
-    <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
-      {sessions.finishing.map((session, index) => {
+    <ul
+      aria-label={part === "read" ? "Tratamientos que siguen en curso" : "Tratamientos de hoy"}
+      className="flex flex-col gap-2 rounded-lg border p-3"
+    >
+      {finishing.map((session, index) => {
         const answer = answers[session.planItemId] ?? "terminar"
         const labelId = `${ids}-terminaste-${index}`
         return (
@@ -961,7 +975,7 @@ export function ClosingSessions({
           </li>
         )
       })}
-      {sessions.continuing.map((session) => (
+      {continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
           {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
           Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Realizado hoy».
@@ -1375,6 +1389,31 @@ export function EncounterClosingDialog({
   const submitting = useStore(form.store, (state) => state.isSubmitting)
   const busy = pending || submitting
   const toRegister = missing.filter((requirement) => requirement !== "signature")
+  // «Hora de fin» se decide: va con lo que se decide, antes de lo que solo se lee (QA del 16 nov, Q18).
+  const endTime = (
+    <form.AppField name="endTime">
+      {(field) => (
+        <field.Control label="Hora de fin">
+          {(control) => (
+            <TimeSelect
+              id={control.id}
+              invalid={control.invalid}
+              aria-describedby={control.describedBy}
+              className="w-44"
+              min={bounds.min}
+              max={bounds.max}
+              emptyLabel={bounds.past ? "La de su cita" : `Ahora (${bounds.max})`}
+              value={field.state.value}
+              onChange={(value) => {
+                field.handleChange(value)
+                field.handleBlur()
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
   return (
     <Dialog
       open={open}
@@ -1463,9 +1502,22 @@ export function EncounterClosingDialog({
                   resolvable={closing.resolvable}
                   keepDiagnoses={keepDiagnoses}
                   onKeepDiagnosis={onKeepDiagnosis}
+                  part="decide"
                 />
               ) : null}
               {nextVisit}
+              {endTime}
+              {/* Desde aquí, lo que solo se lee: lo que sigue en curso y lo que firma el producto (NTS 188). */}
+              {closing?.sessions && onSessionAnswer ? (
+                <ClosingSessions
+                  sessions={closing.sessions}
+                  labelOf={sessionLabel}
+                  answers={sessionAnswers}
+                  onAnswer={onSessionAnswer}
+                  disabled={busy}
+                  part="read"
+                />
+              ) : null}
               {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
               {materials && materials.items.length > 0 ? (
                 <p className="rounded-lg border p-3">
@@ -1484,28 +1536,6 @@ export function EncounterClosingDialog({
                 {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
                 disabled={busy}
               />
-              <form.AppField name="endTime">
-                {(field) => (
-                  <field.Control label="Hora de fin">
-                    {(control) => (
-                      <TimeSelect
-                        id={control.id}
-                        invalid={control.invalid}
-                        aria-describedby={control.describedBy}
-                        className="w-44"
-                        min={bounds.min}
-                        max={bounds.max}
-                        emptyLabel={bounds.past ? "La de su cita" : `Ahora (${bounds.max})`}
-                        value={field.state.value}
-                        onChange={(value) => {
-                          field.handleChange(value)
-                          field.handleBlur()
-                        }}
-                      />
-                    )}
-                  </field.Control>
-                )}
-              </form.AppField>
               {children}
               {/* Leído, no decidido: de quién es la firma (sin colegiatura, sus campos van arriba). */}
               {registration ? null : (

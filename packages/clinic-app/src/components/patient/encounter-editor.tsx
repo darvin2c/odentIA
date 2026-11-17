@@ -2792,6 +2792,7 @@ export function EncounterEditor({
                 prefillPlanItemId={sessionPrefill}
                 onPrefillUsed={() => setSessionPrefill(null)}
                 onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
+                filled={detail.plannedItems.length > 0 || anesthesiaUses.length > 0}
               />
               {suggestionsOf("procedimientos")}
             </>,
