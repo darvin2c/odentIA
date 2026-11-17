@@ -11,8 +11,12 @@ import { Mic } from "lucide-react"
 import { type RefObject, useEffect, useState } from "react"
 import { alertsByRisk } from "./patient-header"
 
-/** Cuántas alertas caben en la línea: en el teléfono una, la más grave; lo demás en «+N». */
-const SHOWN = { phone: 1, wide: 3 } as const
+/**
+ * Cuántas alertas caben en la línea; lo demás en «+N». En el teléfono, dos con su rótulo corto
+ * («Alergia: penicilinas», «Warfarina»): la alergia y el anticoagulante se leen sin tocar nada
+ * (QA del 16 nov, Q6; antes una sola, y la alergia quedaba detrás de «+1»).
+ */
+export const SHOWN = { phone: 2, wide: 3 } as const
 
 /** «Carmen R.»: el primer nombre y la inicial del apellido, para el teléfono. */
 export function shortPatientName(patient: { givenNames?: string | null; familyName?: string | null; displayName: string }): string {
@@ -87,17 +91,20 @@ export function EncounterPatientLine({
   onAntecedentes: () => void
 }): React.JSX.Element {
   const alerts = alertsByRisk(detail, health)
+  // En el teléfono las dos se reparten el ancho y se recortan con puntos suspensivos: ninguna
+  // queda debajo de «+N» ni de «Dictar».
   const chip = (alert: (typeof alerts)[number]) => (
     <Badge
       key={alert.id}
       variant={alert.tone === "destructive" ? "destructive" : alert.tone === "warning" ? "outline" : "secondary"}
       className={cn(
-        "max-w-56 shrink-0 truncate",
+        "max-w-56 justify-start max-sm:min-w-0 max-sm:shrink",
         alert.tone === "warning" && "border-warning/30 bg-warning-soft text-warning",
       )}
       title={alert.label}
     >
-      {alert.label}
+      <span className="min-w-0 truncate sm:hidden">{alert.short}</span>
+      <span className="min-w-0 truncate max-sm:hidden">{alert.label}</span>
     </Badge>
   )
   const more = (shown: number, className: string) =>
@@ -125,7 +132,7 @@ export function EncounterPatientLine({
         <span className="truncate sm:hidden">{shortName}</span>
         {age ? <span className="shrink-0 font-normal text-muted-foreground">· {age}</span> : null}
       </p>
-      {/* Las alertas en el orden del riesgo: la grave nunca queda escondida en «+N». */}
+      {/* Las alertas en el orden del riesgo: la alergia nunca queda escondida en «+N». */}
       <ul aria-label="Alertas clínicas" className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {alerts.map((alert, index) => (
           <li

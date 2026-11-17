@@ -115,10 +115,13 @@ export function clinicalAlerts(
 
 /**
  * Las alertas en una línea, por riesgo (P12, la voz clínica): la alergia grave; que no se le
- * preguntó por alergias; el anticoagulante o la medicina para los huesos; las demás alergias; el
- * embarazo; las enfermedades; lo demás que toma; y al final «Niega alergias». Con una sola a la
- * vista (el teléfono), nunca queda «Niega alergias» con el anticoagulante escondido en «+N».
- * Son las mismas que la franja de arriba (`clinicalAlerts`): no es otra fuente.
+ * preguntó por alergias; las demás alergias; el anticoagulante o la medicina para los huesos; las
+ * intolerancias; el embarazo; las enfermedades; lo demás que toma; y al final «Niega alergias».
+ * Toda alergia va antes que el anticoagulante (QA del 16 nov, Q6): en el teléfono la alergia a
+ * penicilinas quedaba detrás de «+1», justo al recetar. Con pocas a la vista, nunca queda «Niega
+ * alergias» con el anticoagulante escondido en «+N».
+ * Son las mismas que la franja de arriba (`clinicalAlerts`): no es otra fuente. `short` es el
+ * rótulo del teléfono, donde caben dos: «Alergia: penicilinas» y «Warfarina».
  */
 export function alertsByRisk(
   detail: Pick<
@@ -127,9 +130,24 @@ export function alertsByRisk(
   >,
   health: Pick<PatientHealth, "pregnancy"> | null | undefined,
   sex?: string | null,
-): Array<{ id: string; label: string; tone: "destructive" | "warning" | "secondary" }> {
-  const alerts = clinicalAlerts(detail)
+): Array<{ id: string; label: string; short: string; tone: "destructive" | "warning" | "secondary" }> {
+  const allergyOf = new Map(detail.activeAllergies.map((row) => [row.id, row]))
+  const medicationOf = new Map(detail.currentMedications.map((row) => [row.id, row]))
+  const alerts = clinicalAlerts(detail).map((alert) => {
+    const allergy = allergyOf.get(alert.id)
+    const medication = medicationOf.get(alert.id)
+    const short = allergy
+      ? `${allergy.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(allergy)}`
+      : // El grupo y la dosis se leen al tocar «+N» o arriba: en el teléfono, el nombre.
+        medication && alert.tone === "warning"
+        ? medication.name
+        : alert.label
+    return { ...alert, short }
+  })
   const allergyIds = new Set(detail.activeAllergies.map((row) => row.id))
+  const intoleranceIds = new Set(
+    detail.activeAllergies.filter((row) => row.kind === "intolerancia").map((row) => row.id),
+  )
   const medicationIds = new Set(detail.currentMedications.map((row) => row.id))
   const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
   const unasked =
@@ -141,26 +159,29 @@ export function alertsByRisk(
             label: noAllergiesWords({ review: "unknown", saidUnknown: detail.allergySaidUnknown }, sex),
             tone: "warning" as const,
           },
-        ]
+        ].map((alert) => ({ ...alert, short: alert.label }))
       : []
   const denies =
     noAllergies && detail.allergyReview === "none"
-      ? [{ id: "alergias", label: "Niega alergias", tone: "secondary" as const }]
+      ? [{ id: "alergias", label: "Niega alergias", short: "Niega alergias", tone: "secondary" as const }]
       : []
   const pregnancy = health?.pregnancy
     ? [
         {
           id: "embarazo",
           label: pregnancyChip(health.pregnancy),
+          short: pregnancyChip(health.pregnancy),
           tone: health.pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
         },
       ]
     : []
+  const mildAllergy = (alert: (typeof alerts)[number]) => allergyIds.has(alert.id) && alert.tone !== "destructive"
   return [
     ...alerts.filter((alert) => alert.tone === "destructive"),
     ...unasked,
+    ...alerts.filter((alert) => mildAllergy(alert) && !intoleranceIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone === "warning"),
-    ...alerts.filter((alert) => allergyIds.has(alert.id) && alert.tone !== "destructive"),
+    ...alerts.filter((alert) => mildAllergy(alert) && intoleranceIds.has(alert.id)),
     ...pregnancy,
     ...alerts.filter((alert) => !allergyIds.has(alert.id) && !medicationIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone !== "warning"),

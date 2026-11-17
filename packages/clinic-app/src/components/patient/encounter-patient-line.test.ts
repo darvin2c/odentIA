@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { shortPatientName } from "./encounter-patient-line"
+import { SHOWN, shortPatientName } from "./encounter-patient-line"
 import { alertsByRisk } from "./patient-header"
 
 declareProduct(bareProduct("dental"))
@@ -60,6 +60,49 @@ describe("las alertas de la línea fija, por riesgo", () => {
       "Alergias: no se le preguntó",
       "Anticoagulante: Warfarina",
     ])
+  })
+})
+
+// QA del 16 nov, Q6 (B9b): Carmen, alérgica a penicilinas (sin gravedad anotada) y con warfarina. A
+// 390 px la línea decía «Anticoagulante: Warfarina 5 mg · +1» y la alergia quedaba escondida.
+describe("en el teléfono, la alergia y el anticoagulante se leen sin tocar nada", () => {
+  const carmen = {
+    ...base,
+    activeAllergies: [
+      {
+        id: "penicilinas",
+        substance: "Penicilinas",
+        substanceSystem: null,
+        substanceCode: null,
+        kind: "alergia",
+        severity: "desconocida",
+        criticality: "desconocida",
+        verification: "sin_confirmar",
+      },
+      {
+        id: "lactosa",
+        substance: "Lactosa",
+        substanceSystem: null,
+        substanceCode: null,
+        kind: "intolerancia",
+        severity: "leve",
+        criticality: "baja",
+        verification: "sin_confirmar",
+      },
+    ],
+    currentMedications: [{ id: "warfarina", name: "Warfarina", dose: "5 mg", atcCode: "B01AA03" }],
+  } as unknown as Detail
+
+  it("toda alergia va antes que el anticoagulante; la intolerancia, después", () => {
+    expect(alertsByRisk(carmen, null).map((alert) => alert.id)).toEqual(["penicilinas", "warfarina", "lactosa"])
+  })
+
+  it("caben dos, con su rótulo corto: «Alergia: Penicilinas» y «Warfarina»", () => {
+    expect(SHOWN.phone).toBe(2)
+    const shown = alertsByRisk(carmen, null).slice(0, SHOWN.phone)
+    expect(shown.map((alert) => alert.short)).toEqual(["Alergia: Penicilinas", "Warfarina"])
+    // El rótulo entero sigue en la tableta y el escritorio, y al pasar el cursor.
+    expect(shown.map((alert) => alert.label)).toEqual(["Alergia: Penicilinas", "Anticoagulante: Warfarina 5 mg"])
   })
 })
 
