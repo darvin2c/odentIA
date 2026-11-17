@@ -6,14 +6,14 @@
  * Una conversación es un chat (`saas_chat`, con al menos un mensaje de la persona) o el hilo de un
  * correo (con al menos un correo que llegó: uno que escribimos y nadie respondió no espera nada).
  * No se guarda aparte: se lee de lo que entró y de lo que salió. El hilo de un correo se arma al
- * leer (`threadKeyOf` y su gemela `emailThreadKeySql`): se sube por la cadena (el primer
- * Message-ID de su `References` o, si no trae, el de su `In-Reply-To`) mientras sea de un envío
- * nuestro o de un correo que llegó, hasta el primero del hilo o hasta uno que no conocemos; sin
- * esas cabeceras, su propio Message-ID. Un correo que llegó entra en ese hilo solo si quien lo
- * envía ya está en él (`threadAddressSql`) o es de la clínica del hilo (`threadClientSql`: su
- * correo se ligó a ella por su correo exacto o lo ligó una persona): si no, es su propia
- * conversación, aunque conozca el Message-ID de un hilo ajeno. Una respuesta nuestra va en el
- * hilo del correo que responde; lo que escribimos primero, en el de su `References` o su propio
+ * leer (`threadKeyOf` y su gemela `emailThreadKeySql`): el primer Message-ID de su `References`;
+ * si no trae, se sube por su `In-Reply-To` mientras sea de un envío nuestro o de un correo
+ * verificado que conocemos, hasta el primero del hilo o hasta uno que no conocemos; sin esas
+ * cabeceras, su propio Message-ID. Un correo que llegó entra en ese hilo solo si quien lo envía ya
+ * está en él (`threadAddressSql`) o es una persona registrada de la clínica del hilo
+ * (`threadClientSql`): si no, es su propia conversación, aunque conozca el Message-ID de un hilo
+ * ajeno. Una respuesta nuestra va en el hilo del correo que responde y lleva primero el Message-ID
+ * de ese hilo en su `References`; lo que escribimos primero, en el de su `References` o su propio
  * Message-ID.
  *
  * El estado lo dice una sola regla en SQL (`conversationsSql`): solo cuenta como respuesta un
@@ -44,16 +44,11 @@ import {
   emailHeaderKeySql,
   emailThreadKeySql,
   firstIdSql,
-  outreachChainKeySql,
   outreachThreadKeySql,
+  threadClientIdSql,
 } from "./admin-email-thread.js"
 import { inboundFileCarga, matchInboundClient } from "./admin-inbound-email.js"
-import {
-  CHAT_OUTREACH_SETTLE_MS,
-  replySignature,
-  replySubject,
-  threadMessageIds,
-} from "./admin-sales.js"
+import { CHAT_OUTREACH_SETTLE_MS, replySignature, replySubject } from "./admin-sales.js"
 import { outreachSenderPreview } from "./admin-staff-mail.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { kairosHandlesSql } from "./kairos-sells.js"
@@ -256,7 +251,8 @@ function mailConversationsSql(
       -- ese correo quedó fuera de la ventana, leída de nuevo).
       select o.id, o.status, o.by_kairos, o.created_by, o.purpose, o.created_at, o.sent_at,
         o.in_reply_to_email_id,
-        (case when o.in_reply_to_email_id is null then ${outreachChainKeySql("o")}
+        (case when o.in_reply_to_email_id is null
+            then coalesce(${firstIdSql(sql.raw(`o."references"`))}, nullif(btrim(o.message_id), ''))
           when mi.id is not null then mi.thread_key
           else (select ${emailThreadKeySql("ie")} from admin.saas_inbound_email ie
             where ie.id = o.in_reply_to_email_id) end) as thread_key
@@ -833,31 +829,18 @@ const MATCH_WHY: Record<string, string> = {
 
 /**
  * La clínica del hilo al que contesta un correo que quedó aparte (un colega que escribe desde
- * otra dirección): la del primer correo de ese hilo o la de lo último que le escribimos y que el
- * correo nombra en sus cabeceras. Nulo si sus cabeceras no apuntan a otro hilo. Solo sugiere:
- * las cabeceras las pone quien escribe.
+ * otra dirección): la de su primer correo o la de lo que le empezamos o seguimos escribiendo ahí
+ * (`threadClientIdSql`, los hechos con que entra en él una persona de esa clínica). Nulo si sus
+ * cabeceras no apuntan a otro hilo. Solo sugiere: las cabeceras las pone quien escribe, y ligar el
+ * correo no lo pone en el hilo.
  */
 async function headerThreadClient(
   tx: Db,
   email: typeof saasInboundEmail.$inferSelect,
 ): Promise<string | null> {
-  const named = threadMessageIds(email.inReplyTo, email.references)
   const [row] = [
     ...(await tx.execute<{ client_id: string | null }>(
-      sql`select coalesce(
-          (select se.client_id from admin.saas_inbound_email se
-            where se.message_id = hk.key and se.client_id is not null limit 1),
-          (select co.client_id from admin.saas_outreach co
-            where co.channel = 'correo' and co.client_id is not null
-              and (co.message_id = hk.key${
-                named.length
-                  ? sql` or co.message_id in (${sql.join(
-                      named.map((id) => sql`${id}`),
-                      sql`, `,
-                    )})`
-                  : sql``
-              })
-            order by co.created_at desc, co.id desc limit 1))::text as client_id
+      sql`select (${threadClientIdSql(sql.raw("hk.key"))})::text as client_id
         from admin.saas_inbound_email e
         cross join lateral (select ${emailHeaderKeySql("e")} as key) hk
         where e.id = ${email.id}::uuid and hk.key is distinct from nullif(btrim(e.message_id), '')`,
@@ -1048,8 +1031,8 @@ export async function getEmailThread(
  * De quién puede ser un hilo sin cliente, sin ligarlo: el cliente de lo que le escribimos en ese
  * hilo, el de su correo exacto (`matchInboundClient`: un contacto, su solicitud, alguien de su
  * cuenta) o la clínica del hilo al que contesta desde otra dirección (`headerThreadClient`: un
- * colega; ligarlo lo pone en ese hilo). Si el remitente no está verificado, se dice: puede no ser
- * quien dice.
+ * colega; ligarlo dice de quién es, y entra en el hilo cuando le respondemos). Si el remitente no
+ * está verificado, se dice: puede no ser quien dice.
  */
 async function threadSuggestion(
   tx: Db,

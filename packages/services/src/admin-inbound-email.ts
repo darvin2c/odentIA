@@ -30,6 +30,7 @@
  * soporte@ (ADR 0196): Soporte trabaja en la Ayuda de la app y recibe 403.
  */
 
+import { createHash } from "node:crypto"
 import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -233,6 +234,29 @@ async function clientByThread(
   return row?.client_id ?? null
 }
 
+/**
+ * El Message-ID con que se guarda un correo que llegó: el suyo, salvo que sea el de un envío
+ * nuestro. Ese no es de quien escribe (lo copió): se guarda con uno propio, fijo por lo que llegó,
+ * como el que pone el worker al correo que no trae (`<sin-id-…@entrante.sallca>`), que no se
+ * responde por el hilo. Así nadie se hace pasar por lo nuestro en un hilo (`threadKeyOf`: la clave
+ * de un correo sin cabeceras es su Message-ID), y el mismo correo repetido no entra dos veces.
+ */
+async function storedMessageId(
+  tx: Db,
+  input: { messageId: string; from: string; receivedAt: Date },
+): Promise<string> {
+  const [ours] = await tx
+    .select({ id: saasOutreach.id })
+    .from(saasOutreach)
+    .where(eq(saasOutreach.messageId, input.messageId.trim()))
+    .limit(1)
+  if (!ours) return input.messageId
+  const digest = createHash("sha256")
+    .update([input.messageId, input.from, input.receivedAt.toISOString()].join("\n"))
+    .digest("hex")
+  return `<sin-id-${digest}@entrante.sallca>`
+}
+
 /** Recorta y quita lo que no se imprime al final; vacío es nulo. */
 function trimTo(value: string | null | undefined, max: number): string | null {
   const clean = (value ?? "").trim()
@@ -361,12 +385,13 @@ export async function ingestInboundEmail(
     fileId: null,
     objectKey: attachment.fileKey,
   }))
+  const messageId = await storedMessageId(tx, input)
   const [created] = await tx
     .insert(saasInboundEmail)
     .values({
       mailbox: input.mailbox,
       product: input.product,
-      messageId: input.messageId,
+      messageId,
       fromAddress: input.from,
       fromName: trimTo(input.fromName, 200),
       toAddress: input.to,
@@ -391,7 +416,7 @@ export async function ingestInboundEmail(
         matchedBy: saasInboundEmail.matchedBy,
       })
       .from(saasInboundEmail)
-      .where(eq(saasInboundEmail.messageId, input.messageId))
+      .where(eq(saasInboundEmail.messageId, messageId))
       .limit(1)
     if (!existing)
       throw new ServiceError("CONFLICT", 409, "El correo se está registrando en otra petición")

@@ -16,7 +16,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { chatReplyOutbound, skipChatOutreach } from "./admin-chat-send.js"
 import { clientFileKey, deleteClientFile, registerClientFile } from "./admin-client-files.js"
 import type { AdminActor } from "./admin-core.js"
-import { firstIdSql } from "./admin-email-thread.js"
+import { emailHeaderKeySql, firstIdSql, THREAD_CHAIN_MAX } from "./admin-email-thread.js"
 import {
   applyChatStatus,
   assignChat,
@@ -41,6 +41,7 @@ import {
   chatConversationState,
   emailThreadKeySql,
   getEmailThread,
+  headerThreadKeyOf,
   type InboxItem,
   inboxCounts,
   listInbox,
@@ -511,6 +512,106 @@ describe("el hilo de un correo", () => {
     expect(JSON.stringify(forClinic.conversation)).not.toContain("datos de acceso")
   })
 
+  it("quien copia el Message-ID de lo que escribimos no se hace pasar por ello: se guarda con uno propio", async () => {
+    const o0 = "<o0.copia@odentia32.com>"
+    await ownerDb.insert(saasOutreach).values({
+      clientId: sales,
+      channel: "correo",
+      toAddress: "rosa.venta@bandeja.test",
+      subject: "Tu prueba de odentIA",
+      body: "Hola, te cuento de la prueba.",
+      messageId: o0,
+      status: "enviado",
+      sentAt: ago(3 * HOUR),
+      createdBy: admin.userId,
+      createdAt: ago(3 * HOUR),
+    })
+    const copied = mail({
+      messageId: o0,
+      from: "alguien@copia.test",
+      subject: "Tu prueba de odentIA",
+      receivedAt: ago(2 * HOUR),
+    })
+    const posing = await ingestInboundEmail(ownerDb, copied)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, posing.id))
+    expect(row?.messageId).toMatch(/^<sin-id-[0-9a-f]{64}@entrante\.sallca>$/)
+    const thread = await getEmailThread(ownerDb, admin, posing.id, NOW)
+    expect(thread.threadKey).toBe(row?.messageId)
+    expect(thread.entries.map((entry) => entry.id)).toEqual([posing.id])
+    // Tampoco empezó el hilo de lo nuestro: lo que siga escribiendo con sus cabeceras va aparte.
+    const next = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<sigue.copia@copia.test>",
+        from: "alguien@copia.test",
+        inReplyTo: o0,
+        references: o0,
+        receivedAt: ago(HOUR),
+      }),
+    )
+    expect((await getEmailThread(ownerDb, admin, next.id, NOW)).threadKey).toBe(
+      "<sigue.copia@copia.test>",
+    )
+    // El mismo correo repetido no entra dos veces.
+    expect((await ingestInboundEmail(ownerDb, copied)).duplicate).toBe(true)
+  })
+
+  it("la subida por In-Reply-To en SQL dice lo mismo que su gemela: en círculo, a sí mismo, sin verificar y más larga que el tope", async () => {
+    // Fuera de la ventana de la lista: no se listan.
+    const at = ago(400 * 24 * HOUR)
+    const row = (messageId: string, inReplyTo: string | null, senderVerified = true) => ({
+      mailbox: "hola",
+      product: "dental",
+      messageId,
+      fromAddress: "cadena@sql.test",
+      toAddress: "hola@odentia32.com",
+      inReplyTo,
+      senderVerified,
+      receivedAt: at,
+    })
+    const id = (name: string) => `<${name}.sql@cadena.test>`
+    const inserted = await ownerDb
+      .insert(saasInboundEmail)
+      .values([
+        row(id("x"), id("y")),
+        row(id("y"), id("x")),
+        row(id("z"), id("x")),
+        row(id("s"), id("s")),
+        row(id("u0"), null),
+        row(id("u1"), id("u0"), false),
+        row(id("u2"), id("u1")),
+        ...Array.from({ length: THREAD_CHAIN_MAX + 3 }, (_, i) =>
+          row(id(`l${i}`), i === 0 ? null : id(`l${i - 1}`)),
+        ),
+      ])
+      .returning()
+    const known = new Map(inserted.map((email) => [email.messageId, email]))
+    const keys = new Map(
+      [
+        ...(await ownerDb.execute<{ id: string; key: string }>(
+          sql`select e.id::text as id, ${emailHeaderKeySql("e")} as key
+            from admin.saas_inbound_email e where e.id in (${sql.join(
+              inserted.map((email) => sql`${email.id}::uuid`),
+              sql`, `,
+            )})`,
+        )),
+      ].map((r) => [r.id, r.key]),
+    )
+    for (const email of inserted)
+      expect(keys.get(email.id)).toBe(headerThreadKeyOf(email, (mid) => known.get(mid)))
+    const keyOf = (name: string) => keys.get(known.get(id(name))?.id ?? "")
+    // En círculo, el último que no se repite; a sí mismo, el suyo; sin verificar, se corta ahí.
+    expect(keyOf("z")).toBe(id("y"))
+    expect(keyOf("s")).toBe(id("s"))
+    expect(keyOf("u2")).toBe(id("u1"))
+    // Hasta el tope llega al primero; más allá, se corta.
+    expect(keyOf(`l${THREAD_CHAIN_MAX}`)).toBe(id("l0"))
+    expect(keyOf(`l${THREAD_CHAIN_MAX + 2}`)).toBe(id("l1"))
+  })
+
   it("las cabeceras del hilo se buscan por sus índices: la misma expresión que la regla", async () => {
     // Cada búsqueda por el primer Message-ID, armada con la misma expresión de la regla
     // (`firstIdSql`): sin recorrer la tabla, el plan usa su índice de expresión.
@@ -648,7 +749,7 @@ describe("el hilo de un correo", () => {
     expect(await keyOf(forged.id)).toBe(o0)
   })
 
-  it("el colega de la clínica entra en el hilo si es una persona de ella o si alguien liga su correo; el de otra, no", async () => {
+  it("la persona registrada de la clínica entra en su hilo con su primer correo; la de otra, la no verificada y la que solo se liga, no", async () => {
     const keyOf = async (emailId: string) =>
       (await getEmailThread(ownerDb, admin, emailId, NOW)).threadKey
     // «Escribir» a la clínica: el hilo es de ella desde lo que le escribimos.
@@ -685,6 +786,28 @@ describe("el hilo de un correo", () => {
     )
     expect(registered.clientId).toBe(sales)
     expect(await keyOf(registered.id)).toBe(o0)
+    // También en un hilo que empezó la clínica con su correo.
+    await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<inicio.colegas@bandeja.test>",
+        from: "rosa.venta@bandeja.test",
+        subject: "Una consulta",
+        receivedAt: ago(6 * HOUR),
+      }),
+    )
+    const second = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<reg2.colegas@bandeja.test>",
+        from: "colega.reg@bandeja.test",
+        subject: "Re: Una consulta",
+        inReplyTo: "<inicio.colegas@bandeja.test>",
+        references: "<inicio.colegas@bandeja.test>",
+        receivedAt: ago(150 * MIN),
+      }),
+    )
+    expect(await keyOf(second.id)).toBe("<inicio.colegas@bandeja.test>")
     // Una persona de otra clínica con las mismas cabeceras, o un From sin verificar: aparte.
     const foreign = await ingestInboundEmail(
       ownerDb,
@@ -708,6 +831,33 @@ describe("el hilo de un correo", () => {
       }),
     )
     expect(await keyOf(unverified.id)).toBe("<sinver.colegas@bandeja.test>")
+    // La regla en SQL dice lo mismo que su gemela, con la clínica de cada hilo.
+    const ids = [registered.id, second.id, foreign.id, unverified.id]
+    const rows = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(inArray(saasInboundEmail.id, ids))
+    const sqlKeys = new Map(
+      [
+        ...(await ownerDb.execute<{ id: string; key: string }>(
+          sql`select e.id::text as id, ${emailThreadKeySql("e")} as key
+            from admin.saas_inbound_email e where e.id in (${sql.join(
+              ids.map((id) => sql`${id}::uuid`),
+              sql`, `,
+            )})`,
+        )),
+      ].map((row) => [row.id, row.key]),
+    )
+    const threadsOfSales = [o0, "<inicio.colegas@bandeja.test>"]
+    for (const row of rows)
+      expect(sqlKeys.get(row.id)).toBe(
+        threadKeyOf(
+          row,
+          undefined,
+          (key) => (threadsOfSales.includes(key) ? ["rosa.venta@bandeja.test"] : []),
+          (key) => (threadsOfSales.includes(key) ? [sales] : []),
+        ),
+      )
     // Quien no está registrado queda aparte, y «¿De quién es?» sugiere la clínica del hilo.
     const fresh = await ingestInboundEmail(
       ownerDb,
@@ -723,11 +873,25 @@ describe("el hilo de un correo", () => {
     expect(apart.threadKey).toBe("<nueva.colegas@bandeja.test>")
     expect(apart.suggestion).toMatchObject({ clientId: sales })
     expect(apart.suggestion?.why).toContain("desde otra dirección")
-    // Ligarlo a esa clínica lo pone en su hilo, con lo que ya había.
+    // Ligarlo dice de quién es, pero no lo pone en el hilo: las cabeceras las puso quien escribe.
     await assignInboundEmail(ownerDb, admin, fresh.id, sales, ago(HOUR))
+    expect(await keyOf(fresh.id)).toBe("<nueva.colegas@bandeja.test>")
+    // Al responderle, entra en el hilo con lo que ya había.
+    const answer = await prepareEmailReply(
+      ownerDb,
+      admin,
+      fresh.id,
+      { body: "Hola." },
+      ago(50 * MIN),
+    )
     const merged = await getEmailThread(ownerDb, admin, fresh.id, NOW)
     expect(merged.threadKey).toBe(o0)
-    expect(merged.entries.map((entry) => entry.id)).toEqual([first?.id, registered.id, fresh.id])
+    expect(merged.entries.map((entry) => entry.id)).toEqual([
+      first?.id,
+      registered.id,
+      fresh.id,
+      answer.id,
+    ])
     // Un From sin verificar no entra aunque una persona lo ligue a la clínica del hilo.
     await assignInboundEmail(ownerDb, admin, unverified.id, sales, ago(HOUR))
     expect(await keyOf(unverified.id)).toBe("<sinver.colegas@bandeja.test>")
@@ -1419,6 +1583,18 @@ describe("la lista", () => {
     expect(await listed("correo", today.id, { estado: "te_toca", canal: "correo" })).toMatchObject({
       client: { id: chainClient },
     })
+    // Lo que le respondemos lleva primero el Message-ID del hilo: lo que conteste queda en él.
+    const last = await prepareEmailReply(
+      ownerDb,
+      admin,
+      today.id,
+      { body: "Listo." },
+      ago(30 * MIN),
+    )
+    const [lastRow] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, last.id))
+    expect(lastRow?.references).toBe(
+      "<r.cadena@cadena.test> <b.cadena@cadena.test> <d.cadena@cadena.test>",
+    )
   })
 
   it("Soporte no ve la Bandeja: 403 en todo", async () => {
