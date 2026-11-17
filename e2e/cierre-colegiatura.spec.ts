@@ -54,8 +54,9 @@ test("odentIA: sin colegiatura, el cierre la pide, la guarda y firma", async ({ 
   await expect(firma.getByLabel("Colegio")).toHaveValue("COP")
   // El dueño de la clínica de prueba no tiene título: se propone el del país.
   await expect(firma.getByLabel("Título profesional")).toHaveValue("Cirujano dentista")
-  // Lo que falta escribir es el número: ahí empieza el foco.
-  await expect(firma.getByLabel("Número de colegiatura")).toBeFocused()
+  // Hay dos salidas (escribirla o firmar sin ella con el motivo): el foco no elige por la persona.
+  await expect(firma.getByLabel("Número de colegiatura")).not.toBeFocused()
+  await expect(firma.getByLabel("Si firmas sin colegiatura, escribe por qué")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("cierre-pide-colegiatura.png"), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(firma.getByRole("button", { name: "Finalizar y firmar", exact: true })).toBeInViewport()

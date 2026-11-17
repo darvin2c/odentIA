@@ -2397,29 +2397,30 @@ export function EncounterEditor({
   ]
 
   // Sin colegiatura: se escribe aquí (queda en su perfil) o se escribe por qué firma sin ella (17 nov).
+  // Las dos salidas en una sola tarjeta (QA del 17 nov, UX U1): escribirla, «o» firmar sin ella.
   const registrationFields = needsRegistration ? (
-    <div className="flex flex-col gap-3">
-      <SignatureRegistrationFields
-        form={closingForm}
-        fields={REGISTRATION_FIELDS}
-        signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
-        askTitle={!profileQuery.data?.data.professionalTitle}
-        disabled={finalizing}
-        numberRef={registrationNumberRef}
-        title="No tienes tu colegiatura en el perfil"
-        reason="Escríbela y queda en tu perfil, o firma sin ella escribiendo por qué."
-      />
-      <closingForm.AppField name="registrationSkipReason">
-        {(field) => (
-          <field.TextareaField
-            label="Si firmas sin colegiatura, escribe por qué"
-            rows={2}
-            maxLength={2000}
-            disabled={finalizing}
-          />
-        )}
-      </closingForm.AppField>
-    </div>
+    <SignatureRegistrationFields
+      form={closingForm}
+      fields={REGISTRATION_FIELDS}
+      signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
+      askTitle={!profileQuery.data?.data.professionalTitle}
+      disabled={finalizing}
+      numberRef={registrationNumberRef}
+      title="No tienes tu colegiatura en el perfil"
+      reason="Escríbela y queda en tu perfil, o firma sin ella escribiendo por qué."
+      orElse={
+        <closingForm.AppField name="registrationSkipReason">
+          {(field) => (
+            <field.TextareaField
+              label="Si firmas sin colegiatura, escribe por qué"
+              rows={2}
+              maxLength={2000}
+              disabled={finalizing}
+            />
+          )}
+        </closingForm.AppField>
+      }
+    />
   ) : null
   const signatureHint = profileQuery.isSuccess ? (
     <ClosingSignatureHint
@@ -3095,7 +3096,6 @@ export function EncounterEditor({
           if (form) setFormsToggled((current) => setFromDefault(current, formId, finishesByDefault(form), finish))
         }}
         formProposals={confirmWithDictation ? (formId) => <DictationSignList {...signListProps} responseId={formId} /> : undefined}
-        initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
         onPaper={(need) => void openPaper(need)}
         onClose={() => {

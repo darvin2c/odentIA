@@ -31,6 +31,11 @@ export const SignatureRegistrationFields = withFieldGroup({
     reason?: string
     /** El título del bloque; por omisión, «Falta tu colegiatura para firmar». */
     title?: string
+    /**
+     * La otra salida, dentro de la misma tarjeta y después de un «o»: en el cierre, firmar sin
+     * ella escribiendo por qué (ADR 0200). Así las dos salidas se leen juntas.
+     */
+    orElse?: React.ReactNode
     /** El número es lo que falta escribir: ahí empieza el foco. */
     numberRef?: React.Ref<HTMLInputElement>
   },
@@ -41,6 +46,7 @@ export const SignatureRegistrationFields = withFieldGroup({
     disabled,
     reason,
     title,
+    orElse,
     numberRef,
   }) {
     return (
@@ -85,6 +91,14 @@ export const SignatureRegistrationFields = withFieldGroup({
             )}
           </group.AppField>
         </div>
+        {orElse ? (
+          <>
+            <p className="text-sm font-medium" aria-hidden>
+              o
+            </p>
+            {orElse}
+          </>
+        ) : null}
       </div>
     )
   },
