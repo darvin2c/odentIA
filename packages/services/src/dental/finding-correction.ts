@@ -19,8 +19,10 @@ import {
   toothSiteCode,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import type { CorrectionFinding, EncounterMoment } from "../product-hooks.js"
 import { voidOdontogramEntry } from "./odontogram.js"
+import { toothOfRow } from "./site.js"
 
 /** El hallazgo y su diagnóstico nacieron juntos: queda dicho, una vez. */
 export async function linkDiagnosisFinding(
@@ -118,12 +120,117 @@ export async function correctionFindings(
   })
 }
 
-/** Anula esos hallazgos con su motivo, como «Anular» en la pieza (`voidOdontogramEntry`). */
+/**
+ * El diagnóstico que sigue porque lo usa otro hallazgo no conserva la cara del que se anuló (QA
+ * del 16 nov, Q5). Dos caries de la 47 (oclusal y mesial) con el mismo K02.1 comparten un
+ * diagnóstico, que nació con la cara de la primera: al anular la oclusal seguía diciendo «47 ·
+ * Oclusal», la cara anulada, y eso es lo que se firma.
+ *
+ * Un diagnóstico registrado no se reescribe (lo impide la base, `guard_draft_encounter_child`):
+ * se anula, diciendo por qué, y se registra de nuevo con las caras de los hallazgos que quedan,
+ * unido a ellos. El de la pieza (la pulpitis junto a una caries: sin caras) no se toca, ni el que
+ * ya decía bien lo que queda.
+ */
+async function refaceSharedDiagnoses(
+  tx: Db,
+  {
+    orgId,
+    actorUserId,
+    patientId,
+    encounterId,
+    diagnosisIds,
+    reason,
+  }: EncounterMoment & { diagnosisIds: readonly string[]; reason: string },
+): Promise<void> {
+  const ids = [...new Set(diagnosisIds)]
+  if (ids.length === 0) return
+  const diagnoses = await tx
+    .select()
+    .from(encounterDiagnosis)
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.patientId, patientId),
+        eq(encounterDiagnosis.encounterId, encounterId),
+        inArray(encounterDiagnosis.id, ids),
+        isNull(encounterDiagnosis.voidedAt),
+      ),
+    )
+  for (const diagnosis of diagnoses) {
+    const tooth = toothOfRow(diagnosis)
+    if (tooth == null || diagnosis.siteQualifiers.length === 0) continue
+    const live = await tx
+      .select({ id: odontogramEntry.id, surface: odontogramEntry.surface })
+      .from(diagnosisFinding)
+      .innerJoin(
+        odontogramEntry,
+        and(
+          eq(odontogramEntry.organizationId, diagnosisFinding.organizationId),
+          eq(odontogramEntry.id, diagnosisFinding.odontogramEntryId),
+        ),
+      )
+      .where(
+        and(
+          eq(diagnosisFinding.organizationId, orgId),
+          eq(diagnosisFinding.diagnosisId, diagnosis.id),
+          eq(odontogramEntry.encounterId, encounterId),
+          isNull(odontogramEntry.voidedAt),
+        ),
+      )
+      .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id))
+    // Sin ningún hallazgo vigente no hay de dónde decir la cara: queda como se registró.
+    if (live.length === 0) continue
+    const faces = [...new Set(live.flatMap((row) => (row.surface ? [row.surface] : [])))]
+    // Sigue diciendo solo caras con hallazgo vigente: no hay nada falso que corregir.
+    if (diagnosis.siteQualifiers.every((face) => faces.includes(face))) continue
+    await voidEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, diagnosis.id, {
+      reason: `Se anuló el hallazgo de esa cara (${reason.slice(0, 1800)}): el diagnóstico sigue, con la cara que queda.`,
+    })
+    const next = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
+      diagnosisCode: diagnosis.diagnosisCode,
+      diagnosisSystem: diagnosis.diagnosisSystem,
+      diagnosisType: diagnosis.diagnosisType,
+      toothNumber: tooth,
+      surfaces: faces,
+      note: diagnosis.note,
+    })
+    await linkDiagnosisFinding(tx, { orgId, patientId, diagnosisId: next.id, entryIds: live.map((row) => row.id) })
+  }
+}
+
+/**
+ * Anula esos hallazgos con su motivo, como «Anular» en la pieza (`voidOdontogramEntry`). El
+ * diagnóstico que sigue porque lo usa otro hallazgo deja de decir la cara del que se anuló; los
+ * que caen en la misma corrección (`voidingDiagnosisIds`) no se tocan: se anulan enseguida.
+ */
 export async function voidCorrectionFindings(
   tx: Db,
-  { orgId, actorUserId, patientId, ids, reason }: EncounterMoment & { ids: string[]; reason: string },
+  {
+    orgId,
+    actorUserId,
+    patientId,
+    encounterId,
+    ids,
+    reason,
+    voidingDiagnosisIds = [],
+  }: EncounterMoment & { ids: string[]; reason: string; voidingDiagnosisIds?: readonly string[] },
 ): Promise<void> {
+  const linked =
+    ids.length === 0
+      ? []
+      : await tx
+          .select({ diagnosisId: diagnosisFinding.diagnosisId })
+          .from(diagnosisFinding)
+          .where(and(eq(diagnosisFinding.organizationId, orgId), inArray(diagnosisFinding.odontogramEntryId, ids)))
   for (const id of ids) await voidOdontogramEntry(tx, orgId, actorUserId, id, patientId, reason)
+  await refaceSharedDiagnoses(tx, {
+    orgId,
+    actorUserId,
+    patientId,
+    encounterId,
+    diagnosisIds: linked.map((row) => row.diagnosisId).filter((id) => !voidingDiagnosisIds.includes(id)),
+    reason,
+  })
 }
 
 /**

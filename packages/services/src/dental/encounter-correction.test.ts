@@ -118,8 +118,22 @@ it("B3b: dos caries de la 36 con el mismo código comparten el diagnóstico, que
       reason: "Duplicado",
     }),
   )
-  const [still] = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.id, shared))
-  expect(still!.voidedAt).toBeNull()
+  // Q5: el diagnóstico sigue, y dice la cara de la caries que queda, no la de la anulada. Un
+  // diagnóstico registrado no se reescribe: el de «Oclusal» queda anulado diciendo por qué y el
+  // K02.1 sigue registrado con «Mesial», unido a su hallazgo.
+  const k021s = await ownerDb
+    .select()
+    .from(encounterDiagnosis)
+    .where(and(eq(encounterDiagnosis.encounterId, f.encounter.id), eq(encounterDiagnosis.diagnosisCode, "K02.1")))
+  const live = k021s.filter((row) => row.voidedAt === null)
+  expect(live).toHaveLength(1)
+  expect(live[0]).toMatchObject({ siteCode: "36", siteQualifiers: ["mesial"], diagnosisType: "confirmed" })
+  expect(k021s.find((row) => row.id === shared)!.voidReason).toBe(
+    "Se anuló el hallazgo de esa cara (Duplicado): el diagnóstico sigue, con la cara que queda.",
+  )
+  const kept = live[0]!.id
+  const after = await preview({ findingIds: mesial.entries.map((entry) => entry.id) })
+  expect(after.diagnoses).toEqual([{ ids: [kept], label: "K02.1 Caries de la dentina · 36", offered: true, note: null }])
   // La 36 sigue en la atención: le queda la caries mesial.
   const sites = await ownerDb.select().from(encounterSite).where(eq(encounterSite.encounterId, f.encounter.id))
   expect(sites.map((site) => site.siteCode)).toContain("36")
@@ -150,8 +164,35 @@ it("B3b: dos caries de la 36 con el mismo código comparten el diagnóstico, que
     .from(odontogramEntry)
     .where(inArray(odontogramEntry.id, distal.entries.map((entry) => entry.id)))
   expect(distalRows.every((row) => row.voidReason === "Era otra pieza")).toBe(true)
-  const [k021] = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.id, shared))
+  const [k021] = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.id, kept))
   expect(k021!.voidedAt).toBeNull()
+})
+
+it("Q5: al anular la segunda caries, el diagnóstico compartido ya decía bien la que queda y no se toca", async () => {
+  const { f, register } = await setup()
+  const occlusal = await register({
+    toothNumbers: [47],
+    condition: "caries",
+    surfaces: ["occlusal"],
+    details: { variant: "dentin" },
+    diagnosis: { diagnosisCode: "K02.1", diagnosisType: "confirmed" },
+  })
+  const mesial = await register({
+    toothNumbers: [47],
+    condition: "caries",
+    surfaces: ["mesial"],
+    details: { variant: "dentin" },
+    diagnosis: { diagnosisCode: "K02.1", diagnosisType: "confirmed" },
+  })
+  const shared = occlusal.diagnoses[0]!.id
+  await f.run((tx) =>
+    voidWithCorrection(tx, ...f.args, f.encounter.id, { findingIds: mesial.entries.map((entry) => entry.id) }, {
+      reason: "No era caries",
+    }),
+  )
+  const all = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, f.encounter.id))
+  expect(all).toHaveLength(1)
+  expect(all[0]).toMatchObject({ id: shared, voidedAt: null, siteQualifiers: ["occlusal"] })
 })
 
 it("B3c: con el consentimiento de la 47 ya firmado, el aviso lo nombra y el consentimiento queda como estaba", async () => {

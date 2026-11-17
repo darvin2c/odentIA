@@ -579,7 +579,11 @@ export interface ProductHooks {
    */
   correction?: {
     findings(tx: Db, scope: Omit<EncounterMoment, "actorUserId">): Promise<CorrectionFinding[]>
-    voidFindings(tx: Db, moment: EncounterMoment & { ids: string[]; reason: string }): Promise<void>
+    /** `voidingDiagnosisIds`: los diagnósticos que caen en la misma corrección, que no se tocan aquí. */
+    voidFindings(
+      tx: Db,
+      moment: EncounterMoment & { ids: string[]; reason: string; voidingDiagnosisIds?: readonly string[] },
+    ): Promise<void>
   }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>

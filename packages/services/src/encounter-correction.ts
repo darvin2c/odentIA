@@ -282,11 +282,11 @@ export async function voidWithCorrection(
   })
   const moment = { orgId, actorUserId, patientId, encounterId }
   const voidFindings = preview.target.kind === "finding" ? preview.target.ids : findingIds
+  const voidDiagnoses = preview.target.kind === "diagnosis" ? preview.target.ids : diagnosisIds
   if (voidFindings.length > 0) {
     if (!hooks.correction) throw notFound("Hallazgo")
-    await hooks.correction.voidFindings(tx, { ...moment, ids: voidFindings, reason })
+    await hooks.correction.voidFindings(tx, { ...moment, ids: voidFindings, reason, voidingDiagnosisIds: voidDiagnoses })
   }
-  const voidDiagnoses = preview.target.kind === "diagnosis" ? preview.target.ids : diagnosisIds
   for (const id of voidDiagnoses)
     await voidEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, id, { reason })
   for (const id of planItemIds)
