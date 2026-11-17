@@ -49,6 +49,9 @@ test("sesiones habituales: la biblioteca las dice, el servicio las guarda, el pl
 
   // 3. Lo que se indica desde ahora nace con ellas; lo ya indicado no cambia.
   const visit = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { reason: "Sesión de la endodoncia de la 36" }, 201)
+  // El presupuesto de la 36 se acepta antes de indicar lo nuevo: lo indicado con un borrador a la
+  // vista entra ya en él, y aquí lo de hoy va en el suyo, que nace al firmar.
+  await createAcceptedBudget(owner, ids)
   const indicated = await call<{ id: string; plannedSessions: number }>(page, "POST", `${apiPath}/plan/items`, slug, {
     serviceId: ids.serviceId,
     sourceEncounterId: visit.id,
@@ -70,7 +73,6 @@ test("sesiones habituales: la biblioteca las dice, el servicio las guarda, el pl
   expect(crownItem.plannedSessions).toBe(2)
 
   // 4. La endodoncia de la 36 (indicada antes, con 1) se hace hoy y se termina al firmar sin tocar nada.
-  await createAcceptedBudget(owner, ids)
   await call(page, "PATCH", `${apiPath}/encounters/${visit.id}`, slug, { evolution: "Endodoncia de la 36." })
   await call(page, "POST", `${apiPath}/encounters/${visit.id}/diagnoses`, slug, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 36 }, 201)
   await call(page, "POST", `${apiPath}/encounters/${visit.id}/procedures`, slug, { planItemId: ids.itemId }, 201)

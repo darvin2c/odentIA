@@ -85,7 +85,7 @@ test("la atención pide sus enfermedades y su medicación, y el cierre avisa la 
 
   // «Antecedentes y última atención» distingue «niega» de «no se preguntó» y dice la ASA.
   await page.getByRole("button", { name: "Antecedentes y última atención" }).click()
-  await expect(page.getByText("Niega enfermedades.")).toBeVisible()
+  await expect(page.getByText("Niega enfermedades.", { exact: true })).toBeVisible()
   await expect(page.getByText("Aún no se le preguntó por su medicación.")).toBeVisible()
   await expect(page.getByText("ASA sin clasificar.")).toBeVisible()
   await shot("antecedentes-al-lado")

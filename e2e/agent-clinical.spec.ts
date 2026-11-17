@@ -95,9 +95,10 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
 
   const dictate = page.getByRole("button", { name: "Dictar", exact: true })
   const reason = page.getByLabel("Motivo de consulta", { exact: true })
-  // El motivo se escribe en la misma página: nada se abre encima ni toma el cursor (en el teléfono subiría el teclado).
+  // El motivo se escribe en la misma página: nada se abre encima. Con teclado, el cursor empieza
+  // ahí, para que el primer Tab no vuelva al principio de la página.
   await expect(reason).toBeVisible()
-  await expect(reason).not.toBeFocused()
+  await expect(reason).toBeFocused()
   await expect(dictate).toHaveCount(0)
 
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
@@ -105,7 +106,7 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   // Con Clío encendida, dictar es un botón de la cabecera: el cuadro del dictado no ocupa la atención.
   await expect(dictate).toBeVisible()
   await expect(page.getByRole("region", { name: "Dictado de la atención" })).toHaveCount(0)
-  await expect(reason).not.toBeFocused()
+  await expect(reason).toBeFocused()
   await info.attach("atender-sin-motivo", { body: await page.screenshot(), contentType: "image/png" })
 
   // En el teléfono tampoco se abre nada encima.
@@ -113,7 +114,6 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   await gotoHydrated(page, page.url())
   await expect(dictate).toBeVisible()
   await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
-  await expect(reason).not.toBeFocused()
   await info.attach("atender-sin-motivo-movil", { body: await page.screenshot(), contentType: "image/png" })
 
   // Si no lo dictó ni lo escribió, «Finalizar y firmar» lleva a su campo con el cursor ahí.
@@ -123,12 +123,12 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   await expect(reason).toBeFocused()
   await expect(page.getByText("Escribe el motivo: es obligatorio para cerrar")).toBeVisible()
 
-  // Ya escrito, al volver a la atención sigue ahí y el cursor no salta al campo.
+  // Ya escrito, al volver a la atención sigue ahí.
   await reason.fill("Dolor en una muela")
-  await expect(page.getByText(/^Guardado /)).toBeVisible()
+  // El de la cabecera: la línea fija del paciente repite «Guardado» cuando la cabecera ya no se ve.
+  await expect(page.getByRole("status").filter({ hasText: /^Guardado / })).toBeVisible()
   await gotoHydrated(page, page.url())
   await expect(reason).toHaveValue("Dolor en una muela")
-  await expect(reason).not.toBeFocused()
 })
 
 test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloque mientras se dicta, revisión y aviso antes de firmar", async ({ owner, fixtureDb }, info) => {
@@ -354,8 +354,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  // Recargada y sin sugerencias pendientes, dictar está en la cabecera.
-  const dictate = page.getByRole("button", { name: "Dictar", exact: true })
+  // Recargada y sin sugerencias pendientes, dictar está en la cabecera (el primero; con la página
+  // bajada, la línea fija del paciente trae otro).
+  const dictate = page.getByRole("button", { name: "Dictar", exact: true }).first()
   expect((await dictate.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await dictate.click()
   await expect(live).toContainText("Escuchando")
@@ -528,7 +529,7 @@ test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde v
   await expect(allergy).not.toContainText("¿Qué tan fuerte fue?")
   await allergy.getByRole("button", { name: "Confirmar", exact: true }).click()
   // Confirmada, se ve al momento en la franja: severa, en rojo y primero.
-  await expect(page.getByLabel("Alertas clínicas")).toContainText(/Alergia severa: penicilinas/i)
+  await expect(page.getByRole("region", { name: "Alertas clínicas" })).toContainText(/Alergia severa: penicilinas/i)
   await done.getByRole("button", { name: "Confirmar", exact: true }).click()
   await expect(suggested("Procedimientos")).toHaveCount(0)
   const detail = await call<{ procedures: Array<{ description: string; priceCents: number | null; voidedAt: string | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
