@@ -37,6 +37,6 @@ La regla de la UX sigue: avisar donde se decide, sin frenar. Lo clínico lo deci
 ## Referencias
 
 - `packages/clinical/src/vitals.ts` (`bloodPressureAlert`), `local-anesthesia.ts`.
-- `packages/db/seeds/biblioteca_anestesia.csv`, `biblioteca_medica_anestesia.csv`, `src/procedure-codes.ts` (`libraryAnesthesia`), migración `0138_anestesia_del_servicio.sql`.
+- `packages/db/seeds/biblioteca_anestesia.csv`, `biblioteca_medica_anestesia.csv`, `src/procedure-codes.ts` (`libraryAnesthesia`), migración `0139_anestesia_del_servicio.sql`.
 - `packages/services/src/service-catalog.ts` (`localAnesthesiaSql`), `anesthesia-at-signing.ts`, `encounters.ts` (`checkEncounterClosing`, `finalizeEncounter`), `clinical.ts` (`setPatientAsa`).
 - `packages/clinic-app/src/components/patient/encounter-anesthesia.tsx`, `vitals-alert.tsx`.

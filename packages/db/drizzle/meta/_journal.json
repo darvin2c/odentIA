@@ -971,15 +971,22 @@
     {
       "idx": 138,
       "version": "7",
-      "when": 1794859199364,
-      "tag": "0138_anestesia_del_servicio",
+      "when": 1794869934460,
+      "tag": "0138_estado_oauth_instagram",
       "breakpoints": true
     },
     {
       "idx": 139,
       "version": "7",
-      "when": 1794859200364,
-      "tag": "0139_hallazgo_y_su_diagnostico",
+      "when": 1794869935460,
+      "tag": "0139_anestesia_del_servicio",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794869936460,
+      "tag": "0140_hallazgo_y_su_diagnostico",
       "breakpoints": true
     }
   ]

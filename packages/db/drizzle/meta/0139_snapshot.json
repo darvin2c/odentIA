@@ -1,6 +1,6 @@
 {
-  "id": "845758e4-bbf7-4864-93ac-240eb67f5bc8",
-  "prevId": "4cd1977a-bd1a-48ae-80ab-449be01c23bf",
+  "id": "4cd1977a-bd1a-48ae-80ab-449be01c23bf",
+  "prevId": "cffb8b58-0a75-4339-b318-7bbf7034b6ca",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -18177,36 +18177,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
-        },
-        "encounter_diagnosis_org_patient_id_uidx": {
-          "name": "encounter_diagnosis_org_patient_id_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "encounter_diagnosis_encounter_idx": {
           "name": "encounter_diagnosis_encounter_idx",
@@ -18225,9 +18198,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "encounter_diagnosis_legacy_note_uidx": {
           "name": "encounter_diagnosis_legacy_note_uidx",
@@ -18240,10 +18213,10 @@
             }
           ],
           "isUnique": true,
-          "where": "legacy_note_id IS NOT NULL",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "legacy_note_id IS NOT NULL",
+          "concurrently": false
         },
         "encounter_diagnosis_org_code_idx": {
           "name": "encounter_diagnosis_org_code_idx",
@@ -18268,109 +18241,109 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "encounter_diagnosis_organization_id_organization_id_fk": {
           "name": "encounter_diagnosis_organization_id_organization_id_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_encounter_id_encounter_id_fk": {
           "name": "encounter_diagnosis_encounter_id_encounter_id_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "encounter",
           "columnsFrom": [
             "encounter_id"
           ],
+          "tableTo": "encounter",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_legacy_note_id_clinical_note_id_fk": {
           "name": "encounter_diagnosis_legacy_note_id_clinical_note_id_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "clinical_note",
           "columnsFrom": [
             "legacy_note_id"
           ],
+          "tableTo": "clinical_note",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_created_by_user_id_fk": {
           "name": "encounter_diagnosis_created_by_user_id_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "created_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_voided_by_user_id_fk": {
           "name": "encounter_diagnosis_voided_by_user_id_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "voided_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_patient_fk": {
           "name": "encounter_diagnosis_patient_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "patient",
           "columnsFrom": [
             "organization_id",
             "patient_id"
           ],
+          "tableTo": "patient",
           "columnsTo": [
             "organization_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_diagnosis_diagnosis_fk": {
           "name": "encounter_diagnosis_diagnosis_fk",
           "tableFrom": "encounter_diagnosis",
-          "tableTo": "diagnosis_code",
-          "schemaTo": "catalog",
           "columnsFrom": [
             "diagnosis_system",
             "diagnosis_code"
           ],
+          "tableTo": "diagnosis_code",
+          "schemaTo": "catalog",
           "columnsTo": [
             "system_key",
             "code"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -50093,129 +50066,6 @@
           "value": "(\"optical\".\"lens_prescription\".\"voided_at\" IS NULL) = (\"optical\".\"lens_prescription\".\"void_reason\" IS NULL)"
         }
       },
-      "isRLSEnabled": false
-    },
-    "dental.diagnosis_finding": {
-      "name": "diagnosis_finding",
-      "schema": "dental",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "diagnosis_id": {
-          "name": "diagnosis_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "odontogram_entry_id": {
-          "name": "odontogram_entry_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "diagnosis_finding_diagnosis_idx": {
-          "name": "diagnosis_finding_diagnosis_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "diagnosis_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "diagnosis_finding_organization_id_organization_id_fk": {
-          "name": "diagnosis_finding_organization_id_organization_id_fk",
-          "tableFrom": "diagnosis_finding",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "diagnosis_finding_diagnosis_fk": {
-          "name": "diagnosis_finding_diagnosis_fk",
-          "tableFrom": "diagnosis_finding",
-          "tableTo": "encounter_diagnosis",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "diagnosis_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "diagnosis_finding_entry_fk": {
-          "name": "diagnosis_finding_entry_fk",
-          "tableFrom": "diagnosis_finding",
-          "tableTo": "odontogram_entry",
-          "schemaTo": "dental",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "odontogram_entry_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "diagnosis_finding_odontogram_entry_id_diagnosis_id_pk": {
-          "name": "diagnosis_finding_odontogram_entry_id_diagnosis_id_pk",
-          "columns": [
-            "odontogram_entry_id",
-            "diagnosis_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

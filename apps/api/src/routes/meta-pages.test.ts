@@ -6,7 +6,10 @@ import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
+  beginInstagramLogin,
   beginMetaPagesLogin,
+  chooseMetaPage,
+  listPagesToChoose,
   createConnection,
   decryptConfig,
   listInstagramTokensDue,
@@ -145,30 +148,69 @@ describe("la configuración de páginas es opcional", () => {
 })
 
 describe("conectar con Facebook", () => {
-  it("C1 y C2: un botón conecta Messenger de cada página marcada y el Instagram unido; sin Instagram, lo dice", async () => {
+  it("C1: con varias páginas marcadas no conecta nada: se elige una, con o sin su Instagram, y la elección sirve una vez", async () => {
     const meta = fakeFacebook([SONRISA, LIMA])
     const state = await start("org_a", "u-a")
     const location = await back(meta.fetch, "u-a", { state, code: "COD" })
-    expect(location.origin + location.pathname).toBe("https://clinica.example.com/settings/integrations")
-    expect(Object.fromEntries(location.searchParams)).toEqual({ org: "org_a", facebook: "ok", messenger: "2", instagram: "1", sinig: "1", otra: "0" })
-    // El código se cambió con la vuelta fija y la clave corta por la larga.
+    expect(location.origin + location.pathname).toBe("https://clinica.example.com/settings/integrations/messenger")
+    expect(location.searchParams.get("facebook")).toBe("elegir")
+    const pick = location.searchParams.get("pick") ?? ""
+    expect(pick).toMatch(/^[0-9a-f]{64}$/)
+    // El código se cambió con la vuelta fija y la clave corta por la larga; todavía no hay nada conectado.
     const exchange = meta.calls.filter((call) => call.url.pathname.endsWith("/oauth/access_token"))
     expect(exchange[0]?.url.searchParams.get("redirect_uri")).toBe(META.redirectUri)
     expect(exchange[1]?.url.searchParams.get("fb_exchange_token")).toBe("CORTA")
-    // Una suscripción por página, con su clave: sirve a Messenger y a su Instagram.
+    expect(await rowsOf("org_a")).toHaveLength(0)
+    // Lo que se ve para elegir no lleva claves.
+    const choices = await listPagesToChoose(ownerDb, KEY, { pick, userId: "u-a", orgId: "org_a" })
+    expect(choices).toEqual([
+      { id: "P1", name: "Clínica Sonrisa", instagram: "@sonrisadental" },
+      { id: "P2", name: "Dental Lima", instagram: null },
+    ])
+    expect(JSON.stringify(choices)).not.toContain("TP1")
+    // Otra persona u otra clínica no la ven.
+    await expect(listPagesToChoose(ownerDb, KEY, { pick, userId: "u-b", orgId: "org_a" })).rejects.toMatchObject({ status: 403 })
+    await expect(listPagesToChoose(ownerDb, KEY, { pick, userId: "u-a", orgId: "org_b" })).rejects.toMatchObject({ status: 403 })
+    const choose = (input: { pageId: string; withInstagram: boolean }) =>
+      chooseMetaPage(ownerDb, (orgId, fn) => withOrgContext(appDb, orgId, fn), KEY, META, { fetch: meta.fetch }, { pick, userId: "u-a", orgId: "org_a", ...input })
+    const done = await choose({ pageId: "P1", withInstagram: true })
+    expect(done).toMatchObject({ messenger: ["Clínica Sonrisa"], instagram: ["@sonrisadental"], elsewhere: [] })
+    // Un solo uso: la otra página no se conecta con la misma elección.
+    await expect(choose({ pageId: "P2", withInstagram: false })).rejects.toMatchObject({ status: 403 })
     expect(meta.calls.filter((call) => call.method === "POST").map((call) => [call.url.pathname, call.auth])).toEqual([
       ["/v25.0/P1/subscribed_apps", "Bearer TP1"],
-      ["/v25.0/P2/subscribed_apps", "Bearer TP2"],
     ])
     const rows = await rowsOf("org_a")
-    const summary = rows.map((row) => [row.provider, row.externalId, row.displayName, row.status, Boolean(row.signup?.subscribedAt)]).sort()
-    expect(summary).toEqual([
+    expect(rows.map((row) => [row.provider, row.externalId, row.displayName, row.status, Boolean(row.signup?.subscribedAt)]).sort()).toEqual([
       ["instagram", "IG1", "@sonrisadental", "active", true],
       ["messenger", "P1", "Clínica Sonrisa", "active", true],
-      ["messenger", "P2", "Dental Lima", "active", true],
     ])
     const instagram = rows.find((row) => row.provider === "instagram")!
     expect(decryptConfig(KEY, instagram.configEncrypted)).toEqual({ instagramId: "IG1", pageId: "P1", pageAccessToken: "TP1", appId: "APP1" })
+  })
+
+  it("C2: con una sola página marcada se conecta directo; sin Instagram unido, lo dice", async () => {
+    const meta = fakeFacebook([LIMA])
+    const state = await start("org_a", "u-a")
+    const location = await back(meta.fetch, "u-a", { state, code: "COD" })
+    expect(location.origin + location.pathname).toBe("https://clinica.example.com/settings/integrations")
+    expect(Object.fromEntries(location.searchParams)).toEqual({ org: "org_a", facebook: "ok", messenger: "1", instagram: "0", sinig: "1", otra: "0" })
+    expect((await rowsOf("org_a")).filter((row) => row.externalId === "P2").map((row) => row.status)).toEqual(["active"])
+  })
+
+  it("sin elegir su Instagram, se conecta solo el Messenger de la página", async () => {
+    const meta = fakeFacebook([{ ...SONRISA, id: "P5", name: "Sede Norte", access_token: "TP5", instagram_business_account: { id: "IG5", username: "norte" } }, LIMA])
+    const state = await start("org_c", "u-c")
+    const pick = (await back(meta.fetch, "u-c", { state, code: "COD" })).searchParams.get("pick") ?? ""
+    await chooseMetaPage(ownerDb, (orgId, fn) => withOrgContext(appDb, orgId, fn), KEY, META, { fetch: meta.fetch }, {
+      pick,
+      pageId: "P5",
+      withInstagram: false,
+      userId: "u-c",
+      orgId: "org_c",
+    })
+    expect((await rowsOf("org_c")).map((row) => [row.provider, row.externalId])).toEqual([["messenger", "P5"]])
+    await ownerDb.delete(channelConnection).where(eq(channelConnection.organizationId, "org_c"))
   })
 
   it("el state es de un solo uso, de la misma persona y de quien administra", async () => {
@@ -199,6 +241,7 @@ describe("conectar con Facebook", () => {
     const again = await start("org_b", "u-b")
     const location = await back(meta.fetch, "u-b", { state: again, code: "COD" })
     expect(Object.fromEntries(location.searchParams)).toMatchObject({ facebook: "ok", messenger: "0", instagram: "0", otra: "2" })
+    // La primera vuelta ya consumió su elección guardada: no queda nada de esta clínica.
     expect(await rowsOf("org_b")).toHaveLength(0)
   })
 
@@ -313,5 +356,61 @@ describe("volver a conectar a mano una cuenta desconectada", () => {
     expect(row?.status).toBe("active")
     expect(decryptConfig(KEY, row!.configEncrypted)).toMatchObject({ accessToken: "DOS" })
     await expect(withOrgContext(appDb, "org_c", (tx) => createConnection(tx, "org_c", KEY, input, deps))).rejects.toMatchObject({ code: "CONNECTION_EXISTS" })
+  })
+})
+
+describe("conectar con Instagram", () => {
+  const IG = { appId: "IGAPP", appSecret: "secreto-ig", graphVersion: "v25.0", redirectUri: "https://api.example.com/api/meta-pages/instagram/callback" }
+  const instagramFetch = (userId: string) =>
+    (async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.hostname === "api.instagram.com") return new Response(JSON.stringify({ access_token: "CORTA-IG", user_id: userId }))
+      if (url.pathname === "/access_token") return new Response(JSON.stringify({ access_token: "LARGA-IG", expires_in: 5184000 }))
+      if (url.pathname.endsWith("/me/subscribed_apps")) return new Response(JSON.stringify({ success: true }))
+      return new Response(JSON.stringify({ user_id: userId, username: "solo_instagram" }))
+    }) as unknown as typeof fetch
+  const igRoute = (fetchImpl: typeof fetch, userId: string | null) =>
+    createMetaPagesRoute({ auth: fakeAuth(userId), db: appDb, ownerDb, secretsKey: KEY, webUrl: "https://clinica.example.com", instagram: IG, fetch: fetchImpl })
+
+  it("una cuenta de Instagram sin página de Facebook se conecta con su propio inicio de sesión y recibe por la dirección de la app", async () => {
+    const { url } = await withOrgContext(appDb, "org_b", (tx) => beginInstagramLogin(tx, "org_b", "u-b", KEY, IG))
+    const window = new URL(url)
+    expect(window.origin + window.pathname).toBe("https://www.instagram.com/oauth/authorize")
+    const state = window.searchParams.get("state") ?? ""
+    const res = await igRoute(instagramFetch("17841499"), "u-b").request(`/instagram/callback?state=${encodeURIComponent(state)}&code=COD%23_`)
+    const location = new URL(res.headers.get("location") ?? "")
+    expect(location.origin + location.pathname).toBe("https://clinica.example.com/settings/integrations/instagram")
+    expect(location.searchParams.get("conectado")).toBe("ok")
+    const [row] = (await rowsOf("org_b")).filter((candidate) => candidate.externalId === "17841499")
+    expect(row).toMatchObject({ provider: "instagram", displayName: "@solo_instagram", status: "active" })
+    expect(row?.signup?.subscribedAt).toBeTruthy()
+    expect(decryptConfig(KEY, row!.configEncrypted)).toMatchObject({ instagramId: "17841499", accessToken: "LARGA-IG", appId: "IGAPP" })
+    // La clave de Instagram se renueva sola, como la hecha a mano.
+    const later = new Date(Date.now() + 8 * 24 * 3_600_000)
+    expect((await listInstagramTokensDue(ownerDb, KEY, later)).map((due) => due.connectionId)).toContain(row!.id)
+    // Sus avisos llegan firmados con la clave de la app de Instagram.
+    const body = JSON.stringify({
+      object: "instagram",
+      entry: [{ id: "17841499", messaging: [{ sender: { id: "IGSID9" }, recipient: { id: "17841499" }, timestamp: 9, message: { mid: "m.solo-ig", text: "Hola" } }] }],
+    })
+    const hooks = createWebhooksRoute({ ownerDb, db: appDb, secretsKey: KEY, metaApp: { appSecret: META.appSecret, verifyToken: "reto", instagramAppSecret: IG.appSecret } })
+    const signed = `sha256=${createHmac("sha256", IG.appSecret).update(body).digest("hex")}`
+    expect((await hooks.request("/meta/pages", { method: "POST", headers: { "x-hub-signature-256": signed }, body })).status).toBe(200)
+    expect((await ownerDb.select().from(inboundEvent).where(eq(inboundEvent.externalEventId, "m.solo-ig"))).length).toBe(1)
+    // La clave de Instagram no sirve para hacerse pasar por una página de Facebook.
+    const page = JSON.stringify({ object: "page", entry: [] })
+    const fake = `sha256=${createHmac("sha256", IG.appSecret).update(page).digest("hex")}`
+    expect((await hooks.request("/meta/pages", { method: "POST", headers: { "x-hub-signature-256": fake }, body: page })).status).toBe(401)
+  })
+
+  it("cancelar o volver sin sesión lo dice, y el state no sirve dos veces", async () => {
+    const { url } = await withOrgContext(appDb, "org_b", (tx) => beginInstagramLogin(tx, "org_b", "u-b", KEY, IG))
+    const state = new URL(url).searchParams.get("state") ?? ""
+    const ask = async (userId: string | null, query: string) =>
+      new URL((await igRoute(instagramFetch("1"), userId).request(`/instagram/callback?${query}`)).headers.get("location") ?? "").searchParams.get("conectado")
+    expect(await ask("u-b", `error=access_denied&state=${state}`)).toBe("cancelado")
+    expect(await ask(null, `state=${encodeURIComponent(state)}&code=X`)).toBe("sin-sesion")
+    expect(await ask("u-a", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
+    expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
   })
 })

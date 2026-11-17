@@ -1,4 +1,4 @@
-import { Button, Skeleton } from "@odentia/ui"
+import { Alert, AlertDescription, Button, Skeleton } from "@odentia/ui"
 import { EmptyState, ErrorState, PageHeader, SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { MessageCircle } from "lucide-react"
@@ -14,7 +14,7 @@ import {
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
 import { SettingsNoAccess } from "../settings/no-access"
 import { ChannelPanel } from "./channel-panel"
-import { FacebookPagesButton, useFacebookPages } from "./facebook-pages-button"
+import { ChooseFacebookPage, MetaConnectButton, useMetaConnect } from "./facebook-pages-button"
 import { IntegrationBlock, IntegrationRow, IntegrationRowsSkeleton } from "./integration-list"
 import { IntegrationsCrumbWithText } from "./integrations-crumb"
 
@@ -29,7 +29,35 @@ type Open = { connectionId: string | null; opening: number } | null
  * «Desconectados», las anteriores, que guardan sus conversaciones. Conectar,
  * cambiar la clave y desconectar siguen en su panel al lado.
  */
-export function ChannelPage({ channel }: { channel: PanelChannel }) {
+export interface ChannelSearch {
+  /** «elegir»: volvió de Facebook con varias páginas marcadas; `pick` es la elección guardada. */
+  facebook?: string
+  pick?: string
+  /** La vuelta de «Conectar con Instagram». */
+  conectado?: string
+}
+
+const text = (value: unknown): string | undefined => (typeof value === "string" && value ? value : undefined)
+
+/** Lo que trae la dirección al volver de Facebook o de Instagram. */
+export function validateChannelSearch(search: Record<string, unknown>): ChannelSearch {
+  const facebook = text(search.facebook)
+  const pick = text(search.pick)
+  const conectado = text(search.conectado)
+  return { ...(facebook ? { facebook } : {}), ...(pick ? { pick } : {}), ...(conectado ? { conectado } : {}) }
+}
+
+/** La vuelta de «Conectar con Instagram», dicha sin códigos. */
+export function instagramArrival(result: string | undefined): { tone: "success" | "danger" | "info"; text: string } | null {
+  if (!result) return null
+  if (result === "ok") return { tone: "success", text: "Instagram quedó conectado: lo que te escriban por mensaje directo ya entra a la Bandeja." }
+  if (result === "cancelado") return { tone: "info", text: "No se conectó nada: cerraste la ventana de Instagram antes de terminar." }
+  if (result === "sin-sesion") return { tone: "danger", text: "Tu sesión se cerró mientras estabas en Instagram. Entra y vuelve a conectar." }
+  if (result === "otra") return { tone: "danger", text: "Esa cuenta de Instagram ya está conectada en otra clínica: no se tocó." }
+  return { tone: "danger", text: "No pudimos conectar Instagram. Vuelve a intentarlo." }
+}
+
+export function ChannelPage({ channel, search = {} }: { channel: PanelChannel; search?: ChannelSearch }) {
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   const locale = useOrgLocale()
@@ -37,9 +65,13 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
   const [tab, setTab] = useState<Tab>("conexion")
   const [open, setOpen] = useState<Open>(null)
   const openings = useRef(0)
-  // Messenger e Instagram se conectan con Facebook; «con tu propia app» queda de segunda.
-  const pages = useFacebookPages(canWrite && channel !== "telegram")
-  const facebook = pages.on && channel !== "telegram"
+  // Instagram entra con Instagram (o por su página); Messenger, con Facebook. «Con tu propia app» queda de segunda.
+  const meta = useMetaConnect(channel, canWrite)
+  const way = meta.way
+  const viaWords = way === "instagram" ? "Instagram" : "Facebook"
+  // Varias páginas marcadas en Facebook: se elige una, aquí mismo.
+  const [pick, setPick] = useState<string | null>(search.facebook === "elegir" && search.pick ? search.pick : null)
+  const [arrival, setArrival] = useState(() => instagramArrival(search.conectado))
 
   const listQuery = useQuery({
     queryKey: ["connections"],
@@ -96,6 +128,23 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
   return (
     <div className="flex flex-col gap-4">
       {header}
+      {arrival ? (
+        <Alert
+          variant={arrival.tone === "danger" ? "destructive" : "default"}
+          className={arrival.tone === "success" ? "border-success/30 bg-success-soft" : undefined}
+        >
+          <AlertDescription className={arrival.tone === "success" ? "text-foreground" : undefined}>{arrival.text}</AlertDescription>
+        </Alert>
+      ) : null}
+      {pick && canWrite ? (
+        <ChooseFacebookPage
+          pick={pick}
+          onDone={(done) => {
+            setPick(null)
+            if (done) setArrival({ tone: "success", text: done })
+          }}
+        />
+      ) : null}
       {listQuery.isError && listQuery.data === undefined ? (
         <ErrorState
           title={`No pudimos cargar ${name}`}
@@ -140,21 +189,21 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
               ))}
             </IntegrationBlock>
           ) : null}
-          {tab === "conexion" && hasActive && canWrite ? (
+          {tab === "conexion" && hasActive && canWrite && !pick ? (
             // Como varios buzones de correo: otra cuenta se suma a las que ya están.
             <div className="flex flex-wrap items-start gap-2">
-              {facebook ? <FacebookPagesButton label="Conectar otra con Facebook" variant="outline" /> : null}
+              {way ? <MetaConnectButton way={way} label={`Conectar otra con ${viaWords}`} variant="outline" /> : null}
               <Button
                 type="button"
                 variant="outline"
                 className="self-start"
                 onClick={() => show(null)}
               >
-                {facebook ? "Con tu propia app de Meta" : "Conectar otra cuenta"}
+                {way ? "Con tu propia app de Meta" : "Conectar otra cuenta"}
               </Button>
             </div>
           ) : null}
-          {tab === "conexion" && !hasActive ? (
+          {tab === "conexion" && !hasActive && !pick ? (
             canWrite ? (
               <section
                 aria-label={`Conecta ${name}`}
@@ -164,29 +213,31 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
                   <h2 className="text-base font-semibold">Conecta {name}</h2>
                   <p className="text-sm text-muted-foreground">
                     <strong className="font-semibold text-foreground">Para conectar:</strong>{" "}
-                    {facebook
-                      ? channel === "instagram"
-                        ? "entra con el Facebook de quien administra la página unida al Instagram de la clínica y márcala. Se conectan su Instagram y su Messenger."
-                        : "entra con el Facebook de quien administra la página de la clínica y marca sus páginas. Se conectan su Messenger y el Instagram unido a cada una."
-                      : INTEGRATIONS[channel].toConnect}
+                    {way === "instagram"
+                      ? "entra con la cuenta profesional de Instagram de la clínica, tenga o no página de Facebook."
+                      : way === "facebook"
+                        ? channel === "instagram"
+                          ? "entra con el Facebook de quien administra la página unida al Instagram de la clínica y elige esa página."
+                          : "entra con el Facebook de quien administra la página de la clínica. Si marcas varias, eliges una; también puedes conectar su Instagram."
+                        : INTEGRATIONS[channel].toConnect}
                     {disconnected.length > 0
                       ? " También puedes volver a conectar una cuenta anterior en «Desconectados»."
                       : null}
                   </p>
                 </div>
-                {pages.pending ? (
+                {meta.pending ? (
                   <Skeleton className="h-9 w-44 rounded-3xl" aria-label="Cargando cómo conectar" />
-                ) : facebook ? (
+                ) : way ? (
                   <div className="flex flex-wrap items-start gap-2">
-                    <FacebookPagesButton label="Conectar con Facebook" />
+                    <MetaConnectButton way={way} label={`Conectar con ${viaWords}`} />
                     <Button type="button" variant="outline" className="self-start" onClick={() => show(null)}>
                       Con tu propia app de Meta
                     </Button>
                   </div>
-                ) : pages.failed ? (
+                ) : meta.failed ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm text-muted-foreground">No pudimos saber si está «Conectar con Facebook».</p>
-                    <Button type="button" variant="outline" size="sm" onClick={pages.retry}>
+                    <Button type="button" variant="outline" size="sm" onClick={meta.retry}>
                       Reintentar
                     </Button>
                     <Button type="button" variant="ghost" size="sm" onClick={() => show(null)}>

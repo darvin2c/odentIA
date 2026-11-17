@@ -1,5 +1,5 @@
 {
-  "id": "4cd1977a-bd1a-48ae-80ab-449be01c23bf",
+  "id": "cffb8b58-0a75-4339-b318-7bbf7034b6ca",
   "prevId": "6c2cb0fe-c859-48fa-95fd-801bf35a42c0",
   "version": "7",
   "dialect": "postgresql",
@@ -17784,12 +17784,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "anesthesia_at_signing": {
-          "name": "anesthesia_at_signing",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "visit_follow_up_id": {
           "name": "visit_follow_up_id",
           "type": "uuid",
@@ -17829,9 +17823,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "encounter_org_patient_id_uidx": {
           "name": "encounter_org_patient_id_uidx",
@@ -17856,9 +17850,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "encounter_patient_open_uidx": {
           "name": "encounter_patient_open_uidx",
@@ -17871,10 +17865,10 @@
             }
           ],
           "isUnique": true,
-          "where": "status = 'borrador'",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "status = 'borrador'",
+          "concurrently": false
         },
         "encounter_appointment_active_uidx": {
           "name": "encounter_appointment_active_uidx",
@@ -17893,110 +17887,110 @@
             }
           ],
           "isUnique": true,
-          "where": "appointment_id IS NOT NULL AND status <> 'anulada'",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "appointment_id IS NOT NULL AND status <> 'anulada'",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "encounter_organization_id_organization_id_fk": {
           "name": "encounter_organization_id_organization_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_patient_id_patient_id_fk": {
           "name": "encounter_patient_id_patient_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "patient",
           "columnsFrom": [
             "patient_id"
           ],
+          "tableTo": "patient",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "encounter_branch_id_branch_id_fk": {
           "name": "encounter_branch_id_branch_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "branch",
           "columnsFrom": [
             "branch_id"
           ],
+          "tableTo": "branch",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_professional_user_id_user_id_fk": {
           "name": "encounter_professional_user_id_user_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "professional_user_id"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_finalized_by_user_id_fk": {
           "name": "encounter_finalized_by_user_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "finalized_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_voided_by_user_id_fk": {
           "name": "encounter_voided_by_user_id_fk",
           "tableFrom": "encounter",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "voided_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "encounter_appointment_fk": {
           "name": "encounter_appointment_fk",
           "tableFrom": "encounter",
-          "tableTo": "appointment",
           "columnsFrom": [
             "organization_id",
             "patient_id",
             "appointment_id"
           ],
+          "tableTo": "appointment",
           "columnsTo": [
             "organization_id",
             "patient_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19794,18 +19788,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "asa_class_set_at": {
-          "name": "asa_class_set_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "asa_class_set_by": {
-          "name": "asa_class_set_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "marital_status": {
           "name": "marital_status",
           "type": "text",
@@ -19967,9 +19949,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "patient_org_person_uidx": {
           "name": "patient_org_person_uidx",
@@ -19988,9 +19970,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "patient_org_number_uidx": {
           "name": "patient_org_number_uidx",
@@ -20009,94 +19991,80 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "patient_organization_id_organization_id_fk": {
           "name": "patient_organization_id_organization_id_fk",
           "tableFrom": "patient",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_asa_class_set_by_user_id_fk": {
-          "name": "patient_asa_class_set_by_user_id_fk",
-          "tableFrom": "patient",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "asa_class_set_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "patient_registered_branch_id_branch_id_fk": {
           "name": "patient_registered_branch_id_branch_id_fk",
           "tableFrom": "patient",
-          "tableTo": "branch",
           "columnsFrom": [
             "registered_branch_id"
           ],
+          "tableTo": "branch",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "patient_health_reviewed_by_user_id_fk": {
           "name": "patient_health_reviewed_by_user_id_fk",
           "tableFrom": "patient",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "health_reviewed_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "patient_allergies_reviewed_by_user_id_fk": {
           "name": "patient_allergies_reviewed_by_user_id_fk",
           "tableFrom": "patient",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "allergies_reviewed_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "patient_person_fk": {
           "name": "patient_person_fk",
           "tableFrom": "patient",
-          "tableTo": "contact",
           "columnsFrom": [
             "organization_id",
             "person_id"
           ],
+          "tableTo": "contact",
           "columnsTo": [
             "organization_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -26365,12 +26333,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "local_anesthesia": {
-          "name": "local_anesthesia",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
         "session_gap_days": {
           "name": "session_gap_days",
           "type": "smallint",
@@ -26454,10 +26416,10 @@
             }
           ],
           "isUnique": true,
-          "where": "\"code\" IS NOT NULL",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"code\" IS NOT NULL",
+          "concurrently": false
         },
         "service_catalog_org_id_finance_uidx": {
           "name": "service_catalog_org_id_finance_uidx",
@@ -26476,9 +26438,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "service_catalog_org_active_idx": {
           "name": "service_catalog_org_active_idx",
@@ -26497,9 +26459,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "service_catalog_org_specialty_idx": {
           "name": "service_catalog_org_specialty_idx",
@@ -26518,9 +26480,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "service_catalog_template_idx": {
           "name": "service_catalog_template_idx",
@@ -26533,98 +26495,98 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "service_catalog_organization_id_organization_id_fk": {
           "name": "service_catalog_organization_id_organization_id_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "service_catalog_template_id_treatment_template_id_fk": {
           "name": "service_catalog_template_id_treatment_template_id_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "treatment_template",
-          "schemaTo": "catalog",
           "columnsFrom": [
             "template_id"
           ],
+          "tableTo": "treatment_template",
+          "schemaTo": "catalog",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "service_catalog_evaluation_service_id_service_catalog_id_fk": {
           "name": "service_catalog_evaluation_service_id_service_catalog_id_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "service_catalog",
           "columnsFrom": [
             "evaluation_service_id"
           ],
+          "tableTo": "service_catalog",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "service_catalog_patient_guide_reviewed_by_user_id_fk": {
           "name": "service_catalog_patient_guide_reviewed_by_user_id_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "user",
-          "schemaTo": "auth",
           "columnsFrom": [
             "patient_guide_reviewed_by"
           ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "service_catalog_specialty_fk": {
           "name": "service_catalog_specialty_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "org_specialty",
           "columnsFrom": [
             "organization_id",
             "specialty_id"
           ],
+          "tableTo": "org_specialty",
           "columnsTo": [
             "organization_id",
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "service_catalog_procedure_fk": {
           "name": "service_catalog_procedure_fk",
           "tableFrom": "service_catalog",
-          "tableTo": "procedure_code",
-          "schemaTo": "catalog",
           "columnsFrom": [
             "procedure_system",
             "procedure_code",
             "procedure_version"
           ],
+          "tableTo": "procedure_code",
+          "schemaTo": "catalog",
           "columnsTo": [
             "system_key",
             "code",
             "version"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -28529,13 +28491,6 @@
           "notNull": true,
           "default": 1
         },
-        "local_anesthesia": {
-          "name": "local_anesthesia",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "session_gap_days": {
           "name": "session_gap_days",
           "type": "smallint",
@@ -28582,9 +28537,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
