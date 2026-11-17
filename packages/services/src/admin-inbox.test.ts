@@ -29,7 +29,11 @@ import {
   prepareChatReply,
   prepareKairosChatReply,
 } from "./admin-inbound-chat.js"
-import { type InboundEmailInput, ingestInboundEmail } from "./admin-inbound-email.js"
+import {
+  getInboundEmail,
+  type InboundEmailInput,
+  ingestInboundEmail,
+} from "./admin-inbound-email.js"
 import {
   attendEmailThread,
   chatConversationState,
@@ -47,6 +51,7 @@ import {
 } from "./admin-inbox.js"
 import { KAIROS_TEMPLATE_NOTE, listKairosItems } from "./admin-kairos.js"
 import { markOutreachSent, prepareEmailReply } from "./admin-sales.js"
+import { kairosImproveContext } from "./kairos-improve.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -264,10 +269,22 @@ describe("el hilo de un correo", () => {
           ] as const,
       ),
     ])
+    // Quién está en cada hilo (lo que lee la SQL): quien lo empezó; del que no conocemos, quien
+    // escribió primero apuntándole.
+    const inThread = (key: string) =>
+      ["<e1.hilo@clinica.test>", "<desconocido.hilo@otro.test>"].includes(key)
+        ? ["hilo@nadie.test"]
+        : []
     for (const email of emails) {
       const tsKey = threadKeyOf(
-        { references: email.references, inReplyTo: email.inReplyTo, messageId: email.messageId },
+        {
+          references: email.references,
+          inReplyTo: email.inReplyTo,
+          messageId: email.messageId,
+          fromAddress: email.fromAddress,
+        },
         (id) => known.get(id),
+        inThread,
       )
       expect(sqlKeys.get(email.id)).toBe(tsKey)
     }
@@ -391,6 +408,7 @@ describe("el hilo de un correo", () => {
     const thread = await getEmailThread(ownerDb, admin, asked.id, NOW)
     expect(thread.draft).toEqual({
       itemId: item?.id,
+      emailId: asked.id,
       subject: null,
       body: "Hola, sí la tenemos.",
       reason: "Le escribió a hola@ de odentIA",
@@ -408,6 +426,198 @@ describe("el hilo de un correo", () => {
       NOW,
     )
     expect(asked2.items.some((row) => row.id === item?.id)).toBe(true)
+  })
+
+  it("quien conoce el Message-ID de un hilo ajeno no entra en él: su correo es su propia conversación", async () => {
+    const own = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<v1.hilo@victima.test>",
+        from: "rosa@victima.test",
+        subject: "Mi cuenta",
+        text: "Necesito cambiar la clave de mi cuenta",
+        receivedAt: ago(3 * HOUR),
+      }),
+    )
+    const r1 = await prepareEmailReply(
+      ownerDb,
+      admin,
+      own.id,
+      { body: "Te ayudamos." },
+      ago(2 * HOUR),
+    )
+    await markOutreachSent(ownerDb, admin, r1.id, "enviado", ago(2 * HOUR))
+    const [r1Row] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, r1.id))
+    const r1Mid = r1Row?.messageId ?? ""
+    const headers = { inReplyTo: r1Mid, references: `<v1.hilo@victima.test> ${r1Mid}` }
+    // Alguien de fuera con las cabeceras del hilo, y la clínica que sí responde, en mayúsculas.
+    const spoof = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<falso.hilo@malo.test>",
+        from: "atacante@malo.test",
+        subject: "Re: Mi cuenta",
+        text: "Mándame los datos de acceso",
+        receivedAt: ago(HOUR),
+      }),
+    )
+    const answer = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<v2.hilo@victima.test>",
+        from: "Rosa@Victima.test",
+        subject: "Re: Mi cuenta",
+        receivedAt: ago(30 * MIN),
+      }),
+    )
+    const thread = await getEmailThread(ownerDb, admin, own.id, NOW)
+    expect(thread.threadKey).toBe("<v1.hilo@victima.test>")
+    expect(thread.entries.map((entry) => entry.id)).toEqual([own.id, r1.id, answer.id])
+    expect(thread.reply.emailId).toBe(answer.id)
+    expect(thread.reply.to.toLowerCase()).toBe("rosa@victima.test")
+
+    // El de fuera es su propia conversación: se le responde a él y solo con lo suyo.
+    const alone = await getEmailThread(ownerDb, admin, spoof.id, NOW)
+    expect(alone.threadKey).toBe("<falso.hilo@malo.test>")
+    expect(alone.entries.map((entry) => entry.id)).toEqual([spoof.id])
+    expect(alone.reply).toMatchObject({ emailId: spoof.id, to: "atacante@malo.test" })
+    expect(await listed("correo", spoof.id, { cliente: "sin" })).toMatchObject({ state: "te_toca" })
+    // Otro correo suyo con las mismas cabeceras tampoco entra (aunque el primero ya llegó).
+    const again = await ingestInboundEmail(
+      ownerDb,
+      mail({ ...headers, messageId: "<falso2.hilo@malo.test>", from: "atacante@malo.test" }),
+    )
+    expect(
+      (await getEmailThread(ownerDb, admin, again.id, NOW)).entries.map((entry) => entry.id),
+    ).toEqual([again.id])
+
+    // «Mejorar» lee el mismo hilo que la Bandeja: al de fuera no le llega lo de la clínica.
+    const forSpoof = await kairosImproveContext(ownerDb, admin, { emailId: spoof.id })
+    expect(JSON.stringify(forSpoof.conversation)).toContain("datos de acceso")
+    expect(JSON.stringify(forSpoof.conversation)).not.toContain("cambiar la clave")
+    expect(JSON.stringify(forSpoof.conversation)).not.toContain("Te ayudamos")
+    const forClinic = await kairosImproveContext(ownerDb, admin, { emailId: answer.id })
+    expect(JSON.stringify(forClinic.conversation)).toContain("cambiar la clave")
+    expect(JSON.stringify(forClinic.conversation)).not.toContain("datos de acceso")
+  })
+
+  it("la respuesta lista de un correo anterior no cuenta, y responder el hilo cierra todas", async () => {
+    const draftFor = async (emailId: string, body: string): Promise<string> => {
+      const [row] = await ownerDb
+        .insert(kairosItem)
+        .values({
+          kind: "responder_correo",
+          title: "Responder a Rosa Mamani",
+          reason: "Le escribió a hola@ de odentIA",
+          payload: { emailId, body, draft: { subject: null, body, drafter: "plantilla" } },
+          expectedState: {},
+          idempotencyKey: `prueba:${crypto.randomUUID()}`,
+          expiresAt: later(48 * HOUR),
+          adminOnly: true,
+        })
+        .returning({ id: kairosItem.id })
+      return row?.id ?? ""
+    }
+    const first = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<b1.borrador@nadie.test>",
+        from: "dos.borradores@nadie.test",
+        subject: "Precios",
+        receivedAt: ago(2 * HOUR),
+      }),
+    )
+    const stale = await draftFor(first.id, "Hola, el plan cuesta lo que te conté.")
+    const second = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<b2.borrador@nadie.test>",
+        from: "dos.borradores@nadie.test",
+        subject: "Re: Precios",
+        inReplyTo: "<b1.borrador@nadie.test>",
+        references: "<b1.borrador@nadie.test>",
+        receivedAt: ago(HOUR),
+      }),
+    )
+    // Lo de antes no contesta lo último: te toca sin «Kairós dejó la respuesta lista».
+    expect(await listed("correo", second.id, { cliente: "sin" })).toMatchObject({
+      state: "te_toca",
+      stateWhy: null,
+      draftReady: false,
+    })
+    expect((await getEmailThread(ownerDb, admin, first.id, NOW)).draft).toBeNull()
+    const fresh = await draftFor(second.id, "Hola, te respondo lo nuevo.")
+    expect((await getEmailThread(ownerDb, admin, first.id, NOW)).draft).toMatchObject({
+      itemId: fresh,
+      emailId: second.id,
+    })
+    expect(await listed("correo", second.id, { cliente: "sin" })).toMatchObject({
+      stateWhy: "Kairós dejó la respuesta lista",
+      draftReady: true,
+    })
+    // Una persona responde el último: se cierran las dos, también la del correo anterior.
+    await prepareEmailReply(ownerDb, admin, second.id, { body: "Te cuento." }, NOW)
+    const items = await ownerDb
+      .select({ id: kairosItem.id, status: kairosItem.status })
+      .from(kairosItem)
+      .where(inArray(kairosItem.id, [stale, fresh]))
+    expect(items.map((item) => item.status)).toEqual(["vencida", "vencida"])
+    // Y el borrador viejo no sale como segunda respuesta aunque se intente aprobar.
+    await expect(
+      prepareEmailReply(
+        ownerDb,
+        admin,
+        first.id,
+        { body: "Hola, el plan cuesta lo que te conté.", kairosItemId: stale },
+        NOW,
+      ),
+    ).rejects.toMatchObject({ code: "ALREADY_REPLIED" })
+  })
+
+  it("de cada adjunto guardado dice lo que diría «¿Es la carga de datos?», como el correo", async () => {
+    const receivedAt = ago(31 * 24 * HOUR)
+    const email = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa.venta@bandeja.test", subject: "Mis pacientes", receivedAt }),
+    )
+    const contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    const stored = await registerClientFile(ownerDb, null, {
+      clientId: sales,
+      kind: "correo",
+      filename: "pacientes.xlsx",
+      objectKey: clientFileKey(sales, "xlsx"),
+      contentType,
+      sizeBytes: 5,
+      deleteAfter: null,
+      source: "correo",
+      receivedAt,
+      inboundEmailId: email.id,
+    })
+    await ownerDb
+      .update(saasInboundEmail)
+      .set({
+        attachments: [
+          { filename: "pacientes.xlsx", contentType, size: 5, fileId: stored.id },
+          { filename: "lista.zip", contentType: "application/zip", size: 9, fileId: null },
+        ],
+      })
+      .where(eq(saasInboundEmail.id, email.id))
+    const detail = await getInboundEmail(ownerDb, admin, email.id, NOW)
+    const thread = await getEmailThread(ownerDb, admin, email.id, NOW)
+    expect(detail.files[0]).toMatchObject({ fileId: stored.id, cargaDueNow: true })
+    expect(thread.entries[0]).toMatchObject({
+      kind: "entro",
+      attachments: [
+        {
+          fileId: stored.id,
+          cargaDeleteAfter: detail.files[0]?.cargaDeleteAfter,
+          cargaDueNow: true,
+        },
+        { fileId: null, cargaDeleteAfter: null, cargaDueNow: false },
+      ],
+    })
   })
 
   it("sin cliente, sugiere de quién puede ser por su correo exacto, sin ligarlo", async () => {
@@ -694,6 +904,58 @@ describe("las marcas en un correo", () => {
     const thread = await getEmailThread(ownerDb, admin, first.id, later(2 * MIN))
     expect(thread).toMatchObject({ emailId: again.id, state: "te_toca" })
     expect(await audits("arm.inbox_settled", first.id)).toHaveLength(1)
+  })
+
+  it("si después llega el correo que respondía, la clave del hilo cambia y sus marcas siguen", async () => {
+    const child = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<hijo.marca@nadie.test>",
+        from: "marca@nadie.test",
+        subject: "Re: Demo",
+        inReplyTo: "<padre.marca@nadie.test>",
+        receivedAt: ago(HOUR),
+      }),
+    )
+    expect((await getEmailThread(ownerDb, admin, child.id, NOW)).threadKey).toBe(
+      "<padre.marca@nadie.test>",
+    )
+    await settleConversation(ownerDb, admin, { kind: "correo", id: child.id }, ago(50 * MIN))
+    await attendEmailThread(ownerDb, admin, child.id, true, ago(50 * MIN))
+    // Llega el padre (escrito antes, guardado después), que viene de un hilo más largo.
+    const parent = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<padre.marca@nadie.test>",
+        from: "marca@nadie.test",
+        subject: "Demo",
+        inReplyTo: "<raiz.marca@nadie.test>",
+        references: "<raiz.marca@nadie.test>",
+        receivedAt: ago(2 * HOUR),
+      }),
+    )
+    const thread = await getEmailThread(ownerDb, admin, child.id, NOW)
+    expect(thread.threadKey).toBe("<raiz.marca@nadie.test>")
+    expect(thread.entries.map((entry) => entry.id)).toEqual([parent.id, child.id])
+    expect(thread).toMatchObject({
+      state: "respondida",
+      stateWhy: "No necesitaba respuesta",
+      attendedBy: { id: admin.userId, name: "Ada Lovelace" },
+    })
+    expect(await listed("correo", child.id, { cliente: "sin" })).toMatchObject({
+      state: "respondida",
+      attendedBy: { id: admin.userId },
+    })
+    // Sigue quien lo tomó primero; soltarlo y deshacerlo tocan la marca de antes.
+    expect((await attendEmailThread(ownerDb, other, parent.id, true, NOW)).attendedBy?.id).toBe(
+      admin.userId,
+    )
+    await unsettleConversation(ownerDb, admin, { kind: "correo", id: parent.id }, NOW)
+    await attendEmailThread(ownerDb, admin, parent.id, false, NOW)
+    expect(await getEmailThread(ownerDb, admin, child.id, NOW)).toMatchObject({
+      state: "te_toca",
+      attendedBy: null,
+    })
   })
 })
 

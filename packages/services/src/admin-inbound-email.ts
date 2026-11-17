@@ -594,6 +594,25 @@ export interface InboundEmailFile {
 }
 
 /**
+ * Lo que diría «¿Es la carga de datos?» de un adjunto ya guardado: el día de Lima en que se
+ * borraría si se marca ahora y si marcarlo lo borra en el acto (llegó hace 30 días o más). Nulo y
+ * falso si ya es la carga o si se borró. La misma regla para el correo y su hilo.
+ */
+export function inboundFileCarga(
+  file: { kind: string; receivedAt: Date; deletedAt: Date | null },
+  now: Date,
+): { cargaDeleteAfter: string | null; cargaDueNow: boolean } {
+  const ifMarked =
+    file.kind === "archivo_clinica" || file.deletedAt
+      ? null
+      : cargaDeleteAfter(file.receivedAt, now)
+  return {
+    cargaDeleteAfter: ifMarked,
+    cargaDueNow: ifMarked !== null && ifMarked <= limaDate(now),
+  }
+}
+
+/**
  * Un correo que llegó, para leerlo y responderlo, con sus respuestas. Solo
  * Administración (ADR 0196); el hilo entero lo arma `getEmailThread`.
  */
@@ -645,7 +664,6 @@ export async function getInboundEmail(
   const sender = product
     ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
     : null
-  const today = limaDate(now)
   const files: InboundEmailFile[] = (
     await tx
       .select()
@@ -656,7 +674,6 @@ export async function getInboundEmail(
     .filter((file) => file.kind === "correo" || file.kind === "archivo_clinica")
     .map((file): InboundEmailFile => {
       const carga = file.kind === "archivo_clinica"
-      const ifMarked = carga ? null : cargaDeleteAfter(file.receivedAt, now)
       return {
         fileId: file.id,
         filename: file.filename,
@@ -665,8 +682,7 @@ export async function getInboundEmail(
         kind: carga ? "archivo_clinica" : "correo",
         deleteAfter: carga ? file.deleteAfter : null,
         deleted: file.deletedAt !== null,
-        cargaDeleteAfter: file.deletedAt ? null : ifMarked,
-        cargaDueNow: !file.deletedAt && ifMarked !== null && ifMarked <= today,
+        ...inboundFileCarga(file, now),
       }
     })
   return {

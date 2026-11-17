@@ -8,9 +8,11 @@
  * No se guarda aparte: se lee de lo que entró y de lo que salió. El hilo de un correo se arma al
  * leer (`threadKeyOf` y su gemela `emailThreadKeySql`): el primer Message-ID de su `References`;
  * si no trae, la clave del correo que responde (un envío nuestro o un correo que llegó, por el
- * primero de su `In-Reply-To`) o ese mismo id; si tampoco, su propio Message-ID. Una respuesta
- * nuestra va en el hilo del correo que responde; lo que escribimos primero, en el de su
- * `References` o su propio Message-ID.
+ * primero de su `In-Reply-To`) o ese mismo id; si tampoco, su propio Message-ID. Un correo que
+ * llegó entra en ese hilo solo si quien lo envía ya está en él (`threadAddressSql`): si no, es su
+ * propia conversación, aunque conozca el Message-ID de un hilo ajeno. Una respuesta nuestra va en
+ * el hilo del correo que responde; lo que escribimos primero, en el de su `References` o su
+ * propio Message-ID.
  *
  * El estado lo dice una sola regla en SQL (`conversationsSql`): solo cuenta como respuesta un
  * envío `respuesta` (un aviso no responde nada) creado desde lo último que llegó y que no sea el
@@ -36,7 +38,8 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, type SQL, sql } from "drizz
 import { type ChannelRules, channelRulesOf } from "./admin-channel-rules.js"
 import { CLIENT_PHASES, type ClientPhase, clientPhaseSql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { matchInboundClient } from "./admin-inbound-email.js"
+import { emailThreadKeySql, firstIdSql, outreachThreadKeySql } from "./admin-email-thread.js"
+import { inboundFileCarga, matchInboundClient } from "./admin-inbound-email.js"
 import { CHAT_OUTREACH_SETTLE_MS, replySignature, replySubject } from "./admin-sales.js"
 import { outreachSenderPreview } from "./admin-staff-mail.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -66,92 +69,15 @@ function requireAdmin(actor: AdminActor | null): AdminActor {
 
 /* ---------- El hilo de un correo ---------- */
 
-const MESSAGE_ID = /<[^<>\s]+>/
-
-/** El primer Message-ID (`<…>`) de una cabecera, tal como viene (sin pasar a minúsculas); nulo si no trae. */
-export function firstMessageId(value: string | null | undefined): string | null {
-  return (value ?? "").match(MESSAGE_ID)?.[0] ?? null
-}
-
-/** Las cabeceras de un correo que dicen de qué hilo es. Un envío nuestro no trae `inReplyTo`. */
-export interface ThreadHeaders {
-  references?: string | null
-  inReplyTo?: string | null
-  messageId: string | null
-}
-
-/**
- * La clave del hilo de un correo: el primer Message-ID de su `References`; si no trae, la clave
- * de su padre (`parentOf`: el envío nuestro o el correo que llegó con el Message-ID del primero
- * de su `In-Reply-To`), o ese id si no lo conocemos; si tampoco trae `In-Reply-To`, su propio
- * Message-ID. La clave del padre se lee de sus propias cabeceras, sin buscar a su padre: es la
- * misma regla de `emailThreadKeySql`. Sin pasar a minúsculas (un Message-ID distingue).
- */
-export function threadKeyOf(
-  message: ThreadHeaders,
-  parentOf?: (messageId: string) => ThreadHeaders | null | undefined,
-): string | null {
-  const root = firstMessageId(message.references)
-  if (root) return root
-  const parentId = firstMessageId(message.inReplyTo)
-  if (parentId) {
-    const parent = parentOf?.(parentId)
-    return (parent ? threadKeyOf(parent) : null) ?? parentId
-  }
-  return message.messageId?.trim() || null
-}
-
-/**
- * La clave del hilo de un envío nuestro por correo: la del correo que responde, si responde uno;
- * si no (lo que escribimos primero), el primer Message-ID de su `References` o el suyo. Así una
- * respuesta siempre queda en el hilo del correo que contesta.
- */
-export function outreachThreadKeyOf(
-  outreach: { references: string | null; messageId: string | null },
-  repliedEmailKey?: string | null,
-): string | null {
-  return (
-    repliedEmailKey ??
-    threadKeyOf({ references: outreach.references, messageId: outreach.messageId })
-  )
-}
-
-const ALIAS = /^[a-z_][a-z0-9_]*$/
-/** `firstMessageId` en SQL: la misma expresión regular (`[:space:]` es el `\s` de PostgreSQL). */
-const firstIdSql = (expr: SQL) => sql`substring(${expr} from '<[^<>[:space:]]+>')`
-
-function columnsOf(alias: string) {
-  if (!ALIAS.test(alias)) throw new Error(`Alias inválido: ${alias}`)
-  return (name: string) => sql.raw(`${alias}.${name}`)
-}
-
-/**
- * `threadKeyOf` en SQL sobre una fila de `saas_inbound_email` con ese alias: su `References`, su
- * padre (un envío nuestro o un correo que llegó, por el índice único de su `message_id`), su
- * `In-Reply-To` o su propio Message-ID. Gemela de `threadKeyOf`: cambian juntas.
- */
-export function emailThreadKeySql(alias: string): SQL<string | null> {
-  const e = columnsOf(alias)
-  const parentId = firstIdSql(e("in_reply_to"))
-  return sql<string | null>`coalesce(
-    ${firstIdSql(e(`"references"`))},
-    (select coalesce(${firstIdSql(sql.raw(`po."references"`))}, nullif(btrim(po.message_id), ''))
-      from admin.saas_outreach po where po.message_id = ${parentId} limit 1),
-    (select coalesce(${firstIdSql(sql.raw(`pe."references"`))}, ${firstIdSql(sql.raw("pe.in_reply_to"))},
-        nullif(btrim(pe.message_id), ''))
-      from admin.saas_inbound_email pe where pe.message_id = ${parentId} and pe.id <> ${e("id")} limit 1),
-    ${parentId},
-    nullif(btrim(${e("message_id")}), ''))`
-}
-
-/** `outreachThreadKeyOf` en SQL sobre una fila de `saas_outreach` con ese alias. */
-export function outreachThreadKeySql(alias: string): SQL<string | null> {
-  const o = columnsOf(alias)
-  return sql<string | null>`(case when ${o("in_reply_to_email_id")} is not null
-    then (select ${emailThreadKeySql("ie")} from admin.saas_inbound_email ie
-      where ie.id = ${o("in_reply_to_email_id")})
-    else coalesce(${firstIdSql(o(`"references"`))}, nullif(btrim(${o("message_id")}), '')) end)`
-}
+export {
+  emailThreadKeySql,
+  firstMessageId,
+  headerThreadKeyOf,
+  outreachThreadKeyOf,
+  outreachThreadKeySql,
+  type ThreadHeaders,
+  threadKeyOf,
+} from "./admin-email-thread.js"
 
 /* ---------- Lo que llegó, en pocas palabras ---------- */
 
@@ -182,7 +108,11 @@ export function inboxPreview(text: string | null | undefined): string | null {
 
 /* ---------- La regla del estado ---------- */
 
-type ConversationScope = { all: true } | { chatId: string } | { threadKey: string }
+/** Todas (las de la ventana y, con `clientId`, todo lo de ese cliente), un chat o un hilo. */
+type ConversationScope =
+  | { all: true; clientId?: string | null }
+  | { chatId: string }
+  | { threadKey: string }
 
 /** Una respuesta que no es el aviso fijo con que Kairós pasa la conversación (o su respuesta que falló). */
 const notHandoffSql = (alias: string) =>
@@ -249,32 +179,62 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
 }
 
 /**
+ * Cuántos días atrás lee la lista de la Bandeja (y su número): un hilo cuyo último correo llegó
+ * antes ya no espera respuesta ahí, y leerlo todo recalculaba el hilo de cada correo guardado. Lo
+ * de antes sigue en la ficha del cliente (su historial), y filtrar por un cliente trae todo lo
+ * suyo. Un hilo pedido (`getEmailThread`) se lee entero.
+ */
+export const INBOX_WINDOW_DAYS = 180
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
  * Los hilos de correo, cada uno con el último correo que llegó (`l`, con él se abre). Una
  * respuesta cuenta si se creó desde que llegó ese correo o si lo responde a él (los relojes del
  * worker del correo y de la API pueden no coincidir al segundo). El cliente del hilo es el del
- * correo más nuevo que lo tiene: lo liga la entrada o una persona, nunca el hilo solo.
+ * correo más nuevo que lo tiene: lo liga la entrada o una persona, nunca el hilo solo. La
+ * respuesta que dejó lista Kairós cuenta solo si responde ese último correo: la de un correo
+ * anterior ya no contesta lo que escribió después. Una marca de una persona se busca por la
+ * clave del hilo y por el Message-ID de cada uno de sus correos: si después llega el padre de un
+ * correo, la clave cambia y la marca sigue.
  */
-function mailConversationsSql(now: Date, threadKey: string | null): SQL {
+function mailConversationsSql(
+  now: Date,
+  threadKey: string | null,
+  clientId: string | null = null,
+): SQL {
   const at = sql`${now.toISOString()}::timestamptz`
   const settleAt = sql`${new Date(now.getTime() - CHAT_OUTREACH_SETTLE_MS).toISOString()}::timestamptz`
   const sinceLast = sql`(o.created_at >= l.received_at or o.in_reply_to_email_id = l.id)`
+  const windowStart = sql`${new Date(now.getTime() - INBOX_WINDOW_DAYS * DAY_MS).toISOString()}::timestamptz`
+  // Lo que lee la lista: lo de la ventana y, si se filtra por un cliente, todo lo suyo.
+  const inWindow = (alias: "e" | "o", column: "received_at" | "created_at") => {
+    if (threadKey) return sql`true`
+    const recent = sql`${sql.raw(`${alias}.${column}`)} >= ${windowStart}`
+    return clientId
+      ? sql`(${recent} or ${sql.raw(`${alias}.client_id`)} = ${clientId}::uuid)`
+      : recent
+  }
   return sql`with mail as (
-      select e.id, e.client_id, e.mailbox, e.to_address, e.from_address, e.from_name, e.subject,
-        e.text_body, e.attachments, e.received_at, ${emailThreadKeySql("e")} as thread_key
+      select e.id, e.message_id, e.client_id, e.mailbox, e.to_address, e.from_address, e.from_name,
+        e.subject, e.text_body, e.attachments, e.received_at, ${emailThreadKeySql("e")} as thread_key
       from admin.saas_inbound_email e
+      where ${inWindow("e", "received_at")}
     ), mail_last as (
       select distinct on (ml.thread_key) ml.* from mail ml where ml.thread_key is not null
       order by ml.thread_key, ml.received_at desc, ml.id desc
     ), mail_out as (
-      -- La regla de outreachThreadKeySql, con la clave ya leída del correo que responde.
+      -- La regla de outreachThreadKeySql, con la clave ya leída del correo que responde (o, si
+      -- ese correo quedó fuera de la ventana, leída de nuevo).
       select o.id, o.status, o.by_kairos, o.created_by, o.purpose, o.created_at, o.sent_at,
         o.in_reply_to_email_id,
-        (case when o.in_reply_to_email_id is not null then mi.thread_key
-          else coalesce(${firstIdSql(sql.raw(`o."references"`))}, nullif(btrim(o.message_id), '')) end)
-          as thread_key
+        (case when o.in_reply_to_email_id is null
+            then coalesce(${firstIdSql(sql.raw(`o."references"`))}, nullif(btrim(o.message_id), ''))
+          when mi.id is not null then mi.thread_key
+          else (select ${emailThreadKeySql("ie")} from admin.saas_inbound_email ie
+            where ie.id = o.in_reply_to_email_id) end) as thread_key
       from admin.saas_outreach o
       left join mail mi on mi.id = o.in_reply_to_email_id
-      where o.channel = 'correo'
+      where o.channel = 'correo' and ${inWindow("o", "created_at")}
     ), thread_reply as (
       select distinct on (o.thread_key) o.thread_key, o.status, o.by_kairos, o.created_by
       from mail_out o join mail_last l on l.thread_key = o.thread_key
@@ -294,9 +254,18 @@ function mailConversationsSql(now: Date, threadKey: string | null): SQL {
     ), thread_client as (
       select distinct on (mc.thread_key) mc.thread_key, mc.client_id from mail mc
       where mc.client_id is not null order by mc.thread_key, mc.received_at desc, mc.id desc
+    ), thread_mark as (
+      select km.thread_key, max(mk.settled_at) as settled_at,
+        (array_agg(mk.attended_by order by mk.attended_at desc nulls last)
+          filter (where mk.attended_by is not null))[1] as attended_by
+      from (select mt.thread_key, mt.thread_key as mark_key from mail mt where mt.thread_key is not null
+        union select mm.thread_key, nullif(btrim(mm.message_id), '') from mail mm
+          where mm.thread_key is not null) km
+      join admin.saas_conversation_mark mk on mk.thread_key = km.mark_key
+      group by km.thread_key
     ), thread_draft as (
-      select distinct md.thread_key from admin.kairos_item k
-      join mail md on md.id::text = k.payload ->> 'emailId'
+      select distinct dl.thread_key from admin.kairos_item k
+      join mail_last dl on dl.id::text = k.payload ->> 'emailId'
       where k.kind = 'responder_correo' and k.status = 'espera' and k.expires_at > ${at}
         and jsonb_typeof(k.payload -> 'draft') = 'object'
     )
@@ -315,7 +284,7 @@ function mailConversationsSql(now: Date, threadKey: string | null): SQL {
       coalesce(lo.sent_at, lo.created_at) as last_out_at
     from mail_last l
     left join thread_client tc on tc.thread_key = l.thread_key
-    left join admin.saas_conversation_mark mk on mk.thread_key = l.thread_key
+    left join thread_mark mk on mk.thread_key = l.thread_key
     left join thread_reply r on r.thread_key = l.thread_key
     left join thread_uncertain tu on tu.thread_key = l.thread_key
     left join thread_failed tf on tf.thread_key = l.thread_key
@@ -338,7 +307,13 @@ function conversationsSql(now: Date, scope: ConversationScope): SQL {
   if (!("threadKey" in scope))
     parts.push(chatConversationsSql(now, "chatId" in scope ? scope.chatId : null))
   if (!("chatId" in scope))
-    parts.push(mailConversationsSql(now, "threadKey" in scope ? scope.threadKey : null))
+    parts.push(
+      mailConversationsSql(
+        now,
+        "threadKey" in scope ? scope.threadKey : null,
+        "all" in scope ? (scope.clientId ?? null) : null,
+      ),
+    )
   const union = sql.join(
     parts.map((part) => sql`(${part})`),
     sql` union all `,
@@ -593,7 +568,13 @@ export async function listInbox(
     Math.max(Math.trunc(filter.limit ?? INBOX_LIMIT_DEFAULT), 1),
     INBOX_LIMIT_MAX,
   )
-  const rows = await conversationRows(tx, now, { all: true }, { where: filterSql(filter), limit })
+  const clientId = filter.cliente && filter.cliente !== "sin" ? filter.cliente : null
+  const rows = await conversationRows(
+    tx,
+    now,
+    { all: true, clientId },
+    { where: filterSql(filter), limit },
+  )
   return { counts: await countsOf(tx, now), items: rows.map(itemOf) }
 }
 
@@ -656,7 +637,18 @@ export interface EmailThreadInbound {
   textDeleted: boolean
   notice: string | null
   senderVerified: boolean
-  attachments: Array<{ fileId: string | null; filename: string; contentType: string; size: number }>
+  attachments: Array<{
+    fileId: string | null
+    filename: string
+    contentType: string
+    size: number
+    /**
+     * Con su documento guardado y sin marcar: el día de Lima en que se borraría si se marca ahora
+     * como la carga, y si marcarlo lo borra en el acto (lo mismo que dice `getInboundEmail`).
+     */
+    cargaDeleteAfter: string | null
+    cargaDueNow: boolean
+  }>
 }
 
 export interface EmailThreadOutbound {
@@ -708,9 +700,14 @@ export interface EmailThread {
     why: string | null
   }
   rules: ChannelRules
-  /** La respuesta que dejó lista Kairós (`responder_correo`): se envía o se cambia con su ítem. */
+  /**
+   * La respuesta que dejó lista Kairós (`responder_correo`) para el último correo que llegó: se
+   * envía o se cambia con su ítem. La de un correo anterior no sale aquí: no contesta lo último.
+   */
   draft: {
     itemId: string
+    /** El correo que responde (el último que llegó del hilo). */
+    emailId: string
     subject: string | null
     body: string
     reason: string | null
@@ -744,6 +741,19 @@ async function markableThreadKey(tx: Db, emailId: string): Promise<string> {
       "Este correo no trae un Message-ID con que marcar su hilo",
     )
   return key
+}
+
+/**
+ * Las claves con que puede estar marcado un hilo: la de hoy y el Message-ID de cada uno de sus
+ * correos (la marca se guardó con la clave de entonces, que cambia si después llega el padre de
+ * un correo). Es la regla de `thread_mark` en `mailConversationsSql`.
+ */
+async function threadMarkKeys(tx: Db, threadKey: string): Promise<string[]> {
+  const rows = await tx.execute<{ key: string }>(
+    sql`select nullif(btrim(e.message_id), '') as key from admin.saas_inbound_email e
+      where ${emailThreadKeySql("e")} = ${threadKey}`,
+  )
+  return [...new Set([threadKey, ...[...rows].flatMap((row) => (row.key ? [row.key] : []))])]
 }
 
 const MATCH_WHY: Record<string, string> = {
@@ -797,6 +807,30 @@ export async function getEmailThread(
         .where(inArray(saasClientFile.id, fileIds))
     : []
   const fileOf = new Map(fileRows.map((file) => [file.id, file]))
+  // Lo que diría «¿Es la carga de datos?» de cada adjunto ya guardado.
+  const attachmentIds = [
+    ...new Set(
+      emails.flatMap((email) =>
+        (email.attachments as SaasInboundAttachment[]).flatMap((attachment) =>
+          attachment.fileId ? [attachment.fileId] : [],
+        ),
+      ),
+    ),
+  ]
+  const attachmentFiles = new Map(
+    (attachmentIds.length
+      ? await tx
+          .select({
+            id: saasClientFile.id,
+            kind: saasClientFile.kind,
+            receivedAt: saasClientFile.receivedAt,
+            deletedAt: saasClientFile.deletedAt,
+          })
+          .from(saasClientFile)
+          .where(inArray(saasClientFile.id, attachmentIds))
+      : []
+    ).map((file) => [file.id, file]),
+  )
   // El texto de un correo que trajo la carga de datos se borra con ella a los 30 días.
   const withCarga = new Set(
     (
@@ -844,12 +878,16 @@ export async function getEmailThread(
     textDeleted: email.textBody === null && withCarga.has(email.id),
     notice: email.notice,
     senderVerified: email.senderVerified,
-    attachments: (email.attachments as SaasInboundAttachment[]).map((attachment) => ({
-      fileId: attachment.fileId ?? null,
-      filename: attachment.filename,
-      contentType: attachment.contentType,
-      size: attachment.size,
-    })),
+    attachments: (email.attachments as SaasInboundAttachment[]).map((attachment) => {
+      const file = attachment.fileId ? attachmentFiles.get(attachment.fileId) : undefined
+      return {
+        fileId: attachment.fileId ?? null,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        ...(file ? inboundFileCarga(file, now) : { cargaDeleteAfter: null, cargaDueNow: false }),
+      }
+    }),
   }))
   const outbound: EmailThreadEntry[] = replies.map(({ row: reply, authorName }) => ({
     kind: "salio",
@@ -898,7 +936,7 @@ export async function getEmailThread(
       why: sender ? null : "Tu acceso al equipo ya no está activo",
     },
     rules: channelRulesOf("correo"),
-    draft: await threadDraft(tx, emailIds, now),
+    draft: await threadDraft(tx, latest.id, now),
   }
 }
 
@@ -931,13 +969,11 @@ async function threadSuggestion(
   return { clientId: match.clientId, clientName: client.name, why: `${match.why}${unverified}` }
 }
 
-/** La respuesta que dejó lista Kairós para un correo del hilo, la más nueva que sigue en espera. */
-async function threadDraft(
-  tx: Db,
-  emailIds: readonly string[],
-  now: Date,
-): Promise<EmailThread["draft"]> {
-  if (emailIds.length === 0) return null
+/**
+ * La respuesta que dejó lista Kairós para el último correo que llegó del hilo, la más nueva que
+ * sigue en espera. La de un correo anterior no: contestaría lo de antes, no lo último.
+ */
+async function threadDraft(tx: Db, latestId: string, now: Date): Promise<EmailThread["draft"]> {
   const [item] = await tx
     .select()
     .from(kairosItem)
@@ -947,10 +983,7 @@ async function threadDraft(
         eq(kairosItem.status, "espera"),
         gt(kairosItem.expiresAt, now),
         sql`jsonb_typeof(${kairosItem.payload} -> 'draft') = 'object'`,
-        sql`${kairosItem.payload} ->> 'emailId' in (${sql.join(
-          emailIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
+        sql`${kairosItem.payload} ->> 'emailId' = ${latestId}`,
       ),
     )
     .orderBy(desc(kairosItem.createdAt), desc(kairosItem.id))
@@ -966,6 +999,7 @@ async function threadDraft(
   if (!body) return null
   return {
     itemId: item.id,
+    emailId: latestId,
     subject: text(draft.subject),
     body,
     reason: text(item.reason),
@@ -1003,38 +1037,58 @@ export async function attendEmailThread(
 ): Promise<AttendedThread> {
   const staff = requireAdmin(actor)
   const threadKey = await markableThreadKey(tx, emailId)
-  let changed: boolean
-  let mark: typeof saasConversationMark.$inferSelect | undefined
+  // La marca puede estar con la clave de antes del hilo (`threadMarkKeys`).
+  const keys = await threadMarkKeys(tx, threadKey)
+  let changed = false
+  let mark: { attendedBy: string | null; attendedAt: Date | null } | undefined
   if (on) {
-    const upserted = await tx
-      .insert(saasConversationMark)
-      .values({
-        threadKey,
-        attendedBy: staff.userId,
-        attendedAt: now,
-        createdAt: now,
-        updatedAt: now,
+    const [taken] = await tx
+      .select({
+        attendedBy: saasConversationMark.attendedBy,
+        attendedAt: saasConversationMark.attendedAt,
       })
-      .onConflictDoUpdate({
-        target: saasConversationMark.threadKey,
-        set: {
-          attendedBy: sql`coalesce(${saasConversationMark.attendedBy}, excluded.attended_by)`,
-          attendedAt: sql`(case when ${saasConversationMark.attendedBy} is null
-            then excluded.attended_at else ${saasConversationMark.attendedAt} end)`,
+      .from(saasConversationMark)
+      .where(
+        and(
+          inArray(saasConversationMark.threadKey, keys),
+          isNotNull(saasConversationMark.attendedBy),
+        ),
+      )
+      .orderBy(desc(saasConversationMark.attendedAt))
+      .limit(1)
+      .for("update")
+    if (taken) mark = taken
+    else {
+      const upserted = await tx
+        .insert(saasConversationMark)
+        .values({
+          threadKey,
+          attendedBy: staff.userId,
+          attendedAt: now,
+          createdAt: now,
           updatedAt: now,
-        },
-      })
-      .returning()
-    mark = upserted[0]
-    // Lo dejó esta persona ahora (si ya lo atendía alguien, sigue esa persona y no cambió nada).
-    changed = mark?.attendedBy === staff.userId && mark.attendedAt?.getTime() === now.getTime()
+        })
+        .onConflictDoUpdate({
+          target: saasConversationMark.threadKey,
+          set: {
+            attendedBy: sql`coalesce(${saasConversationMark.attendedBy}, excluded.attended_by)`,
+            attendedAt: sql`(case when ${saasConversationMark.attendedBy} is null
+              then excluded.attended_at else ${saasConversationMark.attendedAt} end)`,
+            updatedAt: now,
+          },
+        })
+        .returning()
+      mark = upserted[0]
+      // Lo dejó esta persona ahora (si ya lo atendía alguien, sigue esa persona y no cambió nada).
+      changed = mark?.attendedBy === staff.userId && mark.attendedAt?.getTime() === now.getTime()
+    }
   } else {
     const released = await tx
       .update(saasConversationMark)
       .set({ attendedBy: null, attendedAt: null, updatedAt: now })
       .where(
         and(
-          eq(saasConversationMark.threadKey, threadKey),
+          inArray(saasConversationMark.threadKey, keys),
           isNotNull(saasConversationMark.attendedBy),
         ),
       )
@@ -1137,7 +1191,8 @@ export async function unsettleConversation(
       and(
         "chatId" in key
           ? eq(saasConversationMark.chatId, key.chatId)
-          : eq(saasConversationMark.threadKey, key.threadKey),
+          : // También la que quedó con la clave de antes del hilo.
+            inArray(saasConversationMark.threadKey, await threadMarkKeys(tx, key.threadKey)),
         isNotNull(saasConversationMark.settledAt),
       ),
     )

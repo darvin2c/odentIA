@@ -40,6 +40,7 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   type AssignChatInput,
   type ChatSuggestion,
@@ -2547,6 +2548,14 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
       and e.sender_verified
       and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
       and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)
+      -- Solo el último correo de su hilo (la regla de la Bandeja), y si nadie respondió el hilo
+      -- después de que llegó: un borrador de un correo anterior no contesta lo último.
+      and not exists (select 1 from saas_inbound_email n
+        where n.received_at > e.received_at and n.id <> e.id
+          and ${emailThreadKeySql("n")} = ${emailThreadKeySql("e")})
+      and not exists (select 1 from saas_outreach t
+        where t.channel = 'correo' and t.created_at >= e.received_at
+          and ${outreachThreadKeySql("t")} = ${emailThreadKeySql("e")})
       and not exists (select 1 from kairos_item k
         where k.kind = 'responder_correo' and k.payload ->> 'emailId' = e.id::text)
       and not exists (select 1 from kairos_item k

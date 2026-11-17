@@ -23,6 +23,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { and, desc, eq, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
+import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import type { KairosDrafter } from "./admin-kairos.js"
 import { kairosAllowedEmailText, kairosAllowedFact } from "./admin-kairos-drafts.js"
 import { notFound, ServiceError } from "./errors.js"
@@ -144,22 +145,6 @@ export function kairosImproveLines(rows: readonly KairosImproveRow[]): KairosImp
   return lines
 }
 
-/** El primer Message-ID de la cabecera `References` («references» es palabra reservada en SQL). */
-function firstReferenceSql(alias: string) {
-  const a = sql.raw(alias)
-  return sql`nullif(split_part(regexp_replace(btrim(coalesce(${a}."references", '')), '\\s+', ' ', 'g'), ' ', 1), '')`
-}
-
-/**
- * La raíz del hilo de un correo, como agrupa la Bandeja (ADR 0196): el primer
- * Message-ID de su `References`, o el de su `In-Reply-To`, o el suyo.
- */
-function threadRootSql(alias: string) {
-  const a = sql.raw(alias)
-  return sql`coalesce(${firstReferenceSql(alias)}, nullif(btrim(coalesce(${a}.in_reply_to, '')), ''),
-    ${a}.message_id)`
-}
-
 async function clientOf(
   tx: Db,
   clientId: string | null,
@@ -224,11 +209,13 @@ async function emailRows(
   tx: Db,
   email: typeof saasInboundEmail.$inferSelect,
 ): Promise<KairosImproveRow[]> {
-  const root = await tx.execute<{ root: string }>(
-    sql`select ${threadRootSql("e")} as root from admin.saas_inbound_email e where e.id = ${email.id}::uuid`,
+  // El mismo hilo que muestra la Bandeja (`emailThreadKeySql`): un correo de alguien que no está
+  // en el hilo, aunque traiga su Message-ID, es su propia conversación y no trae lo de los demás.
+  const root = await tx.execute<{ root: string | null }>(
+    sql`select ${emailThreadKeySql("e")} as root from admin.saas_inbound_email e where e.id = ${email.id}::uuid`,
   )
   const thread = root[0]?.root ?? email.messageId
-  const inThread = sql`(e.id = ${email.id}::uuid or ${threadRootSql("e")} = ${thread})`
+  const inThread = sql`(e.id = ${email.id}::uuid or ${emailThreadKeySql("e")} = ${thread})`
   const inbound = await tx.execute<{
     subject: string | null
     text_body: string | null
@@ -236,15 +223,14 @@ async function emailRows(
   }>(sql`select e.subject, e.text_body, e.received_at from admin.saas_inbound_email e
     where ${inThread}
     order by e.received_at desc, e.id desc limit ${KAIROS_IMPROVE_CONTEXT_MAX}`)
-  // Lo nuestro del mismo hilo: lo que respondió a uno de sus correos o lo que lo empezó.
+  // Lo nuestro del mismo hilo, con la regla de la Bandeja (`outreachThreadKeySql`).
   const outbound = await tx.execute<{
     subject: string | null
     body: string
     created_at: Date | string
   }>(sql`select o.subject, o.body, o.created_at from admin.saas_outreach o
     where o.channel = 'correo' and o.status <> 'no_salio'
-      and (o.in_reply_to_email_id in (select e.id from admin.saas_inbound_email e where ${inThread})
-        or o.message_id = ${thread} or ${firstReferenceSql("o")} = ${thread})
+      and ${outreachThreadKeySql("o")} = ${thread}
     order by o.created_at desc, o.id desc limit ${KAIROS_IMPROVE_CONTEXT_MAX}`)
   return [
     ...[...inbound].map(
