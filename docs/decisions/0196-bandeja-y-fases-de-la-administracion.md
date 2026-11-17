@@ -30,4 +30,4 @@ Lo que nos escriben desde fuera de la app (correo de todos los buzones, WhatsApp
 
 - `packages/services/src/admin-inbox.ts`, `admin-clients.ts` (`clientPhaseSql`, `clientTimeline`), `admin-chat-send.ts`, `packages/mail/src/markdown.ts`.
 - `apps/admin/src/routes/_app/inbox.tsx`, `components/arm/reply-editor.tsx`.
-- Migraciones `0138_bandeja_de_la_administracion` y `0139_bandeja_de_la_administracion_reglas`.
+- Migraciones `0139_bandeja_de_la_administracion` y `0140_bandeja_de_la_administracion_reglas`.

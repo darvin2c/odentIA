@@ -7,7 +7,8 @@ import { decryptConfig, encryptJson } from "./secrets.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 
 /**
- * Instagram conectado a mano (Instagram Login, «con tu propia app»): su clave
+ * Instagram con su propio inicio de sesión («Conectar con Instagram» o «con tu
+ * propia app»): su clave
  * dura 60 días. La vuelta diaria la renueva cada 7, así nunca llega a vencer;
  * solo avisa si Instagram no la renovó. Las conectadas con Facebook usan la
  * clave de la página, que no vence.
@@ -35,7 +36,6 @@ export async function listInstagramTokensDue(
       and(
         eq(channelConnection.provider, "instagram"),
         eq(channelConnection.status, "active"),
-        isNull(channelConnection.signup),
         // Una demo no: sus claves son de ejemplo.
         or(isNull(saasSubscription.isDemo), eq(saasSubscription.isDemo, false)),
       ),
@@ -102,7 +102,7 @@ export async function noteInstagramRenewFailed(tx: Db, orgId: string, connection
       dedupeKey: `renovar-instagram:${connectionId}:${userId}`,
       subject: `renovar-instagram:${connectionId}`,
       title: "Instagram no pudo renovar su clave",
-      body: "La clave de Instagram vence a los 60 días y no se pudo renovar. Para que los mensajes sigan llegando, conecta Instagram con Facebook o pega una clave nueva en Configuración › Integraciones › Instagram.",
+      body: "La clave de Instagram vence a los 60 días y no se pudo renovar. Para que los mensajes sigan llegando, vuelve a conectarlo en Configuración › Integraciones › Instagram.",
       href: "/settings/integrations/instagram",
       permission: "settings.write",
     })

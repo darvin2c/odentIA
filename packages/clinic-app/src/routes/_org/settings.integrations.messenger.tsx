@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { ChannelPage } from "../../components/integrations/channel-page"
+import { ChannelPage, validateChannelSearch } from "../../components/integrations/channel-page"
 
-/** Messenger: su cuenta conectada y las anteriores (una activa a la vez). */
+/** Messenger: sus páginas conectadas y las anteriores; vuelve aquí para elegir una página de Facebook. */
 export const Route = createFileRoute("/_org/settings/integrations/messenger")({
-  component: () => <ChannelPage channel="messenger" />,
+  validateSearch: validateChannelSearch,
+  component: function MessengerPage() {
+    return <ChannelPage channel="messenger" search={Route.useSearch()} />
+  },
 })

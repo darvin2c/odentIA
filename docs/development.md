@@ -234,7 +234,14 @@ Messenger e Instagram siguen con «Con tu propia app de Meta».
    (`META_WEBHOOK_VERIFY_TOKEN`) y los campos `messages`, `messaging_postbacks`,
    `message_echoes`, `message_deliveries` y `message_reads`. La suscripción de
    cada página la pide odentIA al conectar.
-5. Conectar una página de prueba con su Instagram unido y comprobar: que vuelve
+5. Para «Conectar con Instagram» (cuentas sin página de Facebook): en el caso
+   de uso de Instagram › «Configuración de la API con inicio de sesión con
+   Instagram», copiar el identificador y la clave secreta de la app de Instagram
+   a `META_INSTAGRAM_APP_ID` y `META_INSTAGRAM_APP_SECRET`, agregar
+   `https://<API>/api/meta-pages/instagram/callback` como URL de redirección
+   (`META_INSTAGRAM_REDIRECT_URI`) y configurar sus webhooks con la misma
+   dirección y clave de verificación, campo `messages`.
+6. Conectar una página de prueba con su Instagram unido y comprobar: que vuelve
    con los dos, un mensaje que entra y otro que sale por cada uno, y que lo
    respondido desde Meta Business Suite aparece en la Bandeja.
 

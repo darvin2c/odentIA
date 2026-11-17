@@ -1,6 +1,6 @@
 -- La Bandeja de la administración (16 nov, ADR 0196): lo que TS no declara. La tabla
 -- `saas_conversation_mark` y las columnas nuevas de `saas_outreach` y `kairos_chat_turn` las generó
--- 0138 desde el esquema; viven en `admin` y no reciben ningún GRANT al rol de la aplicación (ADR 0063
+-- 0139 desde el esquema; viven en `admin` y no reciben ningún GRANT al rol de la aplicación (ADR 0063
 -- y 0064). No llevan RLS: no tienen `organization_id`.
 
 -- Un envío no cambia lo que se envió ni a quién (0110 y 0128). Ahora también se anota cuándo dijo

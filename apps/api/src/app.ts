@@ -6,6 +6,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import {
+  type InstagramLoginConfig,
   type MetaPagesApp,
   brandMailbox,
   CLINIC_LOGO_MAX_BYTES,
@@ -220,6 +221,8 @@ export interface AppDeps {
   metaSignup?: MetaSignupConfig | undefined
   /** «Conectar con Facebook» de Messenger e Instagram (META_PAGES_*): sin ella, solo «con tu propia app». */
   metaPages?: MetaPagesApp | undefined
+  /** «Conectar con Instagram» (META_INSTAGRAM_*): sin ella, Instagram se conecta con Facebook. */
+  instagramLogin?: InstagramLoginConfig | undefined
   /** Solo pruebas: cómo habla con Meta el botón de páginas. */
   metaPagesFetch?: typeof fetch | undefined
   /**
@@ -749,6 +752,7 @@ export function createApp(deps: AppDeps) {
       secretsKey: deps.secretsKey,
       webUrl: deps.webURL,
       app: deps.metaPages,
+      instagram: deps.instagramLogin,
       ...(deps.metaPagesFetch ? { fetch: deps.metaPagesFetch } : {}),
     }),
   )
@@ -848,7 +852,11 @@ export function createApp(deps: AppDeps) {
       db: deps.db,
       secretsKey: deps.secretsKey,
       metaApp: deps.metaSignup
-        ? { appSecret: deps.metaSignup.appSecret, verifyToken: deps.metaSignup.webhookVerifyToken }
+        ? {
+            appSecret: deps.metaSignup.appSecret,
+            verifyToken: deps.metaSignup.webhookVerifyToken,
+            ...(deps.instagramLogin ? { instagramAppSecret: deps.instagramLogin.appSecret } : {}),
+          }
         : undefined,
     }),
   )

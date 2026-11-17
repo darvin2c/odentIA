@@ -20,6 +20,7 @@ ALTER TABLE "admin"."saas_outreach" ADD COLUMN "delivered_at" timestamp with tim
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "read_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "failed_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "failed_why" text;--> statement-breakpoint
+-- `mailbox_oauth_state.payload_encrypted` la agregó 0138 a mano: aquí solo se pone al día la foto del esquema.
 ALTER TABLE "admin"."saas_conversation_mark" ADD CONSTRAINT "saas_conversation_mark_chat_id_saas_chat_id_fk" FOREIGN KEY ("chat_id") REFERENCES "admin"."saas_chat"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_conversation_mark" ADD CONSTRAINT "saas_conversation_mark_attended_by_user_id_fk" FOREIGN KEY ("attended_by") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin"."saas_conversation_mark" ADD CONSTRAINT "saas_conversation_mark_settled_by_user_id_fk" FOREIGN KEY ("settled_by") REFERENCES "auth"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
