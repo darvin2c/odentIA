@@ -43446,6 +43446,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "payload_encrypted": {
+          "name": "payload_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
