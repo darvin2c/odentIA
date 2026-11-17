@@ -23,11 +23,17 @@ import { localAnesthesiaSql } from "./service-catalog.js"
 /**
  * Lo de hoy que usa anestesia local, por su servicio: lo traído a esta atención («Hacerla hoy»,
  * «Continuar») y lo registrado hoy sin anular. Sin repetir el nombre.
+ *
+ * Lo traído cuyo procedimiento de hoy se anuló (y no tiene otro vigente) ya no cuenta: el acto se
+ * difirió. Y `done` deja solo lo registrado sin anular: es lo que guarda la firma, que no afirma
+ * una anestesia de un acto que no quedó en la atención (QA del 16 nov, Q7: la firmada decía
+ * «Anestesia local · Para Exodoncia…» sobre «Anulado: se difiere»).
  */
 export async function anesthesiaUsesOf(
   tx: Db,
   orgId: string,
   encounterId: string,
+  opts: { done?: boolean } = {},
 ): Promise<string[]> {
   const rows = await tx.execute<{ title: string }>(sql`
     select distinct today.title from (
@@ -35,6 +41,15 @@ export async function anesthesiaUsesOf(
       join treatment_plan_item tpi on tpi.organization_id = epi.organization_id and tpi.id = epi.plan_item_id
       where epi.organization_id = ${orgId} and epi.encounter_id = ${encounterId}
         and tpi.status not in ('cancelado', 'reemplazado')
+        and ${opts.done ? sql`false` : sql`true`}
+        and not (
+          exists (select 1 from encounter_procedure gone
+            where gone.organization_id = epi.organization_id and gone.encounter_id = epi.encounter_id
+              and gone.plan_item_id = epi.plan_item_id and gone.voided_at is not null)
+          and not exists (select 1 from encounter_procedure kept
+            where kept.organization_id = epi.organization_id and kept.encounter_id = epi.encounter_id
+              and kept.plan_item_id = epi.plan_item_id and kept.voided_at is null)
+        )
       union all
       select ep.description, ep.service_id, ep.created_at from encounter_procedure ep
       where ep.organization_id = ${orgId} and ep.encounter_id = ${encounterId} and ep.voided_at is null

@@ -3438,7 +3438,8 @@ export async function finalizeEncounter(
       anesthesiaAtSigning: await anesthesiaAtSigningOf(tx, orgId, {
         patientId,
         encounterId,
-        uses: [...new Set([...closing.health.uses, ...closing.health.anesthetics])],
+        // Solo lo que quedó registrado sin anular: lo traído y no hecho no deja anestesia en la firmada.
+        uses: [...new Set([...(await anesthesiaUsesOf(tx, orgId, encounterId, { done: true })), ...closing.health.anesthetics])],
         vitals: (locked.vitals as Vitals | null) ?? null,
         birthDate: person.birthDate ?? null,
         today: dayKeyIn(locked.startedAt, timezone),

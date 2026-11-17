@@ -4,7 +4,14 @@
  * hoy la usa aunque el inventario no tenga anestésicos, la ASA se pone de un toque con su rastro y
  * la atención firmada guarda la ASA, el peso y el máximo.
  */
-import { encounter, patient, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
+import {
+  encounter,
+  encounterPlanItem,
+  patient,
+  serviceCatalog,
+  treatmentPlanItem,
+  treatmentTemplate,
+} from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -15,7 +22,9 @@ import {
   finalizeEncounter,
   getEncounterClosing,
   updateEncounterDraft,
+  voidEncounterProcedure,
 } from "./encounters.js"
+import { addPlanItem } from "./plan.js"
 import { getService, updateService } from "./service-catalog.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -166,6 +175,49 @@ it("B5d: una endodoncia en un adulto sin peso: la firma guarda la ASA y ningún 
   )
   const [signed] = await ownerDb.select().from(encounter).where(eq(encounter.id, f.encounter.id))
   expect(signed?.anesthesiaAtSigning).toMatchObject({ asaClass: null, weightKg: null, dose: null })
+})
+
+// QA del 16 nov, Q7 (Gloria): la exodoncia se registró, se anuló («se difiere por presión») y la
+// atención se firmó. La firmada decía «Anestesia local · Para Exodoncia…» sobre «Anulado: se difiere».
+it("Q7: el acto anulado deja de pedir la línea de anestesia y la firmada no la afirma", async () => {
+  const f = await clinicalFixture()
+  const exodoncia = await libraryService("Exodoncia simple", true)
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: exodoncia.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
+  const closing = () =>
+    f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  const procedure = await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }),
+  )
+  expect((await closing()).health.uses).toEqual(["Exodoncia simple"])
+  await f.run((tx) =>
+    voidEncounterProcedure(tx, ...f.args, f.encounter.id, procedure.id, { reason: "Se difiere por presión" }),
+  )
+  // El tratamiento sigue traído a hoy, pero su acto se anuló: ya no hay anestesia que avisar.
+  expect((await closing()).health.uses).toEqual([])
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, { anesthetic: "lidocaina-2-epinefrina" }))
+  const [signed] = await ownerDb.select().from(encounter).where(eq(encounter.id, f.encounter.id))
+  expect(signed?.anesthesiaAtSigning).toBeNull()
+})
+
+it("Q7: lo traído a hoy pide la línea antes del acto, y sin registrarlo la firmada no dice anestesia", async () => {
+  const f = await clinicalFixture()
+  const endodoncia = await libraryService("Endodoncia posterior vital", true)
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: endodoncia.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  await ownerDb
+    .insert(encounterPlanItem)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, planItemId: item.id })
+  const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(closing.health.uses).toEqual(["Endodoncia posterior vital"])
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, { anesthetic: "lidocaina-2-epinefrina" }))
+  const [signed] = await ownerDb.select().from(encounter).where(eq(encounter.id, f.encounter.id))
+  expect(signed?.anesthesiaAtSigning).toBeNull()
 })
 
 it("sin nada de hoy con anestesia, la atención firmada no guarda anestesia", async () => {
