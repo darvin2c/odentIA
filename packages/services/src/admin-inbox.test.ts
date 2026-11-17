@@ -972,6 +972,44 @@ describe("la lista", () => {
     })
   })
 
+  it("de quién es un hilo lo dicen todos sus correos, también los de antes de la ventana", async () => {
+    // El primer correo, ligado a su cliente, llegó hace 200 días: fuera de la ventana de la lista.
+    const old = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<viejo.ventana@clinica.test>",
+        from: "rosa.venta@bandeja.test",
+        subject: "Hace mucho",
+        receivedAt: ago(200 * 24 * HOUR),
+      }),
+    )
+    expect(old.clientId).toBe(sales)
+    const before = await listInbox(ownerDb, admin, { limit: 1 }, NOW)
+    const recent = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<nuevo.ventana@clinica.test>",
+        from: "rosa.venta@bandeja.test",
+        subject: "Re: Hace mucho",
+        inReplyTo: "<viejo.ventana@clinica.test>",
+        references: "<viejo.ventana@clinica.test>",
+        receivedAt: ago(HOUR),
+      }),
+    )
+    // El nuevo, sin cliente: el hilo sigue siendo de quien es su correo de antes.
+    await ownerDb
+      .update(saasInboundEmail)
+      .set({ clientId: null })
+      .where(eq(saasInboundEmail.id, recent.id))
+    expect(await listed("correo", recent.id, { cliente: "sin" })).toBeUndefined()
+    expect(await listed("correo", recent.id, { estado: "te_toca", canal: "correo" })).toMatchObject(
+      { client: { id: sales } },
+    )
+    const after = await listInbox(ownerDb, admin, { limit: 1 }, NOW)
+    expect(after.counts.teToca).toBe(before.counts.teToca + 1)
+    expect(after.counts.sinCliente).toBe(before.counts.sinCliente)
+  })
+
   it("Soporte no ve la Bandeja: 403 en todo", async () => {
     const email = await ingestInboundEmail(ownerDb, mail({ from: "soporte.no@nadie.test" }))
     const chat = await wrote()

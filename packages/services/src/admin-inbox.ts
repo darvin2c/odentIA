@@ -189,7 +189,8 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
  * Cuántos días atrás lee la lista de la Bandeja (y su número): un hilo cuyo último correo llegó
  * antes ya no espera respuesta ahí, y leerlo todo recalculaba el hilo de cada correo guardado. Lo
  * de antes sigue en la ficha del cliente (su historial), y filtrar por un cliente trae todo lo
- * suyo. Un hilo pedido (`getEmailThread`) se lee entero.
+ * suyo. La ventana dice qué hilos se listan; de quién es un hilo lo dicen todos sus correos
+ * (`mail_before`). Un hilo pedido (`getEmailThread`) se lee entero.
  */
 export const INBOX_WINDOW_DAYS = 180
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -258,9 +259,24 @@ function mailConversationsSql(
       select distinct on (o.thread_key) o.thread_key, o.status, o.by_kairos, o.sent_at, o.created_at
       from mail_out o where o.thread_key is not null
       order by o.thread_key, o.created_at desc, o.id desc
+    ), mail_before as (
+      -- La ventana dice qué hilos se listan, no de quién son: de un hilo listado, sus correos de
+      -- antes con cliente (por el primer Message-ID de sus cabeceras, con índice; uno que solo
+      -- responde por In-Reply-To a otro de antes no se busca).
+      select ob.id, ob.client_id, ob.received_at, ${emailThreadKeySql("ob")} as thread_key
+      from admin.saas_inbound_email ob
+      where ${threadKey ? sql`false` : sql`ob.received_at < ${windowStart}`} and ob.client_id is not null
+        and (ob.message_id in (select bl.thread_key from mail_last bl)
+          or ${firstIdSql(sql.raw(`ob."references"`))} in (select bl.thread_key from mail_last bl)
+          or ${firstIdSql(sql.raw("ob.in_reply_to"))} in (select bl.thread_key from mail_last bl))
     ), thread_client as (
-      select distinct on (mc.thread_key) mc.thread_key, mc.client_id from mail mc
-      where mc.client_id is not null order by mc.thread_key, mc.received_at desc, mc.id desc
+      select distinct on (mc.thread_key) mc.thread_key, mc.client_id from (
+        select cm.thread_key, cm.client_id, cm.received_at, cm.id from mail cm
+        union all
+        select cb.thread_key, cb.client_id, cb.received_at, cb.id from mail_before cb
+      ) mc
+      where mc.client_id is not null and mc.thread_key is not null
+      order by mc.thread_key, mc.received_at desc, mc.id desc
     ), thread_mark as (
       select km.thread_key, max(mk.settled_at) as settled_at,
         (array_agg(mk.attended_by order by mk.attended_at desc nulls last)
@@ -428,9 +444,7 @@ function stateWhyOf(row: ConversationRow): string | null {
     case "no_salio":
       return "No salió tu respuesta"
     case "no_llego":
-      return row.undelivered_by_kairos
-        ? "No llegó la respuesta de Kairós"
-        : "No llegó tu respuesta"
+      return row.undelivered_by_kairos ? "No llegó la respuesta de Kairós" : "No llegó tu respuesta"
     case "borrador":
       return "Kairós dejó la respuesta lista"
     case "kairos_la_paso": {
