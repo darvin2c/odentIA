@@ -615,11 +615,28 @@ export async function clientReportContent(
   if (!client) throw notFound("Cliente")
   const reports = client.organizationId ? await listProgressReports(tx, client.organizationId) : []
   const found = reports.find((report) => report.number === number)
-  if (!found?.pdfKey)
+  if (!found?.pdfKey || !client.organizationId)
     throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+  await noteClientReportViewed(tx, actor, { organizationId: client.organizationId, number }, now)
+  return { objectKey: found.pdfKey, filename: `informe-${number}.pdf` }
+}
+
+/**
+ * Deja que alguien vio el PDF de un informe de la carga, una vez por persona, informe (de esa
+ * cuenta) y día de Lima, por donde sea que lo abrió: el historial del cliente (`/content`) o el
+ * registro de la carga (`/admin/imports/…/pdf`). La entidad es el cliente de la cuenta si lo hay.
+ * El candado de la transacción hace que dos vistas a la vez dejen una.
+ */
+export async function noteClientReportViewed(
+  tx: Db,
+  actor: AdminActor,
+  report: { organizationId: string; number: number },
+  now = new Date(),
+): Promise<void> {
   const today = limaDate(now)
+  const { organizationId, number } = report
   await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`client_report.viewed:${actor.userId}:${clientId}:${number}:${today}`}, 0))`,
+    sql`select pg_advisory_xact_lock(hashtextextended(${`client_report.viewed:${actor.userId}:${organizationId}:${number}:${today}`}, 0))`,
   )
   const [seen] = await tx
     .select({ id: adminAudit.id })
@@ -628,20 +645,24 @@ export async function clientReportContent(
       and(
         eq(adminAudit.action, "client_report.viewed"),
         eq(adminAudit.actorUserId, actor.userId),
-        eq(adminAudit.entityId, clientId),
+        eq(adminAudit.organizationId, organizationId),
         sql`${adminAudit.metadata}->>'number' = ${String(number)}`,
         sql`${adminAudit.metadata}->>'day' = ${today}`,
       ),
     )
     .limit(1)
-  if (!seen)
-    await writeAdminAudit(tx, actor, {
-      action: "client_report.viewed",
-      organizationId: client.organizationId,
-      entityId: clientId,
-      metadata: { clientId, number, day: today },
-    })
-  return { objectKey: found.pdfKey, filename: `informe-${number}.pdf` }
+  if (seen) return
+  const [client] = await tx
+    .select({ id: saasClient.id })
+    .from(saasClient)
+    .where(eq(saasClient.organizationId, organizationId))
+    .limit(1)
+  await writeAdminAudit(tx, actor, {
+    action: "client_report.viewed",
+    organizationId,
+    entityId: client?.id ?? organizationId,
+    metadata: { clientId: client?.id ?? null, number, day: today },
+  })
 }
 
 /** Un archivo que se puede ver: el mismo permiso que descargarlo y un tipo que tiene vista. */

@@ -3,7 +3,12 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { saasClient, saasTask } from "@odentia/db/schema/admin-arm"
-import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
+import {
+  adminAudit,
+  adminSessionVerification,
+  adminStaff,
+  twoFactor,
+} from "@odentia/db/schema/admin-core"
 import {
   type AdminActor,
   clinicImportPlanSchema,
@@ -12,7 +17,7 @@ import {
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
-import { eq, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -289,6 +294,15 @@ it("el informe se ve antes, sale con su PDF una sola vez y el registro lo abre",
   ])
   const pdf = await read("/reports/1/pdf", "u-admin")
   expect(((await pdf.json()) as { data: { url: string } }).data.url).toMatch(/^https:\/\/almacen\.example\/clinics\/org-carga\/informes\//)
+  // Abrirlo deja la misma constancia que verlo en el historial, una vez al día.
+  await read("/reports/1/pdf", "u-admin")
+  const viewed = await ownerDb
+    .select({ actor: adminAudit.actorUserId, metadata: adminAudit.metadata })
+    .from(adminAudit)
+    .where(and(eq(adminAudit.action, "client_report.viewed"), eq(adminAudit.organizationId, ORG)))
+  expect(viewed).toEqual([{ actor: "u-admin", metadata: expect.objectContaining({ number: 1 }) }])
+  // Un número que no es de un informe es 404, no un error.
+  expect((await read("/reports/cero/pdf", "u-admin")).status).toBe(404)
 })
 
 it("un informe que salió por otra vía se registra con su fecha, sin enviarse", async () => {

@@ -29,6 +29,7 @@ import {
   listProgressReports,
   measureLetterheadImage,
   normalizeLetterhead,
+  noteClientReportViewed,
   PROGRESS_REPORT_MAX_PAGES,
   type ProgressReportInput,
   planFileBytes,
@@ -542,16 +543,24 @@ export function createClinicLoad(deps: ClinicLoadDeps) {
     }))
   }
 
-  /** Un enlace firmado y corto para abrir el PDF de un informe enviado. */
+  /**
+   * Un enlace firmado y corto para abrir el PDF de un informe enviado, con la misma constancia
+   * que verlo en el historial del cliente (`noteClientReportViewed`, una vez al día): el informe
+   * cuenta lo que se cargó de la clínica.
+   */
   const reportPdfUrl = async (orgId: string, actor: AdminActor, number: number) => {
     requireLoadAdmin(actor)
-    const reports = await withOrgContext(deps.ownerDb, orgId, (tx) =>
-      listProgressReports(tx, orgId),
-    )
-    const found = reports.find((report) => report.number === number)
-    if (!found?.pdfKey)
-      throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
-    return { url: await deps.storage.attachmentUrl(found.pdfKey, 300) }
+    if (!Number.isInteger(number) || number < 1)
+      throw new ServiceError("NOT_FOUND", 404, "Ese informe no está en el registro")
+    const pdfKey = await withOrgContext(deps.ownerDb, orgId, async (tx) => {
+      const reports = await listProgressReports(tx, orgId)
+      const found = reports.find((report) => report.number === number)
+      if (!found?.pdfKey)
+        throw new ServiceError("NOT_FOUND", 404, "Ese informe no tiene su PDF guardado")
+      await noteClientReportViewed(tx, actor, { organizationId: orgId, number })
+      return found.pdfKey
+    })
+    return { url: await deps.storage.attachmentUrl(pdfKey, 300) }
   }
 
   return {
