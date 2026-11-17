@@ -100,7 +100,7 @@ export function createMailboxesRoute(deps: MailboxesDeps) {
     // A la clínica, en el dominio de su producto: el panel no tiene Configuración.
     // Se lee del state antes de usarlo, para volver a ella también si algo falla.
     const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
-    const back = (query: string): Response => c.redirect(`${base}/settings/integrations?${query}`, 302)
+    const back = (query: string): Response => c.redirect(base ? `${base}/settings/integrations?${query}` : `${webBase}/`, 302)
     if (providerError || !state || !code) {
       return back("error=oauth-denegado")
     }

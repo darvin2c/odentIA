@@ -13,6 +13,7 @@ import {
   type InstagramLoginConfig,
   listPagesToChoose,
   type MetaPagesApp,
+  reportAutomaticCase,
   ServiceError,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -20,6 +21,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { clinicReturnBase, orgOfOauthState } from "../lib/clinic-return.js"
+import { deletionConfirmationCode, parseMetaSignedRequest } from "../lib/meta-signed-request.js"
 import { runService, validationError } from "./helpers.js"
 
 export interface MetaPagesDeps {
@@ -147,7 +149,7 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
     const code = params.get("code") ?? ""
     // La clínica se lee del state antes de usarlo: también se vuelve a ella si algo falla.
     const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
-    const back = (query: string, page = "/settings/integrations"): Response => c.redirect(`${base}${page}?${query}`, 302)
+    const back = (query: string, page = "/settings/integrations"): Response => c.redirect(base ? `${base}${page}?${query}` : `${webBase}/`, 302)
     if (params.get("error") || !state || !code) return back("facebook=cancelado")
     if (!deps.app) return back("facebook=fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
@@ -187,7 +189,7 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
     const state = params.get("state") ?? ""
     const code = params.get("code") ?? ""
     const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
-    const back = (result: string): Response => c.redirect(`${base}/settings/integrations/instagram?conectado=${result}`, 302)
+    const back = (result: string): Response => c.redirect(base ? `${base}/settings/integrations/instagram?conectado=${result}` : `${webBase}/`, 302)
     if (params.get("error") || !state || !code) return back("cancelado")
     if (!deps.instagram) return back("fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
@@ -207,6 +209,54 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
       console.warn("[meta-pages] la vuelta de Instagram falló", error)
       return back("fallo")
     }
+  })
+
+  // ---- lo que Meta llama cuando alguien quita el permiso o pide borrar sus datos ----
+  // Llegan firmados con la clave de la app de Facebook o de la de Instagram.
+  const metaSecrets = () => [deps.app?.appSecret ?? "", deps.instagram?.appSecret ?? ""]
+  const signedRequestOf = async (c: { req: { parseBody: () => Promise<Record<string, unknown>> } }) => {
+    const body: { signed_request?: unknown } = await c.req.parseBody().catch(() => ({}))
+    const raw = typeof body.signed_request === "string" ? body.signed_request : ""
+    return parseMetaSignedRequest(raw, metaSecrets())
+  }
+
+  /**
+   * Alguien quitó el acceso a SALLCA desde Facebook o Instagram. No se puede
+   * saber a qué conexión corresponde por el identificador que manda Meta; la
+   * clave deja de servir y la vuelta diaria marca esa conexión con «Necesita
+   * atención». Aquí solo se responde 200 a lo que viene firmado.
+   * https://developers.facebook.com/docs/facebook-login/guides/advanced/deauthorize-callback
+   */
+  app.post("/deauthorize", async (c) => {
+    const data = await signedRequestOf(c)
+    if (!data) return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
+    console.warn(`[meta-pages] Meta avisó que se quitó el acceso a SALLCA (usuario ${data.user_id ?? "sin identificador"})`)
+    return c.json({ ok: true }, 200)
+  })
+
+  /**
+   * Pedido de borrado de datos desde Facebook o Instagram: abre un caso en Soporte
+   * con un código y responde a Meta dónde se explica y el código, como pide Meta.
+   * El equipo lo atiende como dice la política de privacidad (30 días).
+   * https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback
+   */
+  app.post("/data-deletion", async (c) => {
+    const data = await signedRequestOf(c)
+    if (!data) return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
+    const code = deletionConfirmationCode()
+    await reportAutomaticCase(deps.ownerDb, {
+      dedupeKey: `meta-borrado-${code}`,
+      title: `Pedido de borrado de datos desde Meta (${code})`,
+      note: `Meta pidió borrar los datos del usuario ${data.user_id ?? "sin identificador"} de SALLCA. Plazo: 30 días (política de privacidad).`,
+      detail: `Código de confirmación ${code}. Buscar las conexiones de Messenger e Instagram de esa persona y borrar lo recibido de Meta.`,
+      screen: "/settings/integrations",
+    })
+    const privacy = new URL(webBase)
+    privacy.hostname = privacy.hostname.replace(/^app\./, "")
+    privacy.pathname = "/privacidad"
+    privacy.search = `?borrado=${code}`
+    privacy.hash = "meta"
+    return c.json({ url: privacy.toString(), confirmation_code: code }, 200)
   })
 
   app.route("/", authed)

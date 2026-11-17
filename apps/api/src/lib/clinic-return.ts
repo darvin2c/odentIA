@@ -9,11 +9,11 @@ import { eq } from "drizzle-orm"
 /**
  * A dónde vuelve una conexión por OAuth (correo, Facebook, Instagram): a la
  * dirección de la clínica, en el dominio de su producto. El panel (`WEB_URL`) no
- * tiene las páginas de Configuración: volver ahí da «Not Found». Sin clínica
- * conocida, al panel, donde se elige.
+ * tiene las páginas de Configuración: volver ahí da «Not Found». Nulo sin
+ * clínica conocida: entonces se vuelve al inicio del panel, donde se elige.
  */
-export async function clinicReturnBase(ownerDb: Db, webBase: string, orgId: string | null): Promise<string> {
-  if (!orgId) return webBase
+export async function clinicReturnBase(ownerDb: Db, webBase: string, orgId: string | null): Promise<string | null> {
+  if (!orgId) return null
   const [org] = await ownerDb
     .select({ slug: organization.slug, product: orgProfile.product })
     .from(organization)
@@ -21,7 +21,7 @@ export async function clinicReturnBase(ownerDb: Db, webBase: string, orgId: stri
     .where(eq(organization.id, orgId))
     .limit(1)
     .catch(() => [])
-  if (!org) return webBase
+  if (!org) return null
   return clinicOrigin(org.slug, isClinicalProduct(org.product) ? org.product : "dental") ?? webBase
 }
 
