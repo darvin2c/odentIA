@@ -14,3 +14,18 @@ export const LEFT_OUT_DECISIONS = ["rechazado", "no_elegida", "reemplazado"] as 
 export function isLeftOut(decisionStatus: string | null | undefined): boolean {
   return (LEFT_OUT_DECISIONS as readonly (string | null | undefined)[]).includes(decisionStatus)
 }
+
+/**
+ * Lo indicado en la atención que queda para otro día, como lo cuenta su resumen («1 indicado hoy»):
+ * sin lo quitado, sin lo que ya se hizo hoy y sin lo que la persona dejó fuera. La exodoncia de la
+ * opción B que no eligió no es algo indicado que siga en pie (QA del 16 nov, Q16: el cierre decía
+ * «2 indicados hoy · 1 por ejecutar»).
+ */
+export function indicatedForLater<T extends { id: string; status: string; decisionStatus?: string | null }>(
+  indicated: readonly T[],
+  doneToday: ReadonlySet<string>,
+): T[] {
+  return indicated.filter(
+    (item) => item.status !== "cancelado" && !doneToday.has(item.id) && !isLeftOut(item.decisionStatus),
+  )
+}

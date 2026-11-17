@@ -7,6 +7,7 @@ import {
   formatMoney,
   formatVitals,
   gapWords,
+  indicatedForLater,
   isChildAge,
   localAnestheticOf,
   moneyTotalsText,
@@ -1633,8 +1634,10 @@ export function EncounterEditor({
   const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
   // Lo indicado para otro día: lo que se indicó y se hizo hoy (la consulta, la profilaxis, la
   // sesión 1 de la endodoncia) ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
-  const openIndicated = liveIndicated.filter(
-    (item) => !detail.procedures.some((procedure) => procedure.planItemId === item.id && !procedure.voidedAt),
+  // Tampoco lo que la persona dejó fuera (la opción que no eligió): no sigue indicado (Q16).
+  const openIndicated = indicatedForLater(
+    liveIndicated,
+    new Set(detail.procedures.flatMap((procedure) => (!procedure.voidedAt && procedure.planItemId ? [procedure.planItemId] : []))),
   )
   const sections: Array<{
     key: SectionKey
