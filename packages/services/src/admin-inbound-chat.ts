@@ -1001,7 +1001,7 @@ export type ChatEntry =
       readAt: Date | null
       /**
        * Cuándo dijo WhatsApp que no llegó lo que ya había salido, y por qué: sigue `enviado`, pero
-       * no cuenta como respuesta («No llegó tu respuesta»).
+       * no cuenta como respuesta («No llegó parte de tu respuesta»).
        */
       failedAt: Date | null
       failedWhy: string | null
@@ -1933,14 +1933,17 @@ async function noteFilesSent(tx: Db, row: OutreachRecord): Promise<void> {
 async function handOverKairosReply(
   tx: Db,
   row: OutreachRecord,
-  status: "incierto" | "no_salio",
+  status: "incierto" | "no_salio" | "no_llego",
   now: Date,
   why: string | null,
 ): Promise<void> {
+  const reason = why ? ` (${why.slice(0, 200)})` : ""
   const words =
     status === "no_salio"
-      ? `Su respuesta no salió${why ? ` (${why.slice(0, 200)})` : ""}`
-      : "No se sabe si salió su respuesta"
+      ? `Su respuesta no salió${reason}`
+      : status === "no_llego"
+        ? `Su respuesta no le llegó${reason}`
+        : "No se sabe si salió su respuesta"
   const turns = await tx
     .update(kairosChatTurn)
     .set({ outcome: "fallo", why: words.slice(0, 500), updatedAt: now })
@@ -2085,6 +2088,9 @@ export async function applyChatStatus(
           ...(why ? { why } : {}),
         },
       })
+      // Lo de Kairós que no llegó es como lo que no salió: pasa al equipo, con su porqué.
+      if (marked.byKairos && marked.purpose === "respuesta")
+        await handOverKairosReply(tx, marked, "no_llego", now, why)
     }
   }
   const column =

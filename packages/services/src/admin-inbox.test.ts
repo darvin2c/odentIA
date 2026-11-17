@@ -851,6 +851,108 @@ describe("el estado de un chat", () => {
     })
   })
 
+  it("una parte que no llegó deja la respuesta incompleta: te toca, aunque el texto sí llegó", async () => {
+    const chat = await wrote()
+    await assignChat(ownerDb, admin, chat.chatId, { clientId: sales }, NOW)
+    const pdf = await file(sales, "precios-parte.pdf", "application/pdf")
+    const reply = await prepareChatReply(
+      ownerDb,
+      admin,
+      chat.chatId,
+      { body: "Te mando los precios", fileIds: [pdf.id] },
+      NOW,
+    )
+    await markChatOutreachSent(ownerDb, reply.parts[0]?.outreachId ?? "", "wamid.parte-texto", NOW)
+    await markChatOutreachSent(ownerDb, reply.parts[1]?.outreachId ?? "", "wamid.parte-pdf", NOW)
+    expect(await chatConversationState(ownerDb, chat.chatId, NOW)).toMatchObject({
+      state: "respondida",
+    })
+    // Meta no pudo descargar el PDF: salió, pero no llegó.
+    await applyChatStatus(
+      ownerDb,
+      { externalId: "wamid.parte-pdf", status: "failed", why: "131053: no se pudo descargar" },
+      NOW,
+    )
+    expect(await chatConversationState(ownerDb, chat.chatId, NOW)).toMatchObject({
+      state: "te_toca",
+      stateWhy: "No llegó parte de tu respuesta",
+    })
+  })
+
+  it("lo de Kairós que no llegó pasa al equipo; el aviso con que la pasó, si no llega, sigue diciéndolo", async () => {
+    const kairos = await wrote()
+    const answer = await ownerDb.transaction((tx) =>
+      prepareKairosChatReply(tx as Db, kairos.chatId, { body: "¡Hola! Te cuento." }, NOW),
+    )
+    await ownerDb.insert(kairosChatTurn).values({
+      chatId: kairos.chatId,
+      messageId: kairos.messageId,
+      outcome: "respondio",
+      outreachId: answer.outreachId,
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    await markChatOutreachSent(ownerDb, answer.outreachId, "wamid.kairos-parte", NOW)
+    expect(await chatConversationState(ownerDb, kairos.chatId, NOW)).toMatchObject({
+      state: "kairos",
+    })
+    await applyChatStatus(
+      ownerDb,
+      { externalId: "wamid.kairos-parte", status: "failed", why: "131026: no es de WhatsApp" },
+      NOW,
+    )
+    // Como lo que no sale: su turno falla con el porqué y la conversación queda con el equipo.
+    const [turn] = await ownerDb
+      .select()
+      .from(kairosChatTurn)
+      .where(eq(kairosChatTurn.outreachId, answer.outreachId))
+    expect(turn).toMatchObject({
+      outcome: "fallo",
+      why: "Su respuesta no le llegó (131026: no es de WhatsApp)",
+    })
+    const [paused] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, kairos.chatId))
+    expect(paused?.kairosPausedAt).toBeInstanceOf(Date)
+    expect(paused?.kairosPausedBy).toBeNull()
+    expect(await chatConversationState(ownerDb, kairos.chatId, NOW)).toMatchObject({
+      state: "te_toca",
+      stateWhy: "Kairós te la pasó: Su respuesta no le llegó (131026: no es de WhatsApp)",
+    })
+
+    // El aviso con que Kairós pasó la conversación no llegó: sigue «Kairós te la pasó».
+    const handed = await wrote()
+    const notice = await ownerDb.transaction((tx) =>
+      prepareKairosChatReply(
+        tx as Db,
+        handed.chatId,
+        { body: "Te paso con el equipo", closeItems: false },
+        NOW,
+      ),
+    )
+    await ownerDb.insert(kairosChatTurn).values({
+      chatId: handed.chatId,
+      messageId: handed.messageId,
+      outcome: "paso",
+      why: "Pidió hablar con una persona",
+      outreachId: notice.outreachId,
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    await ownerDb
+      .update(saasChat)
+      .set({ kairosPausedAt: NOW, kairosPausedBy: null })
+      .where(eq(saasChat.id, handed.chatId))
+    await markChatOutreachSent(ownerDb, notice.outreachId, "wamid.aviso-paso", NOW)
+    await applyChatStatus(
+      ownerDb,
+      { externalId: "wamid.aviso-paso", status: "failed", why: "131047: fuera de las 24 horas" },
+      NOW,
+    )
+    expect(await chatConversationState(ownerDb, handed.chatId, NOW)).toMatchObject({
+      state: "te_toca",
+      stateWhy: "Kairós te la pasó: Pidió hablar con una persona",
+    })
+  })
+
   it("«No necesita respuesta» y «No es una clínica»: respondida, hasta que vuelve a escribir", async () => {
     const address = phone()
     const settled = await wrote({ address })

@@ -175,10 +175,12 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
       where o.chat_id = c.id and o.purpose = 'respuesta' and o.status <> 'no_salio'
         and o.failed_at is null and o.created_at >= m.created_at and ${notHandoffSql("o")}
       order by o.created_at desc, ${uncertainFirstSql("o")}, o.id desc limit 1) r on true
-    -- Lo que salió pero WhatsApp dijo que no llegó (un archivo que no pudo descargar): no responde.
+    -- Una parte de lo que le mandamos después de su último mensaje salió pero WhatsApp dijo que
+    -- no llegó (un archivo que no pudo descargar): la respuesta no está completa. El aviso con que
+    -- Kairós la pasó al equipo no cuenta aquí: eso lo dice «Kairós te la pasó».
     left join lateral (select o.id, o.by_kairos, o.created_by from admin.saas_outreach o
-      where o.chat_id = c.id and o.purpose = 'respuesta' and o.failed_at is not null
-        and o.created_at >= m.created_at
+      where o.chat_id = c.id and o.failed_at is not null and o.created_at >= m.created_at
+        and ${notHandoffSql("o")}
       order by o.created_at desc, o.id desc limit 1) nl on true
     left join lateral (select o.status, o.by_kairos, o.sent_at, o.created_at from admin.saas_outreach o
       where o.chat_id = c.id order by o.created_at desc, o.id desc limit 1) lo on true
@@ -323,9 +325,10 @@ function mailConversationsSql(
  * - «No necesita respuesta» desde lo último que llegó, o un chat «No es una clínica»: Respondida.
  * - Una respuesta desde lo último que llegó que salió o puede haber salido: Kairós respondió si
  *   la escribió Kairós solo, si no Respondida (diciendo si no se sabe si salió).
- * - Lo demás espera a una persona: Te toca, con su motivo (no salió la respuesta, salió pero
- *   WhatsApp dijo que no llegó, Kairós dejó la respuesta lista, Kairós la pasó al equipo o la
- *   está respondiendo). Lo que no llegó (`failed_at`) no cuenta como respuesta.
+ * - Una parte de lo que le mandamos desde lo último que llegó salió pero WhatsApp dijo que no
+ *   llegó (`failed_at`): Te toca, aunque otra parte sí llegó (la respuesta quedó incompleta).
+ * - Lo demás espera a una persona: Te toca, con su motivo (no salió la respuesta, Kairós dejó la
+ *   respuesta lista, Kairós la pasó al equipo o la está respondiendo).
  */
 function conversationsSql(now: Date, scope: ConversationScope): SQL {
   const parts: SQL[] = []
@@ -344,15 +347,17 @@ function conversationsSql(now: Date, scope: ConversationScope): SQL {
     sql` union all `,
   )
   const settled = sql`(v.settled_at is not null and v.settled_at >= v.since)`
+  // Una parte que no llegó deja la respuesta incompleta: te toca aunque otra parte sí llegó.
   return sql`select v.*,
       (case when ${settled} then 'respondida' when v.not_clinic then 'respondida'
+        when v.undelivered_after then 'te_toca'
         when v.reply_status is not null then
           (case when v.reply_by_kairos and v.reply_created_by is null then 'kairos' else 'respondida' end)
         else 'te_toca' end) as state,
       (case when ${settled} then 'no_necesita' when v.not_clinic then 'no_es_clinica'
+        when v.undelivered_after then 'no_llego'
         when v.reply_status is not null then (case when v.reply_uncertain then 'incierta' end)
-        when v.failed_after then 'no_salio' when v.undelivered_after then 'no_llego'
-        when v.draft_ready then 'borrador'
+        when v.failed_after then 'no_salio' when v.draft_ready then 'borrador'
         when v.handed_over then 'kairos_la_paso' when v.kairos_busy then 'kairos_responde' end)
         as why_code
     from (${union}) v`
@@ -444,7 +449,9 @@ function stateWhyOf(row: ConversationRow): string | null {
     case "no_salio":
       return "No salió tu respuesta"
     case "no_llego":
-      return row.undelivered_by_kairos ? "No llegó la respuesta de Kairós" : "No llegó tu respuesta"
+      return row.undelivered_by_kairos
+        ? "No llegó la respuesta de Kairós"
+        : "No llegó parte de tu respuesta"
     case "borrador":
       return "Kairós dejó la respuesta lista"
     case "kairos_la_paso": {

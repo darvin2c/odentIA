@@ -525,7 +525,7 @@ describe("prepareChatReply y su resultado", () => {
     // No cuenta como respuesta: te toca, y el chat lo dice.
     expect(await chatConversationState(ownerDb, chatId)).toMatchObject({
       state: "te_toca",
-      stateWhy: "No llegó tu respuesta",
+      stateWhy: "No llegó parte de tu respuesta",
     })
     const detail = await getChat(ownerDb, admin, chatId)
     expect(detail.entries.find((entry) => entry.id === sent.outreachId)).toMatchObject({
