@@ -133,7 +133,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-firmar-falta-colegiatura",
         q: "¿Qué hago si al firmar dice que no tengo mi colegiatura?",
-        a: "Puedes firmar igual. «Finalizar y firmar» muestra «No tienes tu colegiatura en el perfil» con «Título profesional», «Colegio» y «Número de colegiatura»: si la escribes, queda en tu perfil para todas tus atenciones; si no, escribe en «Si firmas sin colegiatura, escribe por qué» el motivo, que queda en la atención, y la hoja sale sin colegiatura. El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». La receta y el consentimiento sí la piden para firmarse, sin perder lo escrito.",
+        a: "Puedes firmar igual. «Finalizar y firmar» muestra «No tienes tu colegiatura en el perfil» con «Colegio» y «Número de colegiatura» (y «Título profesional» si tu perfil no lo tiene): si la escribes, queda en tu perfil para todas tus atenciones; si no, escribe en «Si firmas sin colegiatura, escribe por qué» el motivo, que queda en la atención, y la hoja sale sin colegiatura. El número lleva solo números, sin letras ni guiones: las siglas van en «Colegio». La receta y el consentimiento sí la piden para firmarse, sin perder lo escrito.",
         forms: ["falta tu colegiatura para firmar", "donde pongo mi numero de colegiatura", "no puedo firmar sin colegiatura", "puedo cerrar la atencion sin colegiatura", "no tienes tu colegiatura en el perfil", "por que me pide mi colegiatura para cerrar la atencion"],
         area: "clinica",
         needs: "clinical.write",
@@ -713,6 +713,20 @@ export const CLINICA: readonly HelpMore[] = [
 
       // ---------- Palabras de la atención (estudio de la atención del 16 nov, novata) ----------
       // Cada una en una línea y con palabras simples: la odontóloga nueva no entendió ninguna de estas.
+      {
+        id: "palabras-variante-opcional",
+        q: "¿Tengo que elegir la profundidad de la caries?",
+        a: "No. La profundidad de la caries, el material de una corona o de una restauración y las demás variantes son opcionales en todas las clínicas: el campo dice «(opcional)» y el hallazgo se registra sin ella. Si la eliges, en el odontograma se ve con su sigla y debajo, su nombre entero.",
+        forms: [
+          "la profundidad de la caries es obligatoria",
+          "tengo que elegir la profundidad",
+          "tengo que elegir el material de la corona",
+          "registrar una caries sin profundidad",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
       {
         id: "palabras-siglas-caries",
         q: "¿Qué significan MB, CE, CD y CDP?",

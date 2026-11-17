@@ -931,6 +931,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "cerrar-sin-consentimiento-firmado",
         q: "¿Puedo cerrar sin el consentimiento firmado?",
         a: "Sí. El cierre te lo dice y te pide que escribas por qué (por ejemplo, que fue una urgencia); el motivo queda en la atención. Lo mejor es «Firmar ahora» desde el mismo cierre.",
+        // La QA del 17 nov preguntó así y la Ayuda no supo responder.
+        forms: [
+          "que hago si el paciente no firmo el consentimiento",
+          "el paciente no firmo el consentimiento",
+          "firmar la atencion sin consentimiento",
+          "me pide un motivo por el consentimiento",
+        ],
         area: "clinica",
       },
       {
