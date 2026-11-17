@@ -160,12 +160,12 @@ export function EncounterPatientLine({
         {save.text}
       </span>
       {dictating && onFinishDictation ? (
-        <Button type="button" size="sm" variant="outline" className="h-9 shrink-0 sm:h-8" onClick={onFinishDictation}>
+        <Button type="button" size="sm" variant="outline" className="h-11 shrink-0 sm:h-8" onClick={onFinishDictation}>
           <Mic className="size-4 text-destructive" aria-hidden />
           <span className="max-sm:sr-only">Terminar el dictado</span>
         </Button>
       ) : canDictate ? (
-        <Button type="button" size="sm" className="h-9 shrink-0 sm:h-8" onClick={onDictate}>
+        <Button type="button" size="sm" className="h-11 shrink-0 sm:h-8" onClick={onDictate}>
           <Mic className="size-4" aria-hidden />
           <span className="max-sm:sr-only">Dictar</span>
         </Button>
