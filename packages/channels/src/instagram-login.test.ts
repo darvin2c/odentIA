@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { buildInstagramLoginUrl, completeInstagramLoginCode, subscribeAppToInstagram } from "./instagram-login.js"
 
 const APP = { appId: "IGAPP", appSecret: "secreto-ig", graphVersion: "v25.0" }
@@ -54,4 +54,24 @@ describe("Conectar con Instagram", () => {
     expect(`${meta.calls[0]!.method} ${meta.calls[0]!.url.pathname}`).toBe("POST /v25.0/me/subscribed_apps")
     expect(meta.calls[0]!.url.searchParams.get("subscribed_fields")).toBe("messages,messaging_postbacks,messaging_seen")
   })
+})
+
+it("si Instagram no acepta la clave larga sin versión, la pide con la versión del Graph", async () => {
+  const calls: string[] = []
+  const impl = (async (input: string | URL | Request) => {
+    const url = new URL(String(input))
+    calls.push(url.pathname)
+    if (url.hostname === "api.instagram.com") return new Response(JSON.stringify({ access_token: "IGAA-CORTA", user_id: "1" }))
+    if (url.pathname === "/access_token") return new Response(JSON.stringify({ error: { message: "Unsupported request - method type: get", code: 100 } }), { status: 400 })
+    if (url.pathname === "/v25.0/access_token") return new Response(JSON.stringify({ access_token: "LARGA", expires_in: 5184000 }))
+    return new Response(JSON.stringify({ user_id: "1", username: "u" }))
+  }) as unknown as typeof fetch
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+  const account = await completeInstagramLoginCode({ appId: "A", appSecret: "S", graphVersion: "v25.0" }, { code: "C", redirectUri: "r" }, { fetch: impl })
+  expect(account.accessToken).toBe("LARGA")
+  expect(calls).toEqual(["/oauth/access_token", "/access_token", "/v25.0/access_token", "/v25.0/me"])
+  // El registro dice el tipo de clave, nunca la clave.
+  expect(String(warn.mock.calls[0]?.[0])).toContain("IGAA…")
+  expect(String(warn.mock.calls[0]?.[0])).not.toContain("IGAA-CORTA")
+  warn.mockRestore()
 })
