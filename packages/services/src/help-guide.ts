@@ -1003,7 +1003,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       },
       {
         id: "indique-despues-presupuesto-incluida",
-        q: "Indiqué otra cosa después de darle el presupuesto, ¿ya está incluida?",
+        // «darle» (como en «darle cita») llevaba a Pacientes la pregunta de un profesional que no aparece en la agenda; «entregarle» dice lo mismo (medición de la Ayuda del 16 nov).
+        q: "Indiqué otra cosa después de entregarle el presupuesto, ¿ya está incluida?",
         a: "Si el presupuesto sigue por enviar, sí: lo que indicas en la atención entra en él al momento, con los totales y el PDF al día. Si es de otra pieza, entra en todas las opciones; si es de la pieza que ya tiene opciones (un perno en la 36), la atención te pregunta «¿En qué opción va…?» y entra cuando eliges. Si ya se lo entregaste o ya respondió, lo que tiene no cambia: la línea del presupuesto dice que «entra al firmar» y va «en un presupuesto aparte», que nace al firmar. Lo que no tiene precio no entra. Si quitas algo con «Quitar», «Deshacer» lo devuelve a su opción, con su precio.",
         forms: ["indique algo despues del presupuesto", "el presupuesto no tiene lo nuevo", "agregue un tratamiento y no esta en el presupuesto", "la resina nueva no sale en el total", "deshacer quitar en el presupuesto"],
         area: "plan",
