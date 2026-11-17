@@ -54,7 +54,7 @@ import {
 import { clientByEmail, inboundMailboxWords } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
-import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
+import { emailChainIdsSql, emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   replySignature,
   replySubject,
@@ -197,15 +197,23 @@ export async function inboundPersonOf(
 /**
  * El cliente de un correo por su hilo, con la regla de la Bandeja: solo si el correo entró en el
  * hilo de lo nuestro (`emailThreadKeySql`: remitente verificado que ya está en el hilo), el del
- * envío nuestro más reciente de ese mismo hilo que el correo nombra en sus cabeceras. Un correo
- * que no entró (quien copió las cabeceras, un From sin verificar, quien aún no recibió respuesta)
- * es su propia conversación y solo se liga por su correo exacto (`matchInboundClient`).
+ * envío nuestro más reciente de ese mismo hilo que el correo nombra en sus cabeceras o que está
+ * en su cadena (`emailChainIdsSql`: el que solo trae `In-Reply-To` nombra solo a su padre). Un
+ * correo que no entró (quien copió las cabeceras, un From sin verificar, quien aún no recibió
+ * respuesta) es su propia conversación y solo se liga por su correo exacto (`matchInboundClient`).
  */
 async function clientByThread(
   tx: Db,
   emailId: string,
-  thread: readonly string[],
+  named: readonly string[],
 ): Promise<string | null> {
+  const [chain] = [
+    ...(await tx.execute<{ ids: string[] | null }>(
+      sql`select array${emailChainIdsSql("e")} as ids from admin.saas_inbound_email e
+        where e.id = ${emailId}::uuid`,
+    )),
+  ]
+  const thread = [...new Set([...named, ...(chain?.ids ?? [])])]
   if (thread.length === 0) return null
   const [row] = [
     ...(await tx.execute<{ client_id: string | null }>(

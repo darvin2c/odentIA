@@ -31,6 +31,7 @@ import {
   prepareKairosChatReply,
 } from "./admin-inbound-chat.js"
 import {
+  assignInboundEmail,
   getInboundEmail,
   type InboundEmailInput,
   ingestInboundEmail,
@@ -647,6 +648,91 @@ describe("el hilo de un correo", () => {
     expect(await keyOf(forged.id)).toBe(o0)
   })
 
+  it("el colega de la clínica entra en el hilo si es una persona de ella o si alguien liga su correo; el de otra, no", async () => {
+    const keyOf = async (emailId: string) =>
+      (await getEmailThread(ownerDb, admin, emailId, NOW)).threadKey
+    // «Escribir» a la clínica: el hilo es de ella desde lo que le escribimos.
+    const o0 = "<o0.colegas@odentia32.com>"
+    const [first] = await ownerDb
+      .insert(saasOutreach)
+      .values({
+        clientId: sales,
+        channel: "correo",
+        toAddress: "rosa.venta@bandeja.test",
+        subject: "Tu prueba de odentIA",
+        body: "Hola, te cuento de la prueba.",
+        messageId: o0,
+        status: "enviado",
+        sentAt: ago(5 * HOUR),
+        createdBy: admin.userId,
+        createdAt: ago(5 * HOUR),
+      })
+      .returning({ id: saasOutreach.id })
+    await ownerDb.insert(saasClientContact).values([
+      { clientId: sales, name: "Colega registrada", email: "colega.reg@bandeja.test" },
+      { clientId: stranger, name: "Persona de otra clínica", email: "ajena@bandeja.test" },
+    ])
+    const headers = { inReplyTo: o0, references: o0, subject: "Re: Tu prueba de odentIA" }
+    // Una persona de la clínica que aún no escribía en el hilo: entra con su primer correo.
+    const registered = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<reg.colegas@bandeja.test>",
+        from: "colega.reg@bandeja.test",
+        receivedAt: ago(4 * HOUR),
+      }),
+    )
+    expect(registered.clientId).toBe(sales)
+    expect(await keyOf(registered.id)).toBe(o0)
+    // Una persona de otra clínica con las mismas cabeceras, o un From sin verificar: aparte.
+    const foreign = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<ajena.colegas@bandeja.test>",
+        from: "ajena@bandeja.test",
+        receivedAt: ago(3 * HOUR),
+      }),
+    )
+    expect(foreign.clientId).toBe(stranger)
+    expect(await keyOf(foreign.id)).toBe("<ajena.colegas@bandeja.test>")
+    const unverified = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<sinver.colegas@bandeja.test>",
+        from: "colega.reg@bandeja.test",
+        senderVerified: false,
+        receivedAt: ago(170 * MIN),
+      }),
+    )
+    expect(await keyOf(unverified.id)).toBe("<sinver.colegas@bandeja.test>")
+    // Quien no está registrado queda aparte, y «¿De quién es?» sugiere la clínica del hilo.
+    const fresh = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        ...headers,
+        messageId: "<nueva.colegas@bandeja.test>",
+        from: "colega.nueva@bandeja.test",
+        receivedAt: ago(2 * HOUR),
+      }),
+    )
+    expect(fresh.clientId).toBeNull()
+    const apart = await getEmailThread(ownerDb, admin, fresh.id, NOW)
+    expect(apart.threadKey).toBe("<nueva.colegas@bandeja.test>")
+    expect(apart.suggestion).toMatchObject({ clientId: sales })
+    expect(apart.suggestion?.why).toContain("desde otra dirección")
+    // Ligarlo a esa clínica lo pone en su hilo, con lo que ya había.
+    await assignInboundEmail(ownerDb, admin, fresh.id, sales, ago(HOUR))
+    const merged = await getEmailThread(ownerDb, admin, fresh.id, NOW)
+    expect(merged.threadKey).toBe(o0)
+    expect(merged.entries.map((entry) => entry.id)).toEqual([first?.id, registered.id, fresh.id])
+    // Un From sin verificar no entra aunque una persona lo ligue a la clínica del hilo.
+    await assignInboundEmail(ownerDb, admin, unverified.id, sales, ago(HOUR))
+    expect(await keyOf(unverified.id)).toBe("<sinver.colegas@bandeja.test>")
+  })
+
   it("la respuesta lista de un correo anterior no cuenta, y responder el hilo cierra todas", async () => {
     const draftFor = async (emailId: string, body: string): Promise<string> => {
       const [row] = await ownerDb
@@ -1246,6 +1332,93 @@ describe("la lista", () => {
     const after = await listInbox(ownerDb, admin, { limit: 1 }, NOW)
     expect(after.counts.teToca).toBe(before.counts.teToca + 1)
     expect(after.counts.sinCliente).toBe(before.counts.sinCliente)
+  })
+
+  it("una cadena que solo trae In-Reply-To queda entera en su hilo, y de quién es lo dice un correo de antes de la ventana", async () => {
+    const DAY = 24 * HOUR
+    const chainClient = await client("Clínica de la cadena de la Bandeja (ficticia)")
+    const from = "dr@cadena.test"
+    // El primer correo, de hace 200 días, de alguien que no es contacto de nadie.
+    const root = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<r.cadena@cadena.test>",
+        from,
+        subject: "Consulta",
+        receivedAt: ago(200 * DAY),
+      }),
+    )
+    // Le respondimos, y siguió contestando solo con In-Reply-To, cada vez al anterior.
+    const reply = await prepareEmailReply(
+      ownerDb,
+      admin,
+      root.id,
+      { body: "Claro." },
+      ago(199 * DAY),
+    )
+    await markOutreachSent(ownerDb, admin, reply.id, "enviado", ago(199 * DAY))
+    const [replyRow] = await ownerDb
+      .select()
+      .from(saasOutreach)
+      .where(eq(saasOutreach.id, reply.id))
+    const replyMid = replyRow?.messageId ?? ""
+    const answer = (messageId: string, inReplyTo: string, receivedAt: Date) =>
+      ingestInboundEmail(
+        ownerDb,
+        mail({ messageId, from, subject: "Re: Consulta", inReplyTo, receivedAt }),
+      )
+    const a = await answer("<a.cadena@cadena.test>", replyMid, ago(198 * DAY))
+    const b = await answer("<b.cadena@cadena.test>", "<a.cadena@cadena.test>", ago(197 * DAY))
+    // Una persona ligó ese correo a su clínica; lo de hoy contesta solo al último, sin cliente.
+    await assignInboundEmail(ownerDb, admin, b.id, chainClient, ago(197 * DAY))
+    const today = await answer("<d.cadena@cadena.test>", "<b.cadena@cadena.test>", ago(HOUR))
+    expect(today.clientId).toBeNull()
+
+    // Un solo hilo, el de su primer correo (antes, lo de hoy quedaba en el de «a»).
+    const thread = await getEmailThread(ownerDb, admin, today.id, NOW)
+    expect(thread.threadKey).toBe("<r.cadena@cadena.test>")
+    expect(thread.entries.map((entry) => entry.id)).toEqual([
+      root.id,
+      reply.id,
+      a.id,
+      b.id,
+      today.id,
+    ])
+    // La regla en SQL dice lo mismo que su gemela.
+    const ids = [root.id, a.id, b.id, today.id]
+    const emails = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(inArray(saasInboundEmail.id, ids))
+    const known = new Map<string, ThreadHeaders>([
+      [replyMid, { references: replyRow?.references ?? null, messageId: replyMid }],
+      ...emails.map((email) => [email.messageId, email] as const),
+    ])
+    const sqlKeys = new Map(
+      [
+        ...(await ownerDb.execute<{ id: string; key: string }>(
+          sql`select e.id::text as id, ${emailThreadKeySql("e")} as key
+            from admin.saas_inbound_email e where e.id in (${sql.join(
+              ids.map((id) => sql`${id}::uuid`),
+              sql`, `,
+            )})`,
+        )),
+      ].map((row) => [row.id, row.key]),
+    )
+    for (const email of emails)
+      expect(sqlKeys.get(email.id)).toBe(
+        threadKeyOf(
+          email,
+          (id) => known.get(id),
+          (key) => (key === "<r.cadena@cadena.test>" ? [from] : []),
+        ),
+      )
+
+    // En la lista, de la clínica de su correo de antes: se busca por la cadena hacia adelante.
+    expect(await listed("correo", today.id, { cliente: "sin" })).toBeUndefined()
+    expect(await listed("correo", today.id, { estado: "te_toca", canal: "correo" })).toMatchObject({
+      client: { id: chainClient },
+    })
   })
 
   it("Soporte no ve la Bandeja: 403 en todo", async () => {

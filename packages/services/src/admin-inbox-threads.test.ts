@@ -108,6 +108,109 @@ describe("threadKeyOf", () => {
     ).toBe("<abuelo@clinica.test>")
   })
 
+  it("una cadena que solo trae In-Reply-To sube hasta su primer correo, con lo que le respondimos", () => {
+    // La raíz ← a ← b ← c, cada uno solo con In-Reply-To; nuestra respuesta a b lleva «a b» (la
+    // References que arma `replyReferences`) y lo que la contesta, «a b nuestra».
+    const known: Record<string, ThreadHeaders> = {
+      "<raiz@c.test>": { messageId: "<raiz@c.test>" },
+      "<a@c.test>": { inReplyTo: "<raiz@c.test>", messageId: "<a@c.test>" },
+      "<b@c.test>": { inReplyTo: "<a@c.test>", messageId: "<b@c.test>" },
+      "<nuestra@odentia32.com>": {
+        references: "<a@c.test> <b@c.test>",
+        messageId: "<nuestra@odentia32.com>",
+      },
+    }
+    const parentOf = (id: string) => known[id]
+    expect(headerThreadKeyOf({ inReplyTo: "<b@c.test>", messageId: "<c@c.test>" }, parentOf)).toBe(
+      "<raiz@c.test>",
+    )
+    expect(
+      headerThreadKeyOf(
+        {
+          references: "<a@c.test> <b@c.test> <nuestra@odentia32.com>",
+          inReplyTo: "<nuestra@odentia32.com>",
+          messageId: "<d@c.test>",
+        },
+        parentOf,
+      ),
+    ).toBe("<raiz@c.test>")
+    expect(
+      outreachThreadKeyOf(
+        { references: "<a@c.test> <b@c.test>", messageId: "<nuestra@odentia32.com>" },
+        null,
+        parentOf,
+      ),
+    ).toBe("<raiz@c.test>")
+    // Un eslabón que no conocemos corta la cadena ahí: ese id es la clave.
+    expect(
+      headerThreadKeyOf({ inReplyTo: "<b@c.test>", messageId: "<c@c.test>" }, (id) =>
+        id === "<a@c.test>" ? undefined : known[id],
+      ),
+    ).toBe("<a@c.test>")
+    // Una cadena en círculo no da vueltas sin fin.
+    const loop: Record<string, ThreadHeaders> = {
+      "<x@c.test>": { inReplyTo: "<y@c.test>", messageId: "<x@c.test>" },
+      "<y@c.test>": { inReplyTo: "<x@c.test>", messageId: "<y@c.test>" },
+    }
+    expect(
+      headerThreadKeyOf({ inReplyTo: "<x@c.test>", messageId: "<z@c.test>" }, (id) => loop[id]),
+    ).toMatch(/^<[xy]@c\.test>$/)
+    // Un correo que se responde a sí mismo es su propio hilo.
+    expect(
+      headerThreadKeyOf({ inReplyTo: "<s@c.test>", messageId: "<s@c.test>" }, () => ({
+        inReplyTo: "<s@c.test>",
+        messageId: "<s@c.test>",
+      })),
+    ).toBe("<s@c.test>")
+  })
+
+  it("el colega de la clínica entra en su hilo: por su correo exacto o porque una persona lo ligó", () => {
+    const colleague = {
+      references: "<raiz@clinica.test> <nuestro@odentia32.com>",
+      messageId: "<colega@clinica.test>",
+      fromAddress: "colega@clinica.test",
+      senderVerified: true,
+      clientId: "cliente-a",
+    }
+    const inThread = members({ "<raiz@clinica.test>": ["rosa@clinica.test"] })
+    const clientsIn = (key: string) => (key === "<raiz@clinica.test>" ? ["cliente-a"] : [])
+    for (const matchedBy of ["contacto", "solicitud", "miembro", "persona"])
+      expect(threadKeyOf({ ...colleague, matchedBy }, undefined, inThread, clientsIn)).toBe(
+        "<raiz@clinica.test>",
+      )
+    // Ligado por el hilo, de otra clínica, sin cliente o sin verificar: su propia conversación.
+    const apart = "<colega@clinica.test>"
+    expect(threadKeyOf({ ...colleague, matchedBy: "hilo" }, undefined, inThread, clientsIn)).toBe(
+      apart,
+    )
+    expect(
+      threadKeyOf(
+        { ...colleague, clientId: "cliente-b", matchedBy: "contacto" },
+        undefined,
+        inThread,
+        clientsIn,
+      ),
+    ).toBe(apart)
+    expect(
+      threadKeyOf(
+        { ...colleague, clientId: null, matchedBy: null },
+        undefined,
+        inThread,
+        clientsIn,
+      ),
+    ).toBe(apart)
+    expect(
+      threadKeyOf(
+        { ...colleague, matchedBy: "persona", senderVerified: false },
+        undefined,
+        inThread,
+        clientsIn,
+      ),
+    ).toBe(apart)
+    // Sin saber de qué clínica es el hilo, no entra.
+    expect(threadKeyOf({ ...colleague, matchedBy: "contacto" }, undefined, inThread)).toBe(apart)
+  })
+
   it("un In-Reply-To que no conocemos es la clave: dos respuestas suyas a ese correo van juntas", () => {
     // Del hilo de un correo que no conocemos es quien escribió primero apuntándole.
     const inThread = members({ "<ajeno@x.test>": ["ana@x.test"] })
