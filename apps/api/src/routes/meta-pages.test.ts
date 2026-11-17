@@ -220,10 +220,10 @@ describe("conectar con Facebook", () => {
     const state = await start("org_c", "u-c")
     const stranger = await back(meta.fetch, "u-a", { state, code: "COD" })
     expect(stranger.searchParams.get("facebook")).toBe("fallo")
-    // Ya se consumió: tampoco sirve a su dueña.
-    expect((await back(meta.fetch, "u-c", { state, code: "COD" })).searchParams.get("facebook")).toBe("fallo")
-    // Un state forjado.
-    expect((await back(meta.fetch, "u-c", { state: "abc.def", code: "COD" })).searchParams.get("facebook")).toBe("fallo")
+    // Ya se consumió: tampoco sirve a su dueña; sin clínica que leer, vuelve al inicio del panel.
+    expect((await back(meta.fetch, "u-c", { state, code: "COD" })).href).toBe("https://clinica.example.com/")
+    // Un state forjado: igual, sin decir de qué clínica.
+    expect((await back(meta.fetch, "u-c", { state: "abc.def", code: "COD" })).href).toBe("https://clinica.example.com/")
     // Recepción no conecta canales, aunque empiece el flujo.
     const reception = await start("org_a", "u-recepcion")
     expect((await back(meta.fetch, "u-recepcion", { state: reception, code: "COD" })).searchParams.get("facebook")).toBe("fallo")
@@ -413,7 +413,8 @@ describe("conectar con Instagram", () => {
     expect(await ask("u-b", `error=access_denied&state=${state}`)).toBe("cancelado")
     expect(await ask(null, `state=${encodeURIComponent(state)}&code=X`)).toBe("sin-sesion")
     expect(await ask("u-a", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
-    expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
+    // Ya usado: sin clínica que leer, al inicio del panel.
+    expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBeNull()
   })
 })
 
@@ -429,11 +430,37 @@ describe("a dónde vuelve", () => {
       expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", "org_a")).toBe("https://clinica-a.latidia72.com")
       // Un state forjado no da clínica: vuelve al panel, donde se elige.
       expect(await orgOfOauthState(ownerDb, KEY, "forjado.firma")).toBeNull()
-      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", null)).toBe("https://app.odentia32.com")
+      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", null)).toBeNull()
+      // Sin clínica conocida, al inicio del panel, no a una página de Configuración que no existe ahí.
+      const lost = await route(fakeFacebook([]).fetch, "u-a").request("/instagram/callback?error=x")
+      expect(lost.headers.get("location")).toBe("https://clinica.example.com/")
     } finally {
       configurePublicLinks(null)
       await ownerDb.execute(sql`update "org_profile" set "product" = 'dental' where "organization_id" = 'org_a'`)
       await ownerDb.execute(sql`update "organization" set "slug" = 'org_a' where "id" = 'org_a'`)
     }
+  })
+})
+
+describe("lo que Meta llama al quitar el permiso o pedir el borrado", () => {
+  const sign = (secret: string, data: Record<string, unknown>) => {
+    const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", ...data })).toString("base64url")
+    return `${createHmac("sha256", secret).update(payload).digest("base64url")}.${payload}`
+  }
+  const call = (path: string, signedRequest: string) =>
+    createMetaPagesRoute({ auth: fakeAuth(null), db: appDb, ownerDb, secretsKey: KEY, webUrl: "https://app.odentia32.com", app: META, fetch })
+      .request(path, { method: "POST", body: new URLSearchParams({ signed_request: signedRequest }), headers: { "content-type": "application/x-www-form-urlencoded" } })
+
+  it("el borrado responde el código y dónde se explica, y abre un caso en Soporte; sin la firma de la app, no", async () => {
+    const res = await call("/data-deletion", sign(META.appSecret, { user_id: "123" }))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { url: string; confirmation_code: string }
+    expect(body.confirmation_code).toMatch(/^[0-9A-F]{12}$/)
+    expect(body.url).toBe(`https://odentia32.com/privacidad?borrado=${body.confirmation_code}#meta`)
+    const [found] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from support_case where dedupe_key = ${`meta-borrado-${body.confirmation_code}`}`)
+    expect(found?.n).toBe(1)
+    expect((await call("/data-deletion", sign("otra-clave", { user_id: "123" }))).status).toBe(401)
+    expect((await call("/deauthorize", sign(META.appSecret, { user_id: "123" }))).status).toBe(200)
+    expect((await call("/deauthorize", "no.firmado")).status).toBe(401)
   })
 })

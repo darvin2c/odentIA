@@ -138,6 +138,23 @@ export const PRIVACIDAD: LegalDoc = {
       ],
     },
     {
+      id: "meta",
+      title: "Datos de Facebook, Instagram y Messenger",
+      blocks: [
+        "Cuando una clínica conecta su página de Facebook, su cuenta profesional de Instagram o Messenger con los botones «Conectar con Facebook» o «Conectar con Instagram», odentIA recibe de Meta Platforms, y solo de las cuentas que la clínica elige:",
+        {
+          list: [
+            "El nombre y el identificador de la página y de la cuenta de Instagram.",
+            "Una clave de acceso que permite leer y responder los mensajes de esa página o cuenta. Se guarda cifrada y nunca se muestra en la aplicación.",
+            "Los mensajes que las personas envían a esa página o cuenta, con sus adjuntos y el identificador con que Meta nombra a quien escribe, y las respuestas que la clínica envía desde Meta.",
+          ],
+        },
+        "odentIA usa estos datos solo para mostrar esas conversaciones en la Bandeja de la clínica y enviar las respuestas de la clínica o de su asistente virtual. No los usa para publicidad, no los vende y no los comparte con terceros, salvo los proveedores que prestan el servicio. Las conversaciones son datos de la clínica, que es la responsable de su tratamiento.",
+        "Para dejar de compartirlos, la clínica puede desconectar la cuenta en Configuración › Integraciones: odentIA deja de recibir mensajes y de usar la clave. También puede quitar el acceso a SALLCA desde Facebook (Configuración › Integraciones comerciales) o desde Instagram (Configuración › Apps y sitios web).",
+        `Para que eliminemos los datos recibidos de Meta, escriba a ${TITULAR.correoPrivacidad} indicando la página o la cuenta de Instagram. Los eliminamos dentro de los 30 días siguientes y le confirmamos por correo; si son conversaciones con pacientes, antes lo consultamos con la clínica, que es su responsable.`,
+      ],
+    },
+    {
       id: "seguridad",
       title: "Cómo protegemos los datos",
       blocks: [
