@@ -282,6 +282,7 @@ describe("el hilo de un correo", () => {
           inReplyTo: email.inReplyTo,
           messageId: email.messageId,
           fromAddress: email.fromAddress,
+          senderVerified: email.senderVerified,
         },
         (id) => known.get(id),
         inThread,
@@ -501,6 +502,108 @@ describe("el hilo de un correo", () => {
     const forClinic = await kairosImproveContext(ownerDb, admin, { emailId: answer.id })
     expect(JSON.stringify(forClinic.conversation)).toContain("cambiar la clave")
     expect(JSON.stringify(forClinic.conversation)).not.toContain("datos de acceso")
+  })
+
+  it("a quien le respondimos entra en el hilo con su primer correo; quien no, sigue aparte", async () => {
+    const keyOf = async (emailId: string) =>
+      (await getEmailThread(ownerDb, admin, emailId, NOW)).threadKey
+    // «Escribir» a la clínica: el hilo empieza con lo nuestro, a contacto@.
+    const o0 = "<o0.escribir@odentia32.com>"
+    const [first] = await ownerDb
+      .insert(saasOutreach)
+      .values({
+        clientId: sales,
+        channel: "correo",
+        toAddress: "contacto@clinica-c.test",
+        subject: "Tu prueba de odentIA",
+        body: "Hola, te cuento de la prueba.",
+        messageId: o0,
+        status: "enviado",
+        sentAt: ago(5 * HOUR),
+        createdBy: admin.userId,
+        createdAt: ago(5 * HOUR),
+      })
+      .returning({ id: saasOutreach.id })
+    // Responde la doctora, que no estaba en el hilo: su primer correo es su propia conversación.
+    const d1 = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<d1.dra@clinica-c.test>",
+        from: "dra@clinica-c.test",
+        subject: "Re: Tu prueba de odentIA",
+        inReplyTo: o0,
+        references: o0,
+        receivedAt: ago(4 * HOUR),
+      }),
+    )
+    expect(await keyOf(d1.id)).toBe("<d1.dra@clinica-c.test>")
+    // «Lo atiendo yo» con esa clave, antes de que el hilo la tome.
+    await attendEmailThread(ownerDb, admin, d1.id, true, ago(4 * HOUR))
+    // Le respondemos: desde ahí ella está en el hilo, con su primer correo y los que siguen.
+    const o1 = await prepareEmailReply(ownerDb, admin, d1.id, { body: "Claro." }, ago(3 * HOUR))
+    await markOutreachSent(ownerDb, admin, o1.id, "enviado", ago(3 * HOUR))
+    const [o1Row] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, o1.id))
+    const o1Mid = o1Row?.messageId ?? ""
+    const chain = `${o0} <d1.dra@clinica-c.test> ${o1Mid}`
+    const d2 = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<d2.dra@clinica-c.test>",
+        from: "dra@clinica-c.test",
+        subject: "Re: Tu prueba de odentIA",
+        inReplyTo: o1Mid,
+        references: chain,
+        receivedAt: ago(2 * HOUR),
+      }),
+    )
+    const thread = await getEmailThread(ownerDb, admin, d2.id, NOW)
+    expect(thread.threadKey).toBe(o0)
+    expect(thread.entries.map((entry) => entry.id)).toEqual([first?.id, d1.id, o1.id, d2.id])
+    expect(await keyOf(d1.id)).toBe(o0)
+    // La marca puesta con su clave de antes sigue en el hilo.
+    expect(thread.attendedBy).toMatchObject({ id: admin.userId })
+
+    // Un colega en copia que responde no estaba: su propia conversación.
+    const colleague = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<cc.otro@clinica-c.test>",
+        from: "otro@clinica-c.test",
+        inReplyTo: o1Mid,
+        references: chain,
+        receivedAt: ago(90 * MIN),
+      }),
+    )
+    expect(await keyOf(colleague.id)).toBe("<cc.otro@clinica-c.test>")
+    // Un From de la doctora sin verificar puede ser de cualquiera: tampoco entra.
+    const unverified = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<sinverificar.dra@clinica-c.test>",
+        from: "dra@clinica-c.test",
+        inReplyTo: o1Mid,
+        references: chain,
+        senderVerified: false,
+        receivedAt: ago(80 * MIN),
+      }),
+    )
+    expect(await keyOf(unverified.id)).toBe("<sinverificar.dra@clinica-c.test>")
+    // Alguien de fuera con las cabeceras copiadas: aparte, hasta que le respondemos.
+    const forged = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        messageId: "<falso.c@malo-c.test>",
+        from: "x@malo-c.test",
+        references: o0,
+        receivedAt: ago(70 * MIN),
+      }),
+    )
+    expect(await keyOf(forged.id)).toBe("<falso.c@malo-c.test>")
+    expect(
+      (await getEmailThread(ownerDb, admin, d2.id, NOW)).entries.map((entry) => entry.id),
+    ).not.toContain(forged.id)
+    await prepareEmailReply(ownerDb, admin, forged.id, { body: "¿Quién eres?" }, ago(60 * MIN))
+    expect(await keyOf(forged.id)).toBe(o0)
   })
 
   it("la respuesta lista de un correo anterior no cuenta, y responder el hilo cierra todas", async () => {

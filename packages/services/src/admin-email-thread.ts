@@ -20,6 +20,11 @@ export interface ThreadHeaders {
   messageId: string | null
   /** De un correo que llegó: quién lo envía (su From). */
   fromAddress?: string | null
+  /**
+   * De un correo que llegó: si su remitente está verificado (SPF/DKIM de su dominio). Sin
+   * verificar, el From puede ser de cualquiera: no entra en otro hilo.
+   */
+  senderVerified?: boolean
 }
 
 /**
@@ -46,22 +51,25 @@ export function headerThreadKeyOf(
 }
 
 /**
- * La clave del hilo de un correo que llegó: la de sus cabeceras (`headerThreadKeyOf`) solo si
- * quien lo envía (`fromAddress`, sin mayúsculas) ya está en ese hilo (`addressesIn`: lo que lee
- * `threadAddressSql`); si no, su propio Message-ID. Quien conoce el Message-ID de un hilo ajeno
- * no entra en él: su correo es su propia conversación, no se le responde a él por ese hilo y
- * «Mejorar» no le lee lo de otros. Gemela de `emailThreadKeySql`: cambian juntas.
+ * La clave del hilo de un correo que llegó: la de sus cabeceras (`headerThreadKeyOf`) solo si su
+ * remitente está verificado (`senderVerified`) y ya está en ese hilo (`fromAddress`, sin
+ * mayúsculas, entre lo que dice `addressesIn`: lo que lee `threadAddressSql`); si no, su propio
+ * Message-ID. Quien conoce el Message-ID de un hilo ajeno no entra en él, y un From sin verificar
+ * tampoco aunque sea el de alguien del hilo: su correo es su propia conversación, no se le
+ * responde por ese hilo y «Mejorar» no le lee lo de otros. `addressesIn` es obligatorio: sin
+ * saber quién está en el hilo no hay clave. Gemela de `emailThreadKeySql`: cambian juntas.
  */
 export function threadKeyOf(
   message: ThreadHeaders,
-  parentOf?: (messageId: string) => ThreadHeaders | null | undefined,
-  addressesIn?: (key: string) => readonly string[],
+  parentOf: ((messageId: string) => ThreadHeaders | null | undefined) | undefined,
+  addressesIn: (key: string) => readonly string[],
 ): string | null {
   const own = message.messageId?.trim() || null
   const key = headerThreadKeyOf(message, parentOf)
   if (!key || key === own) return key
+  if (!message.senderVerified) return own
   const from = message.fromAddress?.trim().toLowerCase()
-  const known = new Set((addressesIn?.(key) ?? []).map((address) => address.trim().toLowerCase()))
+  const known = new Set(addressesIn(key).map((address) => address.trim().toLowerCase()))
   return from && known.has(from) ? key : own
 }
 
@@ -110,48 +118,50 @@ function headerThreadKeySql(alias: string): SQL<string | null> {
 
 /**
  * Si `sender` (ya sin mayúsculas) está en el hilo `key`: lo escribió quien empezó el hilo (el
- * correo con ese Message-ID o, si no conocemos ninguno con él, el primero que llegó apuntándole)
- * o le escribimos ahí (un envío nuestro con ese Message-ID, o que lo continúa por su `References`
- * sin responder un correo), o le respondimos un correo del hilo de uno de ellos (su `Reply-To`).
- * No sigue más allá de esas vueltas: lo demás queda como conversación propia, que es lo seguro.
- * `key` y `sender` son columnas ya leídas; sin el Message-ID de un hilo nadie entra (`null`).
+ * correo con ese Message-ID o, si no conocemos ninguno con él, el primero que llegó apuntándole),
+ * le escribimos ahí (un envío nuestro con ese Message-ID, o que lo continúa por su `References`
+ * sin responder un correo) o le respondimos un correo cuyas cabeceras apuntan a ese hilo. Así, a
+ * quien le respondimos, su correo y los que siguen entran en el hilo (la doctora que contesta lo
+ * que le escribimos a la clínica: su primer correo es su propia conversación hasta que le
+ * respondemos); quien solo copia las cabeceras, no. `key` y `sender` son columnas ya leídas; sin
+ * el Message-ID de un hilo nadie entra (`null`).
  */
 function threadAddressSql(key: SQL, sender: SQL): SQL<boolean> {
   const firstRef = (alias: string) => firstIdSql(sql.raw(`${alias}."references"`))
   const firstReply = (alias: string) => firstIdSql(sql.raw(`${alias}.in_reply_to`))
-  const began = (who: SQL) => sql`(
+  return sql<boolean>`(
     exists (select 1 from admin.saas_inbound_email re where re.message_id = ${key}
-      and lower(btrim(re.from_address)) = ${who})
+      and lower(btrim(re.from_address)) = ${sender})
     or exists (select 1 from admin.saas_outreach ro where ro.message_id = ${key}
-      and ro.channel = 'correo' and lower(btrim(ro.to_address)) = ${who})
+      and ro.channel = 'correo' and lower(btrim(ro.to_address)) = ${sender})
     or exists (select 1 from admin.saas_outreach rr where rr.channel = 'correo'
       and rr.in_reply_to_email_id is null and ${firstRef("rr")} = ${key}
-      and lower(btrim(rr.to_address)) = ${who})
+      and lower(btrim(rr.to_address)) = ${sender})
     or (not exists (select 1 from admin.saas_inbound_email ke where ke.message_id = ${key})
       and not exists (select 1 from admin.saas_outreach ko where ko.message_id = ${key})
-      and ${who} = (select lower(btrim(fe.from_address)) from admin.saas_inbound_email fe
+      and ${sender} = (select lower(btrim(fe.from_address)) from admin.saas_inbound_email fe
         where ${firstRef("fe")} = ${key}
           or (${firstRef("fe")} is null and ${firstReply("fe")} = ${key})
-        order by fe.received_at, fe.id limit 1)))`
-  return sql<boolean>`(${began(sender)} or exists (select 1 from admin.saas_outreach lo
+        order by fe.received_at, fe.id limit 1))
+    or exists (select 1 from admin.saas_outreach lo
       join admin.saas_inbound_email le on le.id = lo.in_reply_to_email_id
       where lo.channel = 'correo' and lower(btrim(lo.to_address)) = ${sender}
-        and ${headerThreadKeySql("le")} = ${key}
-        and ${began(sql.raw("lower(btrim(le.from_address))"))}))`
+        and ${headerThreadKeySql("le")} = ${key}))`
 }
 
 /**
  * `threadKeyOf` en SQL sobre una fila de `saas_inbound_email` con ese alias: la clave de sus
- * cabeceras (`headerThreadKeySql`) si quien lo envía ya está en ese hilo (`threadAddressSql`);
- * si no, su propio Message-ID. Gemela de `threadKeyOf`: cambian juntas.
+ * cabeceras (`headerThreadKeySql`) si su remitente está verificado y ya está en ese hilo
+ * (`threadAddressSql`); si no, su propio Message-ID. Gemela de `threadKeyOf`: cambian juntas.
  */
 export function emailThreadKeySql(alias: string): SQL<string | null> {
   const e = columnsOf(alias)
   return sql<string | null>`(select (case when tk.key is null or tk.key = tk.own then tk.key
+        when not tk.verified then tk.own
         when ${threadAddressSql(sql.raw("tk.key"), sql.raw("tk.sender"))} then tk.key
         else tk.own end)
     from (select ${headerThreadKeySql(alias)} as key, nullif(btrim(${e("message_id")}), '') as own,
-      lower(btrim(${e("from_address")})) as sender) tk)`
+      lower(btrim(${e("from_address")})) as sender, ${e("sender_verified")} as verified) tk)`
 }
 
 /** `outreachThreadKeyOf` en SQL sobre una fila de `saas_outreach` con ese alias. */
