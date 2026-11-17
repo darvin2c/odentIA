@@ -277,7 +277,7 @@
     },
     {
       "id": "r03-whatsapp-nuestro-y-suyo",
-      "nota": "Lo que le respondimos por WhatsApp no es lo que hizo la clínica; lo que preguntó sí es de ella.",
+      "nota": "Lo que le respondimos por WhatsApp no es lo que hizo la clínica. De su pregunta solo llega que escribió (el resumen lo lee Soporte): ninguna frase trae el texto del chat, ni el suyo ni el nuestro.",
       "cliente": { "nombre": "Consultorio Santa Rosa (ficticio)", "producto": "medical", "cuenta": true, "paga": true },
       "otros": ["Llegó por: WhatsApp directo"],
       "contactos": ["Dra. Elena Paredes, Directora (decide, usa), persona principal"],

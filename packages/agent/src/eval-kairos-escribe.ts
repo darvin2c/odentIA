@@ -22,12 +22,15 @@
  * y la misma llamada que el escritor (`summaryHuman`, `readSummary`): con los hechos y
  * el prompt de antes (el cuerpo de lo que le escribimos como un hecho más y
  * `SUMMARY_SYSTEM` sin `SUMMARY_FACT_KINDS`) y con los de ahora
- * (`summaryActivityFact`). Cuenta, por reglas, cada frase que repite el texto de algo
- * que le escribimos (comparte con él varias palabras con contenido, o dice una de las
- * expresiones `noAfirma` del caso) sin decir que se lo escribimos: así se contaba
- * como un hecho de la clínica. Es una aproximación por palabras, no una lectura. El
- * juez califica de 1 a 5 la fidelidad contra la bitácora completa del caso y dice si
- * alguna frase atribuye a la clínica lo que le escribimos.
+ * (`summaryActivityFact`: de un correo o un chat, de ida o de vuelta, solo quién y por
+ * dónde, y de lo nuestro el asunto). Cuenta, por reglas, cada frase que repite el texto
+ * de algo que le escribimos (comparte con él varias palabras con contenido, o dice una
+ * de las expresiones `noAfirma` del caso) sin decir que se lo escribimos: así se contaba
+ * como un hecho de la clínica; y cada frase que trae el texto de una conversación, que
+ * no puede estar porque el resumen lo lee también Soporte, que no ve las conversaciones
+ * (ADR 0196). Son aproximaciones por palabras, no una lectura. El juez califica de 1 a 5
+ * la fidelidad contra la bitácora completa del caso y dice si alguna frase atribuye a la
+ * clínica lo que le escribimos.
  *
  * Gasto: tokens y USD del escritor y del juez por parte y en total (de `AI_PRICES`, con
  * lo que reportó el proveedor; sin uso reportado, null), y lo que cuesta cada
@@ -592,6 +595,9 @@ const contentWords = (text: string) =>
       .split(/[^\p{L}]+/u)
       .filter((w) => w.length >= 5 && !STOPWORDS.has(w)),
   )
+/** Cuántas palabras de `words` comparte con el conjunto que más comparte. */
+const overlap = (words: Set<string>, sets: Set<string>[]) =>
+  Math.max(0, ...sets.map((set) => [...words].filter((w) => set.has(w)).length))
 
 /**
  * Las frases del resumen que cuentan lo que le escribimos como si fuera de la clínica, sin decir
@@ -607,8 +613,6 @@ function restatesOurs(c: SummaryCase, sentences: string[]): string[] {
     ...(c.otros ?? []),
     ...(c.contactos ?? []),
   ].map(contentWords)
-  const overlap = (words: Set<string>, sets: Set<string>[]) =>
-    Math.max(0, ...sets.map((set) => [...words].filter((w) => set.has(w)).length))
   const flagged: string[] = []
   for (const sentence of sentences) {
     const text = plain(sentence)
@@ -620,6 +624,37 @@ function restatesOurs(c: SummaryCase, sentences: string[]): string[] {
       flagged.push(sentence)
   }
   return flagged
+}
+
+/** Un correo o un chat, de ida o de vuelta: lo que no es una nota del equipo. */
+const isConversation = (a: Activity) =>
+  Boolean(a.chat) || (a.tipo === "correo" && (a.direccion === "entro" || Boolean(a.enviado)))
+
+/**
+ * Las frases del resumen que traen el texto de una conversación (un correo o un chat, de ida o de
+ * vuelta): el resumen lo lee también Soporte, que no ve las conversaciones (ADR 0196). Repiten
+ * varias palabras con contenido de un mensaje (sin las de su asunto, que de lo nuestro sí llega;
+ * tres, o dos si la frase es corta) y no tantas de lo demás. Decir que se lo escribimos no la
+ * salva: el texto igual está ahí. Por palabras: una aproximación.
+ */
+function quotesConversation(c: SummaryCase, sentences: string[]): string[] {
+  const withoutSubject = (a: Activity) => {
+    const subject = contentWords(a.asunto ?? "")
+    return new Set([...contentWords(a.texto)].filter((w) => !subject.has(w)))
+  }
+  const talks = c.actividades.filter(isConversation).map(withoutSubject)
+  const others = [
+    ...c.actividades
+      .filter((a) => !isConversation(a))
+      .map((a) => `${a.texto} ${a.resultado ?? ""}`),
+    ...(c.otros ?? []),
+    ...(c.contactos ?? []),
+  ].map(contentWords)
+  return sentences.filter((sentence) => {
+    const words = contentWords(sentence)
+    const shared = overlap(words, talks)
+    return shared >= (words.size <= 6 ? 2 : 3) && shared > overlap(words, others)
+  })
 }
 
 /** La bitácora completa del caso, con de quién es cada cosa: lo que lee el juez. */
@@ -648,6 +683,8 @@ interface SummaryVariant {
   resumen: string | null
   frases: string[]
   repiteLoNuestro: string[]
+  /** Frases con el texto de un correo o un chat: Soporte lee el resumen (ADR 0196). */
+  citaConversacion: string[]
   juez: SummaryVerdict | null
   error?: string
 }
@@ -704,12 +741,13 @@ async function runVariant(c: SummaryCase, version: "antes" | "ahora"): Promise<S
       resumen: null,
       frases: [],
       repiteLoNuestro: [],
+      citaConversacion: [],
       juez: null,
       error: error instanceof Error ? error.message.slice(0, 200) : String(error),
     }
   }
   const verdict = await judge<SummaryVerdict & Record<string, unknown>>(
-    `Eres un auditor exigente. Kairós escribió «Lo que hay que saber» de un cliente de Sallca (hace software para clínicas dentales, consultorios médicos y ópticas) para quien lo atiende, solo con los hechos que se le dieron. Abajo está la bitácora del cliente con de quién es cada cosa: lo que anotó el equipo, lo que nos escribió la clínica y lo que le escribimos nosotros. Lo que le escribimos cuenta qué le dijimos o pedimos; no es un hecho de la clínica.
+    `Eres un auditor exigente. Kairós escribió «Lo que hay que saber» de un cliente de Sallca (hace software para clínicas dentales, consultorios médicos y ópticas) para quien lo atiende, solo con los hechos que se le dieron. Abajo está la bitácora del cliente con de quién es cada cosa: lo que anotó el equipo, lo que nos escribió la clínica y lo que le escribimos nosotros. Lo que le escribimos cuenta qué le dijimos o pedimos; no es un hecho de la clínica. De los correos y chats Kairós recibe solo que existieron (quién, por dónde y cuándo, y de lo nuestro el asunto), nunca su texto, porque el resumen lo lee también Soporte: que no diga de qué trataron no es una falta.
 
 Califica de 1 a 5 la fidelidad, sin indulgencia: 5 = cada frase es cierta según la bitácora y atribuye bien quién hizo o dijo qué; 1 = afirma cosas falsas o cuenta como de la clínica lo que solo le escribimos nosotros.
 Di también si alguna frase cuenta como hecho de la clínica algo que solo le escribimos nosotros (atribuyeMal).
@@ -730,6 +768,7 @@ Devuelve solo un JSON: {"fidelidad": n, "atribuyeMal": true o false, "comentario
     resumen: read.summary,
     frases: read.sentences,
     repiteLoNuestro: restatesOurs(c, read.sentences),
+    citaConversacion: quotesConversation(c, read.sentences),
     juez: verdict,
   }
 }
@@ -760,14 +799,19 @@ for (let rep = 1; rep <= repetitions; rep++) {
       ahora: await runVariant(c, "ahora"),
     }
     summaryRuns.push(run)
-    const mark = run.ahora.repiteLoNuestro.length || run.ahora.error ? "✗" : "✓"
+    const mark =
+      run.ahora.repiteLoNuestro.length || run.ahora.citaConversacion.length || run.ahora.error
+        ? "✗"
+        : "✓"
     const score = (v: SummaryVariant) =>
       v.juez ? ` juez ${v.juez.fidelidad}${v.juez.atribuyeMal ? " (atribuye mal)" : ""}` : ""
     console.log(
-      `${mark} ${c.id}${repetitions > 1 ? ` #${rep}` : ""}: antes ${run.antes.repiteLoNuestro.length} frase(s) con lo nuestro${score(run.antes)} → ahora ${run.ahora.repiteLoNuestro.length}${score(run.ahora)}`,
+      `${mark} ${c.id}${repetitions > 1 ? ` #${rep}` : ""}: antes ${run.antes.repiteLoNuestro.length} frase(s) con lo nuestro y ${run.antes.citaConversacion.length} con una conversación${score(run.antes)} → ahora ${run.ahora.repiteLoNuestro.length} y ${run.ahora.citaConversacion.length}${score(run.ahora)}`,
     )
     for (const sentence of run.ahora.repiteLoNuestro)
       console.log(`    ahora repite lo nuestro: ${sentence.slice(0, 200)}`)
+    for (const sentence of run.ahora.citaConversacion)
+      console.log(`    ahora trae el texto de una conversación: ${sentence.slice(0, 200)}`)
     for (const v of [run.antes, run.ahora]) if (v.error) console.log(`    error: ${v.error}`)
   }
 }
@@ -785,6 +829,7 @@ const byResult = (result: ImproveRun["resultado"]) =>
 const judgedA = improveRuns.filter((r) => r.juez)
 const variants = (pick: (r: SummaryRun) => SummaryVariant) => summaryRuns.map(pick)
 const flaggedOf = (vs: SummaryVariant[]) => vs.reduce((sum, v) => sum + v.repiteLoNuestro.length, 0)
+const quotedOf = (vs: SummaryVariant[]) => vs.reduce((sum, v) => sum + v.citaConversacion.length, 0)
 const fidelity = (vs: SummaryVariant[]) => avg(vs, (v) => v.juez?.fidelidad ?? null)
 const misattributed = (vs: SummaryVariant[]) => vs.filter((v) => v.juez?.atribuyeMal).length
 const before = variants((r) => r.antes)
@@ -833,6 +878,9 @@ console.log(
 )
 console.log(
   `| B · Frases que repiten lo nuestro como de la clínica | antes ${flaggedOf(before)} → ahora ${flaggedOf(after)} |`,
+)
+console.log(
+  `| B · Frases con el texto de una conversación (lo lee Soporte) | antes ${quotedOf(before)} → ahora ${quotedOf(after)} |`,
 )
 console.log(
   `| B · Juez (fidelidad; atribuye mal) | ${withJudge ? `antes ${fmt(fidelity(before))}; ${misattributed(before)} → ahora ${fmt(fidelity(after))}; ${misattributed(after)}` : "sin juez"} |`,

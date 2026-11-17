@@ -901,7 +901,7 @@ describe("Lo que hay que saber: de quién es cada hecho", () => {
     ).toBe("Le escribimos por WhatsApp el 12 de noviembre de 2026")
   })
 
-  it("lo que nos escribió dice quién; un correo, sin su texto, como siempre", () => {
+  it("lo que nos escribió dice quién y por dónde, sin su texto: Soporte no ve las conversaciones", () => {
     const mail = { ...base, kind: "correo", direction: "entro", body: "Escribió a hola@: Precios" }
     expect(summaryActivityFact({ ...mail, contactName: "Rosa Quispe" })).toBe(
       "Rosa Quispe nos escribió por correo el 12 de noviembre de 2026",
@@ -909,18 +909,21 @@ describe("Lo que hay que saber: de quién es cada hecho", () => {
     expect(summaryActivityFact(mail)).toBe(
       "La clínica nos escribió por correo el 12 de noviembre de 2026",
     )
-    expect(
-      summaryActivityFact({
+    // Un chat, igual que un correo: el resumen lo lee todo el equipo (ADR 0196).
+    for (const kind of ["whatsapp", "instagram", "messenger"]) {
+      const fact = summaryActivityFact({
         ...base,
-        kind: "whatsapp",
+        kind,
         direction: "entro",
-        body: "¿Cómo conecto mi WhatsApp?",
+        body: "Mi clave es 4471, ¿cómo conecto mi WhatsApp?",
         fromChat: true,
         contactName: "Rosa Quispe",
-      }),
-    ).toBe(
-      "Rosa Quispe nos escribió por WhatsApp el 12 de noviembre de 2026: «¿Cómo conecto mi WhatsApp?»",
-    )
+      })
+      expect(fact).toMatch(
+        /^Rosa Quispe nos escribió por (WhatsApp|Instagram|Messenger) el 12 de noviembre de 2026$/,
+      )
+      expect(fact).not.toContain("4471")
+    }
   })
 
   it("lo que anotó el equipo sigue como nota, también un WhatsApp anotado a mano", () => {

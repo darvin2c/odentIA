@@ -926,11 +926,13 @@ const ACTIVITY_LABELS: Record<string, string> = {
 const MESSAGE_KINDS = new Set(["correo", "whatsapp", "instagram", "messenger"])
 
 /**
- * El hecho de una actividad, de una de tres clases que distingue `SUMMARY_FACT_KINDS`:
+ * El hecho de una actividad, de una de tres clases que distingue `SUMMARY_FACT_KINDS`. «Lo que hay
+ * que saber» lo lee todo el equipo, también Soporte, que no ve las conversaciones (ADR 0196): de un
+ * correo o un chat, de ida o de vuelta, entra solo que existió, nunca su texto.
  * - lo que le escribimos (un correo o un chat que salió): «Le escribimos por correo el …: «asunto»»,
  *   sin su texto, que es lo que le contamos y no algo de la clínica;
- * - lo que nos escribió: un correo, sin su texto como siempre («Rosa Quispe nos escribió por correo
- *   el …»); un chat, con lo que escribió y de quién es;
+ * - lo que nos escribió (un correo o un chat): quién y por dónde, sin su texto («Rosa Quispe nos
+ *   escribió por WhatsApp el …»);
  * - lo que anotó el equipo (una llamada, una reunión, una nota, o un WhatsApp anotado a mano): como
  *   siempre, con lo anotado y en qué quedó.
  */
@@ -943,10 +945,12 @@ export function summaryActivityFact(entry: KairosActivityEntry): string {
     const subject = entry.sent.subject?.trim()
     return `Le escribimos por ${channel} el ${entry.day}${subject ? `: «${subject}»` : ""}${outcome}`
   }
-  if (entry.kind === "correo" && entry.direction === "entro")
-    return `${who} nos escribió por correo el ${entry.day}`
-  if (MESSAGE_KINDS.has(entry.kind) && entry.direction === "entro" && entry.fromChat)
-    return `${who} nos escribió por ${channel} el ${entry.day}: «${entry.body.trim()}»`
+  if (
+    MESSAGE_KINDS.has(entry.kind) &&
+    entry.direction === "entro" &&
+    (entry.kind === "correo" || entry.fromChat)
+  )
+    return `${who} nos escribió por ${channel} el ${entry.day}`
   const by = entry.direction === "entro" ? " de la clínica" : ""
   return `${label}${by} del ${entry.day}: ${entry.body}${outcome}`
 }
