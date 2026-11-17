@@ -706,6 +706,23 @@ describe("Mejorar: la red contra lo que agrega", () => {
     ).toEqual([])
   })
 
+  it("un plazo de uno («un día», «una semana», «unos meses») y «veintiún» también son datos", () => {
+    expect(improveInventions("Te escribo en un día.", ["te escribo pronto"])).toEqual(["un día"])
+    expect(improveInventions("Lo vemos en una semana.", ["lo vemos luego"])).toEqual([
+      "una semana",
+    ])
+    expect(improveInventions("Tarda unos minutos.", ["tarda poco"])).toEqual(["unos minutos"])
+    expect(improveInventions("En unos meses, unas horas o un año.", ["pronto"])).toEqual([
+      "unos meses",
+      "unas horas",
+      "un año",
+    ])
+    expect(improveInventions("Son veintiún días.", ["son varios dias"])).toEqual(["veintiún"])
+    // Si ya estaba, no es nuevo; «un» con otra cosa es el artículo.
+    expect(improveInventions("Te escribo en un día.", ["te escribo en un dia"])).toEqual([])
+    expect(improveInventions("Te mando un enlace y una foto.", ["te mando el enlace"])).toEqual([])
+  })
+
   it("checkImprovedText mira también la clínica y que no crezca de más", () => {
     expect(checkImprovedText({ text: "ok", channel: "whatsapp" }, "Ok, gracias.")).toEqual({
       ok: true,

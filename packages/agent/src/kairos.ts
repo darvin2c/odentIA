@@ -739,18 +739,20 @@ const DAY_WORD =
   /(?<![\p{L}])(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|hoy|ma[ñn]ana|ayer|anteayer|enero|febrero|marzo|abril|mayo|junio|julio|agosto|sep?tiembre|octubre|noviembre|diciembre)(?![\p{L}])/giu
 
 /**
- * Un número dicho con palabras («treinta días», «media hora»): de uno a veinte, los veinti…, las
- * decenas, cien, los cientos, mil y las cantidades de siempre (media hora, medio día, un cuarto de
- * hora, un par, una docena, una quincena). «un» y «una» solos no cuentan: son también el artículo.
+ * Un número dicho con palabras («treinta días», «media hora»): de uno a veinte, los veinti…
+ * (también «veintiún»), las decenas, cien, los cientos, mil, las cantidades de siempre (media hora,
+ * medio día, un cuarto de hora, un par, una docena, una quincena) y «un día», «una semana», «unos
+ * meses»: un plazo, aunque sea uno. «un» y «una» solos no cuentan: son también el artículo.
  */
 const NUMBER_WORD = new RegExp(
   String.raw`(?<![\p{L}\p{N}])(?:${[
     "uno|dos|tres|cuatro|cinco|s[eé]is|siete|ocho|nueve|diez",
     "once|doce|trece|catorce|quince|dieci(?:s[eé]is|siete|ocho|nueve)|veinte",
-    "veinti(?:un[oa]?|d[oó]s|tr[eé]s|cuatro|cinco|s[eé]is|siete|ocho|nueve)",
+    "veinti(?:[uú]n[oa]?|d[oó]s|tr[eé]s|cuatro|cinco|s[eé]is|siete|ocho|nueve)",
     "treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien|ciento",
     "(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s|mil",
     String.raw`media\s+hora|medio\s+d[ií]a|cuarto\s+de\s+hora|un\s+par|docenas?|quincenas?`,
+    String.raw`(?:un|una|unos|unas)\s+(?:minutos?|horas?|d[ií]as?|semanas?|mes(?:es)?|a[ñn]os?)`,
   ].join("|")})(?![\p{L}\p{N}])`,
   "giu",
 )
