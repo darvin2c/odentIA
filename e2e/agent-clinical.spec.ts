@@ -319,12 +319,11 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(idle).toBeVisible()
   expect((await dictation()).suggestions).toEqual([])
 
-  // Odontograma por voz (issue 109): el hallazgo va a su bloque y, en Perú, pide la causa de la ausencia con un toque.
+  // Odontograma por voz (issue 109): el hallazgo va a su bloque. La causa de la ausencia es opcional
+  // en todos los países (ADR 0200): queda lista para confirmar, sin pedirla.
   await write("La cuarenta y seis está ausente.")
   const finding = suggested("Odontograma").getByRole("listitem")
   await expect(finding).toContainText("Pieza 46 · Pieza dentaria ausente")
-  await expect(finding).toContainText("Por revisar")
-  await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
   await expect(finding).not.toContainText("Por revisar")
   await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
   // Lo registrado hoy se ve debajo del odontograma, sin abrir nada.
