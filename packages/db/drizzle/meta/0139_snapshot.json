@@ -1,6 +1,6 @@
 {
-  "id": "d2fe80c8-9c0e-41ca-9535-caea112fcda0",
-  "prevId": "7a3df62a-fe5a-4e70-88b0-cdd05abc041c",
+  "id": "c92f9392-f58f-4736-815d-5cbbb2b11def",
+  "prevId": "95d42726-c7c7-42f8-b7fa-b5ed8a6c7336",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -217,6 +217,21 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "kairos_chat_turn_outreach_idx": {
+          "name": "kairos_chat_turn_outreach_idx",
+          "columns": [
+            {
+              "expression": "outreach_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2912,6 +2927,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "failed_at": {
+          "name": "failed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_why": {
+          "name": "failed_why",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "template": {
           "name": "template",
           "type": "text",
@@ -3221,7 +3248,11 @@
         },
         "saas_outreach_delivery_check": {
           "name": "saas_outreach_delivery_check",
-          "value": "(\"admin\".\"saas_outreach\".\"delivered_at\" IS NULL AND \"admin\".\"saas_outreach\".\"read_at\" IS NULL) OR (\"admin\".\"saas_outreach\".\"chat_id\" IS NOT NULL AND \"admin\".\"saas_outreach\".\"channel\" = 'whatsapp')"
+          "value": "(\"admin\".\"saas_outreach\".\"delivered_at\" IS NULL AND \"admin\".\"saas_outreach\".\"read_at\" IS NULL AND \"admin\".\"saas_outreach\".\"failed_at\" IS NULL) OR (\"admin\".\"saas_outreach\".\"chat_id\" IS NOT NULL AND \"admin\".\"saas_outreach\".\"channel\" = 'whatsapp')"
+        },
+        "saas_outreach_failed_check": {
+          "name": "saas_outreach_failed_check",
+          "value": "\"admin\".\"saas_outreach\".\"failed_why\" IS NULL OR (\"admin\".\"saas_outreach\".\"failed_at\" IS NOT NULL AND length(\"admin\".\"saas_outreach\".\"failed_why\") BETWEEN 1 AND 500)"
         }
       },
       "isRLSEnabled": false

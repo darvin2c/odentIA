@@ -999,6 +999,12 @@ export type ChatEntry =
       /** Cuándo dijo WhatsApp que llegó al teléfono y que lo leyó (los otros canales no lo dicen). */
       deliveredAt: Date | null
       readAt: Date | null
+      /**
+       * Cuándo dijo WhatsApp que no llegó lo que ya había salido, y por qué: sigue `enviado`, pero
+       * no cuenta como respuesta («No llegó tu respuesta»).
+       */
+      failedAt: Date | null
+      failedWhy: string | null
       /** En qué se basó Kairós para responder («los precios de la web»); vacío si no lo escribió él. */
       basis: string[]
       /** El archivo que salió en este mensaje (uno por mensaje); vacío si es texto. */
@@ -1196,6 +1202,8 @@ export async function getChat(
         byKairos: row.byKairos,
         deliveredAt: row.deliveredAt,
         readAt: row.readAt,
+        failedAt: row.failedAt,
+        failedWhy: row.failedWhy,
         basis: basisOf.get(row.id) ?? [],
         files: row.fileIds.flatMap((id) => {
           const file = sentFileOf.get(id)
@@ -2016,17 +2024,25 @@ export type ChatMetaStatus = (typeof CHAT_META_STATUSES)[number]
  * Un estado que llegó por el webhook de WhatsApp, por el `wamid` del envío o
  * por su id (`biz_opaque_callback_data`). Solo WhatsApp: Instagram y Messenger
  * no mandan estados con nuestro id (su incierto lo resuelve una persona). `sent`, `delivered` o `read` dicen que
- * salió: lo pendiente o incierto pasa a enviado. `failed` solo cambia lo
- * pendiente o incierto (a no salió): lo que ya salió no vuelve atrás. Lo que no
- * es de una conversación, o no se reconoce, se ignora (nulo).
+ * salió: lo pendiente o incierto pasa a enviado. `failed` de lo pendiente o
+ * incierto es «no salió»; lo que ya salió no vuelve atrás. Lo que no es de una
+ * conversación, o no se reconoce, se ignora (nulo).
  *
- * De lo que salió, `delivered` anota cuándo llegó al teléfono (`delivered_at`) y `read` cuándo
- * lo leyó (`read_at`): cada uno la primera vez que Meta lo dice, y no vuelve atrás (lo cuida
- * `saas_outreach_guard`). Lo que no salió es final: no se le anota nada.
+ * De lo que salió, `delivered` anota cuándo llegó al teléfono (`delivered_at`), `read` cuándo
+ * lo leyó (`read_at`) y `failed` cuándo dijo Meta que no llegó (`failed_at`, con su motivo en
+ * `why`: un archivo por enlace que no pudo descargar): cada uno la primera vez que Meta lo dice,
+ * y no vuelve atrás (lo cuida `saas_outreach_guard`). Con `failed_at` la respuesta no cuenta como
+ * dada y la conversación vuelve a «Te toca». Lo que no salió es final: no se le anota nada.
  */
 export async function applyChatStatus(
   tx: Db,
-  input: { externalId?: string | null; outreachId?: string | null; status: ChatMetaStatus },
+  input: {
+    externalId?: string | null
+    outreachId?: string | null
+    status: ChatMetaStatus
+    /** Con `failed`: lo que dijo Meta («131053: …»), corto. */
+    why?: string | null
+  },
   now = new Date(),
 ): Promise<ChatOutreachResult | null> {
   if (!(CHAT_META_STATUSES as readonly string[]).includes(input.status)) return null
@@ -2042,9 +2058,34 @@ export async function applyChatStatus(
       row,
       input.status === "failed" ? "no_salio" : "enviado",
       now,
-      { externalId: input.externalId ?? null, metaStatus: input.status },
+      {
+        externalId: input.externalId ?? null,
+        metaStatus: input.status,
+        why: input.status === "failed" ? (input.why ?? null) : null,
+      },
     )
     changed = true
+  } else if (input.status === "failed" && row.status === "enviado" && row.failedAt === null) {
+    // Salió, pero no llegó: sigue enviado y se anota una vez, con su motivo.
+    const why = input.why?.trim().slice(0, 500) || null
+    const [marked] = await tx
+      .update(saasOutreach)
+      .set({ failedAt: now, failedWhy: why, updatedAt: now })
+      .where(and(eq(saasOutreach.id, row.id), isNull(saasOutreach.failedAt)))
+      .returning()
+    if (marked) {
+      current = marked
+      changed = true
+      await writeAdminAudit(tx, null, {
+        action: "arm.outreach_undelivered",
+        entityId: row.clientId ?? row.chatId,
+        metadata: {
+          outreachId: row.id,
+          chatId: row.chatId,
+          ...(why ? { why } : {}),
+        },
+      })
+    }
   }
   const column =
     input.status === "delivered" ? "deliveredAt" : input.status === "read" ? "readAt" : null

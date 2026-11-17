@@ -160,6 +160,8 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
       exists (select 1 from admin.saas_outreach f where f.chat_id = c.id and f.purpose = 'respuesta'
         and f.status = 'no_salio' and f.created_at >= m.created_at
         and (f.created_by is not null or not f.by_kairos)) as failed_after,
+      (nl.id is not null) as undelivered_after,
+      (nl.by_kairos and nl.created_by is null) as undelivered_by_kairos,
       lo.status as last_out_status, lo.by_kairos as last_out_by_kairos,
       coalesce(lo.sent_at, lo.created_at) as last_out_at
     from admin.saas_chat c
@@ -171,8 +173,13 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
     left join admin.saas_conversation_mark mk on mk.chat_id = c.id
     left join lateral (select o.status, o.by_kairos, o.created_by from admin.saas_outreach o
       where o.chat_id = c.id and o.purpose = 'respuesta' and o.status <> 'no_salio'
-        and o.created_at >= m.created_at and ${notHandoffSql("o")}
+        and o.failed_at is null and o.created_at >= m.created_at and ${notHandoffSql("o")}
       order by o.created_at desc, ${uncertainFirstSql("o")}, o.id desc limit 1) r on true
+    -- Lo que salió pero WhatsApp dijo que no llegó (un archivo que no pudo descargar): no responde.
+    left join lateral (select o.id, o.by_kairos, o.created_by from admin.saas_outreach o
+      where o.chat_id = c.id and o.purpose = 'respuesta' and o.failed_at is not null
+        and o.created_at >= m.created_at
+      order by o.created_at desc, o.id desc limit 1) nl on true
     left join lateral (select o.status, o.by_kairos, o.sent_at, o.created_at from admin.saas_outreach o
       where o.chat_id = c.id order by o.created_at desc, o.id desc limit 1) lo on true
     where ${chatId ? sql`c.id = ${chatId}::uuid` : sql`true`}`
@@ -280,6 +287,7 @@ function mailConversationsSql(
       null::text as handover_why, false as kairos_busy, (td.thread_key is not null) as draft_ready,
       r.status as reply_status, r.by_kairos as reply_by_kairos, r.created_by as reply_created_by,
       (tu.thread_key is not null) as reply_uncertain, (tf.thread_key is not null) as failed_after,
+      false as undelivered_after, false as undelivered_by_kairos,
       lo.status as last_out_status, lo.by_kairos as last_out_by_kairos,
       coalesce(lo.sent_at, lo.created_at) as last_out_at
     from mail_last l
@@ -299,8 +307,9 @@ function mailConversationsSql(
  * - «No necesita respuesta» desde lo último que llegó, o un chat «No es una clínica»: Respondida.
  * - Una respuesta desde lo último que llegó que salió o puede haber salido: Kairós respondió si
  *   la escribió Kairós solo, si no Respondida (diciendo si no se sabe si salió).
- * - Lo demás espera a una persona: Te toca, con su motivo (no salió la respuesta, Kairós dejó la
- *   respuesta lista, Kairós la pasó al equipo o la está respondiendo).
+ * - Lo demás espera a una persona: Te toca, con su motivo (no salió la respuesta, salió pero
+ *   WhatsApp dijo que no llegó, Kairós dejó la respuesta lista, Kairós la pasó al equipo o la
+ *   está respondiendo). Lo que no llegó (`failed_at`) no cuenta como respuesta.
  */
 function conversationsSql(now: Date, scope: ConversationScope): SQL {
   const parts: SQL[] = []
@@ -326,7 +335,8 @@ function conversationsSql(now: Date, scope: ConversationScope): SQL {
         else 'te_toca' end) as state,
       (case when ${settled} then 'no_necesita' when v.not_clinic then 'no_es_clinica'
         when v.reply_status is not null then (case when v.reply_uncertain then 'incierta' end)
-        when v.failed_after then 'no_salio' when v.draft_ready then 'borrador'
+        when v.failed_after then 'no_salio' when v.undelivered_after then 'no_llego'
+        when v.draft_ready then 'borrador'
         when v.handed_over then 'kairos_la_paso' when v.kairos_busy then 'kairos_responde' end)
         as why_code
     from (${union}) v`
@@ -362,6 +372,8 @@ interface ConversationRow extends Record<string, unknown> {
   why_code: string | null
   handover_why: string | null
   reply_by_kairos: boolean | null
+  /** La respuesta que no llegó (`failed_at`) la escribió Kairós solo. */
+  undelivered_by_kairos: boolean | null
   draft_ready: boolean
   last_out_status: string | null
   last_out_by_kairos: boolean | null
@@ -382,7 +394,8 @@ async function conversationRows(
       x.client_name, x.client_product, x.client_has_app, x.client_phase, x.mailbox, x.to_address,
       x.attended_by, au.name as attended_name,
       (case when x.settled_at is null then null else ${iso(sql`x.settled_at`)} end) as settled_at,
-      x.state, x.why_code, x.handover_why, x.reply_by_kairos, x.draft_ready, x.last_out_status,
+      x.state, x.why_code, x.handover_why, x.reply_by_kairos, x.undelivered_by_kairos,
+      x.draft_ready, x.last_out_status,
       x.last_out_by_kairos,
       (case when x.last_out_at is null then null else ${iso(sql`x.last_out_at`)} end) as last_out_at
     from (
@@ -414,6 +427,10 @@ function stateWhyOf(row: ConversationRow): string | null {
         : "No se sabe si salió tu respuesta"
     case "no_salio":
       return "No salió tu respuesta"
+    case "no_llego":
+      return row.undelivered_by_kairos
+        ? "No llegó la respuesta de Kairós"
+        : "No llegó tu respuesta"
     case "borrador":
       return "Kairós dejó la respuesta lista"
     case "kairos_la_paso": {

@@ -718,6 +718,14 @@ export const saasOutreach = adminSchema.table(
      */
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     readAt: timestamp("read_at", { withTimezone: true }),
+    /**
+     * Cuándo dijo WhatsApp que no llegó lo que ya había salido (`failed` después de `enviado`: un
+     * archivo por enlace que Meta no pudo descargar), con su motivo corto. El envío sigue
+     * `enviado` (salió hacia el canal; no vuelve atrás), pero la respuesta no cuenta como dada.
+     * Como `delivered_at`, una vez, de nulo a la fecha, y nunca vuelve atrás (ADR 0196).
+     */
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    failedWhy: text("failed_why"),
     /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
     template: text("template"),
     /**
@@ -781,7 +789,11 @@ export const saasOutreach = adminSchema.table(
     ),
     check(
       "saas_outreach_delivery_check",
-      sql`(${table.deliveredAt} IS NULL AND ${table.readAt} IS NULL) OR (${table.chatId} IS NOT NULL AND ${table.channel} = 'whatsapp')`,
+      sql`(${table.deliveredAt} IS NULL AND ${table.readAt} IS NULL AND ${table.failedAt} IS NULL) OR (${table.chatId} IS NOT NULL AND ${table.channel} = 'whatsapp')`,
+    ),
+    check(
+      "saas_outreach_failed_check",
+      sql`${table.failedWhy} IS NULL OR (${table.failedAt} IS NOT NULL AND length(${table.failedWhy}) BETWEEN 1 AND 500)`,
     ),
   ],
 )
@@ -1240,6 +1252,8 @@ export const kairosChatTurn = adminSchema.table(
       sql`${table.ariadnaReply} IS NULL OR (${table.agent} = 'ariadna' AND ${table.ariadnaReply} IN ('respuesta','oferta','datos','soporte','administracion','paciente'))`,
     ),
     index("kairos_chat_turn_chat_idx").on(table.chatId, table.createdAt),
+    // La Bandeja pregunta por cada respuesta si fue el aviso con que Kairós pasó la conversación.
+    index("kairos_chat_turn_outreach_idx").on(table.outreachId),
     check("kairos_chat_turn_outcome_check", oneOf(table.outcome, KAIROS_TURN_OUTCOMES)),
     check("kairos_chat_turn_why_check", sql`${table.why} IS NULL OR length(${table.why}) <= 500`),
   ],
