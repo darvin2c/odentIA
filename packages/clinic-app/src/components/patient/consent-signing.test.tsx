@@ -181,10 +181,11 @@ describe("«Confirma que informaste» sin colegiatura", () => {
   it("con un número mal escrito, «Volver» conserva la firma de Carmen", async () => {
     open()
     await carmenSigns()
-    writeRegistration("12 345")
+    // QA del 16 nov, Q8 (B7c): «abc» se aceptaba y quedó «COP abc» en un consentimiento firmado.
+    writeRegistration("abc")
     fireEvent.click(screen.getByRole("button", { name: "Guardar y confirmar" }))
     expect(
-      await screen.findByText(/La colegiatura lleva solo letras, números y guiones/),
+      await screen.findByText(/El número de colegiatura lleva solo números/),
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Volver" }))
     // Su hoja vuelve con la firma puesta: no se le pide otra vez.
