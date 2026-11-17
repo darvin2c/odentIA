@@ -176,11 +176,17 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
         and o.failed_at is null and o.created_at >= m.created_at and ${notHandoffSql("o")}
       order by o.created_at desc, ${uncertainFirstSql("o")}, o.id desc limit 1) r on true
     -- Una parte de lo que le mandamos después de su último mensaje salió pero WhatsApp dijo que
-    -- no llegó (un archivo que no pudo descargar): la respuesta no está completa. El aviso con que
-    -- Kairós la pasó al equipo no cuenta aquí: eso lo dice «Kairós te la pasó».
+    -- no llegó (un archivo que no pudo descargar): la respuesta no está completa, salvo que algo
+    -- nuestro de después (de quien sea) sí haya salido y llegado: el archivo que se volvió a
+    -- mandar. Las partes de una respuesta van un milisegundo después de la anterior, así que el
+    -- texto no cubre el archivo que va tras él. El aviso con que Kairós pasó la conversación no
+    -- cuenta aquí: eso lo dice «Kairós te la pasó».
     left join lateral (select o.id, o.by_kairos, o.created_by from admin.saas_outreach o
       where o.chat_id = c.id and o.failed_at is not null and o.created_at >= m.created_at
         and ${notHandoffSql("o")}
+        and not exists (select 1 from admin.saas_outreach a where a.chat_id = c.id
+          and a.created_at > o.created_at and a.status = 'enviado' and a.failed_at is null
+          and ${notHandoffSql("a")})
       order by o.created_at desc, o.id desc limit 1) nl on true
     left join lateral (select o.status, o.by_kairos, o.sent_at, o.created_at from admin.saas_outreach o
       where o.chat_id = c.id order by o.created_at desc, o.id desc limit 1) lo on true

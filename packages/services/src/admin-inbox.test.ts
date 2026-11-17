@@ -964,6 +964,47 @@ describe("el estado de un chat", () => {
       state: "te_toca",
       stateWhy: "No llegó parte de tu respuesta",
     })
+    // Se vuelve a mandar el archivo y tampoco llega: sigue «Te toca».
+    const again = await prepareChatReply(
+      ownerDb,
+      admin,
+      chat.chatId,
+      { fileIds: [pdf.id] },
+      later(MIN),
+    )
+    await markChatOutreachSent(
+      ownerDb,
+      again.parts[0]?.outreachId ?? "",
+      "wamid.parte-pdf-2",
+      later(MIN),
+    )
+    await applyChatStatus(
+      ownerDb,
+      { externalId: "wamid.parte-pdf-2", status: "failed", why: "131053: no se pudo descargar" },
+      later(MIN),
+    )
+    expect(await chatConversationState(ownerDb, chat.chatId, later(2 * MIN))).toMatchObject({
+      state: "te_toca",
+      stateWhy: "No llegó parte de tu respuesta",
+    })
+    // La tercera vez llega: la respuesta quedó completa y vuelve a «Respondida».
+    const third = await prepareChatReply(
+      ownerDb,
+      admin,
+      chat.chatId,
+      { fileIds: [pdf.id] },
+      later(3 * MIN),
+    )
+    await markChatOutreachSent(
+      ownerDb,
+      third.parts[0]?.outreachId ?? "",
+      "wamid.parte-pdf-3",
+      later(3 * MIN),
+    )
+    expect(await chatConversationState(ownerDb, chat.chatId, later(4 * MIN))).toMatchObject({
+      state: "respondida",
+      stateWhy: null,
+    })
   })
 
   it("lo de Kairós que no llegó pasa al equipo; el aviso con que la pasó, si no llega, sigue diciéndolo", async () => {
