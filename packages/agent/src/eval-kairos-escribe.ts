@@ -14,7 +14,8 @@
  *     su canal (WhatsApp 4096 caracteres, Messenger 2000, Instagram 1000 bytes);
  *   - lo que el caso pide conservar o no decir, y si cambió un texto que ya estaba bien.
  * Como sospecha, sin quitar puntos: un nombre propio nuevo (una palabra con mayúscula en
- * medio de la frase que no está en el original ni en la conversación).
+ * medio de la frase que no está en el original ni en el nombre de la clínica: la
+ * conversación la escribieron otros y no sustenta nada, como en `improveSources`).
  * Después, un juez (gpt-6-luna, razonamiento medio) califica de 1 a 5 el mismo
  * significado, la claridad y el tono de cada propuesta; nunca quita una regla.
  *
@@ -60,6 +61,7 @@ import {
   IMPROVE_SYSTEM,
   improveHuman,
   improveInventions,
+  improveSources,
   type KairosActivityEntry,
   type KairosClientFacts,
   readSummary,
@@ -382,12 +384,8 @@ function askOf(c: ImproveCase): KairosImproveAsk {
 
 function improveProblems(c: ImproveCase, ask: KairosImproveAsk, proposal: string): string[] {
   const out: string[] = []
-  const sources = [
-    ask.text,
-    ...(ask.context?.conversation ?? []).map((l) => l.text),
-    ask.context?.clientName ?? "",
-  ]
-  const invented = improveInventions(proposal, sources)
+  // La misma red: lo que escribió la persona y el nombre de la clínica, nunca la conversación.
+  const invented = improveInventions(proposal, improveSources(ask))
   if (invented.length) out.push(`agregó datos: ${invented.join(", ")}`)
   for (const [name, re] of MARKS) {
     const before = (ask.text.match(re) ?? []).length
@@ -453,12 +451,8 @@ async function runImprove(c: ImproveCase, repetition: number): Promise<ImproveRu
     }
   }
   const proposal = result.text
-  const sources = [
-    ask.text,
-    ...(ask.context?.conversation ?? []).map((l) => l.text),
-    ask.context?.clientName ?? "",
-  ]
-  const names = newNames(proposal, sources)
+  // Un nombre que solo trae la conversación también es un dato copiado de ella.
+  const names = newNames(proposal, improveSources(ask))
   const conversation = (ask.context?.conversation ?? [])
     .map((l) => `[${l.who}] ${l.text}`)
     .join("\n")
