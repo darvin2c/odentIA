@@ -996,9 +996,7 @@ describe("responder un chat con archivos", () => {
         return `https://r2.test/${key}?firma`
       },
     }
-    const outbound = await ownerDb.transaction((tx) =>
-      chatReplyOutbound(tx as Db, admin, storage, reply, "whatsapp"),
-    )
+    const outbound = await ownerDb.transaction((tx) => chatReplyOutbound(tx as Db, storage, reply))
     expect(outbound.map((part) => part.media?.mimeType ?? null)).toEqual([
       null,
       "application/pdf",
@@ -1009,8 +1007,8 @@ describe("responder un chat con archivos", () => {
       url: `https://r2.test/${pdf.objectKey}?firma`,
     })
     expect(signed.map(([, ttl]) => ttl)).toEqual([3600, 3600])
-    expect(await audits("client_file.sent", pdf.id)).toHaveLength(1)
-    expect(await audits("client_file.sent", png.id)).toHaveLength(1)
+    // Firmar no es mandar: la constancia de cada archivo queda cuando de verdad sale.
+    expect(await audits("client_file.sent", pdf.id)).toHaveLength(0)
     // Sale el texto y el PDF; el logo no se envía si lo anterior no salió: queda no salió.
     await markChatOutreachSent(ownerDb, reply.parts[0]?.outreachId ?? "", "wamid.texto", NOW)
     await markChatOutreachSent(ownerDb, reply.parts[1]?.outreachId ?? "", "wamid.pdf", NOW)
@@ -1021,6 +1019,20 @@ describe("responder un chat con archivos", () => {
       NOW,
     )
     expect([...skipped.values()]).toEqual(["no_salio"])
+    const sentPdf = await audits("client_file.sent", pdf.id)
+    expect(sentPdf).toHaveLength(1)
+    expect(sentPdf[0]).toMatchObject({
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      metadata: expect.objectContaining({
+        clientId: sales,
+        chatId: chat.chatId,
+        channel: "whatsapp",
+        outreachId: reply.parts[1]?.outreachId,
+      }),
+    })
+    // Lo que no salió no se dio a Meta: sin constancia.
+    expect(await audits("client_file.sent", png.id)).toHaveLength(0)
     // Cada archivo que salió deja su actividad con su nombre.
     const bodies = (
       await ownerDb.select().from(saasFollowUp).where(eq(saasFollowUp.chatId, chat.chatId))
@@ -1070,9 +1082,16 @@ describe("responder un chat con archivos", () => {
       sizeBytes: MB,
       adminOnly: true,
     })
-    const cargaWords = "Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días"
+    const cargaWords =
+      "Lo que mandó la clínica para la carga no sale por chat: se borra a los 30 días"
     await expect(
-      prepareChatReply(ownerDb, admin, chat.chatId, { body: "Va", fileIds: [ours.id, carga.id] }, NOW),
+      prepareChatReply(
+        ownerDb,
+        admin,
+        chat.chatId,
+        { body: "Va", fileIds: [ours.id, carga.id] },
+        NOW,
+      ),
     ).rejects.toMatchObject({
       code: "VALIDATION",
       status: 400,
