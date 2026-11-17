@@ -289,4 +289,31 @@ it("B6: la atención que quedó abierta hoy sale en «Mis pacientes de hoy», si
   // No suma a las cifras del día ni es una fila de «Te espera».
   expect(home.today?.summary.total).toBe(1)
   expect(home.waiting.some((row) => row.kind === "staleEncounter")).toBe(false)
+
+  // Q11 (Elena): la misma persona tiene además su cita de hoy, que ya pasó y nadie cerró. Una sola
+  // fila: la de su cita dice su atención abierta, y la fila aparte no la repite.
+  const earlier = new Date(Date.now() - 3 * 60 * 60_000)
+  const [own] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      roomId: room!.id,
+      professionalUserId: f.actor,
+      patientId: f.patient.id,
+      startsAt: earlier,
+      endsAt: new Date(earlier.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+    })
+    .returning()
+  const again = await f.run((tx) => getWorkspaceHome(tx, "org_a", f.actor, workspaceAccessFor("clinician")))
+  expect(again.today?.openEncounters).toEqual([])
+  expect(again.today?.appointments.find((row) => row.id === own!.id)).toMatchObject({
+    patientId: f.patient.id,
+    encounter: null,
+    openEncounter: { id: f.encounter.id, openedAt: expect.any(String) },
+  })
+  // La cita de Carmen, que ya tiene su atención unida, no cambia.
+  expect(again.today?.appointments.find((row) => row.id === visit!.id)?.openEncounter ?? null).toBeNull()
 })

@@ -291,6 +291,8 @@ export interface WorkspaceAppointment {
   next: boolean
   /** Lo que llevaba y ya se terminó: la cita quedó sin objeto. */
   doneFor?: string | null
+  /** La atención que quien mira le abrió hoy sin unirla a esta cita: su fila la dice y ofrece «Continuar». */
+  openEncounter?: { id: string; openedAt: string } | null
 }
 /** Cuántas citas hay hoy: en sala, en atención, atendidas y por venir (las que aún no llegan). */
 export interface WorkspaceTodaySummary {

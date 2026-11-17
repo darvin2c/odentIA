@@ -203,7 +203,12 @@ function PatientRow({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-semibold">{detailOf([item.patientName, what])}</span>
           <span className="truncate text-[13px]">
-            {later ? (
+            {item.openEncounter ? (
+              // Su atención ya está abierta, sin unir a esta cita: una sola fila, con «Continuar».
+              <span className="text-primary">
+                Atención abierta desde las {formatClock(item.openEncounter.openedAt, locale, timezone)} · falta firmar
+              </span>
+            ) : later ? (
               <span className={statusTextClass(visitState(item.visit))}>{visitName(item.visit)}</span>
             ) : item.visit === "en_atencion" && item.encounter ? (
               <span className="text-primary">En atención desde {formatClock(item.encounter.startedAt, locale, timezone)}</span>
@@ -280,8 +285,22 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
     ...today.appointments.filter((item) => item.visit !== "no_vino").map((item) => item.patientId),
     ...open.map((item) => item.patientId),
   ]).size
+  /** Quien ya tiene su atención abierta hoy la continúa: «Atender» o «Registrar la atención» chocarían con ella. */
+  const continueLink = (item: WorkspaceAppointment) =>
+    item.openEncounter ? (
+      <Link
+        to="/patients/$patientId/encounters/$encounterId"
+        params={{ patientId: item.patientId, encounterId: item.openEncounter.id }}
+        aria-label={`Continuar la atención: ${item.patientName}`}
+        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
+      >
+        Continuar
+      </Link>
+    ) : null
   const attendButton = (item: WorkspaceAppointment) =>
-    canAttend ? (
+    item.openEncounter ? (
+      continueLink(item)
+    ) : canAttend ? (
       <SubmitButton
         size="sm"
         className="min-h-11 shrink-0 sm:min-h-8"
@@ -366,8 +385,10 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
             ) : null,
           )}
           {/* Si nadie espera ni se está atendiendo, la siguiente se atiende desde aquí: «Atender» marca la llegada. */}
-          {group("Más tarde", later, (item, index) => (index === 0 && waiting.length === 0 && attending.length === 0 ? attendButton(item) : null))}
-          {group("Sin cerrar", missed, missedActions)}
+          {group("Más tarde", later, (item, index) =>
+            item.openEncounter || (index === 0 && waiting.length === 0 && attending.length === 0) ? attendButton(item) : null,
+          )}
+          {group("Sin cerrar", missed, (item) => continueLink(item) ?? missedActions(item))}
           {attended > 0 ? (
             <p className="text-[13px] text-muted-foreground">
               {attended === 1 ? "1 paciente atendido hoy" : `${attended} pacientes atendidos hoy`}

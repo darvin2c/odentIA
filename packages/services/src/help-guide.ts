@@ -902,7 +902,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "deje-atencion-a-medias",
         q: "Dejé una atención a medias, ¿dónde la encuentro?",
-        a: "Hoy, en Inicio, en «Mis pacientes de hoy»: «Atención abierta desde las…» con la hora en que la abriste y «falta firmar», con «Continuar», que la abre como la dejaste. No cuenta como una cita más ni sale en «Te espera». Si queda sin firmar hasta mañana, pasa a «Te espera» con lo que le falta para cerrarse. También la abres desde su ficha.",
+        a: "Hoy, en Inicio, en «Mis pacientes de hoy»: «Atención abierta desde las…» con la hora en que la abriste y «falta firmar», con «Continuar», que la abre como la dejaste. No cuenta como una cita más ni sale en «Te espera». Si esa persona tiene además una cita tuya hoy que todavía espera, es una sola fila: la de su cita dice «Atención abierta desde las…» y trae «Continuar», no «Atender» ni «Registrar la atención». Si queda sin firmar hasta mañana, pasa a «Te espera» con lo que le falta para cerrarse. También la abres desde su ficha.",
         forms: ["deje una atencion abierta", "me interrumpieron y deje la atencion sin terminar", "donde esta la atencion que no firme", "como vuelvo a la atencion que deje"],
         area: "clinica",
       },

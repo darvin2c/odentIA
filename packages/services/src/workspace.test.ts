@@ -832,6 +832,15 @@ it("«Te espera»: la cita propia cerrada con «Vino» le pide a su profesional 
   expect(await rows()).toMatchObject([{ id: row!.id, patientName: "Rosa Quispe" }])
   // A otro profesional no le sale.
   expect(rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, access))).waiting, "cameUnrecorded")).toEqual([])
+  // QA del 16 nov, Q11 (Marco): con una atención suya abierta la está registrando; no se le pide a
+  // la vez «quedó atendida sin registrar». Si la atención abierta es de otro, sí.
+  const [draft] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: orgId, patientId: person!.id, professionalUserId: ana, reason: "Control" })
+    .returning({ id: encounter.id })
+  expect(await rows()).toEqual([])
+  await ownerDb.update(encounter).set({ professionalUserId: recipient }).where(eq(encounter.id, draft!.id))
+  expect(await rows()).toMatchObject([{ id: row!.id, patientName: "Rosa Quispe" }])
   await withOrgContext(appDb, orgId, tx => skipAppointmentRecord(tx, orgId, ana, row!.id))
   expect(await rows()).toEqual([])
 })

@@ -395,6 +395,11 @@ export interface WorkspaceAppointment {
   next: boolean
   /** Lo que llevaba y ya se terminó, si no le queda nada: la cita quedó sin objeto (QA del 10 nov, M1). */
   doneFor?: string | null
+  /**
+   * La atención que quien mira le abrió hoy a esta persona sin unirla a esta cita (`joinOpenEncounters`):
+   * la fila de la cita la dice y ofrece «Continuar», en vez de otra fila aparte con otra acción.
+   */
+  openEncounter?: { id: string; openedAt: string } | null
 }
 
 /**
@@ -518,6 +523,41 @@ async function openEncountersToday(tx: Db, orgId: string, userId: string, timezo
 
 /** Atenciones abiertas hoy que llegan a «Mis pacientes de hoy» a la vez. */
 const OPEN_ENCOUNTERS_TODAY = 20
+
+/** La cita aún espera a la persona: nadie la atiende ni la cerró. */
+const AWAITING_VISITS: readonly AppointmentVisit[] = ["llego", "por_confirmar", "confirmada", "sin_cerrar"]
+
+/**
+ * Una persona, una fila (QA del 16 nov, Q11): Elena tenía hoy su cita de las 10:00 sin cerrar y una
+ * atención abierta sin cita, y salía dos veces, con «Continuar» y con «Registrar la atención» (que
+ * no puede abrir otra mientras la primera siga abierta). La atención abierta de quien ya tiene hoy
+ * una cita en espera va en la fila de esa cita (`openEncounter`); las demás siguen aparte.
+ */
+export function joinOpenEncounters(
+  appointments: readonly WorkspaceAppointment[],
+  open: readonly WorkspaceOpenEncounter[],
+): { appointments: WorkspaceAppointment[]; openEncounters: WorkspaceOpenEncounter[] } {
+  const joined = new Map<string, WorkspaceOpenEncounter>()
+  const apart: WorkspaceOpenEncounter[] = []
+  for (const encounter of open) {
+    const visit = appointments.find(
+      (item) =>
+        item.patientId === encounter.patientId &&
+        !item.encounter &&
+        !joined.has(item.id) &&
+        AWAITING_VISITS.includes(item.visit),
+    )
+    if (visit) joined.set(visit.id, encounter)
+    else apart.push(encounter)
+  }
+  return {
+    appointments: appointments.map((item) => {
+      const encounter = joined.get(item.id)
+      return encounter ? { ...item, openEncounter: { id: encounter.id, openedAt: encounter.openedAt } } : item
+    }),
+    openEncounters: apart,
+  }
+}
 
 /** Orden de lectura: la sala (por llegada), lo que está en atención, lo que falta y, al final, lo terminado. */
 const VISIT_ORDER: Record<AppointmentVisit, number> = {
@@ -984,6 +1024,10 @@ async function waitingCameUnrecorded(tx: Db, orgId: string, userId: string): Pro
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
       and not exists (select 1 from audit_event s where s.organization_id = a.organization_id and s.entity = 'appointment'
         and s.entity_id = a.id::text and s.action = 'appointment.record_skipped' and s.created_at >= came.created_at)
+      -- Con una atención suya abierta ahora, la está registrando: no se le pide a la vez registrarla
+      -- (QA del 16 nov, Q11). Si la firma sin unirla a la cita, la fila vuelve.
+      and not exists (select 1 from encounter mine where mine.organization_id = a.organization_id
+        and mine.patient_id = a.patient_id and mine.professional_user_id = ${userId} and mine.status = 'borrador')
     order by a.starts_at desc, a.id limit ${CAME_UNRECORDED_ROWS}`)
   return [...rows]
 }
@@ -1289,7 +1333,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     || (access.attends === true && (openToday.length > 0 || await hasOwnAppointmentsToday(tx, orgId, userId, timezone))))
   const today = access.appointments
     ? await workspaceToday(tx, orgId, userId, ownToday, branch, timezone).then((day) =>
-        day.scope === "mine" ? { ...day, openEncounters: openToday } : day,
+        day.scope === "mine" ? { ...day, ...joinOpenEncounters(day.appointments, openToday) } : day,
       )
     : null
   // Quien además ve la sede tiene su agenda en una línea, como la caja.
