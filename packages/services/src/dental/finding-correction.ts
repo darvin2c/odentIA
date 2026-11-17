@@ -186,7 +186,9 @@ async function refaceSharedDiagnoses(
     )
   for (const diagnosis of diagnoses) {
     const tooth = toothOfRow(diagnosis)
-    if (tooth == null || diagnosis.siteQualifiers.length === 0) continue
+    const type = diagnosis.diagnosisType
+    // Sin tipo (un diagnóstico de antes de pedirlo) no se puede registrar de nuevo: queda como está.
+    if (tooth == null || !type || diagnosis.siteQualifiers.length === 0) continue
     const live = await tx
       .select({ id: odontogramEntry.id, surface: odontogramEntry.surface })
       .from(diagnosisFinding)
@@ -217,7 +219,7 @@ async function refaceSharedDiagnoses(
     const next = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
       diagnosisCode: diagnosis.diagnosisCode,
       diagnosisSystem: diagnosis.diagnosisSystem,
-      diagnosisType: diagnosis.diagnosisType,
+      diagnosisType: type,
       toothNumber: tooth,
       surfaces: faces,
       note: diagnosis.note,
