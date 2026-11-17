@@ -87,6 +87,7 @@ import {
   saveProfessionalProfileApi,
   takeOverEncounterApi,
   bringTreatmentApi,
+  leaveTreatmentApi,
 } from "../../lib/encounters"
 import { discardableHere } from "../../lib/encounter-discard"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
@@ -1632,6 +1633,9 @@ export function EncounterEditor({
   )
   // Lo indicado hoy que sigue en pie (lo quitado queda cancelado y no cuenta).
   const liveIndicated = detail.indicatedItems.filter((item) => item.status !== "cancelado")
+  // Lo indicado en esta atención no se repite en «Hoy viene a…»; traído a hoy, su «Hoy no» va en su
+  // fila de «Realizado hoy» (QA del 16 nov, Q17).
+  const indicatedHereIds = new Set(detail.indicatedItems.map((item) => item.id))
   // Lo indicado para otro día: lo que se indicó y se hizo hoy (la consulta, la profilaxis, la
   // sesión 1 de la endodoncia) ya cuenta en «Realizado hoy» y no es «indicado» (QA del 9 nov, repaso 3).
   // Tampoco lo que la persona dejó fuera (la opción que no eligió): no sigue indicado (Q16).
@@ -2683,6 +2687,7 @@ export function EncounterEditor({
                 visitAnswer={detail.visitAnswer ?? null}
                 patientFirstName={patient.patient.givenNames?.trim().split(/\s+/)[0] ?? null}
                 currentReason={reason}
+                indicatedHere={indicatedHereIds}
                 onUseVisitReason={(told) => {
                   if (!locked && reason.trim() === "") editText("reason", told)
                 }}
@@ -2771,6 +2776,8 @@ export function EncounterEditor({
                 items={detail.plannedItems}
                 sessionItemIds={sessionItemIds}
                 onRegisterSession={(itemId) => setSessionPrefill(itemId)}
+                leavableIds={indicatedHereIds}
+                onLeave={(itemId) => leaveTreatmentApi(patientId, encounterId, itemId).then(() => undefined)}
                 disabled={locked}
                 beforeWrite={flush}
                 onChanged={() => void handleChildChanged()}

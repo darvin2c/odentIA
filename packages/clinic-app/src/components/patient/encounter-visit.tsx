@@ -51,6 +51,19 @@ export function visitBookedWords(
   return words.endsWith(".") ? words : `${words}.`
 }
 
+/**
+ * Lo que «Hoy viene a…» muestra de sus tratamientos: solo lo de antes. Lo indicado en esta misma
+ * atención no se repite ahí, tampoco después de «Hacerla hoy» (QA del 16 nov, Q17: la tarjeta
+ * volvía con el tratamiento, una repetición más y unos 110 px). Su fila de «Realizado hoy» lo
+ * dice, con «Registrar la sesión» y «Hoy no».
+ */
+export function visitTreatmentsShown<T extends { planItemId: string }>(
+  treatments: readonly T[],
+  indicatedHere: ReadonlySet<string>,
+): T[] {
+  return treatments.filter((item) => !indicatedHere.has(item.planItemId))
+}
+
 /** «Endodoncia anterior vital · 46 · sesión 2 de 2». */
 export function visitTreatmentWords(item: VisitTreatment): string {
   return [
@@ -106,7 +119,10 @@ export function EncounterVisitStrip({
   patientFirstName = null,
   onUseVisitReason,
   currentReason = "",
+  indicatedHere,
 }: {
+  /** Lo indicado en esta atención: no se repite aquí (`visitTreatmentsShown`). */
+  indicatedHere?: ReadonlySet<string>
   /** El motivo de consulta escrito: si ya es lo que contó, se dice «Ya es el motivo de hoy». */
   currentReason?: string
   /** La atención es de otro día (una cita pasada que se registra después): no se dice «hoy». */
@@ -139,7 +155,7 @@ export function EncounterVisitStrip({
 }): React.JSX.Element | null {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const treatments = visit?.treatments ?? []
+  const treatments = visitTreatmentsShown(visit?.treatments ?? [], indicatedHere ?? new Set())
   const controls = visit?.controls ?? []
   // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
   const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
