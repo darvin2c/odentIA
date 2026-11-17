@@ -1419,17 +1419,30 @@ export async function linkClientToOrganization(
     const message = "Ese cliente ya tiene otra cuenta"
     throw new ServiceError("CLIENT_HAS_ACCOUNT", 409, message, { clientId: message })
   }
+  // Sin responsable, lo lleva quien le dio el alta: su alta no queda sin nadie que la siga.
+  const ownerUserId = client.ownerUserId ?? actor?.userId ?? null
   await tx
     .update(saasClient)
     .set({
       organizationId: input.organizationId,
-      // Sin responsable, lo lleva quien le dio el alta: su alta no queda sin nadie que la siga.
-      ownerUserId: client.ownerUserId ?? actor?.userId ?? null,
+      ownerUserId,
       archivedAt: null,
       archivedBy: null,
       updatedAt: now,
     })
     .where(eq(saasClient.id, client.id))
+  // Poner el responsable queda dicho como cuando lo cambia una persona (`client.updated`).
+  if (ownerUserId !== client.ownerUserId)
+    await writeAdminAudit(tx, actor, {
+      action: "client.updated",
+      organizationId: input.organizationId,
+      entityId: client.id,
+      metadata: {
+        fields: ["ownerUserId"],
+        ownerUserId,
+        why: "Quien le dio el alta lleva al cliente que no tenía responsable",
+      },
+    })
   await closeClientSaleAsEntered(tx, client.id, actor, now)
   return client.id
 }

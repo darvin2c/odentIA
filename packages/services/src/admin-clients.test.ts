@@ -20,7 +20,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, eq, isNull } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import {
   addClientContact,
@@ -1593,6 +1593,24 @@ describe("el responsable al dar de alta", () => {
     expect(created.clientId).toBe(free)
     const [own] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, free))
     expect(own?.ownerUserId).toBe(admin.userId)
+    // Poner el responsable al ligar la cuenta queda en la auditoría, como un cambio de una persona.
+    const ownerSet = (clientId: string) =>
+      ownerDb
+        .select({ actor: adminAudit.actorUserId, metadata: adminAudit.metadata })
+        .from(adminAudit)
+        .where(
+          and(
+            eq(adminAudit.action, "client.updated"),
+            eq(adminAudit.entityId, clientId),
+            sql`${adminAudit.metadata}->>'ownerUserId' is not null`,
+          ),
+        )
+    expect(await ownerSet(free)).toEqual([
+      {
+        actor: admin.userId,
+        metadata: expect.objectContaining({ fields: ["ownerUserId"], ownerUserId: admin.userId }),
+      },
+    ])
 
     const kept = await newClient()
     await ownerDb
@@ -1610,6 +1628,8 @@ describe("el responsable al dar de alta", () => {
     )
     const [still] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, kept))
     expect(still?.ownerUserId).toBe(support.userId)
+    // Sin cambio de responsable, nada que anotar.
+    expect(await ownerSet(kept)).toEqual([])
   })
 })
 
