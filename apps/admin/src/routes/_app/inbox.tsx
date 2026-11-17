@@ -6,10 +6,13 @@ import {
   PageNotice,
   PageShell,
   SkeletonRegion,
+  UnsavedDialog,
+  useDraftBlocker,
   ViewTabs,
 } from "@odentia/ui-patterns"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { AtSign, Mail, MessageCircle, MessagesSquare, Paperclip } from "lucide-react"
+import { useRef, useState } from "react"
 import { ChatPane } from "../../components/arm/chat-drawer"
 import { momentWords } from "../../components/arm/chat-api"
 import { EmailThreadView } from "../../components/arm/email-thread"
@@ -105,12 +108,35 @@ function Inbox() {
     ...(search.canal ? { canal: search.canal } : {}),
     limit: 100,
   })
-  const counts = inbox.data?.counts
+  // Los números de las vistas son de toda la Bandeja: con un filtro puesto no se muestran.
+  const filtered = Boolean(search.fase || search.canal)
+  const counts = filtered ? undefined : inbox.data?.counts
   const items = inbox.data?.items ?? []
   const setSearch = (next: Partial<InboxSearch>, replace = true) =>
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace })
+  // Lo escrito sin enviar en la conversación abierta: cambiar de conversación pregunta antes.
+  const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  dirtyRef.current = dirty
+  const skipGuard = useRef(false)
+  const blocker = useDraftBlocker({
+    disabled: !dirty,
+    enableBeforeUnload: true,
+    keptInPage: { unlessChanges: ["c"] },
+    shouldBlockFn: () => {
+      if (skipGuard.current) {
+        skipGuard.current = false
+        return false
+      }
+      return dirtyRef.current
+    },
+  })
   const open = (item: InboxItem) => setSearch({ c: inboxItemPath(item) }, false)
-  const close = () => setSearch({ c: undefined }, false)
+  // Cerrar desde el panel ya preguntó (su «×» y Escape cuidan lo escrito): no se pregunta dos veces.
+  const close = () => {
+    skipGuard.current = true
+    setSearch({ c: undefined }, false)
+  }
 
   return (
     <PageShell className="flex flex-col gap-5">
@@ -201,16 +227,23 @@ function Inbox() {
                 : {})}
             />
           ) : (
-            <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
-              {items.map((item) => (
-                <InboxRow
-                  key={`${item.kind}:${item.id}`}
-                  item={item}
-                  selected={search.c === inboxItemPath(item)}
-                  onOpen={() => open(item)}
-                />
-              ))}
-            </ul>
+            <>
+              <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+                {items.map((item) => (
+                  <InboxRow
+                    key={`${item.kind}:${item.id}`}
+                    item={item}
+                    selected={search.c === inboxItemPath(item)}
+                    onOpen={() => open(item)}
+                  />
+                ))}
+              </ul>
+              {items.length >= 100 ? (
+                <p className="text-xs text-muted-foreground">
+                  Se ven las 100 primeras. Usa la fase o el canal para encontrar las demás.
+                </p>
+              ) : null}
+            </>
           )}
         </section>
 
@@ -219,9 +252,15 @@ function Inbox() {
           className={cn("min-w-0", !target && "max-lg:hidden")}
         >
           {target?.kind === "chat" ? (
-            <ChatPane key={target.chatId} chatId={target.chatId} onClose={close} />
+            <ChatPane key={target.chatId} chatId={target.chatId} onClose={close} onDirtyChange={setDirty} />
           ) : target?.kind === "correo" ? (
-            <EmailThreadView key={target.emailId} emailId={target.emailId} layout="pane" onClose={close} />
+            <EmailThreadView
+              key={target.emailId}
+              emailId={target.emailId}
+              layout="pane"
+              onClose={close}
+              onDirtyChange={setDirty}
+            />
           ) : (
             <div className="flex h-full min-h-60 items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
               Elige una conversación para leerla y responder.
@@ -229,6 +268,16 @@ function Inbox() {
           )}
         </section>
       </div>
+      <UnsavedDialog
+        open={blocker.status === "blocked"}
+        lost="Lo que escribiste en esta conversación se pierde."
+        onStay={() => {
+          if (blocker.status === "blocked") blocker.reset()
+        }}
+        onDiscard={() => {
+          if (blocker.status === "blocked") blocker.proceed()
+        }}
+      />
     </PageShell>
   )
 }
@@ -258,7 +307,7 @@ function InboxRow({
         onClick={onOpen}
         aria-current={selected ? "true" : undefined}
         className={cn(
-          "flex w-full min-w-0 flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none",
+          "flex w-full min-w-0 flex-col gap-1 px-4 py-3 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset",
           selected && "bg-muted",
           waiting && "border-l-3 border-l-warning",
         )}

@@ -15,7 +15,7 @@ import { Button, cn, toast } from "@odentia/ui"
 import type { FieldControl } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { Bold, Italic, Link2, List, Sparkles, Strikethrough } from "lucide-react"
-import { type ReactNode, useId, useLayoutEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { insertLink, wrapSelection } from "./formatted-body"
@@ -87,6 +87,7 @@ export function ReplyEditor({
   improve,
   tools,
   below,
+  appended,
 }: {
   value: string
   onChange: (value: string) => void
@@ -106,6 +107,8 @@ export function ReplyEditor({
   tools?: ReactNode
   /** Lo que va debajo del campo (los adjuntos). */
   below?: ReactNode
+  /** Lo que el envío agrega al final (la firma de un chat): cuenta para el largo del canal. */
+  appended?: string | null
 }) {
   const ownId = useId()
   const id = control?.id ?? ownId
@@ -113,6 +116,12 @@ export function ReplyEditor({
   const scroller = useRef<HTMLDivElement>(null)
   const [review, setReview] = useState<{ before: string; after: string } | null>(null)
   const invalid = Boolean(control?.["aria-invalid"])
+
+  // Lo que propuso Kairós es para el texto de ese momento: si cambió (se siguió escribiendo o se
+  // envió), la propuesta ya no vale.
+  useEffect(() => {
+    if (review && value !== review.before) setReview(null)
+  }, [value, review])
 
   // Lo que se escribe al final queda a la vista aunque el campo ya tenga barra.
   useLayoutEffect(() => {
@@ -129,6 +138,11 @@ export function ReplyEditor({
     const start = el.selectionStart
     const end = el.selectionEnd
     const next = edit(value, start, end)
+    if (next.value === value) {
+      el.focus()
+      el.setSelectionRange(next.selectionStart, next.selectionEnd)
+      return
+    }
     let prefix = 0
     while (prefix < value.length && prefix < next.value.length && value[prefix] === next.value[prefix])
       prefix++
@@ -181,8 +195,20 @@ export function ReplyEditor({
     },
   })
 
-  const length = lengthOf(value, rules)
-  const problem = replyTextProblem(value, channel, rules)
+  /** Reemplaza todo el texto como si se escribiera: «deshacer» lo vuelve atrás. */
+  const replaceAll = (next: string) => {
+    const el = area.current
+    if (!el) return onChange(next)
+    el.focus()
+    el.setSelectionRange(0, el.value.length)
+    const native = document.execCommand("insertText", false, next)
+    if (!native || el.value !== next) onChange(next)
+  }
+
+  // Lo que se cuenta es lo que sale: el texto y lo que el envío agrega al final.
+  const counted = appended ? `${value.trim()}\n\n${appended}` : value
+  const length = lengthOf(counted, rules)
+  const problem = value.trim() ? replyTextProblem(counted, channel, rules) : null
   const counterId = `${id}-largo`
   const notes: string[] = []
   if (rules?.formatting === "texto" && hasMarks(value))
@@ -335,6 +361,7 @@ export function ReplyEditor({
               className={cn("tabular-nums", length.over ? "text-destructive" : "text-muted-foreground")}
             >
               {length.used} de {length.max} {length.unit} de {CHANNEL_WORDS[channel]}
+              {appended ? " (con tu firma)" : ""}
             </span>
           ) : null}
         </div>
@@ -347,9 +374,9 @@ export function ReplyEditor({
           before={review.before}
           after={review.after}
           onUse={() => {
-            onChange(review.after)
+            const after = review.after
             setReview(null)
-            requestAnimationFrame(() => area.current?.focus())
+            replaceAll(after)
           }}
           onDiscard={() => {
             setReview(null)

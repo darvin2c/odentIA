@@ -194,6 +194,9 @@ const threadEntrySchema = z.discriminatedUnion("kind", [
         filename: z.string(),
         contentType: z.string().default(""),
         size: z.number().default(0),
+        /** Si se marca ahora como la carga: el día en que se borraría, o si se borra en el acto. */
+        cargaDeleteAfter: z.string().nullable().default(null),
+        cargaDueNow: z.boolean().default(false),
       }),
     ),
   }),
@@ -255,6 +258,8 @@ export const emailThreadSchema = z.object({
   draft: z
     .object({
       itemId: z.string(),
+      /** El correo que responde el borrador: solo se aprueba si es el que se está respondiendo. */
+      emailId: z.string().nullable().default(null),
       subject: z.string().nullable(),
       body: z.string(),
       reason: z.string().nullable(),

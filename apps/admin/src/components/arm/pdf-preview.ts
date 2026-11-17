@@ -31,8 +31,15 @@ function pdfjs(): Promise<PdfLib> {
 export class PdfUnavailable extends Error {}
 
 /** Los bytes de un PDF de la API (`/api/admin/...`), con la cookie de la sesión. */
+/** Cuánto se espera un PDF antes de dejarlo: uno colgado no traba las miniaturas que siguen. */
+const PDF_FETCH_TIMEOUT_MS = 20_000
+
 export async function fetchPdfBytes(path: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  const response = await fetch(`${API_URL}${path}`, { credentials: "include", signal })
+  const timeout = AbortSignal.timeout(PDF_FETCH_TIMEOUT_MS)
+  const response = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { message?: string }
@@ -59,11 +66,21 @@ export async function openPdf(bytes: ArrayBuffer): Promise<PdfDocument> {
   const task = lib.getDocument({ data: new Uint8Array(bytes), enableXfa: false })
   const doc = await task.promise
   let current: { cancel: () => void } | null = null
+  // Cada dibujo lleva su turno: si mientras esperaba su página se pidió otro, este no toca el
+  // lienzo (dos dibujos a la vez sobre el mismo lienzo hacen fallar a pdf.js).
+  let turn = 0
+  const superseded = () => {
+    const error = new Error("Se pidió otra página")
+    error.name = "RenderingCancelledException"
+    return error
+  }
   return {
     pages: doc.numPages,
     render: async (number, canvas, widthPx) => {
+      const mine = ++turn
       current?.cancel()
       const page = await doc.getPage(Math.min(Math.max(1, number), doc.numPages))
+      if (mine !== turn) throw superseded()
       const base = page.getViewport({ scale: 1 })
       const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3)
       const viewport = page.getViewport({ scale: (widthPx * ratio) / base.width })

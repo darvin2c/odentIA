@@ -281,10 +281,20 @@ export class ChatSendError extends Error {
     public outcome: "rechazado" | "incierto",
     public outreachId: string | null,
     message: string,
+    /** Cómo le fue a cada parte (el texto y cada archivo), si el servidor lo dijo. */
+    public parts: SentPart[] = [],
   ) {
     super(message)
   }
 }
+
+const partSchema = z.object({
+  outreachId: z.string(),
+  kind: z.enum(["texto", "archivo"]),
+  filename: z.string().nullable(),
+  status: z.string(),
+})
+export type SentPart = z.infer<typeof partSchema>
 
 function sendErrorOf(error: unknown): unknown {
   if (
@@ -293,10 +303,12 @@ function sendErrorOf(error: unknown): unknown {
   ) {
     const outreachId =
       typeof error.details.outreachId === "string" ? error.details.outreachId : null
+    const parts = z.array(partSchema).safeParse(error.details.parts)
     return new ChatSendError(
       error.shape.code === "SEND_UNKNOWN" ? "incierto" : "rechazado",
       outreachId,
       error.shape.message ?? "No se sabe si el mensaje salió",
+      parts.success ? parts.data : [],
     )
   }
   return error
@@ -306,16 +318,7 @@ const sentSchema = z.object({
   outreachId: z.string(),
   status: z.string(),
   /** El texto y cada archivo salen como mensajes aparte, cada uno con su estado. */
-  parts: z
-    .array(
-      z.object({
-        outreachId: z.string(),
-        kind: z.enum(["texto", "archivo"]),
-        filename: z.string().nullable(),
-        status: z.string(),
-      }),
-    )
-    .default([]),
+  parts: z.array(partSchema).default([]),
 })
 
 /** Responder con texto libre (dentro de las 24 h), con archivos de Documentos si hay cliente. */

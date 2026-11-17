@@ -24,7 +24,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
@@ -76,10 +76,13 @@ export function EmailThreadView({
   emailId,
   layout,
   onClose,
+  onDirtyChange,
 }: {
   emailId: string
   layout: "drawer" | "pane"
   onClose: () => void
+  /** El panel dice si tiene algo escrito sin enviar (la Bandeja pregunta antes de cambiar). */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const thread = useEmailThread(emailId)
   if (!thread.data) {
@@ -92,7 +95,17 @@ export function EmailThreadView({
     ) : (
       <LoadingState message="Abriendo el correo…" />
     )
-    if (layout === "pane") return body
+    if (layout === "pane")
+      return (
+        <div className="flex flex-col gap-3">
+          <div>
+            <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+              Volver a la lista
+            </Button>
+          </div>
+          {body}
+        </div>
+      )
     return (
       <FormDrawer
         open
@@ -107,7 +120,16 @@ export function EmailThreadView({
       </FormDrawer>
     )
   }
-  return <Conversation key={thread.data.reply.emailId} thread={thread.data} layout={layout} onClose={onClose} />
+  // Por hilo, no por su último correo: si llega otro mientras se escribe, lo escrito sigue ahí.
+  return (
+    <Conversation
+      key={thread.data.threadKey}
+      thread={thread.data}
+      layout={layout}
+      onClose={onClose}
+      onDirtyChange={onDirtyChange}
+    />
+  )
 }
 
 type Aside = { kind: "ninguno" } | { kind: "elegir" } | { kind: "crear" }
@@ -116,10 +138,12 @@ function Conversation({
   thread,
   layout,
   onClose,
+  onDirtyChange,
 }: {
   thread: EmailThread
   layout: "drawer" | "pane"
   onClose: () => void
+  onDirtyChange?: ((dirty: boolean) => void) | undefined
 }) {
   const queryClient = useQueryClient()
   const isAdmin = useIsAdmin()
@@ -158,6 +182,9 @@ function Conversation({
   })
 
   const draft = thread.draft
+  // El borrador de Kairós se aprueba solo si responde el correo que se está respondiendo; si llegó
+  // otro después, se lo ve como sugerencia y sale como respuesta tuya.
+  const draftAnswersThis = Boolean(draft && (!draft.emailId || draft.emailId === thread.reply.emailId))
   const schema = z
     .object({ body: z.string(), fileIds: z.array(z.string()).max(5, "Adjunta como máximo 5 documentos") })
     .superRefine((value, ctx) => {
@@ -165,13 +192,16 @@ function Conversation({
       const problem = replyTextProblem(value.body, "correo", thread.rules)
       if (problem) ctx.addIssue({ code: "custom", path: ["body"], message: problem })
     })
+  // Lo de partida se fija una vez: si el borrador cambia con una recarga, no pisa lo escrito.
+  const [initial] = useState(() => ({ body: draft?.body ?? "", fileIds: [] as string[] }))
+  const [loadedDraft, setLoadedDraft] = useState(draft?.itemId ?? null)
   const form = useAppForm({
-    defaultValues: { body: draft?.body ?? "", fileIds: [] as string[] },
+    defaultValues: initial,
     validators: { onSubmit: schema },
     onSubmit: async ({ value, formApi }) => {
       const body = value.body.trim()
       try {
-        if (draft && value.fileIds.length === 0) {
+        if (draft && draftAnswersThis && value.fileIds.length === 0) {
           const decision = await approveKairosReply(draft.itemId, body)
           if (decision.status === "vencida" || decision.status === "fallida") {
             toast.error(decision.error ?? "No se pudo enviar: el borrador ya no vale. Escríbela de nuevo.")
@@ -199,6 +229,16 @@ function Conversation({
   })
   // Desde el sí de Kairós el servidor señala el texto como `edited.body`.
   const surface = useFormSurface(form, { fieldMap: { "edited.body": "body" } })
+  useEffect(() => {
+    onDirtyChange?.(surface.isDirty)
+  }, [surface.isDirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
+  // Un borrador nuevo de Kairós entra solo si no se está escribiendo nada.
+  useEffect(() => {
+    if (!draft || draft.itemId === loadedDraft) return
+    setLoadedDraft(draft.itemId)
+    if (!form.getFieldValue("body").trim()) form.setFieldValue("body", draft.body)
+  }, [draft, loadedDraft, form])
 
   const attendedByMe = thread.attendedBy?.id === myUserId
   const settled = thread.state === "respondida" && Boolean(thread.settledAt)
@@ -208,17 +248,15 @@ function Conversation({
     ? `De ${senderWords(firstIn)} · a ${mailboxWords(thread.mailbox, firstIn.to)}`
     : `A ${MAILBOX_WORDS[thread.mailbox] ?? thread.mailbox}`
 
-  if (aside.kind === "elegir")
-    return (
+  const asideDrawer =
+    aside.kind === "elegir" ? (
       <AssignDrawer
         thread={thread}
         pending={assign.isPending}
         onAssign={(clientId) => assign.mutate(clientId)}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
-  if (aside.kind === "crear" && firstIn)
-    return (
+    ) : aside.kind === "crear" && firstIn ? (
       <NewClientDrawer
         open
         title="Crear cliente con este correo"
@@ -228,7 +266,9 @@ function Conversation({
         }}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
+    ) : null
+  // En un cajón, lo de al lado lo reemplaza; en el panel se abre junto al hilo, sin perder lo escrito.
+  if (asideDrawer && layout === "drawer") return asideDrawer
 
   const content = (
     <div className="flex flex-col gap-5">
@@ -344,7 +384,9 @@ function Conversation({
           <div className="flex flex-col gap-1.5 rounded-xl border border-primary/40 bg-primary/5 p-3 text-sm">
             <p className="flex items-center gap-2 font-medium">
               <AgentMark size="sm" className="size-4" />
-              Kairós dejó esta respuesta: cámbiala si hace falta y envíala.
+              {draftAnswersThis
+                ? "Kairós dejó esta respuesta: cámbiala si hace falta y envíala."
+                : "Kairós la dejó para un correo anterior: revísala antes de enviarla, que llegó otro después."}
             </p>
             {draft.reason ? (
               <p className="text-muted-foreground">
@@ -411,18 +453,21 @@ function Conversation({
   )
 
   return layout === "pane" ? (
+    <>
     <FormPanel
       {...surface}
       onClose={onClose}
       title={title}
       description={description}
       hideSubmit={!thread.reply.canReply}
-      submitLabel={draft ? "Enviar la respuesta" : "Enviar"}
+      submitLabel={draft && draftAnswersThis ? "Enviar la respuesta" : "Enviar"}
       cancelLabel={common.actions.close}
       className="h-full"
     >
       {content}
     </FormPanel>
+    {asideDrawer}
+    </>
   ) : (
     <FormDrawer
       {...surface}
@@ -500,8 +545,8 @@ function Inbound({
                     carga.ask({
                       fileId: file.fileId,
                       filename: file.filename,
-                      cargaDeleteAfter: null,
-                      cargaDueNow: false,
+                      cargaDeleteAfter: file.cargaDeleteAfter,
+                      cargaDueNow: file.cargaDueNow,
                     })
                   }
                 >

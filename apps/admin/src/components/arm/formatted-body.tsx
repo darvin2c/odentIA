@@ -95,8 +95,20 @@ export interface Edit {
   selectionEnd: number
 }
 
-/** Envuelve lo seleccionado con `mark`, o lo quita si ya lo tenía; sin selección, deja el cursor en medio. */
-export function wrapSelection(value: string, start: number, end: number, mark: string): Edit {
+/**
+ * Envuelve lo seleccionado con `mark`, o lo quita si ya lo tenía; sin selección, deja el cursor en
+ * medio. Los espacios de las orillas quedan fuera de las marcas: el doble clic de Windows toma
+ * «doctora » con su espacio, y `*doctora *` no sería negrita en ninguna parte.
+ */
+export function wrapSelection(value: string, rawStart: number, rawEnd: number, mark: string): Edit {
+  let start = rawStart
+  let end = rawEnd
+  while (start < end && /\s/.test(value[start] ?? "")) start++
+  while (end > start && /\s/.test(value[end - 1] ?? "")) end--
+  if (start === end && rawStart !== rawEnd) {
+    start = rawStart
+    end = rawStart
+  }
   const before = value.slice(0, start)
   const selected = value.slice(start, end)
   const after = value.slice(end)

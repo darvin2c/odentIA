@@ -37,7 +37,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { supportTime } from "../../lib/support-words"
@@ -94,6 +94,8 @@ export interface ChatDrawerProps {
   decide?: boolean
   /** En un cajón (lo de siempre) o en el panel de la Bandeja. */
   layout?: "drawer" | "pane"
+  /** El panel dice si tiene algo escrito sin enviar (la Bandeja pregunta antes de cambiar). */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function ChatDrawer(props: ChatDrawerProps) {
@@ -102,8 +104,25 @@ export function ChatDrawer(props: ChatDrawerProps) {
 }
 
 /** La conversación en el panel de la Bandeja: la misma del cajón, en su lugar. */
-export function ChatPane({ chatId, onClose }: { chatId: string; onClose: () => void }) {
-  return <ChatSurface key={chatId} chatId={chatId} open onClose={onClose} layout="pane" />
+export function ChatPane({
+  chatId,
+  onClose,
+  onDirtyChange,
+}: {
+  chatId: string
+  onClose: () => void
+  onDirtyChange?: (dirty: boolean) => void
+}) {
+  return (
+    <ChatSurface
+      key={chatId}
+      chatId={chatId}
+      open
+      onClose={onClose}
+      layout="pane"
+      onDirtyChange={onDirtyChange}
+    />
+  )
 }
 
 type Aside =
@@ -120,6 +139,7 @@ function ChatSurface({
   proposalId = null,
   decide = false,
   layout = "drawer",
+  onDirtyChange,
 }: ChatDrawerProps) {
   const queryClient = useQueryClient()
   const chat = useChat(chatId)
@@ -132,14 +152,23 @@ function ChatSurface({
   }
 
   if (!chat.data && layout === "pane") {
-    return chat.isError ? (
-      <ErrorState
-        title="No pude abrir la conversación"
-        error={chat.error}
-        onRetry={() => void chat.refetch()}
-      />
-    ) : (
-      <LoadingState message="Abriendo la conversación…" />
+    return (
+      <div className="flex flex-col gap-3">
+        <div>
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+            Volver a la lista
+          </Button>
+        </div>
+        {chat.isError ? (
+          <ErrorState
+            title="No pude abrir la conversación"
+            error={chat.error}
+            onRetry={() => void chat.refetch()}
+          />
+        ) : (
+          <LoadingState message="Abriendo la conversación…" />
+        )}
+      </div>
     )
   }
   if (!chat.data) {
@@ -177,8 +206,8 @@ function ChatSurface({
         onClose={onClose}
       />
     )
-  if (aside.kind === "correo")
-    return (
+  const asideDrawer =
+    aside.kind === "correo" ? (
       <WriteDrawer
         open
         clientId={aside.clientId}
@@ -186,9 +215,7 @@ function ChatSurface({
         contactId={aside.contactId}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
-  if (aside.kind === "mover" || aside.kind === "decidir")
-    return (
+    ) : aside.kind === "mover" || aside.kind === "decidir" ? (
       <ChatOwnerDrawer
         mode={aside.kind === "mover" ? "mover" : "decidir"}
         currentClientId={data.client?.id ?? null}
@@ -209,17 +236,24 @@ function ChatSurface({
         }}
         onClose={() => setAside({ kind: "ninguno" })}
       />
-    )
+    ) : null
+  // En un cajón, lo de al lado lo reemplaza (un cajón a la vez); en el panel de la Bandeja se abre
+  // junto a la conversación, que sigue montada con lo que se estaba escribiendo.
+  if (asideDrawer && layout === "drawer") return asideDrawer
   return (
-    <Conversation
-      chat={data}
-      draft={draft}
-      proposalId={proposalId}
-      layout={layout}
-      onClose={onClose}
-      onAside={setAside}
-      onChanged={() => refresh(data.client?.id)}
-    />
+    <>
+      <Conversation
+        chat={data}
+        draft={draft}
+        proposalId={proposalId}
+        layout={layout}
+        onClose={onClose}
+        onAside={setAside}
+        onChanged={() => refresh(data.client?.id)}
+        onDirtyChange={onDirtyChange}
+      />
+      {asideDrawer}
+    </>
   )
 }
 
@@ -243,6 +277,7 @@ function Conversation({
   onClose,
   onAside,
   onChanged,
+  onDirtyChange,
 }: {
   chat: ChatDetail
   draft: string
@@ -251,6 +286,7 @@ function Conversation({
   onClose: () => void
   onAside: (aside: Aside) => void
   onChanged: () => void
+  onDirtyChange?: ((dirty: boolean) => void) | undefined
 }) {
   const isAdmin = useIsAdmin()
   const myUserId = useAdminUserId()
@@ -310,14 +346,32 @@ function Conversation({
         setProposal(null)
         formApi.reset(empty)
       } catch (error) {
-        if (error instanceof ChatSendError && error.outcome === "incierto") {
-          // Quedó guardado como «No se sabe si salió»: no se vuelve a enviar.
-          setProposal(null)
-          formApi.reset(empty)
-          toast.warning(error.message)
-          return
+        if (error instanceof ChatSendError) {
+          // Lo que salió (o no se sabe si salió) no se vuelve a enviar: queda en el formulario solo
+          // lo que no salió. El texto va primero y después cada archivo, en el orden elegido.
+          const parts = error.parts
+          const textPart = parts.find((part) => part.kind === "texto")
+          const fileParts = parts.filter((part) => part.kind === "archivo")
+          const somethingLeft = parts.some((part) => part.status !== "no_salio")
+          if (error.outcome === "incierto" || somethingLeft) {
+            const left = parts.length
+              ? {
+                  body: !textPart || textPart.status === "no_salio" ? value.body : "",
+                  fileIds: value.fileIds.filter(
+                    (_id, index) => !fileParts[index] || fileParts[index]?.status === "no_salio",
+                  ),
+                }
+              : empty
+            setProposal(null)
+            formApi.reset(left)
+            const pending = left.body.trim() || left.fileIds.length > 0
+            const words = `${error.message}${pending ? " Lo que no salió quedó aquí para enviarlo de nuevo." : ""}`
+            if (error.outcome === "incierto") toast.warning(words)
+            else toast.error(words)
+            return
+          }
         }
-        // No salió (o pasaron las 24 h): el texto queda para cambiarlo o enviarlo de otra forma.
+        // No salió nada (o pasaron las 24 h): el texto queda para cambiarlo o enviarlo de otra forma.
         throw error
       } finally {
         onChanged()
@@ -325,6 +379,10 @@ function Conversation({
     },
   })
   const surface = useFormSurface(form)
+  useEffect(() => {
+    onDirtyChange?.(surface.isDirty)
+  }, [surface.isDirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const retomar = useMutation({
     mutationFn: () => sendChatRetomar(chat.id),
     onSuccess: (sent) => announceSent(sent.status, channel),
@@ -533,6 +591,7 @@ function Conversation({
                       channel={chat.channel}
                       rules={chat.rules}
                       improve={{ chatId: chat.id }}
+                      appended={chat.replySignature}
                       autoFocus={layout === "drawer" && Boolean(draft)}
                       below={
                         chat.client ? (
@@ -541,6 +600,8 @@ function Conversation({
                               <ReplyFiles
                                 clientId={chat.client?.id ?? ""}
                                 isAdmin={isAdmin}
+                                rules={chat.rules}
+                                channelWords={channel}
                                 value={files.state.value}
                                 onChange={files.handleChange}
                                 error={

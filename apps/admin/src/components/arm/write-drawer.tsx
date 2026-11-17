@@ -408,7 +408,7 @@ function WriteForm({
                     channel={values.channel === "correo" ? "correo" : "whatsapp"}
                     rules={values.channel === "correo" ? WRITE_RULES.correo : WRITE_RULES.whatsapp}
                     rows={7}
-                    improve={{}}
+                    improve={isAdmin ? {} : null}
                   />
                 )}
               </field.Control>

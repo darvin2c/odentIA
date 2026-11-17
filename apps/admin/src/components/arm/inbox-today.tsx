@@ -15,8 +15,11 @@ export function InboxToday() {
   const [target, setTarget] = useState<ConversationTarget | null>(null)
   const total = inbox.data?.counts.teToca ?? 0
   const items = inbox.data?.items ?? []
-  if (!inbox.data || total === 0) return null
+  // El cajón vive fuera de la lista: al responder la última, la lista se va y el cajón sigue.
+  const drawer = <ConversationDrawer target={target} open={Boolean(target)} onClose={() => setTarget(null)} />
   return (
+    <>
+    {inbox.data && total > 0 ? (
     <section aria-labelledby="hoy-te-toca" className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h2 id="hoy-te-toca" className="text-base font-semibold">
@@ -60,7 +63,9 @@ export function InboxToday() {
           </li>
         ))}
       </ul>
-      <ConversationDrawer target={target} open={Boolean(target)} onClose={() => setTarget(null)} />
     </section>
+    ) : null}
+    {drawer}
+    </>
   )
 }

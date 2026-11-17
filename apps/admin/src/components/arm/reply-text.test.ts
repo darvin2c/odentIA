@@ -70,6 +70,15 @@ describe("la lista con «- »", () => {
     expect(on.value).toBe("- uno\n- dos\ntres")
     expect(toggleList(on.value, 0, on.selectionEnd).value).toBe("uno\ndos\ntres")
   })
+
+  it("en una línea vacía empieza la lista con el cursor listo para escribir", () => {
+    const text = "Opciones:\n"
+    expect(toggleList(text, text.length, text.length)).toEqual({
+      value: "Opciones:\n- ",
+      selectionStart: 12,
+      selectionEnd: 12,
+    })
+  })
 })
 
 describe("la diferencia que muestra «Mejorar con Kairós»", () => {

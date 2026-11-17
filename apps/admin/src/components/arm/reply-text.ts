@@ -129,6 +129,11 @@ export function toggleList(value: string, start: number, end: number): Edit {
   const nextBreak = value.indexOf("\n", end)
   const lineEnd = nextBreak === -1 ? value.length : nextBreak
   const block = value.slice(lineStart, lineEnd)
+  // En una línea vacía empieza la lista: «Opciones:⏎» y Lista deja «- » para escribir.
+  if (!block.trim()) {
+    const next = `${value.slice(0, lineStart)}- ${value.slice(lineEnd)}`
+    return { value: next, selectionStart: lineStart + 2, selectionEnd: lineStart + 2 }
+  }
   const lines = block.split("\n")
   const all = lines.every((line) => /^\s{0,3}[-*+•]\s+/.test(line) || !line.trim())
   const next = lines

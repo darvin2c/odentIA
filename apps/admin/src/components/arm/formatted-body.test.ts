@@ -37,4 +37,12 @@ describe("adjuntos de una respuesta", () => {
     ).toMatch(/10 MB/)
     expect(replyFilesProblem(Array.from({ length: 6 }, () => ({ sizeBytes: 1 })))).toMatch(/5/)
   })
+
+  it("los espacios de la selección quedan fuera de las marcas (doble clic en Windows)", () => {
+    // «doctora » con su espacio: la negrita queda en «*doctora* gracias», no en «*doctora *gracias».
+    const text = "Buen día, doctora gracias"
+    const edit = wrapSelection(text, 10, 18, "*")
+    expect(edit.value).toBe("Buen día, *doctora* gracias")
+    expect(edit.value.slice(edit.selectionStart, edit.selectionEnd)).toBe("doctora")
+  })
 })
