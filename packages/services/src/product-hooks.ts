@@ -584,6 +584,11 @@ export interface ProductHooks {
       tx: Db,
       moment: EncounterMoment & { ids: string[]; reason: string; voidingDiagnosisIds?: readonly string[] },
     ): Promise<void>
+    /**
+     * El tratamiento nació de un hallazgo y todos los suyos están anulados: «Deshacer» no lo
+     * devuelve, porque volvería con una pieza y un diagnóstico que ya no son de la atención.
+     */
+    itemLostItsFinding(tx: Db, scope: { orgId: string; patientId: string; planItemId: string }): Promise<boolean>
   }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>

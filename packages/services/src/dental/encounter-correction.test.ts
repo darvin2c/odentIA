@@ -13,6 +13,7 @@ import { createConsentTemplate } from "../clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { getCorrectionPreview, voidWithCorrection } from "../encounter-correction.js"
+import { restoreRemovedInEncounter } from "../encounter-plan-remove.js"
 import { getEncounterClosing } from "../encounters.js"
 import { REMOVED_IN_ENCOUNTER } from "../plan.js"
 import { ownerDb, setupTestDb } from "../test-setup.js"
@@ -76,6 +77,13 @@ it("B3: la caries con pulpitis de la 47 era de la 46: se anulan el hallazgo, su 
   expect(sites.map((site) => site.siteCode)).not.toContain("47")
   const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
   expect(closing.missing).toContain("diagnosis")
+  // Q19: «Deshacer» no devuelve la endodoncia que cayó con su hallazgo: volvería con la 47 y el
+  // K04.0 de un hallazgo anulado.
+  await expect(
+    f.run((tx) => restoreRemovedInEncounter(tx, ...f.args, f.encounter.id, planItemId)),
+  ).rejects.toMatchObject({ code: "FINDING_VOIDED", status: 409 })
+  const [gone] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, planItemId))
+  expect(gone).toMatchObject({ status: "cancelado" })
   // Un doble clic no anula dos veces: ya está anulado.
   await expect(
     f.run((tx) => voidWithCorrection(tx, ...f.args, f.encounter.id, { findingIds: entryIds }, { reason })),

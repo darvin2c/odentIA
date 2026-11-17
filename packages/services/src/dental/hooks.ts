@@ -53,7 +53,12 @@ import {
   signClosingOdontogram,
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
-import { correctionFindings, sameFaceFindings, voidCorrectionFindings } from "./finding-correction.js"
+import {
+  correctionFindings,
+  planItemLostItsFinding,
+  sameFaceFindings,
+  voidCorrectionFindings,
+} from "./finding-correction.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { lesionRowsOf, treatedByItem } from "./lesion.js"
 import { dentalProductSite, dentalSiteOfRow, siteColumns, surfaceWords } from "./site.js"
@@ -253,7 +258,11 @@ export const dentalHooks: ProductHooks = {
     return { odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null }
   },
 
-  correction: { findings: correctionFindings, voidFindings: voidCorrectionFindings },
+  correction: {
+    findings: correctionFindings,
+    voidFindings: voidCorrectionFindings,
+    itemLostItsFinding: planItemLostItsFinding,
+  },
 
   async encounterVoided(tx, { orgId, actorUserId, patientId, encounterId, at, reason }) {
     await tx

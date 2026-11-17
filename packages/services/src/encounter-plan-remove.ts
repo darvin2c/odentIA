@@ -23,6 +23,7 @@ import { notFound, ServiceError } from "./errors.js"
 
 import { requirePatient } from "./patients.js"
 import { lockDraftEncounter, REMOVED_IN_ENCOUNTER, setPlanItemStatus } from "./plan.js"
+import { productHooks } from "./products.js"
 
 const conflict = (code: string, message: string): ServiceError =>
   new ServiceError(code, 409, message)
@@ -162,6 +163,11 @@ export async function restoreRemovedInEncounter(
     item.statusReason !== REMOVED_IN_ENCOUNTER
   )
     throw conflict("NOT_RESTORABLE", "Solo vuelve lo que se quitó en esta atención")
+  // Lo que cayó con la anulación de su hallazgo (la pieza equivocada) no vuelve con «Deshacer»:
+  // volvería con la pieza y el diagnóstico de un hallazgo anulado (QA del 16 nov, Q19).
+  const hooks = await productHooks(tx, orgId)
+  if (await hooks.correction?.itemLostItsFinding(tx, { orgId, patientId, planItemId }))
+    throw conflict("FINDING_VOIDED", "Su hallazgo se anuló: no se puede deshacer. Vuelve a indicarlo en la pieza correcta.")
   const [removal] = await tx
     .select({ metadata: auditEvent.metadata })
     .from(auditEvent)

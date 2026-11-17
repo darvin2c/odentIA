@@ -121,6 +121,34 @@ export async function correctionFindings(
 }
 
 /**
+ * El tratamiento se indicó desde un hallazgo (`dental.plan_item_finding`) y todos esos hallazgos
+ * están anulados (QA del 16 nov, Q19): cayó con la corrección de la pieza equivocada.
+ */
+export async function planItemLostItsFinding(
+  tx: Db,
+  { orgId, patientId, planItemId }: { orgId: string; patientId: string; planItemId: string },
+): Promise<boolean> {
+  const rows = await tx
+    .select({ voidedAt: odontogramEntry.voidedAt })
+    .from(planItemFinding)
+    .innerJoin(
+      odontogramEntry,
+      and(
+        eq(odontogramEntry.organizationId, planItemFinding.organizationId),
+        eq(odontogramEntry.id, planItemFinding.odontogramEntryId),
+      ),
+    )
+    .where(
+      and(
+        eq(planItemFinding.organizationId, orgId),
+        eq(planItemFinding.planItemId, planItemId),
+        eq(odontogramEntry.patientId, patientId),
+      ),
+    )
+  return rows.length > 0 && rows.every((row) => row.voidedAt !== null)
+}
+
+/**
  * El diagnóstico que sigue porque lo usa otro hallazgo no conserva la cara del que se anuló (QA
  * del 16 nov, Q5). Dos caries de la 47 (oclusal y mesial) con el mismo K02.1 comparten un
  * diagnóstico, que nació con la cara de la primera: al anular la oclusal seguía diciendo «47 ·
