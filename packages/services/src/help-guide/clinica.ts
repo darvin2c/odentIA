@@ -384,8 +384,14 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-ficha-odontoestomatologica-cuando",
         q: "¿Cuándo lleno la ficha odontoestomatológica?",
-        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar sin ella.",
+        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar y cobrar sin llenarla.",
+        // Responde también por qué aparece y si hay que llenarla para firmar: la de «¿Por qué me aparece
+        // esta ficha?» (Fichas de consulta) explica la regla de cualquier ficha y ya no nombra a esta, para
+        // que no se respondan lo mismo (medición de la Ayuda del 16 nov). Las formas que Jev tiene que leer
+        // van primero: solo ve los primeros 240 caracteres.
         forms: [
+          "tengo que llenar la ficha odontoestomatologica para firmar",
+          "por que me aparece la ficha odontoestomatologica",
           "por que no me ofrece la ficha odontoestomatologica",
           "cuando se llena la ficha odontoestomatologica",
           "la ficha odontoestomatologica sale en cada sesion",

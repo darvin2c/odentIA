@@ -876,7 +876,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "atencion-donde-hacerla-hoy",
         q: "¿Por qué lo que indiqué hoy no sale en «Hoy viene a…»?",
-        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Tampoco vuelve arriba después de «Hacerla hoy»: su fila de «Realizado hoy» trae «Registrar la sesión» y, si al final no la haces, «Hoy no», que lo saca de la atención y lo deja en el Plan para otro día. Lo que «va después» de otro tratamiento que aún no termina no lo trae: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice qué consentimiento pide, con «Preparar y firmar»; puedes registrarlo igual.",
+        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Tampoco vuelve arriba después de «Hacerla hoy»: su fila de «Realizado hoy» trae «Registrar la sesión» y, si al final no la haces, «Hoy no», que lo saca de la atención y lo deja en el Plan para otro día. Lo indicado hoy que «va después» de otro tratamiento que aún no termina no trae «Hacerla hoy»: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice qué consentimiento pide, con «Preparar y firmar»; puedes registrarlo igual.",
         forms: ["lo que indique hoy no aparece arriba", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento", "que es hacerla hoy", "que hace hacerla hoy", "para que sirve hacerla hoy"],
         area: "clinica",
       },
@@ -911,7 +911,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "tratamiento-va-despues-de-otro",
         q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
-        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, en una visita siguiente «Hoy viene a…» la ofrece con «Hacerla hoy», y «Reservar» sigue ahí. Lo indicado hoy que va después de otro no se ofrece para hoy: su fila del Plan no trae «Hacerla hoy».",
+        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, en una visita siguiente «Hoy viene a…» la ofrece con «Hacerla hoy», que la pasa a «Realizado hoy» sin registrarla ni dar por terminado lo que va antes, y «Reservar» sigue ahí. Lo indicado hoy que va después de otro no se ofrece para hoy: su fila del Plan no trae «Hacerla hoy».",
+        forms: ["puedo hacer la corona antes de terminar la endodoncia", "que pasa si hago hoy lo que va despues de otro tratamiento"],
         area: "plan",
       },
       {
@@ -1210,13 +1211,15 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // Junto a la de quien atiende: es la misma pregunta, y cada rol encuentra la suya en la misma parte.
         area: "clinica",
         a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Si declaró algo de su salud que nadie revisó todavía, dice «Declaró datos de su salud» con el día, también sin cita por venir: lo revisa quien lo atiende, y tú no ves qué. Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
+        // «donde veo si toma anticoagulantes» va primero: Jev lee solo los primeros 240 caracteres y al final
+        // quedaba cortada, así que elegía la de caja, que sí la mostraba (medición de la Ayuda del 16 nov).
         forms: [
+          "donde veo si toma anticoagulantes",
           "ya respondio lo de antes de su cita",
           "como se si el paciente respondio",
           "puedo ver lo que contesto el paciente",
           "recepcion ve las respuestas",
           "sabe si respondio antes de venir",
-          "donde veo si toma anticoagulantes",
         ],
       },
       {
@@ -1488,6 +1491,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "sofi-escribio-persona",
         q: "¿Por qué Sofi no le escribió a una persona?",
         a: "En Agente › Argos, abre la línea y mira «Qué pasó, persona por persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo. Además, sale como mucho un mensaje al día por persona y, al llegar al presupuesto del mes, se pausan los mensajes para recuperar pacientes.",
+        forms: ["por que no les llega el recordatorio a los pacientes"],
       },
       {
         id: "hora-escriben-mensajes-argos",
@@ -1741,6 +1745,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "elijo-precio-dice-sofi",
         q: "¿Cómo elijo qué precio dice Sofi?",
         a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
+        forms: ["que sofi no diga el precio de un servicio"],
       },
       {
         id: "son-espera-entre-sesiones-controles-terminar",
@@ -2397,7 +2402,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-por-que-aparece",
         q: "¿Por qué me aparece esta ficha?",
-        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Una ficha que se llena una vez por plan, como la odontoestomatológica de la norma, no aparece en cada sesión ni en una urgencia: aparece mientras el plan no tenga una. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Una ficha que se llena una vez por plan no aparece en cada sesión ni en una urgencia: aparece mientras el plan no tenga una. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
         forms: [
           "por que me sale esta ficha en la atencion",
           "de donde sale la ficha que aparece sola",

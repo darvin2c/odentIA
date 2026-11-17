@@ -167,7 +167,7 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         id: "inventario-por-vencer-dar-de-baja",
         q: "¿Cómo veo qué está por vencer y doy de baja lo vencido?",
         a: "En Inventario › Productos, «Por vencer» muestra lo que vence en los próximos 30 días y «Hacen falta», lo que está bajo su mínimo. Lo ya vencido trae «Dar de baja» en su fila, para propietario y administrador: queda en Movimientos como «Dado de baja: venció». Al abrir un producto ves sus lotes, con «Venció» o «Por vencer».",
-        forms: ["que esta por vencer", "dar de baja lo vencido", "tengo un producto vencido"],
+        forms: ["como saco del inventario un producto vencido", "que productos estan por acabarse", "que esta por vencer", "dar de baja lo vencido", "tengo un producto vencido"],
         needs: "inventory.write",
       },
       {
