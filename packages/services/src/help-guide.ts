@@ -877,7 +877,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "atencion-donde-hacerla-hoy",
         q: "¿Por qué lo que indiqué hoy no sale en «Hoy viene a…»?",
         a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Tampoco vuelve arriba después de «Hacerla hoy»: su fila de «Realizado hoy» trae «Registrar la sesión» y, si al final no la haces, «Hoy no», que lo saca de la atención y lo deja en el Plan para otro día. Lo que «va después» de otro tratamiento que aún no termina no lo trae: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice qué consentimiento pide, con «Preparar y firmar»; puedes registrarlo igual.",
-        forms: ["lo que indique hoy no aparece arriba", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento"],
+        forms: ["lo que indique hoy no aparece arriba", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento", "que es hacerla hoy", "que hace hacerla hoy", "para que sirve hacerla hoy"],
         area: "clinica",
       },
       {
@@ -898,6 +898,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "En la atención firmada, en «Lo que sigue»: es la misma lista de «Qué sigue» de su ficha, con lo de esta atención primero. Si su próxima sesión aún no tiene cita dice «Falta la cita de la próxima sesión» con «Reservar la sesión 2», que la reserva ahí mismo; si ya la tiene, dice el día y la hora. Debajo van el consentimiento que falta recabar y, si ves la caja, lo que debe.",
         forms: ["ya le reservaron la siguiente sesion", "donde veo si tiene cita para la sesion 2", "firme la atencion y no se si tiene su proxima cita", "que sigue despues de firmar la atencion"],
         area: "plan",
+        // A recepción y a caja, que no abren la atención, les responde la suya: en la ficha, «Qué sigue» (Q20).
+        notFor: { lacks: "clinical.read" },
       },
       {
         id: "deje-atencion-a-medias",
