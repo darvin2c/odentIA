@@ -2551,20 +2551,28 @@ export function replyableMessageId(value: string | null | undefined): string | n
 /**
  * La cabecera References de una respuesta (RFC 5322 §3.6.4): la References del
  * correo o, si no trae, su In-Reply-To (solo si es un único id), más su
- * Message-ID; hasta 8000 caracteres. Null si no queda ninguno.
+ * Message-ID; hasta 8000 caracteres. Null si no queda ninguno. Con la clave del
+ * hilo del correo (`threadKey`, si es otra que la suya), esa va primero: así lo
+ * que contesten a la respuesta queda en el hilo aunque quien escribe solo mande
+ * In-Reply-To, y su cadena no crece con cada vuelta (`THREAD_CHAIN_MAX`).
  */
-export function replyReferences(email: {
-  references: string | null
-  inReplyTo: string | null
-  messageId: string
-}): string | null {
+export function replyReferences(
+  email: {
+    references: string | null
+    inReplyTo: string | null
+    messageId: string
+  },
+  threadKey?: string | null,
+): string | null {
   const parent = threadMessageIds(email.references)
   if (parent.length === 0) {
     const inReplyTo = threadMessageIds(email.inReplyTo)
     if (inReplyTo.length === 1) parent.push(...inReplyTo)
   }
+  const root =
+    threadKey && threadKey.trim() !== email.messageId.trim() ? replyableMessageId(threadKey) : null
   const own = replyableMessageId(email.messageId)
-  const ids = (own ? threadMessageIds(parent.join(" "), own) : parent).filter(
+  const ids = threadMessageIds(root, parent.join(" "), own).filter(
     (id) => !INVENTED_MESSAGE_ID.test(id),
   )
   // Se conservan el primero (el que abrió el hilo) y los últimos: así lo hace todo cliente de correo.
@@ -2696,6 +2704,13 @@ export async function prepareEmailReply(
         `La respuesta va a ${to}, que no es un contacto del cliente: agrégalo como contacto o envía sin adjuntos`,
       )
   }
+  // La clave del hilo del correo con la regla de la Bandeja: va primero en su References.
+  const [thread] = [
+    ...(await tx.execute<{ key: string | null }>(
+      sql`select ${emailThreadKeySql("e")} as key from admin.saas_inbound_email e
+        where e.id = ${email.id}::uuid`,
+    )),
+  ]
   const [row] = await tx
     .insert(saasOutreach)
     .values({
@@ -2712,7 +2727,7 @@ export async function prepareEmailReply(
       inReplyToEmailId: email.id,
       fromAddress: sender.address,
       messageId: newMessageId(product),
-      references: replyReferences(email),
+      references: replyReferences(email, thread?.key ?? null),
       createdBy: actor.userId,
       createdAt: now,
       updatedAt: now,
