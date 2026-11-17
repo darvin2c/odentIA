@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { SideColumn, useSideColumnWidth, useStaysBeside } from "./side-dock.js"
+import { SideColumn, SideDockProvider, useDockedColumnHandle, useSideColumnWidth, useStaysBeside } from "./side-dock.js"
 
 function setViewport(width: number) {
   Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: width })
@@ -128,6 +128,69 @@ describe("useStaysBeside (regla 5)", () => {
     expect(onClose).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
     expect(screen.getByText("al lado")).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  // QA del 16 nov, Q13: «Seguir aquí» dejaba abierto lo que le quitó el ancho (Antecedentes) y el
+  // arco quedaba en 137 px hasta cerrar algo a mano.
+  function Docked(props: { onClose?: () => void; dirty?: boolean }) {
+    useDockedColumnHandle(props.onClose, props.dirty ?? false)
+    return null
+  }
+
+  it("«Seguir aquí» cierra lo que se abrió en la columna y le quitó el ancho", async () => {
+    const onClose = vi.fn()
+    const closeColumn = vi.fn()
+    const page = (fits: boolean, column: boolean) => (
+      <SideDockProvider>
+        <Page open fits={fits} dirty onClose={onClose} />
+        {column ? <Docked onClose={closeColumn} /> : null}
+      </SideDockProvider>
+    )
+    const { rerender } = render(page(true, false))
+    // Se abre Antecedentes en la columna: la pieza pierde el ancho y pregunta.
+    rerender(page(false, true))
+    fireEvent.click(await screen.findByRole("button", { name: "Seguir aquí" }))
+    expect(closeColumn).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText("al lado")).toBeTruthy()
+  })
+
+  it("lo que tiene algo escrito en la columna no se cierra por «Seguir aquí»", async () => {
+    const closeColumn = vi.fn()
+    const page = (fits: boolean, column: boolean) => (
+      <SideDockProvider>
+        <Page open fits={fits} dirty onClose={() => {}} />
+        {column ? <Docked onClose={closeColumn} dirty /> : null}
+      </SideDockProvider>
+    )
+    const { rerender } = render(page(true, false))
+    rerender(page(false, true))
+    fireEvent.click(await screen.findByRole("button", { name: "Seguir aquí" }))
+    expect(closeColumn).not.toHaveBeenCalled()
+    expect(screen.getByText("al lado")).toBeTruthy()
+  })
+
+  it("retenida y sin sitio, al guardarse lo escrito se cierra: no queda aplastada", async () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits dirty onClose={onClose} />)
+    rerender(<Page open fits={false} dirty onClose={onClose} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Seguir aquí" }))
+    expect(onClose).not.toHaveBeenCalled()
+    // Registró el hallazgo: ya no hay nada que perder, y sigue sin caber.
+    rerender(<Page open fits={false} onClose={onClose} />)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("retenida, cuando vuelve el ancho deja de estarlo: si lo pierde otra vez, vuelve a preguntar", async () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits dirty onClose={onClose} />)
+    rerender(<Page open fits={false} dirty onClose={onClose} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Seguir aquí" }))
+    rerender(<Page open fits dirty onClose={onClose} />)
+    expect(screen.queryByRole("button", { name: "Seguir aquí" })).toBeNull()
+    rerender(<Page open fits={false} dirty onClose={onClose} />)
+    expect(await screen.findByRole("button", { name: "Seguir aquí" })).toBeTruthy()
     expect(onClose).not.toHaveBeenCalled()
   })
 

@@ -470,7 +470,9 @@ function StudioBody({
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
-        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
+        // El arco no baja de 18rem: más angosto no se lee (QA del 16 nov, Q13: quedaba en 137 px con
+        // los números encimados). Sin `overflow` aquí: el arco y el panel se pegan a la ventana.
+        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(18rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
       >
         <section
           ref={mouthRef}
