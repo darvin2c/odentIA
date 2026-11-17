@@ -147,7 +147,7 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
     const code = params.get("code") ?? ""
     // La clínica se lee del state antes de usarlo: también se vuelve a ella si algo falla.
     const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
-    const back = (query: string, page = "/settings/integrations"): Response => c.redirect(`${base}${page}?${query}`, 302)
+    const back = (query: string, page = "/settings/integrations"): Response => c.redirect(base ? `${base}${page}?${query}` : `${webBase}/`, 302)
     if (params.get("error") || !state || !code) return back("facebook=cancelado")
     if (!deps.app) return back("facebook=fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)
@@ -187,7 +187,7 @@ export function createMetaPagesRoute(deps: MetaPagesDeps) {
     const state = params.get("state") ?? ""
     const code = params.get("code") ?? ""
     const base = await clinicReturnBase(deps.ownerDb, webBase, await orgOfOauthState(deps.ownerDb, deps.secretsKey, state))
-    const back = (result: string): Response => c.redirect(`${base}/settings/integrations/instagram?conectado=${result}`, 302)
+    const back = (result: string): Response => c.redirect(base ? `${base}/settings/integrations/instagram?conectado=${result}` : `${webBase}/`, 302)
     if (params.get("error") || !state || !code) return back("cancelado")
     if (!deps.instagram) return back("fallo")
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null)

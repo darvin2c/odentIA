@@ -220,10 +220,10 @@ describe("conectar con Facebook", () => {
     const state = await start("org_c", "u-c")
     const stranger = await back(meta.fetch, "u-a", { state, code: "COD" })
     expect(stranger.searchParams.get("facebook")).toBe("fallo")
-    // Ya se consumió: tampoco sirve a su dueña.
-    expect((await back(meta.fetch, "u-c", { state, code: "COD" })).searchParams.get("facebook")).toBe("fallo")
-    // Un state forjado.
-    expect((await back(meta.fetch, "u-c", { state: "abc.def", code: "COD" })).searchParams.get("facebook")).toBe("fallo")
+    // Ya se consumió: tampoco sirve a su dueña; sin clínica que leer, vuelve al inicio del panel.
+    expect((await back(meta.fetch, "u-c", { state, code: "COD" })).href).toBe("https://clinica.example.com/")
+    // Un state forjado: igual, sin decir de qué clínica.
+    expect((await back(meta.fetch, "u-c", { state: "abc.def", code: "COD" })).href).toBe("https://clinica.example.com/")
     // Recepción no conecta canales, aunque empiece el flujo.
     const reception = await start("org_a", "u-recepcion")
     expect((await back(meta.fetch, "u-recepcion", { state: reception, code: "COD" })).searchParams.get("facebook")).toBe("fallo")
@@ -413,7 +413,8 @@ describe("conectar con Instagram", () => {
     expect(await ask("u-b", `error=access_denied&state=${state}`)).toBe("cancelado")
     expect(await ask(null, `state=${encodeURIComponent(state)}&code=X`)).toBe("sin-sesion")
     expect(await ask("u-a", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
-    expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
+    // Ya usado: sin clínica que leer, al inicio del panel.
+    expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBeNull()
   })
 })
 
@@ -429,7 +430,10 @@ describe("a dónde vuelve", () => {
       expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", "org_a")).toBe("https://clinica-a.latidia72.com")
       // Un state forjado no da clínica: vuelve al panel, donde se elige.
       expect(await orgOfOauthState(ownerDb, KEY, "forjado.firma")).toBeNull()
-      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", null)).toBe("https://app.odentia32.com")
+      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", null)).toBeNull()
+      // Sin clínica conocida, al inicio del panel, no a una página de Configuración que no existe ahí.
+      const lost = await route(fakeFacebook([]).fetch, "u-a").request("/instagram/callback?error=x")
+      expect(lost.headers.get("location")).toBe("https://clinica.example.com/")
     } finally {
       configurePublicLinks(null)
       await ownerDb.execute(sql`update "org_profile" set "product" = 'dental' where "organization_id" = 'org_a'`)
