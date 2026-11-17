@@ -708,9 +708,7 @@ describe("Mejorar: la red contra lo que agrega", () => {
 
   it("un plazo de uno («un día», «una semana», «unos meses») y «veintiún» también son datos", () => {
     expect(improveInventions("Te escribo en un día.", ["te escribo pronto"])).toEqual(["un día"])
-    expect(improveInventions("Lo vemos en una semana.", ["lo vemos luego"])).toEqual([
-      "una semana",
-    ])
+    expect(improveInventions("Lo vemos en una semana.", ["lo vemos luego"])).toEqual(["una semana"])
     expect(improveInventions("Tarda unos minutos.", ["tarda poco"])).toEqual(["unos minutos"])
     expect(improveInventions("En unos meses, unas horas o un año.", ["pronto"])).toEqual([
       "unos meses",
