@@ -2477,10 +2477,10 @@ export function EncounterEditor({
   // se guarda o se comprueba, dice por qué aún no se firma: la lista de faltantes podría estar vieja.
   const footerWait =
     signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
-  // El pie es el único lugar de lo que falta para firmar, y lo dice entero (P10): lo que pide el
-  // cierre y las firmas que esperan. Nunca «Listo para firmar» con una firma de la paciente
-  // pendiente («Falta 1: la firma de Carmen»). Cada cosa lleva a su lugar. La colegiatura no es una
-  // falta (17 nov): el cierre la pide o pide escribir por qué se firma sin ella.
+  // El pie es el único lugar de lo que falta para firmar (P10), y «Faltan» es solo lo que frena:
+  // motivo, diagnóstico y evolución. Las firmas que esperan no frenan (al cerrar se escribe por
+  // qué se sigue sin ellas): van aparte, como aviso (17 nov, ADR 0200). La colegiatura tampoco es
+  // una falta: el cierre la pide o pide escribir por qué se firma sin ella. Cada cosa lleva a su lugar.
   const footerMissing: Array<{ key: string; words: string; go: () => void }> =
     !dictation.busy && !footerWait && closingQuery.isSuccess
       ? [
@@ -2495,6 +2495,12 @@ export function EncounterEditor({
                 : CLOSING_SHORT[requirement],
             go: () => requireBlock(requirement),
           })),
+        ]
+      : []
+  // Lo que espera una firma y no frena: un aviso con su acción, aparte de «Faltan».
+  const footerNotices: Array<{ key: string; words: string; go: () => void }> =
+    !dictation.busy && !footerWait && closingQuery.isSuccess
+      ? [
           ...(awaitingSignature.length > 0
             ? [
                 {
@@ -3006,6 +3012,27 @@ export function EncounterEditor({
             ) : (
               footerText
             )}
+            {footerNotices.length > 0 ? (
+              // «Aviso, no frena: la firma de Rosa. Si firmas sin ella, escribes por qué.»
+              <span className="block text-xs">
+                Aviso, no frena:{" "}
+                {footerNotices.map((item, index) => (
+                  <span key={item.key}>
+                    {index === 0 ? "" : " y "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 align-baseline text-xs"
+                      disabled={!attending || locked}
+                      onClick={item.go}
+                    >
+                      {item.words}
+                    </Button>
+                  </span>
+                ))}
+                . Si firmas sin {footerNotices.length === 1 ? "ella" : "ellas"}, escribes por qué.
+              </span>
+            ) : null}
           </span>
           <Button
             type="button"

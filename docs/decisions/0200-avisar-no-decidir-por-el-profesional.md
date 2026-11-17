@@ -17,6 +17,7 @@ Ninguna de esas reglas era un estándar ni lo configuraba la clínica. El criter
 - **La colegiatura no frena el cierre.** El cierre la pide en el mismo diálogo. Si se escribe, queda en el perfil. Si no, se firma escribiendo por qué (`encounter.registration_skip_reason`), y el papel sale sin colegiatura. La receta, el consentimiento y el odontograma firmado a pedido siguen como estaban.
 - **Sin el consentimiento firmado, también se cierra con el motivo escrito**, como ya pasaba, pero sin atajos de un toque como «Urgencia».
 - **Los motivos siempre se escriben.**
+- **El pie de la atención llama «Faltan» solo a lo que frena:** motivo, diagnóstico y evolución, el mínimo de cualquier nota clínica (SOAP). La firma del consentimiento que espera va aparte, como aviso, porque no frena.
 - **Las fichas se ofrecen solo por lo que la clínica configuró:**
   - la especialidad del servicio de la cita o la de quien atiende;
   - la que el paciente ya tiene;

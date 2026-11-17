@@ -56,7 +56,7 @@ test("sesión desde su cita: motivo y diagnóstico propuestos, lo que falta una 
   await expect(page.getByRole("button", { name: "Listo", exact: true })).toHaveCount(0)
   await page.getByLabel("Evolución", { exact: true }).fill("Se trabajó la 36; sin molestias.")
   await views("evolucion-en-linea")
-  // Guardado: lo que falta ya no incluye la evolución.
-  await expect(page.getByText(/^Falta 1: /)).toBeVisible()
+  // Guardado: ya no falta nada que frene; una firma que espera va aparte, como aviso (ADR 0200).
+  await expect(page.getByText("Listo para firmar")).toBeVisible()
   await shot("sesion-casi-lista")
 })

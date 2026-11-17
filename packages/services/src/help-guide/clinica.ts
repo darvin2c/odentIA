@@ -80,7 +80,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "atencion-cerrar-finalizar",
         q: "¿Cómo cierro la atención cuando termino de atender?",
-        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta, respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura. Después ya no se edita: lo que falte se agrega con una adenda.",
+        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo; una firma del paciente que espera va debajo como aviso, porque no frena. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta (o escribes por qué sigues sin él), respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura (sin ella, escribes por qué). Después ya no se edita: lo que falte se agrega con una adenda.",
         forms: [
           "como cierro la atencion",
           "quiero cerrar la atencion",
