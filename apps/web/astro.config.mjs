@@ -1,5 +1,6 @@
 // La web de marketing se arma en el servidor al servir cada página (ADR 0062): así los precios y
 // el programa Fundadores salen de la administración y los buscadores siguen leyendo el HTML entero.
+import { execFileSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
 import { join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -51,6 +52,17 @@ const pages = pageFiles(pagesDir)
   .filter(ours)
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
+// La última vez que cambió la web (el último commit que tocó apps/web): el buscador vuelve a pasar
+// cuando cambia. Sin git (un armado fuera del repositorio), el mapa va sin fecha.
+let lastmod
+try {
+  const date = execFileSync("git", ["log", "-1", "--format=%cI", "--", "."], {
+    cwd: fileURLToPath(new URL(".", import.meta.url)),
+    encoding: "utf8",
+  }).trim()
+  if (date) lastmod = new Date(date)
+} catch {}
+
 // Las webs se publican en Cloudflare Workers (ADR 0136) con `WEB_TARGET=cloudflare`; sin él,
 // el servidor de Node, solo para `pnpm dev`: así la web local llega a la API de portless.
 const workers = process.env.WEB_TARGET === "cloudflare"
@@ -75,6 +87,7 @@ export default defineConfig({
     react(),
     sitemap({
       customPages: pages,
+      ...(lastmod && { lastmod }),
       filter: (page) => {
         const path = page.replace(/\/$/, "")
         // Cada web, solo sus páginas: las demás responden 404 en su dominio.

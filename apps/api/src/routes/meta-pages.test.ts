@@ -7,6 +7,7 @@ import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
   beginInstagramLogin,
+  configurePublicLinks,
   beginMetaPagesLogin,
   chooseMetaPage,
   listPagesToChoose,
@@ -24,6 +25,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { clinicReturnBase, orgOfOauthState } from "../lib/clinic-return.js"
 import { createMetaPagesRoute, metaPagesFromEnv } from "./meta-pages.js"
 import { createWebhooksRoute } from "./webhooks.js"
 
@@ -194,7 +196,7 @@ describe("conectar con Facebook", () => {
     const state = await start("org_a", "u-a")
     const location = await back(meta.fetch, "u-a", { state, code: "COD" })
     expect(location.origin + location.pathname).toBe("https://clinica.example.com/settings/integrations")
-    expect(Object.fromEntries(location.searchParams)).toEqual({ org: "org_a", facebook: "ok", messenger: "1", instagram: "0", sinig: "1", otra: "0" })
+    expect(Object.fromEntries(location.searchParams)).toEqual({ facebook: "ok", messenger: "1", instagram: "0", sinig: "1", otra: "0" })
     expect((await rowsOf("org_a")).filter((row) => row.externalId === "P2").map((row) => row.status)).toEqual(["active"])
   })
 
@@ -412,5 +414,26 @@ describe("conectar con Instagram", () => {
     expect(await ask(null, `state=${encodeURIComponent(state)}&code=X`)).toBe("sin-sesion")
     expect(await ask("u-a", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
     expect(await ask("u-b", `state=${encodeURIComponent(state)}&code=X`)).toBe("fallo")
+  })
+})
+
+describe("a dónde vuelve", () => {
+  it("a la dirección de la clínica en el dominio de su producto, no al panel, también si se canceló", async () => {
+    configurePublicLinks({ webURL: "https://app.odentia32.com", cookieDomain: ".odentia32.com", productDomains: { medical: "latidia72.com", optical: undefined } })
+    try {
+      await ownerDb.execute(sql`update "organization" set "slug" = 'clinica-a' where "id" = 'org_a'`)
+      const state = await start("org_a", "u-a")
+      const cancelled = await back(fakeFacebook([]).fetch, "u-a", { error: "access_denied", state })
+      expect(cancelled.origin + cancelled.pathname).toBe("https://clinica-a.odentia32.com/settings/integrations")
+      await ownerDb.execute(sql`update "org_profile" set "product" = 'medical' where "organization_id" = 'org_a'`)
+      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", "org_a")).toBe("https://clinica-a.latidia72.com")
+      // Un state forjado no da clínica: vuelve al panel, donde se elige.
+      expect(await orgOfOauthState(ownerDb, KEY, "forjado.firma")).toBeNull()
+      expect(await clinicReturnBase(ownerDb, "https://app.odentia32.com", null)).toBe("https://app.odentia32.com")
+    } finally {
+      configurePublicLinks(null)
+      await ownerDb.execute(sql`update "org_profile" set "product" = 'dental' where "organization_id" = 'org_a'`)
+      await ownerDb.execute(sql`update "organization" set "slug" = 'org_a' where "id" = 'org_a'`)
+    }
   })
 })
