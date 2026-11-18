@@ -13,11 +13,18 @@ import { ACCOUNT_EVENT_TYPES } from "@odentia/db/schema/auth"
 export { ACCOUNT_EVENT_TYPES }
 export type AccountEventType = (typeof ACCOUNT_EVENT_TYPES)[number]
 
+/**
+ * Lo que llega en cada aviso. `cuenta.cerrada`: la cuenta ya no entra a ninguna app.
+ * `cuenta.bloqueada`: no entra hasta `expiresAt` (ISO 8601; nulo, hasta que se reabra; si ya
+ * pasó, el bloqueo no frena, igual que en las clínicas).
+ * `cuenta.reabierta`: se quitó el bloqueo, también el de un cierre, y vuelve a entrar.
+ * Los de una misma cuenta llegan en el orden en que pasaron: el último manda.
+ */
 export interface AccountEventPayload {
   type: AccountEventType
   /** Cuándo pasó, ISO 8601. */
   timestamp: string
-  data: { userId: string }
+  data: { userId: string; expiresAt?: string | null }
 }
 
 /** Cuánto puede diferir la hora de un aviso de la del que lo recibe (lo que sugiere el estándar). */

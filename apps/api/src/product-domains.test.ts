@@ -90,7 +90,7 @@ it("el enlace y la llave del portal van en el dominio del producto de la clínic
 })
 
 describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () => {
-  const appWith = (entry: Auth | null, more: Partial<Parameters<typeof createApp>[0]> = {}) =>
+  const appWith = (entry: Auth, more: Partial<Parameters<typeof createApp>[0]> = {}) =>
     createApp({
       ...more,
       auth: sessionOf("odentIA"),
@@ -111,13 +111,11 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       listenUrl: "postgres://localhost:5432/dentalagent",
     })
 
-  it("sin su entrada, nada responde en su dominio: ni la cuenta ni las clínicas", async () => {
-    const off = appWith(null)
-    expect((await off.request("https://api.gestoria.test/api/auth/get-session")).status).toBe(404)
-    expect((await off.request("https://api.gestoria.test/api/patients")).status).toBe(404)
-    expect((await off.request("https://gestoria.test/health")).status).toBe(404)
-    // Las clínicas siguen igual.
-    expect(await (await off.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
+  it("en su dominio no responde nada de las clínicas, y las clínicas siguen igual", async () => {
+    const app = appWith(sessionOf("gestorIA"))
+    expect((await app.request("https://api.gestoria.test/api/patients")).status).toBe(404)
+    expect((await app.request("https://gestoria.test/health")).status).toBe(404)
+    expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
   })
 
   it("con su entrada, solo responde la cuenta, sin las organizaciones de las clínicas", async () => {
@@ -148,7 +146,7 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
     const asked: string[][] = []
     // Se arma dentro de cada prueba: `createApp` fija los dominios de todo el proceso, y la
     // prueba del portal (arriba) lee los del primero.
-    const reviewing = () => appWith(null, {
+    const reviewing = () => appWith(sessionOf("gestorIA"), {
       accountEventSenders: [{ app: "gestoria", url: "https://servidor.gestoria.test/avisos/cuenta", secret: SECRET }],
       reviewAccounts: async (ids) => {
         asked.push(ids)
@@ -193,7 +191,7 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
     it("no existe sin el secreto de la app, ni en el dominio de las clínicas", async () => {
       const withReview = reviewing()
       const body = JSON.stringify({ userIds: ["u-1"] })
-      expect((await ask(appWith(null), body)).status).toBe(404)
+      expect((await ask(appWith(sessionOf("gestorIA")), body)).status).toBe(404)
       expect((await ask(withReview, body, SECRET, "api.odentia.test")).status).not.toBe(200)
       expect((await withReview.request("https://api.gestoria.test/api/account-apps/review")).status).toBe(404)
     })

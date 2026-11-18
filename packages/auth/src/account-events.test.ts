@@ -74,6 +74,30 @@ describe("los avisos de la cuenta, firmados (Standard Webhooks)", () => {
     expect(verifySignedMessage({ secret: SECRET, headers, body: `${question} `, now })).toBeNull()
   })
 
+  it("la app reconoce el bloqueo, con su fecha, y la reapertura; un tipo desconocido no vale", () => {
+    const now = new Date("2026-11-17T20:00:30Z")
+    const read = (type: string, data: Record<string, unknown>) => {
+      const text = JSON.stringify({ type, timestamp: now.toISOString(), data })
+      const headers = new Headers(
+        signAccountEvent({
+          secret: SECRET,
+          id: "evt-2",
+          body: text,
+          timestamp: Math.floor(now.getTime() / 1000),
+        }),
+      )
+      return verifyAccountEvent({ secret: SECRET, headers, body: text, now })
+    }
+    expect(
+      read("cuenta.bloqueada", { userId: "u-1", expiresAt: "2026-12-01T00:00:00.000Z" }),
+    ).toMatchObject({
+      type: "cuenta.bloqueada",
+      data: { userId: "u-1", expiresAt: "2026-12-01T00:00:00.000Z" },
+    })
+    expect(read("cuenta.reabierta", { userId: "u-1" })).toMatchObject({ type: "cuenta.reabierta" })
+    expect(read("cuenta.suspendida", { userId: "u-1" })).toBeNull()
+  })
+
   it("el secreto es whsec_ y al menos 24 bytes", () => {
     expect(isAccountEventSecret(SECRET)).toBe(true)
     expect(isAccountEventSecret("whsec_corto")).toBe(false)
