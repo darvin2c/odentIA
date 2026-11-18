@@ -10,9 +10,9 @@ Método de trabajo, no catálogo visual ni fuente paralela de reglas de negocio.
 ## Cargar solo contexto pertinente
 
 - Visión, objetivo del software y objetivo de la UX: `AGENTS.md` raíz, fuente principal de estas definiciones. Responsabilidades de las aplicaciones: `apps/AGENTS.md`.
-- Composición: `packages/ui-patterns/AGENTS.md`; primitivas: `packages/ui/AGENTS.md` si se modifican.
+- Composición: `shared/packages/ui-patterns/AGENTS.md`; primitivas: `shared/packages/ui/AGENTS.md` si se modifican.
 - Consultar el componente y su story existente; localizar símbolos/consumidores con LSP. No leer todo el catálogo para una pantalla.
-- Referencias: `packages/ui-patterns/src/app-shell.stories.tsx`, `page-header.stories.tsx`, `data-table.stories.tsx`, `form/form-drawer.stories.tsx` y `charts/charts.stories.tsx` dentro del mismo directorio `src`.
+- Referencias: `shared/packages/ui-patterns/src/app-shell.stories.tsx`, `page-header.stories.tsx`, `data-table.stories.tsx`, `form/form-drawer.stories.tsx` y `charts/charts.stories.tsx` dentro del mismo directorio `src`.
 - Reglas del dominio afectado en su AGENTS y servicios; la interfaz no las redefine.
 
 ## Diseñar desde la tarea

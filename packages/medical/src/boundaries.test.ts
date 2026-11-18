@@ -21,10 +21,10 @@ const OUTSIDE = [
   "packages/db/src",
   "packages/agent/src",
   "packages/auth/src",
-  "packages/channels/src",
-  "packages/mail/src",
-  "packages/ui/src",
-  "packages/ui-patterns/src",
+  "shared/packages/channels/src",
+  "shared/packages/mail/src",
+  "shared/packages/ui/src",
+  "shared/packages/ui-patterns/src",
   "packages/clinic-app/src",
   "apps/dental-clinic/src",
   "apps/optical-clinic/src",
@@ -32,7 +32,7 @@ const OUTSIDE = [
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",
-  "apps/admin/src",
+  "admin/apps/web/src",
 ]
 /**
  * Lo médico de los servicios, y `products.ts`: el único lugar que conecta cada

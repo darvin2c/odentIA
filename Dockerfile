@@ -14,26 +14,27 @@ COPY patches ./patches
 COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/panel/package.json apps/panel/
-COPY apps/admin/package.json apps/admin/
+COPY admin/apps/web/package.json admin/apps/web/
 COPY apps/dental-clinic/package.json apps/dental-clinic/
 COPY apps/medical-clinic/package.json apps/medical-clinic/
 COPY apps/optical-clinic/package.json apps/optical-clinic/
 COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
-COPY packages/brand-scene/package.json packages/brand-scene/
-COPY packages/channels/package.json packages/channels/
+COPY shared/packages/brand-scene/package.json shared/packages/brand-scene/
+COPY shared/packages/channels/package.json shared/packages/channels/
 COPY packages/clinic-app/package.json packages/clinic-app/
 COPY packages/clinical/package.json packages/clinical/
 COPY packages/db/package.json packages/db/
 COPY packages/dental/package.json packages/dental/
-COPY packages/mail/package.json packages/mail/
+COPY shared/packages/mail/package.json shared/packages/mail/
 COPY packages/medical/package.json packages/medical/
 COPY packages/optical/package.json packages/optical/
 COPY packages/services/package.json packages/services/
-COPY packages/ui/package.json packages/ui/
-COPY packages/ui-patterns/package.json packages/ui-patterns/
+COPY shared/packages/ui/package.json shared/packages/ui/
+COPY shared/packages/ui-patterns/package.json shared/packages/ui-patterns/
 COPY e2e/package.json e2e/
+COPY admin/e2e/package.json admin/e2e/
 # Instalación filtrada: solo lo que necesitan la API y el worker para ejecutar los paquetes
 # fuente TS (las migraciones viven en @odentia/db, que los dos usan).
 RUN pnpm install --frozen-lockfile \

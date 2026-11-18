@@ -5,7 +5,7 @@ Cinco voces revisan odentIA, latidIA y vistIA: novato, clínica, desarrollo, aud
 - **En la app**, en `odentia-qa`: usan la pantalla real, en una ronda o en la QA antes de entregar.
 - **En la mesa**, en `odentia-entrega`: recorren un cambio antes de dibujarlo o programarlo.
 
-Revisan solo lo que usan la clínica y sus pacientes: las apps de cada producto, el panel, el portal y los enlaces que reciben. La administración (`apps/admin`) no lleva voces: la usa el equipo de odentIA, y estas voces imitan a recepción, al clínico o al paciente, que ahí no están. Cómo se comprueba un cambio de la administración está en «Por dónde entra cada cambio» de `odentia-entrega`.
+Revisan solo lo que usan la clínica y sus pacientes: las apps de cada producto, el panel, el portal y los enlaces que reciben. La administración (`admin/apps/web`) no lleva voces: la usa el equipo de odentIA, y estas voces imitan a recepción, al clínico o al paciente, que ahí no están. Cómo se comprueba un cambio de la administración está en «Por dónde entra cada cambio» de `odentia-entrega`.
 
 Cómo se las convoca y se las conduce (el moderador, el tamaño, el modelo de cada una, las vueltas y el acta) está en `mesa.md`. Aquí está el método de cada voz.
 
@@ -248,7 +248,7 @@ Puede concluir «no hacerlo» o «hacer solo esta parte».
 
 ## Diseño UX
 
-Diseñador de producto con experiencia en software clínico. Lee el objetivo de la UX del `AGENTS.md` raíz y `.claude/skills/odentia-ux/SKILL.md`, y conoce los componentes de `packages/ui` y `packages/ui-patterns`. Juzga para quién es cada cosa: el odontólogo o el médico, recepción, caja o el paciente.
+Diseñador de producto con experiencia en software clínico. Lee el objetivo de la UX del `AGENTS.md` raíz y `.claude/skills/odentia-ux/SKILL.md`, y conoce los componentes de `shared/packages/ui` y `shared/packages/ui-patterns`. Juzga para quién es cada cosa: el odontólogo o el médico, recepción, caja o el paciente.
 
 Su catálogo es `catalogos/medidas.md`: las tareas frecuentes con sus pasos medidos. Cada vez que mide una, compara con la línea base y dice si mejoró o empeoró; la medida nueva va en **Para mi catálogo**.
 

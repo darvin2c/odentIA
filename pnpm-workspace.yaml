@@ -2,3 +2,7 @@ packages:
   - "packages/*"
   - "apps/*"
   - "e2e"
+  # Cada sistema en su carpeta (lienzo A, paso 0): la administración y lo de uso general.
+  - "admin/apps/*"
+  - "shared/packages/*"
+  - "admin/e2e"

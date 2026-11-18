@@ -4,7 +4,7 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 
 **Cómo se mide:** pantallas, cajones, clics o toques, tecleos (campos escritos), saltos (salir de donde estaba) y decisiones, siempre con el ancho. «A mantener» = no debe subir. «A mejorar» = todavía cuesta de más. «Medida vieja» = la pantalla cambió después; se mide de nuevo antes de comparar. Una voz simulada contó estos pasos: no es el tiempo de una clínica real.
 
-**Abreviaturas:** `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/_org/`, `UP` = `packages/ui-patterns/src/`, `UI` = `packages/ui/src/components/`. Cuántas veces al día se hace cada tarea es **supuesto** en todas: ninguna tiene fuente de una clínica real.
+**Abreviaturas:** `CA` = `packages/clinic-app/src/components/`, `R` = `packages/clinic-app/src/routes/_org/`, `UP` = `shared/packages/ui-patterns/src/`, `UI` = `shared/packages/ui/src/components/`. Cuántas veces al día se hace cada tarea es **supuesto** en todas: ninguna tiene fuente de una clínica real.
 
 **Lista común** (se revisa en cada tarea, además de lo propio):
 
