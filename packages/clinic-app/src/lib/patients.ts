@@ -349,20 +349,8 @@ export const CONDITION_STATUS_LABELS: Record<string, string> = {
   inactiva: "Inactiva",
 }
 
-/** Clasificación ASA del estado físico (ASA Physical Status Classification System). */
-export const ASA_OPTIONS: Array<[string, string]> = [
-  ["I", "ASA I · sano"],
-  ["II", "ASA II · enfermedad sistémica leve"],
-  ["III", "ASA III · enfermedad sistémica grave"],
-  ["IV", "ASA IV · amenaza constante para la vida"],
-  ["V", "ASA V · moribundo"],
-  ["VI", "ASA VI · muerte cerebral (donante)"],
-]
-
-/** «ASA II · enfermedad sistémica leve» de lo guardado; null sin clasificar (QA del 6 nov: no salía en ningún resumen). */
-export function asaLabel(value: string | null | undefined): string | null {
-  return ASA_OPTIONS.find(([key]) => key === value)?.[1] ?? null
-}
+// La ASA en palabras: las mismas de la copia de la historia, en `@odentia/clinical`.
+export { ASA_OPTIONS, asaLabel } from "@odentia/clinical"
 
 /**
  * Enfermedades y medicación que nunca se le preguntaron: el grupo sigue en «no

@@ -673,10 +673,11 @@ it("odontograma firmado: solo en clínicas de Perú, con el perfil, sin trazo ni
     expect(listed.status).toBe(200)
     expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(1)
     const sheet = await app.request(
-      `/patients/${patientId}/odontogram/assessments/${sealedBody.data.id}/print`,
+      `/patients/${patientId}/odontogram/assessments/${sealedBody.data.id}/pdf`,
     )
     expect(sheet.status).toBe(200)
-    expect(await sheet.json()).toMatchObject({ data: { assessment: { id: sealedBody.data.id } } })
+    expect(sheet.headers.get("content-type")).toBe("application/pdf")
+    expect(new TextDecoder().decode((await sheet.arrayBuffer()).slice(0, 5))).toBe("%PDF-")
   } finally {
     await ownerDb.execute(sql`update "org_profile" set "country_code" = 'PE' where "organization_id" = 'org_a'`)
   }

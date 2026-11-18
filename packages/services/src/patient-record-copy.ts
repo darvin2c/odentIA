@@ -17,6 +17,7 @@ import {
   DIAGNOSIS_SYSTEM_INFO,
   isDiagnosisSystem,
   isImageDocumentCategory,
+  signerWords,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { issuedPaper } from "@odentia/db/schema/clinical-forms"
@@ -98,9 +99,20 @@ function safeName(text: string): string {
     .slice(0, 90)
 }
 
-/** «Receta N.º 2 - 2026-11-18 (anulada) (1a2b3c4d).pdf». */
-function paperFileName(label: string, at: Date, voided: boolean, id: string): string {
-  return `${safeName(label)} - ${at.toISOString().slice(0, 10)}${voided ? " (anulada)" : ""} (${id.slice(0, 8)}).pdf`
+/** El día (AAAA-MM-DD) de un instante en la zona de la clínica: lo de las 21:00 en Lima es de ese día, no del siguiente. */
+export function clinicIsoDay(at: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone || "UTC" }).format(at)
+}
+
+/** «Receta N.º 2 - 2026-11-18 (anulada) (1a2b3c4d).pdf», con el día en la zona de la clínica. */
+function paperFileName(
+  label: string,
+  at: Date,
+  timezone: string,
+  mark: "anulada" | "revocado" | null,
+  id: string,
+): string {
+  return `${safeName(label)} - ${clinicIsoDay(at, timezone)}${mark ? ` (${mark})` : ""} (${id.slice(0, 8)}).pdf`
 }
 
 /**
@@ -133,11 +145,18 @@ async function plannedPapers(
       label,
       at: row.issuedAt,
       mark: voided ? voidedOn(row.cancelledAt, row.cancelReason) : null,
-      signer:
-        [row.prescriberName, row.prescriberTitle, row.prescriberRegistration]
-          .filter(Boolean)
-          .join(", ") || null,
-      fileName: paperFileName(label, row.issuedAt, voided, row.id),
+      signer: signerWords({
+        name: row.prescriberName,
+        title: row.prescriberTitle,
+        registration: row.prescriberRegistration,
+      }),
+      fileName: paperFileName(
+        label,
+        row.issuedAt,
+        zone.timezone,
+        voided ? "anulada" : null,
+        row.id,
+      ),
       related: items[0] ? { resourceType: "MedicationRequest", id: items[0].id } : null,
       size: null,
       render: health("prescription", row.id),
@@ -156,9 +175,12 @@ async function plannedPapers(
         : o.status === "completado"
           ? null
           : "Sin resultado",
-      signer:
-        [o.signerName, o.signerTitle, o.signerRegistration].filter(Boolean).join(", ") || null,
-      fileName: paperFileName(label, o.createdAt, voided, o.id),
+      signer: signerWords({
+        name: o.signerName,
+        title: o.signerTitle,
+        registration: o.signerRegistration,
+      }),
+      fileName: paperFileName(label, o.createdAt, zone.timezone, voided ? "anulada" : null, o.id),
       related: { resourceType: "ServiceRequest", id: o.id },
       size: null,
       render: health("order", o.id),
@@ -173,9 +195,12 @@ async function plannedPapers(
       label,
       at: l.issuedAt,
       mark: voided ? voidedOn(l.cancelledAt, l.cancelReason, "Anulado") : null,
-      signer:
-        [l.signerName, l.signerTitle, l.signerRegistration].filter(Boolean).join(", ") || null,
-      fileName: paperFileName(label, l.issuedAt, voided, l.id),
+      signer: signerWords({
+        name: l.signerName,
+        title: l.signerTitle,
+        registration: l.signerRegistration,
+      }),
+      fileName: paperFileName(label, l.issuedAt, zone.timezone, voided ? "anulada" : null, l.id),
       related: null,
       size: null,
       render: health("medical_leave", l.id),
@@ -202,11 +227,13 @@ async function plannedPapers(
       at,
       mark: null,
       signer: visit
-        ? [visit.row.signerName, visit.row.signerTitle, visit.row.signerRegistration]
-            .filter(Boolean)
-            .join(", ") || null
+        ? signerWords({
+            name: visit.row.signerName,
+            title: visit.row.signerTitle,
+            registration: visit.row.signerRegistration,
+          })
         : null,
-      fileName: paperFileName("Hoja de atención", at, false, sheet.id),
+      fileName: paperFileName("Hoja de atención", at, zone.timezone, null, sheet.id),
       related: { resourceType: "Encounter", id: sheet.id },
       size: sheet.size,
       render: health("attention_sheet", sheet.id),
@@ -223,16 +250,19 @@ async function plannedPapers(
       at: c.signedAt ?? c.createdAt,
       mark: revoked ? voidedOn(c.revokedAt, c.revokeReason, "Revocado") : null,
       signer: c.signerName ?? null,
-      fileName: paperFileName(label, c.signedAt ?? c.createdAt, revoked, c.id).replace(
-        " (anulada)",
-        " (revocado)",
+      fileName: paperFileName(
+        label,
+        c.signedAt ?? c.createdAt,
+        zone.timezone,
+        revoked ? "revocado" : null,
+        c.id,
       ),
       related: { resourceType: "Consent", id: c.id },
       size: null,
       render: health("consent", c.id),
     })
   }
-  // Lo del producto que ya trae su PDF (odentIA: cada odontograma firmado y el de hoy, sin firmar).
+  // Lo del producto (odentIA: cada odontograma firmado y el de hoy, sin firmar), con su PDF diferido.
   if (hooks.recordPapers)
     for (const paper of await hooks.recordPapers(tx, { orgId, patientId }, deps.storage))
       papers.push({
@@ -244,8 +274,9 @@ async function plannedPapers(
         signer: paper.signer,
         fileName: safeName(paper.fileName.replace(/\.pdf$/i, "")) + ".pdf",
         related: null,
-        size: paper.bytes.byteLength,
-        render: async () => paper.bytes,
+        size: paper.size,
+        // Se dibuja recién al armar el ZIP, en su punto de guardado: contar no dibuja ni guarda.
+        render: (sp) => paper.render(sp),
       })
   // Lo del producto que se ve en su portal (vistIA: la receta de lentes), con su PDF.
   const own = hooks.portalPapers
@@ -258,13 +289,24 @@ async function plannedPapers(
         at: paper.at,
         mark: paper.stateWord,
         signer: null,
-        fileName: paperFileName(paper.title, paper.at, false, paper.id),
+        // La anulada lo dice en su nombre, como cualquier papel (vistIA: la receta de lentes).
+        fileName: paperFileName(
+          paper.title,
+          paper.at,
+          zone.timezone,
+          paper.stateWord && /^anulad/i.test(paper.stateWord) ? "anulada" : null,
+          paper.id,
+        ),
         related: null,
         size: null,
         render: async (sp) => (await own.pdf(sp, orgId, patientId, paper.id)).bytes,
       })
   // Lo ya guardado dice cuánto pesa: lo cuenta la pantalla sin armarlo.
-  const unknown = papers.filter((paper) => paper.size === null).map((paper) => paper.id)
+  // Solo los papeles comunes: los del producto ya dicen el suyo (y el de hoy no tiene fila).
+  const COMMON_KINDS = ["receta", "orden", "descanso", "hoja"]
+  const unknown = papers
+    .filter((paper) => paper.size === null && COMMON_KINDS.includes(paper.kind))
+    .map((paper) => paper.id)
   if (unknown.length) {
     const stored = await tx
       .select({ id: issuedPaper.documentId, size: issuedPaper.sizeBytes })
@@ -304,12 +346,11 @@ function summaryOf(
 ): PatientRecordSummary {
   const studies = new Map(record.imagingStudies.map((study) => [study.documentId, study]))
   const count = (kind: string) => papers.filter((paper) => paper.kind === kind).length
-  const kept = files
-  const images = kept.filter(
+  const images = files.filter(
     (d) => !studies.has(d.id) && isImageDocumentCategory(d.category),
   ).length
-  const tomographies = kept.filter((d) => studies.has(d.id)).length
-  const known = [...papers.map((paper) => paper.size), ...kept.map((d) => d.sizeBytes ?? null)]
+  const tomographies = files.filter((d) => studies.has(d.id)).length
+  const known = [...papers.map((paper) => paper.size), ...files.map((d) => d.sizeBytes ?? null)]
   const sum = known.reduce<number>((total, size) => total + (size ?? 0), 0)
   return {
     signedOdontograms: count("signed_odontogram"),
@@ -323,7 +364,7 @@ function summaryOf(
     ).length,
     images,
     tomographies,
-    otherFiles: kept.length - images - tomographies,
+    otherFiles: files.length - images - tomographies,
     approxBytes: known.some((size) => size !== null) || extraBytes ? sum + extraBytes : null,
   }
 }
@@ -457,10 +498,9 @@ async function assemble(
   const fileName = patientRecordFileName(copyRecord, "zip")
   const base = fileName.replace(/\.zip$/, "")
   const stored = await patientRecordFiles(tx, orgId, copyRecord)
-  const included = papers.filter((paper) => bytesOf.has(paper.path))
   const summary = summaryOf(
     copyRecord,
-    included.map((paper) => ({ kind: paper.kind, id: paper.id, size: paper.size })),
+    papers.map((paper) => ({ kind: paper.kind, id: paper.id, size: paper.size })),
     files,
     pdf.byteLength + fhirBytes.byteLength,
   )
@@ -469,7 +509,7 @@ async function assemble(
       readmeText(copyRecord, {
         base,
         fhir,
-        papers: included.length,
+        papers: papers.length,
         files: files.length,
         missing: [
           ...missing,
@@ -487,7 +527,7 @@ async function assemble(
       entries: [
         { name: `${base}.pdf`, bytes: pdf },
         { name: `${base}.fhir.json`, bytes: fhirBytes },
-        ...included.map((paper) => ({
+        ...papers.map((paper) => ({
           name: paper.path,
           bytes: bytesOf.get(paper.path) as Uint8Array,
         })),

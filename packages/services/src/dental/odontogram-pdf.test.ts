@@ -150,7 +150,7 @@ it("el odontograma firmado se emite una vez, con su huella, y se reutiliza", asy
   expect(sha(first.bytes)).toBe(row!.sha256)
   expect(sha(again.bytes)).toBe(row!.sha256)
   expect(first.label).toBe("Odontograma firmado · Inicio del plan de tratamiento")
-  expect(first.signer).toBe("Ana Torres · Cirujano dentista · COP 12345")
+  expect(first.signer).toBe("Ana Torres, Cirujano dentista, COP 12345")
 
   // Una hoja, con su título; el QR lo reconoce por su huella.
   const pdf = await PDFDocument.load(first.bytes)
@@ -219,25 +219,33 @@ it("la copia lleva cada odontograma firmado con su momento y el de hoy, sin firm
   expect(signedPaper).toMatchObject({
     id: assessmentId,
     fileName: `Odontograma firmado - Inicio del plan (${assessmentId.slice(0, 8)}).pdf`,
-    signer: "Ana Torres · Cirujano dentista · COP 12345",
+    signer: "Ana Torres, Cirujano dentista, COP 12345",
+    size: null,
   })
-  // El firmado es el papel guardado; el de hoy no se guarda: su huella es la de lo que se dibujó.
+  // Listarlos no dibuja ni guarda nada: lo hace `render`, recién al armar el ZIP.
+  expect(puts()).toBe(0)
+  expect(await storedPapers(f.orgId, assessmentId)).toEqual([])
+  // El firmado es el papel guardado; el de hoy no se guarda.
+  const signedBytes = await f.run((tx) => signedPaper!.render(tx))
   const [row] = await storedPapers(f.orgId, assessmentId)
-  expect(signedPaper!.sha256).toBe(row!.sha256)
+  expect(sha(signedBytes)).toBe(row!.sha256)
   expect(puts()).toBe(1)
-  expect(today).toMatchObject({ id: `hoy-${f.patientId}`, signer: null })
+  expect(today).toMatchObject({ id: `hoy-${f.patientId}`, signer: null, size: null })
   expect(today!.fileName).toMatch(/^Odontograma de hoy - sin firmar \(\d{4}-\d{2}-\d{2}\)\.pdf$/)
-  expect(today!.sha256).toBe(sha(today!.bytes))
-  expect((await PDFDocument.load(today!.bytes)).getTitle()).toBe("Odontograma sin firmar")
+  const todayBytes = await f.run((tx) => today!.render(tx))
+  expect((await PDFDocument.load(todayBytes)).getTitle()).toBe("Odontograma sin firmar")
+  expect(puts()).toBe(1)
 
-  // Pedirla otra vez no vuelve a guardar el firmado.
-  await f.run(async (tx) =>
+  // Pedirlos otra vez dice cuánto pesa lo guardado, y dibujarlo no lo vuelve a guardar.
+  const again = await f.run(async (tx) =>
     (await productHooks(tx, f.orgId)).recordPapers!(
       tx,
       { orgId: f.orgId, patientId: f.patientId },
       storage,
     ),
   )
+  expect(again[0]!.size).toBe(row!.sizeBytes)
+  expect(sha(await f.run((tx) => again[0]!.render(tx)))).toBe(row!.sha256)
   expect(puts()).toBe(1)
 })
 
@@ -265,5 +273,6 @@ it("fuera de Perú no hay firmados: solo el de hoy en la hoja neutra, si tiene h
   expect(papers.map((paper) => [paper.kind, paper.mark])).toEqual([
     ["odontogram_today", "sin firmar"],
   ])
-  expect((await PDFDocument.load(papers[0]!.bytes)).getTitle()).toBe("Odontograma sin firmar")
+  const bytes = await f.run((tx) => papers[0]!.render(tx))
+  expect((await PDFDocument.load(bytes)).getTitle()).toBe("Odontograma sin firmar")
 })

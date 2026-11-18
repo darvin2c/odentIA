@@ -237,13 +237,18 @@ export interface RecordPaper {
   at: Date
   /** Nombre dentro del ZIP, sin carpeta: «Odontograma firmado - Inicio del plan (1a2b3c4d).pdf». */
   fileName: string
-  bytes: Uint8Array
   /** «sin firmar» para el de hoy; null si es un papel firmado vigente. */
   mark: string | null
-  /** Quién lo firmó, con su título y colegiatura, para el PDF de lectura. */
+  /** Quién lo firmó, con su título y colegiatura (`signerWords`), para el PDF de lectura. */
   signer: string | null
-  /** SHA-256 en hex del PDF guardado (el del papel emitido). */
-  sha256: string
+  /** Cuánto pesa lo ya guardado (`issued_paper.size_bytes`); null si no se guardó todavía o no se guarda. */
+  size: number | null
+  /**
+   * Su PDF, dibujado o leído recién al armar el ZIP, en el punto de guardado de la copia: contar lo
+   * que trae (la pantalla, la página del enlace) no dibuja ni guarda nada. Puede fallar (huella que
+   * no coincide, almacenamiento caído): la copia lo nombra en «No se pudo incluir».
+   */
+  render(tx: Db): Promise<Uint8Array>
 }
 
 /** Qué hechos de la historia se piden: tipos, si van fuera de su atención y la pieza o sitio. */

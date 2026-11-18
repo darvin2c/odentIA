@@ -843,10 +843,19 @@ export const patientDataRequest = pgTable(
     copyUntil: timestamp("copy_until", { withTimezone: true }),
     /** Documentos mal escritos al bajarla: con el tope, el enlace deja de servir para la copia. */
     copyFailedAttempts: smallint("copy_failed_attempts").notNull().default(0),
+    /**
+     * La huella (SHA-256) del token de un solo propósito que viaja solo dentro del PDF enviado:
+     * no es «Su enlace» ni lo devuelve ninguna ruta del equipo. Cada envío pone uno nuevo y el
+     * anterior deja de servir; vence con `copy_until`.
+     */
+    copyTokenHash: text("copy_token_hash"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("patient_data_request_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("patient_data_request_copy_token_uidx")
+      .on(table.organizationId, table.copyTokenHash)
+      .where(sql`${table.copyTokenHash} IS NOT NULL`),
     foreignKey({
       name: "patient_data_request_requester_fk",
       columns: [table.organizationId, table.patientId, table.requesterContactId],

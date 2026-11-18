@@ -20,10 +20,10 @@ import {
   issueFields,
   listBookingLinkProfessionals,
   listBookingLinkSlots,
-  recordRecordCopyFailure,
   registerFromBookingLink,
   resendPersonalLink,
   reservePersonalLink,
+  reserveRecordCopyAttempt,
   ServiceError,
   type Storage,
   setPersonalLinkMessages,
@@ -452,21 +452,21 @@ export function createPublicBookingRoute(deps: {
     return answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyView(tx, orgId, query.data.token, { storage })))
   })
 
-  // Un documento mal escrito se anota después del rollback, como el PIN del portal: con el tope, el
-  // enlace deja de servir para la copia.
-  const countingFailure = <T>(c: Context, linkToken: string, run: () => Promise<T>) =>
-    run().catch(async (error: unknown) => {
-      if (error instanceof ServiceError && error.code === "RECORD_COPY_DOCUMENT")
-        await inOrg(c, (tx, orgId) => recordRecordCopyFailure(tx, orgId, linkToken))
-      throw error
-    })
+  // Cada intento con su documento se cuenta antes de comparar, en su propia transacción ya
+  // confirmada (como el PIN del portal): muchas peticiones a la vez no prueban más que el tope.
+  // Si el documento coincide, la operación lo devuelve.
+  const withAttempt = async <T>(c: Context, linkToken: string, run: () => Promise<T>) => {
+    await inOrg(c, (tx, orgId) => reserveRecordCopyAttempt(tx, orgId, linkToken))
+    return run()
+  }
 
-  // «Descargar», antes de bajar: si el documento no es el suyo se dice en su campo, sin bajar nada.
+  // «Descargar», antes de bajar: si el documento no es el suyo o ya no le quedan descargas, se
+  // dice en la página (el formulario del navegador no mostraría bien un rechazo), sin bajar nada.
   app.post("/:slug/copy/check", async (c) => {
     const body = copyBody.safeParse(await bodyOf(c))
     if (!body.success) return unavailable(c)
     return answer(c, 200, () =>
-      countingFailure(c, body.data.token, () =>
+      withAttempt(c, body.data.token, () =>
         inOrg(c, (tx, orgId) => checkRecordCopyDocument(tx, orgId, body.data.token, body.data.docNumber)),
       ),
     )
@@ -484,7 +484,7 @@ export function createPublicBookingRoute(deps: {
     const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
     let copy: Awaited<ReturnType<typeof startRecordCopyDownload>>
     try {
-      copy = await countingFailure(c, body.data.token, () =>
+      copy = await withAttempt(c, body.data.token, () =>
         inOrg(c, (tx, orgId) =>
           startRecordCopyDownload(tx, orgId, body.data.token, { docNumber: body.data.docNumber }, evidence, { storage }),
         ),

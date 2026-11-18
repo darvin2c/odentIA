@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import {
   CORE_VITAL_KEYS,
   DENTAL_IMAGING_TYPES,
@@ -14,6 +13,7 @@ import {
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { issuedPaper } from "@odentia/db/schema/clinical-forms"
 import {
   dentalTemplateRule,
   odontogramAssessment,
@@ -33,6 +33,8 @@ import {
   phaseForKind,
   type SameFaceFinding,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
+  SIGNED_ODONTOGRAM_PURPOSE_SHORT,
+  type SignedOdontogramPurpose,
   TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
 } from "@odentia/dental"
@@ -60,7 +62,12 @@ import {
   odontogramLines,
   signClosingOdontogram,
 } from "./odontogram.js"
-import { signedOdontogramPaper, todayOdontogramPaper } from "./odontogram-pdf.js"
+import {
+  odontogramSignerWords,
+  signedOdontogramLabel,
+  signedOdontogramPaper,
+  todayOdontogramPaper,
+} from "./odontogram-pdf.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import {
   correctionFindings,
@@ -352,35 +359,52 @@ export const dentalHooks: ProductHooks = {
   // Fuera de Perú no se firma: solo va el de hoy, en la hoja neutra, si tiene hallazgos.
   async recordPapers(tx, { orgId, patientId }, storage) {
     const signed = (await listOdontogramAssessments(tx, orgId, patientId)).reverse()
-    const papers: RecordPaper[] = []
-    for (const row of signed) {
-      const paper = await signedOdontogramPaper(tx, orgId, patientId, row.id, storage)
-      papers.push({
+    // Lo ya guardado dice cuánto pesa: contar lo que trae la copia no dibuja ni guarda nada.
+    const stored = signed.length
+      ? await tx
+          .select({ id: issuedPaper.documentId, size: issuedPaper.sizeBytes })
+          .from(issuedPaper)
+          .where(
+            and(
+              eq(issuedPaper.organizationId, orgId),
+              eq(issuedPaper.documentType, "signed_odontogram"),
+              inArray(
+                issuedPaper.documentId,
+                signed.map((row) => row.id),
+              ),
+            ),
+          )
+      : []
+    const sizes = new Map(stored.map((row) => [row.id, row.size]))
+    const papers: RecordPaper[] = signed.map((row) => {
+      const purpose = row.purpose as SignedOdontogramPurpose
+      return {
         kind: "signed_odontogram",
         id: row.id,
-        label: paper.label,
+        label: signedOdontogramLabel(purpose),
         at: new Date(row.createdAt),
-        fileName: `Odontograma firmado - ${paper.short} (${row.id.slice(0, 8)}).pdf`,
-        bytes: paper.bytes,
+        fileName: `Odontograma firmado - ${SIGNED_ODONTOGRAM_PURPOSE_SHORT[purpose]} (${row.id.slice(0, 8)}).pdf`,
         mark: null,
-        signer: paper.signer || null,
-        sha256: createHash("sha256").update(paper.bytes).digest("hex"),
-      })
-    }
+        signer: odontogramSignerWords(row),
+        size: sizes.get(row.id) ?? null,
+        // El papel emitido (con su huella): se lee, o se dibuja y se guarda la primera vez.
+        render: async (sp) =>
+          (await signedOdontogramPaper(sp, orgId, patientId, row.id, storage, { viewing: true })).bytes,
+      }
+    })
     const today = await todayOdontogramPaper(tx, orgId, patientId, { always: signed.length > 0 })
-    if (today) {
+    if (today)
       papers.push({
         kind: "odontogram_today",
         id: `hoy-${patientId}`,
         label: `Odontograma · Estado al ${today.dayWords}`,
         at: today.at,
         fileName: `Odontograma de hoy - sin firmar (${today.isoDay}).pdf`,
-        bytes: today.bytes,
         mark: "sin firmar",
         signer: null,
-        sha256: createHash("sha256").update(today.bytes).digest("hex"),
+        size: null,
+        render: () => today.render(),
       })
-    }
     return papers
   },
 

@@ -37,7 +37,6 @@ export function siteColumns(site: Partial<DentalSite> | null | undefined): SiteC
   return { siteSystem: body.system, siteCode: body.code, siteQualifiers: [...body.qualifiers] }
 }
 
-/** Columnas del sitio común → pieza, caras, cuadrante y arcada. */
 /**
  * La pieza como código de HL7 FHIR R4 (`http://terminology.hl7.org/CodeSystem/ex-tooth`, el
  * sistema de ejemplo de `valueset-tooth.html`, que es la numeración FDI de ISO 3950). Solo trae
@@ -64,6 +63,7 @@ export function surfaceWords(surfaces: readonly string[]): string {
   return surfaces.map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")
 }
 
+/** Columnas del sitio común → pieza, caras, cuadrante y arcada. */
 export function dentalSiteOfRow(row: SiteColumns): DentalSite {
   return dentalSiteOf({
     system: row.siteSystem,

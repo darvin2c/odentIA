@@ -45,7 +45,6 @@ import {
   patientCharge,
   patientCondition,
   patientContact,
-  patientDataRequest,
   patientDocument,
   patientDocumentContext,
   patientHealthDeclaration,
@@ -155,7 +154,6 @@ import { eraseForDataRequest } from "../data-erasure.js"
 import {
   addCalendarDays,
   createDataRequest,
-  RECORD_COPY_DAYS,
   respondDataRequest,
   verifyDataRequest,
 } from "../data-requests.js"
@@ -219,6 +217,7 @@ import { secretsKeyFromEnv } from "../secrets.js"
 import { configureDocumentChecks } from "../document-check.js"
 import { configureDocumentLogos } from "../document-clinic.js"
 import { configurePublicLinks } from "../public-links.js"
+import { issueRecordCopyLink } from "../record-copy-link.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
 import { seedAdminArm } from "../seed-admin-arm.js"
 import { seedAdminOrganizations } from "../seed-admin-organizations.js"
@@ -4001,13 +4000,13 @@ await withOrgContext(db, ORG_A, async (tx) => {
   await respondDataRequest(tx, ORG_A, ANA_ID, carlosPatientId, copy.id, {
     resolution: "Se le envió por WhatsApp el PDF de su historia, con el enlace para bajar la copia completa.",
   })
-  // Su enlace de siempre, renovado como al enviarla: el pedido dice hasta cuándo sirve la copia.
-  await issuePersonalLink(tx, ORG_A, { contactId: carlosContactId, patientId: carlosPatientId, createdBy: ANA_ID }, { secretsKey })
-  const sentAt = new Date(Date.now() - 86_400_000)
-  await tx
-    .update(patientDataRequest)
-    .set({ copyUntil: new Date(sentAt.getTime() + RECORD_COPY_DAYS * 86_400_000) })
-    .where(and(eq(patientDataRequest.organizationId, ORG_A), eq(patientDataRequest.id, copy.id)))
+  // Su enlace propio, el que viajó dentro del PDF (no «Su enlace»), vigente hasta el final del día del envío + 7.
+  // Necesita la dirección pública de la clínica, como el QR de los papeles.
+  if (process.env.WEB_URL && process.env.COOKIE_DOMAIN)
+    configurePublicLinks({ webURL: process.env.WEB_URL, cookieDomain: process.env.COOKIE_DOMAIN })
+  const link = await issueRecordCopyLink(tx, ORG_A, { requestId: copy.id })
+  configurePublicLinks(null)
+  if (link) console.log(`copia de Carlos Paredes (demo, DNI 45678903): ${link.url}`)
   await tx.insert(patientRecordDownload).values({
     organizationId: ORG_A,
     patientId: carlosPatientId,

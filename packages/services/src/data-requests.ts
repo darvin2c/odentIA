@@ -46,10 +46,10 @@ export const DATA_REQUEST_DAYS = 10
 export const DATA_REQUEST_WARN_DAYS = 3
 
 /**
- * La copia enviada (mesa del 18 nov): su PDF lleva en la primera página «Su
- * enlace» con `abre=copia`, que sirve para bajar la copia completa estos días
- * desde el último envío, hasta estas veces, y deja de servir con estos
- * documentos mal escritos (como el PIN del portal).
+ * La copia enviada (mesa del 18 nov): su PDF lleva en la primera página un
+ * enlace con token propio (`record-copy-link.ts`) que sirve para bajar la copia
+ * completa hasta el final del día del envío más estos días, hasta estas veces, y
+ * deja de servir con estos documentos mal escritos (como el PIN del portal).
  */
 export const RECORD_COPY_DAYS = 7
 export const RECORD_COPY_DOWNLOADS = 5

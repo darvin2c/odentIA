@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vitest"
 const DOC = "45678903"
 const calls = {
   view: 0,
-  failures: 0,
+  attempts: 0,
+  exhausted: false,
   downloads: [] as Array<{ docNumber: string; ip: string | null | undefined }>,
 }
 vi.mock("@odentia/services", async (original) => ({
@@ -29,8 +30,10 @@ vi.mock("@odentia/services", async (original) => ({
       })
     return { ok: true }
   },
-  recordRecordCopyFailure: async () => {
-    calls.failures++
+  reserveRecordCopyAttempt: async () => {
+    if (calls.exhausted)
+      throw new ServiceError("RECORD_COPY_LIMIT", 409, "Ya la bajaste 5 veces con este enlace.")
+    calls.attempts++
   },
   startRecordCopyDownload: async (
     _tx: Db,
@@ -105,9 +108,9 @@ describe("«Copia de tu historia» por su enlace", () => {
     expect(b!.error).toMatchObject({ code: "NOT_FOUND", message: "Enlace no disponible" })
   })
 
-  it("un documento que no es el suyo se dice en su campo y se cuenta, como el PIN del portal", async () => {
+  it("cada intento se cuenta antes de comparar, como el PIN del portal; uno que no es el suyo se dice en su campo", async () => {
     const route = app("203.0.113.41")
-    calls.failures = 0
+    calls.attempts = 0
     const wrong = await route.request("/clinica/copy/check", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -117,14 +120,26 @@ describe("«Copia de tu historia» por su enlace", () => {
     expect(
       ((await wrong.json()) as { error: { fields: Record<string, string> } }).error.fields,
     ).toHaveProperty("docNumber")
-    expect(calls.failures).toBe(1)
+    expect(calls.attempts).toBe(1)
     const right = await route.request("/clinica/copy/check", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: TOKEN, docNumber: DOC }),
     })
     expect(right.status).toBe(200)
-    expect(calls.failures).toBe(1)
+    expect(calls.attempts).toBe(2)
+    // Agotadas las descargas, la comprobación lo dice (la página lo muestra) sin abrir la descarga.
+    calls.exhausted = true
+    const done = await route.request("/clinica/copy/check", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: TOKEN, docNumber: DOC }),
+    })
+    expect(done.status).toBe(409)
+    expect(((await done.json()) as { error: { code: string } }).error.code).toBe(
+      "RECORD_COPY_LIMIT",
+    )
+    calls.exhausted = false
   })
 
   it("«Descargar» llega como formulario del navegador y baja el ZIP en streaming, con el token en el cuerpo", async () => {
@@ -141,15 +156,15 @@ describe("«Copia de tu historia» por su enlace", () => {
     const bytes = new Uint8Array(await zip.arrayBuffer())
     expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
     expect(calls.downloads).toEqual([{ docNumber: DOC, ip: "203.0.113.42" }])
-    // Con otro documento no baja nada y se cuenta el intento.
-    calls.failures = 0
+    // Con otro documento no baja nada y el intento queda contado.
+    calls.attempts = 0
     const wrong = await route.request("/clinica/copy/download", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ token: TOKEN, docNumber: "999" }).toString(),
     })
     expect(wrong.status).toBe(400)
-    expect(calls.failures).toBe(1)
+    expect(calls.attempts).toBe(1)
     expect(calls.downloads).toHaveLength(1)
   })
 })

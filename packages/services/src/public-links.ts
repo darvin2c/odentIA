@@ -82,10 +82,9 @@ export function panelOrigin(product: ClinicalProduct = BASE_PRODUCT, config: Pub
  * Lo que abre directo un enlace (entrega 2, «Un enlace por cosa»): el destino va en la
  * dirección y no en la base, porque el token es uno por persona y paciente y cada envío
  * lo renueva. `firma` y `presupuesto` abren el que se envió (`id` en la dirección escrita) o,
- * sin `id` (el botón fijo de una plantilla), el último enviado. `copia` es la copia de su
- * historia, que viaja dentro del PDF que se le envía (`record-copy-link.ts`).
+ * sin `id` (el botón fijo de una plantilla), el último enviado.
  */
-export const PERSONAL_LINK_OPENS = ["firma", "presupuesto", "cita", "datos", "mensajes", "copia"] as const
+export const PERSONAL_LINK_OPENS = ["firma", "presupuesto", "cita", "datos", "mensajes"] as const
 export type PersonalLinkOpens = (typeof PERSONAL_LINK_OPENS)[number]
 
 /**

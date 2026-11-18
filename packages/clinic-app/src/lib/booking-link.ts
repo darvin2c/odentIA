@@ -525,6 +525,8 @@ export function signLinkConsent(
 export interface RecordCopyView {
   clinicName: string
   locale: string
+  /** La zona de la clínica: «hasta el 25 de noviembre» se dice como ella. */
+  timezone: string
   countryCode: string | null
   firstName: string | null
   /** El del paciente si quien la abre decide por él: «La historia de Mateo». */

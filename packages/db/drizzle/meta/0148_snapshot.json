@@ -1,5 +1,5 @@
 {
-  "id": "9cf40fdf-5f1a-441c-a3a5-509ebfd024c4",
+  "id": "aa6503ee-876c-4f65-a3aa-903ce728321d",
   "prevId": "63e99339-8f2d-4ccc-97bf-a207023f0173",
   "version": "7",
   "dialect": "postgresql",
@@ -22441,6 +22441,12 @@
           "notNull": true,
           "default": 0
         },
+        "copy_token_hash": {
+          "name": "copy_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -22474,6 +22480,28 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "patient_data_request_copy_token_uidx": {
+          "name": "patient_data_request_copy_token_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "copy_token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"patient_data_request\".\"copy_token_hash\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -15,7 +15,14 @@
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { withOrgContext } from "@odentia/db"
-import { patient, patientAllergy, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
+import {
+  patient,
+  patientAllergy,
+  patientDocument,
+  prescription,
+  serviceCatalog,
+} from "@odentia/db/schema/clinical"
+import { issuedPaper } from "@odentia/db/schema/clinical-forms"
 import { Ajv } from "ajv"
 import { eq } from "drizzle-orm"
 import { strFromU8, unzipSync } from "fflate"
@@ -38,6 +45,7 @@ import {
   patientRecordSummary,
   RECORD_README,
 } from "../patient-record.js"
+import { clinicIsoDay } from "../patient-record-copy.js"
 import { type FhirResource, relativeResources } from "../patient-record-test-kit.js"
 import { cancelPrescription, createPrescription } from "../prescriptions.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
@@ -423,8 +431,13 @@ it("FHIR: el paquete de un caso completo pasa el esquema JSON oficial de HL7 FHI
     }),
   )
   // Una alergia con su criticidad anotada (la columna de la ficha; el alta de hoy no la pide).
-  const latex = await run((tx) => addPatientAllergy(tx, ...f.args, { substance: "Látex", severity: "moderada" }))
-  await ownerDb.update(patientAllergy).set({ criticality: "alta" }).where(eq(patientAllergy.id, latex.id))
+  const latex = await run((tx) =>
+    addPatientAllergy(tx, ...f.args, { substance: "Látex", severity: "moderada" }),
+  )
+  await ownerDb
+    .update(patientAllergy)
+    .set({ criticality: "alta" })
+    .where(eq(patientAllergy.id, latex.id))
   await readyToClose(ORG, f.actor, f.patient.id, f.encounter.id)
   await run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
 
@@ -499,10 +512,14 @@ it("FHIR: el paquete de un caso completo pasa el esquema JSON oficial de HL7 FHI
   const allergies = bundle.entry
     .filter((item) => item.resource.resourceType === "AllergyIntolerance")
     .map((item) => item.resource)
-  const penicillin = allergies.find((r) => (r.code as { text?: string }).text?.startsWith("Penicilinas"))
+  const penicillin = allergies.find((r) =>
+    (r.code as { text?: string }).text?.startsWith("Penicilinas"),
+  )
   expect(penicillin).toBeDefined()
   expect(penicillin).not.toHaveProperty("criticality")
-  expect(allergies.find((r) => (r.code as { text?: string }).text === "Látex")).toMatchObject({ criticality: "high" })
+  expect(allergies.find((r) => (r.code as { text?: string }).text === "Látex")).toMatchObject({
+    criticality: "high",
+  })
   // El odontograma por pieza, con la pieza en FDI (`ex-tooth`).
   const tooth = bundle.entry.find(
     (item) =>
@@ -539,4 +556,71 @@ it("FHIR: el paquete de un caso completo pasa el esquema JSON oficial de HL7 FHI
     )
   expect(urls.length).toBeGreaterThan(0)
   expect(urls.filter((url) => !names.has(url))).toEqual([])
+})
+
+it("un odontograma firmado que no se puede leer no tumba la copia, y contar lo que trae no dibuja ni guarda nada", async () => {
+  const f = await clinicalFixture()
+  await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, {
+      toothNumber: 16,
+      condition: "caries",
+      surfaces: ["occlusal"],
+      details: { variant: "dentin" },
+      encounterId: f.encounter.id,
+    }),
+  )
+  await f.ready(f.encounter.id)
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const assessmentId = (closed.odontogram as { id: string }).id
+  const papersOf = () =>
+    ownerDb.select().from(issuedPaper).where(eq(issuedPaper.patientId, f.patient.id))
+  let puts = 0
+  const counting = {
+    putPatientDocument: async () => {
+      puts += 1
+      return { objectKey: "x.pdf", mimeType: "application/pdf", filename: "x.pdf", size: 1 }
+    },
+  }
+  // Mirar (la pantalla, la página del enlace) no dibuja ni guarda ningún papel.
+  const before = (await papersOf()).length
+  const summary = await f.run((tx) =>
+    patientRecordSummary(tx, ORG, f.patient.id, { storage: counting }),
+  )
+  expect(summary.signedOdontograms).toBe(1)
+  expect(puts).toBe(0)
+  expect((await papersOf()).length).toBe(before)
+
+  // Su papel guardado no coincide con su huella: la copia sale igual y el LÉEME lo nombra.
+  await ownerDb.insert(issuedPaper).values({
+    organizationId: ORG,
+    patientId: f.patient.id,
+    documentType: "signed_odontogram",
+    documentId: assessmentId,
+    storageKey: "org_a/alterado.pdf",
+    sha256: "0".repeat(64),
+    sizeBytes: 10,
+    patientInitials: "P. d.",
+  })
+  const altered = { getAttachment: async () => new TextEncoder().encode("otro archivo") }
+  const copy = await f.run((tx) =>
+    buildPatientRecordCopy(tx, ORG, f.patient.id, { storage: altered }),
+  )
+  expect(copy.entries.some((item) => item.name.startsWith("papeles/Odontograma firmado"))).toBe(
+    false,
+  )
+  expect(copy.entries.some((item) => item.name.startsWith("papeles/Odontograma de hoy"))).toBe(true)
+  expect(copy.summary.signedOdontograms).toBe(0)
+  expect(readme(copy)).toMatch(
+    /- Odontograma firmado · [^\r\n]+: no se pudo leer su PDF guardado; pídelo en la clínica\./,
+  )
+})
+
+it("los nombres de los papeles llevan el día de la clínica, no el de UTC", async () => {
+  // Las 21:30 del 17 en Lima son las 02:30 del 18 en UTC: el papel es del 17.
+  expect(clinicIsoDay(new Date("2026-11-18T02:30:00Z"), "America/Lima")).toBe("2026-11-17")
+  const { f, rx } = await rosa()
+  const copy = await f.run((tx) => buildPatientRecordCopy(tx, ORG, f.patient.id, DEPS))
+  const [row] = await ownerDb.select().from(prescription).where(eq(prescription.id, rx.id))
+  const name = copy.entries.find((item) => item.name.startsWith("papeles/Receta"))?.name
+  expect(name).toContain(` - ${clinicIsoDay(row!.issuedAt, "America/Lima")} (anulada)`)
 })

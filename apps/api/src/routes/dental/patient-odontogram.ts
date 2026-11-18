@@ -5,7 +5,6 @@ import {
   createOdontogramAssessment,
   getOdontogram,
   getOdontogramPrint,
-  getSignedOdontogramPrint,
   getToothHistory,
   keepSignedOdontogramPaper,
   listOdontogramAssessments,
@@ -200,17 +199,6 @@ export function createPatientOdontogramRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listOdontogramAssessments(tx, orgId, c.req.param("id")),
-      ),
-    )
-  })
-  // Un odontograma firmado para ver e imprimir (gráfico de la norma, en negro).
-  app.get("/:id/odontogram/assessments/:assessmentId/print", async (c) => {
-    const { orgId } = orgContextOf(c)
-    const assessmentId = z.uuid().safeParse(c.req.param("assessmentId"))
-    if (!assessmentId.success) return validationError(c, assessmentId.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getSignedOdontogramPrint(tx, orgId, c.req.param("id"), assessmentId.data),
       ),
     )
   })

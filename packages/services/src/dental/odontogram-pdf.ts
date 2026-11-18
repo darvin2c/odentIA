@@ -15,7 +15,7 @@
  * El gráfico sale de `@odentia/dental/odontogram-sheet`, el mismo que dibuja la pantalla.
  */
 import type { Db } from "@odentia/db"
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, signerWords } from "@odentia/clinical"
 import {
   conditionLabel,
   FDI_ADULT_ROWS,
@@ -57,6 +57,7 @@ import {
 } from "../document-kit.js"
 import { loadDocumentClinic } from "../document-clinic.js"
 import { issuedPaperBytes, type PaperStorage } from "../issued-papers.js"
+import { findOrgLocale } from "../locale.js"
 import { getOdontogramPrint, getSignedOdontogramPrint } from "./odontogram.js"
 import { orgDentalProfile } from "./profile.js"
 
@@ -488,10 +489,9 @@ export async function signedOdontogramPaper(
     assessment,
     label: signedOdontogramLabel(purpose),
     // Neutro, como los demás papeles: el momento no dice nada clínico.
-    filename: `Odontograma-firmado-${new Date(assessment.createdAt).toISOString().slice(0, 10)}.pdf`,
-    signer: [assessment.examinerName, assessment.examinerTitle, assessment.registrationNumber]
-      .filter(Boolean)
-      .join(" · "),
+    // El día de la firma en la zona de la clínica, no en UTC: firmado a las 21:00 en Lima es ese día.
+    filename: `Odontograma-firmado-${await clinicDayOf(tx, orgId, new Date(assessment.createdAt))}.pdf`,
+    signer: odontogramSignerWords(assessment) ?? "",
     short: SIGNED_ODONTOGRAM_PURPOSE_SHORT[purpose],
   }
 }
@@ -530,6 +530,21 @@ export async function keepSignedOdontogramPaper(input: {
   clearTimeout(timer)
 }
 
+/** El día (AAAA-MM-DD) de un instante en la zona de la clínica. */
+export async function clinicDayOf(tx: Db, orgId: string, at: Date): Promise<string> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(at)
+}
+
+/** Quién firmó un odontograma, con su título y colegiatura, como todo papel firmado (`signerWords`). */
+export function odontogramSignerWords(row: {
+  examinerName: string | null
+  examinerTitle: string | null
+  registrationNumber: string | null
+}): string | null {
+  return signerWords({ name: row.examinerName, title: row.examinerTitle, registration: row.registrationNumber })
+}
+
 /**
  * El odontograma de hoy, sin firmar y sin guardar: lo vigente ahora. En Perú, con el
  * gráfico de la norma; fuera, la hoja neutra. Sin hallazgos es null, salvo con `always`
@@ -553,14 +568,15 @@ export async function todayOdontogramPaper(
     docNumber: print.patient.docNumber,
   }
   const context: PaperContext = { clinic: await loadDocumentClinic(tx, orgId), checkUrl: null }
-  const bytes = official
-    ? await renderNormOdontogramPdf(
-        { person, entries, standard: official.standard, purpose: null, at, signer: null },
-        context,
-      )
-    : await renderNeutralOdontogramPdf({ person, entries, at }, context)
   return {
-    bytes,
+    /** Se dibuja recién cuando se pide: contar lo que trae la copia no lo dibuja. */
+    render: () =>
+      official
+        ? renderNormOdontogramPdf(
+            { person, entries, standard: official.standard, purpose: null, at, signer: null },
+            context,
+          )
+        : renderNeutralOdontogramPdf({ person, entries, at }, context),
     at,
     /** «18 de noviembre de 2026» y «2026-11-18», en el día de la clínica. */
     dayWords: dayWords(at, context.clinic),

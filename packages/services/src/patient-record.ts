@@ -17,11 +17,13 @@
 import { createHash } from "node:crypto"
 import {
   allergiesSaidUnknownOf,
+  asaLabel,
   medicationAlertWords,
   planItemStateText,
   postalAddressText,
   sessionWords,
   showsSession,
+  signerWords,
   type PregnancyToday,
 } from "@odentia/clinical"
 import {
@@ -1142,24 +1144,6 @@ const RELATION_WORDS: Record<string, string> = {
   other: "otra persona",
 }
 
-/**
- * La ASA en palabras, las mismas de la ficha (`asaLabel` de la pantalla): ASA Physical Status
- * Classification System de la American Society of Anesthesiologists.
- */
-const ASA_WORDS: Record<string, string> = {
-  I: "ASA I · sano",
-  II: "ASA II · enfermedad sistémica leve",
-  III: "ASA III · enfermedad sistémica grave",
-  IV: "ASA IV · amenaza constante para la vida",
-  V: "ASA V · moribundo",
-  VI: "ASA VI · muerte cerebral (donante)",
-}
-
-/** «Ana Torres, Cirujano Dentista, COP 12345»: quién firmó, con lo que dice su perfil al firmar. */
-function signerWords(s: { name: string | null; title: string | null; registration: string | null }): string | null {
-  return [s.name, s.title, s.registration].filter((part) => !!part?.trim()).join(", ") || null
-}
-
 /** Quién firmó la atención y a qué hora; sin colegiatura, su motivo escrito (ADR 0200). */
 function encounterSignerWords(row: PatientRecord["encounters"][number]["row"], zone: Zone): string {
   const who = signerWords({ name: row.signerName, title: row.signerTitle, registration: row.signerRegistration }) ?? "el equipo"
@@ -1388,7 +1372,7 @@ function beforeCareLines(record: PatientRecord, zone: Zone): string[] {
     lines.push(`${MEDICATION_CLASSES[item.group].label}: ${MEDICINE_CLASS_WORDS[item.answer]}${item.said ? " · lo dijo la persona" : ""}`)
   if (record.asa)
     lines.push(
-      `Riesgo anestésico: ${ASA_WORDS[record.asa.value] ?? `ASA ${record.asa.value}`}${record.asa.by ? ` · la clasificó ${record.asa.by}` : ""}${record.asa.at ? ` el ${dayWords(record.asa.at, zone)}` : ""}`,
+      `Riesgo anestésico: ${asaLabel(record.asa.value) ?? `ASA ${record.asa.value}`}${record.asa.by ? ` · la clasificó ${record.asa.by}` : ""}${record.asa.at ? ` el ${dayWords(record.asa.at, zone)}` : ""}`,
     )
   const pregnancy = record.pregnancy
   if (pregnancy)
@@ -2665,7 +2649,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     // Las notas clínicas de la atención: en R4 no hay un recurso de nota suelta; va como
     // Observation con el código LOINC de la nota de evolución (11506-3, «Progress note»).
     for (const note of record.clinicalNotes.filter((n) => n.encounterId === row.id))
-      resources.push(clinicalNoteObservation(note, patientRef, encounterRef))
+      resources.push(clinicalNoteObservation(note, patientRef, encounterRef, observationStatus))
     for (const d of diagnoses)
       resources.push({
         resourceType: "Condition",
@@ -3179,7 +3163,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     })
   // Las notas sueltas, como las de una atención.
   for (const note of record.clinicalNotes.filter((n) => !n.encounterId))
-    resources.push(clinicalNoteObservation(note, patientRef, null))
+    resources.push(clinicalNoteObservation(note, patientRef, null, "final"))
   // Lo del producto (odentIA: cada pieza del odontograma y cada periodontograma).
   for (const product of record.productSections) resources.push(...((product.fhir ?? []) as Resource[]))
   // R4 pide que `fullUrl` sea una dirección absoluta, y un `urn:uuid` lleva un UUID: el id que no lo
@@ -3238,16 +3222,21 @@ function paperAttachment(paper: RecordPaperEntry): Record<string, unknown> {
   }
 }
 
-/** Una nota clínica como Observation (LOINC 11506-3, nota de evolución), con quien la escribió. */
+/**
+ * Una nota clínica como Observation (LOINC 11506-3, nota de evolución), con quien la escribió. Su
+ * estado es el de su atención, como lo demás observado en ella: de una atención anulada ya no vale
+ * (`entered-in-error`); de un borrador, `preliminary`.
+ */
 function clinicalNoteObservation(
   note: PatientRecord["clinicalNotes"][number],
   patientRef: { reference: string },
   encounterRef: { reference: string } | null,
+  status: string,
 ): Resource {
   return {
     resourceType: "Observation",
     id: note.id,
-    status: "final",
+    status,
     code: { coding: [{ system: FHIR_LOINC_SYSTEM, code: "11506-3", display: "Progress note" }], text: "Nota clínica" },
     subject: patientRef,
     ...(encounterRef ? { encounter: encounterRef } : {}),
@@ -3523,12 +3512,8 @@ export async function sendPatientRecordCopy(
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
     throw validation("La copia se envía por WhatsApp o por correo")
-  const link = await issueRecordCopyLink(
-    tx,
-    orgId,
-    { requestId, contactId: recipient.contactId, patientId, actorUserId },
-    deps,
-  )
+  // Un token propio, de un solo propósito, que viaja solo dentro del PDF (no «Su enlace»).
+  const link = await issueRecordCopyLink(tx, orgId, { requestId })
   const record = await loadPatientRecord(tx, orgId, patientId)
   const pdf = await renderPatientRecordPdf(record, record.clinic, link ? { copyLink: link } : undefined)
   const { conversationId, messageId } = await deliverDocumentPdf(

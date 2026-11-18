@@ -22,15 +22,13 @@ import {
 import { sizeWords } from "../../lib/data-requests"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { useHydrated } from "../../lib/hydrated"
-import { activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
+import { setOrgLocale } from "../../lib/locale"
 
 /** «25 de noviembre», en la zona de la clínica. */
-function untilWords(at: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    day: "numeric",
-    month: "long",
-    timeZone: activeOrgTimeZone(),
-  }).format(new Date(at))
+function untilWords(at: string, locale: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", timeZone }).format(
+    new Date(at),
+  )
 }
 
 /** Vencido, quitado o que nunca existió: lo mismo, sin nada de la persona. */
@@ -103,6 +101,8 @@ function CopyScreen({
   onDownloaded: () => void
 }) {
   const [started, setStarted] = useState(false)
+  // Se agotaron las descargas mientras la página estaba abierta: se dice, no un error suelto.
+  const [exhausted, setExhausted] = useState(false)
   const theirs = view.patientFirstName
   const title = theirs ? `La historia de ${theirs}` : "Tu historia completa"
   const size = sizeWords(view.approxBytes)
@@ -123,7 +123,15 @@ function CopyScreen({
     onSubmit: async ({ value }) => {
       const docNumber = value.docNumber.trim()
       // Primero se comprueba: si no es el suyo, se dice en su campo y no se baja nada.
-      await checkRecordCopy(slug, token, docNumber)
+      try {
+        await checkRecordCopy(slug, token, docNumber)
+      } catch (error) {
+        if (error instanceof ApiError && error.shape.code === "RECORD_COPY_LIMIT") {
+          setExhausted(true)
+          return
+        }
+        throw error
+      }
       submitRecordCopyDownload(slug, token, docNumber)
       setStarted(true)
       // La descarga quedó anotada: la página cuenta las que le quedan.
@@ -152,7 +160,7 @@ function CopyScreen({
         description={`Para bajarla desde aquí necesitamos tu documento en tu ficha, y no lo tenemos. Pídela en ${view.clinicName} y te la entregamos.`}
       />
     )
-  } else if (view.downloadsLeft <= 0 && !started) {
+  } else if ((view.downloadsLeft <= 0 || exhausted) && !started) {
     body = (
       <EmptyState
         icon={Lock}
@@ -172,7 +180,7 @@ function CopyScreen({
           dentro está «LÉEME», que explica qué trae y cómo la carga otra clínica.
         </p>
         <p className="text-sm text-muted-foreground">
-          Disponible hasta el {untilWords(view.until, view.locale)}.
+          Disponible hasta el {untilWords(view.until, view.locale, view.timezone)}.
         </p>
       </div>
     )
@@ -207,7 +215,7 @@ function CopyScreen({
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">
-          Disponible hasta el {untilWords(view.until, view.locale)}.
+          Disponible hasta el {untilWords(view.until, view.locale, view.timezone)}.
           {heavy ? " Pesa bastante: mejor con wifi." : ""}
         </p>
       </form>

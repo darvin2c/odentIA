@@ -1,59 +1,80 @@
 /**
- * La copia de la historia por «Su enlace» (mesa del 18 nov, ADR 0080 y 0167): lo que
- * hace el envío. El PDF que le llega lleva en su primera página «Su enlace» con
- * `abre=copia`; con él la persona baja la copia completa (el ZIP) escribiendo su
- * documento. El enlace va dentro del PDF y nunca en el texto del mensaje: el PDF es
- * de la historia clínica y en la Bandeja solo lo abre quien atiende; el texto lo ve
- * recepción.
+ * La copia de la historia por su enlace (mesa del 18 nov, ADR 0080): lo que hace el
+ * envío. El PDF que le llega lleva en su primera página un enlace con un token propio,
+ * de un solo propósito: bajar la copia completa (el ZIP) escribiendo su documento. No es
+ * «Su enlace»: ese lo puede mostrar o copiar recepción, y este solo viaja dentro del PDF,
+ * que en la Bandeja abre únicamente quien atiende. Tampoco va en el texto del mensaje.
  *
- * Manda el pedido, no el enlace: «Su enlace» se renueva con cada mensaje, y la copia
- * sirve `RECORD_COPY_DAYS` días desde su último envío (`copy_until` del pedido).
+ * En la base queda su huella (`copy_token_hash`) y hasta cuándo sirve (`copy_until`, el
+ * final del día del envío más `RECORD_COPY_DAYS`, en la zona de la clínica). Cada envío
+ * («Enviar de nuevo» también) pone uno nuevo y el anterior deja de servir.
  */
+import { createHash, randomBytes } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { patientDataRequest } from "@odentia/db/schema/clinical"
 import { and, eq } from "drizzle-orm"
-import { issuePersonalLink } from "./booking-links.js"
-import { RECORD_COPY_DAYS } from "./data-requests.js"
+import { zonedTimeToUtc } from "./availability.js"
+import { addCalendarDays, RECORD_COPY_DAYS } from "./data-requests.js"
+import { clinicToday } from "./inventory-stock.js"
 import { findOrgLocale } from "./locale.js"
-import { clinicOriginOf, personalLinkAddress } from "./public-links.js"
+import { clinicOriginOf } from "./public-links.js"
 
 export interface RecordCopyLink {
   url: string
   until: Date
 }
 
+/** Un token de la copia: 32 bytes al azar en hexadecimal, como «Su enlace» en su forma. */
+export const RECORD_COPY_TOKEN = /^[0-9a-f]{64}$/
+
+/** La huella con que se guarda y se busca el token; el token no se guarda nunca. */
+export function recordCopyTokenHash(token: string): string {
+  return createHash("sha256").update(`copia:${token}`).digest("hex")
+}
+
+/** La página pública de la copia, de la familia de «Su enlace» (`/pendientes`), con su token. */
+export function recordCopyAddress(origin: string, token: string): string {
+  return `${origin}/pendientes?abre=copia&token=${token}`
+}
+
 /**
- * Le da a quien pidió la copia su enlace (`issuePersonalLink`, el mismo «Su enlace» de
- * siempre, renovado) y deja el pedido sirviendo la copia desde hoy. Null si la clínica
- * no tiene dirección pública o el servidor no tiene con qué firmar el enlace: entonces
- * le llega solo el PDF. Va en la transacción del envío: si el mensaje no se encola, el
- * pedido queda como estaba.
+ * El último instante del día del envío más `RECORD_COPY_DAYS`, en la zona de la clínica:
+ * «hasta el 25 de noviembre» sirve todo el 25.
+ */
+export async function recordCopyUntil(tx: Db, orgId: string): Promise<Date> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const lastDay = addCalendarDays(await clinicToday(tx, orgId), RECORD_COPY_DAYS)
+  return new Date(zonedTimeToUtc(addCalendarDays(lastDay, 1), 0, timezone).getTime() - 1)
+}
+
+/**
+ * Le da a quien pidió la copia un enlace nuevo, de un solo propósito, y deja el pedido
+ * sirviendo la copia hasta `copy_until`. Null si la clínica no tiene dirección pública:
+ * entonces le llega solo el PDF. Va en la transacción del envío: si el mensaje no se
+ * encola, el pedido queda como estaba (y el enlace anterior, si lo había, sigue).
  */
 export async function issueRecordCopyLink(
   tx: Db,
   orgId: string,
-  input: { requestId: string; contactId: string; patientId: string; actorUserId: string },
-  deps: { secretsKey?: Buffer },
+  input: { requestId: string },
 ): Promise<RecordCopyLink | null> {
-  if (!deps.secretsKey) return null
   const origin = await clinicOriginOf(tx, orgId)
   if (!origin) return null
-  const link = await issuePersonalLink(
-    tx,
-    orgId,
-    { contactId: input.contactId, patientId: input.patientId, createdBy: input.actorUserId },
-    { secretsKey: deps.secretsKey },
-  )
-  const now = new Date()
-  const until = new Date(now.getTime() + RECORD_COPY_DAYS * 86_400_000)
-  // Un envío nuevo vuelve a contar los documentos mal escritos desde cero.
+  const token = randomBytes(32).toString("hex")
+  const until = await recordCopyUntil(tx, orgId)
+  // Un envío nuevo reemplaza el token anterior y vuelve a contar los documentos mal escritos.
   await tx
     .update(patientDataRequest)
-    .set({ copyUntil: until, copyFailedAttempts: 0, updatedAt: now })
+    .set({
+      copyTokenHash: recordCopyTokenHash(token),
+      copyUntil: until,
+      copyFailedAttempts: 0,
+      updatedAt: new Date(),
+    })
     .where(
       and(eq(patientDataRequest.organizationId, orgId), eq(patientDataRequest.id, input.requestId)),
     )
-  return { url: personalLinkAddress(origin, link.token, "copia"), until }
+  return { url: recordCopyAddress(origin, token), until }
 }
 
 /** «25 de noviembre», en el idioma y la zona de la clínica. */
