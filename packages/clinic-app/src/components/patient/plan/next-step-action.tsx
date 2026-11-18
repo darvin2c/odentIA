@@ -9,6 +9,8 @@ import { Button, toast } from "@odentia/ui"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ComponentProps, useEffect, useState } from "react"
+import { type AgendaAppointment, invalidateAppointmentQueries } from "../../../lib/agenda"
+import { apiFetch } from "../../../lib/api"
 import {
   BUDGET_ANSWERABLE_STATUSES,
   budgetNumberLabel,
@@ -22,15 +24,13 @@ import {
   type SchedulableControl,
 } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
-import { type AgendaAppointment, invalidateAppointmentQueries } from "../../../lib/agenda"
-import { apiFetch } from "../../../lib/api"
 import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { errorMessage } from "../../agenda/shared"
 import { FollowUpScheduler } from "../follow-up-scheduler"
 import { FreedAppointmentButtons } from "../freed-appointments"
-import { useBudgetFormat } from "./budget-parts"
 import { BudgetNoAnswer } from "./budget-no-answer"
+import { useBudgetFormat } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 
@@ -153,6 +153,16 @@ export function NextStepButton({
         // Lo que va después de otro tratamiento, o el control que aún no se puede hacer: desde ese día.
         ...(action.date ? { date: action.date } : {}),
         ...(action.note ? { note: action.note, notBefore: action.date } : {}),
+        // La sesión siguiente, con quien hizo la anterior y en su sede, primero; se puede cambiar
+        // (mesa del 17 nov: la regla de la especialidad dejaba fuera a quien la empezó).
+        ...(action.professionalUserId
+          ? {
+              professionalUserId: action.professionalUserId,
+              ...(action.professionalName ? { professionalLabel: action.professionalName } : {}),
+              keepProfessional: true,
+            }
+          : {}),
+        ...(action.branchId ? { branchId: action.branchId } : {}),
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")

@@ -87,7 +87,6 @@ import {
   saveProfessionalProfileApi,
   takeOverEncounterApi,
   bringTreatmentApi,
-  leaveTreatmentApi,
 } from "../../lib/encounters"
 import { discardableHere } from "../../lib/encounter-discard"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
@@ -142,6 +141,7 @@ import {
   ClosingSignatureHint,
   FinalizedNextSessions,
   type ClosingValues,
+  sessionAnswersBody,
   closingControlsBody,
   continuingAfterSign,
   type DictatedControl,
@@ -171,7 +171,8 @@ import { type ClioFormProposals, ClioFormProposalsContext, type FormHint } from 
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
-import { EncounterTreatments } from "./encounter-treatments"
+import { EncounterReadDrawer } from "./encounter-read-drawer"
+import { RecorridoClinicoTab } from "./recorrido-tab"
 import { EncounterVisitStrip } from "./encounter-visit"
 import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
@@ -501,21 +502,6 @@ function resolveDiagnosesBody(
   return ids.length ? { resolveDiagnosisIds: ids } : {}
 }
 
-/**
- * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`: solo «Falta otra
- * sesión», de lo que el cierre pregunta hoy (lo que ya no está, porque se anuló
- * su sesión, no se manda). Lo demás que llega a sus previstas lo termina el
- * servidor al firmar: «Sí, terminar» es lo que viene elegido (ADR 0161).
- */
-function sessionAnswerBody(
-  answers: SessionAnswers,
-  sessions: { finishing: Array<{ planItemId: string }> } | undefined,
-): { addSessionPlanItemIds?: string[] } {
-  const asked = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
-  const addSession = Object.entries(answers).flatMap(([id, chosen]) => (chosen === "otra" && asked.has(id) ? [id] : []))
-  return addSession.length ? { addSessionPlanItemIds: addSession } : {}
-}
-
 export function EncounterEditor({
   patientId,
   detail,
@@ -680,8 +666,14 @@ export function EncounterEditor({
   const [contextOpen, setContextOpen] = useState(false)
   /** Una propuesta de diagnóstico sin tipo, usada desde la tarjeta: el bloque abre su formulario con ella. */
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
-  /** «Registrar la sesión» desde «Realizado hoy» o «Hoy viene a…»: el tratamiento con que se abre el registro. */
+  /** «Registrar» desde la fila del plan: el tratamiento con que se abre el registro. */
   const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
+  /** «Anular…» pedido desde una fila del plan: lo abre el registro, con su motivo. */
+  const [voidRequest, setVoidRequest] = useState<string | null>(null)
+  /** «Ver» un tratamiento: su recorrido al lado, sin salir de la atención (la atención agrupada, 17 nov). */
+  const [journeyItemId, setJourneyItemId] = useState<string | null>(null)
+  /** «Abrir» una sesión anterior: se lee al lado. */
+  const [readEncounter, setReadEncounter] = useState<{ id: string; title: string } | null>(null)
   /** «¿Terminaste?» del cierre: lo que se cambió de cada tratamiento de hoy (sin cambiar, se termina). */
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
   /** Los diagnósticos que el cierre proponía resolver y quien firma desmarcó. */
@@ -798,6 +790,26 @@ export function EncounterEditor({
     onSubmit: (value) => finalizeWith(value),
   })
   const closingError = useFormSubmitError(closingForm)
+  // Lo escrito en el cierre sobrevive a recargar la página (mesa del 17 nov): se guarda en este
+  // navegador hasta firmar y vuelve al abrirlo de nuevo, como el resto de la atención.
+  const closingDraftKey = `odentia:cierre:${encounterId}`
+  // biome-ignore lint/correctness/useExhaustiveDependencies: una vez por atención.
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(closingDraftKey)
+      if (saved) closingForm.reset({ ...closingForm.state.values, ...(JSON.parse(saved) as Partial<ClosingValues>) })
+    } catch {
+      // Sin almacenamiento del navegador, el cierre empieza vacío, como antes.
+    }
+    const subscription = closingForm.store.subscribe(() => {
+      try {
+        window.sessionStorage.setItem(closingDraftKey, JSON.stringify(closingForm.state.values))
+      } catch {
+        // Sin almacenamiento del navegador no se guarda: no traba el cierre.
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [closingDraftKey])
   const afterVoid = async () => {
     setVoidOpen(false)
     await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
@@ -1433,7 +1445,7 @@ export function EncounterEditor({
             ? { registrationSkipReason: value.registrationSkipReason.trim() }
             : {}),
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
-          ...sessionAnswerBody(sessionAnswers, askedSessions),
+          ...sessionAnswersBody(sessionAnswers, askedSessions),
           // Lo que lo de hoy resuelve y la pantalla mostró marcado queda resuelto; lo demás, no.
           ...resolveDiagnosesBody(closingQuery.data?.data.resolvable, askedSessions, sessionAnswers, keepDiagnoses),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
@@ -1452,6 +1464,11 @@ export function EncounterEditor({
       setSessionAnswers({})
       setKeepDiagnoses(new Set())
       closingForm.reset()
+      try {
+        window.sessionStorage.removeItem(closingDraftKey)
+      } catch {
+        // Nada que borrar.
+      }
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
@@ -1842,6 +1859,38 @@ export function EncounterEditor({
     description: "Solo lectura: se editan en Antecedentes, en su página.",
     onClose: () => setContextOpen(false),
     children: <EncounterContextBody patientId={patientId} encounterId={encounterId} patient={patient} />,
+  }
+  // El recorrido, al lado de la atención: lo que en la ficha cambia de pestaña aquí abre la ficha en
+  // otra pestaña del navegador, para no perder la atención (la atención agrupada, 17 nov).
+  const journeySurface = {
+    title: "Recorrido del tratamiento",
+    description: "Qué se observó, qué se propuso, qué se decidió, qué se hizo y qué falta.",
+    onClose: () => setJourneyItemId(null),
+    children: journeyItemId ? (
+      <RecorridoClinicoTab
+        patientId={patientId}
+        patientName={patient.patient.displayName}
+        initialItemId={journeyItemId}
+        showPhases={false}
+        onChangeItem={(itemId) => setJourneyItemId(itemId)}
+        inAttention={{
+          encounterId,
+          // «Ver odontograma» baja al de esta atención; «Registrar» abre el registro con él puesto.
+          onOdontogram: () => {
+            setJourneyItemId(null)
+            requestAnimationFrame(() => goTo(`${uid}-odontograma`))
+          },
+          onRegister: (itemId) => {
+            setJourneyItemId(null)
+            setSessionPrefill(itemId)
+          },
+        }}
+        onTabChange={(tab, target) => {
+          const search = new URLSearchParams({ tab, ...(target?.itemId ? { itemId: target.itemId } : {}) })
+          window.open(`/patients/${patientId}?${search.toString()}`, "_blank", "noopener")
+        }}
+      />
+    ) : null,
   }
   const transcriptSurface = {
     title: "Lo dictado",
@@ -2432,7 +2481,7 @@ export function EncounterEditor({
       }}
     />
   ) : null
-  /** La línea de anestesia de hoy: en «Realizado hoy» antes de anestesiar, y al firmar. */
+  /** La línea de anestesia de hoy: arriba del plan antes de anestesiar, y al firmar. */
   const anesthesiaLine = (atSign: boolean) => (
     <EncounterAnesthesiaLine
       patientId={patientId}
@@ -2691,40 +2740,15 @@ export function EncounterEditor({
         className={canWrite && attending ? "pb-28 sm:pb-20" : undefined}
         panel={
           mode === "panel"
-            ? ((contextOpen ? <DetailPanel {...contextSurface} /> : null) ??
+            ? ((journeyItemId ? <DetailPanel {...journeySurface} /> : null) ??
+              (contextOpen ? <DetailPanel {...contextSurface} /> : null) ??
               (transcriptOpen && dictation.enabled ? <DetailPanel {...transcriptSurface} /> : null))
             : null
         }
       >
         <div className="flex flex-col gap-4">
-          {canWrite && attending ? (
-            <div id={`${uid}-visita`} className="scroll-mt-4">
-              <EncounterVisitStrip
-                past={pastVisit}
-                patientId={patientId}
-                encounterId={encounterId}
-                visit={detail.visit}
-                offeredReason={offeredReason}
-                bookedReason={detail.bookedReason}
-                onUseReason={takeOfferedReason}
-                reasonEmpty={reason.trim() === ""}
-                // Lo que contó antes de venir (entrega 8): sus palabras como motivo, sin teclear y sin pisar nada.
-                visitAnswer={detail.visitAnswer ?? null}
-                patientFirstName={patient.patient.givenNames?.trim().split(/\s+/)[0] ?? null}
-                currentReason={reason}
-                indicatedHere={indicatedHereIds}
-                onUseVisitReason={(told) => {
-                  if (!locked && reason.trim() === "") editText("reason", told)
-                }}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={handleChildChanged}
-                onPendingChange={handlePendingChange}
-              />
-            </div>
-          ) : null}
 
-          {/* Las fichas que aparecen solas, a la vista debajo de «Hoy viene a…» (dibujo 18). Ninguna se exige. */}
+          {/* Las fichas que aparecen solas, arriba de Consulta (dibujo 18). Ninguna se exige. */}
           {detail.encounter.status === "borrador" ? (
             <FormOffersBox
               patientId={patientId}
@@ -2741,6 +2765,33 @@ export function EncounterEditor({
             "consulta",
             "Consulta",
             <>
+              {/* Por qué viene, en el motivo (la atención agrupada, 17 nov): su cita, lo que contó y la
+                  cita que ya tiene. «Usar» llena el motivo solo si está vacío. */}
+              {canWrite && attending ? (
+                <div id={`${uid}-visita`} className="scroll-mt-4 pb-2">
+                  <EncounterVisitStrip
+                        past={pastVisit}
+                    patientId={patientId}
+                    encounterId={encounterId}
+                    visit={detail.visit}
+                    offeredReason={offeredReason}
+                    bookedReason={detail.bookedReason}
+                    onUseReason={takeOfferedReason}
+                    reasonEmpty={reason.trim() === ""}
+                    // Lo que contó antes de venir (entrega 8): sus palabras como motivo, sin teclear y sin pisar nada.
+                    visitAnswer={detail.visitAnswer ?? null}
+                    patientFirstName={patient.patient.givenNames?.trim().split(/\s+/)[0] ?? null}
+                    currentReason={reason}
+                    onUseVisitReason={(told) => {
+                      if (!locked && reason.trim() === "") editText("reason", told)
+                    }}
+                    disabled={locked}
+                    beforeWrite={flush}
+                    onChanged={handleChildChanged}
+                    onPendingChange={handlePendingChange}
+                  />
+                </div>
+              ) : null}
               {consultaBody}
               {suggestionsOf("consulta")}
             </>,
@@ -2790,43 +2841,12 @@ export function EncounterEditor({
           </div>
 
           {block(
-            "realizado",
-            pastVisit ? "Realizado ese día" : "Realizado hoy",
-            <>
-              {/* Antes de anestesiar: en cuanto algo de hoy usa anestesia local (QA del 16 nov). */}
-              {anesthesiaLine(false)}
-              <EncounterTreatments
-                patientId={patientId}
-                encounterId={encounterId}
-                items={detail.plannedItems}
-                sessionItemIds={sessionItemIds}
-                onRegisterSession={(itemId) => setSessionPrefill(itemId)}
-                leavableIds={indicatedHereIds}
-                onLeave={(itemId) => leaveTreatmentApi(patientId, encounterId, itemId).then(() => undefined)}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={() => void handleChildChanged()}
-              />
-              <EncounterProcedures
-                patientId={patientId}
-                detail={detail}
-                disabled={locked}
-                beforeWrite={flush}
-                onChanged={handleChildChanged}
-                onPendingChange={handlePendingChange}
-                prefillPlanItemId={sessionPrefill}
-                onPrefillUsed={() => setSessionPrefill(null)}
-                onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
-                filled={detail.plannedItems.length > 0 || anesthesiaUses.length > 0}
-              />
-              {suggestionsOf("procedimientos")}
-            </>,
-          )}
-
-          {block(
             "plan",
-            "Plan",
+            productUi().site ? "Plan de tratamiento" : "Plan",
             <>
+              {/* Antes de anestesiar: en cuanto algo de hoy usa anestesia local (QA del 16 nov), arriba
+                  del plan y antes de «Registrar». */}
+              {anesthesiaLine(false)}
               <EncounterPlanPanel
                 patientId={patientId}
                 encounterId={encounterId}
@@ -2841,7 +2861,29 @@ export function EncounterEditor({
                 broughtIds={new Set(detail.plannedItems.map((item) => item.id))}
                 indicationDefaults={indicationDefaults}
                 showControls={followUps.length > 0}
+                visit={detail.visit}
+                procedures={detail.procedures}
+                onRegister={(itemId) => setSessionPrefill(itemId)}
+                onVoid={(procedureId) => setVoidRequest(procedureId)}
+                onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
+                onOpenJourney={(itemId) => setJourneyItemId(itemId)}
+                onOpenEncounter={(id, title) => setReadEncounter({ id, title })}
               />
+              <EncounterProcedures
+                patientId={patientId}
+                detail={detail}
+                disabled={locked}
+                beforeWrite={flush}
+                onChanged={handleChildChanged}
+                onPendingChange={handlePendingChange}
+                prefillPlanItemId={sessionPrefill}
+                onPrefillUsed={() => setSessionPrefill(null)}
+                voidRequestId={voidRequest}
+                onVoidRequestUsed={() => setVoidRequest(null)}
+                onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
+                filled
+              />
+              {suggestionsOf("procedimientos")}
               {suggestionsOf("plan")}
             </>,
           )}
@@ -2925,7 +2967,10 @@ export function EncounterEditor({
                 {accountQuery.isSuccess
                   ? chargeableText
                     ? `Cargos nuevos al cerrar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
-                    : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
+                    : // Con algo marcado «Hoy» sin registrar, no se da una razón que no es (mesa del 17 nov).
+                      detail.plannedItems.some((item) => !sessionItemIds.has(item.id))
+                      ? "Sin cargos nuevos por ahora: lo marcado «Hoy» se carga al registrarlo, según su presupuesto."
+                      : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
                   : accountQuery.isError
                     ? "No se pudo consultar la cuenta para estimar los cargos."
                     : "Consultando cargos existentes…"}
@@ -3047,6 +3092,15 @@ export function EncounterEditor({
       ) : null}
 
       {mode === "drawer" ? <DetailDrawer open={contextOpen} {...contextSurface} /> : null}
+      {mode === "drawer" ? <DetailDrawer open={journeyItemId !== null} {...journeySurface} /> : null}
+      {readEncounter ? (
+        <EncounterReadDrawer
+          patientId={patientId}
+          encounterId={readEncounter.id}
+          title={readEncounter.title}
+          onClose={() => setReadEncounter(null)}
+        />
+      ) : null}
 
       {mode === "drawer" && dictation.enabled ? (
         <DetailDrawer open={transcriptOpen} {...transcriptSurface} />
@@ -3259,7 +3313,9 @@ export function EncounterEditor({
                 ...(finalizedNext.find((session) => session.planItemId === bookingNext[0])?.serviceId
                   ? { serviceId: finalizedNext.find((session) => session.planItemId === bookingNext[0])?.serviceId ?? undefined }
                   : {}),
-                // La sesión siguiente suele hacerla quien atendió hoy: su columna, que se puede cambiar.
+                // La sesión siguiente suele hacerla quien atendió hoy, en la sede de hoy: su columna, que se
+                // puede cambiar (mesa del 17 nov).
+                ...(encounter.branchId ? { branchId: encounter.branchId } : {}),
                 professionalUserId: encounter.professionalUserId,
                 professionalLabel: memberName(encounter.professionalUserId),
                 keepProfessional: true,

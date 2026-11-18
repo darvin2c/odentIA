@@ -272,12 +272,20 @@ export function EncounterProcedures({
   onPrefillUsed,
   onConsentFirst,
   filled = false,
+  voidRequestId = null,
+  onVoidRequestUsed,
 }: {
   /**
-   * «Realizado hoy» ya tiene algo a la vista (un tratamiento por registrar, la anestesia): no se
-   * dice «Sin procedimientos registrados» debajo (QA del 16 nov, Q18; estándar E2).
+   * El plan ya tiene algo a la vista: no se dice «Sin procedimientos registrados» debajo (QA del
+   * 16 nov, Q18; estándar E2).
    */
   filled?: boolean
+  /**
+   * «Anular…» desde la fila del plan (la atención agrupada, 17 nov): lo registrado de un
+   * tratamiento se ve en su fila; su anulación es la misma de aquí, con su motivo.
+   */
+  voidRequestId?: string | null
+  onVoidRequestUsed?: () => void
   patientId: string
   detail: EncounterDetail
   /**
@@ -302,6 +310,7 @@ export function EncounterProcedures({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(autoOpen && !disabled)
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
+  const unplanned = detail.procedures.filter((proc) => !proc.planItemId)
   /** Lo que vino puesto al abrir: el cajón lo dice mientras siga elegido. */
   const [presetId, setPresetId] = useState<string | null>(null)
   // «Otro servicio del catálogo» elegido a propósito: sin elegir nada, con varios tratamientos,
@@ -529,6 +538,18 @@ export function EncounterProcedures({
     onPrefillUsed?.()
   }, [prefillPlanItemId, planQuery.data])
 
+  // «Anular…» pedido desde la fila del plan: abre la misma anulación, con su motivo.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: corre al pedirlo.
+  useEffect(() => {
+    if (!voidRequestId) return
+    const proc = detail.procedures.find((row) => row.id === voidRequestId && !row.voidedAt)
+    if (proc && canWrite && !finalized) {
+      voidForm.reset()
+      setVoidingProc(proc)
+    }
+    onVoidRequestUsed?.()
+  }, [voidRequestId])
+
   const handleClose = () => {
     // Durante el guardado no se cierra: el error y lo elegido se conservan
     // en el drawer y no se pierde la selección del catálogo/presupuesto.
@@ -554,14 +575,19 @@ export function EncounterProcedures({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3">
-        <section aria-label="Procedimientos registrados">
-          {detail.procedures.length === 0 ? (
+        <section aria-label="Hecho hoy fuera del plan">
+          {/* Lo de un tratamiento del plan se ve en su fila del Plan (la atención agrupada, 17 nov):
+              aquí queda lo que se hizo sin tratamiento, con su «Anular…». */}
+          {unplanned.length === 0 ? (
             filled ? null : (
               <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
             )
           ) : (
             <ul className="flex flex-col gap-2">
-              {detail.procedures.map((proc) => {
+              <li className="text-xs font-semibold text-muted-foreground">
+                Hecho hoy fuera del plan
+              </li>
+              {unplanned.map((proc) => {
                 const linked = proc.planItemId ? planById[proc.planItemId] : undefined
                 return (
                   <li
@@ -642,7 +668,7 @@ export function EncounterProcedures({
                 setOpen(true)
               }}
             >
-              Registrar lo de hoy
+              Registrar algo fuera del plan
             </Button>
           </div>
         )}

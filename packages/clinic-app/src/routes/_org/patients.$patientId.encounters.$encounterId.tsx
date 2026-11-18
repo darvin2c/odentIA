@@ -1,18 +1,17 @@
-import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
 import { EncounterBreadcrumb } from "../../components/patient/encounter-breadcrumb"
-import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
+import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { WideSectionProvider } from "../../components/patient/wide-section"
 import { EncounterLoading } from "../../components/person/person-loading"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
@@ -21,6 +20,7 @@ import {
   hcLabel,
   type PatientFull,
 } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 
 /** «lun 12 oct 2026, 3:07 a 4:07 p. m.»: el día una vez, sin repetirlo en el fin. */
 function encounterWhen(start: string, end: string | null): string {
@@ -50,6 +50,7 @@ export const Route = createFileRoute("/_org/patients/$patientId/encounters/$enco
 function EncounterPage() {
   const { patientId, encounterId } = Route.useParams()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   // Lo que el producto firmó con la atención (odentIA: el odontograma firmado).
   const EncounterSigned = productUi().history.EncounterSigned
   const canRead = usePermission("clinical.read")
@@ -113,6 +114,21 @@ function EncounterPage() {
 
   if (patientQuery.isLoading || encounterQuery.isLoading) return <EncounterLoading />
   if (!patientQuery.data || !encounterQuery.data) {
+    // Una dirección con una atención o un paciente que no existe: se dice y se vuelve a Pacientes.
+    const missing = [encounterQuery.error, patientQuery.error].some(
+      (error) => error instanceof ApiError && error.status === 404,
+    )
+    if (missing)
+      return (
+        <PageShell className="flex flex-col gap-4">
+          <ErrorState
+            title="No encontramos esta atención"
+            message="Puede que la dirección esté mal escrita o que ya no exista."
+            retryLabel="Ir a Pacientes"
+            onRetry={() => void navigate({ to: "/patients" })}
+          />
+        </PageShell>
+      )
     return (
       <PageShell className="flex flex-col gap-4">
         <EncounterBreadcrumb

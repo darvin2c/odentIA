@@ -16,16 +16,18 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   type ConsentDocument,
+  type ConsentTreatmentChoice,
   cancelConsent,
   consentSignatureWords,
   createConsent,
   fetchConsentHistory,
   fetchConsentTemplates,
+  fetchConsentTreatments,
   generateConsentPdf,
   revokeConsent,
 } from "../../lib/clinical-forms"
@@ -61,14 +63,20 @@ export const CONSENT_EVENT_LABELS: Record<string, string> = {
 
 interface NewConsentValues {
   templateId: string
+  /** El tratamiento del plan al que va; `OUTSIDE_PLAN` si es para otro procedimiento. */
+  planItemId: string
   procedureRef: string
   diagnosisCode: string
   diagnosisSystem: string | null
 }
 
+/** «Otro procedimiento, fuera del plan»: no se une a ningún tratamiento. */
+const OUTSIDE_PLAN = "fuera-del-plan"
+
 /** Los mismos límites que `consentCreate` de la API. */
 const newConsentSchema = z.object({
   templateId: z.string().min(1, "Elige una plantilla publicada"),
+  planItemId: z.string(),
   procedureRef: z.string().trim().max(500, "Escribe como mucho 500 caracteres."),
   diagnosisCode: z.string(),
   diagnosisSystem: z.string().nullable(),
@@ -105,16 +113,28 @@ export function NewConsentDrawer({
   const create = useMutation({ mutationFn: createConsent })
   const defaultValues: NewConsentValues = {
     templateId: "",
+    planItemId: "",
     procedureRef: defaultProcedureRef ?? "",
     diagnosisCode: defaultDiagnosisCode ?? "",
     diagnosisSystem: defaultDiagnosisSystem ?? null,
   }
+  /** Los tratamientos del plan que piden la plantilla elegida: con alguno, se dice a cuál va. */
+  const choicesNow = useRef<ConsentTreatmentChoice[]>([])
+  /** Lo que se escribió solo en «Procedimiento al que aplica» al elegir un tratamiento. */
+  const autoProcedure = useRef<string | null>(null)
   const form = useAppForm({
     defaultValues,
     validators: {
       // Desde la atención o el tratamiento, el procedimiento ya va unido; si no, se escribe.
       onSubmit: newConsentSchema.superRefine((value, ctx) => {
-        if (!encounterId && !planItemId && !value.procedureRef.trim())
+        if (!planItemId && choicesNow.current.length > 0 && !value.planItemId)
+          ctx.addIssue({
+            code: "custom",
+            path: ["planItemId"],
+            message: "Elige el tratamiento al que aplica",
+          })
+        const linked = choicesNow.current.some((item) => item.planItemId === value.planItemId)
+        if (!encounterId && !planItemId && !linked && !value.procedureRef.trim())
           ctx.addIssue({
             code: "custom",
             path: ["procedureRef"],
@@ -123,18 +143,25 @@ export function NewConsentDrawer({
       }),
     },
     onSubmit: async ({ value }) => {
+      // Solo uno de los que se ven: el elegido para otra plantilla no viaja.
+      const chosen = choicesNow.current.some((item) => item.planItemId === value.planItemId)
+        ? value.planItemId
+        : null
       const result = await create.mutateAsync({
         templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
-        planItemId: planItemId ?? null,
+        planItemId: planItemId ?? chosen,
+        ...(!planItemId && value.planItemId === OUTSIDE_PLAN ? { outsidePlan: true } : {}),
         procedureRef: value.procedureRef.trim() || null,
         diagnosisCode: value.diagnosisCode || null,
         diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
       })
       toast.success("Consentimiento generado: pendiente de firma")
+      autoProcedure.current = null
       form.reset({
         templateId: "",
+        planItemId: "",
         procedureRef: "",
         diagnosisCode: "",
         diagnosisSystem: value.diagnosisSystem,
@@ -144,6 +171,42 @@ export function NewConsentDrawer({
   })
   const surface = useFormSurface(form)
   const diagnosisSystem = useStore(form.store, (state) => state.values.diagnosisSystem)
+
+  // El consentimiento va con el tratamiento, como con «Preparar» (QA del 17 nov): con la
+  // plantilla elegida, los tratamientos del plan que la piden y aún no la tienen. Uno solo viene
+  // puesto; con varios se elige. Lo dice el servidor, que vuelve a comprobarlo al generarlo.
+  const templateId = useStore(form.store, (state) => state.values.templateId)
+  const choicesQuery = useQuery({
+    queryKey: ["consent-treatments", patientId, templateId],
+    queryFn: () => fetchConsentTreatments(patientId, templateId),
+    enabled: open && !planItemId && Boolean(templateId),
+  })
+  const choices = !planItemId && templateId ? (choicesQuery.data?.data ?? []) : []
+  choicesNow.current = choices
+  /** Elegir el tratamiento escribe su procedimiento, si no se escribió otro a mano. */
+  const followTreatment = (id: string) => {
+    const current = form.getFieldValue("procedureRef").trim()
+    const untouched =
+      !current ||
+      current === autoProcedure.current ||
+      current === (defaultProcedureRef ?? "").trim()
+    if (!untouched) return
+    const choice = choicesNow.current.find((item) => item.planItemId === id)
+    autoProcedure.current = choice?.procedureRef ?? null
+    form.setFieldValue("procedureRef", choice?.procedureRef ?? defaultProcedureRef ?? "")
+  }
+  // Al llegar los de la plantilla: uno solo viene elegido; lo elegido que ya no está, se quita.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada plantilla.
+  useEffect(() => {
+    const list = choicesQuery.data?.data
+    if (!list) return
+    const current = form.getFieldValue("planItemId")
+    if (current === OUTSIDE_PLAN || list.some((item) => item.planItemId === current)) return
+    const next = list.length === 1 ? (list[0]?.planItemId ?? "") : ""
+    choicesNow.current = list
+    form.setFieldValue("planItemId", next)
+    followTreatment(next)
+  }, [choicesQuery.data])
   return (
     <FormDrawer
       {...surface}
@@ -171,6 +234,28 @@ export function NewConsentDrawer({
             />
           )}
         </form.AppField>
+        {choices.length > 0 ? (
+          <form.AppField
+            name="planItemId"
+            listeners={{ onChange: ({ value }) => followTreatment(value) }}
+          >
+            {(field) => (
+              <field.SelectField
+                label="Tratamiento del plan"
+                placeholder="Elige el tratamiento"
+                options={[
+                  ...choices.map((item) => ({ value: item.planItemId, label: item.label })),
+                  { value: OUTSIDE_PLAN, label: "Otro procedimiento, fuera del plan" },
+                ]}
+                description={
+                  choices.length > 1
+                    ? "Lo piden varios tratamientos: elige a cuál aplica."
+                    : "Queda con el tratamiento: al firmarlo, el plan deja de pedirlo."
+                }
+              />
+            )}
+          </form.AppField>
+        ) : null}
         <form.AppField name="procedureRef">
           {(field) => (
             <field.TextField

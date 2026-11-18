@@ -12,9 +12,9 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  ListSearchScope,
   type FilterDef,
   internationalText,
+  ListSearchScope,
   PageHeader,
   PageShell,
   PersonAvatar,
@@ -30,31 +30,32 @@ import { NextStepButton } from "../../components/patient/plan/next-step-action"
 import { ContactNextAction } from "../../components/person/contact-next-action"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
 import { PeopleLoading, visiblePeopleViews } from "../../components/person/person-loading"
+import { ASK_RECEPTION_TO_REGISTER } from "../../components/person-picker"
 import { PeopleSkeleton } from "../../components/skeletons/people"
 import { apiFetch } from "../../lib/api"
-import { timeAgo, useCan, usePermission } from "../../lib/crm"
-import { usePrivateListSearch } from "../../lib/private-list-search"
-import { peopleHeader, peopleSubtitle } from "../../lib/screen-rules"
-import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { channelLabel } from "../../lib/channels"
+import { timeAgo, useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { hcLabel } from "../../lib/patients"
 import {
+  attentionWords,
+  daysSince,
   isPeopleShortcut,
   isPeopleView,
+  listDay,
   PEOPLE_SHORTCUTS,
   PERSON_KIND_LABELS,
   type PeopleShortcutCounts,
   type PeopleView,
   type PersonListItem,
-  attentionWords,
-  daysSince,
-  listDay,
   personShapeKey,
   personShapeOf,
   situationAction,
   situationText,
 } from "../../lib/people"
+import { usePrivateListSearch } from "../../lib/private-list-search"
+import { peopleHeader, peopleSubtitle } from "../../lib/screen-rules"
 
 const PAGE_LIMIT = 30
 const NEW_PATIENT: NewPatientTarget = { kind: "new" }
@@ -393,7 +394,12 @@ function PeoplePage() {
           />
         </ListSearchScope>
         <p className="text-xs text-muted-foreground">
-          {atajoRule ? `«${atajoLabel}»: ${atajoRule.charAt(0).toLowerCase()}${atajoRule.slice(1)} ` : ""}Una sola búsqueda en toda la clínica.
+          {atajoRule
+            ? `«${atajoLabel}»: ${atajoRule.charAt(0).toLowerCase()}${atajoRule.slice(1)} `
+            : ""}
+          Una sola búsqueda en toda la clínica.
+          {/* Donde estaría «Nuevo paciente»: a quien no registra a nadie, quién lo hace. */}
+          {canCreate ? "" : ` ${ASK_RECEPTION_TO_REGISTER}`}
         </p>
       </div>
       {query.isPending && rows.length === 0 ? (
@@ -421,7 +427,9 @@ function PeoplePage() {
           description={
             filtered
               ? "Prueba con otra parte del nombre, el teléfono o el documento, o mira en «Todos»."
-              : "Cuando alguien escriba o lo registres, aparece aquí."
+              : canCreate
+                ? "Cuando alguien escriba o lo registres, aparece aquí."
+                : "Cuando recepción registre a alguien, aparece aquí."
           }
           actionLabel={
             filtered && archivedMatches > 0

@@ -6,8 +6,10 @@ import {
   closingControlsBody,
   continuingAfterSign,
   controlBesideAccepted,
-  needsNextControlDay,
   finishingAtSign,
+  needsNextControlDay,
+  resolvingOnSign,
+  sessionAnswersBody,
   signFormsOf,
   signFormWords,
 } from "./encounter-closing"
@@ -132,5 +134,34 @@ describe("la ficha se cierra con la firma (revisión final del 15 nov, propuesta
     expect(finishingAtSign(signForms, [])).toEqual(["endo"])
     // Desmarcarla la deja a medias; marcar la vacía la finaliza; la que no tiene su obligatoria, nunca.
     expect(finishingAtSign(signForms, ["endo", "vacia", "sin-pieza"])).toEqual(["vacia"])
+  })
+})
+
+describe("«¿Terminaste?» también en lo que aún no llega a sus previstas (mesa del 17 nov)", () => {
+  it("sin respuesta sigue en curso; «Sí, terminar» lo deja realizado al firmar y lo pide la firma", () => {
+    const sessions = { finishing: [resin], continuing: [endo] }
+    expect(sessionAnswersBody({}, sessions)).toEqual({})
+    expect(sessionAnswersBody({ endo: "terminar", resina: "otra" }, sessions)).toEqual({
+      addSessionPlanItemIds: ["resina"],
+      completePlanItemIds: ["endo"],
+    })
+    // «Sigue en curso» no se manda: es lo que pasa sin decir nada. «Sí, terminar» en lo que
+    // llega a sus previstas tampoco: el servidor lo termina solo.
+    expect(sessionAnswersBody({ endo: "otra", resina: "terminar" }, sessions)).toEqual({})
+    // Lo que el cierre no preguntó no se manda.
+    expect(sessionAnswersBody({ otro: "terminar" }, sessions)).toEqual({})
+  })
+
+  it("terminada antes, la endodoncia ya no vuelve y lo que resuelve pasa a resuelto", () => {
+    const sessions = { finishing: [], continuing: [endo] }
+    expect(continuingAfterSign(sessions, { endo: "terminar" })).toEqual([])
+    const pulpitis = {
+      diagnosisIds: ["dx"],
+      planItemIds: ["endo"],
+      label: "Pulpitis",
+      site: "pieza 46",
+    }
+    expect(resolvingOnSign([pulpitis], sessions, {})).toEqual([])
+    expect(resolvingOnSign([pulpitis], sessions, { endo: "terminar" })).toEqual([pulpitis])
   })
 })

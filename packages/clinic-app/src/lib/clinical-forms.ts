@@ -726,8 +726,28 @@ export function createConsent(body: {
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
+  /** «Otro, fuera del plan»: no se une al tratamiento que pide esta plantilla. */
+  outsidePlan?: boolean
 }) {
   return post<ConsentDocument>(`${BASE}/consents`, body)
+}
+
+/** Un tratamiento del plan al que puede ir un consentimiento nuevo (`consentTreatmentChoices`). */
+export interface ConsentTreatmentChoice {
+  planItemId: string
+  /** «Endodoncia posterior vital · pieza 46». */
+  label: string
+  /** Lo que se consiente, como lo escribe «Preparar». */
+  procedureRef: string
+  diagnosisCode: string | null
+  diagnosisSystem: string | null
+}
+
+/** Los tratamientos del plan que piden esa plantilla y aún no la tienen preparada ni firmada. */
+export function fetchConsentTreatments(patientId: string, templateId: string) {
+  return apiFetch<{ data: ConsentTreatmentChoice[] }>(
+    `${BASE}/consents/treatments${toSearch({ patientId, templateId })}`,
+  )
 }
 
 export function signConsent(

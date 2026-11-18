@@ -30,24 +30,38 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { Fragment, useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import {
+  ASSEMBLED_QUERY_KEYS,
   budgetNumberLabel,
   commonPlanItemIds,
   fetchBudgetDetail,
   fetchTreatmentPlans,
-  ASSEMBLED_QUERY_KEYS,
   INDICATED_QUERY_KEYS,
   PLAN_QUERY_KEYS,
   planDecisionLabel,
   totalsOf,
 } from "../../lib/budgets"
-import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
-import { bringTreatmentApi, removeIndicatedApi, restoreIndicatedApi } from "../../lib/encounters"
+import { usePermission } from "../../lib/crm"
+import {
+  bringTreatmentApi,
+  chooseVisitControlApi,
+  leaveTreatmentApi,
+  removeIndicatedApi,
+  restoreIndicatedApi,
+} from "../../lib/encounters"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
-import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
+import {
+  type EncounterVisit,
+  type PlanItem,
+  type ProcedureItem,
+  planStatusLabel,
+  quotedPriceOf,
+  treatmentConsentWords,
+} from "../../lib/patients"
 import {
   fetchService,
   fetchServices,
@@ -60,10 +74,11 @@ import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
+import { visitWaitWords } from "./encounter-visit"
 import { treatmentSiteLabel, useBudgetFormat } from "./plan/budget-parts"
+import { RecommendedLine } from "./plan/budget-recommended"
 import { AnsweredBy } from "./plan/budget-response"
 import { BudgetShowActions } from "./plan/budget-show"
-import { RecommendedLine } from "./plan/budget-recommended"
 import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
@@ -77,6 +92,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
+import { PlanItemSessions } from "./plan-fases"
 import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
@@ -191,7 +207,32 @@ export function EncounterPlanPanel({
   broughtIds = new Set<string>(),
   indicationDefaults,
   showControls = true,
+  visit = null,
+  procedures = [],
+  onRegister,
+  onVoid,
+  onConsentFirst,
+  onOpenJourney,
+  onOpenEncounter,
 }: {
+  /**
+   * Lo que se puede hacer hoy de cada tratamiento, como lo calcula el servidor (la atención
+   * agrupada, 17 nov): su sesión, si lo trae la cita, si ya se registró, su espera y su
+   * consentimiento. El Plan de la atención es el único lugar de cada tratamiento.
+   */
+  visit?: EncounterVisit | null
+  /** Lo registrado en esta atención: lo de cada tratamiento se ve en su fila, con «Anular…». */
+  procedures?: ProcedureItem[]
+  /** «Registrar»: abre el registro con ese tratamiento puesto. */
+  onRegister?: (itemId: string) => void
+  /** «Anular…» de lo registrado en la fila. */
+  onVoid?: (procedureId: string) => void
+  /** «Preparar» o «Firmar ahora» el consentimiento antes del acto. */
+  onConsentFirst?: (planItemId: string, awaiting: boolean) => void
+  /** «Ver»: el recorrido del tratamiento, al lado, sin salir de la atención. */
+  onOpenJourney?: (itemId: string) => void
+  /** «Abrir» una sesión anterior: se lee al lado. */
+  onOpenEncounter?: (encounterId: string, title: string) => void
   patientId: string
   encounterId: string
   /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
@@ -331,30 +372,193 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
+  // «Hacer hoy» en cada fila de lo que se puede hacer hoy (la atención agrupada, 17 nov): lo dice el
+  // servidor (`visit.treatments`, sin tope), también lo de visitas anteriores. Marca la fila «Hoy»
+  // en su mismo lugar. Lo que «va después» de otro no se ofrece primero: lo dice su fila.
+  const { phases } = productUi().plan
+  const doable = new Map((visit?.treatments ?? []).map((row) => [row.planItemId, row]))
   const bringAction = (item: PlanItem) =>
     canWrite &&
     !disabled &&
-    today.has(item.id) &&
+    doable.has(item.id) &&
+    !doable.get(item.id)?.linked &&
     !broughtIds.has(item.id) &&
-    !item.waitsFor &&
-    item.decisionStatus === "aceptado" &&
-    ["pendiente", "programado", "en_curso"].includes(item.status) ? (
+    !item.waitsFor ? (
       <Button
         type="button"
         size="sm"
         variant="outline"
-        aria-label={`Hacerla hoy: ${item.title}`}
+        aria-label={`Hacer hoy: ${item.title}`}
         disabled={bringing !== null || removing !== null}
         onClick={() => void bringToday(item)}
       >
-        {bringing === item.id ? "Preparando…" : "Hacerla hoy"}
+        {bringing === item.id ? "Preparando…" : "Hacer hoy"}
       </Button>
     ) : null
+  const [choosingControl, setChoosingControl] = useState<string | null>(null)
+  /**
+   * El control al que viene hoy: uno por atención, y se cumple al firmar (la misma operación de
+   * siempre). Elegir otro reemplaza al anterior.
+   */
+  const chooseControl = async (controlId: string | null) => {
+    if (choosingControl) return
+    setChoosingControl(controlId ?? "ninguno")
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await chooseVisitControlApi(patientId, encounterId, controlId)
+      await onChanged()
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    } finally {
+      setChoosingControl(null)
+      onPendingChange(false)
+    }
+  }
+  const [leaving, setLeaving] = useState<string | null>(null)
+  /** «Hoy no»: lo desmarca; sigue en el plan para otro día. Lo que trae la cita no se desmarca. */
+  const leaveToday = async (itemId: string) => {
+    if (leaving) return
+    setLeaving(itemId)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await leaveTreatmentApi(patientId, encounterId, itemId)
+      await refreshPlan()
+    } catch (err) {
+      setRowError({ itemId, message: submitErrorMessage(err) })
+    } finally {
+      setLeaving(null)
+      onPendingChange(false)
+    }
+  }
+  /**
+   * Lo de hoy en la fila (la atención agrupada, 17 nov): «Hoy», su sesión, «por hacer» o «hecha hoy»,
+   * lo registrado con «Anular…», la espera entre sesiones y el consentimiento antes del acto. Y sus
+   * sesiones anteriores, con el día, quién y lo anotado.
+   */
+  const todayPart = (item: PlanItem) => {
+    const visitRow = doable.get(item.id)
+    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked)
+    const done = procedures.filter((proc) => proc.planItemId === item.id && !proc.voidedAt)
+    const earlier = (item.sessions ?? []).filter((session) => session.encounterId !== encounterId)
+    const wait = isToday && done.length === 0 && visitRow ? visitWaitWords(visitRow) : null
+    const consentWords =
+      isToday && done.length === 0 ? treatmentConsentWords(item.consent, item.consentMissing) : null
+    const consentPending = consentWords != null && item.consent !== "firmado"
+    if (!isToday && earlier.length === 0) return null
+    const sessionLine = visitRow && visitRow.m > 1 ? `Sesión ${visitRow.n} de ${visitRow.m} · ` : ""
+    return (
+      <div className="flex basis-full flex-col gap-1.5">
+        {isToday ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border-l-2 border-primary bg-primary/5 px-3 py-2">
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-xs">
+                <Badge variant="default" className="mr-2 align-middle">
+                  Hoy
+                </Badge>
+                {sessionLine}
+                {done.length > 0 ? (
+                  <span className="font-medium text-success">hecha hoy</span>
+                ) : (
+                  <span className="font-medium text-warning">por hacer</span>
+                )}
+                {visitRow?.broughtByAppointment ? " · la trajo su cita" : ""}
+              </span>
+              {done.map((proc) => (
+                <span
+                  key={proc.id}
+                  className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+                >
+                  Registrado: {proc.description}
+                  {canWrite && !disabled && onVoid ? (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => onVoid(proc.id)}>
+                      Anular…
+                    </Button>
+                  ) : null}
+                </span>
+              ))}
+              {wait ? <span className="text-xs text-warning">{wait}</span> : null}
+              {consentWords ? (
+                <span
+                  className={
+                    consentPending ? "text-xs text-warning" : "text-xs text-muted-foreground"
+                  }
+                >
+                  {consentWords}
+                </span>
+              ) : null}
+            </span>
+            {canWrite && !disabled && done.length === 0 ? (
+              <span className="flex flex-wrap items-center gap-1">
+                {consentPending && onConsentFirst ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onConsentFirst(item.id, false)}
+                  >
+                    {item.consent === "sin_firmar" ? "Firmar ahora" : "Preparar"}
+                  </Button>
+                ) : null}
+                {onRegister ? (
+                  <Button type="button" size="sm" onClick={() => onRegister(item.id)}>
+                    Registrar
+                  </Button>
+                ) : null}
+                {visitRow?.broughtByAppointment ? null : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Hoy no: ${item.title}`}
+                    disabled={leaving !== null}
+                    onClick={() => void leaveToday(item.id)}
+                  >
+                    Hoy no
+                  </Button>
+                )}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {earlier.length > 0 ? (
+          // Las sesiones se ven igual en la atención, el recorrido y la ficha (mesa del 17 nov).
+          <PlanItemSessions
+            sessions={earlier}
+            itemLabel={item.title}
+            current={encounterId}
+            className="text-xs text-muted-foreground"
+            onOpen={onOpenEncounter ? (id) => onOpenEncounter(id, item.title) : undefined}
+          />
+        ) : null}
+      </div>
+    )
+  }
+
   /** Lo que se hace con un renglón: traerlo a hoy y corregirlo. */
   const actionsOf = (item: PlanItem) => (
     <>
       {bringAction(item)}
       {rowActions(item)}
+      {onOpenJourney ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label={`Ver ${item.title}`}
+          onClick={() => onOpenJourney(item.id)}
+        >
+          Ver
+        </Button>
+      ) : null}
+    </>
+  )
+  const noticeOf = (item: PlanItem) => (
+    <>
+      {todayPart(item)}
+      {fitNotice(item)}
     </>
   )
   /**
@@ -535,8 +739,8 @@ export function EncounterPlanPanel({
   const canPlace = canWrite && canBudget && !disabled
   const pathGroups = groupPlanPaths(brief)
   const rows = brief.filter((item) => !isOpenPath(item))
-  // «Va también» o «En los dos»: solo deja de preguntar aquí; no cambia nada.
-  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set())
+  // «Va también» y «En las dos» se guardan en el servidor (`pathAnsweredAt`): al recargar no se
+  // vuelve a preguntar (mesa del 17 nov; antes solo dejaba de preguntar en esta pantalla).
   const [placeError, setPlaceError] = useState<{ itemId: string; message: string } | null>(null)
   const place = usePlacePath({ patientId, encounterId, beforeWrite, onChanged })
   const placeIn = (planItemId: string, path: PathTarget) => {
@@ -551,7 +755,6 @@ export function EncounterPlanPanel({
       },
     )
   }
-  const dismiss = (itemId: string) => setDismissed((prev) => new Set(prev).add(itemId))
   const chooser = (patientName.trim().split(/\s+/)[0] ?? "") || "la persona"
 
   return (
@@ -571,7 +774,7 @@ export function EncounterPlanPanel({
           }}
         />
       ) : null}
-      <BlockPart title="Lo que sigue por hacer">
+      <div className="flex flex-col gap-3">
         {itemsQuery.isPending || plansQuery.isPending ? (
           <LoadingState message="Cargando el plan…" />
         ) : brief.length === 0 ? (
@@ -582,81 +785,88 @@ export function EncounterPlanPanel({
           <>
             {rows.length > 0 ? (
               <ul className="flex flex-col divide-y">
-                {rows.map((item) => {
+                {rows.map((item, index) => {
                   // Sin responder «¿otro camino o va también?» no se sabe si va después de lo otro de
                   // la pieza: la exodoncia que es otro camino no «va después de la endodoncia» (QA del
                   // 10 nov, B2). Se calla hasta responder, también para quien no puede responderlo.
-                  const unanswered = !dismissed.has(item.id)
-                    ? pathQuestion(item, brief, today, pathGroups)
-                    : null
+                  const unanswered = pathQuestion(item, brief, today, pathGroups)
                   const question = canPlace ? unanswered : null
                   const error = placeError?.itemId === item.id ? placeError.message : null
+                  // Por fases, como el plan de la ficha (la atención agrupada, 17 nov).
+                  const phaseLabel =
+                    phases.length > 1 && (index === 0 || rows[index - 1]?.phase !== item.phase)
+                      ? (phases.find((phase) => phase.key === item.phase)?.label ?? null)
+                      : null
                   return (
-                    <li
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-                    >
-                      <span className="flex min-w-0 flex-col">
-                        <span className="font-medium">
-                          {item.title}
-                          {today.has(item.id) ? (
-                            <Badge variant="default" className="ml-2 align-middle">
-                              Indicado hoy
-                            </Badge>
-                          ) : null}
+                    <Fragment key={item.id}>
+                      {phaseLabel ? (
+                        <li className="pt-3 text-xs font-semibold text-muted-foreground">
+                          Fase {phaseLabel.toLowerCase()}
+                        </li>
+                      ) : null}
+                      <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                        <span className="flex min-w-0 flex-col">
+                          <span className="font-medium">
+                            {item.title}
+                            {today.has(item.id) ? (
+                              <Badge variant="default" className="ml-2 align-middle">
+                                Indicado hoy
+                              </Badge>
+                            ) : null}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {[
+                              treatmentSiteLabel(item),
+                              item.waitsFor && !unanswered
+                                ? `va después de ${item.waitsFor.title}`
+                                : "",
+                              // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
+                              quotedPriceOf(item).priceCents != null && orgLocale
+                                ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
+                                : "",
+                              // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
+                              treatmentConsentWords(item.consent, item.consentMissing) ?? "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
                         </span>
-                        <span className="text-xs text-muted-foreground">
-                          {[
-                            treatmentSiteLabel(item),
-                            item.waitsFor && !unanswered
-                              ? `va después de ${item.waitsFor.title}`
-                              : "",
-                            // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
-                            quotedPriceOf(item).priceCents != null && orgLocale
-                              ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
-                              : "",
-                            // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
-                            treatmentConsentWords(item.consent, item.consentMissing) ?? "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
+                        <span className="flex flex-wrap items-center gap-1">
+                          <Badge
+                            variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
+                          >
+                            {planDecisionLabel(item.decisionStatus)}
+                          </Badge>
+                          {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
+                          {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
+                            <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                          )}
+                          {actionsOf(item)}
                         </span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-1">
-                        <Badge
-                          variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
-                        >
-                          {planDecisionLabel(item.decisionStatus)}
-                        </Badge>
-                        {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
-                        {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
-                          <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
-                        )}
-                        {actionsOf(item)}
-                      </span>
-                      <ExtractionRisks lines={item.extractionRisks} />
-                      {fitNotice(item)}
-                      {changeForm(item)}
-                      {rowError?.itemId === item.id ? (
-                        <p role="alert" className="basis-full text-sm text-destructive">
-                          {rowError.message}
-                        </p>
-                      ) : null}
-                      {question ? (
-                        <PathQuestionRow
-                          item={item}
-                          question={question}
-                          pending={place.isPending}
-                          onPlace={(path) => placeIn(item.id, path)}
-                          onDismiss={() => dismiss(item.id)}
-                        />
-                      ) : null}
-                      {error ? (
-                        <p role="alert" className="basis-full text-sm text-destructive">
-                          {error}
-                        </p>
-                      ) : null}
-                    </li>
+                        <ExtractionRisks lines={item.extractionRisks} />
+                        {noticeOf(item)}
+                        {changeForm(item)}
+                        {rowError?.itemId === item.id ? (
+                          <p role="alert" className="basis-full text-sm text-destructive">
+                            {rowError.message}
+                          </p>
+                        ) : null}
+                        {question ? (
+                          <PathQuestionRow
+                            item={item}
+                            question={question}
+                            pending={place.isPending}
+                            onPlace={(path) => placeIn(item.id, path)}
+                            onDismiss={() => placeIn(item.id, "todos")}
+                          />
+                        ) : null}
+                        {error ? (
+                          <p role="alert" className="basis-full text-sm text-destructive">
+                            {error}
+                          </p>
+                        ) : null}
+                      </li>
+                    </Fragment>
                   )
                 })}
               </ul>
@@ -681,11 +891,76 @@ export function EncounterPlanPanel({
                 onPlace={placeIn}
                 rowActions={actionsOf}
                 changeForm={changeForm}
-                fitNotice={fitNotice}
+                fitNotice={noticeOf}
               />
             ))}
           </>
         )}
+        {(visit?.controls ?? []).length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-muted-foreground">Controles</p>
+            <ul className="flex flex-col divide-y text-sm">
+              {(visit?.controls ?? []).map((control) => {
+                const day = new Date(control.dueAt).toLocaleDateString(activeOrgLocale(), {
+                  day: "numeric",
+                  month: "short",
+                  timeZone: activeOrgTimeZone(),
+                })
+                const chosen = control.chosen || control.byAppointment
+                return (
+                  <li
+                    key={control.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2"
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-medium">
+                        {chosen ? (
+                          <Badge variant="default" className="mr-2 align-middle">
+                            Hoy
+                          </Badge>
+                        ) : null}
+                        {control.title}
+                      </span>
+                      <span
+                        className={
+                          control.overdue ? "text-xs text-warning" : "text-xs text-muted-foreground"
+                        }
+                      >
+                        {[
+                          control.overdue ? `vencido el ${day}` : `toca el ${day}`,
+                          control.byName ? `lo indicó ${control.byName}` : null,
+                          control.byAppointment
+                            ? "lo trae su cita: se cumple al firmar"
+                            : control.chosen
+                              ? "se cumple al firmar"
+                              : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    {canWrite && !disabled && !control.byAppointment ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={control.chosen ? "ghost" : "outline"}
+                        aria-label={`${control.chosen ? "Hoy no" : "Hacer hoy"}: ${control.title}`}
+                        disabled={choosingControl !== null}
+                        onClick={() => void chooseControl(control.chosen ? null : control.id)}
+                      >
+                        {choosingControl === control.id
+                          ? "Anotando…"
+                          : control.chosen
+                            ? "Hoy no"
+                            : "Hacer hoy"}
+                      </Button>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
         {/* La línea del presupuesto, antes del formulario: abierto, la empujaba fuera de la vista (QA del 9 nov). */}
         <EncounterBudgetSend
           patientId={patientId}
@@ -720,7 +995,7 @@ export function EncounterPlanPanel({
                   className="group self-start"
                   disabled={disabled}
                 >
-                  Indicar un tratamiento
+                  Añadir un tratamiento al plan
                   <ChevronDown
                     aria-hidden
                     className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
@@ -741,7 +1016,7 @@ export function EncounterPlanPanel({
             </CollapsibleContent>
           </Collapsible>
         ) : null}
-      </BlockPart>
+      </div>
 
       {showControls ? (
         <ControlesPanel
@@ -774,7 +1049,13 @@ function pathQuestion(
   today: ReadonlySet<string>,
   groups: PlanPathGroup[],
 ): PathQuestion | null {
-  if (!today.has(item.id) || item.decisionStatus !== "pendiente" || item.path) return null
+  if (
+    !today.has(item.id) ||
+    item.decisionStatus !== "pendiente" ||
+    item.path ||
+    item.pathAnsweredAt
+  )
+    return null
   if (item.toothNumber == null || item.priceCents == null) return null
   const tooth = item.toothNumber
   const siblings = brief.filter(

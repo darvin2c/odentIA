@@ -28,6 +28,8 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
 import { useId, useRef, useState } from "react"
+import { CLINICAL_NAME } from "../../lib/agent-names"
+import type { FormResponse } from "../../lib/clinical-forms"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
@@ -45,8 +47,8 @@ import {
   controlDaySaid,
   type FinishingControl,
   type FinishingControlChange,
-  keepsDiagnosis,
   type HealthGap,
+  keepsDiagnosis,
   type NextSession,
   type SignatureRegistration,
   signatureRegistrationErrors,
@@ -55,8 +57,6 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
 import { whenSaid } from "../agenda/shared"
-import { CLINICAL_NAME } from "../../lib/agent-names"
-import type { FormResponse } from "../../lib/clinical-forms"
 import { answersWords } from "./clio-form-proposals"
 import type { DictationSuggestion } from "./dictation-session"
 import { isOn } from "./dictation-sign-list"
@@ -225,7 +225,10 @@ export function continuingAfterSign(
     ...(session.booked ? { booked: session.booked } : {}),
   })
   const going = [
-    ...sessions.continuing.map((session) => visit(session, session.m)),
+    // Lo que aún no llega a sus previstas sigue, salvo que se responda «Sí, terminar».
+    ...sessions.continuing
+      .filter((session) => answers[session.planItemId] !== "terminar")
+      .map((session) => visit(session, session.m)),
     ...sessions.finishing
       .filter((session) => answers[session.planItemId] === "otra")
       .map((session) => visit(session, Math.max(session.m, session.n) + 1)),
@@ -233,7 +236,9 @@ export function continuingAfterSign(
   // Si nada sigue en curso, vuelve para lo aceptado sin empezar (la corona tras la endodoncia):
   // no un control genérico que pedía otra cita (QA del 9 nov). La regla del servidor (`finalizeEncounter`).
   if (going.length > 0) return going
-  const after = sessions.finishing.find((session) => answers[session.planItemId] !== "otra")?.title
+  const after =
+    sessions.finishing.find((session) => answers[session.planItemId] !== "otra")?.title ??
+    sessions.continuing.find((session) => answers[session.planItemId] === "terminar")?.title
   return (sessions.accepted ?? []).map((session) => ({
     ...visit(session, session.m),
     accepted: true,
@@ -840,17 +845,46 @@ export function ClosingSignatureHint({
 }
 
 /**
- * Lo que se respondió a «¿Terminaste?» de cada tratamiento. Sin respuesta vale
- * «Sí, terminar»: es lo que viene elegido y lo que hace el servidor (ADR 0161).
+ * Lo que se respondió a «¿Terminaste?» de cada tratamiento. En lo que llega a sus
+ * sesiones previstas, sin respuesta vale «Sí, terminar»: es lo que viene elegido y lo
+ * que hace el servidor (ADR 0161). En lo que aún no llega, sin respuesta sigue en curso
+ * («otra»): solo «terminar» lo deja realizado antes.
  */
 export type SessionAnswers = Record<string, "terminar" | "otra">
+
+/**
+ * Lo respondido, como lo pide la firma (`applySessionAnswers`): «Falta otra sesión» de
+ * lo que llega a sus previstas y «Sí, terminar» de lo que aún no llega. Solo de lo que
+ * el cierre preguntó.
+ */
+export function sessionAnswersBody(
+  answers: SessionAnswers,
+  sessions:
+    | { finishing: Array<{ planItemId: string }>; continuing?: Array<{ planItemId: string }> }
+    | null
+    | undefined,
+): { addSessionPlanItemIds?: string[]; completePlanItemIds?: string[] } {
+  const finishing = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
+  const continuing = new Set((sessions?.continuing ?? []).map((session) => session.planItemId))
+  const addSession = Object.entries(answers).flatMap(([id, chosen]) =>
+    chosen === "otra" && finishing.has(id) ? [id] : [],
+  )
+  const complete = Object.entries(answers).flatMap(([id, chosen]) =>
+    chosen === "terminar" && continuing.has(id) ? [id] : [],
+  )
+  return {
+    ...(addSession.length ? { addSessionPlanItemIds: addSession } : {}),
+    ...(complete.length ? { completePlanItemIds: complete } : {}),
+  }
+}
 
 /**
  * Lo trabajado hoy de un tratamiento, una línea por cada uno. Lo que con esta
  * atención llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí,
  * terminar» ya elegido y «Falta otra sesión» a un toque, y dice debajo qué
- * pasará al firmar; lo demás dice que sigue en curso. El mismo bloque va en el
- * cierre y al firmar con lo dictado.
+ * pasará al firmar. Lo que aún no llega pregunta lo mismo con «Sigue en curso»
+ * elegido: terminarlo antes es «Sí, terminar», aquí y no en otra parte (mesa del
+ * 17 nov). El mismo bloque va en el cierre y al firmar con lo dictado.
  */
 export function ClosingSessions({
   sessions,
@@ -865,8 +899,8 @@ export function ClosingSessions({
 }: {
   /**
    * En el diálogo de firmar, lo que se decide va primero y lo que solo se lee, después (QA del 16
-   * nov, Q18): `decide` son «¿Terminaste?», lo que no se registró y lo que queda resuelto; `read`,
-   * «Sigue en curso…». Sin decirlo, todo junto.
+   * nov, Q18): `decide` son «¿Terminaste?» (también lo que sigue en curso), lo que no se registró y
+   * lo que queda resuelto; `read` hoy no tiene nada propio. Sin decirlo, todo junto.
    */
   part?: "all" | "decide" | "read"
   sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
@@ -882,10 +916,10 @@ export function ClosingSessions({
   onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
 }): React.JSX.Element | null {
   const ids = useId()
-  const reads = part !== "decide"
   const decides = part !== "read"
   const finishing = decides ? sessions.finishing : []
-  const continuing = reads ? sessions.continuing : []
+  // Lo que sigue en curso también se responde (¿Terminaste?): va con lo que se decide.
+  const continuing = decides ? sessions.continuing : []
   const notRegistered = decides ? (sessions.notRegistered ?? []) : []
   const resolving = decides ? resolvingOnSign(resolvable, sessions, answers) : []
   if (finishing.length === 0 && continuing.length === 0 && notRegistered.length === 0 && resolving.length === 0)
@@ -900,6 +934,10 @@ export function ClosingSessions({
   const choices = [
     { value: "terminar", label: "Sí, terminar" },
     { value: "otra", label: "Falta otra sesión" },
+  ] as const
+  const continuingChoices = [
+    { value: "otra", label: "Sigue en curso" },
+    { value: "terminar", label: "Sí, terminar" },
   ] as const
   return (
     <ul
@@ -941,17 +979,47 @@ export function ClosingSessions({
           </li>
         )
       })}
-      {continuing.map((session) => (
-        <li key={session.planItemId} className="text-muted-foreground">
-          {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
-          Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Realizado hoy».
-        </li>
-      ))}
+      {/* Lo que aún no llega a sus previstas también pregunta, con «Sigue en curso» elegido: si sus
+          sesiones habituales eran más de las que hizo falta, terminarlo es un toque aquí mismo. */}
+      {continuing.map((session, index) => {
+        const answer = answers[session.planItemId] === "terminar" ? "terminar" : "otra"
+        const labelId = `${ids}-sigue-${index}`
+        return (
+          <li key={session.planItemId} className="flex flex-col gap-2">
+            <span id={labelId}>
+              <span className="font-medium">{asked(session)}</span> · ¿Terminaste?
+            </span>
+            <ToggleGroup
+              aria-labelledby={labelId}
+              value={[answer]}
+              onValueChange={(next: unknown[]) => {
+                const picked = next[0]
+                if (picked === "terminar" || picked === "otra") onAnswer(session.planItemId, picked)
+              }}
+              disabled={disabled}
+              spacing={2}
+              className="flex-wrap"
+            >
+              {continuingChoices.map((choice) => (
+                <ToggleGroupItem key={choice.value} value={choice.value} className={CHIP}>
+                  {answer === choice.value ? <Check aria-hidden className="size-4" /> : null}
+                  {choice.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">
+              {answer === "terminar"
+                ? `Al firmar queda realizado, en la sesión ${session.n} de ${session.m}.`
+                : `Sigue en curso: le queda la sesión ${session.n + 1}.`}
+            </p>
+          </li>
+        )
+      })}
       {/* Avisa, no frena: quizá hoy no se pudo hacer. */}
       {notRegistered.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
-          Venía a {line(session)} y no registraste su sesión: si la hiciste, regístrala en
-          «Realizado hoy».
+          Venía a {line(session)} y no registraste su sesión: si la hiciste, regístrala en el plan,
+          en su fila.
         </li>
       ))}
       {/* Lo que el tratamiento terminado resuelve: marcado, se desmarca si no (QA del 9 nov). */}
@@ -996,7 +1064,9 @@ export function resolvingOnSign(
 ): ClosingResolvable[] {
   // Basta un tratamiento que termine (o que ya terminó hoy): lo mismo que mira el servidor al firmar.
   const ends = (planItemId: string) => {
-    if (sessions?.continuing.some((session) => session.planItemId === planItemId)) return false
+    // Lo que aún no llega a sus previstas termina solo con «Sí, terminar».
+    if (sessions?.continuing.some((session) => session.planItemId === planItemId))
+      return answers[planItemId] === "terminar"
     const finishing = sessions?.finishing.some((session) => session.planItemId === planItemId)
     return !finishing || (answers[planItemId] ?? "terminar") === "terminar"
   }

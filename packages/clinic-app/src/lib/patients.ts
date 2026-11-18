@@ -3,15 +3,15 @@ import {
   type AnesthesiaAtSigning,
   ageInYears,
   DIAGNOSIS_VERIFICATION_LABELS,
-  hasHealthInfo as sharedHasHealthInfo,
-  healthReviewPending,
-  isCurrentMedication,
   type HealthAtSigning,
   type HealthDeclarant,
+  healthReviewPending,
+  isCurrentMedication,
   type MedicationClass,
   type MedicineClassAnswer,
   type MissingPersonDatum,
   type PregnancyToday,
+  hasHealthInfo as sharedHasHealthInfo,
   type Vitals,
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
@@ -578,6 +578,15 @@ export interface ProcedureItem {
   voidReason?: string | null
 }
 
+/** Una sesión de un tratamiento: la atención donde se registró. */
+export interface PlanItemSession {
+  encounterId: string
+  at: string
+  signed: boolean
+  byName: string | null
+  note: string | null
+}
+
 /** Ítem del plan de tratamiento (decisión derivada de la línea vigente). Fechas como ISO string. */
 export interface PlanItem {
   id: string
@@ -596,6 +605,11 @@ export interface PlanItem {
   /** Sesiones previstas y hechas (atenciones distintas con un procedimiento vigente). */
   plannedSessions?: number
   sessionsDone?: number
+  /**
+   * Cada sesión, de la primera a la última (solo en el plan, para quien lee lo clínico). La nota es
+   * el comienzo de su evolución y solo viene con la atención firmada.
+   */
+  sessions?: PlanItemSession[]
   /** En la atención: indicado en ella, sin respuesta ni entregar; quien la lleva lo puede quitar. Lo decide el servidor. */
   removable?: boolean
   decidedAt: string | null
@@ -631,6 +645,8 @@ export interface PlanItem {
    * común no tiene camino). Lo dice el servidor; el plan agrupa lo que compite.
    */
   path?: PlanItemPath | null
+  /** Ya se respondió «¿otro camino o va también?»: no se vuelve a preguntar. */
+  pathAnsweredAt?: string | null
   /** Aceptado, y la revisión entregada le pregunta de nuevo por su precio: vale lo aceptado mientras tanto. */
   newTermsPending?: boolean
   /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
@@ -866,8 +882,8 @@ export interface VisitControl {
 }
 
 export interface EncounterVisit {
+  /** Todo lo aceptado que se puede hacer hoy, también lo indicado en esta atención. */
   treatments: VisitTreatment[]
-  moreTreatments: number
   controls: VisitControl[]
   /** Sin cita hoy: su próxima cita ya reservada. */
   booked?: { startsAt: string; serviceName: string | null } | null

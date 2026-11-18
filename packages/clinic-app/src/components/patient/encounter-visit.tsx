@@ -1,39 +1,18 @@
 /**
- * «Hoy viene a…» (QA de la atención del 8 nov, propuesta 4.1): arriba de la
- * atención, con o sin cita, lo que el servidor sabe que la persona viene a
- * hacer de antes: lo que trae su cita, sus tratamientos aceptados por hacer con
- * la sesión que le toca y los controles por cumplir. Lo indicado en esta misma
- * atención no se repite aquí: su «Hacerla hoy» está en su fila del Plan. Un
- * toque prepara la atención (motivo, diagnóstico que sigue, el tratamiento en
- * «Realizado hoy»); nada se da por hecho: la sesión cuenta al registrarla y el
- * control se cumple al firmar. Sin nada de antes no hay tarjeta (estándar E2):
- * «Es una urgencia» va en el título de Consulta.
+ * Por qué viene, dentro de Consulta (la atención agrupada, 17 nov; antes «Hoy viene a…»): lo que
+ * trae su cita, lo que contó antes de venir y, sin cita, la que ya tiene reservada. «Usar como
+ * motivo» llena el motivo solo si está vacío y, si su cita continúa un tratamiento, trae su
+ * diagnóstico. Los tratamientos y los controles de hoy están en el Plan, en su fila. Sin nada
+ * que decir no se muestra (estándar E2).
  */
 import { gapWords, visitReasonForEncounter } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useState } from "react"
-import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../../lib/encounters"
+import { bringTreatmentApi } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import {
-  type EncounterVisit,
-  type EncounterVisitAnswerView,
-  treatmentConsentWords,
-  type VisitControl,
-  type VisitTreatment,
-} from "../../lib/patients"
+import type { EncounterVisit, EncounterVisitAnswerView, VisitTreatment } from "../../lib/patients"
 import { visitPainWords, visitToldHeading } from "../../lib/visit-answer-words"
-
-/** «4 may», en la zona de la clínica. */
-function shortDay(iso: string): string {
-  return new Date(iso)
-    .toLocaleDateString(activeOrgLocale(), {
-      day: "numeric",
-      month: "short",
-      timeZone: activeOrgTimeZone(),
-    })
-    .replace(".", "")
-}
 
 /**
  * «Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 3:00 p. m. · Limpieza.» La frase
@@ -52,30 +31,6 @@ export function visitBookedWords(
 }
 
 /**
- * Lo que «Hoy viene a…» muestra de sus tratamientos: solo lo de antes. Lo indicado en esta misma
- * atención no se repite ahí, tampoco después de «Hacerla hoy» (QA del 16 nov, Q17: la tarjeta
- * volvía con el tratamiento, una repetición más y unos 110 px). Su fila de «Realizado hoy» lo
- * dice, con «Registrar la sesión» y «Hoy no».
- */
-export function visitTreatmentsShown<T extends { planItemId: string }>(
-  treatments: readonly T[],
-  indicatedHere: ReadonlySet<string>,
-): T[] {
-  return treatments.filter((item) => !indicatedHere.has(item.planItemId))
-}
-
-/** «Endodoncia anterior vital · 46 · sesión 2 de 2». */
-export function visitTreatmentWords(item: VisitTreatment): string {
-  return [
-    item.title,
-    item.toothNumber != null ? String(item.toothNumber) : null,
-    item.m > 1 ? `sesión ${item.n} de ${item.m}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ")
-}
-
-/**
  * La espera entre sesiones que aún no se cumple (QA del 10 nov, B6), con los días que pide su
  * servicio: «La sesión anterior fue hoy: la medicación suele dejarse una semana.». Avisa y no
  * traba: «Continuar hoy» sigue. Null si no hay espera pendiente.
@@ -86,18 +41,6 @@ export function visitWaitWords(item: Pick<VisitTreatment, "wait">): string | nul
   const when =
     wait.sinceDays === 0 ? "hoy" : wait.sinceDays === 1 ? "ayer" : `hace ${wait.sinceDays} días`
   return `La sesión anterior fue ${when}: la medicación suele dejarse ${gapWords(wait.days)}.`
-}
-
-/** «vencido el 4 may · lo indicó Dr. Hugo». */
-function controlWords(control: VisitControl): string {
-  return [
-    control.overdue
-      ? `vencido el ${shortDay(control.dueAt)}`
-      : `toca el ${shortDay(control.dueAt)}`,
-    control.byName ? `lo indicó ${control.byName}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ")
 }
 
 const row = "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2"
@@ -119,10 +62,7 @@ export function EncounterVisitStrip({
   patientFirstName = null,
   onUseVisitReason,
   currentReason = "",
-  indicatedHere,
 }: {
-  /** Lo indicado en esta atención: no se repite aquí (`visitTreatmentsShown`). */
-  indicatedHere?: ReadonlySet<string>
   /** El motivo de consulta escrito: si ya es lo que contó, se dice «Ya es el motivo de hoy». */
   currentReason?: string
   /** La atención es de otro día (una cita pasada que se registra después): no se dice «hoy». */
@@ -155,13 +95,13 @@ export function EncounterVisitStrip({
 }): React.JSX.Element | null {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const treatments = visitTreatmentsShown(visit?.treatments ?? [], indicatedHere ?? new Set())
-  const controls = visit?.controls ?? []
+  // Su cita: lo que continúa (la sesión 2) también trae su diagnóstico al usarla como motivo.
+  const allTreatments = visit?.treatments ?? []
   // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
   const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
   // Sus palabras se ofrecen como motivo mientras no haya otro; usadas o con otro escrito, siguen a la vista.
   const toldReason = visitAnswer ? visitReasonForEncounter(visitAnswer) : null
-  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason && !usedReason && !visitAnswer
+  const nothing = !offeredReason && !usedReason && !visitAnswer
 
   const run = async (key: string, write: () => Promise<unknown>) => {
     if (busy) return
@@ -184,13 +124,10 @@ export function EncounterVisitStrip({
   if (nothing && !visit?.booked) return null
 
   return (
-    <section
-      aria-labelledby={`${encounterId}-visit`}
-      className="flex flex-col gap-1 rounded-sm bg-card px-6 py-4"
-    >
-      <h2 id={`${encounterId}-visit`} className="font-heading text-base font-medium">
-        {past ? "Vino a…" : "Hoy viene a…"}
-      </h2>
+    <section aria-labelledby={`${encounterId}-visit`} className="flex flex-col gap-1">
+      <h3 id={`${encounterId}-visit`} className="sr-only">
+        {past ? "Por qué vino" : "Por qué viene"}
+      </h3>
       {visit?.booked ? (
         // Sin cita hoy, pero ya tiene una reservada: se dice, para no reservarle otra sin saberlo (QA del 9 nov).
         <p className="text-sm text-muted-foreground">{visitBookedWords(visit.booked, activeOrgLocale(), activeOrgTimeZone())}</p>
@@ -220,8 +157,9 @@ export function EncounterVisitStrip({
                   // Lo que su cita continúa (la sesión 2 de la endodoncia) trae también su
                   // diagnóstico, como «Continuar hoy» sin cita: la misma operación por los dos
                   // caminos (QA del 9 nov). El motivo escrito se guarda antes y no se pisa.
-                  const continuing = treatments.find(
-                    (item) => item.linked && item.broughtByAppointment && item.started && !item.registered,
+                  const continuing = allTreatments.find(
+                    (item) =>
+                      item.linked && item.broughtByAppointment && item.started && !item.registered,
                   )
                   if (continuing)
                     void run(continuing.planItemId, () =>
@@ -262,133 +200,6 @@ export function EncounterVisitStrip({
               ) : null}
             </li>
           ) : null}
-          {treatments.map((item) => {
-            const words = visitTreatmentWords(item)
-            return (
-              <li key={item.planItemId} className={row}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="font-medium">{words}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {item.registered
-                      ? "Sesión de hoy registrada en «Realizado hoy»"
-                      : item.linked
-                        ? "Está en «Realizado hoy»: ahí registras su sesión cuando la hagas"
-                        : item.started
-                          ? "En curso"
-                          : item.after
-                            ? // La misma regla de «Qué sigue»: avisa, y «Hacerla hoy» queda como segunda opción.
-                              `Aceptado · va después de terminar ${item.after.title}${item.after.today ? ", que se hace hoy" : ""}`
-                            : "Aceptado, sin empezar"}
-                  </span>
-                  {!item.registered && visitWaitWords(item) ? (
-                    <span className="text-xs text-warning">{visitWaitWords(item)}</span>
-                  ) : null}
-                  {/* El consentimiento va con el tratamiento: se firma antes de empezar, en Documentos. */}
-                  {!item.registered && treatmentConsentWords(item.consent, item.consentMissing) ? (
-                    <span className={item.consent === "firmado" ? "text-xs text-muted-foreground" : "text-xs text-warning"}>
-                      {treatmentConsentWords(item.consent, item.consentMissing)}
-                    </span>
-                  ) : null}
-                </span>
-                {item.registered ? null : item.linked ? (
-                  <span className="flex flex-wrap gap-2">
-                    {item.broughtByAppointment ? null : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={disabled || busy !== null}
-                        aria-label={`Hoy no: ${words}`}
-                        onClick={() =>
-                          void run(item.planItemId, () =>
-                            leaveTreatmentApi(patientId, encounterId, item.planItemId),
-                          )
-                        }
-                      >
-                        Hoy no
-                      </Button>
-                    )}
-                  </span>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={disabled || busy !== null}
-                    aria-label={`${item.started ? "Continuar hoy" : "Hacerla hoy"}: ${words}`}
-                    onClick={() =>
-                      void run(item.planItemId, () =>
-                        bringTreatmentApi(patientId, encounterId, item.planItemId),
-                      )
-                    }
-                  >
-                    {busy === item.planItemId
-                      ? "Preparando…"
-                      : item.started
-                        ? "Continuar hoy"
-                        : "Hacerla hoy"}
-                  </Button>
-                )}
-              </li>
-            )
-          })}
-          {visit && visit.moreTreatments > 0 ? (
-            <li className="py-2 text-xs text-muted-foreground">
-              Y {visit.moreTreatments}{" "}
-              {visit.moreTreatments === 1
-                ? "tratamiento aceptado más"
-                : "tratamientos aceptados más"}{" "}
-              en su Plan.
-            </li>
-          ) : null}
-          {controls.map((control) => (
-            <li key={control.id} className={row}>
-              <span className="flex min-w-0 flex-col">
-                <span className="font-medium">{control.title}</span>
-                <span
-                  className={
-                    control.overdue ? "text-xs text-warning" : "text-xs text-muted-foreground"
-                  }
-                >
-                  {controlWords(control)}
-                  {control.byAppointment
-                    ? " · su cita de hoy es este control: se cumple al firmar"
-                    : control.chosen
-                      ? " · viene a este control: se cumple al firmar"
-                      : ""}
-                </span>
-              </span>
-              {control.byAppointment ? null : control.chosen ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled || busy !== null}
-                  aria-label={`No viene a ${control.title}`}
-                  onClick={() =>
-                    void run(control.id, () => chooseVisitControlApi(patientId, encounterId, null))
-                  }
-                >
-                  No es este
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || busy !== null}
-                  aria-label={`Viene a su control: ${control.title}`}
-                  onClick={() =>
-                    void run(control.id, () =>
-                      chooseVisitControlApi(patientId, encounterId, control.id),
-                    )
-                  }
-                >
-                  {busy === control.id ? "Anotando…" : "Viene a su control"}
-                </Button>
-              )}
-            </li>
-          ))}
         </ul>
       )}
       {/* Qué hace elegir (la sesión cuenta al registrarla; el control, al firmar) lo dicen sus

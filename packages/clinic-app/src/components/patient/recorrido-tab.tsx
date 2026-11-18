@@ -7,8 +7,7 @@
  * no corresponda a este tratamiento.
  */
 
-import { label } from "../../lib/glossary"
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, formatMoney } from "@odentia/clinical"
 import { Badge, Button, Checkbox } from "@odentia/ui"
 import {
   EmptyState,
@@ -19,7 +18,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -38,21 +37,28 @@ import {
   reviseTreatmentApi,
   suspendTreatmentApi,
 } from "../../lib/clinical-journey"
-import { useMyUserId, usePermission } from "../../lib/crm"
-import type { Encounter, PatientSummary, PlanItem, TreatmentNextAction } from "../../lib/patients"
-import { planStatusLabel } from "../../lib/patients"
-import { formatMoney } from "@odentia/clinical"
+import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { bringTreatmentApi } from "../../lib/encounters"
+import { label } from "../../lib/glossary"
 import { useOrgProfile } from "../../lib/org"
+import type {
+  Encounter,
+  EncounterDetail,
+  PatientSummary,
+  PlanItem,
+  TreatmentNextAction,
+} from "../../lib/patients"
+import { planStatusLabel } from "../../lib/patients"
 import type { ServiceCatalogItem } from "../../lib/services"
-import { ChoiceSelect } from "../ui/choice-select"
-import { CollectButton } from "./collect-flow"
-import { DiagnosisSearch } from "./diagnosis-search"
-import { ControlesPanel, RecetasPanel } from "./clinical-panels"
-import { DocumentOpenButton } from "./document-open-button"
-import { PlanPhases } from "./plan-fases"
-import { ServicePicker } from "./service-picker"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
+import { ChoiceSelect } from "../ui/choice-select"
+import { ControlesPanel, RecetasPanel } from "./clinical-panels"
+import { CollectButton } from "./collect-flow"
+import { DiagnosisSearch } from "./diagnosis-search"
+import { DocumentOpenButton } from "./document-open-button"
+import { PlanItemSessions, PlanPhases } from "./plan-fases"
+import { ServicePicker } from "./service-picker"
 
 const MAX_TEXT = 2000
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const
@@ -71,6 +77,19 @@ export interface RecorridoNavigation {
   itemId?: string
   planId?: string
   budgetId?: string
+}
+
+/**
+ * El recorrido abierto al lado de la atención (mesa del 17 nov, tablero 8: nada te saca de
+ * ella). El odontograma y «Registrar» se resuelven en la misma atención; lo demás de la ficha
+ * se abre en otra pestaña del navegador.
+ */
+export interface RecorridoInAttention {
+  encounterId: string
+  /** «Ver odontograma»: baja al odontograma de esta atención, en la pieza. */
+  onOdontogram: (tooth?: number) => void
+  /** «Registrar»: registra la sesión de ese tratamiento en esta atención. */
+  onRegister: (itemId: string) => void
 }
 
 function decisionBadge(status: string): "default" | "secondary" | "success" | "destructive" {
@@ -100,6 +119,7 @@ export function RecorridoClinicoTab({
   showPhases = true,
   onChangeItem,
   onTabChange,
+  inAttention,
 }: {
   patientId: string
   /** Para cobrar desde el recorrido. */
@@ -109,13 +129,59 @@ export function RecorridoClinicoTab({
   showPhases?: boolean
   onChangeItem: (itemId: string) => void
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
+  /** Abierto al lado de la atención: nada navega fuera de ella. Sin él, como en la ficha. */
+  inAttention?: RecorridoInAttention
 }): React.JSX.Element {
   const navigate = useNavigate()
-  const goToEncounter = (encounterId: string) =>
+  const router = useRouter()
+  const memberName = useMemberName()
+  const openInNewTab = (href: string) => void window.open(href, "_blank", "noopener")
+  const goToEncounter = (encounterId: string) => {
+    // Desde la atención, otra atención (una sesión anterior) se abre aparte: esta no se pierde.
+    if (inAttention) {
+      if (encounterId !== inAttention.encounterId)
+        openInNewTab(
+          router.buildLocation({
+            to: "/patients/$patientId/encounters/$encounterId",
+            params: { patientId, encounterId },
+          }).href,
+        )
+      return
+    }
     void navigate({
       to: "/patients/$patientId/encounters/$encounterId",
       params: { patientId, encounterId },
     })
+  }
+  /**
+   * Ir a otra parte de la ficha. En la ficha cambia de pestaña (`onTabChange`); desde la
+   * atención, el odontograma es el de ella y lo demás abre la misma dirección de la ficha en
+   * otra pestaña del navegador.
+   */
+  const goTo = (tab: RecorridoTarget, target?: RecorridoNavigation) => {
+    if (!inAttention) {
+      onTabChange(tab, target)
+      return
+    }
+    if (tab === "odontograma") {
+      inAttention.onOdontogram(target?.tooth)
+      return
+    }
+    const search = {
+      tab,
+      ...(target?.itemId ? { itemId: target.itemId } : {}),
+      ...(target?.planId ? { planId: target.planId } : {}),
+      ...(target?.budgetId ? { budgetId: target.budgetId } : {}),
+      ...(target?.tooth != null ? { tooth: target.tooth } : {}),
+    }
+    openInNewTab(
+      router.buildLocation({
+        to: "/patients/$patientId",
+        params: { patientId },
+        search: search as never,
+      }).href,
+    )
+  }
   const canWrite = usePermission("clinical.write")
   const myUserId = useMyUserId()
   const canRead = usePermission("clinical.read")
@@ -204,7 +270,24 @@ export function RecorridoClinicoTab({
   // Dentro de la atención en curso escribe quien la lleva (ADR 0002): revisar, completar, cambiar el
   // estado y la receta se unen solo a la propia. La de otro profesional se abre y se toma el relevo ahí.
   const ownEncounterId =
-    openEncounterId && (!summary?.openEncounter || summary.openEncounter.professionalUserId === myUserId) ? openEncounterId : null
+    openEncounterId &&
+    (!summary?.openEncounter || summary.openEncounter.professionalUserId === myUserId)
+      ? openEncounterId
+      : null
+  // La atención de hoy donde «Hacer hoy» lo marca: la que está abierta al lado o la propia.
+  const todayEncounterId = inAttention?.encounterId ?? ownEncounterId
+  // La abierta de otro profesional: se dice, sin un botón que el servidor rechazaría.
+  const othersEncounter =
+    !inAttention && openEncounterId && !ownEncounterId ? (summary?.openEncounter ?? null) : null
+  // Lo que ya trae la atención de hoy (la misma lectura y caché que la página de la atención).
+  const todayQuery = useQuery({
+    queryKey: ["encounter", patientId, todayEncounterId],
+    queryFn: () =>
+      apiFetch<{ data: EncounterDetail }>(
+        `/api/patients/${patientId}/encounters/${todayEncounterId}`,
+      ),
+    enabled: canRead && todayEncounterId != null,
+  })
   const [startingSession, setStartingSession] = useState(false)
 
   if (itemsQuery.isPending) {
@@ -218,7 +301,7 @@ export function RecorridoClinicoTab({
           description="Los tratamientos se indican durante una atención abierta. Abre una atención para evaluar al paciente e indicar el tratamiento."
         />
         <div>
-          <Button type="button" variant="outline" onClick={() => onTabChange("historia")}>
+          <Button type="button" variant="outline" onClick={() => goTo("historia")}>
             Ver la historia del paciente
           </Button>
         </div>
@@ -263,48 +346,89 @@ export function RecorridoClinicoTab({
     }
   }
 
+  // «Hacer hoy» (mesa del 17 nov): lo aceptado por empezar y lo que sigue en curso se hacen en la
+  // atención de hoy. Ya traído a ella, el botón es «Registrar»; registrado hoy, no queda nada aquí.
+  const doesToday = nextAction === "iniciar" || nextAction === "continuar"
+  const broughtToday =
+    todayQuery.data?.data.plannedItems.some((planned) => planned.id === selectedId) ?? false
+  const registeredToday =
+    todayEncounterId != null &&
+    (item?.sessions ?? []).some((session) => session.encounterId === todayEncounterId)
+  const todayStep: "hacer" | "registrar" | "registrado" | "de_otro" | null = !doesToday
+    ? null
+    : othersEncounter
+      ? "de_otro"
+      : registeredToday
+        ? "registrado"
+        : broughtToday
+          ? "registrar"
+          : "hacer"
+
+  const doToday = async () => {
+    if (!item) return
+    if (todayStep === "registrar") {
+      // En la atención se registra ahí mismo; desde la ficha, se va a ella.
+      if (inAttention) inAttention.onRegister(item.id)
+      else if (todayEncounterId) goToEncounter(todayEncounterId)
+      return
+    }
+    if (todayStep === "registrado") {
+      if (!inAttention && todayEncounterId) goToEncounter(todayEncounterId)
+      return
+    }
+    if (todayStep !== "hacer") return
+    setStartingSession(true)
+    try {
+      if (todayEncounterId) {
+        // Con la atención abierta, se marca en ella: no se abre otra (el servidor la rechaza).
+        await bringTreatmentApi(patientId, todayEncounterId, item.id)
+        invalidate()
+        for (const key of ["encounter", "encounter-visit", "encounter-closing", "consent-needs"])
+          void queryClient.invalidateQueries({ queryKey: [key, patientId] })
+        if (!inAttention) goToEncounter(todayEncounterId)
+        return
+      }
+      // Sin atención abierta, se abre una con él.
+      const created = await apiFetch<{ data: Encounter }>(`/api/patients/${patientId}/encounters`, {
+        method: "POST",
+        body: JSON.stringify({
+          reason: item.title,
+          teeth: item.toothNumber != null ? [item.toothNumber] : [],
+          planItemIds: [item.id],
+          // La sede en la que se trabaja: lo que quede por cobrar llega a su caja.
+          ...(sede.branchId ? { branchId: sede.branchId } : {}),
+        }),
+      })
+      invalidate()
+      goToEncounter(created.data.id)
+    } catch (mutationError) {
+      setError(submitErrorMessage(mutationError))
+    } finally {
+      setStartingSession(false)
+    }
+  }
+
   const runPrimaryAction = async () => {
     if (!item) return
     setError(null)
     const openEncounter = goToEncounter
-    if (nextAction === "iniciar") {
-      setStartingSession(true)
-      try {
-        const created = await apiFetch<{ data: Encounter }>(
-          `/api/patients/${patientId}/encounters`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              reason: item.title,
-              teeth: item.toothNumber != null ? [item.toothNumber] : [],
-              planItemIds: [item.id],
-              // La sede en la que se trabaja: lo que quede por cobrar llega a su caja.
-              ...(sede.branchId ? { branchId: sede.branchId } : {}),
-            }),
-          },
-        )
-        invalidate()
-        openEncounter(created.data.id)
-      } catch (mutationError) {
-        setError(submitErrorMessage(mutationError))
-      } finally {
-        setStartingSession(false)
-      }
+    if (doesToday) {
+      await doToday()
       return
     }
-    // Continuar o definir se resuelven en la atención abierta: navegar es la acción.
-    if (nextAction === "continuar" || nextAction === "definir") {
+    // Definir se resuelve en la atención abierta: navegar es la acción.
+    if (nextAction === "definir") {
       if (openEncounterId) openEncounter(openEncounterId)
       return
     }
-    if (nextAction === "completar" && openEncounterId) {
+    if (nextAction === "completar" && (todayEncounterId || openEncounterId)) {
       // La lleva otro profesional: se abre para tomar el relevo ahí.
-      if (ownEncounterId) completeMutation.mutate(ownEncounterId)
-      else openEncounter(openEncounterId)
+      if (todayEncounterId) completeMutation.mutate(todayEncounterId)
+      else if (openEncounterId) openEncounter(openEncounterId)
       return
     }
     if (nextAction === "presupuestar" || nextAction === "decidir") {
-      onTabChange("plan", { itemId: item.id, planId: journey?.plan.id, budgetId: currentBudgetId })
+      goTo("plan", { itemId: item.id, planId: journey?.plan.id, budgetId: currentBudgetId })
       return
     }
     // Un tratamiento suspendido se reanuda donde quedó: en curso si ya tenía
@@ -314,22 +438,43 @@ export function RecorridoClinicoTab({
       return
     }
     if (nextAction === "controlar") {
-      onTabChange("controles", { itemId: item.id })
+      goTo("controles", { itemId: item.id })
     }
   }
 
+  const todayLabel = {
+    hacer: "Hacer hoy",
+    registrar: "Registrar",
+    registrado: "Abrir la atención",
+    de_otro: "",
+  } as const
   const primaryLabel: Record<TreatmentNextAction, string> = {
-    definir: "Continuar en la atención abierta",
+    definir: "Ir a la atención abierta",
     presupuestar: "Ir al presupuesto",
     decidir: "Registrar la decisión",
-    iniciar: "Iniciar sesión",
+    iniciar: todayLabel[todayStep ?? "hacer"],
     reanudar: "Reanudar tratamiento",
-    continuar: "Continuar en la atención",
+    continuar: todayLabel[todayStep ?? "hacer"],
     completar: "Completar tratamiento",
     controlar: "Ver los controles",
   }
-  // Sin una atención abierta no hay a dónde llevar: la línea de arriba dice qué falta, sin un botón que no hace nada.
-  const canDoNext = nextAction !== null && !((nextAction === "continuar" || nextAction === "definir") && !openEncounterId)
+  // Sin una atención abierta no hay a dónde llevar: la línea de arriba dice qué falta, sin un botón
+  // que no hace nada. La de otro profesional se dice, sin un botón que el servidor rechazaría; en la
+  // atención, lo ya registrado hoy no tiene más que hacer aquí, y definir es ahí mismo.
+  const canDoNext =
+    nextAction !== null &&
+    !(nextAction === "definir" && (!openEncounterId || inAttention)) &&
+    todayStep !== "de_otro" &&
+    !(todayStep === "registrado" && inAttention)
+  /** «Hoy» en la línea de arriba: en qué va hoy lo que se hace en la atención. */
+  const todayWords =
+    todayStep === "registrado"
+      ? "Registrado hoy en su atención."
+      : todayStep === "registrar"
+        ? "Marcado para hoy: falta registrarlo."
+        : todayStep === "de_otro" && othersEncounter
+          ? `La atención abierta es de ${memberName(othersEncounter.professionalUserId)}: lo de hoy se registra en ella, y quien la lleva lo marca.`
+          : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -343,6 +488,7 @@ export function RecorridoClinicoTab({
             setError(null)
             onChangeItem(itemId)
           }}
+          onOpenEncounter={goToEncounter}
         />
       ) : null}
 
@@ -368,6 +514,20 @@ export function RecorridoClinicoTab({
                   <span className="text-xs text-muted-foreground">
                     {followUpAppointmentLabel(nextFollowUp)}
                   </span>
+                ) : null}
+                {todayWords ? (
+                  <span className="text-xs text-muted-foreground">{todayWords}</span>
+                ) : null}
+                {todayStep === "de_otro" && othersEncounter ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="link"
+                    className="self-start px-0"
+                    onClick={() => goToEncounter(othersEncounter.id)}
+                  >
+                    Abrir su atención
+                  </Button>
                 ) : null}
               </div>
               {canWrite && nextAction && canDoNext ? (
@@ -449,7 +609,7 @@ export function RecorridoClinicoTab({
                   size="sm"
                   variant="outline"
                   onClick={() =>
-                    onTabChange("odontograma", { tooth: journey.item.toothNumber ?? undefined })
+                    goTo("odontograma", { tooth: journey.item.toothNumber ?? undefined })
                   }
                 >
                   Ver odontograma
@@ -487,7 +647,7 @@ export function RecorridoClinicoTab({
                       size="sm"
                       variant="outline"
                       onClick={() =>
-                        onTabChange("plan", {
+                        goTo("plan", {
                           itemId: journey.item.id,
                           planId: journey.plan.id,
                           budgetId: budget.id,
@@ -505,9 +665,7 @@ export function RecorridoClinicoTab({
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() =>
-                    onTabChange("plan", { itemId: journey.item.id, planId: journey.plan.id })
-                  }
+                  onClick={() => goTo("plan", { itemId: journey.item.id, planId: journey.plan.id })}
                 >
                   Ir al presupuesto
                 </Button>
@@ -562,45 +720,29 @@ export function RecorridoClinicoTab({
           </div>
 
           <div className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
-            <div className="font-heading text-base font-medium">4. Qué se ejecutó</div>
-            {journey.procedures.length === 0 ? (
+            <div className="font-heading text-base font-medium">4. Sesiones</div>
+            {/* Las mismas sesiones que la ficha (mesa del 17 nov): la firmada con ✓, el día, quién y
+                lo anotado; la de un borrador, «en curso», sin ✓ ni nota. */}
+            {(item?.sessions ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Aún no hay sesiones registradas para este tratamiento.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
-                {journey.procedures.map(({ procedure, encounter }) => (
-                  <li key={procedure.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span>
-                      {formatDateTime(encounter.createdAt)} · {procedure.description}
-                    </span>
-                    <Badge variant={encounter.status === "borrador" ? "default" : "secondary"}>
-                      {encounter.status === "borrador" ? "En curso" : "Atención finalizada"}
-                    </Badge>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => goToEncounter(encounter.id)}
-                    >
-                      Abrir la atención
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <PlanItemSessions
+                sessions={item?.sessions ?? []}
+                itemLabel={journey.item.title}
+                onOpen={goToEncounter}
+                current={inAttention?.encounterId}
+                nextAt={
+                  doesToday &&
+                  !["realizado", "cancelado", "reemplazado"].includes(journey.item.status)
+                    ? (summaryRow?.nextAppointmentAt ?? null)
+                    : null
+                }
+              />
             )}
             {canWrite ? (
               <div className="flex flex-wrap gap-2">
-                {openEncounterId ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => goToEncounter(openEncounterId)}
-                  >
-                    Continuar en la atención abierta
-                  </Button>
-                ) : null}
                 {!["realizado", "cancelado", "reemplazado"].includes(journey.item.status) ? (
                   <>
                     <Button
@@ -650,7 +792,7 @@ export function RecorridoClinicoTab({
               </div>
             ) : null}
             {canWrite &&
-            !ownEncounterId &&
+            !todayEncounterId &&
             !["realizado", "cancelado", "reemplazado"].includes(journey.item.status) ? (
               <p className="text-xs text-muted-foreground">
                 {openEncounterId
@@ -663,14 +805,14 @@ export function RecorridoClinicoTab({
           <ControlesPanel
             patientId={patientId}
             itemId={selectedId}
-            encounterId={ownEncounterId ?? undefined}
+            encounterId={todayEncounterId ?? undefined}
             items={items}
           />
 
           <RecetasPanel
             patientId={patientId}
             itemId={selectedId}
-            encounterId={ownEncounterId ?? undefined}
+            encounterId={todayEncounterId ?? undefined}
             items={items}
           />
 
@@ -705,7 +847,7 @@ export function RecorridoClinicoTab({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => onTabChange("imagenes", { itemId: journey.item.id })}
+                onClick={() => goTo("imagenes", { itemId: journey.item.id })}
               >
                 Subir o revisar documentos
               </Button>
@@ -784,7 +926,7 @@ export function RecorridoClinicoTab({
         open={form === "revise"}
         patientId={patientId}
         itemId={selectedId}
-        encounterId={ownEncounterId}
+        encounterId={todayEncounterId}
         initialTooth={journey?.item.toothNumber ?? null}
         onClose={close}
         onDone={() => {
@@ -798,7 +940,7 @@ export function RecorridoClinicoTab({
         open={form === "suspend" || form === "cancel"}
         patientId={patientId}
         itemId={selectedId}
-        encounterId={ownEncounterId}
+        encounterId={todayEncounterId}
         onClose={close}
         onDone={() => {
           close()
