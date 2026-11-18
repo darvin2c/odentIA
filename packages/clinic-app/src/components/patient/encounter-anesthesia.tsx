@@ -203,7 +203,9 @@ export function EncounterAnesthesiaLine({
   const setBy = health?.asaClassSetBy ? memberName(health.asaClassSetBy) : null
   const setAt = health?.asaClassSetAt ? shortDay(health.asaClassSetAt) : null
   // Contestada y sin nada que avisar: dos líneas, sin el color de aviso, con «Cambiar».
-  if (!expanded && anesthesiaAnswered({ asksAsa, health, gaps, risks, warnings: words.warnings, today }))
+  // El tope de epinefrina es un aviso: con él, el bloque va entero.
+  const warnings = [...(words.cap ? [words.cap] : []), ...words.warnings]
+  if (!expanded && anesthesiaAnswered({ asksAsa, health, gaps, risks, warnings, today }))
     return (
       <section
         aria-labelledby={`${ids}-title`}
@@ -312,10 +314,23 @@ export function EncounterAnesthesiaLine({
             </option>
           ))}
         </ChoiceSelect>
-        <p id={`${ids}-dose`} className="text-sm font-medium">
-          {words.dose
-            ? `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
-            : "Anota su peso en los signos vitales para ver la dosis máxima."}
+        <p id={`${ids}-dose`} className={words.cap ? "text-sm" : "text-sm font-medium"}>
+          {/* Con tope, lo que manda va primero y destacado, y el máximo por peso después, más discreto
+              (QA de diseño del 18 nov, H7). */}
+          {words.cap ? (
+            <>
+              <strong className="font-semibold">{words.cap}</strong>
+              <span className="text-muted-foreground">
+                {words.dose
+                  ? ` · ${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
+                  : " · Sin peso anotado, sin el máximo por peso."}
+              </span>
+            </>
+          ) : words.dose ? (
+            `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
+          ) : (
+            "Anota su peso en los signos vitales para ver la dosis máxima."
+          )}
           {/* Lleva a los signos vitales del examen clínico (QA del 18 nov: había que adivinarlo). */}
           {!words.dose && onAddWeight && canWrite ? (
             <>
@@ -364,7 +379,15 @@ export function AnesthesiaAtSigningView({
           {who}
         </li>
       ) : null}
-      {value.dose ? (
+      {/* Lo que manda primero, como en la atención (QA de diseño del 18 nov, H7). */}
+      {value.cap ? (
+        <li>
+          <strong className="font-semibold">{value.cap}</strong>
+          <span className="text-muted-foreground">
+            {value.dose ? ` · ${value.dose}` : " · Sin peso anotado, sin el máximo por peso"}
+          </span>
+        </li>
+      ) : value.dose ? (
         <li>{value.dose}</li>
       ) : value.weightKg === null ? (
         <li>Sin peso anotado: sin dosis máxima</li>

@@ -668,6 +668,8 @@ export function EncounterEditor({
   const [savedAt, setSavedAt] = useState<string>(encounter.updatedAt)
   // Antecedentes y última atención, al lado y sin salir.
   const [contextOpen, setContextOpen] = useState(false)
+  // «Anotar su peso» lleva al peso del examen; desde ahí, «Volver a la anestesia» (QA de diseño del 18 nov, H8).
+  const [weightReturn, setWeightReturn] = useState(false)
   /** Una propuesta de diagnóstico sin tipo, usada desde la tarjeta: el bloque abre su formulario con ella. */
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
   /** «Registrar» desde la fila del plan: el tratamiento con que se abre el registro. */
@@ -2276,6 +2278,22 @@ export function EncounterEditor({
         </div>
         {/* La presión que pide pensar antes de lo electivo, bajo sus campos: avisa y no frena (QA del 16 nov). */}
         <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
+        {weightReturn ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="self-start"
+            onClick={() => {
+              setWeightReturn(false)
+              const line = document.getElementById(`${uid}-anestesia`)
+              line?.scrollIntoView({ block: "center", behavior: "smooth" })
+              line?.focus({ preventScroll: true })
+            }}
+          >
+            Volver a la anestesia
+          </Button>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           La presión se registra completa (sistólica y diastólica).
         </p>
@@ -2543,6 +2561,7 @@ export function EncounterEditor({
       onAddWeight={() => {
         setConfirmOpen(false)
         setContextOpen(false)
+        setWeightReturn(true)
         openExtra("examen")
         requestAnimationFrame(() => {
           goTo(`${uid}-examen`)
@@ -2902,7 +2921,10 @@ export function EncounterEditor({
             <>
               {/* Antes de anestesiar: en cuanto algo de hoy usa anestesia local (QA del 16 nov), arriba
                   del plan y antes de «Registrar». */}
-              {anesthesiaLine(false)}
+              {/* «Volver a la anestesia» trae aquí, con el foco, después de anotar el peso. */}
+              <div id={`${uid}-anestesia`} tabIndex={-1} className="outline-none empty:hidden">
+                {anesthesiaLine(false)}
+              </div>
               <EncounterPlanPanel
                 patientId={patientId}
                 encounterId={encounterId}

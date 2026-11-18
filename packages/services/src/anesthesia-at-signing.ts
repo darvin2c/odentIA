@@ -157,7 +157,7 @@ export async function anesthesiaAtSigningOf(
         ageYears,
         epinephrine,
       })
-    : { dose: null, warnings: [] }
+    : { cap: null, dose: null, warnings: [] }
   return {
     uses: [...input.uses],
     asaClass,
@@ -168,6 +168,8 @@ export async function anesthesiaAtSigningOf(
     asaSetAt: asaClass ? (header?.setAt?.toISOString() ?? null) : null,
     weightKg,
     anesthetic: anesthetic?.label ?? null,
+    // Lo que manda primero, como en la pantalla (QA de diseño del 18 nov, H7).
+    cap: words.cap,
     dose: words.dose,
     warnings: words.warnings,
   }

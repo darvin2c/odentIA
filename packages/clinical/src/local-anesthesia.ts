@@ -223,6 +223,10 @@ export function epinephrineCheckOf(input: {
  * La línea del máximo y sus avisos: «Máximo para 22 kg con lidocaína 2 % con epinefrina
  * (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos». Sin peso no inventa un máximo (`dose`
  * nulo): la pantalla pide anotarlo en los signos vitales.
+ *
+ * Con tope de epinefrina, lo que manda va primero (QA de diseño del 18 nov, H7): `cap` dice «Epinefrina
+ * hasta 0,04 mg por su ASA III: unos 2,2 cartuchos», y `dose` el máximo por peso, corto, después
+ * («Máximo por peso (64 kg): 7,8»). La pantalla y lo firmado los dicen en ese orden.
  */
 export function localAnesthesiaWords(input: {
   weightKg: number | null | undefined
@@ -230,9 +234,9 @@ export function localAnesthesiaWords(input: {
   ageYears: number | null | undefined
   /** El tope de epinefrina con sus motivos y si falta tomar la presión (`epinephrineCheckOf`). */
   epinephrine: EpinephrineCheck | null
-}): { dose: string | null; warnings: string[] } {
+}): { cap: string | null; dose: string | null; warnings: string[] } {
   const anesthetic = localAnestheticOf(input.anesthetic)
-  if (!anesthetic) return { dose: null, warnings: [] }
+  if (!anesthetic) return { cap: null, dose: null, warnings: [] }
   const warnings: string[] = []
   const { ageYears } = input
   if (
@@ -244,26 +248,27 @@ export function localAnesthesiaWords(input: {
     warnings.push(
       `La ${anesthetic.name.split(" ")[0]} no se recomienda en menores de ${anesthetic.minAgeYears} años.`,
     )
-  const cap = input.epinephrine?.cap ?? null
-  if (cap && anesthetic.epinephrineMgPerMl) {
+  const epinephrineCap = input.epinephrine?.cap ?? null
+  let cap: string | null = null
+  if (epinephrineCap && anesthetic.epinephrineMgPerMl) {
     const perCartridge = anesthetic.epinephrineMgPerMl * CARTRIDGE_ML
     const why = listWords([
-      ...(cap.asaClass ? [`su ASA ${cap.asaClass}`] : []),
-      ...cap.conditions.map((condition) => `su ${condition}`),
-      ...(cap.pressure ? [`la presión de hoy (${cap.pressure})`] : []),
+      ...(epinephrineCap.asaClass ? [`su ASA ${epinephrineCap.asaClass}`] : []),
+      ...epinephrineCap.conditions.map((condition) => `su ${condition}`),
+      ...(epinephrineCap.pressure ? [`la presión de hoy (${epinephrineCap.pressure})`] : []),
     ])
-    warnings.push(
-      `Por ${why}, la epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por sesión: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos de este anestésico.`,
-    )
+    cap = `Epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por ${why}: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos`
   }
   // Con cualquier anestésico: la presión de hoy dice si está controlada y si lo electivo se difiere.
   if (input.epinephrine?.takePressure)
     warnings.push(`Con su ${input.epinephrine.takePressure}, toma la presión antes de anestesiar.`)
   const weight = input.weightKg
-  if (weight === null || weight === undefined || !(weight > 0)) return { dose: null, warnings }
+  if (weight === null || weight === undefined || !(weight > 0)) return { cap, dose: null, warnings }
   const max = maxLocalAnestheticDose(weight, anesthetic)
+  if (cap) return { cap, dose: `Máximo por peso (${number(weight)} kg): ${number(max.cartridges)}`, warnings }
   const mg = max.capped ? `${number(max.mg)} mg (el tope)` : `${number(max.mg)} mg`
   return {
+    cap,
     dose: `Máximo para ${number(weight)} kg con ${anesthetic.name} (cartucho de ${number(CARTRIDGE_ML)} mL): ${mg}, unos ${number(max.cartridges)} cartuchos`,
     warnings,
   }
@@ -373,7 +378,12 @@ export interface AnesthesiaAtSigning {
   weightKg: number | null
   /** El anestésico elegido para el cálculo («Lidocaína 2 % con epinefrina 1:100 000»). */
   anesthetic: string | null
-  /** «Máximo para 22 kg con…»; nulo sin peso. */
+  /**
+   * El tope de epinefrina, que manda sobre el máximo por peso: «Epinefrina hasta 0,04 mg por su ASA
+   * III: unos 2,2 cartuchos». Lo firmado antes del 18 nov no lo tiene: lo lleva en `warnings`.
+   */
+  cap?: string | null
+  /** «Máximo para 22 kg con…» o, con tope, «Máximo por peso (64 kg): 7,8»; nulo sin peso. */
   dose: string | null
   warnings: string[]
 }

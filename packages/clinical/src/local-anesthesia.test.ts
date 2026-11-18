@@ -21,6 +21,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         epinephrine: null,
       }),
     ).toEqual({
+      cap: null,
       dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos",
       warnings: [],
     })
@@ -81,6 +82,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         epinephrine: null,
       }),
     ).toEqual({
+      cap: null,
       dose: null,
       warnings: [],
     })
@@ -98,12 +100,29 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       vitals: input.vitals ?? null,
       ageYears: input.ageYears ?? 60,
     })
-  const warn = (epinephrine: ReturnType<typeof epinephrineCheckOf> | null, anesthetic = "lidocaina-2-epinefrina") =>
-    localAnesthesiaWords({ weightKg: 70, anesthetic, ageYears: 60, epinephrine }).warnings
+  // El tope y los avisos, en el orden en que se leen: el tope primero.
+  const warn = (epinephrine: ReturnType<typeof epinephrineCheckOf> | null, anesthetic = "lidocaina-2-epinefrina") => {
+    const words = localAnesthesiaWords({ weightKg: 70, anesthetic, ageYears: 60, epinephrine })
+    return [...(words.cap ? [words.cap] : []), ...words.warnings]
+  }
   const hta = { name: "Hipertensión esencial", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
   const fa = { name: "Fibrilación auricular", diagnosisSystem: "ICD-10", diagnosisCode: "I48" }
-  const cap = (why: string) =>
-    `Por ${why}, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.`
+  const cap = (why: string) => `Epinefrina hasta 0,04 mg por ${why}: unos 2,2 cartuchos`
+
+  // QA de diseño del 18 nov (H7): el primer número que se leía era el máximo por peso (7,8), no el tope (2,2).
+  it("con tope, lo que manda va primero y el máximo por peso después, corto", () => {
+    const words = localAnesthesiaWords({
+      weightKg: 64,
+      anesthetic: "lidocaina-2-epinefrina",
+      ageYears: 68,
+      epinephrine: check({ asaClass: "III" }),
+    })
+    expect(words).toEqual({
+      cap: "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos",
+      dose: "Máximo por peso (64 kg): 7,8",
+      warnings: [],
+    })
+  })
 
   it("en un cardiópata avisa el tope de epinefrina, y sin vasoconstrictor no", () => {
     const epinephrine = check({ conditions: [fa], asaClass: "II" })
