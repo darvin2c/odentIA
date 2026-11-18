@@ -93,7 +93,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
-import { PlanItemSessions } from "./plan-fases"
+import { PlanItemSessions, phaseHeading } from "./plan-fases"
 import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
@@ -931,9 +931,10 @@ export function EncounterPlanPanel({
                   // Por fases, como el plan de la ficha: un encabezado por fase (las filas ya van
                   // ordenadas por ella).
                   const previous = rows[index - 1]
+                  const phase = phases[phaseIndexOf(item)]
                   const phaseLabel =
-                    phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
-                      ? (phases[phaseIndexOf(item)]?.label ?? null)
+                    phase && phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
+                      ? phaseHeading(phaseIndexOf(item), phase.label)
                       : null
                   // El precio, solo de lo que aún no empezó: lo empezado ya se cobró o se cobra por
                   // sesión, y la fila no lo sabe sin la caja (QA en pantalla del 17 nov).
@@ -957,7 +958,7 @@ export function EncounterPlanPanel({
                     <Fragment key={item.id}>
                       {phaseLabel ? (
                         <li className="pt-3 text-xs font-semibold text-muted-foreground">
-                          Fase {phaseLabel.toLowerCase()}
+                          {phaseLabel}
                         </li>
                       ) : null}
                       {/* Una sola fila por tratamiento (el lienzo, tablero 1): con «Hoy», la fila entera

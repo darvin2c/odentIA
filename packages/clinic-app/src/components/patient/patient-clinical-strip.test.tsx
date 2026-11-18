@@ -58,7 +58,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(page.match(/Lo dijo ella el 13 nov, sin revisar/g)).toHaveLength(1)
     expect(page).toContain("Embarazo · 32 semanas hoy (30 el 13 nov)")
     expect(page).toContain("Alergia: Látex")
-    expect(page).toContain("Toma Sulfato ferroso")
+    expect(page).toContain("Toma sulfato ferroso")
   })
 
   it("nombra a quien lo dijo: la madre que lo llenó, aunque el preferido sea otro, y a la persona si lo envió ella", () => {
@@ -94,8 +94,8 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(first).toBeGreaterThan(-1)
     expect(second).toBeGreaterThan(first)
     // Cada cosa bajo su fecha.
-    expect(page.indexOf("Toma Sulfato ferroso")).toBeGreaterThan(first)
-    expect(page.indexOf("Toma Sulfato ferroso")).toBeLessThan(second)
+    expect(page.indexOf("Toma sulfato ferroso")).toBeGreaterThan(first)
+    expect(page.indexOf("Toma sulfato ferroso")).toBeLessThan(second)
     expect(page.indexOf("Alergia: Látex")).toBeGreaterThan(second)
   })
 
@@ -173,7 +173,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(box?.label).toBe("Lo dijo ella el 13 nov, sin revisar")
     expect(box?.inside).toContain("Alergia: Látex")
     expect(box?.inside).toContain("Presión alta")
-    expect(box?.inside).toContain("Toma Losartán 50 mg")
+    expect(box?.inside).toContain("Toma losartán 50 mg")
     expect(box?.inside).not.toContain("Penicilinas")
     // Es una lista: la caja se nombra con su marca y lo de afuera es otro elemento.
     expect(markup).toMatch(/^<section aria-label="Alertas clínicas"[^>]*><ul/)
@@ -195,7 +195,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(box?.inside).not.toContain("Sulfato ferroso")
     const page = markup.replace(/<[^>]+>/g, "|")
     expect(page).toContain("Embarazo · 30 semanas (lo dijo el 13 nov)")
-    expect(page).toContain("Toma Sulfato ferroso")
+    expect(page).toContain("Toma sulfato ferroso")
   })
 
   it("dos declaraciones, dos cajas; y una severa nunca se va a «+N», aunque haya muchas cosas antes", () => {
@@ -266,7 +266,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     const page = markup.replace(/<[^>]+>/g, "|")
     expect(page.indexOf("Anticoagulante: warfarina 5 mg")).toBeGreaterThan(-1)
     expect(page.indexOf("Medicina para los huesos: alendronato")).toBeGreaterThan(page.indexOf("Anticoagulante: warfarina 5 mg"))
-    expect(page.indexOf("Toma Losartán")).toBeGreaterThan(page.indexOf("Medicina para los huesos: alendronato"))
+    expect(page.indexOf("Toma losartán")).toBeGreaterThan(page.indexOf("Medicina para los huesos: alendronato"))
   })
 
   it("en la atención, «No se le preguntó» no es «dijo que no»; la ficha no lo repite", () => {
@@ -310,8 +310,8 @@ describe("¿cambió algo?, en la franja", () => {
       />,
     )
     expect(page).toMatch(/Lo dijo ella el 14 may( 2027)?, sin revisar/)
-    expect(page).toMatch(/Anticoagulante: Apixabán 5 mg · antes Warfarina 5 mg y Warfarina 7\.5 mg, cambió el 14 may( 2027)?/)
-    expect(page).not.toContain("Anticoagulante: Warfarina")
+    expect(page).toMatch(/Anticoagulante: apixabán 5 mg · antes Warfarina 5 mg y Warfarina 7\.5 mg, cambió el 14 may( 2027)?/)
+    expect(page).not.toContain("Anticoagulante: warfarina")
     expect(page).not.toContain("alertas")
   })
 

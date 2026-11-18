@@ -93,6 +93,7 @@ export function clinicalAlerts(
     .filter((a) => !critical(a))
     .map((a) => ({
       id: a.id,
+      intolerance: a.kind === "intolerancia",
       label: `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}: ${allergyName(a)}${a.severity === "desconocida" ? "" : ` (${label("alergia", a.severity).toLowerCase()})`}`,
       // Toda alergia alerta al menos como una enfermedad (QA de la ficha del 10 nov, B1).
       tone: "warning" as const,
@@ -107,10 +108,31 @@ export function clinicalAlerts(
   // llevan su marca, «Anticoagulante: warfarina 5 mg», y van antes que lo demás (mesa del 13 nov).
   const medications = detail.currentMedications.map((m) => {
     const words = medicationAlertWords(m)
-    return { id: m.id, label: words.label, tone: words.group ? ("warning" as const) : ("secondary" as const) }
+    return { id: m.id, label: drugWords(words.label), tone: words.group ? ("warning" as const) : ("secondary" as const) }
   })
   const marked = medications.filter((m) => m.tone === "warning")
-  return [...severe, ...marked, ...other, ...conditions, ...medications.filter((m) => m.tone !== "warning")]
+  // El mismo orden que la línea fija de la atención (`alertsByRisk`): toda alergia antes que el
+  // anticoagulante, y las intolerancias después (QA de diseño del 18 nov, H12: arriba iba al revés).
+  const plain = ({ intolerance: _intolerance, ...alert }: (typeof other)[number]) => alert
+  return [
+    ...severe,
+    ...other.filter((a) => !a.intolerance).map(plain),
+    ...marked,
+    ...other.filter((a) => a.intolerance).map(plain),
+    ...conditions,
+    ...medications.filter((m) => m.tone !== "warning"),
+  ]
+}
+
+/**
+ * El nombre del medicamento después de su marca, en minúscula como en la línea de anestesia, se
+ * haya escrito como se escriba: «Anticoagulante: apixabán», «Medicina para los huesos: alendronato»,
+ * «Toma losartán» (QA de diseño del 18 nov, H12). Una sigla («AAS») queda como está.
+ */
+export function drugWords(label: string): string {
+  return label.replace(/^(Toma |[^:]+: )(\p{Lu})(?=\p{Ll})/u, (_all, head: string, first: string) =>
+    `${head}${first.toLocaleLowerCase("es")}`,
+  )
 }
 
 /**
