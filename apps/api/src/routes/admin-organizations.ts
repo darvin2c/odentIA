@@ -139,8 +139,11 @@ const recoveryDecisionInput = z.object({
  * ejecuta recuperaciones. El personal nunca cambia roles de clínica.
  */
 export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
-  /** Tras un cambio de la cuenta (cerrar, bloquear, reabrir), el aviso sale en el momento. */
-  const sentToApps = () => {
+  /**
+   * Tras un cambio de la cuenta (cerrar, bloquear, reabrir), el aviso a las apps sale en el
+   * momento sin esperarlo: si falla, lo reintenta el trabajador.
+   */
+  const notifyAppsNow = () => {
     sendAccountEventsNow(deps)
     return { ok: true }
   }
@@ -369,7 +372,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
           reason: parsed.data.reason,
           expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined,
         }),
-      ).then(sentToApps),
+      ).then(notifyAppsNow),
     )
   })
 
@@ -378,7 +381,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
     return runService(c, 200, () =>
-      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(sentToApps),
+      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(notifyAppsNow),
     )
   })
   app.post("/users/:id/close", async (c) => {
@@ -390,7 +393,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     return runService(c, 200, () =>
       owner((tx) =>
         closeAccountByAdmin(tx, actor, { userId: c.req.param("id"), reason: parsed.data.reason }),
-      ).then(sentToApps),
+      ).then(notifyAppsNow),
     )
   })
 

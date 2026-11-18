@@ -217,6 +217,10 @@ export const accountEvent = authSchema.table(
   },
   (table) => [
     index("account_event_pending_idx").on(table.app, table.nextAttemptAt).where(sql`delivered_at IS NULL`),
+    // El orden por persona: si hay uno anterior suyo esperando (`deliverAccountEvents`).
+    index("account_event_pending_user_idx")
+      .on(table.app, table.userId, table.createdAt)
+      .where(sql`delivered_at IS NULL`),
     check("account_event_app_check", appIn("app")),
     check(
       "account_event_type_check",

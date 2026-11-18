@@ -79,7 +79,7 @@ async function recordAccountEvent(
   expiresAt: Date | null = null,
 ): Promise<void> {
   if (EXTERNAL_ACCOUNT_APPS.length === 0) return
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`account_event:${userId}`}))`)
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`account_event:${userId}`}, 0))`)
   await tx
     .insert(accountEvent)
     .values(EXTERNAL_ACCOUNT_APPS.map((app) => ({ userId, type, app, expiresAt })))

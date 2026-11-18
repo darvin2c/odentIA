@@ -15,7 +15,8 @@ export type AccountEventType = (typeof ACCOUNT_EVENT_TYPES)[number]
 
 /**
  * Lo que llega en cada aviso. `cuenta.cerrada`: la cuenta ya no entra a ninguna app.
- * `cuenta.bloqueada`: no entra hasta `expiresAt` (ISO 8601; nulo, hasta que se reabra).
+ * `cuenta.bloqueada`: no entra hasta `expiresAt` (ISO 8601; nulo, hasta que se reabra; si ya
+ * pasó, el bloqueo no frena, igual que en las clínicas).
  * `cuenta.reabierta`: se quitó el bloqueo, también el de un cierre, y vuelve a entrar.
  * Los de una misma cuenta llegan en el orden en que pasaron: el último manda.
  */

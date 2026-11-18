@@ -1,5 +1,5 @@
 {
-  "id": "eca4f3d1-4e3e-4fc1-aa57-3cf07d537530",
+  "id": "63e99339-8f2d-4ccc-97bf-a207023f0173",
   "prevId": "828ac385-4824-4423-9264-962b42f2cc42",
   "version": "7",
   "dialect": "postgresql",
@@ -11729,6 +11729,34 @@
             },
             {
               "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "delivered_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_event_pending_user_idx": {
+          "name": "account_event_pending_user_idx",
+          "columns": [
+            {
+              "expression": "app",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
