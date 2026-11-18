@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
 import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, kairosModelNotice, platformLlmFromEnv } from "@odentia/agent"
-import { type Auth, accountAppNotReady, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
+import { type Auth, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
@@ -91,7 +91,7 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
 }
 // Las apps que son otro sistema (gestorIA, ADR 0201): en su dominio solo su entrada a la cuenta,
 // con su marca y el token firmado con que su servidor reconoce a quien entró. Sin su dominio no
-// existe; con él pero sin la marca de sus correos, ese dominio responde 404 y las clínicas siguen.
+// existe.
 const externalApps: ExternalAppEntry[] = []
 for (const app of EXTERNAL_ACCOUNT_APPS) {
   const domain = env.externalAppDomains[app]
@@ -106,24 +106,20 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
     console.error(`api: el dominio de ${app} (${domain}) es o contiene uno de las clínicas: su entrada queda apagada.`)
     continue
   }
-  const notReady = accountAppNotReady(app)
-  if (notReady) console.error(`api: ${notReady}`)
   const trustedOrigins = trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin])
   externalApps.push({
     app,
     domain,
     trustedOrigins,
-    auth: notReady
-      ? null
-      : createAuth({
-          ...authOptions,
-          app,
-          signedTokens: true,
-          baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
-          webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
-          cookieDomain: domain,
-          trustedOrigins,
-        }),
+    auth: createAuth({
+      ...authOptions,
+      app,
+      signedTokens: true,
+      baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
+      webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
+      cookieDomain: domain,
+      trustedOrigins,
+    }),
   })
 }
 // Lo que pasa con la cuenta, a esas apps (ADR 0201): sale al momento y el trabajador lo reintenta.

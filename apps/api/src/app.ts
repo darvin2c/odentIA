@@ -164,7 +164,7 @@ import { createWorkspaceRoute } from "./routes/workspace.js"
 export interface ExternalAppEntry {
   app: AccountApp
   domain: string
-  /** Su Better Auth; nulo mientras no se pueda encender (`accountAppNotReady`). */
+  /** Su Better Auth; nulo, su dominio responde 404 (una entrada apagada). */
   auth: Auth | null
   /** Sus pantallas: las únicas que pueden llamar a su entrada desde el navegador. */
   trustedOrigins: string[]

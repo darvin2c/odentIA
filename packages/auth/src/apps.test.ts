@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest"
 import {
   ACCOUNT_APP_INFO,
   ACCOUNT_APPS,
-  accountAppNotReady,
   appOfProduct,
   createAuth,
   EXTERNAL_ACCOUNT_APPS,
@@ -43,7 +42,6 @@ describe("las apps de la cuenta (ADR 0201)", () => {
     expect(EXTERNAL_ACCOUNT_APPS).toEqual(["gestoria"])
     // Nunca una entrada que mande la verificación con la marca de otra app.
     expect(ACCOUNT_APP_INFO.gestoria.mailBrand).toBe("gestoria")
-    for (const app of ACCOUNT_APPS) expect(accountAppNotReady(app), app).toBeNull()
     expect(() => createAuth({ ...options, app: "gestoria" })).not.toThrow()
   })
 

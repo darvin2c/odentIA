@@ -30,10 +30,10 @@ export interface AccountAppInfo {
   product: ClinicalProduct | null
   /**
    * La marca de los correos de la cuenta en su entrada (verificar, entrar, cambiar el
-   * correo). Nula: todavía no tiene correos con su marca y su entrada no se enciende
-   * (`accountAppNotReady`): nunca le llega a nadie un correo con la marca de otra app.
+   * correo). Obligatoria: una app nueva no tiene entrada sin la suya en `shared/packages/mail`,
+   * así nunca le llega a nadie un correo con la marca de otra app.
    */
-  mailBrand: MailBrand | null
+  mailBrand: MailBrand
 }
 
 function clinicApp(product: ClinicalProduct): AccountAppInfo {
@@ -65,13 +65,3 @@ export function isAccountApp(value: unknown): value is AccountApp {
 export const EXTERNAL_ACCOUNT_APPS: readonly AccountApp[] = ACCOUNT_APPS.filter(
   (app) => ACCOUNT_APP_INFO[app].product === null,
 )
-
-/**
- * Por qué la entrada de una app no se puede encender todavía; null si se puede. Una
- * entrada sin la marca de sus correos mandaría la verificación con la de otra app.
- */
-export function accountAppNotReady(app: AccountApp): string | null {
-  return ACCOUNT_APP_INFO[app].mailBrand
-    ? null
-    : `La entrada de ${ACCOUNT_APP_INFO[app].name} queda apagada: sus correos todavía no tienen su marca.`
-}

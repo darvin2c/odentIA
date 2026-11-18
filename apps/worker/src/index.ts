@@ -93,7 +93,6 @@ const lifecycleApps: Partial<Record<AccountApp, LifecycleApp>> = {}
 for (const product of CLINICAL_PRODUCTS) {
   const app = appOfProduct(product)
   const brand = ACCOUNT_APP_INFO[app].mailBrand
-  if (!brand) continue
   const domain =
     product === BASE_PRODUCT ? undefined : (publicLinks.productDomains as Partial<Record<ClinicalProduct, string>>)[product]
   const on = (address: string) => (domain ? onDomain(address, env.COOKIE_DOMAIN, domain) : address)

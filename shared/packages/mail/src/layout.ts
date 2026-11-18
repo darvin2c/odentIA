@@ -102,7 +102,11 @@ const MAIL_BRANDS: Record<
   MailBrand,
   {
     name: string
-    /** Dónde trabaja quien la usa: «tu clínica», «tu tienda». */
+    /**
+     * Dónde trabaja quien la usa: «tu clínica», «tu tienda». Las tres de clínicas dicen
+     * «clínica» en los correos de la cuenta, como siempre, aunque la app diga «consultorio»
+     * u «óptica» (`productWords(p).place`, que este paquete no puede importar).
+     */
     lugar: string
     /** Una línea bajo el nombre, en la firma del pie, junto a la web. */
     firma?: string
