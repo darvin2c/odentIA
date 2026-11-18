@@ -1,4 +1,4 @@
-import { medicalLeaveWords } from "@odentia/clinical"
+import { isLeftOut, medicalLeaveWords } from "@odentia/clinical"
 import {
   Button,
   DropdownMenu,
@@ -106,13 +106,23 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * formularios, imágenes y archivos. Una sola lectura para el bloque, su
  * resumen y el cierre: React Query comparte las consultas.
  */
+/** Los estados de un tratamiento que todavía se hará: los que el servidor deja consentir. */
+const ITEM_STILL_DONE = new Set(["pendiente", "programado", "en_curso"])
+
 /**
  * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
- * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
- * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
- * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide», ni
- * el recién preparado para un tratamiento que lo pide y que lo pedido todavía no
- * nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
+ * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) o para lo
+ * anulado ya no se pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su
+ * enlace sigue su curso. Mientras lo que pide se vuelve a leer, nada se da por «ya
+ * no se pide», ni el recién preparado para un tratamiento que lo pide y que lo
+ * pedido todavía no nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
+ *
+ * El de un tratamiento de la atención que sigue en pie («Por decidir», aceptado o por
+ * hacer) se sigue pidiendo aunque hoy no se haga: el Plan dice «falta firmarlo» de él,
+ * y Documentos decía «Ya no se pide: no lo aceptó o eligió otra opción» (QA del 18 nov,
+ * novato 1). Lo que pide la atención solo cuenta lo que se hace hoy, porque eso es lo
+ * que se pide al cerrar; «ya no se pide» es otra cosa: lo dejado fuera o anulado
+ * (`isLeftOut`, la misma regla del servidor).
  */
 export function consentsStillAsked<
   T extends {
@@ -130,19 +140,26 @@ export function consentsStillAsked<
     }
     isFetching: boolean
   },
+  /** Los tratamientos de la atención (los traídos y los indicados en ella). */
+  items: ReadonlyArray<{ id: string; status: string; decisionStatus?: string | null }> = [],
 ): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
   const list = needs.data && !needs.isFetching ? needs.data.data : null
+  const stillDone = (doc: T) => {
+    const item = doc.planItemId ? items.find((candidate) => candidate.id === doc.planItemId) : undefined
+    return !!item && ITEM_STILL_DONE.has(item.status) && !isLeftOut(item.decisionStatus)
+  }
   const isAsked = (doc: T) =>
     list != null &&
-    list.some(
-      (need) =>
-        need.documentId === doc.id ||
-        // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
-        (need.documentId == null &&
-          need.planItemId != null &&
-          need.planItemId === doc.planItemId &&
-          (need.templateId == null || need.templateId === doc.templateId)),
-    )
+    (stillDone(doc) ||
+      list.some(
+        (need) =>
+          need.documentId === doc.id ||
+          // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
+          (need.documentId == null &&
+            need.planItemId != null &&
+            need.planItemId === doc.planItemId &&
+            (need.templateId == null || need.templateId === doc.templateId)),
+      ))
   const notAsked = list
     ? pending.filter((doc) => !isAsked(doc) && !doc.linkSentAt && !doc.personSignedAt)
     : []
@@ -224,10 +241,11 @@ export function useEncounterDocuments(
   const { pendingSignatures, notAsked, toSign } = consentsStillAsked(
     ownConsents.filter((doc) => doc.status === "pendiente"),
     needs,
+    [...detail.plannedItems, ...detail.indicatedItems],
   )
   return {
     needs: needList,
-    /** Preparado para lo que dejó fuera: ya no hace falta firmarlo. */
+    /** Preparado para lo que dejó fuera o se anuló: ya no hace falta firmarlo. */
     notAsked,
     toPrepare: needList.filter((need) => need.status === "sin_preparar"),
     unpublished: needList.filter((need) => need.status === "sin_publicar"),
@@ -699,7 +717,7 @@ export function EncounterDocumentsBlock({
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
               <span className="text-xs text-muted-foreground">
-                Ya no se pide: no lo aceptó o eligió otra opción
+                Ya no se pide: no lo aceptó, eligió otra opción o se anuló
               </span>
             </div>
             <Button
