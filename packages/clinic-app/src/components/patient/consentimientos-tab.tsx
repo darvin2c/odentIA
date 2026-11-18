@@ -238,8 +238,14 @@ export function NewConsentDrawer({
   })
   const choices = !planItemId && templateId ? (choicesQuery.data?.data ?? []) : []
   choicesNow.current = choices
+  const chosenPlanItem = useStore(form.store, (state) => state.values.planItemId)
+  const chosenTreatment =
+    Boolean(encounterId) && (Boolean(planItemId) || choices.some((item) => item.planItemId === chosenPlanItem))
+  /** El diagnóstico que se puso solo al elegir un tratamiento. */
+  const autoDiagnosis = useRef<string | null>(null)
   /** Elegir el tratamiento escribe su procedimiento, si no se escribió otro a mano. */
   const followTreatment = (id: string) => {
+    followDiagnosis(id)
     const current = form.getFieldValue("procedureRef").trim()
     const untouched =
       !current ||
@@ -249,6 +255,24 @@ export function NewConsentDrawer({
     const choice = choicesNow.current.find((item) => item.planItemId === id)
     autoProcedure.current = choice?.procedureRef ?? null
     form.setFieldValue("procedureRef", choice?.procedureRef ?? defaultProcedureRef ?? "")
+  }
+  /**
+   * El diagnóstico va con el tratamiento elegido, si no se eligió otro a mano: el del tratamiento o,
+   * sin él, vacío, y el servidor pone el de la atención en esa misma pieza. Lo de lo registrado hoy
+   * en otra pieza no se queda (verificación del 18 nov: la exodoncia de la 48 salía con la pulpitis
+   * de la 36).
+   */
+  function followDiagnosis(id: string) {
+    const current = form.getFieldValue("diagnosisCode")
+    const untouched = !current || current === autoDiagnosis.current || current === (defaultDiagnosisCode ?? "")
+    if (!untouched) return
+    const choice = choicesNow.current.find((item) => item.planItemId === id)
+    const next = choice
+      ? { code: choice.diagnosisCode ?? "", system: choice.diagnosisSystem }
+      : { code: defaultDiagnosisCode ?? "", system: defaultDiagnosisSystem ?? null }
+    autoDiagnosis.current = next.code || null
+    form.setFieldValue("diagnosisSystem", next.code ? next.system : (defaultDiagnosisSystem ?? null))
+    form.setFieldValue("diagnosisCode", next.code)
   }
   // Al llegar los de la plantilla: uno solo viene elegido; lo elegido que ya no está, se quita.
   // Desde una atención que trae lo suyo (lo registrado hoy), viene elegido lo de hoy y nunca otro
@@ -335,7 +359,14 @@ export function NewConsentDrawer({
         </form.AppField>
         <form.AppField name="diagnosisCode">
           {(field) => (
-            <field.Control label="Diagnóstico que lo motiva (opcional)">
+            <field.Control
+              label="Diagnóstico que lo motiva (opcional)"
+              description={
+                chosenTreatment && !field.state.value
+                  ? "Vacío, va el de la atención en esa misma pieza, si lo hay."
+                  : undefined
+              }
+            >
               {(control) => (
                 <DiagnosisSearch
                   id={control.id}

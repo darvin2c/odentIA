@@ -15,6 +15,7 @@ import {
   advanceClinicalOrder,
   cancelClinicalOrder,
   createClinicalOrder,
+  createConsentDocument,
   createConsentTemplate,
   createFormResponse,
   createFormTemplate,
@@ -50,6 +51,7 @@ import {
   sendHealthDocument,
 } from "./health-documents.js"
 import { createPatient, getPatient } from "./patients.js"
+import { addPlanItem } from "./plan.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -162,6 +164,55 @@ it("el consentimiento se propone por el servicio, se prepara lleno y el cierre p
     status: "finalizada",
     consentSkipReason: "Urgencia: se firmará en la próxima visita",
   })
+})
+
+// Verificación del 18 nov: con la pulpitis anotada en la 36, el consentimiento de la exodoncia de la
+// 48 decía «Diagnóstico que lo motiva: K04.0» en la hoja que se firma. Va el de su tratamiento o el
+// de la atención en esa misma pieza; nunca el de otra.
+it("el diagnóstico del consentimiento es el de su pieza, nunca el de otra", async () => {
+  const v = await visit()
+  const exodoncia = await v.template("Exodoncia simple o quirúrgica")
+  await v.run((tx) => setConsentTemplateServices(tx, "org_a", v.actor, exodoncia.id, [v.extraction.id]))
+  const indicate = (toothNumber: number) =>
+    v.run((tx) =>
+      addPlanItem(tx, "org_a", v.actor, v.lucia.id, {
+        serviceId: v.extraction.id,
+        sourceEncounterId: v.draft.id,
+        toothNumber,
+      }),
+    )
+  // La atención tiene K01.1 en la 38; la exodoncia de la 48, sin diagnóstico propio.
+  const in48 = await indicate(48)
+  const [need] = await v.run((tx) =>
+    getEncounterConsentNeeds(tx, "org_a", v.lucia.id, v.draft.id, [in48.id]),
+  )
+  expect(need).toMatchObject({ planItemId: in48.id, diagnosisCode: null })
+  const prepared = await v.run((tx) =>
+    prepareEncounterConsents(tx, "org_a", v.actor, v.lucia.id, v.draft.id, undefined, in48.id),
+  )
+  expect(prepared.created).toEqual([expect.objectContaining({ planItemId: in48.id, diagnosisCode: null })])
+
+  // Desde Documentos, unido al tratamiento: el de la atención en la misma pieza, o ninguno.
+  const in38 = await indicate(38)
+  const for38 = await v.run((tx) =>
+    createConsentDocument(tx, "org_a", v.actor, {
+      templateId: exodoncia.id,
+      patientId: v.lucia.id,
+      encounterId: v.draft.id,
+      planItemId: in38.id,
+    }),
+  )
+  expect(for38.diagnosisCode).toBe("K01.1")
+  await v.run((tx) => cancelConsentDocument(tx, "org_a", v.actor, prepared.created[0]!.id, "Prueba"))
+  const for48 = await v.run((tx) =>
+    createConsentDocument(tx, "org_a", v.actor, {
+      templateId: exodoncia.id,
+      patientId: v.lucia.id,
+      encounterId: v.draft.id,
+      planItemId: in48.id,
+    }),
+  )
+  expect(for48.diagnosisCode).toBeNull()
 })
 
 it("firma en la clínica sin dibujar la del profesional, y en papel con la foto de la hoja", async () => {

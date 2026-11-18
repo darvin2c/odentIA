@@ -185,6 +185,32 @@ export function inLinkWords(docs: ReadonlyArray<{ linkSentAt?: string | null }>)
   return docs.length === 1 ? " · lo tiene en su enlace" : " · los tiene en su enlace"
 }
 
+type SiteOf = { toothNumber: number | null; quadrant?: number | null; arch?: string | null }
+const hasSite = (row: SiteOf) => row.toothNumber != null || row.quadrant != null || row.arch != null
+
+/**
+ * El diagnóstico con que viene el consentimiento nuevo de la atención: el de lo que se registró
+ * (el suyo o el de la atención en la misma pieza); sin pieza, el que tampoco la tiene. Nunca el de
+ * otra pieza: la exodoncia de la 48 no se firmaba con la pulpitis de la 36 (verificación del
+ * 18 nov). La misma regla que «Preparar» en el servidor.
+ */
+export function consentDefaultDiagnosis(
+  procedures: ReadonlyArray<SiteOf & { diagnosisCode: string | null; diagnosisSystem?: string | null; voidedAt?: string | null }>,
+  diagnoses: ReadonlyArray<SiteOf & { diagnosisCode: string; diagnosisSystem: string; voidedAt: string | null }>,
+): { code: string; system: string | null } | null {
+  const proc = procedures.find((row) => !row.voidedAt)
+  if (proc?.diagnosisCode) return { code: proc.diagnosisCode, system: proc.diagnosisSystem ?? null }
+  const active = diagnoses.filter((dx) => !dx.voidedAt)
+  const tooth = proc?.toothNumber ?? null
+  const found =
+    tooth != null
+      ? active.find((dx) => dx.toothNumber === tooth)
+      : proc && hasSite(proc)
+        ? undefined
+        : active.find((dx) => !hasSite(dx))
+  return found ? { code: found.diagnosisCode, system: found.diagnosisSystem } : null
+}
+
 export function useEncounterDocuments(
   patientId: string,
   encounterId: string,
@@ -423,6 +449,7 @@ export function EncounterDocumentsBlock({
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode
   const firstDiagnosisSystem = firstActive?.diagnosisSystem
+  const consentDiagnosis = consentDefaultDiagnosis(activeProcedures, detail.diagnoses ?? [])
   const who = useConsentSignerWord(patientId, firstName(patient))
 
   const startNew = (kind: NewDocumentKind) => {
@@ -935,8 +962,8 @@ export function EncounterDocumentsBlock({
           encounterId={encounterId}
           defaultProcedureRef={procedureRef}
           todayPlanItemIds={activeProcedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : []))}
-          defaultDiagnosisCode={firstDiagnosis}
-          defaultDiagnosisSystem={firstDiagnosisSystem}
+          defaultDiagnosisCode={consentDiagnosis?.code}
+          defaultDiagnosisSystem={consentDiagnosis?.system ?? undefined}
           onClose={() => setCreating(null)}
           onCreated={async () => {
             setCreating(null)

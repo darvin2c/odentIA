@@ -3041,6 +3041,57 @@ export async function createConsentDocument(
     "Procedimiento",
     500,
   )
+  // El tratamiento sin diagnóstico propio, en una atención: el de lo registrado de él en ella o el de
+  // esa atención en la misma pieza, como lo propone «Preparar» (`getEncounterConsentNeeds`). Nunca
+  // el de otra pieza.
+  if (!input.diagnosisCode?.trim() && !planDiagnosis && planItemId && encounterId) {
+    const [done] = await tx
+      .select({ code: encounterProcedure.diagnosisCode, system: encounterProcedure.diagnosisSystem })
+      .from(encounterProcedure)
+      .where(
+        and(
+          eq(encounterProcedure.organizationId, orgId),
+          eq(encounterProcedure.encounterId, encounterId),
+          eq(encounterProcedure.planItemId, planItemId),
+          isNull(encounterProcedure.voidedAt),
+          isNotNull(encounterProcedure.diagnosisCode),
+        ),
+      )
+      .orderBy(asc(encounterProcedure.createdAt))
+      .limit(1)
+    if (done?.code) planDiagnosis = { code: done.code, system: done.system }
+  }
+  if (!input.diagnosisCode?.trim() && !planDiagnosis && planItemId && encounterId) {
+    const site = await siteOf(tx, orgId)
+    const loose = (row: SiteColumns) => (row.siteSystem === site.system ? site.value(row.siteCode) : null)
+    const [item] = await tx
+      .select({
+        siteSystem: treatmentPlanItem.siteSystem,
+        siteCode: treatmentPlanItem.siteCode,
+        siteQualifiers: treatmentPlanItem.siteQualifiers,
+      })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.id, planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+      .limit(1)
+    const diagnoses = await tx
+      .select({
+        code: encounterDiagnosis.diagnosisCode,
+        system: encounterDiagnosis.diagnosisSystem,
+        siteSystem: encounterDiagnosis.siteSystem,
+        siteCode: encounterDiagnosis.siteCode,
+        siteQualifiers: encounterDiagnosis.siteQualifiers,
+      })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.encounterId, encounterId),
+          isNull(encounterDiagnosis.voidedAt),
+        ),
+      )
+      .orderBy(asc(encounterDiagnosis.createdAt))
+    planDiagnosis = item ? sameSiteDiagnosis(diagnoses, loose(item), loose) : null
+  }
   const diagnosis = input.diagnosisCode?.trim()
     ? await resolveOptionalDiagnosisCode(
         tx,
@@ -4679,6 +4730,22 @@ function consentReference(sources: { label: string; where: string | null; whereS
   return last > 0 ? cut.slice(0, last) : cut
 }
 
+/**
+ * El diagnóstico de la atención que va con lo que se hace en `tooth`: el de esa misma pieza; sin
+ * pieza, el primero que tampoco tiene sitio. Nunca el de otra pieza ni otra zona.
+ */
+function sameSiteDiagnosis<D extends SiteColumns & { code: string; system: string | null }>(
+  diagnoses: readonly D[],
+  tooth: number | null,
+  loose: (row: SiteColumns) => number | null,
+): { code: string; system: string | null } | null {
+  const found =
+    tooth != null
+      ? diagnoses.find((dx) => loose(dx) === tooth)
+      : diagnoses.find((dx) => !dx.siteSystem && !dx.siteCode)
+  return found ? { code: found.code, system: found.system } : null
+}
+
 const NEED_RANK: Record<ConsentNeedStatus, number> = {
   sin_publicar: 0,
   sin_preparar: 1,
@@ -4875,11 +4942,12 @@ export async function getEncounterConsentNeeds(
       ),
     )
     .orderBy(asc(encounterDiagnosis.createdAt))
+  // El diagnóstico que motiva lo que se consiente: el de su tratamiento o, sin él, el de la
+  // atención en el mismo sitio. Nunca el de otra pieza: la exodoncia de la 48 no lleva a la hoja que
+  // se firma la pulpitis de la 36 (verificación del 18 nov). Lo que no tiene sitio (latidIA, o una
+  // profilaxis) toma el de la atención que tampoco lo tiene.
   const diagnosisFor = (source: NeedSource | undefined): { code: string; system: string | null } | null =>
-    source?.diagnosis ??
-    diagnoses.find((dx) => source?.toothNumber != null && loose(dx) === source.toothNumber) ??
-    diagnoses[0] ??
-    null
+    source?.diagnosis ?? sameSiteDiagnosis(diagnoses, source?.toothNumber ?? null, loose)
 
   const needs: ConsentNeed[] = []
   const covered = new Set<string>()
