@@ -1,0 +1,1 @@
+ALTER TABLE "treatment_plan_item" ADD COLUMN "path_answered_at" timestamp with time zone;

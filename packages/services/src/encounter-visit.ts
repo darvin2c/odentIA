@@ -19,8 +19,8 @@ import {
   encounterSite,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { auditEvent } from "@odentia/db/schema/org"
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { getDiagnosisSuggestions } from "./diagnosis-codes.js"
 import { recordEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
@@ -98,9 +98,12 @@ export interface VisitControl {
 }
 
 export interface EncounterVisit {
+  /**
+   * Todo lo aceptado que se puede hacer hoy, sin tope y también lo indicado en esta misma
+   * atención: el Plan de la atención es el único lugar de cada tratamiento, y cada fila dice con
+   * esto si se hace hoy, si ya se registró, su sesión, su espera y su consentimiento.
+   */
   treatments: VisitTreatment[]
-  /** Cuántos tratamientos aceptados más tiene por hacer, fuera de los que se muestran. */
-  moreTreatments: number
   controls: VisitControl[]
   /**
    * Sin cita hoy: su próxima cita ya reservada, para no reservarle otra ni hacer hoy lo que esa
@@ -108,9 +111,6 @@ export interface EncounterVisit {
    */
   booked: { startsAt: Date; serviceName: string | null } | null
 }
-
-/** Los tratamientos que se muestran: con más, se dice cuántos quedan en el Plan. */
-const VISIT_TREATMENTS = 4
 
 /** Lo que se le ofrece «Hacerla hoy»: aceptado y por hacer, y donde hace falta, con su presupuesto aceptado. */
 function linkableSql(orgId: string, patientId: string, budgetRequired: boolean) {
@@ -192,12 +192,6 @@ export async function encounterVisitOf(
         order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_today
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
-      -- «Hoy viene a…» lleva solo lo que viene de antes (P11, decisión D6 del estudio de la atención,
-      -- ADR 0199): lo indicado en esta misma atención no es «a qué viene», en ningún producto. Su
-      -- «Hacerla hoy» está en su fila del Plan, para que el consentimiento se pida antes del acto;
-      -- lo que ya se trajo con él (o con su cita) sigue aquí.
-      and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept
-        where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
   // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
   const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)
@@ -205,7 +199,7 @@ export async function encounterVisitOf(
   const { timezone } = await findOrgLocale(tx, orgId)
   // La espera entre sesiones de lo que ya empezó y aún no se registra hoy (B6): la misma regla
   // con que la reserva busca la próxima sesión.
-  const shown = ordered.slice(0, VISIT_TREATMENTS)
+  const shown = ordered
   const gaps = await nextSessionGapOf(
     tx,
     orgId,
@@ -296,7 +290,6 @@ export async function encounterVisitOf(
   return {
     booked: next ? { startsAt: new Date(next.startsAt), serviceName: next.serviceName } : null,
     treatments,
-    moreTreatments: Math.max(0, rows.length - treatments.length),
     controls: [
       ...booked.map((control) => ({
         id: control.id,

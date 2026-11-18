@@ -508,8 +508,8 @@ it("encounters: un tratamiento indicado con la pieza por definir la pide al hace
   expect((await post({ planItemId: item.id, toothNumber: 26 })).status).toBe(201)
   const plan = (await (await app.request(`/patients/${patientId}/plan`)).json()) as { data: PlanItemRow[] }
   expect(plan.data.find((row) => row.id === item.id)?.toothNumber).toBe(26)
-  // Ya definida, la siguiente sesión conserva la pieza.
-  expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(400)
+  // En la misma atención no se registra otra vez (mesa del 17 nov): se anula antes lo de hoy.
+  expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(409)
 })
 
 it("encounters: las sesiones mantienen en curso hasta completar explícitamente", async () => {
@@ -548,7 +548,9 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
       body: JSON.stringify({ planItemId: itemId }),
     },
   )
-  expect(duplicate.status).toBe(201)
+  // Dos veces lo mismo en una atención se rechaza: con el cobro por sesión cargaba dos (mesa del 17 nov).
+  expect(duplicate.status).toBe(409)
+  expect(((await duplicate.json()) as ErrorBody).error.code).toBe("SESSION_REGISTERED")
   const during = await app.request(`/patients/${patientId}/plan`)
   expect(
     ((await during.json()) as { data: PlanItemRow[] }).data.find((row) => row.id === itemId)
@@ -579,7 +581,7 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
 
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
   const detailBody = (await detail.json()) as EncounterDetailBody
-  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(2)
+  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(1)
   expect(detailBody.data.indicatedItems.map((row) => row.id)).toContain(itemId)
 })
 it("encounters: referencias de otro paciente del mismo org responden 404 sin efectos", async () => {

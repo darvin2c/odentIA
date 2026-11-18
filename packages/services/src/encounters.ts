@@ -60,6 +60,7 @@ import {
   sql,
 } from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
+import { anesthesiaAtSigningOf, anesthesiaUsesOf } from "./anesthesia-at-signing.js"
 import {
   appointmentSessionsOf,
   type FreedAppointment,
@@ -75,15 +76,14 @@ import {
   readBillingModes,
   removeBudgetItems,
 } from "./budgets.js"
+import { ADVANCE_KEY, type WholeReturnedCharge, wholeReturnedCharges } from "./charge-returns.js"
 import {
-  type HealthGap,
   anesthesiaRisksOf,
+  type HealthGap,
   healthGapsOf,
   listEncounterDocuments,
   type PatientDocumentWithContext,
 } from "./clinical.js"
-import { anesthesiaAtSigningOf, anesthesiaUsesOf } from "./anesthesia-at-signing.js"
-import { healthAtSigningOf } from "./health-at-signing.js"
 import {
   type ConsentNeed,
   cancelDerivationTask,
@@ -92,18 +92,17 @@ import {
   hasAnswersSql,
   listOpenEncounterForms,
 } from "./clinical-forms.js"
-import { type FormRecord, loadFormRecords } from "./form-record.js"
 import {
   type ClosingResolvable,
   resolvableDiagnosesOf,
   resolveDiagnosesOnSign,
 } from "./closing-diagnoses.js"
+import { treatmentConsentStates } from "./consent-state.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { assertAttending } from "./encounter-attending.js"
 import { removableFromEncounter } from "./encounter-plan-remove.js"
 import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
-import { type EncounterVisitAnswer, encounterVisitAnswer } from "./visit-answers.js"
 import {
   checkEncounterVoidBudgets,
   type EncounterVoidPreview,
@@ -128,10 +127,10 @@ import {
   undoFinishControls,
 } from "./finish-controls.js"
 import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
-import { treatmentConsentStates } from "./consent-state.js"
+import { type FormRecord, loadFormRecords } from "./form-record.js"
+import { healthAtSigningOf } from "./health-at-signing.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { ADVANCE_KEY, type WholeReturnedCharge, wholeReturnedCharges } from "./charge-returns.js"
 import { createCharge } from "./payments.js"
 import {
   addPlanItem,
@@ -154,7 +153,6 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { nextSessionGapOf } from "./session-gap.js"
 import { professionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -164,8 +162,10 @@ import {
   type DiscountedMaterials,
   discountEncounterMaterials,
 } from "./service-materials.js"
+import { nextSessionGapOf } from "./session-gap.js"
 import {
   canBookAnother,
+  carriedByUpcomingSql,
   controlWindowOpenSql,
   controlWindowStart,
   dayKeyIn,
@@ -179,6 +179,7 @@ import {
   sessionsDoneSql,
   TO_SCHEDULE_STATUSES,
 } from "./to-schedule.js"
+import { type EncounterVisitAnswer, encounterVisitAnswer } from "./visit-answers.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -1720,6 +1721,36 @@ async function requestedSiteCode(tx: Db, orgId: string, input: AddEncounterProce
   }
 }
 
+/**
+ * Rechaza una segunda sesión vigente del mismo tratamiento en la misma atención,
+ * con el mismo código que «Hoy no» (`SESSION_REGISTERED`). Lo anulado no cuenta:
+ * anular la pieza equivocada y registrarla bien sigue pudiéndose.
+ */
+async function assertNoSessionToday(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+  planItemId: string,
+): Promise<void> {
+  const [registered] = await tx
+    .select({ id: encounterProcedure.id })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+        eq(encounterProcedure.planItemId, planItemId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .limit(1)
+  if (registered)
+    throw conflict(
+      "SESSION_REGISTERED",
+      "Ya registraste este tratamiento en la atención de hoy: si fue un error, anula ese registro antes de volver a registrarlo",
+    )
+}
+
 export async function addEncounterProcedure(
   tx: Db,
   orgId: string,
@@ -1783,6 +1814,11 @@ export async function addEncounterProcedure(
       patientId,
       planItemIdParam,
     )
+    // Un tratamiento del plan lleva como mucho una sesión vigente por atención: con
+    // el cobro por sesión, dos pestañas cargaban dos sesiones en una sola visita. El
+    // lock de la atención (arriba) serializa dos pedidos a la vez: el segundo espera
+    // y, al seguir, ya ve la sesión del primero.
+    await assertNoSessionToday(tx, orgId, encounterId, planItemIdParam)
     if (["realizado", "cancelado", "reemplazado"].includes(plan.status)) {
       throw conflict("ITEM_CLOSED", "El tratamiento ya está cerrado")
     }
@@ -3937,10 +3973,26 @@ async function closeAppointment(
 }
 
 /**
+ * Lo que queda sin ninguna sesión vigente vuelve a «por empezar» (`pendiente`); a
+ * «programado» solo si una cita por venir lo lleva, con la misma regla que «Por
+ * agendar» (`carriedByUpcomingSql`). La cita de esta atención ya no está por venir.
+ */
+async function notStartedStatusOf(
+  tx: Db,
+  orgId: string,
+  planItemId: string,
+): Promise<"pendiente" | "programado"> {
+  const [row] = await tx.execute<{ carried: boolean }>(
+    sql`select ${carriedByUpcomingSql({ id: sql`${planItemId}`, organizationId: sql`${orgId}` })} as carried`,
+  )
+  return row?.carried ? "programado" : "pendiente"
+}
+
+/**
  * Anula un procedimiento del borrador sin borrarlo: no genera cargo ni cuenta
  * como sesión. La indicación vuelve a su carril real: un tratamiento directo
- * se cancela; uno planificado queda en curso si le quedan sesiones o vuelve a
- * programado si no.
+ * se cancela; uno planificado queda en curso si le quedan sesiones o, si no,
+ * vuelve a por empezar (`notStartedStatusOf`).
  */
 async function voidProcedureRow(
   tx: Db,
@@ -4006,7 +4058,7 @@ async function voidProcedureRow(
         await tx
           .update(treatmentPlanItem)
           .set({
-            status: sessions > 0 ? "en_curso" : "programado",
+            status: sessions > 0 ? "en_curso" : await notStartedStatusOf(tx, orgId, item.id),
             completedAt: null,
             ...(sessions > 0 ? {} : { startedAt: null }),
             updatedAt: at,
@@ -4159,7 +4211,7 @@ async function voidEncounterPapers(
 /**
  * Lo que se dio por realizado en esta atención sin una sesión suya (la cita
  * trajo el tratamiento y se completó aquí) deja de estarlo al anularla: vuelve
- * a «en curso» si le quedan sesiones válidas, o a «programado». Lo que tenía
+ * a «en curso» si le quedan sesiones válidas, o a por empezar (`notStartedStatusOf`). Lo que tenía
  * su sesión aquí ya lo devolvió anular el procedimiento.
  */
 async function undoCompletionsOf(
@@ -4203,10 +4255,11 @@ async function undoCompletionsOf(
         ),
       )
     const sessions = remaining?.n ?? 0
+    const status = sessions > 0 ? "en_curso" : await notStartedStatusOf(tx, orgId, item.id)
     await tx
       .update(treatmentPlanItem)
       .set({
-        status: sessions > 0 ? "en_curso" : "programado",
+        status,
         completedAt: null,
         ...(sessions > 0 ? {} : { startedAt: null }),
         updatedAt: at,
@@ -4215,7 +4268,7 @@ async function undoCompletionsOf(
     await audit(tx, orgId, actorUserId, "plan.item_status_changed", "treatment_plan_item", item.id, {
       patientId,
       from: "realizado",
-      to: sessions > 0 ? "en_curso" : "programado",
+      to: status,
       reason,
       encounterId,
     })

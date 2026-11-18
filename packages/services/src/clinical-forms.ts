@@ -1,12 +1,12 @@
 import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import {
   BUDGET_SIGN_DECLARATION,
+  BUDGET_SIGNATURE_NOTE,
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
+  CONSENT_SIGNATURE_NOTES,
   type ConsentSections,
   consentSectionsToText,
-  BUDGET_SIGNATURE_NOTE,
-  CONSENT_SIGNATURE_NOTES,
   documentText,
   type HealthDeclarant,
   isLeftOut,
@@ -17,6 +17,7 @@ import {
   typedIdentityDocument,
 } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import {
   diagnosisCatalog,
@@ -46,11 +47,22 @@ import {
   orgSpecialty,
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
-import { appointment } from "@odentia/db/schema/agenda"
 import { contact, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, type SQL, sql } from "drizzle-orm"
-import { findOrgLocale } from "./locale.js"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm"
 import { requireCanAttend } from "./attending.js"
 import {
   addDeclaredAllergies,
@@ -70,7 +82,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
-import { findOrgCountry } from "./locale.js"
+import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { updatePersonIdentity } from "./people.js"
@@ -2831,6 +2843,105 @@ export interface CreateConsentDocumentInput {
   diagnosisCode?: string | null
   /** Lista del código; sin ella, la de la clínica. */
   diagnosisSystem?: string | null
+  /**
+   * No va con un tratamiento del plan aunque alguno pida esta plantilla: es para otro
+   * procedimiento («Otro, fuera del plan» en Documentos) o cubre varios a la vez (lo que
+   * «Preparar» arma para dos tratamientos de la atención). Sin esto y sin `planItemId`, se une
+   * al único tratamiento que lo pide (`consentTreatmentChoices`).
+   */
+  outsidePlan?: boolean
+}
+
+/**
+ * Un tratamiento del plan al que va un consentimiento nuevo de esa plantilla: su servicio lo pide
+ * y todavía no tiene uno preparado ni firmado (QA del 17 nov: el que se creaba desde Documentos
+ * quedaba suelto y el Plan, la sesión siguiente y el cierre lo volvían a pedir).
+ */
+export interface ConsentTreatmentChoice {
+  planItemId: string
+  /** «Endodoncia posterior vital · pieza 46»: para elegirlo. */
+  label: string
+  /** Lo que se consiente, como lo escribe «Preparar». */
+  procedureRef: string
+  diagnosisCode: string | null
+  diagnosisSystem: string | null
+}
+
+/**
+ * A qué tratamientos del plan puede ir un consentimiento nuevo de la plantilla `key`: lo por hacer
+ * (sin lo que la persona dejó fuera) cuyo servicio la pide y que aún no tiene uno pendiente ni
+ * firmado de ella (lo firmado antes de «Cambiar» ya no cuenta). Uno solo: se une a él. Varios: se
+ * elige, sin adivinar. La misma regla que el estado del Plan (`treatmentConsentStates`).
+ */
+async function treatmentChoicesFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  key: string,
+): Promise<ConsentTreatmentChoice[]> {
+  const rows = await tx
+    .select({
+      id: treatmentPlanItem.id,
+      title: treatmentPlanItem.title,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
+      siteQualifiers: treatmentPlanItem.siteQualifiers,
+      diagnosisCode: treatmentPlanItem.diagnosisCode,
+      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
+    })
+    .from(treatmentPlanItem)
+    .innerJoin(
+      consentTemplateService,
+      and(
+        eq(consentTemplateService.organizationId, treatmentPlanItem.organizationId),
+        eq(consentTemplateService.serviceId, treatmentPlanItem.serviceId),
+        eq(consentTemplateService.templateKey, key),
+      ),
+    )
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso"]),
+        notInArray(treatmentPlanItem.decisionStatus, [...LEFT_OUT_DECISIONS]),
+        sql`not exists (select 1 from consent_document d join consent_template dt on dt.id = d.template_id
+          where d.organization_id = ${treatmentPlanItem.organizationId} and d.plan_item_id = ${treatmentPlanItem.id}
+          and dt.key = ${key} and (d.status = 'pendiente' or (d.status = 'firmado'
+            and (${treatmentPlanItem.consentResetAt} is null or d.signed_at > ${treatmentPlanItem.consentResetAt}))))`,
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  if (rows.length === 0) return []
+  const site = await siteOf(tx, orgId)
+  return rows.map((row) => {
+    const whereShort = site.words(row, "short")
+    return {
+      planItemId: row.id,
+      label: `${row.title}${whereShort ? ` · ${whereShort}` : ""}`,
+      procedureRef: consentReference([
+        { label: row.title, where: site.words(row, "patient"), whereShort },
+      ]),
+      diagnosisCode: row.diagnosisCode,
+      diagnosisSystem: row.diagnosisSystem,
+    }
+  })
+}
+
+/** «Nuevo › Consentimiento»: a qué tratamientos del plan puede ir uno de esa plantilla. */
+export async function consentTreatmentChoices(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  templateId: string,
+): Promise<ConsentTreatmentChoice[]> {
+  await requirePatient(tx, orgId, patientId)
+  const [template] = await tx
+    .select({ key: consentTemplate.key })
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
+    .limit(1)
+  if (!template) throw notFound("Plantilla de consentimiento")
+  return treatmentChoicesFor(tx, orgId, patientId, template.key)
 }
 
 export async function createConsentDocument(
@@ -2880,10 +2991,30 @@ export async function createConsentDocument(
     planItemId = item.id
     planDiagnosis = item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null
   }
+  // Desde Documentos, sin tratamiento: el de un tratamiento del plan que lo pide va con él, como
+  // con «Preparar», para que el Plan, la sesión siguiente y el cierre lo cuenten (QA del 17 nov).
+  // Si lo piden varios, se elige: no se adivina.
+  let planReference: string | null = null
+  if (!planItemId && !input.outsidePlan) {
+    const choices = await treatmentChoicesFor(tx, orgId, input.patientId, template.key)
+    if (choices.length > 1) throw invalidField("planItemId", "Elige el tratamiento al que aplica")
+    const only = choices[0]
+    if (only) {
+      planItemId = only.planItemId
+      planDiagnosis = only.diagnosisCode
+        ? { code: only.diagnosisCode, system: only.diagnosisSystem }
+        : null
+      planReference = only.procedureRef
+    }
+  }
   if (!encounterId && !planItemId && !input.procedureRef?.trim()) {
     throw invalidField("procedureRef", "Indica la atención, el tratamiento o el procedimiento al que aplica")
   }
-  const procedureRef = assertOptionalText(input.procedureRef, "Procedimiento", 500)
+  const procedureRef = assertOptionalText(
+    input.procedureRef?.trim() ? input.procedureRef : planReference,
+    "Procedimiento",
+    500,
+  )
   const diagnosis = input.diagnosisCode?.trim()
     ? await resolveOptionalDiagnosisCode(
         tx,
@@ -4579,6 +4710,8 @@ export async function prepareEncounterConsents(
         patientId,
         encounterId,
         planItemId: need.planItemId,
+        // El de varios tratamientos de hoy, o el de lo hecho sin plan, cubre lo de la atención.
+        outsidePlan: !need.planItemId,
         procedureRef: need.procedureRef,
         diagnosisCode: need.diagnosisCode,
       }),

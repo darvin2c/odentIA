@@ -218,7 +218,16 @@ async function computePreview(
         ),
       )
     for (const description of new Set(done.map((row) => row.description)))
-      notices.push(`«${description}» ya se registró como hecho hoy y no se deshace: si no se hizo, anúlalo en «Realizado hoy».`)
+      notices.push(
+        `«${description}» ya se registró como hecho hoy y no se deshace: si no se hizo, anúlalo en su fila del plan.`,
+      )
+  }
+  return {
+    target,
+    findings: findingChoices,
+    diagnoses: diagnosisChoices,
+    planItems: planChoices,
+    notices,
   }
   return { target, findings: findingChoices, diagnoses: diagnosisChoices, planItems: planChoices, notices }
 }

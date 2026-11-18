@@ -33,8 +33,8 @@ import {
   getEncounterClosing,
   getEncounterDetail,
 } from "./encounters.js"
-import { budgetLine } from "./plan-next.js"
 import { addPlanItem, listPlanItems } from "./plan.js"
+import { budgetLine } from "./plan-next.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -336,15 +336,17 @@ it("lo que la persona dejó fuera no se prepara por el tratamiento", async () =>
   ).rejects.toMatchObject({ code: "ITEM_NOT_READY" })
 })
 
-// Estudio de la atención (16 nov, P11, D6): «Hoy viene a…» lleva solo lo de antes. Lo indicado y
-// aceptado en esta misma atención no se repite ahí (su «Hacerla hoy» está en su fila del Plan); traído
-// a hoy, sí, con su «Hoy no». En la sesión siguiente vuelve a ser «de antes».
-it("lo indicado en esta misma atención no se repite en «Hoy viene a…»; traído a hoy, sí; en la siguiente, también", async () => {
+// La atención agrupada (17 nov): el Plan de la atención es el único lugar de cada tratamiento, y su
+// fila dice si se hace hoy. Lo aceptado está siempre, también lo indicado en esta misma atención,
+// antes y después de traerlo a hoy, y en la sesión siguiente.
+it("lo aceptado está en la atención, también lo indicado en ella; traído a hoy y en la siguiente, también", async () => {
   const f = await clinicalFixture()
   const item = await accepted(f, 2)
   const visitOf = async (id: string) =>
-    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map((row) => row.planItemId)
-  expect(await visitOf(f.encounter.id)).toEqual([])
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map(
+      (row) => row.planItemId,
+    )
+  expect(await visitOf(f.encounter.id)).toEqual([item.id])
   await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id))
   expect(await visitOf(f.encounter.id)).toEqual([item.id])
   await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, f.encounter.id, item.id))
