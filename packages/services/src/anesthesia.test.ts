@@ -8,6 +8,7 @@ import {
   encounter,
   encounterPlanItem,
   patient,
+  patientCondition,
   serviceCatalog,
   treatmentPlanItem,
   treatmentTemplate,
@@ -15,8 +16,9 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { anesthesiaAtSigningOf } from "./anesthesia-at-signing.js"
 import { getPatientHealth, setPatientAsa } from "./clinical.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -261,5 +263,56 @@ it("R13: setPatientAsa ignora una atención que no es borrador de ese paciente",
   expect(trail.map((row) => (row.metadata as { encounterId: string | null }).encounterId)).toEqual([
     null,
     f.encounter.id,
+  ])
+})
+
+// Reglas clínicas del 18 nov, caso C2 (Rodrigo, HTA con losartán, ASA II): la firma guarda el tope
+// de epinefrina solo si la presión de hoy lo pide, con la misma regla que la línea de la atención.
+it("la firma no limita la epinefrina a la hipertensión controlada y sí a la presión de hoy de 165/100", async () => {
+  const f = await clinicalFixture()
+  await seedDiagnosisCodes([
+    { code: "I10", title: "Hipertensión esencial (primaria)" },
+    { code: "I48", title: "Fibrilación y aleteo auricular" },
+  ])
+  await ownerDb.insert(patientCondition).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    name: "Hipertensión arterial",
+    diagnosisSystem: "ICD-10-PE",
+    diagnosisCode: "I10",
+    status: "activa",
+  })
+  await f.run((tx) => setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "II" }))
+  const signing = (vitals: { presionSistolica: number; presionDiastolica: number } | null) =>
+    f.run((tx) =>
+      anesthesiaAtSigningOf(tx, "org_a", {
+        patientId: f.patient.id,
+        encounterId: f.encounter.id,
+        uses: ["Endodoncia"],
+        vitals,
+        birthDate: "1984-05-02",
+        today: "2026-11-18",
+        anesthetic: "lidocaina-2-epinefrina",
+        asksAsa: true,
+      }),
+    )
+  expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.warnings).toEqual([])
+  expect((await signing({ presionSistolica: 165, presionDiastolica: 100 }))?.warnings).toEqual([
+    "Por la presión de hoy (165/100), la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
+  ])
+  expect((await signing(null))?.warnings).toEqual([
+    "Con su hipertensión arterial (I10), toma la presión antes de anestesiar.",
+  ])
+  // Una fibrilación auricular con su código, aun con ASA II, sí lo pide.
+  await ownerDb.insert(patientCondition).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    name: "Fibrilación auricular",
+    diagnosisSystem: "ICD-10-PE",
+    diagnosisCode: "I48",
+    status: "activa",
+  })
+  expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.warnings).toEqual([
+    "Por su fibrilación auricular (I48), la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
   ])
 })

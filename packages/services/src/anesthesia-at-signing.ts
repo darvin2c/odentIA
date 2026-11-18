@@ -7,8 +7,7 @@
 import {
   type AnesthesiaAtSigning,
   ageInYears,
-  epinephrineCapOf,
-  isCardiacCondition,
+  epinephrineCheckOf,
   localAnesthesiaWords,
   localAnestheticOf,
   type Vitals,
@@ -103,7 +102,11 @@ export async function anesthesiaAtSigningOf(
         .limit(1)
     : []
   const conditions = await tx
-    .select({ system: patientCondition.diagnosisSystem, code: patientCondition.diagnosisCode })
+    .select({
+      name: patientCondition.name,
+      diagnosisSystem: patientCondition.diagnosisSystem,
+      diagnosisCode: patientCondition.diagnosisCode,
+    })
     .from(patientCondition)
     .where(
       and(
@@ -112,9 +115,13 @@ export async function anesthesiaAtSigningOf(
         eq(patientCondition.status, "activa"),
       ),
     )
-  const cardiac = epinephrineCapOf({
-    cardiacCondition: conditions.some((row) => isCardiacCondition(row.system, row.code)),
-    asaClass: header?.asaClass,
+  const ageYears = ageInYears(input.birthDate, input.today)
+  // La misma regla que la línea de la atención (`epinephrineCheckOf`).
+  const epinephrine = epinephrineCheckOf({
+    conditions,
+    asaClass,
+    vitals: input.vitals ?? null,
+    ageYears,
   })
   const anesthetic = localAnestheticOf(input.anesthetic)
   const weightKg = input.vitals?.peso ?? null
@@ -122,8 +129,8 @@ export async function anesthesiaAtSigningOf(
     ? localAnesthesiaWords({
         weightKg,
         anesthetic: anesthetic.key,
-        ageYears: ageInYears(input.birthDate, input.today),
-        cardiac,
+        ageYears,
+        epinephrine,
       })
     : { dose: null, warnings: [] }
   return {
