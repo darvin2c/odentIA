@@ -572,3 +572,8 @@ export function submitRecordCopyDownload(slug: string, token: string, docNumber:
   form.submit()
   form.remove()
 }
+
+/** La clínica del enlace de la copia que ya no sirve: su nombre y un teléfono, sin nada de la persona. */
+export function fetchRecordCopyClinic(slug: string): Promise<{ data: { clinicName: string; phone: string | null } }> {
+  return publicFetch(`${base(slug)}/copy/clinic`)
+}

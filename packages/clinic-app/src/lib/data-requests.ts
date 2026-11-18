@@ -45,7 +45,7 @@ export interface DataRequestCopy {
 
 export const DATA_REQUEST_KIND_TEXT: Record<DataRequestKind, { title: string; detail: string }> = {
   copia: {
-    title: "Una copia de sus datos",
+    title: "Copia de su historia",
     detail: "Su historia en PDF y en un archivo que otra clínica puede cargar.",
   },
   corregir: { title: "Corregir un dato", detail: "Su dirección, su documento o algo de su historia." },

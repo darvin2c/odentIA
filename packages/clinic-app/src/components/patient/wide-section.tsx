@@ -124,7 +124,7 @@ export function WideSectionProvider({
       return <PlanTab patientId={patientId} patientName={name} initialBudgetId={target.budgetId} initialItemId={target.itemId} />
     if (target.id === "responsables") return <ResponsablesTab patientId={patientId} startGranting={target.grant} />
     if (target.id === "portal") return <PortalSection patientId={patientId} withLink={false} />
-    if (target.id === "copia") return <RecordCopy patientId={patientId} />
+    if (target.id === "copia") return <RecordCopy patientId={patientId} bare />
     if (!own) return null
     return own.render({
       patientId,

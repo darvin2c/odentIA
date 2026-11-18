@@ -17,6 +17,7 @@ import {
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
+  getRecordCopyClinic,
   getRecordCopyView,
   issueFields,
   listBookingLinkProfessionals,
@@ -452,6 +453,10 @@ export function createPublicBookingRoute(deps: {
     if (!query.success || !storage) return unavailable(c)
     return answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyView(tx, orgId, query.data.token, { storage })))
   })
+
+  // La clínica del enlace que ya no sirve: su nombre y un teléfono para pedirla de nuevo. Sin token:
+  // es lo público de la clínica, igual para un enlace vencido, reemplazado o inválido.
+  app.get("/:slug/copy/clinic", (c) => answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyClinic(tx, orgId))))
 
   // Cada intento con su documento se cuenta antes de comparar, en su propia transacción ya
   // confirmada (como el PIN del portal): muchas peticiones a la vez no prueban más que el tope.

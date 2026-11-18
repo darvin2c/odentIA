@@ -29,6 +29,7 @@ import { issueRecordCopyLink } from "./record-copy-link.js"
 import {
   checkRecordCopyDocument,
   finishRecordCopyDownload,
+  getRecordCopyClinic,
   getRecordCopyView,
   reserveRecordCopyAttempt,
   startRecordCopyDownload,
@@ -471,4 +472,11 @@ it("el documento mal escrito dice cuántos intentos quedan", async () => {
   ).rejects.toMatchObject({
     message: expect.stringContaining("Ya no quedan intentos"),
   })
+})
+
+it("el enlace que ya no sirve dice de qué clínica es, sin nada de la persona", async () => {
+  const { run } = await sentCopy()
+  const clinic = await run((tx) => getRecordCopyClinic(tx, "org_a"))
+  expect(clinic.clinicName).toBeTruthy()
+  expect(Object.keys(clinic).sort()).toEqual(["clinicName", "phone"])
 })

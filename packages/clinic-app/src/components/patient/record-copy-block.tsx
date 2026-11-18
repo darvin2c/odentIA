@@ -23,10 +23,6 @@ function listed(parts: Array<string | null>): string | null {
   return items.length === 0 ? (last ?? null) : `${items.join(", ")} y ${last}`
 }
 
-function capital(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
 /** Los papeles emitidos de esta persona, con sus cifras; null si no tiene ninguno. */
 export function papersWords(s: PatientRecordSummary): string | null {
   const total =
@@ -44,35 +40,38 @@ export function papersWords(s: PatientRecordSummary): string | null {
     count(s.consentsSigned, "consentimiento firmado", "consentimientos firmados"),
     count(s.productPapers, "papel más", "papeles más"),
   ])
-  return list
-    ? `${capital(list)}, ${total > 1 ? "cada uno en su PDF" : "en su PDF"}. Lo anulado va marcado, con su motivo.`
-    : null
+  return list ? `${list}, ${total > 1 ? "cada uno en su PDF" : "en su PDF"}` : null
 }
 
-/**
- * Lo que la clínica arma sin que sea un papel entregado: la hoja de cada atención y el
- * odontograma de hoy, sin firmar. Null si no trae nada de eso.
- */
+/** Lo que arma la clínica sin que sea un papel entregado: la hoja de cada atención y el odontograma de hoy. */
 export function clinicSheetsWords(s: PatientRecordSummary): string | null {
-  const list = listed([
+  return listed([
     count(s.attentionSheets, "hoja de atención", "hojas de atención"),
     s.odontogramToday ? "el odontograma de hoy, sin firmar" : null,
   ])
-  return list ? `${capital(list)}, en PDF.` : null
 }
 
 /** Sus imágenes y archivos, con sus cifras; null si no tiene ninguno. */
 export function filesWords(s: PatientRecordSummary): string | null {
-  const images = count(s.images, "imagen tal como se subió", "imágenes tal como se subieron")
+  const images = count(s.images, "imagen", "imágenes")
   const scans =
     s.tomographies > 0
       ? s.tomographies === 1
-        ? "su tomografía con todos sus cortes"
-        : `sus ${s.tomographies} tomografías con todos sus cortes`
+        ? "su tomografía"
+        : `sus ${s.tomographies} tomografías`
       : null
   const others = count(s.otherFiles, "archivo más", "archivos más")
-  const list = listed([images, scans, others])
-  return list ? `${capital(list)}.` : null
+  return listed([images, scans, others])
+}
+
+/** Lo que trae, en una frase con las cifras de esta persona; lo que es 0 no se nombra. */
+export function contentsWords(s: PatientRecordSummary | undefined): string {
+  const parts = s
+    ? [papersWords(s), clinicSheetsWords(s), filesWords(s)].filter(
+        (part): part is string => part !== null,
+      )
+    : []
+  return `Su historia en PDF para leer${parts.map((part) => `; ${part}`).join("")}; y el archivo para el sistema de otra clínica. Lo anulado va marcado, con su motivo.`
 }
 
 /** «CIE-10», «CIE-10 y CIE-11»: las listas de diagnósticos que de verdad usa su copia. */
@@ -80,26 +79,8 @@ function diagnosisStandard(
   s: PatientRecordSummary | undefined,
 ): { name: string; detail: string } | null {
   const systems = s?.diagnosisSystems ?? []
-  if (systems.length === 0) return null
-  return { name: listed(systems) ?? systems[0]!, detail: "El código de cada diagnóstico." }
-}
-
-/**
- * Una fila término y descripción: en el teléfono, en una sola línea corrida («HL7 FHIR R4 · …»)
- * para que el bloque no empuje los pedidos fuera de la vista; desde `sm`, en dos columnas.
- */
-function Row({ term, children }: { term: string; children: string }) {
-  return (
-    <div className="py-1.5 text-sm sm:flex sm:gap-4 sm:py-2">
-      <dt className="inline font-medium sm:block sm:w-48 sm:shrink-0">{term}</dt>
-      <dd className="inline min-w-0 text-muted-foreground sm:block">
-        <span aria-hidden className="sm:hidden">
-          {" · "}
-        </span>
-        {children}
-      </dd>
-    </div>
-  )
+  const name = listed(systems)
+  return name ? { name, detail: "sus diagnósticos" } : null
 }
 
 /**
@@ -110,9 +91,11 @@ function Row({ term, children }: { term: string; children: string }) {
 export function DownloadCopyButton({
   patientId,
   size,
+  variant = "outline",
 }: {
   patientId: string
   size?: "sm" | "default"
+  variant?: "default" | "outline"
 }) {
   const queryClient = useQueryClient()
   const [started, setStarted] = useState(false)
@@ -128,7 +111,7 @@ export function DownloadCopyButton({
   return (
     <div className="flex flex-col items-start gap-1">
       <SubmitButton
-        variant="outline"
+        variant={variant}
         size={size}
         pending={started}
         onClick={() => {
@@ -152,10 +135,18 @@ export function DownloadCopyButton({
  * «Copia de su historia» (mesa del 18 nov), arriba de Datos › Privacidad y pedidos y desde
  * «…» de la cabecera: qué trae con las cifras de esta persona (las de la misma lista que
  * arma el ZIP; lo que es 0 no se nombra), «Descargar copia» y los estándares que de verdad
- * sigue su copia, a la vista. Solo para quien lee la historia (`clinical.read`): el
- * servidor lo exige también.
+ * sigue su copia, a la vista y en corto, para que los pedidos queden cerca también en el
+ * teléfono. `bare`: dentro de un panel que ya lleva el título, sin tarjeta ni título propio,
+ * y «Descargar copia» como la acción principal. Solo para quien lee la historia
+ * (`clinical.read`): el servidor lo exige también.
  */
-export function RecordCopyBlock({ patientId }: { patientId: string }) {
+export function RecordCopyBlock({
+  patientId,
+  bare = false,
+}: {
+  patientId: string
+  bare?: boolean
+}) {
   const summary = useQuery({
     queryKey: recordSummaryKey(patientId),
     queryFn: () => fetchRecordSummary(patientId),
@@ -164,97 +155,71 @@ export function RecordCopyBlock({ patientId }: { patientId: string }) {
   const titleId = useId()
   const s = summary.data
   const size = s ? sizeWords(s.approxBytes) : null
-  const papers = s ? papersWords(s) : null
-  const sheets = s ? clinicSheetsWords(s) : null
-  const files = s ? filesWords(s) : null
   const scans = (s?.tomographies ?? 0) > 0
   const diagnoses = diagnosisStandard(s)
   const standards = [
-    {
-      name: "HL7 FHIR R4",
-      detail: "El formato internacional para pasar la historia al sistema de otra clínica.",
-    },
+    { name: "HL7 FHIR R4", detail: "para otro sistema" },
     ...(diagnoses ? [diagnoses] : []),
-    ...(s?.toothNumbers
-      ? [
-          {
-            name: "FDI (ISO 3950)",
-            detail: "La numeración de las piezas, en el odontograma y en cada hallazgo.",
-          },
-        ]
-      : []),
-    ...(scans ? [{ name: "DICOM", detail: "Sus tomografías, tal como salieron del equipo." }] : []),
+    ...(s?.toothNumbers ? [{ name: "FDI (ISO 3950)", detail: "la numeración de las piezas" }] : []),
+    ...(scans ? [{ name: "DICOM", detail: "sus tomografías" }] : []),
   ]
   return (
     <section
-      aria-labelledby={titleId}
-      className="elevated flex flex-col gap-4 rounded-xl border bg-card p-4 sm:p-6"
+      {...(bare ? { "aria-label": "Copia de su historia" } : { "aria-labelledby": titleId })}
+      className={
+        bare
+          ? "flex flex-col gap-3"
+          : "elevated flex flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6"
+      }
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-          <h2 id={titleId} className="font-heading text-base font-medium">
-            Copia de su historia
-          </h2>
+          {bare ? null : (
+            <h2 id={titleId} className="font-heading text-base font-medium">
+              Copia de su historia
+            </h2>
+          )}
           <p className="text-sm text-muted-foreground">
-            Todo lo de su historia en un archivo ZIP, para entregárselo o para que otra clínica siga
-            con su atención
-            {size ? `. Pesa ${size}.` : "."}
+            Todo en un ZIP, para entregárselo o para que otra clínica siga con su atención
+            {size ? ` · ${size}` : ""}.
           </p>
         </div>
-        <DownloadCopyButton patientId={patientId} />
+        <DownloadCopyButton patientId={patientId} variant={bare ? "default" : "outline"} />
       </div>
-      <div>
+      <div className="flex flex-col gap-1">
         <h3 className="text-sm font-semibold">Qué trae</h3>
-        <dl className="divide-y">
-          <Row term="Su historia para leer · PDF">
-            Sus datos, alergias y antecedentes, cada atención con su diagnóstico, el plan con lo que
-            decidió y lo que sigue.
-          </Row>
-          {papers ? <Row term="Cada papel emitido">{papers}</Row> : null}
-          {sheets ? <Row term="Lo que arma la clínica">{sheets}</Row> : null}
-          {files ? <Row term="Sus imágenes y archivos">{files}</Row> : null}
-          <Row term="Para el sistema de otra clínica">
-            Lo mismo, en el formato internacional, para cargarlo sin volver a escribirlo.
-          </Row>
-        </dl>
         {summary.isPending ? (
-          <div
-            role="status"
-            aria-label="Contando lo que trae…"
-            className="flex flex-col gap-2 py-2"
-          >
+          <div role="status" aria-label="Contando lo que trae…" className="flex flex-col gap-2">
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-1/2" />
           </div>
-        ) : null}
-        {summary.isError ? (
-          <p className="py-2 text-sm text-muted-foreground">
-            No pudimos contar sus papeles e imágenes; la copia los trae igual.
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {contentsWords(s)}
+            {summary.isError
+              ? " No pudimos contar sus papeles e imágenes; la copia los trae igual."
+              : ""}
           </p>
-        ) : null}
-      </div>
-      <div>
-        <h3 className="text-sm font-semibold">Estándares que sigue</h3>
-        <dl className="divide-y">
-          {standards.map((standard) => (
-            <Row key={standard.name} term={standard.name}>
-              {standard.detail}
-            </Row>
-          ))}
-        </dl>
+        )}
       </div>
       <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold">Cómo se carga en otro sistema</h3>
-        <p className="text-sm text-muted-foreground">
-          Si el sistema de la otra clínica lee HL7 FHIR R4, carga el archivo «.fhir.json» sin volver
-          a escribir nada; si no, se queda con el PDF para leer
-          {scans ? ". Las tomografías se abren en cualquier visor DICOM" : ""}. El ZIP trae un
-          «LÉEME» que lo explica.
-        </p>
+        <h3 className="text-sm font-semibold">Estándares que sigue</h3>
+        <ul className="grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-2">
+          {standards.map((standard) => (
+            <li key={standard.name}>
+              <span className="font-medium">{standard.name}</span>
+              <span className="text-muted-foreground"> · {standard.detail}</span>
+            </li>
+          ))}
+        </ul>
       </div>
+      <p className="text-sm text-muted-foreground">
+        <span className="font-semibold text-foreground">Cómo se carga en otro sistema: </span>
+        si lee HL7 FHIR R4, con el archivo «.fhir.json», sin volver a escribir nada
+        {scans ? "; las tomografías, en cualquier visor DICOM" : ""}. El «LÉEME» del ZIP lo explica.
+      </p>
       <p className="text-xs text-muted-foreground">
-        No trae presupuestos ni cobros: no son parte de la historia clínica. Cada descarga queda en
-        «Consultas a la historia clínica».
+        No trae presupuestos ni cobros. Cada descarga queda en «Consultas a la historia clínica».
       </p>
     </section>
   )

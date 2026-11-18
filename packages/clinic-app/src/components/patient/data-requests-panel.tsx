@@ -26,8 +26,8 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FileText, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { FileText, Link2Off, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ChoiceButtons } from "../choice-buttons"
 import { ApiError } from "../../lib/api"
@@ -263,6 +263,28 @@ export function copyStateWords(copy: NonNullable<DataRequest["copy"]>, now: Date
   return live ? `Todavía no se baja · vence el ${day(copy.until)}` : `No se bajó · su enlace venció el ${day(copy.until)}`
 }
 
+/** El enlace de la copia ya no sirve antes de vencer: pide «Enviar de nuevo». */
+function copyClosed(request: DataRequest): boolean {
+  return request.copy !== null && request.copy.closed !== null && new Date(request.copy.until).getTime() > Date.now()
+}
+
+/**
+ * El estado de la copia enviada en la fila y en el cajón. Si el enlace ya no sirve, se ve como
+ * lo que pide actuar: con icono y en advertencia, no solo con otro color.
+ */
+function CopyState({ copy, locale }: { copy: NonNullable<DataRequest["copy"]>; locale: string }) {
+  const words = copyStateWords(copy, new Date(), locale, activeOrgTimeZone())
+  const closed = copy.closed !== null && new Date(copy.until).getTime() > Date.now()
+  return closed ? (
+    <p className="flex items-start gap-1.5 text-sm font-medium text-warning">
+      <Link2Off className="mt-0.5 size-4 shrink-0" aria-hidden />
+      {words}
+    </p>
+  ) : (
+    <p className="text-sm font-medium">{words}</p>
+  )
+}
+
 /** Un pedido de copia ya enviado con su enlace se puede enviar de nuevo, con la misma operación. */
 function canSendAgain(request: DataRequest): boolean {
   return request.kind === "copia" && request.status === "respondida" && request.copy !== null
@@ -315,11 +337,14 @@ function RequestRow({
             {request.resolution ? ` · ${request.resolution}` : ""}
           </p>
         )}
-        {request.copy ? (
-          <p className="text-sm font-medium">{copyStateWords(request.copy, new Date(), locale, activeOrgTimeZone())}</p>
-        ) : null}
+        {request.copy ? <CopyState copy={request.copy} locale={locale} /> : null}
       </div>
-      <Button type="button" size="sm" variant={pending ? "default" : again ? "outline" : "ghost"} onClick={onOpen}>
+      <Button
+        type="button"
+        size="sm"
+        variant={pending || (again && copyClosed(request)) ? "default" : again ? "outline" : "ghost"}
+        onClick={onOpen}
+      >
         {pending ? "Atender" : again ? "Enviar de nuevo" : "Ver"}
       </Button>
     </li>
@@ -544,7 +569,21 @@ function AttendDrawer({
     request.requesterRelation === "representante_legal" ? "representante" : request.channel === "portal" ? "portal" : "documento",
   )
   const [denying, setDenying] = useState(false)
-  const verify = useMutation({ mutationFn: () => verifyDataRequestApi(patientId, request.id, how), onSuccess: refresh })
+  // Tras «Comprobé que es ella», el foco va al paso 2 (el botón desaparece y no queda en la nada).
+  const nextStep = useRef<HTMLElement>(null)
+  const [moveToNext, setMoveToNext] = useState(false)
+  const verify = useMutation({
+    mutationFn: () => verifyDataRequestApi(patientId, request.id, how),
+    onSuccess: async () => {
+      await refresh()
+      setMoveToNext(true)
+    },
+  })
+  useEffect(() => {
+    if (!moveToNext || !verified) return
+    nextStep.current?.focus()
+    setMoveToNext(false)
+  }, [moveToNext, verified])
   const respond = useMutation({ mutationFn: (resolution: string) => respondDataRequestApi(patientId, request.id, resolution) })
   const deny = useMutation({ mutationFn: (reason: string) => denyDataRequestApi(patientId, request.id, reason) })
   const respondForm = useAppForm({
@@ -609,9 +648,7 @@ function AttendDrawer({
             <div className="rounded-lg border p-3">
               <p className="font-medium">{DATA_REQUEST_STATUS_TEXT[request.status]}</p>
               {request.resolution ? <p className="text-muted-foreground">{request.resolution}</p> : null}
-              {request.copy ? (
-                <p className="font-medium">{copyStateWords(request.copy, new Date(), locale, activeOrgTimeZone())}</p>
-              ) : null}
+              {request.copy ? <CopyState copy={request.copy} locale={locale} /> : null}
               {request.verifiedHow ? (
                 <p className="text-muted-foreground">
                   Se comprobó: {DATA_REQUEST_VERIFICATION_TEXT[request.verifiedHow].toLowerCase()}
@@ -688,6 +725,7 @@ function AttendDrawer({
               number={2}
               done={false}
               disabled={!verified}
+              sectionRef={nextStep}
               title={request.kind === "copia" ? "Envía la copia" : erase ? "Borra sus datos y bloquea su historia" : "Haz lo que pidió"}
             >
               {erase ? (
@@ -815,6 +853,11 @@ function SendCopy({
       {sendOptions.data && channels.length === 0 ? (
         <p className="text-muted-foreground">No tiene WhatsApp ni correo para enviársela: entrégala en mano.</p>
       ) : null}
+      <p className="text-muted-foreground">
+        {again
+          ? "Le llega otro PDF; el enlace del anterior deja de servir."
+          : "Le llega el PDF de su historia con el enlace a la copia completa, también lo que no ve en su portal (sirve 7 días)."}
+      </p>
       <div className="flex flex-wrap gap-2">
         {channels.map((option) => (
           <Button
@@ -840,12 +883,6 @@ function SendCopy({
           </p>
         ))}
       {note ? <p className="text-muted-foreground">{note}</p> : null}
-      <p className="text-muted-foreground">
-        Le llega el PDF de su historia; en su primera página, el enlace para bajar la copia completa (sus imágenes, sus
-        papeles y el archivo para otra clínica), escribiendo su documento. Sirve 7 días y cada descarga queda registrada.
-        Trae también lo que no se muestra en su portal: es su historia. Se envía solo a ella o a su representante legal
-        {again ? "." : "; el pedido queda respondido solo."}
-      </p>
       {send.error ? (
         <p role="alert" className="text-destructive">
           {submitErrorMessage(send.error)}
@@ -1000,16 +1037,25 @@ function Step({
   done,
   disabled = false,
   title,
+  sectionRef,
   children,
 }: {
   number: number
   done: boolean
   disabled?: boolean
   title: string
+  /** El paso al que se lleva el foco cuando el anterior se completa. */
+  sectionRef?: React.Ref<HTMLElement>
   children: React.ReactNode
 }) {
   return (
-    <section className={`flex flex-col gap-2 rounded-lg border p-3 ${disabled ? "opacity-60" : ""}`} aria-disabled={disabled}>
+    <section
+      ref={sectionRef}
+      tabIndex={sectionRef ? -1 : undefined}
+      aria-label={sectionRef ? `Paso ${number}: ${title}` : undefined}
+      className={`flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 ${disabled ? "opacity-60" : ""}`}
+      aria-disabled={disabled}
+    >
       <p className="flex items-center gap-2 font-medium">
         <span
           aria-hidden="true"

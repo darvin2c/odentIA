@@ -19,7 +19,8 @@ import { documentText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm"
+import { branch } from "@odentia/db/schema/org"
+import { and, asc, eq, gt, isNotNull, isNull, lt, lte, sql } from "drizzle-orm"
 import { clinicNameOf } from "./booking-links.js"
 import { sameDocument } from "./clinical-forms.js"
 import {
@@ -328,4 +329,19 @@ export async function finishRecordCopyDownload(
         isNull(patientRecordDownload.completedAt),
       ),
     )
+}
+
+/**
+ * La clínica de la página de la copia, para el enlace que ya no sirve: su nombre y un
+ * teléfono para pedirla de nuevo. Es lo público de la clínica (sale de su dirección, no del
+ * enlace): no dice nada de la persona, así que vencido, reemplazado e inválido dicen lo mismo.
+ */
+export async function getRecordCopyClinic(tx: Db, orgId: string): Promise<{ clinicName: string; phone: string | null }> {
+  const [row] = await tx
+    .select({ phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true), isNotNull(branch.phone)))
+    .orderBy(asc(branch.createdAt))
+    .limit(1)
+  return { clinicName: await clinicNameOf(tx, orgId), phone: row?.phone?.trim() || null }
 }
