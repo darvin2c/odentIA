@@ -257,7 +257,12 @@
     {"q":"¿Cómo emito una receta?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde hago la receta, el consentimiento o la orden de la atención?"]},
     {"q":"Quiero leer el consentimiento antes de pasarle la tablet","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo firma la persona su consentimiento?"]},
     {"q":"¿Dónde veo cómo le fue en su sesión anterior sin perder lo que estoy haciendo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde veo cómo le fue en la sesión anterior?"]},
-    {"q":"Llegó una persona nueva que no está registrada, ¿qué hago?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué no puedo registrar a un paciente nuevo?"]}
+    {"q":"Llegó una persona nueva que no está registrada, ¿qué hago?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué no puedo registrar a un paciente nuevo?"]},
+    {"q":"¿por qué no me avisa del alendronato?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?"]},
+    {"q":"¿cuántos cartuchos puedo usar con un hipertenso?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde veo la dosis máxima de anestesia según su peso?"]},
+    {"q":"¿por qué no se firmó el odontograma hoy?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo se firma el odontograma?"]},
+    {"q":"¿cómo agrego los riesgos propios al consentimiento?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo pongo en el consentimiento el riesgo propio de este paciente?"]},
+    {"q":"¿dónde anoto una pulpitis?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo registro una caries en la tablet?"]}
   ],
   "control": [
     {"q":"como le contesto a un paciente que escribio por wasap","expected":["bandeja"],"producto":"odentia","faqs":["¿Cómo respondo yo en vez de Sofi?"],"temas":["bandeja"]},
