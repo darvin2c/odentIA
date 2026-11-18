@@ -97,8 +97,14 @@ export async function api<T>(
       error?: { code?: string; message?: string; fields?: Record<string, string> }
     }
     if (response.ok) return body as T
+    // Con sesión en la cuenta y un token recién pedido, un rechazo no se arregla entrando otra
+    // vez (volvería aquí): se dice, sin mandar a entrar.
     if (response.status === 401)
-      throw new SignedOut(body.error?.message ?? "Entra con tu cuenta para seguir.")
+      throw new ApiError(
+        401,
+        "TOKEN_REJECTED",
+        "No pudimos confirmar tu sesión con gestorIA. Recarga la página; si sigue, sal y vuelve a entrar.",
+      )
     throw new ApiError(
       response.status,
       body.error?.code ?? "ERROR",

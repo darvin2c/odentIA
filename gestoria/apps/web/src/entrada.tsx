@@ -293,7 +293,10 @@ export function RegisterPage() {
             <Checkbox
               id="terms"
               checked={accepted}
-              onCheckedChange={(value) => setAccepted(value === true)}
+              onCheckedChange={(value) => {
+                setAccepted(value === true)
+                if (value === true) form.setErrors(({ terms: _, ...rest }) => rest)
+              }}
               aria-invalid={form.errors.terms ? true : undefined}
               aria-describedby={form.errors.terms ? "terms-error" : undefined}
             />

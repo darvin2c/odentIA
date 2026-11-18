@@ -185,7 +185,7 @@ export function StoresPage() {
         <div>
           <Button variant="outline" render={<Link to="/tiendas/nueva" />}>
             <Plus aria-hidden />
-            Crear otra tienda
+            {stores.length > 0 ? "Crear otra tienda" : "Crear mi tienda"}
           </Button>
         </div>
       )}
@@ -290,7 +290,7 @@ export function NewStorePage() {
               id="store-name"
               autoFocus
               maxLength={80}
-              placeholder="Calzados Rosa"
+              placeholder="Por ejemplo, Calzados Rosa"
               value={name}
               onChange={(e) => setName(e.target.value)}
               aria-invalid={errors.name ? true : undefined}

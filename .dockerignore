@@ -10,3 +10,5 @@ infra/prod/.env
 *.log
 e2e/test-results
 e2e/playwright-report
+# Ningún .env local entra a una imagen (tampoco los de gestoria/infra).
+**/.env
