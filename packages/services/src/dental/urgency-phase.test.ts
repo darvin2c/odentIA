@@ -7,7 +7,7 @@ import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { expect, it } from "vitest"
 import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
-import { addPlanItem, updatePlanItem, updatePlanItemPlanning } from "../plan.js"
+import { addPlanItem, listPlanItems, updatePlanItem, updatePlanItemPlanning } from "../plan.js"
 import { createService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
 import { ownerDb, setupTestDb } from "../test-setup.js"
@@ -89,4 +89,35 @@ it("cambiar el servicio vuelve a proponer la fase, salvo la que se eligió a man
   const moved = await f.indicate(f.endodontics.id, { toothNumber: 37 }, "K04.0")
   await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, moved.id, { phase: "basica" }))
   expect(await change(moved.id, f.extraction.id)).toMatchObject({ phase: "basica" })
+})
+
+// Revisión de las reglas clínicas del 18 nov: la pulpitis anotada después de indicar la endodoncia
+// también la lleva a «Urgencia», y lo que cambia de fase por la regla entra al final de la nueva.
+it("anotar la pulpitis después de indicar la endodoncia la pasa a «Urgencia», al final de esa fase", async () => {
+  const f = await withDentalServices()
+  const first = await f.indicate(f.endodontics.id, { toothNumber: 11 }, "K04.0")
+  const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
+  expect(endo).toMatchObject({ phase: "basica" })
+  // La que el odontólogo movió a mano con «Planificar…» no se mueve.
+  const kept = await f.indicate(f.endodontics.id, { toothNumber: 46 })
+  await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, kept.id, { phase: "quirurgica" }))
+  await f.diagnose("K04.0", 36)
+  await f.diagnose("K04.0", 46)
+  const items = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
+  const of = (id: string) => items.find((item) => item.id === id)!
+  expect(of(endo.id).phase).toBe("urgencia")
+  expect(of(endo.id).sortOrder).toBeGreaterThan(of(first.id).sortOrder)
+  expect(of(kept.id).phase).toBe("quirurgica")
+})
+
+it("cambiar la fase por la regla al cambiar el servicio lo deja al final de la nueva, como «Planificar…»", async () => {
+  const f = await withDentalServices()
+  const extraction = await f.indicate(f.extraction.id, { toothNumber: 18 })
+  const resin = await f.indicate(f.resin.id, { toothNumber: 26, surfaces: ["occlusal"] })
+  expect(extraction.sortOrder).toBeLessThan(resin.sortOrder)
+  const changed = await f.run((tx) =>
+    updatePlanItem(tx, ...f.args, extraction.id, { serviceId: f.endodontics.id, encounterId: f.encounter.id }),
+  )
+  expect(changed.phase).toBe("basica")
+  expect(changed.sortOrder).toBeGreaterThan(resin.sortOrder)
 })
