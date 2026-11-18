@@ -6,3 +6,6 @@ packages:
   - "admin/apps/*"
   - "shared/packages/*"
   - "admin/e2e"
+  # gestorIA (lienzo B): su carpeta, su base, su CI y su despliegue (ADR 0203).
+  - "gestoria/apps/*"
+  - "gestoria/packages/*"

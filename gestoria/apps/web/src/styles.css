@@ -1,0 +1,45 @@
+@import "@odentia/ui/globals.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@source "../../../../shared/packages/ui/src";
+@source "../../../../shared/packages/ui-patterns/src";
+@source "./";
+
+/*
+ * La marca de gestorIA (aprobada el 17 nov): naranja fuerte #EA580C en el logo, el isotipo y
+ * «IA», igual en claro y en oscuro; #CC4604 para botones y enlaces con letras blancas (4,72:1).
+ * En oscuro el texto en color usa un naranja claro (#FB923C) para leerse sobre el fondo, y el
+ * botón sigue en #CC4604 con letras blancas. Solo cambian la identidad y el primario: los
+ * estados conservan sus colores. Vive aquí y no en `@odentia/ui` mientras la marca de gestorIA
+ * no pase a lo de uso general (cambio aparte).
+ */
+:root[data-brand="gestoria"],
+:root[data-brand="gestoria"] .theme-light {
+  --identity-accent: #ea580c;
+  --primary: #cc4604;
+  --primary-foreground: #ffffff;
+  --primary-fill: #cc4604;
+  --primary-fill-foreground: #ffffff;
+  --primary-soft: #ffedd5;
+  --primary-soft-foreground: #9a3412;
+  --ring: #cc4604;
+  --sidebar-primary: #cc4604;
+  --sidebar-ring: #cc4604;
+  --agent-soft: #fff7ed;
+  --agent-border: #fed7aa;
+}
+
+:root.dark[data-brand="gestoria"] {
+  --identity-accent: #ea580c;
+  --primary: #fb923c;
+  --primary-foreground: #1c0a02;
+  --primary-fill: #cc4604;
+  --primary-fill-foreground: #ffffff;
+  --primary-soft: #431407;
+  --primary-soft-foreground: #fed7aa;
+  --ring: #fb923c;
+  --sidebar-primary: #fb923c;
+  --sidebar-primary-foreground: #1c0a02;
+  --sidebar-ring: #fb923c;
+  --agent-soft: #2a1206;
+  --agent-border: #5a2a0c;
+}
