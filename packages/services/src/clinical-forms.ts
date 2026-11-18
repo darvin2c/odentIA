@@ -3110,9 +3110,11 @@ async function proposedPersonalRisks(
   planItemId: string | null,
 ): Promise<string[]> {
   const hooks = await productHooks(tx, orgId)
-  let profile: ConsentRiskProfile =
-    hooks.consentSuggestions.find((suggestion) => suggestion.key === templateKey)?.riskProfile ?? {}
-  if (!profile.jawBone && planItemId && hooks.extractionServiceIds) {
+  const suggestion = hooks.consentSuggestions.find((row) => row.key === templateKey)
+  let profile: ConsentRiskProfile = suggestion?.riskProfile ?? {}
+  // El servicio solo habla por una plantilla propia: la sugerida ya dice su procedimiento, y la de
+  // la anestesia de una exodoncia no consiente la extracción (no lleva el riesgo del hueso).
+  if (!suggestion && planItemId && hooks.extractionServiceIds) {
     const [item] = await tx
       .select({ serviceId: treatmentPlanItem.serviceId })
       .from(treatmentPlanItem)

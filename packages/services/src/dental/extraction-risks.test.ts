@@ -7,7 +7,9 @@ import { randomUUID } from "node:crypto"
 import { patientMedication, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { serviceFinding } from "@odentia/db/schema/dental"
 import { expect, it } from "vitest"
+import { SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { addDeclaredHealth, getPatientHealth, recordHealthDeclaration, savePatientHealth } from "../clinical.js"
+import { createConsentDocument, createConsentTemplate, publishConsentTemplate } from "../clinical-forms.js"
 import { clinicalFixture } from "../clinical-test-fixture.js"
 import { addPlanItem, listPlanItems } from "../plan.js"
 import { ownerDb, setupTestDb } from "../test-setup.js"
@@ -149,4 +151,33 @@ it("el implante y la cirugía oral avisan lo mismo que la exodoncia; la endodonc
   expect(risks(items.implant.id)).toEqual(osteonecrosis)
   expect(risks(items.surgery.id)).toEqual(osteonecrosis)
   expect(risks(items.rootCanal.id)).toBeUndefined()
+})
+
+// Revisión de las reglas clínicas del 18 nov: el servicio del tratamiento solo dice el procedimiento
+// de una plantilla propia. La sugerida «Anestesia local» de una exodoncia consiente la anestesia, no
+// la extracción: no lleva el riesgo del hueso, que va en el consentimiento de la exodoncia.
+it("la anestesia sugerida de una exodoncia no lleva el riesgo del hueso; una plantilla propia, sí", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(serviceFinding).values({ serviceId: f.service.id, organizationId: "org_a", condition: "missing_tooth" })
+  await ownerDb
+    .insert(patientMedication)
+    .values({ organizationId: "org_a", patientId: f.patient.id, name: "alendronato 70 mg semanal", atcCode: "M05BA04" })
+  const item = await f.run((tx) => addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id }))
+  const published = async (key: string) => {
+    const suggested = SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "anestesia-local")!
+    const draft = await f.run((tx) =>
+      createConsentTemplate(tx, "org_a", f.actor, { key, title: `${suggested.title} ${key}`, sections: suggested.sections }),
+    )
+    return f.run((tx) => publishConsentTemplate(tx, "org_a", f.actor, draft.id))
+  }
+  const prepare = async (templateId: string) => {
+    const doc = await f.run((tx) =>
+      createConsentDocument(tx, "org_a", f.actor, { patientId: f.patient.id, templateId, planItemId: item.id }),
+    )
+    return (doc.sectionsSnapshot as { personalRisks?: string[] } | null)?.personalRisks ?? null
+  }
+  expect(await prepare((await published("anestesia-local")).id)).toBeNull()
+  expect(await prepare((await published(`propia-${randomUUID().slice(0, 8)}`)).id)).toEqual([
+    expect.stringContaining("osteonecrosis"),
+  ])
 })
