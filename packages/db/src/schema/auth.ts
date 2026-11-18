@@ -198,8 +198,7 @@ export const jwks = authSchema.table("jwks", {
  * repetido por su `id`, así que repetirla nunca duplica el efecto. `user_id` no es clave
  * foránea: el aviso es historia y no cuenta como relación de la cuenta. `expires_at` es hasta
  * cuándo dura un bloqueo (nula, sin fecha o no es un bloqueo). Los de una persona salen en el
- * orden de `created_at`, que se escribe con la hora de la base al anotarlo (ver
- * `recordAccountEvent`).
+ * orden de `created_at` (ver `recordAccountEvent`).
  */
 export const accountEvent = authSchema.table(
   "account_event",
@@ -208,7 +207,8 @@ export const accountEvent = authSchema.table(
     userId: text("user_id").notNull(),
     type: text("type").notNull(),
     app: text("app").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // La hora al anotarlo, no la del inicio de la transacción: da el orden de llegada.
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),

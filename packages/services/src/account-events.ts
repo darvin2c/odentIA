@@ -67,10 +67,10 @@ export function accountEventSendersFromEnv(env: {
 }
 
 /**
- * Anota, en la transacción del cambio, el aviso a cada app que es otro sistema. Va después
- * de escribir el bloqueo de la cuenta (`user_global_block`), que deja tomada su fila: así
- * dos cambios de la misma cuenta se anotan uno tras otro, y su `created_at`, la hora de la
- * base en ese momento (no la del inicio de la transacción), sigue el orden en que pasaron.
+ * Anota, en la transacción del cambio, el aviso a cada app que es otro sistema. Toma una
+ * llave de esa cuenta hasta terminar la transacción: dos cambios de la misma cuenta se
+ * anotan uno tras otro, y su `created_at` (la hora de la base al anotarlo, no la del inicio
+ * de la transacción) sigue el orden en que quedaron hechos.
  */
 async function recordAccountEvent(
   tx: Db,
@@ -79,15 +79,10 @@ async function recordAccountEvent(
   expiresAt: Date | null = null,
 ): Promise<void> {
   if (EXTERNAL_ACCOUNT_APPS.length === 0) return
-  await tx.insert(accountEvent).values(
-    EXTERNAL_ACCOUNT_APPS.map((app) => ({
-      userId,
-      type,
-      app,
-      expiresAt,
-      createdAt: sql`clock_timestamp()`,
-    })),
-  )
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`account_event:${userId}`}))`)
+  await tx
+    .insert(accountEvent)
+    .values(EXTERNAL_ACCOUNT_APPS.map((app) => ({ userId, type, app, expiresAt })))
 }
 
 /** Se cerró la cuenta: cada app saca a esa persona de sus equipos y marca cerrada su copia. */
