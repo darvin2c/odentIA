@@ -124,9 +124,9 @@ export function FindingPicker({
           ) : null}
         </InputGroupAddon>
       </InputGroup>
-      {found.reason && visible.length === 0 ? (
-        <FindingReasonNotice reason={found.reason} onReason={onReason} />
-      ) : visible.length === 0 ? (
+      {/* «caries dolorosa»: el dolor es el motivo y la caries, un hallazgo; se dicen los dos. */}
+      {found.reason ? <FindingReasonNotice reason={found.reason} onReason={onReason} /> : null}
+      {found.reason && visible.length === 0 ? null : visible.length === 0 ? (
         (other ?? (
           <EmptyState
             icon={SearchX}

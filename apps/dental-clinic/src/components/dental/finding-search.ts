@@ -82,10 +82,9 @@ export interface FindingSearch {
   elsewhere: boolean
 }
 
-/** Lo que dice el buscador de «¿Qué observas?» para lo escrito. */
-export function searchFindings(text: string): FindingSearch {
-  const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
-  if (!query) return { query, findings: FINDINGS, reason: null, elsewhere: false }
+/** Lo escrito, en el orden en que se ofrece: por el nombre desde el inicio de una palabra, por cómo se dice, y por el medio de una palabra. */
+function matchFindings(query: string): { findings: FindingDefinition[]; byName: number } {
+  const startsWord = (label: string) => ` ${label}`.includes(` ${query}`)
   const byName = FINDINGS.filter((finding) => normalizeSearchText(finding.label).includes(query))
   const named = new Set(byName.map((finding) => finding.code))
   const saidAs = findingsSaidAs(query)
@@ -97,14 +96,55 @@ export function searchFindings(text: string): FindingSearch {
       ) ||
         saidAs.has(finding.code)),
   )
-  const reason =
-    query.length >= REASON_MIN
-      ? (REASON_WORDS.find(([word]) => word.startsWith(query) || query.includes(word))?.[1] ?? null)
+  // «funda» está dentro de «profundas»: la corona («funda») va antes que las fosas y fisuras.
+  const atStart = byName.filter((finding) => startsWord(normalizeSearchText(finding.label)))
+  const inside = byName.filter((finding) => !atStart.includes(finding))
+  return { findings: [...atStart, ...otherwise, ...inside], byName: byName.length }
+}
+
+/** Lo que dice el buscador de «¿Qué observas?» para lo escrito. */
+export function searchFindings(text: string): FindingSearch {
+  const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
+  if (!query) return { query, findings: FINDINGS, reason: null, elsewhere: false }
+  const reasonOf = (said: string) =>
+    said.length >= REASON_MIN
+      ? (REASON_WORDS.find(([word]) => word.startsWith(said) || said.includes(word))?.[1] ?? null)
       : null
+  const reason = reasonOf(query)
+  const whole = matchFindings(query)
+  let findings = whole.findings
+  // «caries dolorosa»: nada se llama así entero, pero «caries» es un hallazgo y «dolorosa» el motivo.
+  // Cada palabra que no es del motivo se busca sola, en el orden escrito.
+  if (findings.length === 0 && query.includes(" ")) {
+    const seen = new Set<string>()
+    findings = query
+      .split(" ")
+      .filter((word) => word.length >= ELSEWHERE_MIN && reasonOf(word) === null)
+      .flatMap((word) => matchFindings(word).findings)
+      .filter((finding) => !seen.has(finding.code) && !!seen.add(finding.code))
+  }
   return {
     query,
-    findings: [...byName, ...otherwise],
+    findings,
     reason,
-    elsewhere: reason === null && byName.length === 0 && query.length >= ELSEWHERE_MIN,
+    elsewhere: reason === null && whole.byName === 0 && query.length >= ELSEWHERE_MIN,
   }
+}
+
+/**
+ * Cómo se dice en la clínica el tratamiento que se busca para el plan: «sacar la muela», «extraer»
+ * o «extracción» es la exodoncia, que es como se llama el servicio.
+ */
+const TREATMENT_SAID_AS: ReadonlyArray<readonly [name: string, words: readonly string[]]> = [
+  ["exodoncia", ["sacar", "extraer", "extraccion", "extrae"]],
+]
+
+/** Lo que se busca en los tratamientos para lo escrito: el nombre del servicio si se dijo de otro modo. */
+export function treatmentSearchTerm(text: string): string {
+  const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
+  const words = query.split(" ")
+  const said = TREATMENT_SAID_AS.find(([, synonyms]) =>
+    synonyms.some((synonym) => words.some((word) => word.startsWith(synonym))),
+  )
+  return said ? said[0] : text.trim()
 }

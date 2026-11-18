@@ -1,14 +1,16 @@
 import { apiFetch } from "@odentia/clinic-app/lib/api"
 import { INDICATED_QUERY_KEYS } from "@odentia/clinic-app/lib/budgets"
-import { addDiagnosisApi } from "@odentia/clinic-app/lib/encounters"
+import { addDiagnosisApi, fetchPatientDiagnoses } from "@odentia/clinic-app/lib/encounters"
+import type { PlanItem } from "@odentia/clinic-app/lib/patients"
 import { fetchServices, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, pulpStateOfDiagnosis } from "@odentia/clinical"
 import { anatomyFitRank } from "@odentia/dental"
 import { Button } from "@odentia/ui"
 import { common, EmptyState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchX } from "lucide-react"
 import { useEffect, useState } from "react"
+import { treatmentSearchTerm } from "./finding-search"
 import { toothAnatomyOf } from "./tooth-fit-notice"
 
 /** Un código de la lista de la clínica, como lo devuelve su buscador (`/api/diagnosis-codes`). */
@@ -23,6 +25,64 @@ interface DiagnosisOption {
 const MAX_DIAGNOSES = 3
 /** Lo que se planifica desde la pieza es de la pieza o de sus caras. */
 const TOOTH_SCOPES: readonly string[] = ["tooth", "surfaces"]
+/** Lo indicado que sigue en el plan: lo hecho, cancelado o reemplazado ya no está por hacer. */
+const PLANNED_STATUSES: readonly string[] = ["pendiente", "programado", "en_curso", "suspendido"]
+
+type Pulp = "vital" | "necrotic"
+/** La endodoncia vital o no vital, por su familia de la biblioteca o, sin ella, por su nombre. */
+function pulpVariant(service: ServiceCatalogItem): Pulp | null {
+  const family = service.toothAnatomy?.family
+  if (family === "endodoncia-vital") return "vital"
+  if (family === "endodoncia-no-vital") return "necrotic"
+  const name = service.name.toLowerCase()
+  if (!/endodon|conducto/.test(name)) return null
+  return /\bno vital\b/.test(name) ? "necrotic" : /\bvital\b/.test(name) ? "vital" : null
+}
+
+/**
+ * Los tratamientos que se ofrecen para la pieza (reglas clínicas del 18 nov, H5): el que mejor encaja
+ * en ella, como en «Tratamiento». Si es una endodoncia, la que dice el diagnóstico de la pieza: con
+ * pulpitis, la vital; con necrosis o lo que la presupone, la no vital (`pulpStateOfDiagnosis`). Si no
+ * se sabe, las dos.
+ */
+export function offeredServices(
+  services: readonly ServiceCatalogItem[],
+  toothNumber: number,
+  pulp: Pulp | null,
+): ServiceCatalogItem[] {
+  const rank = (row: ServiceCatalogItem) =>
+    anatomyFitRank(row.toothAnatomy ? toothAnatomyOf(row.toothAnatomy) : null, toothNumber)
+  const fitting = services
+    .filter((row) => TOOTH_SCOPES.includes(row.scope ?? ""))
+    .sort((a, b) => rank(a) - rank(b))
+  const [first] = fitting
+  if (!first) return []
+  if (!pulpVariant(first)) return [first]
+  const best = fitting.filter((row) => pulpVariant(row) && rank(row) === rank(first))
+  const matching = pulp ? best.find((row) => pulpVariant(row) === pulp) : undefined
+  if (matching) return [matching]
+  const vital = best.find((row) => pulpVariant(row) === "vital")
+  const necrotic = best.find((row) => pulpVariant(row) === "necrotic")
+  return [vital, necrotic].filter((row): row is ServiceCatalogItem => !!row)
+}
+
+/** La pulpa que dicen los diagnósticos vigentes de la pieza; null si ninguno lo dice o dicen las dos. */
+export function toothPulp(
+  diagnoses: ReadonlyArray<{
+    diagnosisCode: string
+    toothNumber: number | null
+    status: string
+    voidedAt: string | null
+  }>,
+  toothNumber: number,
+): Pulp | null {
+  const states = new Set(
+    diagnoses
+      .filter((row) => row.toothNumber === toothNumber && row.status === "activo" && !row.voidedAt)
+      .flatMap((row) => pulpStateOfDiagnosis(row.diagnosisCode) ?? []),
+  )
+  return states.size === 1 ? ([...states][0] ?? null) : null
+}
 
 /**
  * Lo que no es un hallazgo y se escribió en «¿Qué observas?» (reglas clínicas del 18 nov): un
@@ -70,11 +130,25 @@ export function FindingElsewhere({
     enabled: withDiagnoses && debounced.length > 0,
     staleTime: 60_000,
   })
+  // «sacar muela», «extraer»: se busca el servicio por su nombre, la exodoncia.
+  const treatment = treatmentSearchTerm(debounced)
   const servicesQuery = useQuery({
-    queryKey: ["services", "picker", debounced, "todas"],
-    queryFn: () => fetchServices({ q: debounced || undefined, state: "active", limit: 30 }),
-    enabled: debounced.length > 0,
+    queryKey: ["services", "picker", treatment, "todas"],
+    queryFn: () => fetchServices({ q: treatment || undefined, state: "active", limit: 30 }),
+    enabled: treatment.length > 0,
     staleTime: 30_000,
+  })
+  // Lo que la pieza ya tiene en el plan, con las mismas claves que el plan: no se ofrece otra vez.
+  const planQuery = useQuery({
+    queryKey: ["plan-items", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: debounced.length > 0,
+  })
+  // La pulpa de la pieza, por sus diagnósticos: decide la endodoncia vital o la no vital.
+  const toothDiagnoses = useQuery({
+    queryKey: ["patient-diagnoses", patientId],
+    queryFn: () => fetchPatientDiagnoses(patientId),
+    enabled: debounced.length > 0,
   })
   const [saving, setSaving] = useState<string | null>(null)
   const [done, setDone] = useState<Record<string, string>>({})
@@ -84,13 +158,25 @@ export function FindingElsewhere({
     ? (diagnosesQuery.data?.data ?? []).filter((row) => !row.isCategory).slice(0, MAX_DIAGNOSES)
     : []
   // El que encaja en la pieza primero (la endodoncia de molar en la 36), como en «Tratamiento».
-  const [service] = [...(servicesQuery.data?.data ?? [])]
-    .filter((row) => TOOTH_SCOPES.includes(row.scope ?? ""))
-    .sort(
-      (a, b) =>
-        anatomyFitRank(a.toothAnatomy ? toothAnatomyOf(a.toothAnatomy) : null, toothNumber) -
-        anatomyFitRank(b.toothAnatomy ? toothAnatomyOf(b.toothAnatomy) : null, toothNumber),
-    )
+  const services = offeredServices(
+    servicesQuery.data?.data ?? [],
+    toothNumber,
+    toothPulp(toothDiagnoses.data?.data ?? [], toothNumber),
+  )
+  const planned = (planQuery.data?.data ?? []).filter(
+    (item) => item.toothNumber === toothNumber && PLANNED_STATUSES.includes(item.status),
+  )
+  // Lo que ya está indicado en la pieza no se ofrece otra vez (H4): el mismo servicio o, si es una
+  // endodoncia, la otra variante (la pieza ya tiene su endodoncia).
+  const inPlan = (row: ServiceCatalogItem) =>
+    planned.find(
+      (item) =>
+        item.serviceId === row.id ||
+        (pulpVariant(row) !== null &&
+          (servicesQuery.data?.data ?? []).some(
+            (other) => other.id === item.serviceId && pulpVariant(other) !== null,
+          )),
+    ) ?? null
   const searching =
     query.trim() !== debounced || diagnosesQuery.isFetching || servicesQuery.isFetching
   const busy = disabled || saving !== null
@@ -152,7 +238,10 @@ export function FindingElsewhere({
       [...INDICATED_QUERY_KEYS, "encounter", "encounter-closing", "tooth-history"],
     )
 
-  const nothing = diagnoses.length === 0 && !service
+  // Con la endodoncia ya indicada, se dice una vez, sin ofrecer la otra variante.
+  const indicated = services.find((row) => inPlan(row))
+  const shown = indicated && services.length > 1 ? [indicated] : services
+  const nothing = diagnoses.length === 0 && shown.length === 0
   if (nothing && searching) {
     return withDiagnoses ? (
       <p role="status" className="text-sm text-muted-foreground">
@@ -206,25 +295,46 @@ export function FindingElsewhere({
           Para lo que ves en la pieza, busca por ejemplo «caries».
         </p>
       ) : null}
-      {service ? (
-        <div className={`flex flex-col gap-2 ${diagnoses.length > 0 ? "border-t pt-3" : ""}`}>
-          <p className="text-sm">
-            <span className="font-medium">{service.name}</span> es un tratamiento.
-          </p>
-          {done[`sv:${service.id}`] ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {done[`sv:${service.id}`]}
+      {shown.length > 0 ? (
+        <div className={`flex flex-col gap-3 ${diagnoses.length > 0 ? "border-t pt-3" : ""}`}>
+          {shown.length > 1 ? (
+            <p className="text-sm">
+              Son tratamientos. Elige según la pulpa de la {toothNumber}: la vital con pulpitis, la
+              no vital con necrosis.
             </p>
-          ) : (
-            <Button
-              type="button"
-              className="h-auto min-h-11 max-w-full self-start whitespace-normal text-left"
-              disabled={busy}
-              onClick={() => void plan(service)}
-            >
-              {saving === `sv:${service.id}` ? "Agregando…" : `Agregar ${service.name} al plan`}
-            </Button>
-          )}
+          ) : null}
+          {shown.map((service, index) => {
+            const key = `sv:${service.id}`
+            const already = inPlan(service)
+            return (
+              <div key={key} className="flex flex-col gap-2">
+                {shown.length === 1 ? (
+                  <p className="text-sm">
+                    <span className="font-medium">{service.name}</span> es un tratamiento.
+                  </p>
+                ) : null}
+                {done[key] ? (
+                  <p role="status" className="text-sm text-muted-foreground">
+                    {done[key]}
+                  </p>
+                ) : already ? (
+                  <p role="status" className="text-sm text-muted-foreground">
+                    {already.title} ya está en el plan de la {toothNumber}.
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    className="h-auto min-h-11 max-w-full self-start whitespace-normal text-left"
+                    variant={index === 0 ? "default" : "outline"}
+                    disabled={busy}
+                    onClick={() => void plan(service)}
+                  >
+                    {saving === key ? "Agregando…" : `Agregar ${service.name} al plan`}
+                  </Button>
+                )}
+              </div>
+            )
+          })}
         </div>
       ) : null}
       {error ? (
