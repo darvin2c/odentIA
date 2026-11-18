@@ -196,7 +196,7 @@ test("La app de la conversación: el anuncio se ata en Hoy, el botón de la web 
   )
   expect(
     (
-      await api(support.page, "POST", `/api/admin/chats/${silentChat?.id}/app`, {
+      await api(support.page, "POST", `/api/admin/chats/${silentChat?.id}/app`, undefined, {
         product: "optical",
       })
     ).status,
