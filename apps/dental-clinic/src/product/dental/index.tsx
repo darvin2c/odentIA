@@ -23,6 +23,7 @@ import {
   variantLabel,
 } from "@odentia/dental"
 import { FindingChoices, PlanSiteChoices } from "../../components/dental/dictation-finding-choices"
+import { treatmentSearchTerm } from "../../components/dental/finding-search"
 import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
 import {
   OdontogramLoading,
@@ -180,6 +181,8 @@ export const dentalUi: ProductUi = {
     },
     // La endodoncia anterior en la 46: se avisa y se ofrece la posterior (entrega 8 de la atención).
     // Al buscar en una pieza, primero lo que encaja (QA del 10 nov, B3); solo ordena.
+    // «sacar muela», «extracción»: la exodoncia, también en «Añadir un tratamiento al plan».
+    searchTerm: treatmentSearchTerm,
     toothFit: {
       Notice: (props) => <ToothFitNotice {...props} />,
       rank: (anatomy, place) => anatomyFitRank(anatomy ? toothAnatomyOf(anatomy) : null, place),

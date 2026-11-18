@@ -77,11 +77,13 @@ export function ServicePicker({
   // Las especialidades de la clínica: la misma lista que Configuración › Especialidades.
   const specialties = (useClinicSpecialties({ activeOnly: true, enabled: canRead && !disabled }).data?.data ?? [])
 
+  // «sacar muela» o «extracción» buscan la exodoncia donde el producto lo dice así.
+  const asked = productUi().services.searchTerm?.(query) ?? query.trim()
   const servicesQuery = useQuery({
-    queryKey: ["services", "picker", query.trim(), specialty],
+    queryKey: ["services", "picker", asked, specialty],
     queryFn: () =>
       fetchServices({
-        q: query.trim() || undefined,
+        q: asked || undefined,
         specialtyId: specialty === NO_SPECIALTY ? undefined : specialty,
         state: "active",
         limit: 30,

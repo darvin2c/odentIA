@@ -671,7 +671,8 @@ export function ToothDrawer({
     // El detalle depende del hallazgo: nada de otra definición sobrevive, ni sus errores.
     setFreehand(false)
     form.reset({ ...form.state.values, ...EMPTY_DETAILS, condition: value ?? "" }, { keepDefaultValues: true })
-    setChoosingFinding(false)
+    // «Quitar» la elegida por error: sigue eligiendo, sin hallazgo y sin «¿Salir sin guardar?».
+    setChoosingFinding(!value)
     setSavedMessage("")
   }
 

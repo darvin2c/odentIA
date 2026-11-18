@@ -410,6 +410,11 @@ export interface ProductServicesUi {
    * producto no tiene anatomía.
    */
   toothFit: ProductToothFitUi | null
+  /**
+   * Cómo se busca un servicio dicho de otro modo (odentIA: «sacar muela» o «extracción» es la
+   * exodoncia); sin él, lo escrito tal cual.
+   */
+  searchTerm?: (text: string) => string
 }
 
 export interface ProductToothFitUi {

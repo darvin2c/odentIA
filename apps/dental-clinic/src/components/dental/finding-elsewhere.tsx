@@ -9,7 +9,7 @@ import { Button } from "@odentia/ui"
 import { common, EmptyState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchX } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { treatmentSearchTerm } from "./finding-search"
 import { toothAnatomyOf } from "./tooth-fit-notice"
 
@@ -23,10 +23,15 @@ interface DiagnosisOption {
 
 /** Cuántos diagnósticos se ofrecen: el más probable primero, con su botón principal. */
 const MAX_DIAGNOSES = 3
+/** Cuántos tratamientos que encajan en la pieza se ofrecen, como los diagnósticos. */
+const MAX_SERVICES = 3
 /** Lo que se planifica desde la pieza es de la pieza o de sus caras. */
 const TOOTH_SCOPES: readonly string[] = ["tooth", "surfaces"]
 /** Lo indicado que sigue en el plan: lo hecho, cancelado o reemplazado ya no está por hacer. */
 const PLANNED_STATUSES: readonly string[] = ["pendiente", "programado", "en_curso", "suspendido"]
+
+/** `anatomyFitRank` de lo que no es para la pieza. */
+const NO_FIT = 100
 
 type Pulp = "vital" | "necrotic"
 /** La endodoncia vital o no vital, por su familia de la biblioteca o, sin ella, por su nombre. */
@@ -40,10 +45,11 @@ function pulpVariant(service: ServiceCatalogItem): Pulp | null {
 }
 
 /**
- * Los tratamientos que se ofrecen para la pieza (reglas clínicas del 18 nov, H5): el que mejor encaja
- * en ella, como en «Tratamiento». Si es una endodoncia, la que dice el diagnóstico de la pieza: con
- * pulpitis, la vital; con necrosis o lo que la presupone, la no vital (`pulpStateOfDiagnosis`). Si no
- * se sabe, las dos.
+ * Los tratamientos que se ofrecen para la pieza (reglas clínicas del 18 nov, H5): los que encajan en
+ * ella, el más específico primero, como en «Tratamiento», hasta tres (QA de diseño del 18 nov, H3:
+ * «sacar muela» en una 48 con raíz retenida ofrecía solo la exodoncia de impactada, no la simple). Si
+ * es una endodoncia, la que dice el diagnóstico de la pieza: con pulpitis, la vital; con necrosis o
+ * lo que la presupone, la no vital (`pulpStateOfDiagnosis`). Si no se sabe, las dos.
  */
 export function offeredServices(
   services: readonly ServiceCatalogItem[],
@@ -57,7 +63,10 @@ export function offeredServices(
     .sort((a, b) => rank(a) - rank(b))
   const [first] = fitting
   if (!first) return []
-  if (!pulpVariant(first)) return [first]
+  if (!pulpVariant(first)) {
+    const fit = fitting.filter((row) => !pulpVariant(row) && rank(row) < NO_FIT)
+    return fit.length > 0 ? fit.slice(0, MAX_SERVICES) : [first]
+  }
   const best = fitting.filter((row) => pulpVariant(row) && rank(row) === rank(first))
   const matching = pulp ? best.find((row) => pulpVariant(row) === pulp) : undefined
   if (matching) return [matching]
@@ -153,6 +162,14 @@ export function FindingElsewhere({
   const [saving, setSaving] = useState<string | null>(null)
   const [done, setDone] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  // El botón se reemplaza por lo que quedó: el foco va a esa frase, no al inicio de la página (H5).
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [focusKey, setFocusKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusKey) return
+    rootRef.current?.querySelector<HTMLElement>(`[data-done="${focusKey}"]`)?.focus()
+    setFocusKey(null)
+  }, [focusKey])
 
   const diagnoses = withDiagnoses
     ? (diagnosesQuery.data?.data ?? []).filter((row) => !row.isCategory).slice(0, MAX_DIAGNOSES)
@@ -199,6 +216,7 @@ export function FindingElsewhere({
       )
       await onChanged()
       setDone((before) => ({ ...before, [key]: said }))
+      setFocusKey(key)
     } catch (err) {
       setError(submitErrorMessage(err))
     } finally {
@@ -209,7 +227,7 @@ export function FindingElsewhere({
   const annotate = (row: DiagnosisOption) =>
     run(
       `dx:${row.code}`,
-      `${row.description} quedó en la ${toothNumber} como presuntivo: lo cambias en «Diagnósticos».`,
+      `${row.description} quedó en la ${toothNumber} como presuntivo: lo cambias en «Diagnóstico».`,
       () =>
         addDiagnosisApi(patientId, encounterId, {
           diagnosisCode: row.code,
@@ -260,7 +278,7 @@ export function FindingElsewhere({
     ) : null
   }
   return (
-    <div className="flex flex-col gap-3 rounded-lg border p-3" aria-live="polite">
+    <div ref={rootRef} className="flex flex-col gap-3 rounded-lg border p-3" aria-live="polite">
       {diagnoses.map((row, index) => {
         const key = `dx:${row.code}`
         return (
@@ -273,7 +291,12 @@ export function FindingElsewhere({
               </span>
             </p>
             {done[key] ? (
-              <p role="status" className="text-sm text-muted-foreground">
+              <p
+                role="status"
+                tabIndex={-1}
+                data-done={key}
+                className="text-sm text-muted-foreground outline-none"
+              >
                 {done[key]}
               </p>
             ) : (
@@ -299,8 +322,9 @@ export function FindingElsewhere({
         <div className={`flex flex-col gap-3 ${diagnoses.length > 0 ? "border-t pt-3" : ""}`}>
           {shown.length > 1 ? (
             <p className="text-sm">
-              Son tratamientos. Elige según la pulpa de la {toothNumber}: la vital con pulpitis, la
-              no vital con necrosis.
+              {shown.every((row) => pulpVariant(row))
+                ? `Son tratamientos. Elige según la pulpa de la ${toothNumber}: la vital con pulpitis, la no vital con necrosis.`
+                : `Son tratamientos que encajan en la ${toothNumber}. Elige el que harás.`}
             </p>
           ) : null}
           {shown.map((service, index) => {
@@ -314,7 +338,12 @@ export function FindingElsewhere({
                   </p>
                 ) : null}
                 {done[key] ? (
-                  <p role="status" className="text-sm text-muted-foreground">
+                  <p
+                    role="status"
+                    tabIndex={-1}
+                    data-done={key}
+                    className="text-sm text-muted-foreground outline-none"
+                  >
                     {done[key]}
                   </p>
                 ) : already ? (

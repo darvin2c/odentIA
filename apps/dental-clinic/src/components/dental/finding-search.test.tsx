@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { FindingElsewhere, offeredServices, toothPulp } from "./finding-elsewhere"
-import { FindingReasonNotice } from "./finding-picker"
+import { FindingReasonNotice, findingPickerBlocks } from "./finding-picker"
 import { searchFindings, treatmentSearchTerm } from "./finding-search"
 
 // Reglas clínicas del 18 nov: «¿Qué observas?» encuentra los hallazgos por cómo se dicen y, lo que
@@ -173,4 +173,50 @@ describe("los tratamientos que se ofrecen desde la pieza", () => {
     expect(html).toContain("Endodoncia posterior no vital ya está en el plan de la 36.")
     expect(html).not.toContain("Agregar")
   })
+})
+
+// QA de diseño del 18 nov (H3): «sacar muela» en una 48 con raíz retenida ofrecía solo la de impactada.
+describe("las exodoncias que encajan en la pieza", () => {
+  const exodoncia = (id: string, name: string, groups: string[] | null) =>
+    ({
+      id,
+      name,
+      scope: "tooth",
+      toothAnatomy: groups ? { groups, dentition: "permanent", family: null, siblings: [] } : null,
+    }) as unknown as Parameters<typeof offeredServices>[0][number]
+  const simple = exodoncia("s-1", "Exodoncia simple", null)
+  const surgical = exodoncia("s-2", "Exodoncia quirúrgica con colgajo", null)
+  const impacted = exodoncia("s-3", "Exodoncia de pieza impactada en hueso", ["molar"])
+  const anterior = exodoncia("s-4", "Exodoncia de diente anterior", ["anterior"])
+
+  it("ofrece hasta tres, la más específica primero, y no la que no es para la pieza", () => {
+    const names = offeredServices([simple, surgical, impacted, anterior], 48, null).map(
+      (row) => row.name,
+    )
+    expect(names).toEqual([
+      "Exodoncia de pieza impactada en hueso",
+      "Exodoncia simple",
+      "Exodoncia quirúrgica con colgajo",
+    ])
+  })
+})
+
+// QA de diseño del 18 nov (H4): lo primero era la tarjeta de un hallazgo ya hecho, y con «caries
+// dolorosa» el aviso del motivo iba antes que la caries.
+it("el orden de «¿Qué observas?»: primero lo que responde a lo escrito", () => {
+  // «endodoncia»: agregarla al plan y después la tarjeta del tratamiento de conducto hecho.
+  expect(findingPickerBlocks({ reason: false, cards: true, other: true })).toEqual([
+    "other",
+    "cards",
+  ])
+  // «caries dolorosa»: la caries y después el motivo.
+  expect(findingPickerBlocks({ reason: true, cards: true, other: false })).toEqual([
+    "cards",
+    "reason",
+  ])
+  // «dolor»: el motivo solo.
+  expect(findingPickerBlocks({ reason: true, cards: false, other: false })).toEqual(["reason"])
+  // «pulpitis»: el diagnóstico; sin nada, «Sin resultados».
+  expect(findingPickerBlocks({ reason: false, cards: false, other: true })).toEqual(["other"])
+  expect(findingPickerBlocks({ reason: false, cards: false, other: false })).toEqual(["empty"])
 })
