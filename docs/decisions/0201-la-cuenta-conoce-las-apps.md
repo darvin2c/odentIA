@@ -32,6 +32,7 @@ Una sola cuenta por persona sirve para la administración y para todas las apps 
 ## Consecuencias
 
 - gestorIA puede construir su entrada con la cuenta sin tocar las rutas de las clínicas: le falta la marca de sus correos (`shared/packages/mail`, cambio aparte) y configurar su dominio.
+  Actualización (18 nov): sus correos ya tienen su marca. Ahora la marca es obligatoria en cada app (`mailBrand`), así que la entrada se enciende con solo configurar `GESTORIA_DOMAIN`. Los avisos del trabajador (completa tu cuenta, crea tu clínica, términos nuevos) siguen siendo solo de las clínicas; las cuentas de gestorIA sin verificar se limpian a los 30 días como las demás.
 - Los avisos de la cuenta salen al cerrarla, bloquearla y reabrirla (migración `0147_la_cuenta_avisa_bloqueo_y_reapertura`). Un aviso que la app no recibe frena los siguientes de esa persona a esa app hasta que lo reciba. Altas y cambios de nombre o correo (la copia de la cuenta en cada app, decisión 11 del lienzo) y la revisión diaria quedan para cuando gestorIA tenga su copia.
 - Hasta el paso 7 la cuenta vive con las clínicas: si su servidor cae, nadie entra a ninguna app.
 - Revisar si una app nueva necesita enterarse de otros cambios de la cuenta o si el token debe durar distinto.

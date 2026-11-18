@@ -161,11 +161,14 @@ gestorIA es otro sistema que entra con la misma cuenta (ADR 0201). Todo lo suyo 
 mientras no se configure:
 
 - `GESTORIA_DOMAIN` (API): en ese dominio solo responde su entrada a la cuenta
-  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas. Mientras
-  sus correos no tengan su marca (cambio aparte en `shared/packages/mail`), ese dominio
-  responde 404 y la API lo dice en su registro al arrancar. Con la entrada encendida,
+  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas.
   `/api/auth/token` da a quien entró un JWT de 15 minutos firmado (EdDSA) y
-  `/api/auth/jwks` publica la llave para verificarlo.
+  `/api/auth/jwks` publica la llave para verificarlo. Los correos de esa entrada (verificar,
+  entrar sin contraseña, cambiar el correo o la contraseña) salen con la marca de gestorIA y,
+  en el pie, Términos, Privacidad y Ayuda de `https://<dominio>/terminos`, `/privacidad` y
+  `/contacto`: su web tiene que tenerlas.
+- `GESTORIA_SMTP_FROM` (API): el remitente de esos correos, cuando su dominio tenga SPF y
+  DKIM; vacío, el de `SMTP_FROM` con «gestorIA».
 - `GESTORIA_ACCOUNT_EVENTS_URL` y `GESTORIA_ACCOUNT_EVENTS_SECRET` (API y worker): adónde
   (https) y con qué secreto (`whsec_` y al menos 24 bytes en base64) se avisa a gestorIA que
   se cerró una cuenta, firmado con Standard Webhooks. La API lo manda al cerrar; si falla, el

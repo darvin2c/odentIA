@@ -24,6 +24,11 @@ const IMAGES = [
   { name: "vistiaLogotipoOscuro", file: "vistia-logotipo-oscuro.svg", height: 32 },
   { name: "vistiaIsotipoClaro", file: "vistia-isotipo-claro.svg", height: 32 },
   { name: "vistiaIsotipoOscuro", file: "vistia-isotipo-oscuro.svg", height: 32 },
+  // gestorIA: «gestor» en la tinta, «IA» y el [24] en su naranja. El [24] es el mismo
+  // naranja en claro y en oscuro (lienzo de su marca): un solo isotipo.
+  { name: "gestoriaLogotipoClaro", file: "gestoria-logotipo-claro.svg", height: 32 },
+  { name: "gestoriaLogotipoOscuro", file: "gestoria-logotipo-oscuro.svg", height: 32 },
+  { name: "gestoriaIsotipo", file: "gestoria-isotipo.svg", height: 32 },
 ]
 
 const entries = []

@@ -164,6 +164,8 @@ describe("términos", () => {
   it("el aviso de una versión nueva sale una vez y solo a quien aceptó una anterior", async () => {
     const before = randomUUID()
     const never = randomUUID()
+    const shop = randomUUID()
+    const latid = randomUUID()
     await ownerDb.insert(user).values([
       {
         id: before,
@@ -173,10 +175,28 @@ describe("términos", () => {
         termsVersion: "2026-10-17",
       },
       { id: never, name: "Pedro Salas", email: `${never}@legal.test`, emailVerified: true },
+      // De gestorIA y sin clínica: su aviso no saldría con su marca; lo manda gestorIA.
+      {
+        id: shop,
+        name: "Ana Tienda",
+        email: `${shop}@legal.test`,
+        emailVerified: true,
+        termsVersion: "2026-10-17",
+        signupApp: "gestoria",
+      },
+      {
+        id: latid,
+        name: "Luis Médico",
+        email: `${latid}@legal.test`,
+        emailVerified: true,
+        termsVersion: "2026-10-17",
+        signupApp: "latidia",
+      },
     ])
     const first = await claimLegalNotices(ownerDb, "2027-03-01", 1000)
-    expect(first.map((r) => r.userId)).toContain(before)
+    expect(first.map((r) => r.userId)).toEqual(expect.arrayContaining([before, latid]))
     expect(first.map((r) => r.userId)).not.toContain(never)
+    expect(first.map((r) => r.userId)).not.toContain(shop)
     const again = await claimLegalNotices(ownerDb, "2027-03-01", 1000)
     expect(again.map((r) => r.userId)).not.toContain(before)
   }, 60_000)

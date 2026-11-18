@@ -28,8 +28,8 @@ export interface LifecycleApp {
 export interface AccountLifecycleOptions {
   notify: AccountLifecycleMailer
   /**
-   * Cada app con sus avisos. La que no está aquí (gestorIA, mientras no tenga la marca de
-   * sus correos) no recibe ninguno de la cuenta; la limpieza a los 30 días sigue igual.
+   * Cada app con sus avisos. La que no está aquí (gestorIA, que los manda ella) no recibe
+   * ninguno de la cuenta; la limpieza a los 30 días sigue igual.
    */
   apps: Partial<Record<AccountApp, LifecycleApp>>
   /** Días que sirve ese enlace; el correo lo dice. */

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest"
 import {
   ACCOUNT_APP_INFO,
   ACCOUNT_APPS,
-  accountAppNotReady,
   appOfProduct,
   createAuth,
   EXTERNAL_ACCOUNT_APPS,
@@ -39,12 +38,11 @@ describe("las apps de la cuenta (ADR 0201)", () => {
     expect(isAccountApp("dental")).toBe(false)
   })
 
-  it("gestorIA es otro sistema: recibe los avisos y su entrada no se enciende sin la marca de sus correos", () => {
+  it("gestorIA es otro sistema: recibe los avisos y su entrada sale con la marca de sus correos", () => {
     expect(EXTERNAL_ACCOUNT_APPS).toEqual(["gestoria"])
-    expect(accountAppNotReady("gestoria")).toMatch(/gestorIA/)
-    expect(accountAppNotReady("latidia")).toBeNull()
     // Nunca una entrada que mande la verificación con la marca de otra app.
-    expect(() => createAuth({ ...options, app: "gestoria" })).toThrow(/gestorIA/)
+    expect(ACCOUNT_APP_INFO.gestoria.mailBrand).toBe("gestoria")
+    expect(() => createAuth({ ...options, app: "gestoria" })).not.toThrow()
   })
 
   it("sin token firmado, sus rutas no existen", async () => {
