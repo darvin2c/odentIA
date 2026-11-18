@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
+import { fetchTreatmentPlans } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { voidProcedureApi } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -36,6 +37,7 @@ import type { ServiceCatalogItem } from "../../lib/services"
 import { type PlaceWithParts, productUi } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
 import { DiagnosisSearch } from "./diagnosis-search"
+import { currentPlanIdsOf, liveProcedureItems, shownInEncounterPlan } from "./encounter-plan-panel"
 import { ServicePicker } from "./service-picker"
 
 const NO_PLAN = "__sin-plan__"
@@ -193,42 +195,24 @@ export function consentAhead(
 }
 
 /**
- * Qué trae puesto «Registrar lo de hoy» y en qué orden se ofrece lo del plan
- * (segundo repaso del 9 nov: arrancaba en el catálogo con la endodoncia recién
- * indicada). Primero lo que trajo esta atención (su cita, «Continuar hoy»),
- * después lo indicado hoy y después lo demás; lo que va después de otro
- * tratamiento de la misma pieza (`waitsFor`, la regla de «Qué sigue»: la
- * corona tras la endodoncia) va al final y nunca viene puesto. Viene puesto el
- * único de la primera tanda que tenga algo para hacer hoy: aceptado, o indicado
- * hoy (se acepta al hacerlo), y sin su sesión de hoy. Si hay dos, no se adivina.
+ * En qué orden se ofrece lo del plan al registrar (segundo repaso del 9 nov): primero lo que trajo
+ * esta atención (su cita, «Hacer hoy»), después lo indicado hoy y después lo demás; lo que va
+ * después de otro tratamiento de la misma pieza (`waitsFor`, la regla de «Qué sigue»: la corona
+ * tras la endodoncia) va al final. Nada viene puesto solo: lo del plan se registra desde su fila,
+ * que abre el registro con él («Registrar»), y «Registrar algo fuera del plan» abre en el
+ * catálogo (revisión del 17 nov).
  */
 export function sessionChoices(
   items: readonly PlanItem[],
-  context: {
-    encounterId: string
-    brought: ReadonlySet<string>
-    doneToday: ReadonlySet<string | null>
-  },
-): { ordered: PlanItem[]; preset: PlanItem | null } {
+  context: { encounterId: string; brought: ReadonlySet<string> },
+): PlanItem[] {
   const indicatedToday = (item: PlanItem) => item.sourceEncounterId === context.encounterId
   const tier = (item: PlanItem) =>
     item.waitsFor ? 3 : context.brought.has(item.id) ? 0 : indicatedToday(item) ? 1 : 2
-  const ordered = items
+  return items
     .map((item, index) => ({ item, index }))
     .sort((a, b) => tier(a.item) - tier(b.item) || a.index - b.index)
     .map(({ item }) => item)
-  const doable = ordered.filter(
-    (item) =>
-      !item.waitsFor &&
-      !context.doneToday.has(item.id) &&
-      (item.decision === "aceptado" || (item.decision === "pendiente" && indicatedToday(item))),
-  )
-  for (const level of [0, 1, 2]) {
-    const here = doable.filter((item) => tier(item) === level)
-    if (here.length > 1) return { ordered, preset: null }
-    if (here.length === 1) return { ordered, preset: here[0] ?? null }
-  }
-  return { ordered, preset: null }
 }
 
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
@@ -252,10 +236,10 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
 }
 
 /**
- * Procedimientos de la atención: resumen de lectura con los procedimientos
- * reales del detalle y los tratamientos vinculados al abrir (pendientes de
- * realizar), más registro en un FormDrawer hermano (tratamiento aceptado del
- * presupuesto o servicio directo del catálogo, con pieza y diagnóstico opcionales).
+ * Lo registrado en la atención que no está en una fila del Plan («Hecho hoy fuera del plan», con
+ * su «Anular…»), y el registro en un FormDrawer hermano (tratamiento del plan, servicio directo
+ * del catálogo o acto libre, con pieza y diagnóstico opcionales). Lo de un tratamiento del plan
+ * se ve y se anula en su fila (`EncounterPlanPanel`), con la misma anulación de aquí.
  * Toda escritura respeta el protocolo de barrera: avisa pending al padre,
  * espera `beforeWrite` (flush del borrador), escribe, espera `onChanged`
  * (refresh del encounter) y recién ahí libera y cierra.
@@ -271,15 +255,9 @@ export function EncounterProcedures({
   prefillPlanItemId = null,
   onPrefillUsed,
   onConsentFirst,
-  filled = false,
   voidRequestId = null,
   onVoidRequestUsed,
 }: {
-  /**
-   * El plan ya tiene algo a la vista: no se dice «Sin procedimientos registrados» debajo (QA del
-   * 16 nov, Q18; estándar E2).
-   */
-  filled?: boolean
   /**
    * «Anular…» desde la fila del plan (la atención agrupada, 17 nov): lo registrado de un
    * tratamiento se ve en su fila; su anulación es la misma de aquí, con su motivo.
@@ -300,7 +278,7 @@ export function EncounterProcedures({
   onPendingChange: (pending: boolean) => void
   /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
   autoOpen?: boolean
-  /** «Registrar la sesión» desde «Hecho hoy»: el formulario se abre con ese tratamiento puesto. */
+  /** «Registrar» desde la fila del plan: el formulario se abre con ese tratamiento puesto. */
   prefillPlanItemId?: string | null
   onPrefillUsed?: () => void
 }): React.JSX.Element {
@@ -310,7 +288,6 @@ export function EncounterProcedures({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(autoOpen && !disabled)
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
-  const unplanned = detail.procedures.filter((proc) => !proc.planItemId)
   /** Lo que vino puesto al abrir: el cajón lo dice mientras siga elegido. */
   const [presetId, setPresetId] = useState<string | null>(null)
   // «Otro servicio del catálogo» elegido a propósito: sin elegir nada, con varios tratamientos,
@@ -336,6 +313,22 @@ export function EncounterProcedures({
   const planById: Record<string, PlanItem> = Object.fromEntries(
     allItems.map((item) => [item.id, item]),
   )
+  // «Hecho hoy fuera del plan»: lo registrado sin tratamiento y lo de un tratamiento que el Plan de
+  // la atención no muestra (el servicio directo anulado queda cancelado). Lo demás está en su
+  // fila, con la misma regla (`shownInEncounterPlan`); sin el plan a la vista, solo lo suelto.
+  const plansQuery = useQuery({
+    queryKey: ["treatment-plans", patientId],
+    queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead && canWrite && !finalized,
+  })
+  const currentPlanIds = currentPlanIdsOf(plansQuery.data?.data ?? [])
+  const liveHere = liveProcedureItems(detail.procedures)
+  const unplanned = detail.procedures.filter((proc) => {
+    if (!proc.planItemId) return true
+    if (!planQuery.isSuccess || !plansQuery.isSuccess) return false
+    const item = planById[proc.planItemId]
+    return !item || !shownInEncounterPlan(item, currentPlanIds, liveHere)
+  })
 
   // Lo dice la pantalla (depende de la pieza elegida): el esquema lo consulta al enviar.
   const mustChoose = useRef(false)
@@ -452,20 +445,14 @@ export function EncounterProcedures({
   const tooth = values.site.toothNumber
   // Al elegir pieza solo caben sus ítems más los generales (sin pieza); el
   // servidor no exige coincidencia, así que los generales siempre aplican.
-  const doneToday = new Set(
-    detail.procedures
-      .filter((procedure) => !procedure.voidedAt)
-      .map((procedure) => procedure.planItemId),
-  )
-  const choices = sessionChoices(openItems, {
+  const ordered = sessionChoices(openItems, {
     encounterId: encounter.id,
     brought: new Set(detail.plannedItems.map((planned) => planned.id)),
-    doneToday,
   })
   const visiblePlans =
     tooth == null
-      ? choices.ordered
-      : choices.ordered.filter((item) => item.toothNumber == null || item.toothNumber === tooth)
+      ? ordered
+      : ordered.filter((item) => item.toothNumber == null || item.toothNumber === tooth)
   const selectedPlan = values.planItemId ? (planById[values.planItemId] ?? null) : null
   const options =
     selectedPlan && !visiblePlans.some((item) => item.id === selectedPlan.id)
@@ -527,7 +514,7 @@ export function EncounterProcedures({
     form.setFieldValue("site", { toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
 
-  // Lo que se eligió en «Hecho hoy», en cuanto se conoce el plan: una sola vez por pedido.
+  // Lo que se eligió en la fila del plan («Registrar»), en cuanto se conoce el plan: una sola vez por pedido.
   // biome-ignore lint/correctness/useExhaustiveDependencies: corre al pedirlo y al llegar el plan.
   useEffect(() => {
     if (!prefillPlanItemId || !canWrite || finalized || !planById[prefillPlanItemId]) return
@@ -577,18 +564,14 @@ export function EncounterProcedures({
       <div className="flex flex-col gap-3">
         <section aria-label="Hecho hoy fuera del plan">
           {/* Lo de un tratamiento del plan se ve en su fila del Plan (la atención agrupada, 17 nov):
-              aquí queda lo que se hizo sin tratamiento, con su «Anular…». */}
-          {unplanned.length === 0 ? (
-            filled ? null : (
-              <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
-            )
-          ) : (
+              aquí queda lo que se hizo sin tratamiento, con su «Anular…». Sin nada, el plan ya
+              dice lo de hoy: no se repite «Sin procedimientos» (estándar E2). */}
+          {unplanned.length === 0 ? null : (
             <ul className="flex flex-col gap-2">
               <li className="text-xs font-semibold text-muted-foreground">
                 Hecho hoy fuera del plan
               </li>
               {unplanned.map((proc) => {
-                const linked = proc.planItemId ? planById[proc.planItemId] : undefined
                 return (
                   <li
                     key={proc.id}
@@ -609,18 +592,9 @@ export function EncounterProcedures({
                         <span>{procedureSiteLabel(proc)}</span>
                         {(proc.quantity ?? 1) > 1 ? <span>× {proc.quantity}</span> : null}
                         {proc.diagnosisCode ? <Badge>{diagnosisCodeLabel(proc.diagnosisSystem, proc.diagnosisCode)}</Badge> : null}
-                        {proc.planItemId ? (
-                          linked ? (
-                            <span className="font-medium">Plan: {linked.title}</span>
-                          ) : (
-                            <span>Vinculado a un tratamiento del plan</span>
-                          )
-                        ) : null}
                         <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
-                        {/* Lo de un tratamiento del plan se cobra con su presupuesto (una vez, o por
-                            sesión): la fila no dice un precio que quizá ya se cobró en una sesión
-                            anterior (P10, C18). Lo que se cargará lo dicen el cierre y la caja. */}
-                        {proc.planItemId ? null : proc.priceCents != null && proc.currency ? (
+                        {/* Lo anulado ya dice que no genera cargo: no lleva precio. */}
+                        {proc.voidedAt ? null : proc.priceCents != null && proc.currency ? (
                           <span className="font-medium text-foreground">
                             {orgLocale ? formatMoney(proc.priceCents, proc.currency, orgLocale) : "…"}
                           </span>
@@ -657,14 +631,14 @@ export function EncounterProcedures({
               variant="outline"
               disabled={!canOpen}
               onClick={() => {
-                // Viene puesto lo que se hace hoy (`sessionChoices`): lo que trajo esta atención o lo
-                // indicado hoy, si es uno solo, nunca lo que va después de otro de la misma pieza. Lo
-                // elegido antes de ir a Evolución se conserva. El catálogo sigue a un toque.
-                const only = choices.preset
-                if (only && !values.planItemId && !values.service && !values.freeMode) {
-                  onPlanChange(only.id)
-                  setPresetId(only.id)
+                // «Fuera del plan» abre en el catálogo, sin ningún tratamiento del plan elegido: lo
+                // del plan se registra desde su fila (revisión del 17 nov). Lo de fuera del plan
+                // elegido antes de ir a Evolución se conserva.
+                if (values.planItemId) {
+                  form.reset()
+                  setPresetId(null)
                 }
+                setOtherPicked(true)
                 setOpen(true)
               }}
             >

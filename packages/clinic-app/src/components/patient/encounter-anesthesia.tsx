@@ -109,7 +109,7 @@ export function anesthesiaAnswered(input: {
 
 /**
  * La línea de anestesia (QA del 16 nov, E5b y E5c): aparece en cuanto algo de hoy usa anestesia
- * local («Hacerla hoy», «Continuar» o lo registrado hoy), antes de anestesiar, y se repite al
+ * local (lo marcado «Hoy» en el plan o lo registrado hoy), antes de anestesiar, y se repite al
  * firmar. Dice sus alergias, su medicación y lo que dijo; pide la ASA con un toque donde el
  * producto la pide; y con el anestésico elegido y el peso de los signos vitales, el máximo. Avisa
  * y no frena.

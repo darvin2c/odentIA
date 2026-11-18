@@ -18,6 +18,7 @@ import {
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { treatmentConsentStates } from "./consent-state.js"
+import { addEncounterProcedure } from "./encounters.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -171,4 +172,29 @@ it("con dos tratamientos que lo piden se elige cuál, y «fuera del plan» no se
   )
   expect(outside.planItemId).toBeNull()
   expect(await stateOf(f, first.id)).toBe("falta")
+})
+
+it("desde una atención que ya registró lo suyo, no se une solo a otro tratamiento del plan", async () => {
+  const f = await clinicalFixture()
+  const template = await endodonticsAsksConsent(f)
+  // El plan tiene lo de la 48 sin su consentimiento; hoy se hizo otra cosa, en la 38.
+  const other = await indicate(f, 48)
+  await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, {
+      description: "Exodoncia simple",
+      toothNumber: 38,
+    }),
+  )
+  const doc = await f.run((tx) =>
+    createConsentDocument(tx, "org_a", f.actor, {
+      templateId: template.id,
+      patientId: f.patient.id,
+      encounterId: f.encounter.id,
+      procedureRef: "Exodoncia simple · pieza 38",
+    }),
+  )
+  expect(doc.planItemId).toBeNull()
+  expect(doc.procedureRef).toBe("Exodoncia simple · pieza 38")
+  // Lo de la 48 lo sigue pidiendo: no se firmó para él.
+  expect(await stateOf(f, other.id)).toBe("falta")
 })

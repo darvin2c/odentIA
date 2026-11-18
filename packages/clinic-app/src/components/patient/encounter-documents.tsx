@@ -846,6 +846,7 @@ export function EncounterDocumentsBlock({
           patientId={patientId}
           encounterId={encounterId}
           defaultProcedureRef={procedureRef}
+          todayPlanItemIds={activeProcedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : []))}
           defaultDiagnosisCode={firstDiagnosis}
           defaultDiagnosisSystem={firstDiagnosisSystem}
           onClose={() => setCreating(null)}

@@ -638,7 +638,7 @@ export function registrationLabel(
     : null
 }
 
-/** «Hacerla hoy»: trae a la atención un tratamiento aceptado por hacer (motivo y diagnóstico si faltan). */
+/** «Hacer hoy»: trae a la atención un tratamiento aceptado por hacer (motivo y diagnóstico si faltan). */
 export function bringTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
   return apiFetch<{ data: { reasonSet: boolean; diagnosisAdded: boolean } }>(
     `${base(patientId)}/encounters/${encounterId}/visit/treatments`,
@@ -646,7 +646,7 @@ export function bringTreatmentApi(patientId: string, encounterId: string, planIt
   )
 }
 
-/** Deshace «Hacerla hoy» mientras no tenga su sesión registrada. */
+/** «Hoy no»: deshace «Hacer hoy» mientras no tenga su sesión registrada. */
 export function leaveTreatmentApi(patientId: string, encounterId: string, planItemId: string) {
   return apiFetch(`${base(patientId)}/encounters/${encounterId}/visit/treatments/${planItemId}`, {
     method: "DELETE",

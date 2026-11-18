@@ -4,6 +4,7 @@ import { setOrgLocale } from "../../lib/locale"
 import {
   type ClosingValues,
   closingControlsBody,
+  closingDraftKeyOf,
   continuingAfterSign,
   controlBesideAccepted,
   finishingAtSign,
@@ -163,5 +164,15 @@ describe("«¿Terminaste?» también en lo que aún no llega a sus previstas (me
     }
     expect(resolvingOnSign([pulpitis], sessions, {})).toEqual([])
     expect(resolvingOnSign([pulpitis], sessions, { endo: "terminar" })).toEqual([pulpitis])
+  })
+})
+
+// Revisión del 17 nov: en la PC compartida, la colegiatura que la Dra. A escribió y no firmó
+// aparecía en el cierre del Dr. B y quedaba en su perfil al firmar.
+describe("lo escrito en el cierre se guarda por persona", () => {
+  it("la misma atención, con otra persona, no lee lo de la primera", () => {
+    expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-1", "dr-b"))
+    expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-2", "dra-a"))
+    expect(closingDraftKeyOf("enc-1", "dra-a")).toBe(closingDraftKeyOf("enc-1", "dra-a"))
   })
 })

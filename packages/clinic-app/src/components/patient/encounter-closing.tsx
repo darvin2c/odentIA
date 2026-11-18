@@ -845,6 +845,15 @@ export function ClosingSignatureHint({
 }
 
 /**
+ * Dónde guarda este navegador lo escrito en el cierre hasta firmar: por atención y por quien lo
+ * escribe. En una computadora compartida, lo de otra persona (su colegiatura) no se abre en el
+ * cierre de quien entra después ni llega a su perfil al firmar (revisión del 17 nov).
+ */
+export function closingDraftKeyOf(encounterId: string, userId: string): string {
+  return `odentia:cierre:${userId}:${encounterId}`
+}
+
+/**
  * Lo que se respondió a «¿Terminaste?» de cada tratamiento. En lo que llega a sus
  * sesiones previstas, sin respuesta vale «Sí, terminar»: es lo que viene elegido y lo
  * que hace el servidor (ADR 0161). En lo que aún no llega, sin respuesta sigue en curso

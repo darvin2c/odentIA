@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { appointment } from "@odentia/db/schema/agenda"
-import { appointmentPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { appointmentPlanItem, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -167,4 +167,53 @@ it("anular la única sesión lo devuelve a por empezar; con una cita por venir q
     }),
   )
   expect((await itemOf(item.id)).status).toBe("programado")
+})
+
+it("anular la única sesión, atendida antes de la hora de su cita, no deja «programado» por esa misma cita", async () => {
+  const { f, item } = await acceptedBySession(2)
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({
+      organizationId: "org_a",
+      name: `Sede ${randomUUID().slice(0, 6)}`,
+      timezone: "America/Lima",
+    })
+    .returning()
+  const room = await f.run((tx) =>
+    createRoom(tx, "org_a", { branchId: site!.id, name: "Unidad dental" }),
+  )
+  // Su cita es a las 15:00 y llegó temprano: se atiende a las 14:40 y la cita sigue confirmada.
+  const startsAt = new Date(Date.now() + 20 * 60_000)
+  const [visit] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+    })
+    .returning({ id: appointment.id })
+  await ownerDb.insert(appointmentPlanItem).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    appointmentId: visit!.id,
+    planItemId: item.id,
+  })
+  await ownerDb
+    .update(encounter)
+    .set({ appointmentId: visit!.id })
+    .where(eq(encounter.id, f.encounter.id))
+  const session = await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }),
+  )
+  await f.run((tx) =>
+    voidEncounterProcedure(tx, ...f.args, f.encounter.id, session.id, { reason: "Era otra pieza" }),
+  )
+  // La cita que se está atendiendo no está por venir: vuelve a por empezar.
+  expect((await itemOf(item.id)).status).toBe("pendiente")
 })

@@ -80,12 +80,26 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function open() {
+function open(
+  fromEncounter?: { procedureRef: string; todayPlanItemIds: string[] },
+) {
   const onCreated = vi.fn(async () => {})
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={client}>
-      <NewConsentDrawer open patientId="p-1" onClose={() => {}} onCreated={onCreated} />
+      <NewConsentDrawer
+        open
+        patientId="p-1"
+        {...(fromEncounter
+          ? {
+              encounterId: "enc-1",
+              defaultProcedureRef: fromEncounter.procedureRef,
+              todayPlanItemIds: fromEncounter.todayPlanItemIds,
+            }
+          : {})}
+        onClose={() => {}}
+        onCreated={onCreated}
+      />
     </QueryClientProvider>,
   )
   return onCreated
@@ -164,5 +178,42 @@ describe("el consentimiento nuevo y el tratamiento del plan que lo pide", () => 
       outsidePlan: true,
       procedureRef: "Endodoncia de la 11",
     })
+  })
+
+  // Revisión del 17 nov: hoy se extrajo la 38 (tratamiento directo, ya realizado) y el plan tiene
+  // otra exodoncia sin consentimiento. Venía unido a esa y borraba «Exodoncia simple · pieza 38».
+  it("desde la atención, lo registrado hoy no se une solo a otro tratamiento ni se borra", async () => {
+    treatments = [endodoncia46]
+    const onCreated = open({ procedureRef: "Exodoncia simple · pieza 38", todayPlanItemIds: ["item-38"] })
+    await pick(
+      await screen.findByRole("combobox", { name: /^Plantilla/ }),
+      "Tratamiento de conductos (endodoncia)",
+    )
+    const treatment = await screen.findByRole("combobox", { name: /^Tratamiento del plan/ })
+    await waitFor(() =>
+      expect(treatment.textContent).toContain("Otro procedimiento, fuera del plan"),
+    )
+    expect(procedure().value).toBe("Exodoncia simple · pieza 38")
+    fireEvent.click(screen.getByRole("button", { name: "Generar consentimiento" }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(created).toMatchObject({
+      encounterId: "enc-1",
+      planItemId: null,
+      outsidePlan: true,
+      procedureRef: "Exodoncia simple · pieza 38",
+    })
+  })
+
+  it("desde la atención, si lo de hoy es uno de los que la piden, viene puesto ese", async () => {
+    treatments = [endodoncia46, endodoncia36]
+    open({ procedureRef: "Endodoncia posterior vital · pieza 36", todayPlanItemIds: ["item-36"] })
+    await pick(
+      await screen.findByRole("combobox", { name: /^Plantilla/ }),
+      "Tratamiento de conductos (endodoncia)",
+    )
+    const treatment = await screen.findByRole("combobox", { name: /^Tratamiento del plan/ })
+    await waitFor(() =>
+      expect(treatment.textContent).toContain("Endodoncia posterior vital · pieza 36"),
+    )
   })
 })

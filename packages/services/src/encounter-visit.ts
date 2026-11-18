@@ -1,10 +1,11 @@
 /**
- * «Hoy viene a…» (QA de la atención del 8 nov, propuesta 4.1): a qué viene la
- * persona, con o sin cita, calculado aquí y no en la pantalla. Lo que trae su
- * cita de hoy, los tratamientos aceptados que tiene por hacer (con la sesión
- * que le toca hoy) y los controles por cumplir.
+ * Lo que se puede hacer hoy (QA de la atención del 8 nov, propuesta 4.1; la atención agrupada,
+ * 17 nov): a qué viene la persona, con o sin cita, calculado aquí y no en la pantalla. Lo que trae
+ * su cita, la cita misma (su hora y su profesional), los tratamientos aceptados que tiene por
+ * hacer (con la sesión que le toca hoy) y los controles por cumplir. La atención lo dice en la
+ * fila de cada tratamiento del Plan.
  *
- * Elegir es preparar, no hacer: «Hacerla hoy» une el tratamiento a la atención
+ * Elegir es preparar, no hacer: «Hacer hoy» une el tratamiento a la atención
  * (como la cita que lo trae) y propone el motivo y el diagnóstico que sigue; la
  * sesión cuenta recién al registrar su procedimiento. «Viene a su control»
  * deja anotado cuál es: el cierre lo trae marcado y se cumple al firmar.
@@ -54,7 +55,7 @@ export interface VisitTreatment {
   m: number
   /** Ya empezó (alguna sesión hecha en otra atención, o en curso). */
   started: boolean
-  /** Unido a esta atención (por su cita o por «Hacerla hoy»). */
+  /** Unido a esta atención (por su cita o por «Hacer hoy»). */
   linked: boolean
   /** Ya tiene un procedimiento vigente en esta atención: la sesión de hoy está registrada. */
   registered: boolean
@@ -110,9 +111,14 @@ export interface EncounterVisit {
    * viene a hacer sin saberlo (QA del 9 nov). Nula con cita o sin ninguna por venir.
    */
   booked: { startsAt: Date; serviceName: string | null } | null
+  /**
+   * La cita de esta atención: su hora y con quién. «Su cita» la dice al ofrecer su motivo, porque
+   * puede ser la de otra profesional (la sesión 2 adelantada en la agenda de la Dra. Vela).
+   */
+  appointment: { startsAt: Date; professionalName: string | null } | null
 }
 
-/** Lo que se le ofrece «Hacerla hoy»: aceptado y por hacer, y donde hace falta, con su presupuesto aceptado. */
+/** Lo que se le ofrece «Hacer hoy»: aceptado y por hacer, y donde hace falta, con su presupuesto aceptado. */
 function linkableSql(orgId: string, patientId: string, budgetRequired: boolean) {
   return sql`i.organization_id = ${orgId} and i.patient_id = ${patientId}
     and i.decision_status = 'aceptado' and i.status in (${sql.join(
@@ -144,7 +150,7 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 }
 
-/** «Hoy viene a…» de un borrador. Una atención firmada o anulada no lo tiene. */
+/** Lo que se puede hacer hoy en un borrador. Una atención firmada o anulada no lo tiene. */
 export async function encounterVisitOf(
   tx: Db,
   orgId: string,
@@ -280,6 +286,12 @@ export async function encounterVisitOf(
       )
     : new Map<string, string>()
   const now = Date.now()
+  const [mine] = row.appointmentId
+    ? await tx.execute<{ startsAt: Date; professionalName: string | null }>(sql`
+      select a.starts_at as "startsAt", u.name as "professionalName" from appointment a
+      left join "user" u on u.id = a.professional_user_id
+      where a.organization_id = ${orgId} and a.id = ${row.appointmentId} limit 1`)
+    : []
   const [next] = row.appointmentId
     ? []
     : await tx.execute<{ startsAt: Date; serviceName: string | null }>(sql`
@@ -289,6 +301,9 @@ export async function encounterVisitOf(
       order by starts_at limit 1`)
   return {
     booked: next ? { startsAt: new Date(next.startsAt), serviceName: next.serviceName } : null,
+    appointment: mine
+      ? { startsAt: new Date(mine.startsAt), professionalName: mine.professionalName }
+      : null,
     treatments,
     controls: [
       ...booked.map((control) => ({
@@ -496,7 +511,7 @@ async function continuingDiagnosis(
 }
 
 /**
- * «Hacerla hoy» / «Continuar hoy»: el tratamiento aceptado pasa a esta atención,
+ * «Hacer hoy»: el tratamiento aceptado pasa a esta atención,
  * como si lo trajera su cita. Si el motivo está vacío, queda «Continúa: …»; el
  * diagnóstico que sigue se registra con su tipo (nunca lo sube a definitivo) y
  * lo ya escrito no se toca. No cuenta la sesión ni cambia el tratamiento: eso
@@ -571,7 +586,7 @@ export async function bringTreatmentToEncounter(
 }
 
 /**
- * Deshace «Hacerla hoy» mientras no tenga su sesión registrada aquí: el
+ * «Hoy no»: deshace «Hacer hoy» mientras no tenga su sesión registrada aquí: el
  * tratamiento deja de estar en esta atención. Lo escrito (motivo, diagnóstico)
  * queda como está: se corrige donde se ve.
  */

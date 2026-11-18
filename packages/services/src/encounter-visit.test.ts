@@ -8,6 +8,7 @@
 
 import { randomUUID } from "node:crypto"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { user } from "@odentia/db/schema/auth"
 import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
@@ -499,5 +500,62 @@ it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cu�
   )
   expect(closing.controls.byAppointment).toEqual([
     expect.objectContaining({ id: control!.id, title: "Limpieza y control" }),
+  ])
+})
+
+it("la cita de esta atención llega con su hora y su profesional, para ofrecer su motivo (B6)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
+  // La sesión 2 se adelantó en la agenda de otra doctora.
+  const colleague = randomUUID()
+  await ownerDb
+    .insert(user)
+    .values({ id: colleague, name: "Dra. Vela", email: `${colleague}@example.test` })
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: colleague,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Endodoncia, sesión 2",
+    })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ appointmentId: visitAt!.id })
+    .where(eq(encounter.id, f.encounter.id))
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))
+  expect(detail.bookedReason).toBe("Endodoncia, sesión 2")
+  expect(detail.visit?.appointment).toEqual({ startsAt, professionalName: "Dra. Vela" })
+  expect(detail.visit?.booked).toBeNull()
+})
+
+it("la sesión lleva el día de la atención, no el de la firma (atendida el lunes, firmada el jueves)", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f, 2)
+  const monday = new Date(Date.now() - 3 * 86_400_000)
+  await ownerDb.update(encounter).set({ startedAt: monday }).where(eq(encounter.id, f.encounter.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const listed = await f.run((tx) =>
+    listPlanItems(tx, "org_a", f.patient.id, undefined, { sessions: true }),
+  )
+  expect(listed.find((row) => row.id === item.id)?.sessions).toEqual([
+    expect.objectContaining({ encounterId: f.encounter.id, at: monday, signed: true }),
   ])
 })

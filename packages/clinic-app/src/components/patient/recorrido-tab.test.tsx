@@ -219,6 +219,32 @@ it("al lado de la atención, «Registrar» y el odontograma se quedan en ella, y
   open.mockRestore()
 })
 
+// Revisión del 17 nov: el motivo escrito y aún sin guardar chocaba con el «Continúa: …» del servidor.
+it("al lado de la atención, «Hacer hoy» guarda antes el borrador, avisa que escribe y no navega", async () => {
+  const beforeWrite = vi.fn(async () => {
+    calls.push("guardar el borrador")
+  })
+  const onPendingChange = vi.fn()
+  const onChanged = vi.fn(async () => {})
+  show({
+    encounterId: "enc-1",
+    onRegister: vi.fn(),
+    onOdontogram: vi.fn(),
+    beforeWrite,
+    onPendingChange,
+    onChanged,
+  })
+  fireEvent.click(await screen.findByRole("button", { name: "Hacer hoy" }))
+  const bring = "POST /api/patients/p-1/encounters/enc-1/visit/treatments"
+  await waitFor(() => expect(calls).toContain(bring))
+  expect(calls.indexOf("guardar el borrador")).toBeGreaterThan(-1)
+  expect(calls.indexOf("guardar el borrador")).toBeLessThan(calls.indexOf(bring))
+  await waitFor(() => expect(onPendingChange).toHaveBeenLastCalledWith(false))
+  expect(onPendingChange).toHaveBeenCalledWith(true)
+  expect(onChanged).toHaveBeenCalled()
+  expect(navigate).not.toHaveBeenCalled()
+})
+
 it("«4. Sesiones»: la firmada con ✓, el día, quién y su nota; la de un borrador, «en curso hoy», sin nota", async () => {
   state.sessions = [
     {

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "../../lib/locale"
 import { visitToldHeading } from "../../lib/visit-answer-words"
-import { visitBookedWords, visitWaitWords } from "./encounter-visit"
+import { visitAppointmentWords, visitBookedWords, visitWaitWords } from "./encounter-visit"
 
 describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", () => {
   it("la sesión 1 de hoy avisa con los días que pide su servicio, sin trabar", () => {
@@ -65,5 +65,26 @@ describe("lo que contó para otra cita", () => {
   it("lo de la cita de hoy se dice como siempre", () => {
     expect(visitToldHeading(told, "Rosa")).toBe("Lo que contó Rosa antes de venir (14 nov, desde su enlace)")
     expect(visitToldHeading({ ...told, otherAppointment: false }, null)).toBe("Lo que contó antes de venir (14 nov, desde su enlace)")
+  })
+})
+
+// Acta, criterio 3 y B6: la sesión 2 adelantada en la cita de otra doctora decía solo su motivo.
+describe("«Su cita» con su hora y su profesional", () => {
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const at = "2026-11-14T15:30:00.000Z"
+
+  it("dice la hora y con quién", () => {
+    expect(
+      plain(visitAppointmentWords({ startsAt: at, professionalName: "Dra. Vela" }, "es-PE", "America/Lima")),
+    ).toBe("10:30 a. m. · Dra. Vela")
+  })
+
+  it("de otro día, también el día; sin profesional, solo la hora", () => {
+    expect(
+      plain(visitAppointmentWords({ startsAt: at, professionalName: "Dra. Vela" }, "es-PE", "America/Lima", true)),
+    ).toBe("sáb 14 nov, 10:30 a. m. · Dra. Vela")
+    expect(plain(visitAppointmentWords({ startsAt: at, professionalName: null }, "es-PE", "America/Lima"))).toBe(
+      "10:30 a. m.",
+    )
   })
 })

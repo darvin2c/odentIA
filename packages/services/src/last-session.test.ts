@@ -116,3 +116,27 @@ it("quien ya no está en la clínica no se propone, y una sede cerrada tampoco",
     .where(eq(encounter.id, f.encounter.id))
   expect((await f.run((tx) => lastSessionOf(tx, "org_a", [item.id]))).has(item.id)).toBe(false)
 })
+
+it("si quien hizo la última sesión ya no está, no se propone a quien hizo una anterior", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f)
+  // La sesión 1 la hizo quien sigue en la clínica, y se firmó.
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  // La sesión 2, otra atención, la hizo una colega que ya salió de la clínica.
+  const [second] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor })
+    .returning({ id: encounter.id })
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second!.id, { planItemId: item.id }))
+  const colleague = randomUUID()
+  await ownerDb
+    .insert(user)
+    .values({ id: colleague, name: "Dra. Paz", email: `${colleague}@example.test` })
+  await ownerDb
+    .update(encounter)
+    .set({ professionalUserId: colleague })
+    .where(eq(encounter.id, second!.id))
+  expect((await f.run((tx) => lastSessionOf(tx, "org_a", [item.id]))).has(item.id)).toBe(false)
+})

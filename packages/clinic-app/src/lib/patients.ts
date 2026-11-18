@@ -810,7 +810,7 @@ export interface EncounterDetail {
   forms?: FormRecord[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
-  /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
+  /** Lo que se puede hacer hoy en el borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
   visit?: EncounterVisit | null
   /**
    * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8): solo de
@@ -853,7 +853,7 @@ export interface VisitTreatment {
   n: number
   m: number
   started: boolean
-  /** Ya está en esta atención (lo trajo su cita o «Hacerla hoy»). */
+  /** Ya está en esta atención (lo trajo su cita o «Hacer hoy»). */
   linked: boolean
   /** Su sesión de hoy ya está registrada. */
   registered: boolean
@@ -887,6 +887,8 @@ export interface EncounterVisit {
   controls: VisitControl[]
   /** Sin cita hoy: su próxima cita ya reservada. */
   booked?: { startsAt: string; serviceName: string | null } | null
+  /** La cita de esta atención: su hora y con quién (puede ser la de otra profesional). */
+  appointment?: { startsAt: string; professionalName: string | null } | null
 }
 
 export type TimelineType =

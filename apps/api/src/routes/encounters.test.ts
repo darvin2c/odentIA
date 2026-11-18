@@ -492,8 +492,12 @@ it("encounters: un tratamiento indicado con la pieza por definir la pide al hace
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Pieza Por Definir")
   const ctx = await setupPlan(app, patientId)
-  // Indicar no es hacer: la corona entra al plan aunque aún no se diga la pieza.
-  const item = await addPlanItem(app, patientId, ctx, { serviceId: "c1111111-1111-4111-8111-111111111111" })
+  // Indicar no es hacer: la corona entra al plan aunque aún no se diga la pieza. En dos sesiones:
+  // la siguiente, en otra atención, conserva la pieza.
+  const item = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    plannedSessions: 2,
+  })
   expect(item.toothNumber).toBeNull()
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
   await deliverBudget(app, patientId, budgetId)
@@ -510,6 +514,26 @@ it("encounters: un tratamiento indicado con la pieza por definir la pide al hace
   expect(plan.data.find((row) => row.id === item.id)?.toothNumber).toBe(26)
   // En la misma atención no se registra otra vez (mesa del 17 nov): se anula antes lo de hoy.
   expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(409)
+
+  // Ya definida, la sesión siguiente, en otra atención, conserva la pieza.
+  await prepareClosing(app, patientId, ctx.encounterId)
+  const signed = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(signed.status).toBe(200)
+  const next = await postEncounter(app, patientId, { reason: "Sesión 2" })
+  expect(next.status).toBe(201)
+  const nextId = ((await next.json()) as { data: { id: string } }).data.id
+  const nextPost = (body: Record<string, unknown>) =>
+    app.request(`/patients/${patientId}/encounters/${nextId}/procedures`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  const moved = await nextPost({ planItemId: item.id, toothNumber: 27 })
+  expect(moved.status).toBe(400)
+  expect(((await moved.json()) as ErrorBody).error.message).toContain("conserva")
+  expect((await nextPost({ planItemId: item.id, toothNumber: 26 })).status).toBe(201)
 })
 
 it("encounters: las sesiones mantienen en curso hasta completar explícitamente", async () => {

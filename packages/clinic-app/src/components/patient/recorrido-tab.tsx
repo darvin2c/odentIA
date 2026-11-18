@@ -90,6 +90,16 @@ export interface RecorridoInAttention {
   onOdontogram: (tooth?: number) => void
   /** «Registrar»: registra la sesión de ese tratamiento en esta atención. */
   onRegister: (itemId: string) => void
+  /**
+   * Antes de escribir en la atención («Hacer hoy»), guarda lo escrito en el borrador, como la fila
+   * del plan: si no, el servidor pondría «Continúa: …» sobre un motivo aún sin guardar y el
+   * autoguardado chocaría con ese cambio (revisión del 17 nov).
+   */
+  beforeWrite?: () => Promise<void>
+  /** Escribe en la atención: firmar espera a que termine. */
+  onPendingChange?: (pending: boolean) => void
+  /** Ya escrito: la atención vuelve a leer su detalle (el motivo y el diagnóstico que puso). */
+  onChanged?: () => Promise<void>
 }
 
 function decisionBadge(status: string): "default" | "secondary" | "success" | "destructive" {
@@ -128,7 +138,8 @@ export function RecorridoClinicoTab({
   /** `false`: solo el recorrido del tratamiento (la lista por fases ya está en el Plan). */
   showPhases?: boolean
   onChangeItem: (itemId: string) => void
-  onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
+  /** Ir a otra pestaña de la ficha. Al lado de la atención no se usa: lo demás se abre aparte. */
+  onTabChange?: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
   /** Abierto al lado de la atención: nada navega fuera de ella. Sin él, como en la ficha. */
   inAttention?: RecorridoInAttention
 }): React.JSX.Element {
@@ -160,7 +171,7 @@ export function RecorridoClinicoTab({
    */
   const goTo = (tab: RecorridoTarget, target?: RecorridoNavigation) => {
     if (!inAttention) {
-      onTabChange(tab, target)
+      onTabChange?.(tab, target)
       return
     }
     if (tab === "odontograma") {
@@ -378,13 +389,17 @@ export function RecorridoClinicoTab({
     }
     if (todayStep !== "hacer") return
     setStartingSession(true)
+    inAttention?.onPendingChange?.(true)
     try {
       if (todayEncounterId) {
-        // Con la atención abierta, se marca en ella: no se abre otra (el servidor la rechaza).
+        // Con la atención abierta, se marca en ella: no se abre otra (el servidor la rechaza). Al
+        // lado de ella, primero se guarda lo escrito en el borrador.
+        await inAttention?.beforeWrite?.()
         await bringTreatmentApi(patientId, todayEncounterId, item.id)
         invalidate()
         for (const key of ["encounter", "encounter-visit", "encounter-closing", "consent-needs"])
           void queryClient.invalidateQueries({ queryKey: [key, patientId] })
+        await inAttention?.onChanged?.()
         if (!inAttention) goToEncounter(todayEncounterId)
         return
       }
@@ -405,6 +420,7 @@ export function RecorridoClinicoTab({
       setError(submitErrorMessage(mutationError))
     } finally {
       setStartingSession(false)
+      inAttention?.onPendingChange?.(false)
     }
   }
 

@@ -2993,10 +2993,28 @@ export async function createConsentDocument(
   }
   // Desde Documentos, sin tratamiento: el de un tratamiento del plan que lo pide va con él, como
   // con «Preparar», para que el Plan, la sesión siguiente y el cierre lo cuenten (QA del 17 nov).
-  // Si lo piden varios, se elige: no se adivina.
+  // Si lo piden varios, se elige: no se adivina. Desde una atención que ya registró lo suyo, se une
+  // por sí solo únicamente a lo que se hizo en ella: la exodoncia de la 48 del plan no se lleva el
+  // consentimiento de la 38 que se extrajo hoy (revisión del 17 nov).
   let planReference: string | null = null
   if (!planItemId && !input.outsidePlan) {
-    const choices = await treatmentChoicesFor(tx, orgId, input.patientId, template.key)
+    const all = await treatmentChoicesFor(tx, orgId, input.patientId, template.key)
+    const doneHere = encounterId
+      ? await tx
+          .selectDistinct({ planItemId: encounterProcedure.planItemId })
+          .from(encounterProcedure)
+          .where(
+            and(
+              eq(encounterProcedure.organizationId, orgId),
+              eq(encounterProcedure.encounterId, encounterId),
+              isNull(encounterProcedure.voidedAt),
+            ),
+          )
+      : []
+    const choices =
+      doneHere.length > 0
+        ? all.filter((choice) => doneHere.some((row) => row.planItemId === choice.planItemId))
+        : all
     if (choices.length > 1) throw invalidField("planItemId", "Elige el tratamiento al que aplica")
     const only = choices[0]
     if (only) {

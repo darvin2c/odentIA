@@ -229,7 +229,6 @@ async function computePreview(
     planItems: planChoices,
     notices,
   }
-  return { target, findings: findingChoices, diagnoses: diagnosisChoices, planItems: planChoices, notices }
 }
 
 /** La vista previa: qué cae con lo que se anula, sin efectos. Solo quien lleva la atención. */

@@ -1,13 +1,12 @@
 /**
- * «Plan y controles» dentro de la atención (tablero 3, ADR 0034): un solo
- * bloque en lugar de «Plan de tratamiento», «Tratamientos de esta atención» y
- * «Controles». De arriba abajo: el plan en corto con lo indicado hoy marcado e
- * «Indicar un tratamiento», «Hecho hoy» con «Completar», «Próximo control» con
- * «Reservar» y, si hay un presupuesto por enviar y la persona sigue en el
- * unidad dental, «Enviar presupuesto».
+ * El Plan de la atención (la atención agrupada, 17 nov): el único lugar de cada tratamiento. De
+ * arriba abajo, por fases como la ficha: cada fila con su estado, lo de hoy en ella («Hoy», su
+ * sesión, «Registrar», lo registrado con «Anular…», la espera y el consentimiento) y sus sesiones
+ * anteriores; los caminos de una pieza en su recuadro; los controles que puede cumplir esta
+ * visita; la línea del presupuesto; «Añadir un tratamiento al plan» y «Próximo control».
  *
- * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
- * persona, que se crea solo con la primera indicación.
+ * Añadir no ejecuta ni cobra, y no se elige plan: va al plan abierto de la persona, que se crea
+ * solo con la primera indicación.
  */
 import { budgetAnswerLine, budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
 import {
@@ -110,6 +109,35 @@ const QUADRANT_LABELS: Record<string, string> = {
 /** Lo cerrado ya no es «lo que sigue» en el plan en corto. */
 const CLOSED = new Set(["realizado", "cancelado", "reemplazado"])
 
+/**
+ * Lo que el Plan de la atención muestra: lo abierto de los planes vigentes, sin lo que la persona
+ * dejó fuera, y lo registrado en esta atención aunque ya quedó realizado (el servicio de una
+ * sesión, lo aceptado al hacerlo, «Completar»): ahí se ve y se anula (revisión del 17 nov). Lo
+ * demás que se registró hoy va en «Hecho hoy fuera del plan» (`EncounterProcedures`).
+ */
+export function shownInEncounterPlan(
+  item: Pick<PlanItem, "id" | "planId" | "status" | "decisionStatus">,
+  currentPlanIds: ReadonlySet<string>,
+  liveHere: ReadonlySet<string>,
+): boolean {
+  if (liveHere.has(item.id)) return true
+  return currentPlanIds.has(item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus)
+}
+
+/** Los planes vigentes: el abierto y los que aún tienen algo por hacer (QA del 6 nov, M12 y M13). */
+export function currentPlanIdsOf(
+  rows: ReadonlyArray<{ plan: { id: string }; isOpen: boolean; active?: boolean }>,
+): Set<string> {
+  return new Set(rows.filter((row) => row.isOpen || row.active).map((row) => row.plan.id))
+}
+
+/** Los tratamientos con un procedimiento vigente en esta atención. */
+export function liveProcedureItems(procedures: readonly ProcedureItem[]): Set<string> {
+  return new Set(
+    procedures.flatMap((proc) => (proc.planItemId && !proc.voidedAt ? [proc.planItemId] : [])),
+  )
+}
+
 const QUADRANT_OPTIONS = Object.entries(QUADRANT_LABELS).map(([value, label]) => ({ value, label }))
 const ARCH_OPTIONS = [
   { value: "upper", label: "Superior" },
@@ -172,26 +200,6 @@ function editableSessions(item: PlanItem): boolean {
 /** El servidor nombra el dato como en el cuerpo de la petición. */
 const INDICATION_FIELD_MAP = { serviceId: "service", toothNumber: "teeth", plannedSessions: "sessions" }
 
-function BlockPart({
-  title,
-  action,
-  children,
-}: {
-  title: string
-  action?: React.ReactNode
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section aria-label={title} className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  )
-}
-
 export function EncounterPlanPanel({
   patientId,
   encounterId,
@@ -209,6 +217,8 @@ export function EncounterPlanPanel({
   showControls = true,
   visit = null,
   procedures = [],
+  past = false,
+  chargedIds = new Set<string>(),
   onRegister,
   onVoid,
   onConsentFirst,
@@ -223,6 +233,13 @@ export function EncounterPlanPanel({
   visit?: EncounterVisit | null
   /** Lo registrado en esta atención: lo de cada tratamiento se ve en su fila, con «Anular…». */
   procedures?: ProcedureItem[]
+  /** La atención es de otro día (una cita pasada que se registra después): «Ese día», no «Hoy». */
+  past?: boolean
+  /**
+   * Los tratamientos de cobro único que ya tienen su cargo (`conCargo` de la cuenta): hacerlos hoy
+   * no cobra nada, así que su fila no dice un precio. Sin la cuenta a la vista, vacío.
+   */
+  chargedIds?: ReadonlySet<string>
   /** «Registrar»: abre el registro con ese tratamiento puesto. */
   onRegister?: (itemId: string) => void
   /** «Anular…» de lo registrado en la fila. */
@@ -237,7 +254,7 @@ export function EncounterPlanPanel({
   encounterId: string
   /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
   removableIds: ReadonlySet<string>
-  /** Lo que ya se trajo a esta atención («Hacerla hoy» o su cita): su fila no lo ofrece otra vez. */
+  /** Lo que ya se trajo a esta atención («Hacer hoy» o su cita): su fila no lo ofrece otra vez. */
   broughtIds?: ReadonlySet<string>
   /** Al indicar, la pieza y el diagnóstico del último hallazgo de hoy. */
   indicationDefaults?: Partial<IndicationValues>
@@ -248,12 +265,12 @@ export function EncounterPlanPanel({
   showControls?: boolean
   /** Para «Mostrar a Rosa» el presupuesto en borrador. */
   patientName: string
-  /** Indicados en esta atención: se marcan «Hoy» en el plan en corto. */
+  /** Indicados en esta atención: se marcan «Indicado hoy» en el plan. */
   indicatedItems: PlanItem[]
   /** Unos y otros, para ligar un control a su tratamiento. */
   attentionItems: PlanItem[]
   disabled?: boolean
-  /** Recién agregado el bloque: abre «Indicar un tratamiento» sin un clic de más. */
+  /** Recién agregado el bloque: abre «Añadir un tratamiento al plan» sin un clic de más. */
   autoOpen?: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -273,12 +290,13 @@ export function EncounterPlanPanel({
     enabled: canRead,
   })
   // Los planes con algo por hacer, no solo el que recibe lo nuevo (QA del 6 nov, M12 y M13).
-  const current = (plansQuery.data?.data ?? []).filter((row) => row.isOpen || row.active)
+  const currentPlanIds = currentPlanIdsOf(plansQuery.data?.data ?? [])
   const today = new Set(indicatedItems.map((item) => item.id))
-  // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero.
+  const liveHere = liveProcedureItems(procedures)
+  // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero. La opción que no
+  // eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
   const brief = (itemsQuery.data?.data ?? [])
-    // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
-    .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
+    .filter((item) => shownInEncounterPlan(item, currentPlanIds, liveHere))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   // Lo que va después de otro de la misma pieza (la corona tras la endodoncia en curso) baja a
   // continuación de él, aunque se indicara hoy: la regla de «Qué sigue» (QA del 9 nov, repaso 3).
@@ -290,6 +308,18 @@ export function EncounterPlanPanel({
       brief.splice(blocker, 0, item)
     }
   }
+  // Por fases, en el orden del producto y con su fase por defecto, como el plan de la ficha
+  // (`plan-fases.tsx`); dentro de cada una, el orden de arriba. Sin esto, lo indicado hoy abría
+  // una fase que volvía a salir más abajo (revisión del 17 nov).
+  const { phases, defaultPhase } = productUi().plan
+  const phaseIndexOf = (item: PlanItem) => {
+    const at = phases.findIndex((phase) => phase.key === (item.phase ?? defaultPhase))
+    return at === -1 ? phases.length : at
+  }
+  brief.sort((a, b) => phaseIndexOf(a) - phaseIndexOf(b))
+  /** «Hoy», o «Ese día» en una atención de otro día. */
+  const dayWord = past ? "Ese día" : "Hoy"
+  const indicatedWord = past ? "Indicado ese día" : "Indicado hoy"
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
@@ -352,9 +382,9 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
-  // «Hacerla hoy» de lo indicado y aceptado hoy (P11, D6): está en su fila, no en «Hoy viene a…», y
-  // trae el tratamiento a la atención con la misma operación, para que su consentimiento se pida
-  // antes del acto. Nunca en lo que «va después» de otro (la corona tras la endodoncia): no toca hoy.
+  // «Hacer hoy» en su fila: trae el tratamiento a la atención con la misma operación que su cita,
+  // para que su consentimiento se pida antes del acto. Nunca en lo que «va después» de otro (la
+  // corona tras la endodoncia): no toca hoy.
   const [bringing, setBringing] = useState<string | null>(null)
   const bringToday = async (item: PlanItem) => {
     if (bringing) return
@@ -375,8 +405,9 @@ export function EncounterPlanPanel({
   // «Hacer hoy» en cada fila de lo que se puede hacer hoy (la atención agrupada, 17 nov): lo dice el
   // servidor (`visit.treatments`, sin tope), también lo de visitas anteriores. Marca la fila «Hoy»
   // en su mismo lugar. Lo que «va después» de otro no se ofrece primero: lo dice su fila.
-  const { phases } = productUi().plan
   const doable = new Map((visit?.treatments ?? []).map((row) => [row.planItemId, row]))
+  const bringWord = past ? "Se hizo ese día" : "Hacer hoy"
+  const leaveWord = past ? "Ese día no" : "Hoy no"
   const bringAction = (item: PlanItem) =>
     canWrite &&
     !disabled &&
@@ -388,11 +419,11 @@ export function EncounterPlanPanel({
         type="button"
         size="sm"
         variant="outline"
-        aria-label={`Hacer hoy: ${item.title}`}
+        aria-label={`${bringWord}: ${item.title}`}
         disabled={bringing !== null || removing !== null}
         onClick={() => void bringToday(item)}
       >
-        {bringing === item.id ? "Preparando…" : "Hacer hoy"}
+        {bringing === item.id ? "Preparando…" : bringWord}
       </Button>
     ) : null
   const [choosingControl, setChoosingControl] = useState<string | null>(null)
@@ -435,13 +466,16 @@ export function EncounterPlanPanel({
   }
   /**
    * Lo de hoy en la fila (la atención agrupada, 17 nov): «Hoy», su sesión, «por hacer» o «hecha hoy»,
-   * lo registrado con «Anular…», la espera entre sesiones y el consentimiento antes del acto. Y sus
-   * sesiones anteriores, con el día, quién y lo anotado.
+   * lo registrado con «Anular…» (y lo anulado, tachado y con su motivo), la espera entre sesiones y
+   * el consentimiento antes del acto. Y sus sesiones anteriores, con el día, quién y lo anotado.
    */
   const todayPart = (item: PlanItem) => {
     const visitRow = doable.get(item.id)
-    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked)
-    const done = procedures.filter((proc) => proc.planItemId === item.id && !proc.voidedAt)
+    const mine = procedures.filter((proc) => proc.planItemId === item.id)
+    const done = mine.filter((proc) => !proc.voidedAt)
+    const voided = mine.filter((proc) => proc.voidedAt)
+    // Lo registrado aquí es de hoy aunque ya no esté unido (lo anulado sigue a la vista).
+    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked) || mine.length > 0
     const earlier = (item.sessions ?? []).filter((session) => session.encounterId !== encounterId)
     const wait = isToday && done.length === 0 && visitRow ? visitWaitWords(visitRow) : null
     const consentWords =
@@ -456,11 +490,13 @@ export function EncounterPlanPanel({
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="text-xs">
                 <Badge variant="default" className="mr-2 align-middle">
-                  Hoy
+                  {dayWord}
                 </Badge>
                 {sessionLine}
                 {done.length > 0 ? (
-                  <span className="font-medium text-success">hecha hoy</span>
+                  <span className="font-medium text-success">
+                    {past ? "hecha ese día" : "hecha hoy"}
+                  </span>
                 ) : (
                   <span className="font-medium text-warning">por hacer</span>
                 )}
@@ -477,6 +513,13 @@ export function EncounterPlanPanel({
                       Anular…
                     </Button>
                   ) : null}
+                </span>
+              ))}
+              {/* Lo anulado no desaparece: se lee qué fue y por qué, tachado y con su motivo. */}
+              {voided.map((proc) => (
+                <span key={proc.id} className="text-xs text-muted-foreground">
+                  <span className="line-through">Registrado: {proc.description}</span>
+                  {` · Anulado: ${proc.voidReason ?? ""}. No cuenta como sesión ni genera cargo.`}
                 </span>
               ))}
               {wait ? <span className="text-xs text-warning">{wait}</span> : null}
@@ -499,7 +542,12 @@ export function EncounterPlanPanel({
                     variant="outline"
                     onClick={() => onConsentFirst(item.id, false)}
                   >
-                    {item.consent === "sin_firmar" ? "Firmar ahora" : "Preparar"}
+                    {/* Lo que firmó en su enlace se confirma; no se prepara otra vez. */}
+                    {item.consent === "sin_firmar"
+                      ? "Firmar ahora"
+                      : item.consent === "por_confirmar"
+                        ? "Confirmar"
+                        : "Preparar"}
                   </Button>
                 ) : null}
                 {onRegister ? (
@@ -512,11 +560,11 @@ export function EncounterPlanPanel({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    aria-label={`Hoy no: ${item.title}`}
+                    aria-label={`${leaveWord}: ${item.title}`}
                     disabled={leaving !== null}
                     onClick={() => void leaveToday(item.id)}
                   >
-                    Hoy no
+                    {leaveWord}
                   </Button>
                 )}
               </span>
@@ -740,7 +788,10 @@ export function EncounterPlanPanel({
   const pathGroups = groupPlanPaths(brief)
   const rows = brief.filter((item) => !isOpenPath(item))
   // «Va también» y «En las dos» se guardan en el servidor (`pathAnsweredAt`): al recargar no se
-  // vuelve a preguntar (mesa del 17 nov; antes solo dejaba de preguntar en esta pantalla).
+  // vuelve a preguntar (mesa del 17 nov). «Va también» cierra la pregunta aquí mismo, como antes:
+  // si el servidor no puede guardarlo (`PATH_NO_BUDGET`), la pregunta no vuelve y el error se dice
+  // en su fila (revisión del 17 nov).
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set())
   const [placeError, setPlaceError] = useState<{ itemId: string; message: string } | null>(null)
   const place = usePlacePath({ patientId, encounterId, beforeWrite, onChanged })
   const placeIn = (planItemId: string, path: PathTarget) => {
@@ -789,14 +840,23 @@ export function EncounterPlanPanel({
                   // Sin responder «¿otro camino o va también?» no se sabe si va después de lo otro de
                   // la pieza: la exodoncia que es otro camino no «va después de la endodoncia» (QA del
                   // 10 nov, B2). Se calla hasta responder, también para quien no puede responderlo.
-                  const unanswered = pathQuestion(item, brief, today, pathGroups)
+                  const unanswered = dismissed.has(item.id)
+                    ? null
+                    : pathQuestion(item, brief, today, pathGroups)
                   const question = canPlace ? unanswered : null
                   const error = placeError?.itemId === item.id ? placeError.message : null
-                  // Por fases, como el plan de la ficha (la atención agrupada, 17 nov).
+                  // Por fases, como el plan de la ficha: un encabezado por fase (las filas ya van
+                  // ordenadas por ella).
+                  const previous = rows[index - 1]
                   const phaseLabel =
-                    phases.length > 1 && (index === 0 || rows[index - 1]?.phase !== item.phase)
-                      ? (phases.find((phase) => phase.key === item.phase)?.label ?? null)
+                    phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
+                      ? (phases[phaseIndexOf(item)]?.label ?? null)
                       : null
+                  // El precio, solo si hacerlo hoy cobra algo: lo de cobro único ya cargado no se
+                  // cobra otra vez (acta, criterio 13).
+                  const price = chargedIds.has(item.id) ? null : quotedPriceOf(item)
+                  // «Hecha hoy» ya lo dice: «Realizado» antes de firmar diría que está terminado.
+                  const doneHere = CLOSED.has(item.status) && liveHere.has(item.id)
                   return (
                     <Fragment key={item.id}>
                       {phaseLabel ? (
@@ -810,7 +870,7 @@ export function EncounterPlanPanel({
                             {item.title}
                             {today.has(item.id) ? (
                               <Badge variant="default" className="ml-2 align-middle">
-                                Indicado hoy
+                                {indicatedWord}
                               </Badge>
                             ) : null}
                           </span>
@@ -821,8 +881,8 @@ export function EncounterPlanPanel({
                                 ? `va después de ${item.waitsFor.title}`
                                 : "",
                               // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
-                              quotedPriceOf(item).priceCents != null && orgLocale
-                                ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
+                              price?.priceCents != null && orgLocale
+                                ? `${formatMoney(price.priceCents, price.currency, orgLocale)}${price.offered ? " en su presupuesto" : ""}`
                                 : "",
                               // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
                               treatmentConsentWords(item.consent, item.consentMissing) ?? "",
@@ -838,7 +898,7 @@ export function EncounterPlanPanel({
                             {planDecisionLabel(item.decisionStatus)}
                           </Badge>
                           {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
-                          {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
+                          {isLeftOut(item.decisionStatus) || item.status === "pendiente" || doneHere ? null : (
                             <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
                           )}
                           {actionsOf(item)}
@@ -857,7 +917,10 @@ export function EncounterPlanPanel({
                             question={question}
                             pending={place.isPending}
                             onPlace={(path) => placeIn(item.id, path)}
-                            onDismiss={() => placeIn(item.id, "todos")}
+                            onDismiss={() => {
+                              setDismissed((prev) => new Set(prev).add(item.id))
+                              placeIn(item.id, "todos")
+                            }}
                           />
                         ) : null}
                         {error ? (
@@ -878,6 +941,7 @@ export function EncounterPlanPanel({
                 group={group}
                 chooser={chooser}
                 today={today}
+                indicatedWord={indicatedWord}
                 locale={orgLocale}
                 editable={canPlace}
                 pending={place.isPending}
@@ -916,7 +980,7 @@ export function EncounterPlanPanel({
                       <span className="font-medium">
                         {chosen ? (
                           <Badge variant="default" className="mr-2 align-middle">
-                            Hoy
+                            {dayWord}
                           </Badge>
                         ) : null}
                         {control.title}
@@ -944,15 +1008,15 @@ export function EncounterPlanPanel({
                         type="button"
                         size="sm"
                         variant={control.chosen ? "ghost" : "outline"}
-                        aria-label={`${control.chosen ? "Hoy no" : "Hacer hoy"}: ${control.title}`}
+                        aria-label={`${control.chosen ? leaveWord : bringWord}: ${control.title}`}
                         disabled={choosingControl !== null}
                         onClick={() => void chooseControl(control.chosen ? null : control.id)}
                       >
                         {choosingControl === control.id
                           ? "Anotando…"
                           : control.chosen
-                            ? "Hoy no"
-                            : "Hacer hoy"}
+                            ? leaveWord
+                            : bringWord}
                       </Button>
                     ) : null}
                   </li>
@@ -1164,6 +1228,7 @@ function PathsBox({
   group,
   chooser,
   today,
+  indicatedWord,
   locale,
   editable,
   pending,
@@ -1178,6 +1243,8 @@ function PathsBox({
   /** «Ana» o «la persona». */
   chooser: string
   today: ReadonlySet<string>
+  /** «Indicado hoy», o «Indicado ese día» en una atención de otro día. */
+  indicatedWord: string
   locale: string | undefined
   editable: boolean
   pending: boolean
@@ -1287,7 +1354,7 @@ function PathsBox({
                             {item.title}
                             {today.has(item.id) ? (
                               <Badge variant="default" className="ml-2 align-middle">
-                                Indicado hoy
+                                {indicatedWord}
                               </Badge>
                             ) : null}
                           </span>

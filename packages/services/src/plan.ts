@@ -1042,7 +1042,11 @@ export async function listPlanItems(
  */
 export interface PlanItemSession {
   encounterId: string
-  /** El día de la sesión: el de la firma, o el de su inicio si sigue abierta. */
+  /**
+   * El día de la sesión: el de la atención (su inicio), como la fechan la Historia y la propia
+   * atención. No el de la firma: una cita registrada después o un borrador de otro día se firman
+   * otro día (revisión del 17 nov).
+   */
   at: Date
   signed: boolean
   byName: string | null
@@ -1066,7 +1070,7 @@ async function planItemSessionsOf(
     evolution: string | null
   }>(sql`
     select distinct on (p.plan_item_id, e.id) p.plan_item_id as item_id, e.id as encounter_id, e.status,
-      coalesce(e.finalized_at, e.started_at) as at, u.name as by_name, e.evolution
+      e.started_at as at, u.name as by_name, e.evolution
     from encounter_procedure p
     join encounter e on e.organization_id = p.organization_id and e.id = p.encounter_id
     left join "user" u on u.id = e.professional_user_id

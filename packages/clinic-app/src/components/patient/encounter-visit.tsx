@@ -31,6 +31,24 @@ export function visitBookedWords(
 }
 
 /**
+ * La cita de esta atención, para «Su cita»: «10:30 a. m. · Dra. Vela» (acta, criterio 3 y B6: la
+ * sesión 2 adelantada en la cita de otra doctora). De otro día, también el día.
+ */
+export function visitAppointmentWords(
+  appointment: { startsAt: string; professionalName: string | null },
+  locale: string | undefined,
+  timeZone: string,
+  past = false,
+): string {
+  const starts = new Date(appointment.startsAt)
+  const time = starts.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit", timeZone })
+  const day = past
+    ? `${starts.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).replace(/[.,]/g, "")}, `
+    : ""
+  return [`${day}${time}`, appointment.professionalName?.trim() || null].filter(Boolean).join(" · ")
+}
+
+/**
  * La espera entre sesiones que aún no se cumple (QA del 10 nov, B6), con los días que pide su
  * servicio: «La sesión anterior fue hoy: la medicación suele dejarse una semana.». Avisa y no
  * traba: «Continuar hoy» sigue. Null si no hay espera pendiente.
@@ -102,6 +120,11 @@ export function EncounterVisitStrip({
   // Sus palabras se ofrecen como motivo mientras no haya otro; usadas o con otro escrito, siguen a la vista.
   const toldReason = visitAnswer ? visitReasonForEncounter(visitAnswer) : null
   const nothing = !offeredReason && !usedReason && !visitAnswer
+  // «Su cita, 10:30 a. m. · Dra. Vela:» dice de qué cita es el motivo que se ofrece.
+  const appointmentWords = visit?.appointment
+    ? visitAppointmentWords(visit.appointment, activeOrgLocale(), activeOrgTimeZone(), past)
+    : null
+  const citaLabel = appointmentWords ? `Su cita, ${appointmentWords}: ` : "Su cita: "
 
   const run = async (key: string, write: () => Promise<unknown>) => {
     if (busy) return
@@ -137,7 +160,7 @@ export function EncounterVisitStrip({
           {usedReason ? (
             <li className={row}>
               <span className="min-w-0">
-                <span className="text-muted-foreground">Su cita: </span>«{usedReason}»
+                <span className="text-muted-foreground">{citaLabel}</span>«{usedReason}»
                 <span className="block text-xs text-muted-foreground">Ya es el motivo de hoy</span>
               </span>
             </li>
@@ -145,7 +168,7 @@ export function EncounterVisitStrip({
           {offeredReason ? (
             <li className={row}>
               <span className="min-w-0">
-                <span className="text-muted-foreground">Su cita: </span>«{offeredReason}»
+                <span className="text-muted-foreground">{citaLabel}</span>«{offeredReason}»
               </span>
               <Button
                 type="button"

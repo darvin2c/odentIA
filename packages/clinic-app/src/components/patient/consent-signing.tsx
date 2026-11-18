@@ -170,21 +170,27 @@ export function CompleteSigningData({
     onDone?.()
   }
 
-  // Quien firma un menor es su representante: de él es el documento que falta.
+  // El documento que falta es el de quien firma. Un menor firma por su representante. Un adulto
+  // firma él mismo si es quien recibe lo suyo y su ficha no tiene documento; si no, firma por él su
+  // representante legal y el que falta es el de este (revisión del 17 nov: abría el del paciente,
+  // que ya lo tenía, y guardarlo no destrababa la firma).
   const withoutDoc = choices.filter((choice) => choice.kind === "representante" && !choice.doc)
+  const patientSigns =
+    !isMinor && choices[0]?.kind === "paciente" && !patient?.docNumber?.trim()
   const targets: Array<{ key: string; label: string; target: NonNullable<typeof open> }> =
     gap === "sin-representante"
       ? [{ key: "responsables", label: "Completar", target: { kind: "responsables" } }]
-      : gap === "sin-fecha"
+      : gap === "sin-fecha" || patientSigns
         ? [{ key: "patient", label: "Completar", target: { kind: "patient" } }]
-        : isMinor
-          ? withoutDoc.map((choice) => ({
-              key: choice.contactId,
-              label:
-                withoutDoc.length > 1 ? `Completar el de ${firstName(choice.name)}` : "Completar",
-              target: { kind: "person" as const, contactId: choice.contactId },
-            }))
-          : [{ key: "patient", label: "Completar", target: { kind: "patient" } }]
+        : withoutDoc.map((choice) => ({
+            key: choice.contactId,
+            // De un adulto, el texto nombra al paciente: el botón dice de quién es el que falta.
+            label:
+              withoutDoc.length > 1 || !isMinor
+                ? `Completar el de ${firstName(choice.name)}`
+                : "Completar",
+            target: { kind: "person" as const, contactId: choice.contactId },
+          }))
 
   if (!canWrite || !patient || targets.length === 0) return <span>Pídeselo a recepción.</span>
 

@@ -91,6 +91,7 @@ export function NewConsentDrawer({
   defaultProcedureRef,
   defaultDiagnosisCode,
   defaultDiagnosisSystem,
+  todayPlanItemIds = [],
   onCreated,
 }: {
   open: boolean
@@ -100,6 +101,11 @@ export function NewConsentDrawer({
   planItemId?: string
   /** Desde la atención: lo que se registró (procedimiento y pieza) y su diagnóstico. */
   defaultProcedureRef?: string
+  /**
+   * Desde la atención: los tratamientos de lo que se registró en ella. Si uno pide la plantilla,
+   * viene puesto él; si lo registrado no es de ninguno que la pida, no se elige otro solo.
+   */
+  todayPlanItemIds?: readonly string[]
   defaultDiagnosisCode?: string
   defaultDiagnosisSystem?: string
   onCreated: (id: string) => Promise<void>
@@ -196,13 +202,26 @@ export function NewConsentDrawer({
     form.setFieldValue("procedureRef", choice?.procedureRef ?? defaultProcedureRef ?? "")
   }
   // Al llegar los de la plantilla: uno solo viene elegido; lo elegido que ya no está, se quita.
+  // Desde una atención que trae lo suyo (lo registrado hoy), viene elegido lo de hoy y nunca otro
+  // tratamiento solo: si lo de hoy no es de ninguno que la pida, va «fuera del plan» con lo que se
+  // registró, y la 48 del plan no se lleva el consentimiento de la 38 que se extrajo hoy (revisión
+  // del 17 nov). Se puede elegir otro igual. El servidor hace lo mismo.
   // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada plantilla.
   useEffect(() => {
     const list = choicesQuery.data?.data
     if (!list) return
     const current = form.getFieldValue("planItemId")
     if (current === OUTSIDE_PLAN || list.some((item) => item.planItemId === current)) return
-    const next = list.length === 1 ? (list[0]?.planItemId ?? "") : ""
+    const ownToday = (defaultProcedureRef ?? "").trim() !== ""
+    const candidates = ownToday
+      ? list.filter((item) => todayPlanItemIds.includes(item.planItemId))
+      : list
+    const next =
+      candidates.length === 1
+        ? (candidates[0]?.planItemId ?? "")
+        : ownToday && candidates.length === 0
+          ? OUTSIDE_PLAN
+          : ""
     choicesNow.current = list
     form.setFieldValue("planItemId", next)
     followTreatment(next)

@@ -57,17 +57,19 @@ beforeAll(() => {
 
 let minor = false
 let representatives: unknown[] = []
+let patientDoc: string | null = null
 
 beforeEach(() => {
   permissions.write = true
   minor = false
   representatives = []
+  patientDoc = null
   route.mockReset()
   route.mockImplementation(async (url) => {
     if (url === "/api/patients/p-1")
       return {
         data: {
-          patient: { id: "p-1", givenNames: "Ana" },
+          patient: { id: "p-1", givenNames: "Ana", docNumber: patientDoc },
           contacts: [{ contactId: "c-ana", displayName: "Ana Torres", relationship: "self" }],
           isMinor: minor,
         },
@@ -120,6 +122,34 @@ describe("«Completar» lo que falta para firmar", () => {
       expect(screen.getByRole("dialog", { name: "Datos" }).textContent).toBe(
         "persona c-rosa: docType,docNumber",
       ),
+    )
+  })
+
+  // Revisión del 17 nov: abría el documento del paciente, que ya lo tenía, y guardarlo no destrababa la firma.
+  it("un adulto que firma por su representante: «Completar» abre los datos de quien firma", async () => {
+    patientDoc = "45678912"
+    representatives = [
+      {
+        isCurrent: true,
+        kind: "representante_legal",
+        contact: { id: "c-rosa", displayName: "Rosa Torres", docType: null, docNumber: null },
+      },
+    ]
+    show("sin-documento")
+    fireEvent.click(await screen.findByRole("button", { name: "Completar el de Rosa" }))
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Datos" }).textContent).toBe(
+        "persona c-rosa: docType,docNumber",
+      ),
+    )
+  })
+
+  it("un adulto sin documento que firma él mismo: «Completar» abre su ficha", async () => {
+    show("sin-documento")
+    fireEvent.click(await screen.findByRole("button", { name: "Completar" }))
+    expect(await screen.findByRole("dialog", { name: "Datos" })).toHaveProperty(
+      "textContent",
+      "ficha p-1: docType,docNumber",
     )
   })
 

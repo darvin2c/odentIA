@@ -361,6 +361,21 @@ async function toReplayPayload(
   return null
 }
 
+/**
+ * Los tramos de la dirección, decodificados uno a uno. Un `%` mal escrito (`%E0%A4%A`) queda como
+ * llegó, igual que el parámetro de la ruta: así no lanza dentro del manejador de errores, que
+ * respondería un 500 sin cuerpo.
+ */
+function pathSegments(path: string): string[] {
+  return path.split("/").map((segment) => {
+    try {
+      return decodeURIComponent(segment)
+    } catch {
+      return segment
+    }
+  })
+}
+
 /** Error 22P02 de uuid cuyo valor inválido viene de la dirección pedida (no del cuerpo). */
 export function idMalformadoEnLaDireccion(err: unknown, path: string): boolean {
   let actual: unknown = err
@@ -372,7 +387,7 @@ export function idMalformadoEnLaDireccion(err: unknown, path: string): boolean {
     }
     if (code === "22P02" && typeof message === "string") {
       const valor = /type uuid: "(.*)"/s.exec(message)?.[1]
-      if (valor && /^[^/]+$/.test(valor)) return decodeURIComponent(path).split("/").includes(valor)
+      if (valor && /^[^/]+$/.test(valor)) return pathSegments(path).includes(valor)
     }
     actual = cause
   }

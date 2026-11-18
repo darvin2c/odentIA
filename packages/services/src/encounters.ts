@@ -338,7 +338,7 @@ export interface EncounterDetailBase {
     voidedWith: boolean
   }>
   /**
-   * «Hoy viene a…» del borrador (`encounterVisitOf`): lo que trae, con o sin
+   * Lo que se puede hacer hoy en el borrador (`encounterVisitOf`): lo que trae, con o sin
    * cita. Nulo en una atención firmada o anulada.
    */
   visit: EncounterVisit | null
@@ -2610,7 +2610,7 @@ async function closingSessionsOf(
     const session: ClosingSession = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m), ...(booked ? { booked } : {}) }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
-  // Lo que la cita traía, o se trajo al empezar («Hacerla hoy»), y hoy no se
+  // Lo que la cita traía, o se trajo al empezar («Hacer hoy»), y hoy no se
   // registró: la sesión que le tocaba. Con o sin cita: el cierre lo avisa sin frenar.
   const notRegistered: ClosingSession[] = []
   const carried = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
@@ -3975,15 +3975,17 @@ async function closeAppointment(
 /**
  * Lo que queda sin ninguna sesión vigente vuelve a «por empezar» (`pendiente`); a
  * «programado» solo si una cita por venir lo lleva, con la misma regla que «Por
- * agendar» (`carriedByUpcomingSql`). La cita de esta atención ya no está por venir.
+ * agendar» (`carriedByUpcomingSql`). `attending`: la cita que se está atendiendo, que
+ * no cuenta como por venir aunque empiece más tarde (llegó antes de su hora).
  */
 async function notStartedStatusOf(
   tx: Db,
   orgId: string,
   planItemId: string,
+  attending: string | null = null,
 ): Promise<"pendiente" | "programado"> {
   const [row] = await tx.execute<{ carried: boolean }>(
-    sql`select ${carriedByUpcomingSql({ id: sql`${planItemId}`, organizationId: sql`${orgId}` })} as carried`,
+    sql`select ${carriedByUpcomingSql({ id: sql`${planItemId}`, organizationId: sql`${orgId}` }, sql`now()`, attending)} as carried`,
   )
   return row?.carried ? "programado" : "pendiente"
 }
@@ -4003,6 +4005,11 @@ async function voidProcedureRow(
   proc: typeof encounterProcedure.$inferSelect,
   reason: string,
   at: Date,
+  /**
+   * La cita de esta atención, si sigue atendiéndose (se anula un procedimiento, no la atención):
+   * no cuenta como por venir. Al anular la atención entera, su cita puede volver a atenderse.
+   */
+  attendingAppointmentId: string | null = null,
 ): Promise<EncounterProcedureRow> {
   const [voided] = await tx
     .update(encounterProcedure)
@@ -4058,7 +4065,10 @@ async function voidProcedureRow(
         await tx
           .update(treatmentPlanItem)
           .set({
-            status: sessions > 0 ? "en_curso" : await notStartedStatusOf(tx, orgId, item.id),
+            status:
+              sessions > 0
+                ? "en_curso"
+                : await notStartedStatusOf(tx, orgId, item.id, attendingAppointmentId),
             completedAt: null,
             ...(sessions > 0 ? {} : { startedAt: null }),
             updatedAt: at,
@@ -4115,7 +4125,17 @@ export async function voidEncounterProcedure(
     .limit(1)
   if (!proc) throw notFound("Procedimiento")
   if (proc.voidedAt) throw conflict("ALREADY_VOIDED", "El procedimiento ya está anulado")
-  return voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, reason, new Date())
+  return voidProcedureRow(
+    tx,
+    orgId,
+    actorUserId,
+    patientId,
+    encounterId,
+    proc,
+    reason,
+    new Date(),
+    locked.appointmentId,
+  )
 }
 
 /**
