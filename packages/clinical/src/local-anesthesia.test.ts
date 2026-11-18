@@ -164,6 +164,14 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     expect(warn(today, "mepivacaina-3")).toEqual(["Con su hipertensión esencial (I10), toma la presión antes de anestesiar."])
   })
 
+  // QA clínica del 18 nov: «Con su hipertensión esencial (primaria) (I10)…», con dos paréntesis seguidos.
+  it("el nombre de la CIE-10 que ya trae paréntesis lleva el código dentro, legible", () => {
+    const primary = { name: "Hipertensión esencial (primaria)", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
+    const today = check({ conditions: [primary], asaClass: "II" })
+    expect(today.takePressure).toBe("hipertensión esencial (primaria, I10)")
+    expect(warn(today)).toEqual(["Con su hipertensión esencial (primaria, I10), toma la presión antes de anestesiar."])
+  })
+
   // latidIA no pide la ASA: llega nula, y vale lo demás.
   it("sin ASA (latidIA), la hipertensión sola no lleva tope y la cardiopatía sí", () => {
     expect(check({ conditions: [hta], vitals: { presionSistolica: 128, presionDiastolica: 80 } }).cap).toBeNull()

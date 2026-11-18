@@ -169,7 +169,11 @@ export interface AnesthesiaCondition {
 function conditionWords(condition: AnesthesiaCondition): string {
   const name = condition.name.trim()
   const lower = /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
-  return condition.diagnosisCode ? `${lower} (${condition.diagnosisCode})` : lower
+  if (!condition.diagnosisCode) return lower
+  // «Hipertensión esencial (primaria)» de la CIE-10 ya cierra con un paréntesis: el código va dentro,
+  // «(primaria, I10)», no «(primaria) (I10)» (QA clínica del 18 nov).
+  if (lower.endsWith(")")) return `${lower.slice(0, -1)}, ${condition.diagnosisCode})`
+  return `${lower} (${condition.diagnosisCode})`
 }
 
 /**
