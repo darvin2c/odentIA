@@ -36,6 +36,24 @@ const examples = FINDINGS.map((finding) => ({
   ],
 }))
 
+/**
+ * Lo que cuenta el paciente no se dibuja: va en el motivo (reglas clínicas del 18 nov). Aparece
+ * mientras se escribe, así que se anuncia (`role="status"`), como el recuadro del diagnóstico o
+ * del tratamiento (`FindingElsewhere`).
+ */
+export function FindingReasonNotice({ reason, onReason }: { reason: string; onReason?: () => void }) {
+  return (
+    <div role="status" className="flex flex-col gap-2 rounded-lg border p-3">
+      <p className="text-sm">{reason} es el motivo de consulta.</p>
+      {onReason ? (
+        <Button type="button" variant="outline" className="min-h-11 self-start" onClick={onReason}>
+          Ir al motivo
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 export function FindingPicker({
   value,
   onChange,
@@ -107,15 +125,7 @@ export function FindingPicker({
         </InputGroupAddon>
       </InputGroup>
       {found.reason && visible.length === 0 ? (
-        // Lo que cuenta el paciente no se dibuja: va en el motivo (reglas clínicas del 18 nov).
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <p className="text-sm">{found.reason} es el motivo de consulta.</p>
-          {onReason ? (
-            <Button type="button" variant="outline" className="min-h-11 self-start" onClick={onReason}>
-              Ir al motivo
-            </Button>
-          ) : null}
-        </div>
+        <FindingReasonNotice reason={found.reason} onReason={onReason} />
       ) : visible.length === 0 ? (
         (other ?? (
           <EmptyState

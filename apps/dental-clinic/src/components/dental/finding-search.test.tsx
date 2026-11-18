@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { FindingElsewhere } from "./finding-elsewhere"
+import { FindingReasonNotice } from "./finding-picker"
 import { searchFindings } from "./finding-search"
 
 // Reglas clínicas del 18 nov: «¿Qué observas?» encuentra los hallazgos por cómo se dicen y, lo que
@@ -46,6 +47,14 @@ describe("el buscador de hallazgos de la pieza", () => {
     expect(searchFindings("sensibilidad").reason).toBe("La sensibilidad")
     expect(searchFindings("hinchazón").reason).toBe("La hinchazón")
     expect(searchFindings("sangrado de encías").reason).toBe("El sangrado de encías")
+  })
+
+  // Revisión de las reglas clínicas del 18 nov: aparece mientras se escribe, y se anuncia.
+  it("«El dolor es el motivo de consulta» se anuncia a quien usa un lector de pantalla", () => {
+    const html = renderToStaticMarkup(<FindingReasonNotice reason="El dolor" onReason={() => {}} />)
+    expect(html).toMatch(/^<div role="status"/)
+    expect(html).toContain("El dolor es el motivo de consulta.")
+    expect(html).toContain("Ir al motivo")
   })
 
   it("buscar «pulpitis» en la 36 ofrece «Anotar Pulpitis en la 36», no «Sin resultados»", () => {

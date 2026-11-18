@@ -21,6 +21,20 @@ export function personalRisksEditable(
 }
 
 /**
+ * La ayuda del campo: «Lo propone el sistema» solo si el sistema los propuso y nadie los cambió (el
+ * documento sigue como nació); sin riesgos, una ayuda neutra para escribirlos.
+ */
+export function personalRisksHelp(
+  document: Pick<ConsentDocument, "sectionsSnapshot" | "createdAt" | "updatedAt">,
+): string {
+  const saved = document.sectionsSnapshot?.personalRisks ?? []
+  if (saved.length === 0) return "Escribe los riesgos propios de su caso, una frase por línea."
+  if (document.updatedAt === document.createdAt)
+    return "Lo propone el sistema según sus antecedentes. Cámbialo o bórralo. Una frase por línea."
+  return "Cámbialo o bórralo. Una frase por línea."
+}
+
+/**
  * Los riesgos propios de su caso (reglas clínicas del 18 nov): el sistema los propone al generar el
  * consentimiento desde sus antecedentes y el procedimiento; aquí se cambian o se borran, una frase
  * por línea, mientras está pendiente y no se envió a su enlace. Vacío, la hoja queda como siempre.
@@ -76,7 +90,7 @@ export function ConsentPersonalRisksField({
                   ? `Riesgos propios de ${first} (opcional)`
                   : "Riesgos propios de su caso (opcional)"
               }
-              description="Lo propone el sistema según sus antecedentes. Cámbialo o bórralo. Una frase por línea."
+              description={personalRisksHelp(document)}
               rows={3}
               maxLength={6000}
               disabled={pending}
