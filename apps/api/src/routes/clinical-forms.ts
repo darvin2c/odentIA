@@ -458,6 +458,9 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/form-templates/:id/*", knownId("Ficha no encontrada"))
   app.use("/form-responses/:id", knownId("Ficha no encontrada"))
   app.use("/form-responses/:id/*", knownId("Ficha no encontrada"))
+  // Lo que cuelga de un consentimiento (`/consents/:id/sign`, `…/personal-risks`…), sin tocar
+  // `/consents/treatments`, que no lleva id: el comodín `/consents/:id/*` también lo tomaría.
+  app.use("/consents/:id/:action{.+}", knownId("Consentimiento no encontrado"))
 
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
@@ -1162,7 +1165,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       const signed = await withOrgContext(deps.db, orgId, (tx) =>
-        signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+        signConsentDocument(tx, orgId, userId, formId(c), parsed.data),
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
       // el PDF se reintenta con POST …/pdf (no se repite la firma). El aviso del
@@ -1190,7 +1193,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { requestId: parsed.data.requestId ?? null })
+        const consent = await markConsentSentByLink(tx, orgId, userId, formId(c), { requestId: parsed.data.requestId ?? null })
         return sendConsentToSign(
           tx,
           orgId,
@@ -1213,7 +1216,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     c.header("Referrer-Policy", "no-referrer")
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { shown: true })
+        const consent = await markConsentSentByLink(tx, orgId, userId, formId(c), { shown: true })
         return showPersonalLink(tx, orgId, userId, consent.patientId, { secretsKey: deps.secretsKey }, consent.id)
       }),
     )
@@ -1232,7 +1235,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const { encounterId } = parsed.data
     return runService(c, 200, async () => {
       const signed = await withOrgContext(deps.db, orgId, (tx) =>
-        confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id"), { encounterId }),
+        confirmLinkSignedConsent(tx, orgId, userId, formId(c), { encounterId }),
       )
       // Como al firmar en la clínica: el PDF se genera después y se reintenta aparte si falla.
       try {
@@ -1249,7 +1252,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para generar el PDF del consentimiento")
     }
-    return runService(c, 200, () => generateConsentPdf(orgId, userId, c.req.param("id")))
+    return runService(c, 200, () => generateConsentPdf(orgId, userId, formId(c)))
   })
 
   app.get("/consents/:id/print", async (c) => {
@@ -1258,7 +1261,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const data = await getConsentPrint(tx, orgId, c.req.param("id"))
+        const data = await getConsentPrint(tx, orgId, formId(c))
         patientId = data.document.patientId
         return data
       }),
@@ -1278,7 +1281,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setConsentPersonalRisks(tx, orgId, userId, c.req.param("id"), parsed.data.personalRisks),
+        setConsentPersonalRisks(tx, orgId, userId, formId(c), parsed.data.personalRisks),
       ),
     )
   })
@@ -1292,7 +1295,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        cancelConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
+        cancelConsentDocument(tx, orgId, userId, formId(c), parsed.data.reason),
       ),
     )
   })
@@ -1306,7 +1309,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       const revoked = await withOrgContext(deps.db, orgId, (tx) =>
-        revokeConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+        revokeConsentDocument(tx, orgId, userId, formId(c), parsed.data),
       )
       // Como al firmar: el PDF de la revocación se genera después y se
       // reintenta con POST …/pdf si falla (no se repite la revocación).
@@ -1325,8 +1328,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        patientId = await consentDocumentPatientId(tx, orgId, c.req.param("id"))
-        return listConsentEvents(tx, orgId, c.req.param("id"))
+        patientId = await consentDocumentPatientId(tx, orgId, formId(c))
+        return listConsentEvents(tx, orgId, formId(c))
       }),
     )
     if (response.status === 200 && patientId)
