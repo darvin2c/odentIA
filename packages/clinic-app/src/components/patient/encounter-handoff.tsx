@@ -79,10 +79,11 @@ export function EncounterHandoff({
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
-  // Lo que ya no se pide (no lo aceptó o eligió otro camino) no queda por recabar.
+  // Lo que ya no se pide (no lo aceptó, eligió otro camino o se anuló) no queda por recabar.
   const { pendingSignatures: pendingConsents } = consentsStillAsked(
     (consents.data?.data ?? []).filter((row) => row.encounterId === encounterId && row.status === "pendiente"),
     needs,
+    [...detail.plannedItems, ...detail.indicatedItems],
   )
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
     (balance) => balance.porCobrar > 0,

@@ -3526,6 +3526,7 @@ export async function finalizeEncounter(
         today: dayKeyIn(locked.startedAt, timezone),
         anesthetic: input.anesthetic ?? null,
         asksAsa: hooks.asksAsa,
+        timeZone: timezone,
       }),
       updatedAt: now,
     })

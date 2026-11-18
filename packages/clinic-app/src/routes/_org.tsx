@@ -67,7 +67,14 @@ import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-no
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
-import { requireTermsAccepted, requireVerifiedSession, type SessionInfo, ssrFetchOptions } from "../lib/guards"
+import {
+  ApiUnavailableError,
+  apiUnavailable,
+  requireTermsAccepted,
+  requireVerifiedSession,
+  type SessionInfo,
+  ssrFetchOptions,
+} from "../lib/guards"
 import { ApiError, apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { activeOrgLocale, activeOrgTimeZone, notifyOrgLocale, setOrgLocale } from "../lib/locale"
@@ -124,7 +131,12 @@ async function loadOrgRegion(): Promise<OrgRegion> {
  */
 const ORG_ACCESS_FRESH_MS = 120_000
 
-/** Sesión verificada, términos aceptados y la clínica del host, o el redirect que toque. */
+/**
+ * Sesión verificada, términos aceptados y la clínica del host, o el redirect que toque. Si la API
+ * no responde al volver a comprobarlo, sigue lo ya comprobado en esta pantalla: un corte no saca a
+ * nadie de lo que está haciendo (QA del 18 nov, novato 5), y la API autoriza cada pedido igual. Sin
+ * nada comprobado, la pantalla de error de la ruta lo dice, con «Reintentar».
+ */
 async function checkOrgAccess(
   location: { href: string },
 ): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode | null }> {
@@ -133,6 +145,19 @@ async function checkOrgAccess(
   if (typeof window !== "undefined" && cached && cached.slug === slug && Date.now() - cached.at < ORG_ACCESS_FRESH_MS) {
     return cached
   }
+  try {
+    return await checkOrgAccessNow(location, slug, cached)
+  } catch (error) {
+    if (error instanceof ApiUnavailableError && typeof window !== "undefined" && cached && cached.slug === slug) return cached
+    throw error
+  }
+}
+
+async function checkOrgAccessNow(
+  location: { href: string },
+  slug: string | null,
+  cached: typeof orgChecks.access,
+): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode | null }> {
   const fetchOptions = ssrFetchOptions()
   // Soporte de odentIA con el permiso de la clínica: entra sin sesión de la clínica, en solo
   // lectura. En el servidor solo se pregunta si llega su cookie; en el navegador (la cookie no
@@ -172,7 +197,11 @@ async function checkOrgAccess(
   if (!slug || !orgRead) {
     throw redirect({ href: panelUrl("/") })
   }
-  const { data } = await orgRead
+  const { data, error } = await orgRead.catch(() => {
+    throw new ApiUnavailableError()
+  })
+  // La API no respondió: no es que no sea de esta clínica.
+  if (!data && apiUnavailable(error)) throw new ApiUnavailableError()
   if (!data) {
     const { data: orgs } = await authClient.organization.list({ fetchOptions })
     throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })

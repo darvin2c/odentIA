@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AgendaAvailability } from "../../lib/agenda"
-import { emptyDaySaid, offDutyOn, seedNoteOf } from "./when"
+import { blockedOn, emptyDaySaid, offDutyOn, seedNoteOf } from "./when"
 
 /**
  * «Reservar la sesión 2» con quien atendió (QA del 8 nov): si la agenda no lo
@@ -80,6 +80,27 @@ describe("lo que se dice de un día sin nada libre", () => {
     )
     // Otro día, Ana tampoco atiende.
     expect(offDutyOn(lanes([ana]), [anaMonday], "2026-11-10", tz)).toBe("Dra. Ana Torres")
+  })
+
+  // QA del 18 nov (novato 8): Luis, con su agenda vacía, tenía vacaciones; decía «No queda nada libre».
+  it("quien atiende ese día pero está de vacaciones: lo dice, no «No queda nada libre» a secas", () => {
+    const vacation = {
+      professionalUserId: "ana",
+      roomId: null,
+      kind: "ausencia" as const,
+      reason: "Vacaciones",
+      startsAt: "2026-11-09T05:00:00.000Z",
+      endsAt: "2026-11-12T05:00:00.000Z",
+    }
+    const blocked = blockedOn(lanes([ana]), [anaMonday], [vacation], day, tz)
+    expect(blocked).toEqual({ label: "Dra. Ana Torres", reasons: ["Vacaciones"] })
+    expect(emptyDaySaid({ moving: false, offDuty: null, blocked })).toBe(
+      "Este día no queda nada libre con Dra. Ana Torres: Vacaciones. Prueba otro día u otro profesional.",
+    )
+    // La de otro profesional, la de una unidad dental o con «Cualquiera» no la nombran.
+    expect(blockedOn(lanes([ana]), [anaMonday], [{ ...vacation, professionalUserId: "oscar" }], day, tz)).toBeNull()
+    expect(blockedOn(lanes([ana]), [anaMonday], [{ ...vacation, roomId: "unidad-1" }], day, tz)).toBeNull()
+    expect(blockedOn(lanes([ana, oscar]), [anaMonday], [vacation], day, tz)).toBeNull()
   })
 
   it("con «Cualquiera» no se nombra a nadie; al mover, lo de siempre", () => {

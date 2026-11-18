@@ -36,7 +36,7 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { CalendarDays, ChevronDown } from "lucide-react"
 import * as React from "react"
-import type { AgendaAvailability } from "../../lib/agenda"
+import type { AgendaAvailability, ScheduleBlock } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { appWords } from "../../lib/product-words"
 import { rangeSaid, shortName } from "./shared"
@@ -132,6 +132,8 @@ export interface WhenState {
   hoursThatDay: string[]
   /** Quien se mira (uno solo) no atiende ese día en la sede: su nombre; si no, null. */
   offDuty: string | null
+  /** Quien se mira (uno solo) atiende ese día, pero una ausencia o un bloqueo cae en su horario. */
+  blocked: { label: string; reasons: string[] } | null
   loading: boolean
   failed: boolean
   ready: boolean
@@ -388,6 +390,7 @@ export function useWhen(input: WhenInput): WhenState {
           })
       : [],
     offDuty: offDutyOn(lanes, open, date, timeZone),
+    blocked: blockedOn(lanes, open, availability?.blocks ?? [], date, timeZone),
     loading: availabilityQuery.isLoading || availabilityQuery.isPlaceholderData,
     failed: availabilityQuery.isError,
     ready: availability !== undefined,
@@ -451,15 +454,53 @@ export function offDutyOn(
 }
 
 /**
+ * Quien se mira, si es uno solo y atiende ese día pero una ausencia o un bloqueo de la agenda
+ * cae sobre su horario: su nombre y por qué («Vacaciones»). Es lo que le quita lo libre aunque
+ * no tenga citas (QA del 18 nov, novato 8: Luis tenía vacaciones del 23 al 25 y la pantalla
+ * decía «No queda nada libre», que sonaba a agenda llena). Con «Cualquiera», null.
+ */
+export function blockedOn(
+  lanes: ScheduleColumn[],
+  open: ScheduleAvailability[],
+  blocks: ReadonlyArray<Pick<ScheduleBlock, "professionalUserId" | "roomId" | "kind" | "reason" | "startsAt" | "endsAt">>,
+  date: string,
+  timeZone: string,
+): { label: string; reasons: string[] } | null {
+  if (lanes.length !== 1) return null
+  const [only] = lanes
+  if (!only) return null
+  const hours = open.flatMap((item) => {
+    const range = item.columnId === only.id ? dayRangeOf(item.start, item.end, date, timeZone) : null
+    return range ? [range] : []
+  })
+  const reasons = blocks.flatMap((block) => {
+    // Lo de una unidad dental no le quita el día: se reserva en otra.
+    if (block.roomId !== null || (block.professionalUserId !== null && block.professionalUserId !== only.id)) return []
+    const range = dayRangeOf(block.startsAt, block.endsAt, date, timeZone)
+    if (!range || !hours.some((hour) => range.startMinutes < hour.endMinutes && range.endMinutes > hour.startMinutes))
+      return []
+    return [block.reason?.trim() || (block.kind === "ausencia" ? "una ausencia" : "un bloqueo de la agenda")]
+  })
+  return reasons.length ? { label: only.label, reasons: [...new Set(reasons)] } : null
+}
+
+/**
  * Lo que se dice de un día sin nada elegido ni libre: un solo mensaje. Si quien
  * se eligió no atiende ese día, se puede reservar igual tocando una hora (queda
- * fuera de su horario); «No queda nada libre» es solo para quien atiende y lo
- * tiene todo ocupado (QA del 9 nov: salían los dos a la vez).
+ * fuera de su horario); si una ausencia o un bloqueo le quita el día, se dice cuál;
+ * «No queda nada libre» a secas es solo para quien atiende y lo tiene todo ocupado
+ * (QA del 9 nov: salían los dos a la vez).
  */
-export function emptyDaySaid(options: { moving: boolean; offDuty: string | null }): string {
+export function emptyDaySaid(options: {
+  moving: boolean
+  offDuty: string | null
+  blocked?: { label: string; reasons: string[] } | null
+}): string {
   if (options.moving) return "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
   if (options.offDuty)
     return `${options.offDuty} no atiende este día en esta sede. Toca una hora para reservar igual, o elige a otro profesional.`
+  if (options.blocked)
+    return `Este día no queda nada libre con ${options.blocked.label}: ${options.blocked.reasons.join(", ")}. Prueba otro día u otro profesional.`
   return "No queda nada libre este día. Prueba otro día u otro profesional."
 }
 
@@ -727,7 +768,7 @@ function WhenSlot({ when }: { when: WhenState }) {
       ) : when.team.length === 0 && when.ready ? null : (
         // Sin nadie con horario en la sede, eso ya se dijo arriba: un solo mensaje (QA antes de entregar).
         <p className="text-sm text-muted-foreground">
-          {emptyDaySaid({ moving, offDuty: when.offDuty })}
+          {emptyDaySaid({ moving, offDuty: when.offDuty, blocked: when.blocked })}
         </p>
       )}
       {/* Tras enviar, lo que impide reservar o mover se dice aquí una sola vez, unido a las horas. */}
