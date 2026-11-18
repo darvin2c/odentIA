@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { FindingElsewhere, offeredServices, toothPulp } from "./finding-elsewhere"
+import { FindingElsewhere, offeredServices, toothExtractionFinding, toothPulp } from "./finding-elsewhere"
 import { FindingReasonNotice, findingPickerBlocks } from "./finding-picker"
 import { searchFindings, treatmentSearchTerm } from "./finding-search"
 
@@ -189,15 +189,41 @@ describe("las exodoncias que encajan en la pieza", () => {
   const impacted = exodoncia("s-3", "Exodoncia de pieza impactada en hueso", ["molar"])
   const anterior = exodoncia("s-4", "Exodoncia de diente anterior", ["anterior"])
 
-  it("ofrece hasta tres, la más específica primero, y no la que no es para la pieza", () => {
+  // Verificación del 18 nov (H4): la primera, resaltada, era la de impactada aunque nada lo dijera.
+  it("ofrece hasta tres, la simple primero si la pieza no dice otra cosa, y no la que no es para la pieza", () => {
     const names = offeredServices([simple, surgical, impacted, anterior], 48, null).map(
       (row) => row.name,
     )
     expect(names).toEqual([
-      "Exodoncia de pieza impactada en hueso",
       "Exodoncia simple",
+      "Exodoncia de pieza impactada en hueso",
       "Exodoncia quirúrgica con colgajo",
     ])
+  })
+
+  it("primero la que nombra lo que tiene la pieza: la raíz retenida o la impactada", () => {
+    const remnant = exodoncia("s-5", "Exodoncia simple de resto radicular", null)
+    const remnantSurgical = exodoncia("s-6", "Exodoncia quirúrgica de restos radiculares", null)
+    const all = [impacted, simple, surgical, remnantSurgical, remnant]
+    expect(offeredServices(all, 48, null, "root_remnant").map((row) => row.name).slice(0, 2)).toEqual([
+      "Exodoncia simple de resto radicular",
+      "Exodoncia quirúrgica de restos radiculares",
+    ])
+    expect(offeredServices(all, 48, null, "impaction")[0]?.name).toBe("Exodoncia de pieza impactada en hueso")
+  })
+
+  it("lo que tiene la pieza sale de sus hallazgos o de su diagnóstico (K08.3, raíz retenida)", () => {
+    const dx = (code: string, toothNumber: number) => ({
+      diagnosisCode: code,
+      diagnosisSystem: "ICD-10",
+      toothNumber,
+      status: "activo",
+      voidedAt: null,
+    })
+    expect(toothExtractionFinding(["root_remnant"], [], 48)).toBe("root_remnant")
+    expect(toothExtractionFinding([], [dx("K08.3", 48)], 48)).toBe("root_remnant")
+    expect(toothExtractionFinding([], [dx("K08.3", 36)], 48)).toBeNull()
+    expect(toothExtractionFinding([], [dx("K01.1", 48)], 48)).toBe("impaction")
   })
 })
 

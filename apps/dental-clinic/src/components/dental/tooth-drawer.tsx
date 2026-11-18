@@ -937,6 +937,9 @@ export function ToothDrawer({
                     patientId={patientId}
                     encounterId={encounterId}
                     toothNumber={singleTooth}
+                    toothFindings={entriesOf(singleTooth)
+                      .filter((entry) => !entry.voidedAt && !entry.resolvedAt)
+                      .map((entry) => entry.condition)}
                     query={query}
                     diagnoses={diagnoses}
                     disabled={fieldDisabled}

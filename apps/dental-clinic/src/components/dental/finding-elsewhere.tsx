@@ -3,10 +3,10 @@ import { INDICATED_QUERY_KEYS } from "@odentia/clinic-app/lib/budgets"
 import { addDiagnosisApi, fetchPatientDiagnoses } from "@odentia/clinic-app/lib/encounters"
 import type { PlanItem } from "@odentia/clinic-app/lib/patients"
 import { fetchServices, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
-import { diagnosisCodeLabel, pulpStateOfDiagnosis } from "@odentia/clinical"
+import { diagnosisCodeLabel, findingDiagnosisCode, isDiagnosisSystem, pulpStateOfDiagnosis } from "@odentia/clinical"
 import { anatomyFitRank } from "@odentia/dental"
 import { Button } from "@odentia/ui"
-import { common, EmptyState, submitErrorMessage } from "@odentia/ui-patterns"
+import { common, EmptyState, normalizeSearchText, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SearchX } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -51,10 +51,60 @@ function pulpVariant(service: ServiceCatalogItem): Pulp | null {
  * es una endodoncia, la que dice el diagnóstico de la pieza: con pulpitis, la vital; con necrosis o
  * lo que la presupone, la no vital (`pulpStateOfDiagnosis`). Si no se sabe, las dos.
  */
+/** Lo que tiene la pieza y nombra una exodoncia: la raíz retenida o la pieza impactada. */
+type ExtractionFinding = "root_remnant" | "impaction"
+const EXTRACTION_NAMES: Record<ExtractionFinding, RegExp> = {
+  root_remnant: /\brestos? radicular/,
+  impaction: /\bimpactad|\bretenid/,
+}
+
+/**
+ * Lo que dice la pieza de su extracción, por sus hallazgos vigentes o sus diagnósticos (K08.3 o DA0A.3
+ * la raíz retenida, K01.1 o DA07.8 la impactada, los que propone el odontograma); null si nada.
+ */
+export function toothExtractionFinding(
+  findings: readonly string[],
+  diagnoses: ReadonlyArray<{
+    diagnosisCode: string
+    diagnosisSystem?: string | null
+    toothNumber: number | null
+    status: string
+    voidedAt: string | null
+  }>,
+  toothNumber: number,
+): ExtractionFinding | null {
+  const kinds = Object.keys(EXTRACTION_NAMES) as ExtractionFinding[]
+  const byFinding = kinds.find((kind) => findings.includes(kind))
+  if (byFinding) return byFinding
+  const codes = diagnoses.filter((row) => row.toothNumber === toothNumber && row.status === "activo" && !row.voidedAt)
+  return (
+    kinds.find((kind) =>
+      codes.some(
+        (row) =>
+          isDiagnosisSystem(row.diagnosisSystem) &&
+          findingDiagnosisCode(row.diagnosisSystem, kind) === row.diagnosisCode,
+      ),
+    ) ?? null
+  )
+}
+
+/**
+ * Cuál va primero entre los que encajan (verificación del 18 nov, H4: «sacar muela» en la 48 resaltaba
+ * la de impactada): el que nombra lo que tiene la pieza (la de restos radiculares con la raíz
+ * retenida; la simple antes que la quirúrgica) y, si no, la exodoncia simple, la más común.
+ */
+function extractionPreference(service: ServiceCatalogItem, said: ExtractionFinding | null): number {
+  const name = normalizeSearchText(service.name)
+  if (said && EXTRACTION_NAMES[said].test(name)) return /\bquirurgic/.test(name) ? 1 : 0
+  if (/^exodoncia simple\b/.test(name)) return 2
+  return 3
+}
+
 export function offeredServices(
   services: readonly ServiceCatalogItem[],
   toothNumber: number,
   pulp: Pulp | null,
+  said: ExtractionFinding | null = null,
 ): ServiceCatalogItem[] {
   const rank = (row: ServiceCatalogItem) =>
     anatomyFitRank(row.toothAnatomy ? toothAnatomyOf(row.toothAnatomy) : null, toothNumber)
@@ -64,7 +114,9 @@ export function offeredServices(
   const [first] = fitting
   if (!first) return []
   if (!pulpVariant(first)) {
-    const fit = fitting.filter((row) => !pulpVariant(row) && rank(row) < NO_FIT)
+    const fit = fitting
+      .filter((row) => !pulpVariant(row) && rank(row) < NO_FIT)
+      .sort((a, b) => extractionPreference(a, said) - extractionPreference(b, said) || rank(a) - rank(b))
     return fit.length > 0 ? fit.slice(0, MAX_SERVICES) : [first]
   }
   const best = fitting.filter((row) => pulpVariant(row) && rank(row) === rank(first))
@@ -110,10 +162,13 @@ export function FindingElsewhere({
   beforeWrite,
   onChanged,
   onPendingChange,
+  toothFindings = [],
 }: {
   patientId: string
   encounterId: string
   toothNumber: number
+  /** Los hallazgos vigentes de la pieza («root_remnant»): deciden qué exodoncia va primero. */
+  toothFindings?: readonly string[]
   /** Lo escrito en el buscador. */
   query: string
   /** Ningún hallazgo coincide: se buscan también diagnósticos, y sin nada se dice «Sin resultados». */
@@ -179,6 +234,7 @@ export function FindingElsewhere({
     servicesQuery.data?.data ?? [],
     toothNumber,
     toothPulp(toothDiagnoses.data?.data ?? [], toothNumber),
+    toothExtractionFinding(toothFindings, toothDiagnoses.data?.data ?? [], toothNumber),
   )
   const planned = (planQuery.data?.data ?? []).filter(
     (item) => item.toothNumber === toothNumber && PLANNED_STATUSES.includes(item.status),
