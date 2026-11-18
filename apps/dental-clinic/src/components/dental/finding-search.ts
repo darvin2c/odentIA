@@ -6,12 +6,32 @@ import { normalizeSearchText } from "@odentia/ui-patterns"
  * restauración, «funda» una corona. «Endodoncia» es además un tratamiento: el hallazgo es el
  * tratamiento de conducto que la pieza ya tiene (en azul), y el buscador ofrece también agregarla al plan.
  * Los nombres de todos los días («curación», «funda», «resto radicular») son de uso común en el Perú.
+ * Lo temporal se dice igual con «temporal» o «provisional»: «curación temporal» es la restauración
+ * temporal, no la definitiva.
  */
 const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   definitive_restoration: ["resina", "obturacion", "curacion"],
+  temporary_restoration: ["curacion temporal", "obturacion temporal", "curacion provisional", "obturacion provisional"],
   root_remnant: ["resto radicular"],
   crown: ["funda"],
+  temporary_crown: ["funda temporal", "funda provisional", "corona provisional"],
   root_canal_treatment: ["endodoncia", "conducto"],
+}
+
+/**
+ * Los hallazgos que se dicen así. Lo escrito que trae un sinónimo entero se queda con el más largo
+ * («curación temporal» lleva «curación», y es la temporal); solo si no trae ninguno, vale lo que
+ * se está escribiendo («cura» es las dos).
+ */
+function findingsSaidAs(query: string): Set<string> {
+  if (query.length < ELSEWHERE_MIN) return new Set()
+  const entries = Object.entries(FINDING_SYNONYMS) as [string, readonly string[]][]
+  const contained = entries.map(
+    ([code, words]) => [code, Math.max(0, ...words.filter((word) => query.includes(word)).map((word) => word.length))] as const,
+  )
+  const longest = Math.max(0, ...contained.map(([, length]) => length))
+  if (longest > 0) return new Set(contained.filter(([, length]) => length === longest).map(([code]) => code))
+  return new Set(entries.filter(([, words]) => words.some((word) => word.includes(query))).map(([code]) => code))
 }
 
 /**
@@ -56,16 +76,14 @@ export function searchFindings(text: string): FindingSearch {
   if (!query) return { query, findings: FINDINGS, reason: null, elsewhere: false }
   const byName = FINDINGS.filter((finding) => normalizeSearchText(finding.label).includes(query))
   const named = new Set(byName.map((finding) => finding.code))
+  const saidAs = findingsSaidAs(query)
   const otherwise = FINDINGS.filter(
     (finding) =>
       !named.has(finding.code) &&
       ((finding.variants ?? []).some((variant) =>
         normalizeSearchText(variant.label).includes(query),
       ) ||
-        (query.length >= ELSEWHERE_MIN &&
-          (FINDING_SYNONYMS[finding.code] ?? []).some(
-            (word) => word.includes(query) || query.includes(word),
-          ))),
+        saidAs.has(finding.code)),
   )
   const reason =
     query.length >= REASON_MIN

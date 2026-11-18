@@ -21,6 +21,18 @@ describe("el buscador de hallazgos de la pieza", () => {
     expect(searchFindings("caries")).toMatchObject({ elsewhere: false, reason: null })
   })
 
+  // Revisión de las reglas clínicas del 18 nov: «curación temporal» traía la restauración definitiva.
+  it("lo temporal se encuentra como temporal, no como la variante definitiva", () => {
+    expect(codes("curación temporal")).toEqual(["temporary_restoration"])
+    expect(codes("obturación temporal")).toEqual(["temporary_restoration"])
+    expect(codes("funda temporal")).toEqual(["temporary_crown"])
+    expect(codes("curación")).toEqual(["definitive_restoration"])
+    expect(codes("funda")).toContain("crown")
+    expect(codes("funda")).not.toContain("temporary_crown")
+    // A medio escribir, las dos.
+    expect(codes("cura")).toEqual(expect.arrayContaining(["definitive_restoration", "temporary_restoration"]))
+  })
+
   it("«pulpitis» no es un hallazgo: se busca en diagnósticos y tratamientos", () => {
     expect(searchFindings("pulpitis")).toMatchObject({
       findings: [],
