@@ -63,8 +63,9 @@ it("un apixabán dice el riesgo de sangrado, y el bisfosfonato que ya dejó sigu
     (row) => row.id === item.id,
   )
   expect(listed?.extractionRisks).toEqual([
-    "Toma Apixabán 5 mg: riesgo de sangrado.",
-    "Tomó Ácido zoledrónico: riesgo de osteonecrosis de los maxilares.",
+    // En minúscula en medio de la frase, como en la franja (verificación del 18 nov); la marca, no.
+    "Toma apixabán 5 mg: riesgo de sangrado.",
+    "Tomó ácido zoledrónico: riesgo de osteonecrosis de los maxilares.",
   ])
 })
 

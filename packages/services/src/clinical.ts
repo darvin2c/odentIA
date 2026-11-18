@@ -1539,6 +1539,18 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
   ]
 }
 
+/**
+ * El nombre del medicamento en medio de la frase, en minúscula como en la franja: «Toma apixabán 5 mg»,
+ * no «Toma Apixabán» como viene del catálogo (verificación del 18 nov). Una sigla («AAS») y una marca
+ * que la lista escribe con mayúscula («Eliquis», `HABITUAL_MEDICATIONS`) quedan como están.
+ */
+function drugMidSentence(name: string): string {
+  if (!/^\p{Lu}\p{Ll}/u.test(name)) return name
+  const listed = matchHabitualMedication(name, HABITUAL_MEDICATIONS)?.name
+  if (listed && /^\p{Lu}/u.test(listed)) return name
+  return name.charAt(0).toLocaleLowerCase("es") + name.slice(1)
+}
+
 /** Los antagonistas de la vitamina K (warfarina, acenocumarol): con ellos, el INR del día antes de extraer. */
 const VITAMIN_K_ANTAGONISTS_ATC = "B01AA"
 /**
@@ -1585,7 +1597,7 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
     const what =
       row.name === MEDICATION_CLASSES[group].unnamed
         ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
-        : row.name
+        : drugMidSentence(row.name)
     const vitaminK =
       row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || isVitaminKAntagonistName(row.name)
     // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
