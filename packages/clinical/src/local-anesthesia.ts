@@ -296,7 +296,9 @@ export function isHypertension(system: string | null | undefined, code: string |
  * cardiaca. En la CIE-10 de la OMS (versión 2019, cap. IX, «Enfermedades hipertensivas» I10–I15):
  * I10 (esencial), I11.9 (cardiopatía hipertensiva sin insuficiencia cardiaca), I12.x (enfermedad
  * renal hipertensiva), I13.1 (cardiorrenal con insuficiencia renal, sin la cardiaca) e I15.x
- * (secundaria). En la CIE-11 (MMS), BA00 (hipertensión esencial). Las demás sí lo llevan: I11.0 e
+ * (secundaria). En la CIE-11 (MMS), lo mismo: BA00 (esencial), BA02 (enfermedad renal
+ * hipertensiva) y BA04 (secundaria); BA01 y BA03 nombran la cardiopatía y, sin saber si hay
+ * insuficiencia cardiaca, llevan el tope como I11 e I13 sin detalle. Las demás sí lo llevan: I11.0 e
  * I13.0 dicen «con insuficiencia cardiaca (congestiva)», I13.2 «con insuficiencia cardiaca e
  * insuficiencia renal», y en I11, I13 o I13.9 sin detalle no se sabe; la insuficiencia cardiaca
  * es enfermedad cardiovascular importante, con el tope de 0,04 mg (Malamed SF, *Handbook of Local
@@ -308,7 +310,7 @@ export function isHypertensionWithoutHeartFailure(
   code: string | null | undefined,
 ): boolean {
   if (!code) return false
-  if (system === "ICD-11") return /^BA00/.test(code)
+  if (system === "ICD-11") return /^BA0[024]/.test(code)
   return /^I(10|11\.?9|12|13\.?1|15)/.test(code)
 }
 

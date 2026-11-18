@@ -181,6 +181,8 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     for (const code of ["I11.0", "I13.0", "I13.2"]) expect(capOf(code)?.conditions).toEqual([`cardiopatía (${code})`])
     for (const code of ["I10", "I11.9", "I12.0", "I12.9", "I13.1", "I15.0", "I15.9"]) expect(capOf(code)).toBeNull()
     expect(capOf("BA00", "ICD-11")).toBeNull()
+    expect(capOf("BA02", "ICD-11")).toBeNull()
+    expect(capOf("BA04", "ICD-11")).toBeNull()
     expect(capOf("BA01", "ICD-11")?.conditions).toEqual(["cardiopatía (BA01)"])
     // Sigue pidiendo tomar la presión si no se tomó hoy.
     expect(check({ conditions: [{ name: "Cardiopatía hipertensiva", diagnosisSystem: "ICD-10", diagnosisCode: "I11.0" }], asaClass: "II" }).takePressure).toBe(
