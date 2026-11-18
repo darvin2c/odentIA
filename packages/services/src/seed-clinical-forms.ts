@@ -4,7 +4,7 @@ import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, notIlike, sql } from "drizzle-orm"
 import {
   addFormAddendum,
   advanceClinicalOrder,
@@ -337,7 +337,14 @@ export async function seedClinicalForms(
   const extractions = await tx
     .select({ id: serviceCatalog.id })
     .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.organizationId, orgId), ilike(serviceCatalog.name, "%exodoncia%")))
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        ilike(serviceCatalog.name, "%exodoncia%"),
+        // «Alveoloplastia sin exodoncias» no extrae nada: no pide el de exodoncia (QA clínica del 18 nov).
+        notIlike(serviceCatalog.name, "%sin exodoncia%"),
+      ),
+    )
   const extractionConsent = consentTemplates.get("exodoncia")
   if (extractions.length > 0 && extractionConsent)
     await setConsentTemplateServices(
