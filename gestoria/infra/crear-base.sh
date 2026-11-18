@@ -22,8 +22,11 @@ set -euo pipefail
 : "${GESTORIA_APP_PASSWORD:?GESTORIA_APP_PASSWORD: la contraseña de gestoria_app}"
 CLINICS_DB="${CLINICS_DB:-dentalagent}"
 
-psql "$POSTGRES_URL" -X -v ON_ERROR_STOP=1 \
-  -v owner_pass="$GESTORIA_OWNER_PASSWORD" -v app_pass="$GESTORIA_APP_PASSWORD" -v clinics_db="$CLINICS_DB" <<'SQL'
+export GESTORIA_OWNER_PASSWORD GESTORIA_APP_PASSWORD
+# Las contraseñas las lee psql del entorno (\getenv), no de su línea de comandos: no salen en `ps`.
+psql "$POSTGRES_URL" -X -v ON_ERROR_STOP=1 -v clinics_db="$CLINICS_DB" <<'SQL'
+\getenv owner_pass GESTORIA_OWNER_PASSWORD
+\getenv app_pass GESTORIA_APP_PASSWORD
 SELECT format('CREATE ROLE gestoria LOGIN PASSWORD %L', :'owner_pass')
   WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'gestoria') \gexec
 SELECT format('CREATE ROLE gestoria_app LOGIN PASSWORD %L', :'app_pass')

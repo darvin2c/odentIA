@@ -184,11 +184,13 @@ mientras no se encienda. Para encenderlo, en este orden:
    `POSTGRES_URL` del superusuario, `GESTORIA_OWNER_PASSWORD`, `GESTORIA_APP_PASSWORD` y
    `CLINICS_DB=dentalagent`): crea la base `gestoria`, su dueño `gestoria` y `gestoria_app`, con
    tope de conexiones y de tiempo por consulta, y deja que ninguno de los dos entre a la base de
-   las clínicas (a cada usuario que hoy entra a ella se le da antes su permiso).
+   las clínicas (a cada usuario que hoy entra a ella se le da antes su permiso). Desde ahí, un
+   usuario nuevo con login en la base de las clínicas (monitoreo, réplica) necesita su
+   `GRANT CONNECT ON DATABASE dentalagent`.
 2. **El respaldo.** En el entorno del servicio `backup` de las clínicas,
    `GESTORIA_BACKUP_DATABASE_URL` (el superusuario sobre la base `gestoria`): cada vuelta la
-   vuelca, la restaura para comprobarla y la sube a `gestoria/` del mismo bucket. Un fallo sale en
-   Soporte como «Backup sin verificar» con «gestorIA» en el detalle.
+   vuelca, la restaura para comprobarla y la sube a `gestoria/` del mismo bucket. Un fallo queda
+   en el registro del servicio (`[backup] …: gestorIA: FALLO en …`); todavía no sale en Soporte.
 3. **El servidor.** Un proyecto nuevo en OpenShip con `gestoria/compose.prod.yaml` y las
    variables de `gestoria/infra/prod/.env.example`; en GitHub, `GESTORIA_OPENSHIP_PROJECT_ID`
    (variable) y `GESTORIA_OPENSHIP_DEPLOY_TOKEN` (secreto). Desde ahí cada cambio de

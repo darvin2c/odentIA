@@ -20,7 +20,7 @@ import {
   VerifyEmailSentPage,
 } from "./entrada"
 import { SignedOut } from "./lib/api"
-import { authClient, authFetch } from "./lib/cuenta"
+import { authClient, authFetch, safeNext } from "./lib/cuenta"
 import { InvitationPage, NewStorePage, StorePage, StoresPage } from "./tiendas"
 
 // El tema sigue al del equipo de la persona.
@@ -48,12 +48,7 @@ async function requireSession({ location }: { location: { href: string } }) {
 async function skipIfSignedIn({ search }: { search: Record<string, unknown> }) {
   const { data } = await authClient.getSession().catch(() => ({ data: null }))
   if (data?.session) {
-    const next =
-      typeof search.next === "string" &&
-      search.next.startsWith("/") &&
-      !search.next.startsWith("//")
-        ? search.next
-        : "/"
+    const next = safeNext(typeof search.next === "string" ? search.next : null) ?? "/"
     throw redirect({ href: next })
   }
 }

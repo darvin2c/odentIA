@@ -78,6 +78,9 @@ const people = {
   mario: { id: "u-mario", email: "mario@calzados.test", name: "Mario Huamán" },
   lucia: { id: "u-lucia", email: "lucia@calzados.test", name: "Lucía Torres" },
   ajena: { id: "u-ajena", email: "ajena@otra.test", name: "Ajena" },
+  dueno: { id: "u-dueno", email: "dueno@polos.test", name: "Dueño Único" },
+  admin: { id: "u-admin", email: "admin@polos.test", name: "Admin Polos" },
+  nueva: { id: "u-nueva", email: "nueva@polos.test", name: "Nueva" },
 }
 type Who = keyof typeof people
 
@@ -492,6 +495,70 @@ describe("la copia de las cuentas", () => {
     asked = []
     expect((await reviewAccountCopies(db.ownerDb, config())).reviewed).toBe(0)
     expect(asked).toEqual([])
+  })
+})
+
+describe("cuando quien manda deja de poder", () => {
+  it("al cerrar su cuenta el único Dueño, el Administrador más antiguo pasa a Dueño y sus invitaciones se anulan", async () => {
+    const created = await call("dueno", "POST", "/api/tiendas", { name: "Polos", currency: "PEN" })
+    const polos = created.json.store.id as string
+    const toAdmin = await call("dueno", "POST", `/api/tiendas/${polos}/invitaciones`, {
+      email: "admin@polos.test",
+      role: "admin",
+    })
+    expect(
+      (await call("admin", "POST", `/api/invitaciones/${toAdmin.json.invitation.id}/aceptar`))
+        .status,
+    ).toBe(200)
+    const toNew = await call("dueno", "POST", `/api/tiendas/${polos}/invitaciones`, {
+      email: "nueva@polos.test",
+      role: "owner",
+    })
+    const body = JSON.stringify({
+      type: "cuenta.cerrada",
+      timestamp: new Date().toISOString(),
+      data: { userId: "u-dueno" },
+    })
+    const closed = await app.request("https://servidor.gestoria.test/avisos/cuenta", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...signMessage({ secret: SECRET, id: "evt-dueno", body }),
+      },
+      body,
+    })
+    expect(closed.status).toBe(200)
+    const team = await call("admin", "GET", `/api/tiendas/${polos}/equipo`)
+    expect(team.json.members).toEqual([
+      expect.objectContaining({ userId: "u-admin", role: "owner" }),
+    ])
+    expect(team.json.invitations).toEqual([])
+    expect(
+      (await call("nueva", "POST", `/api/invitaciones/${toNew.json.invitation.id}/aceptar`)).status,
+    ).toBe(404)
+  })
+
+  it("si quien invitó ya no puede dar ese rol, su invitación no vale", async () => {
+    const created = await call("admin", "GET", "/api/yo")
+    const polos = (created.json.stores as { id: string; name: string }[]).find(
+      (s) => s.name === "Polos",
+    )!.id
+    // Un Administrador invita como Ventas y después lo quitan del equipo.
+    const first = await call("admin", "POST", `/api/tiendas/${polos}/invitaciones`, {
+      email: "nueva@polos.test",
+      role: "admin",
+    })
+    expect(
+      (await call("nueva", "POST", `/api/invitaciones/${first.json.invitation.id}/aceptar`)).status,
+    ).toBe(200)
+    const byNew = await call("nueva", "POST", `/api/tiendas/${polos}/invitaciones`, {
+      email: "ajena@otra.test",
+      role: "sales",
+    })
+    expect((await call("admin", "DELETE", `/api/tiendas/${polos}/equipo/u-nueva`)).status).toBe(204)
+    expect(
+      (await call("ajena", "POST", `/api/invitaciones/${byNew.json.invitation.id}/aceptar`)).status,
+    ).toBe(404)
   })
 })
 

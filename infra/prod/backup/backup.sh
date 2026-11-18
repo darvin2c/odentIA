@@ -73,9 +73,13 @@ stop_verify() {
 
 # La base de gestorIA (ADR 0203), en el mismo servidor: su propio volcado, verificado igual, en
 # `gestoria/` del mismo bucket y con la misma retención. Solo si `GESTORIA_BACKUP_DATABASE_URL`
-# está puesta; sin ella, nada cambia. Un fallo se anota en admin.platform_backup (Soporte lo ve,
-# con «gestorIA» en el detalle); uno verificado no se anota: el aviso de las clínicas sigue
-# contando solo los suyos.
+# está puesta; sin ella, nada cambia. No se anota en admin.platform_backup: ese registro es el
+# aviso de las clínicas («Backup sin verificar») y lee solo la última vuelta. Un fallo de gestorIA
+# queda en el registro del servicio, con «gestorIA» al inicio.
+gestoria_fail() {
+  echo "[backup] $ts: gestorIA: FALLO en $1: $2" >&2
+}
+
 backup_gestoria() {
   local work object log conn migrations expected size
   work=$(mktemp -d /tmp/backup-gestoria.XXXXXX)
@@ -83,19 +87,19 @@ backup_gestoria() {
   log="$work/log"
   object="gestoria/gestoria-$ts.dump"
   if ! pg_dump --format=custom --no-owner --file="$work/dump" "$GESTORIA_BACKUP_DATABASE_URL" 2>"$log"; then
-    record fallido volcado "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+    gestoria_fail volcado "$(tail -c 900 "$log")"
   elif ! verify "$work/dump" "$work" "$log"; then
     stop_verify "$work"
-    record fallido restauracion "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+    gestoria_fail restauracion "$(tail -c 900 "$log")"
   else
     conn="host=$work port=5499 user=postgres dbname=verificar"
     migrations=$(psql "$conn" -X -At -c "select count(*) from drizzle.__drizzle_migrations" 2>>"$log" || true)
     expected=$(psql "$GESTORIA_BACKUP_DATABASE_URL" -X -At -c "select count(*) from drizzle.__drizzle_migrations" 2>>"$log" || true)
     stop_verify "$work"
     if [ -z "$migrations" ] || [ "$migrations" = 0 ] || [ "$migrations" != "$expected" ]; then
-      record fallido comprobacion "" "" "" "" "" "gestorIA: restaurado con $migrations migraciones (producción: $expected)"
+      gestoria_fail comprobacion "restaurado con $migrations migraciones (producción: $expected)"
     elif ! rclone copyto "$work/dump" "r2:$BACKUP_BUCKET/$object" 2>"$log"; then
-      record fallido subida "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+      gestoria_fail subida "$(tail -c 900 "$log")"
     else
       size=$(stat -c %s "$work/dump")
       echo "[backup] $ts: gestorIA verificado y subido ($size bytes, $migrations migraciones)"

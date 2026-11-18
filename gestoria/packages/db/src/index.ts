@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm"
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js"
-import postgres from "postgres"
+import postgres, { type Sql } from "postgres"
 import * as schema from "./schema.js"
 
 export * from "./schema.js"
@@ -58,4 +58,31 @@ export async function withPerson<T>(
 /** Cambia la tienda dentro de la misma transacción (crear una tienda, aceptar una invitación). */
 export async function enterStore(tx: Db, storeId: string): Promise<void> {
   await tx.execute(sql`select set_config('app.store_id', ${storeId}, true)`)
+}
+
+/**
+ * Corre `fn` si nadie más tiene el candado `key` (candado de sesión en una conexión reservada):
+ * un trabajo que espera a otro servidor no deja una transacción abierta. Null si estaba tomado.
+ * Solo con una conexión de `createOwnerDb` o `createAppDb`, nunca dentro de una transacción.
+ */
+export async function withSessionLock<T>(
+  db: Db,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T | null> {
+  const client = (db as unknown as { $client: Sql }).$client
+  const reserved = await client.reserve()
+  try {
+    const [lock] = await reserved<
+      { ok: boolean }[]
+    >`select pg_try_advisory_lock(hashtext(${key})) as ok`
+    if (!lock?.ok) return null
+    try {
+      return await fn()
+    } finally {
+      await reserved`select pg_advisory_unlock(hashtext(${key}))`
+    }
+  } finally {
+    reserved.release()
+  }
 }

@@ -1,5 +1,6 @@
 import type { Db } from "@gestoria/db"
 import { type Context, Hono } from "hono"
+import { bodyLimit } from "hono/body-limit"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
@@ -101,9 +102,25 @@ export function createApp(deps: AppDeps) {
         400,
       )
     }
+    // Dos pedidos iguales a la vez (invitar dos veces, aceptar dos veces): uno gana.
+    const cause = (error as { cause?: { code?: string } }).cause
+    if ((error as { code?: string }).code === "23505" || cause?.code === "23505")
+      return c.json(
+        errorBody(c, "CONFLICT", "Eso ya se hizo hace un momento. Recarga para verlo."),
+        409,
+      )
     console.error("gestoria-api:", error)
     return c.json(errorBody(c, "INTERNAL", "Algo falló de nuestro lado. Inténtalo de nuevo."), 500)
   })
+
+  // Tope de tamaño leído mientras llega (también sin `content-length`).
+  app.use(
+    "*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) => c.json(errorBody(c, "PAYLOAD_TOO_LARGE", "Pedido demasiado grande"), 413),
+    }),
+  )
 
   app.get("/health", (c) => c.json({ ok: true }))
 

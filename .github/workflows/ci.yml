@@ -679,7 +679,7 @@ jobs:
       needs.alcance.result == 'success' &&
       (needs.deploy.result == 'success' || (needs.deploy.result == 'skipped' && needs.alcance.outputs.vps != 'true')) &&
       (needs.deploy-web.result == 'success' || (needs.deploy-web.result == 'skipped' && needs.alcance.outputs.cloudflare == '[]')) &&
-      (needs.deploy-gestoria.result == 'success' || needs.deploy-gestoria.result == 'skipped') }}
+      (needs.deploy-gestoria.result == 'success' || (needs.deploy-gestoria.result == 'skipped' && (needs.alcance.outputs.gestoria_vps != 'true' || vars.GESTORIA_OPENSHIP_PROJECT_ID == ''))) }}
     needs: [alcance, deploy, deploy-web, deploy-gestoria]
     runs-on: ubuntu-latest
     permissions:

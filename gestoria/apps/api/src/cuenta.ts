@@ -5,7 +5,9 @@ import {
   accountEventReceipt,
   type Db,
   storeEvent,
+  storeInvitation,
   storeMember,
+  withSessionLock,
 } from "@gestoria/db"
 import { and, asc, eq, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose"
@@ -113,7 +115,7 @@ export async function syncAccountCopy(
   const changed =
     copy.name !== values.name || copy.email !== values.email || copy.image !== values.image
   if (reopened || changed || now.getTime() - copy.seenAt.getTime() > SEEN_EVERY_MS) {
-    await ownerDb
+    const updated = await ownerDb
       .update(accountCopy)
       .set({
         ...values,
@@ -121,7 +123,12 @@ export async function syncAccountCopy(
         ...(changed || reopened ? { updatedAt: now } : {}),
         ...(reopened ? { state: "activa" as const, stateChangedAt: now } : {}),
       })
-      .where(eq(accountCopy.userId, who.sub))
+      // Si el estado cambió entre medio (un aviso o la revisión lo bloqueó), no se pisa.
+      .where(
+        and(eq(accountCopy.userId, who.sub), eq(accountCopy.stateChangedAt, copy.stateChangedAt)),
+      )
+      .returning({ userId: accountCopy.userId })
+    if (updated.length === 0) return syncAccountCopy(ownerDb, who, now)
   }
   return { userId: who.sub, email: values.email, name: values.name }
 }
@@ -200,26 +207,75 @@ async function applyReview(tx: Db, account: ReviewedAccount, now: Date): Promise
     .where(eq(accountCopy.userId, account.userId))
 }
 
-/** Cierra la copia y saca a la persona de todos sus equipos, dejándolo anotado en cada tienda. */
+/**
+ * Cierra la copia y saca a la persona de todos sus equipos, dejándolo anotado en cada tienda.
+ * Sus invitaciones pendientes se anulan. Si era el único Dueño de una tienda, el Administrador
+ * más antiguo pasa a Dueño (anotado): una tienda nunca se queda sin quien decida el plan. Sin
+ * Administrador, la tienda queda sin Dueño y lo dice su registro.
+ */
 async function closeCopy(tx: Db, userId: string, now: Date): Promise<void> {
   await tx
     .update(accountCopy)
     .set({ state: "cerrada", stateChangedAt: now, updatedAt: now })
     .where(and(eq(accountCopy.userId, userId), ne(accountCopy.state, "cerrada")))
+  await tx
+    .update(storeInvitation)
+    .set({ revokedAt: now, revokedBy: userId })
+    .where(
+      and(
+        eq(storeInvitation.invitedBy, userId),
+        isNull(storeInvitation.acceptedAt),
+        isNull(storeInvitation.revokedAt),
+      ),
+    )
   const memberships = await tx
     .delete(storeMember)
     .where(eq(storeMember.userId, userId))
     .returning({ storeId: storeMember.storeId, role: storeMember.role })
-  if (memberships.length > 0)
-    await tx.insert(storeEvent).values(
-      memberships.map((m) => ({
-        storeId: m.storeId,
-        actorUserId: null,
-        action: "cuenta.cerrada" as const,
-        subject: userId,
-        detail: { role: m.role },
-      })),
-    )
+  for (const m of memberships) {
+    // eslint-disable-next-line no-await-in-loop
+    await tx.insert(storeEvent).values({
+      storeId: m.storeId,
+      actorUserId: null,
+      action: "cuenta.cerrada",
+      subject: userId,
+      detail: { role: m.role },
+    })
+    if (m.role !== "owner") continue
+    // eslint-disable-next-line no-await-in-loop
+    const [owner] = await tx
+      .select({ userId: storeMember.userId })
+      .from(storeMember)
+      .where(and(eq(storeMember.storeId, m.storeId), eq(storeMember.role, "owner")))
+      .limit(1)
+    if (owner) continue
+    // eslint-disable-next-line no-await-in-loop
+    const [admin] = await tx
+      .select({ userId: storeMember.userId })
+      .from(storeMember)
+      .where(and(eq(storeMember.storeId, m.storeId), eq(storeMember.role, "admin")))
+      .orderBy(asc(storeMember.createdAt), asc(storeMember.userId))
+      .limit(1)
+    if (!admin) {
+      console.warn(
+        `gestoria-api: la tienda ${m.storeId} quedó sin Dueño al cerrarse la cuenta de su único Dueño`,
+      )
+      continue
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await tx
+      .update(storeMember)
+      .set({ role: "owner" })
+      .where(and(eq(storeMember.storeId, m.storeId), eq(storeMember.userId, admin.userId)))
+    // eslint-disable-next-line no-await-in-loop
+    await tx.insert(storeEvent).values({
+      storeId: m.storeId,
+      actorUserId: null,
+      action: "equipo.rol",
+      subject: admin.userId,
+      detail: { from: "admin", to: "owner", motivo: "El único Dueño cerró su cuenta" },
+    })
+  }
 }
 
 /* ---------- Los avisos de la cuenta ---------- */
@@ -313,11 +369,15 @@ export async function reviewAccountCopies(
   now = new Date(),
 ): Promise<ReviewRun> {
   if (!config.eventsSecret) return { reviewed: 0, failed: false }
-  return ownerDb.transaction(async (lockTx) => {
-    const [lock] = await lockTx.execute<{ ok: boolean }>(
-      sql`select pg_try_advisory_xact_lock(hashtext('gestoria_revision_de_cuentas')) as ok`,
-    )
-    if (!lock?.ok) return { reviewed: 0, failed: false }
+  // Un solo proceso a la vez, sin dejar una transacción abierta mientras se espera a la cuenta.
+  const run = await withSessionLock(ownerDb, "gestoria_revision_de_cuentas", () =>
+    reviewDue(ownerDb, config, now),
+  )
+  return run ?? { reviewed: 0, failed: false }
+}
+
+async function reviewDue(ownerDb: Db, config: AccountConfig, now: Date): Promise<ReviewRun> {
+  {
     const due = new Date(now.getTime() - REVIEW_EVERY_MS)
     let reviewedCount = 0
     for (;;) {
@@ -363,5 +423,5 @@ export async function reviewAccountCopies(
       })
       reviewedCount += batch.length
     }
-  })
+  }
 }

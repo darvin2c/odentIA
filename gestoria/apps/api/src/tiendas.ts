@@ -359,6 +359,23 @@ export async function acceptInvitation(
         "Esta invitación ya no está vigente o es para otro correo",
       )
     await enterStore(tx, invitation.storeId)
+    // Quien invitó tiene que seguir pudiendo dar ese rol: si lo quitaron o bajó de rol, su
+    // invitación ya no vale.
+    const [inviter] = await tx
+      .select({ role: storeMember.role })
+      .from(storeMember)
+      .where(
+        and(
+          eq(storeMember.storeId, invitation.storeId),
+          eq(storeMember.userId, invitation.invitedBy),
+        ),
+      )
+    if (!inviter || !canAssign(inviter.role, invitation.role))
+      throw new StoreError(
+        404,
+        "NOT_FOUND",
+        "Esta invitación ya no está vigente: quien te invitó ya no puede dar ese rol. Pide otra.",
+      )
     const [member] = await tx
       .select({ role: storeMember.role })
       .from(storeMember)

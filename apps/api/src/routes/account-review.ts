@@ -45,8 +45,8 @@ export async function answerAccountReview(
   const declared = Number(c.req.header("content-length") ?? "0")
   if (declared > MAX_BODY_BYTES)
     return c.json(errorBody(c, "PAYLOAD_TOO_LARGE", "Pregunta demasiado grande"), 413)
-  const body = await c.req.text()
-  if (body.length > MAX_BODY_BYTES)
+  const body = await readLimited(c.req.raw, MAX_BODY_BYTES)
+  if (body === null)
     return c.json(errorBody(c, "PAYLOAD_TOO_LARGE", "Pregunta demasiado grande"), 413)
   if (!verifySignedMessage({ secret: sender.secret, headers: c.req.raw.headers, body }))
     return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
@@ -61,4 +61,24 @@ export async function answerAccountReview(
   }
   const review = deps.reviewAccounts ?? ((ids: string[]) => reviewAccounts(deps.ownerDb, ids))
   return c.json({ accounts: await review(parsed.userIds) })
+}
+
+/** El cuerpo como texto, leído mientras llega y cortado al pasar el tope (también sin `content-length`). */
+async function readLimited(request: Request, max: number): Promise<string | null> {
+  if (!request.body) return ""
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString("utf8")
 }

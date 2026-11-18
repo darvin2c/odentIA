@@ -116,6 +116,13 @@ export function forgetToken(): void {
 
 /** Una dirección de vuelta de la propia app; nunca otra web. */
 export function safeNext(next: string | undefined | null): string | null {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return null
-  return next
+  if (!next?.startsWith("/")) return null
+  // El navegador quita tabulaciones y saltos y lee «\» como «/»: se resuelve como él y se
+  // acepta solo si queda en el mismo origen.
+  try {
+    const url = new URL(next, window.location.origin)
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : null
+  } catch {
+    return null
+  }
 }
