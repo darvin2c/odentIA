@@ -2,8 +2,6 @@ import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduc
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import {
-  ACCOUNT_APP_INFO,
-  ACCOUNT_APPS,
   type AccountApp,
   appOfProduct,
   BASE_ACCOUNT_APP,
@@ -370,10 +368,11 @@ export interface LifecycleCandidate {
 
 const appOfSignup = (value: string | null): AccountApp => (isAccountApp(value) ? value : BASE_ACCOUNT_APP)
 
-/** Las apps de clínicas: el aviso «crea tu clínica» es solo de ellas. */
+/**
+ * Las apps de clínicas: los avisos de la cuenta («completa tu cuenta», «crea tu clínica») son
+ * solo de ellas; los de otra app los manda esa app (ADR 0201).
+ */
 const CLINIC_APPS: readonly AccountApp[] = CLINICAL_PRODUCTS.map(appOfProduct)
-/** Las apps con correos de su marca: el recordatorio de verificar sale solo con la suya. */
-const MAILED_APPS: readonly AccountApp[] = ACCOUNT_APPS.filter((app) => ACCOUNT_APP_INFO[app].mailBrand)
 
 // ---------------------------------------------------------------------------
 // Validación de borde (zod) y guards de rol interno
@@ -1939,8 +1938,9 @@ export async function findLifecycleCandidates(
       and(
         eq(user.emailVerified, false),
         lt(user.createdAt, reminderCutoff),
-        // La de una app sin correos de su marca no ocupa el lugar de otra (ADR 0201).
-        or(isNull(user.signupApp), inArray(user.signupApp, [...MAILED_APPS])),
+        // La de una app que manda sus propios avisos no ocupa el lugar de otra (ADR 0201): solo
+        // entra cuando toca limpiarla, a los 30 días, como todas.
+        or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS]), lt(user.createdAt, cleanupCutoff)),
       ),
     )
     .orderBy(user.createdAt)

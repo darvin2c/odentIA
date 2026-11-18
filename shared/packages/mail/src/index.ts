@@ -1,5 +1,14 @@
 import nodemailer, { type Transporter } from "nodemailer"
-import { BASE_MAIL_BRAND, logoAttachments, type MailAccent, type MailBrand, mailBrandName, type MailTemplate, renderEmail } from "./layout.js"
+import {
+  BASE_MAIL_BRAND,
+  logoAttachments,
+  type MailAccent,
+  type MailBrand,
+  mailBrandName,
+  mailBrandPlace,
+  type MailTemplate,
+  renderEmail,
+} from "./layout.js"
 
 export {
   BASE_MAIL_BRAND,
@@ -15,6 +24,7 @@ export {
   type MailBrand,
   type MailBrandDomains,
   mailBrandName,
+  mailBrandPlace,
   type MailTemplate,
   renderEmail,
   resetMailLinks,
@@ -176,7 +186,7 @@ export function changeEmailConfirmationTemplate({
 
 /**
  * Enlace para entrar sin la contraseña («¿Olvidaste tu contraseña?»): deja a la
- * persona dentro de su clínica, donde elige una nueva. `expiresText` es la hora
+ * persona dentro de su clínica (o su tienda, en gestorIA), donde elige una nueva. `expiresText` es la hora
  * a la que vence en la zona de quien lo pidió («9:20 (hora de Lima)»); sin ella
  * se dice el plazo.
  */
@@ -197,7 +207,7 @@ export function accessLinkTemplate({
     subject: `Tu enlace para entrar a ${name}`,
     preview: `Sirve una sola vez y ${expires}.`,
     title: "Tu enlace para entrar",
-    paragraphs: [`${hello(firstName)}Pediste entrar sin tu contraseña. Con este botón entras a tu clínica y eliges una nueva.`],
+    paragraphs: [`${hello(firstName)}Pediste entrar sin tu contraseña. Con este botón entras a tu ${mailBrandPlace(brand)} y eliges una nueva.`],
     action: { label: `Entrar a ${name}`, url },
     note: `Sirve una sola vez y ${expires}. Si no lo pediste, ignora este correo: tu contraseña sigue igual.`,
     reason: `Te escribimos porque alguien pidió entrar a tu cuenta de ${name} sin contraseña.`,
@@ -290,6 +300,7 @@ export function invitationTemplate({
   expires?: { at: Date; timeZone: string } | undefined
 } & Branded): MailTemplate {
   const name = mailBrandName(brand)
+  const place = mailBrandPlace(brand)
   return renderEmail({
     brand,
     ...(accent ? { accent } : {}),
@@ -298,7 +309,7 @@ export function invitationTemplate({
     title: `Te invitaron a ${organizationName}`,
     paragraphs: [`Hola. ${inviterName} te invitó a unirte al equipo de ${organizationName} en ${name}.`],
     action: { label: "Aceptar invitación", url },
-    note: `${expires ? `El enlace vale hasta el ${expiresWords(expires.at, expires.timeZone)}. ` : ""}Entras con tu correo y eliges tu contraseña. Si no conoces a esta clínica, ignora este correo.`,
+    note: `${expires ? `El enlace vale hasta el ${expiresWords(expires.at, expires.timeZone)}. ` : ""}Entras con tu correo y eliges tu contraseña. Si no conoces a esta ${place}, ignora este correo.`,
     reason: `Te escribimos porque ${inviterName} te invitó desde ${name}.`,
   })
 }
@@ -365,13 +376,15 @@ export function staffInvitationTemplate({ url }: { url: string }): MailTemplate 
 
 /**
  * Recordatorios de una cuenta sin terminar: sin verificar a los 3 días (se
- * borra a los 30) o verificada y sin clínica. Informativos, no publicidad.
+ * borra a los 30) o verificada y sin clínica. Informativos, no publicidad. En
+ * gestorIA dicen «tienda» donde las clínicas dicen «clínica».
  */
 export function accountReminderTemplate(
   input: ({ kind: "sin_verificar"; url: string; days: number } | { kind: "sin_clinica"; url: string }) & Branded,
 ): MailTemplate {
   const brand = input.brand
   const name = mailBrandName(brand)
+  const place = mailBrandPlace(brand)
   if (input.kind === "sin_verificar") {
     return renderEmail({
     brand,
@@ -379,7 +392,7 @@ export function accountReminderTemplate(
       preview: "Verifícala o, si no la necesitas, se eliminará a los 30 días.",
       title: "Completa tu cuenta",
       paragraphs: [
-        `Hola. Creaste una cuenta en ${name}, pero aún no la verificaste ni pertenece a ninguna clínica.`,
+        `Hola. Creaste una cuenta en ${name}, pero aún no la verificaste ni pertenece a ninguna ${place}.`,
         `Si quieres usarla, verifica tu correo con este botón. Sirve durante ${input.days} días; después, entra con tu correo y pide otro enlace.`,
       ],
       action: { label: "Verificar mi correo", url: input.url },
@@ -389,13 +402,13 @@ export function accountReminderTemplate(
   }
   return renderEmail({
     brand,
-    subject: `Tu cuenta de ${name} está verificada: crea o acepta tu clínica`,
-    preview: "Crea tu clínica o acepta la invitación que te enviaron.",
-    title: "Crea o acepta tu clínica",
-    paragraphs: ["Hola. Tu cuenta ya está verificada, pero aún no pertenece a ninguna clínica."],
-    action: { label: "Crear mi clínica", url: input.url },
-    note: "Si te invitaron a una clínica, acepta la invitación desde el correo que te enviaron.",
-    reason: `Te escribimos porque tu cuenta de ${name} aún no tiene clínica. Es un aviso informativo, no publicidad.`,
+    subject: `Tu cuenta de ${name} está verificada: crea o acepta tu ${place}`,
+    preview: `Crea tu ${place} o acepta la invitación que te enviaron.`,
+    title: `Crea o acepta tu ${place}`,
+    paragraphs: [`Hola. Tu cuenta ya está verificada, pero aún no pertenece a ninguna ${place}.`],
+    action: { label: `Crear mi ${place}`, url: input.url },
+    note: `Si te invitaron a una ${place}, acepta la invitación desde el correo que te enviaron.`,
+    reason: `Te escribimos porque tu cuenta de ${name} aún no tiene ${place}. Es un aviso informativo, no publicidad.`,
   })
 }
 

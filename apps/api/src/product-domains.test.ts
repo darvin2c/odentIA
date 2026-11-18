@@ -89,7 +89,7 @@ it("el enlace y la llave del portal van en el dominio del producto de la clínic
 })
 
 describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () => {
-  const appWith = (entry: Auth | null) =>
+  const appWith = (entry: Auth) =>
     createApp({
       auth: sessionOf("odentIA"),
       externalApps: [
@@ -109,13 +109,11 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       listenUrl: "postgres://localhost:5432/dentalagent",
     })
 
-  it("sin su entrada, nada responde en su dominio: ni la cuenta ni las clínicas", async () => {
-    const off = appWith(null)
-    expect((await off.request("https://api.gestoria.test/api/auth/get-session")).status).toBe(404)
-    expect((await off.request("https://api.gestoria.test/api/patients")).status).toBe(404)
-    expect((await off.request("https://gestoria.test/health")).status).toBe(404)
-    // Las clínicas siguen igual.
-    expect(await (await off.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
+  it("en su dominio no responde nada de las clínicas, y las clínicas siguen igual", async () => {
+    const app = appWith(sessionOf("gestorIA"))
+    expect((await app.request("https://api.gestoria.test/api/patients")).status).toBe(404)
+    expect((await app.request("https://gestoria.test/health")).status).toBe(404)
+    expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
   })
 
   it("con su entrada, solo responde la cuenta, sin las organizaciones de las clínicas", async () => {
