@@ -172,6 +172,22 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     ])
   })
 
+  // Revisión de las reglas clínicas del 18 nov: la cardiopatía hipertensiva con insuficiencia
+  // cardiaca no es «hipertensión»; lleva el tope, aunque la ASA sea II y la presión de hoy esté bien.
+  it("la cardiopatía hipertensiva con insuficiencia cardiaca lleva tope; la hipertensión sin ella, no", () => {
+    const vitals = { presionSistolica: 128, presionDiastolica: 80 }
+    const capOf = (diagnosisCode: string, diagnosisSystem = "ICD-10") =>
+      check({ conditions: [{ name: "Cardiopatía", diagnosisSystem, diagnosisCode }], asaClass: "II", vitals }).cap
+    for (const code of ["I11.0", "I13.0", "I13.2"]) expect(capOf(code)?.conditions).toEqual([`cardiopatía (${code})`])
+    for (const code of ["I10", "I11.9", "I12.0", "I12.9", "I13.1", "I15.0", "I15.9"]) expect(capOf(code)).toBeNull()
+    expect(capOf("BA00", "ICD-11")).toBeNull()
+    expect(capOf("BA01", "ICD-11")?.conditions).toEqual(["cardiopatía (BA01)"])
+    // Sigue pidiendo tomar la presión si no se tomó hoy.
+    expect(check({ conditions: [{ name: "Cardiopatía hipertensiva", diagnosisSystem: "ICD-10", diagnosisCode: "I11.0" }], asaClass: "II" }).takePressure).toBe(
+      "cardiopatía hipertensiva (I11.0)",
+    )
+  })
+
   it("cada anestésico tiene su tope y su dosis por kilo", () => {
     for (const anesthetic of LOCAL_ANESTHETICS) {
       expect(anesthetic.mgPerKg).toBeGreaterThan(0)

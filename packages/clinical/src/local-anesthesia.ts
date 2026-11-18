@@ -177,8 +177,9 @@ function conditionWords(condition: AnesthesiaCondition): string {
  * El tope de 0,04 mg por sesión (Malamed, *Handbook of Local Anesthesia*, 7.ª ed., 2020) sale con:
  * - la ASA III o IV, que pone el profesional (donde el producto la pide; latidIA no la pide y ahí
  *   llega nula);
- * - una enfermedad del corazón con su código, sin la hipertensión (CIE-10 I10–I15; CIE-11
- *   BA00–BA04): la fibrilación auricular (I48) sí cuenta;
+ * - una enfermedad del corazón con su código, sin la hipertensión que no la tiene
+ *   (`isHypertensionWithoutHeartFailure`): la fibrilación auricular (I48) y la cardiopatía
+ *   hipertensiva con insuficiencia cardiaca (I11.0, I13.0, I13.2) sí cuentan;
  * - la presión de hoy de 160/95 o más, desde los 13 años (`EPINEPHRINE_CAP_PRESSURE`).
  * Sin edad (sin fecha de nacimiento) la presión cuenta igual, como en `bloodPressureAlert`. La
  * enfermedad escrita sin código no cuenta: no se reconoce por el nombre. Es un aviso: decide el
@@ -192,7 +193,9 @@ export function epinephrineCheckOf(input: {
 }): EpinephrineCheck {
   const asaClass = isSevereAsa(input.asaClass) ? (input.asaClass ?? null) : null
   const cardiac = input.conditions.filter(
-    (row) => isCardiacCondition(row.diagnosisSystem, row.diagnosisCode) && !isHypertension(row.diagnosisSystem, row.diagnosisCode),
+    (row) =>
+      isCardiacCondition(row.diagnosisSystem, row.diagnosisCode) &&
+      !isHypertensionWithoutHeartFailure(row.diagnosisSystem, row.diagnosisCode),
   )
   const hypertension = input.conditions.find((row) => isHypertension(row.diagnosisSystem, row.diagnosisCode))
   const systolic = input.vitals?.presionSistolica
@@ -265,7 +268,8 @@ export function localAnesthesiaWords(input: {
  * Una enfermedad del corazón o de la presión registrada con su código: CIE-10 I00–I52 (fiebre
  * reumática, hipertensión, isquemia, corazón pulmonar y otras del corazón) o CIE-11 BA00–BC9Z y
  * la insuficiencia cardiaca (BD1x). Lo cerebrovascular y lo de las arterias no cuentan aquí. Para
- * el tope de epinefrina se quita la hipertensión (`isHypertension`).
+ * el tope de epinefrina se quita la hipertensión sin insuficiencia cardiaca
+ * (`isHypertensionWithoutHeartFailure`).
  */
 export function isCardiacCondition(
   system: string | null | undefined,
@@ -278,12 +282,34 @@ export function isCardiacCondition(
 
 /**
  * La hipertensión registrada con su código: CIE-10 I10–I15 (enfermedades hipertensivas) o CIE-11
- * BA00–BA04. Verificar los rangos de la CIE-11 en el navegador de la OMS.
+ * BA00–BA04. Pide tomar la presión antes de anestesiar. Verificar los rangos de la CIE-11 en el
+ * navegador de la OMS.
  */
 export function isHypertension(system: string | null | undefined, code: string | null | undefined): boolean {
   if (!code) return false
   if (system === "ICD-11") return /^BA0[0-4]/.test(code)
   return /^I1[0-5]/.test(code)
+}
+
+/**
+ * La hipertensión que por sí sola no lleva el tope de epinefrina: la que no dice insuficiencia
+ * cardiaca. En la CIE-10 de la OMS (versión 2019, cap. IX, «Enfermedades hipertensivas» I10–I15):
+ * I10 (esencial), I11.9 (cardiopatía hipertensiva sin insuficiencia cardiaca), I12.x (enfermedad
+ * renal hipertensiva), I13.1 (cardiorrenal con insuficiencia renal, sin la cardiaca) e I15.x
+ * (secundaria). En la CIE-11 (MMS), BA00 (hipertensión esencial). Las demás sí lo llevan: I11.0 e
+ * I13.0 dicen «con insuficiencia cardiaca (congestiva)», I13.2 «con insuficiencia cardiaca e
+ * insuficiencia renal», y en I11, I13 o I13.9 sin detalle no se sabe; la insuficiencia cardiaca
+ * es enfermedad cardiovascular importante, con el tope de 0,04 mg (Malamed SF, *Handbook of Local
+ * Anesthesia*, 7.ª ed., 2020, evaluación física, enfermedad cardiovascular; verificar la página).
+ * Es un aviso: decide el profesional.
+ */
+export function isHypertensionWithoutHeartFailure(
+  system: string | null | undefined,
+  code: string | null | undefined,
+): boolean {
+  if (!code) return false
+  if (system === "ICD-11") return /^BA00/.test(code)
+  return /^I(10|11\.?9|12|13\.?1|15)/.test(code)
 }
 
 /** La clasificación ASA que se elige en el consultorio (ASA 2020): V y VI no son de consultorio. */
