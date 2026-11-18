@@ -44,26 +44,26 @@ importers:
         specifier: 8.10.2
         version: 8.10.2
 
-  apps/admin:
+  admin/apps/web:
     dependencies:
       '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
       '@odentia/auth':
         specifier: workspace:*
-        version: link:../../packages/auth
+        version: link:../../../packages/auth
       '@odentia/clinical':
         specifier: workspace:*
-        version: link:../../packages/clinical
+        version: link:../../../packages/clinical
       '@odentia/mail':
         specifier: workspace:*
-        version: link:../../packages/mail
+        version: link:../../../shared/packages/mail
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../../packages/ui
+        version: link:../../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../../packages/ui-patterns
+        version: link:../../../shared/packages/ui-patterns
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
@@ -141,6 +141,30 @@ importers:
         specifier: 4.148.0
         version: 4.148.0(@types/node@24.19.2)
 
+  admin/e2e:
+    devDependencies:
+      '@odentia/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@odentia/e2e':
+        specifier: workspace:*
+        version: link:../../e2e
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
   apps/api:
     dependencies:
       '@hono/node-server':
@@ -154,7 +178,7 @@ importers:
         version: link:../../packages/auth
       '@odentia/channels':
         specifier: workspace:*
-        version: link:../../packages/channels
+        version: link:../../shared/packages/channels
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
@@ -166,7 +190,7 @@ importers:
         version: link:../../packages/dental
       '@odentia/mail':
         specifier: workspace:*
-        version: link:../../packages/mail
+        version: link:../../shared/packages/mail
       '@odentia/services':
         specifier: workspace:*
         version: link:../../packages/services
@@ -239,10 +263,10 @@ importers:
         version: link:../../packages/dental
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../../packages/ui
+        version: link:../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../../packages/ui-patterns
+        version: link:../../shared/packages/ui-patterns
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
@@ -378,10 +402,10 @@ importers:
         version: link:../../packages/medical
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../../packages/ui
+        version: link:../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../../packages/ui-patterns
+        version: link:../../shared/packages/ui-patterns
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
@@ -508,10 +532,10 @@ importers:
         version: link:../../packages/optical
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../../packages/ui
+        version: link:../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../../packages/ui-patterns
+        version: link:../../shared/packages/ui-patterns
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
@@ -611,16 +635,16 @@ importers:
         version: 5.3.0
       '@odentia/brand-scene':
         specifier: workspace:*
-        version: link:../../packages/brand-scene
+        version: link:../../shared/packages/brand-scene
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../../packages/ui
+        version: link:../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../../packages/ui-patterns
+        version: link:../../shared/packages/ui-patterns
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
@@ -717,7 +741,7 @@ importers:
         version: link:../../packages/auth
       '@odentia/brand-scene':
         specifier: workspace:*
-        version: link:../../packages/brand-scene
+        version: link:../../shared/packages/brand-scene
       '@odentia/dental':
         specifier: workspace:*
         version: link:../../packages/dental
@@ -775,7 +799,7 @@ importers:
         version: link:../../packages/auth
       '@odentia/channels':
         specifier: workspace:*
-        version: link:../../packages/channels
+        version: link:../../shared/packages/channels
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
@@ -784,7 +808,7 @@ importers:
         version: link:../../packages/db
       '@odentia/mail':
         specifier: workspace:*
-        version: link:../../packages/mail
+        version: link:../../shared/packages/mail
       '@odentia/services':
         specifier: workspace:*
         version: link:../../packages/services
@@ -887,7 +911,7 @@ importers:
         version: 1.5.13(@aws-sdk/credential-provider-node@3.972.83)(@langchain/core@1.2.11(openai@7.15.0(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(undici@8.10.2)(ws@8.22.0)(zod@4.6.2))(ws@8.22.0))(@smithy/signature-v4@5.7.3)(undici@8.10.2)(ws@8.22.0)
       '@odentia/channels':
         specifier: workspace:*
-        version: link:../channels
+        version: link:../../shared/packages/channels
       '@odentia/db':
         specifier: workspace:*
         version: link:../db
@@ -930,7 +954,7 @@ importers:
         version: link:../db
       '@odentia/mail':
         specifier: workspace:*
-        version: link:../mail
+        version: link:../../shared/packages/mail
       better-auth:
         specifier: 1.7.4
         version: 1.7.4(@prisma/client@5.22.0)(@tanstack/react-start@1.168.60(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.8)(rollup@4.63.1)(vite@8.3.0(@types/node@22.20.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1))
@@ -949,33 +973,6 @@ importers:
         version: 7.0.2
       vitest:
         specifier: 3.2.7
-        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
-
-  packages/brand-scene:
-    devDependencies:
-      '@types/react':
-        specifier: ^19.2.18
-        version: 19.3.0
-      react:
-        specifier: ^19.2.8
-        version: 19.3.0
-      typescript:
-        specifier: 7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.7
-        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
-
-  packages/channels:
-    devDependencies:
-      '@types/node':
-        specifier: 22.20.2
-        version: 22.20.2
-      typescript:
-        specifier: 7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
   packages/clinic-app:
@@ -1009,10 +1006,10 @@ importers:
         version: link:../clinical
       '@odentia/ui':
         specifier: workspace:*
-        version: link:../ui
+        version: link:../../shared/packages/ui
       '@odentia/ui-patterns':
         specifier: workspace:*
-        version: link:../ui-patterns
+        version: link:../../shared/packages/ui-patterns
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
@@ -1110,7 +1107,7 @@ importers:
     dependencies:
       '@odentia/channels':
         specifier: workspace:*
-        version: link:../channels
+        version: link:../../shared/packages/channels
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../clinical
@@ -1165,28 +1162,6 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
-  packages/mail:
-    dependencies:
-      nodemailer:
-        specifier: 10.0.9
-        version: 10.0.9
-    devDependencies:
-      '@types/node':
-        specifier: 22.20.2
-        version: 22.20.2
-      '@types/nodemailer':
-        specifier: 8.0.1
-        version: 8.0.1
-      sharp:
-        specifier: 0.34.4
-        version: 0.34.4
-      typescript:
-        specifier: 7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^3.2.7
-        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
-
   packages/medical:
     dependencies:
       '@odentia/clinical':
@@ -1226,7 +1201,7 @@ importers:
         version: link:../auth
       '@odentia/channels':
         specifier: workspace:*
-        version: link:../channels
+        version: link:../../shared/packages/channels
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../clinical
@@ -1238,7 +1213,7 @@ importers:
         version: link:../dental
       '@odentia/mail':
         specifier: workspace:*
-        version: link:../mail
+        version: link:../../shared/packages/mail
       '@odentia/medical':
         specifier: workspace:*
         version: link:../medical
@@ -1298,7 +1273,56 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
-  packages/ui:
+  shared/packages/brand-scene:
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.3.0
+      react:
+        specifier: ^19.2.8
+        version: 19.3.0
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
+  shared/packages/channels:
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
+  shared/packages/mail:
+    dependencies:
+      nodemailer:
+        specifier: 10.0.9
+        version: 10.0.9
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      '@types/nodemailer':
+        specifier: 8.0.1
+        version: 8.0.1
+      sharp:
+        specifier: 0.34.4
+        version: 0.34.4
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
+  shared/packages/ui:
     dependencies:
       '@base-ui/react':
         specifier: 1.8.0
@@ -1383,7 +1407,7 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
-  packages/ui-patterns:
+  shared/packages/ui-patterns:
     dependencies:
       '@maskito/core':
         specifier: 5.4.0

@@ -24,7 +24,7 @@ La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, almacenamiento S3 con RustFS :9000 (consola :9001; `storage-init` crea los buckets con `infra/dev/storage-init.sh`) y Mailpit :1025/:8025. MinIO se archivó en 2026 y ya no publica imagen. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
 
-Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 30 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `packages/mail/assets/`.
+Correos: todos salen del molde de `@odentia/mail` (`renderEmail`). `pnpm --filter @odentia/services mail:preview` envía los 30 a Mailpit con datos de ejemplo; con `--html <carpeta>` los deja como archivos. El logotipo va adjunto en PNG: si cambia la marca, `pnpm --filter @odentia/mail logos` lo regenera desde `shared/packages/mail/assets/`.
 
 El correo de liquidación incluye una fila por clínica y otra por ajuste antes
 del total. `mail:preview --html <carpeta>` permite revisar ese detalle sin
@@ -56,7 +56,7 @@ pnpm db:seed
 
 ### Administración de odentIA
 
-`apps/admin` usa la API compartida, no un backend ni una base independientes.
+`admin/apps/web` usa la API compartida, no un backend ni una base independientes.
 Configurar `ADMIN_URL` con el origen HTTPS exacto del backoffice. La cuenta del
 cliente conserva organizaciones, invitaciones, soporte y Plan y pagos en `panel`.
 `admin` y `storage` son subdominios reservados (`RESERVED_ORG_SLUGS`): la API

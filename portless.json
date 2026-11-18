@@ -5,7 +5,7 @@
     "apps/medical-clinic": { "name": "latidia" },
     "apps/optical-clinic": { "name": "vistia" },
     "apps/panel": { "name": "app.odentia" },
-    "apps/admin": { "name": "admin.odentia" },
+    "admin/apps/web": { "name": "admin.odentia" },
     "apps/api": { "name": "api.odentia" },
     "apps/worker": { "proxy": false }
   }

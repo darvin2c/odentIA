@@ -43,12 +43,14 @@ Permitir que cada usuario complete su trabajo con facilidad mediante una experie
 
 Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este núcleo, no lo contradicen.
 
+Cada sistema en su carpeta: las clínicas en `apps/`, `packages/` y `e2e/`; la administración en `admin/` (`apps/web` y sus recorridos en `e2e/`); lo de uso general en `shared/packages/` (ui, ui-patterns, channels, mail, brand-scene), que no importa a ningún sistema (`shared-boundaries.test.ts`). Un cambio en `shared/` va en su propio PR y corre todas las pruebas de las clínicas.
+
 - `apps/AGENTS.md`: responsabilidades de panel, dental-clinic, API y worker.
 - `packages/AGENTS.md`: límites de paquetes compartidos.
 - `packages/services/AGENTS.md`: contratos e invariantes de negocio.
 - `packages/db/AGENTS.md`: esquema, migraciones y catálogos.
 - `packages/agent/AGENTS.md`: contexto, herramientas y autonomía.
-- `packages/ui/AGENTS.md` y `packages/ui-patterns/AGENTS.md`: primitivas y composición de interfaz.
+- `shared/packages/ui/AGENTS.md` y `shared/packages/ui-patterns/AGENTS.md`: primitivas y composición de interfaz.
 - `e2e/AGENTS.md`: aislamiento y verificación de recorridos.
 - `.claude/skills/odentia-ux/SKILL.md`: usar al diseñar o cambiar interfaces y recorridos.
 - `.claude/skills/odentia-arch/SKILL.md`: usar para stack, topología, tenancy, adaptadores y storage.

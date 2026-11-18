@@ -1,6 +1,6 @@
 # Paquetes compartidos
 
-Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni duplicar contratos del dominio.
+Cada paquete tiene una responsabilidad; no importar apps desde paquetes ni duplicar contratos del dominio. `channels`, `mail`, `ui`, `ui-patterns` y `brand-scene` viven en `shared/packages/`: son de uso general y no importan ningún paquete de un sistema.
 
 | Paquete | Responsabilidad y límite |
 | --- | --- |

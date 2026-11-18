@@ -36,7 +36,7 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 | Función pequeña dentro de un patrón que ya existe, o mover algo de lugar | Corta: quien hace la tarea (el novato en su rol) y desarrollo | No | Novato, desarrollo y diseño UX |
 | Error | Corta, solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
 | Cambio interno, sin efecto visible | Sin mesa | No | Desarrollo |
-| Cambio de la administración (`apps/admin`) | Sin mesa | Si cambia una pantalla y hay más de una forma razonable | Sin voces: la recorre quien implementa |
+| Cambio de la administración (`admin/apps/web`) | Sin mesa | Si cambia una pantalla y hay más de una forma razonable | Sin voces: la recorre quien implementa |
 
 La administración no lleva voces: la usa el equipo de odentIA, y las voces imitan a la clínica y a sus pacientes. Cómo debe ser lo decide el usuario, en el lienzo o en el pedido. Quien implementa recorre en la pantalla real lo que cambió («Implementar y comprobar» de `odentia-ux`), y la etapa 6 lleva siempre `security-review`, porque la administración ve todas las clínicas. Si el mismo cambio también toca lo que ve la clínica, las voces entran solo para esa parte.
 

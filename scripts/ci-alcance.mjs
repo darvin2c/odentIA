@@ -7,11 +7,16 @@
 //
 // Reglas, de lo más seguro a lo más preciso:
 // - Solo documentación o skills (lista blanca abajo): no corre nada.
-// - Un archivo fuera de apps/, packages/ y e2e/ (CI, Dockerfile, compose, infra, raíz,
-//   turbo.json, lockfile): corre todo. No se sabe qué toca.
+// - Un archivo fuera de apps/, packages/, e2e/, admin/ y shared/ (CI, Dockerfile, compose,
+//   infra, raíz, turbo.json, lockfile): corre todo. No se sabe qué toca.
 // - Si no hay base comparable: corre todo.
 // - Lo demás: solo los paquetes afectados según el grafo de turbo (el paquete cambiado
 //   y todo lo que depende de él).
+// - Los recorridos E2E: si todo lo que cambió está en la carpeta de la administración
+//   (admin/), solo los suyos y los de las clínicas que abren sus pantallas (proyecto `admin`
+//   de Playwright, `ALSO_ADMIN` en e2e/playwright.config.ts), en una parte; si no, todos,
+//   en tres. El cobro y el soporte viven todavía en packages/ y apps/api, así que siguen
+//   corriendo todo (lienzo A, paso 0).
 // Las pruebas que leen el repositorio entero no van aquí: van en el job `arquitectura`.
 import { execFileSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
@@ -21,9 +26,12 @@ const SHA = process.env.SHA || "HEAD"
 
 // Solo documentación y skills: no se compilan, no se prueban ni se despliegan.
 const SOLO_DOCS =
-  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|(apps|packages)\/[^/]+\/AGENTS\.md$)/
+  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|(apps|packages|admin\/apps|shared\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
-const EN_PAQUETES = /^(apps|packages|e2e)\//
+// En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
+const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/)/
+// La administración: si todo lo cambiado está aquí, solo sus recorridos E2E.
+const SOLO_ADMIN = /^admin\/(apps\/[^/]+|e2e)\//
 
 const SERVICIOS_EN_PARTES = 3
 const INTERFAZ = [
@@ -42,6 +50,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/web",
   "@odentia/panel",
   "@odentia/admin",
+  "@odentia/admin-e2e",
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
   "@odentia/optical-clinic",
@@ -93,7 +102,8 @@ function turbo(args) {
 }
 
 function archivosCambiados() {
-  return git(["diff", "--name-only", BASE, SHA]).split("\n").filter(Boolean)
+  // Sin detectar renombres: un archivo que se muda a admin/ cuenta también por donde estaba.
+  return git(["diff", "--name-only", "--no-renames", BASE, SHA]).split("\n").filter(Boolean)
 }
 
 function decidir() {
@@ -115,7 +125,9 @@ function decidir() {
     }
   }
   const afectados = turbo(["ls", `--filter=...[${BASE}]`])
-  return { motivo: `${afectados.length} paquete(s) afectado(s)`, soloDocs: false, afectados }
+  const soloAdmin = codigo.every((f) => SOLO_ADMIN.test(f))
+  const motivo = `${afectados.length} paquete(s) afectado(s)${soloAdmin ? ", solo de la administración" : ""}`
+  return { motivo, soloDocs: false, afectados, soloAdmin }
 }
 
 function filtros(nombres) {
@@ -170,6 +182,12 @@ function partesDeCheck(afectados) {
   return partes
 }
 
+/** Las partes del job E2E (su matriz): solo la administración en una, o todo en tres. */
+function partesDeE2e(soloAdmin) {
+  if (soloAdmin) return [{ parte: "administración", nombre: "admin", opciones: "--project=admin" }]
+  return [1, 2, 3].map((k) => ({ parte: `${k}/3`, nombre: String(k), opciones: `--shard=${k}/3` }))
+}
+
 const decision = decidir()
 const { afectados } = decision
 const partes = partesDeCheck(afectados)
@@ -186,6 +204,8 @@ const salidas = {
   }),
   // E2E prueba la app completa; el marketing (web) no la usa.
   e2e: String(afectados.some((n) => n !== "@odentia/web")),
+  // Las partes de E2E: los de la administración solos, o todos en tres partes.
+  e2e_partes: JSON.stringify(partesDeE2e(decision.soloAdmin === true)),
   vps: String(afectados.some((n) => VPS.includes(n))),
   cloudflare: JSON.stringify(afectados.filter((n) => CLOUDFLARE.includes(n))),
   // Las pruebas que leen el repositorio entero corren en cada cambio de código.
