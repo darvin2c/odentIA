@@ -307,6 +307,9 @@ describe("la revisión diaria de la copia en otra app", () => {
     const closed = people.find((p) => p.email === "cerrada@apps.test")!
     await ownerDb.update(user).set({ name: "Rosa Quispe" }).where(eq(user.id, active.id))
     await ownerDb.transaction((tx) => closeMyAccount(tx, closed.id))
+    // El cierre deja su aviso a gestorIA pendiente; aquí no se mide la entrega, y otras pruebas
+    // del archivo entregan todo lo que espera.
+    await ownerDb.delete(accountEvent).where(eq(accountEvent.userId, closed.id))
 
     const reviewed = await reviewAccounts(ownerDb, [active.id, closed.id, "no-existe", active.id])
     expect(reviewed).toEqual([
