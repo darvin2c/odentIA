@@ -165,7 +165,9 @@ it("la ausencia de un profesional vale en todas las sedes", async () => {
 it("una cita confirmada que se mueve a otro día queda por confirmar", async () => {
   const c = await clinic()
   const person = await c.patient("Andrés Vega")
+  // A las 10:00 de Lima: «una hora después» no puede caer en el día siguiente según a qué hora corra.
   const startsAt = new Date(Date.now() + 2 * 86_400_000)
+  startsAt.setUTCHours(15, 0, 0, 0)
   const visit = await c.book({ patientId: person.id, professional: c.ids.ana, branchId: c.branches.first, roomId: c.rooms.a, startsAt })
   const moved = await c.tx((db) =>
     moveAppointment(db, c.orgId, c.ids.rita, visit.id, {
