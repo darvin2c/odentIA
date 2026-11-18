@@ -77,9 +77,37 @@ export function consentEventWords(
     if (who) return `${label} · ${removed ? "los quitó" : "los cambió"} ${who}`
     return `${label} · ${removed ? "Quitados de la hoja" : "Cambiados"}`
   }
-  return [label, event.reason && event.reason !== "Documento creado" ? event.reason : null, who]
-    .filter(Boolean)
-    .join(" · ")
+  const reason = event.reason && event.reason !== "Documento creado" ? event.reason : null
+  // «Informado por el profesional · Ana Torres · COP 12345» ya lleva su nombre: no se repite al final.
+  const named = who && reason ? reason.includes(who.replace(/^(Dra?|Lic|Mg)\.\s*/i, "")) : false
+  return [label, reason, named ? null : who].filter(Boolean).join(" · ")
+}
+
+/**
+ * La Historia del documento, con los cambios seguidos de los riesgos propios de una misma persona en
+ * una sola línea (QA de diseño del 18 nov, H13: cinco líneas iguales). Cada grupo lleva cuántas
+ * veces y la hora de la última.
+ */
+export function groupConsentEvents<
+  E extends Pick<ConsentEvent, "toStatus" | "reason" | "actorName" | "createdAt">,
+>(events: readonly E[]): { event: E; times: number; lastAt: string }[] {
+  const out: { event: E; times: number; lastAt: string }[] = []
+  for (const event of events) {
+    const previous = out[out.length - 1]
+    if (
+      previous &&
+      event.toStatus === "riesgos_propios" &&
+      previous.event.toStatus === "riesgos_propios" &&
+      previous.event.reason === event.reason &&
+      (previous.event.actorName ?? null) === (event.actorName ?? null)
+    ) {
+      previous.times += 1
+      previous.lastAt = event.createdAt
+      continue
+    }
+    out.push({ event, times: 1, lastAt: event.createdAt })
+  }
+  return out
 }
 
 interface NewConsentValues {

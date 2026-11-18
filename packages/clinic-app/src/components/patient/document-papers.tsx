@@ -51,7 +51,7 @@ import { SendFinancialDocument } from "../finance-documents/SendFinancialDocumen
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentPersonalRisksField, personalRisksEditable } from "./consent-personal-risks"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
-import { consentEventWords, RevokeForm } from "./consentimientos-tab"
+import { consentEventWords, groupConsentEvents, RevokeForm } from "./consentimientos-tab"
 import { DocumentPaperPanel } from "./document-paper-panel"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { OrderCancelDrawer, OrderResultDrawer } from "./ordenes-tab"
@@ -514,13 +514,19 @@ function ConsentHistoryDrawer({
       onClose={onClose}
     >
       <ol className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {(history.data?.data ?? []).map((event) => (
+        {/* Los cambios seguidos de una misma persona, en una línea: «· 5 veces, la última a las 11:02». */}
+        {groupConsentEvents(history.data?.data ?? []).map(({ event, times, lastAt }) => (
           <li key={event.id}>
             {new Date(event.createdAt).toLocaleString(activeOrgLocale(), {
               dateStyle: "medium",
               timeStyle: "short",
             })}{" "}
             · {consentEventWords(event)}
+            {times > 1
+              ? ` · ${times} veces, la última a las ${new Date(lastAt).toLocaleTimeString(activeOrgLocale(), {
+                  timeStyle: "short",
+                })}`
+              : ""}
           </li>
         ))}
       </ol>

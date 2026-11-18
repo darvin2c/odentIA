@@ -3189,6 +3189,37 @@ export async function proposeConsentPersonalRisks(tx: Db, orgId: string, documen
 }
 
 /**
+ * Quién cambió los riesgos propios mientras otro los editaba (QA de diseño del 18 nov, H6): el
+ * sistema lo sabe, la Historia del documento lo dice, y el aviso no dice «Alguien». La misma persona
+ * en otra pestaña, «los cambiaste en otra pestaña».
+ */
+async function risksChangedWords(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  actorUserId: string,
+): Promise<string> {
+  const [last] = await tx
+    .select({ actorUserId: consentEvent.actorUserId, name: user.name })
+    .from(consentEvent)
+    .leftJoin(user, eq(user.id, consentEvent.actorUserId))
+    .where(
+      and(
+        eq(consentEvent.organizationId, orgId),
+        eq(consentEvent.documentId, documentId),
+        eq(consentEvent.toStatus, "riesgos_propios"),
+      ),
+    )
+    .orderBy(desc(consentEvent.createdAt))
+    .limit(1)
+  const then = "Mira los de ahora y vuelve a guardar lo tuyo."
+  if (last?.actorUserId && last.actorUserId === actorUserId)
+    return `Los cambiaste en otra pestaña mientras los editabas aquí. ${then}`
+  const who = last?.name?.trim()
+  return `${who || "Alguien"} cambió los riesgos propios mientras los editabas. ${then}`
+}
+
+/**
  * Cambia o borra los riesgos propios de un consentimiento pendiente (reglas clínicas del 18 nov),
  * una frase por línea; vacío los quita y la hoja queda como siempre. Con el mismo permiso que
  * generarlo. Solo mientras nadie lo firmó ni se envió a su enlace: lo que la persona lee en su
@@ -3233,10 +3264,7 @@ export async function setConsentPersonalRisks(
   // Lo mismo otra vez (un reintento tras perder la respuesta, un doble clic): ya está, sin otro evento.
   if (sameRisks(before, personalRisks ?? [])) return current
   if (seen !== undefined && !sameRisks(before, seen ?? []))
-    throw conflict(
-      "CONSENT_RISKS_CHANGED",
-      "Alguien cambió los riesgos propios mientras los editabas. Mira los de ahora y vuelve a guardar lo tuyo.",
-    )
+    throw conflict("CONSENT_RISKS_CHANGED", await risksChangedWords(tx, orgId, documentId, actorUserId))
   const { personalRisks: _before, ...rest } = sections
   const [row] = await tx
     .update(consentDocument)

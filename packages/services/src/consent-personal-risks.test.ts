@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { patientMedication } from "@odentia/db/schema/clinical"
+import { user } from "@odentia/db/schema/auth"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -246,19 +247,21 @@ it("si otra pestaña cambió los riesgos mientras los editaba, no se pisan: 409 
     .values({ organizationId: "org_a", patientId: f.patient.id, name: "Eliquis", atcCode: "B01AF02" })
   const doc = await create(f)
   const proposed = ["Toma un anticoagulante (Eliquis): puede sangrar más tiempo después de la extracción."]
-  // La pestaña B guarda tres riesgos.
-  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Uno.\nDos.\nTres.", proposed))
-  // La pestaña A todavía veía el propuesto: no pisa lo de B.
+  // Luis, en otro equipo, guarda tres riesgos.
+  const luis = randomUUID()
+  await ownerDb.insert(user).values({ id: luis, name: "Luis Prado", email: `${luis}@example.test` })
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", luis, doc.id, "Uno.\nDos.\nTres.", proposed))
+  // Quien todavía veía el propuesto no pisa lo de Luis, y el aviso dice quién fue (QA de diseño, H6).
   await expect(
     f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Solo uno.", proposed)),
   ).rejects.toMatchObject({
     code: "CONSENT_RISKS_CHANGED",
     status: 409,
-    message: "Alguien cambió los riesgos propios mientras los editabas. Mira los de ahora y vuelve a guardar lo tuyo.",
+    message: "Luis Prado cambió los riesgos propios mientras los editabas. Mira los de ahora y vuelve a guardar lo tuyo.",
   })
   expect(await personalRisksOf(doc.id)).toEqual(["Uno.", "Dos.", "Tres."])
   // El reintento de lo mismo que ya quedó (se perdió la respuesta) no falla ni deja otro evento.
-  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Uno.\nDos.\nTres.", proposed))
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", luis, doc.id, "Uno.\nDos.\nTres.", proposed))
   const changes = (await f.run((tx) => listConsentEvents(tx, "org_a", doc.id))).filter(
     (event) => event.toStatus === "riesgos_propios",
   )
@@ -266,4 +269,10 @@ it("si otra pestaña cambió los riesgos mientras los editaba, no se pisan: 409 
   // Con lo de ahora a la vista, guarda.
   await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Solo uno.", ["Uno.", "Dos.", "Tres."]))
   expect(await personalRisksOf(doc.id)).toEqual(["Solo uno."])
+  // La misma persona en otra pestaña: ni «Alguien» ni su propio nombre.
+  await expect(
+    f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Otro.", ["Uno.", "Dos.", "Tres."])),
+  ).rejects.toMatchObject({
+    message: "Los cambiaste en otra pestaña mientras los editabas aquí. Mira los de ahora y vuelve a guardar lo tuyo.",
+  })
 })
