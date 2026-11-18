@@ -70,6 +70,21 @@ function statusVariant(status: string): "success" | "outline" | "secondary" {
   return "outline"
 }
 
+/**
+ * La nota bajo el plan, con la regla de ahora (reglas clínicas del 18 nov): la fase la propone el
+ * tipo de servicio y, si el producto tiene «Urgencia», también el diagnóstico (`phaseFor` del
+ * servidor). Con una sola fase no hay nada que proponer.
+ */
+export function planPhasesNote(): string {
+  const { phases } = productUi().plan
+  const sessions = "Cada procedimiento registrado en una atención suma una sesión."
+  if (phases.length <= 1) return sessions
+  const urgent = phases.find((phase) => phase.key === "urgencia")
+  return urgent
+    ? `La fase la propone el tipo de servicio; si su diagnóstico es de dolor, infección aguda o trauma, «${urgent.label}». Se puede cambiar con «Planificar…». ${sessions}`
+    : `La fase la propone el tipo de servicio y se puede cambiar con «Planificar…». ${sessions}`
+}
+
 function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`
 }
@@ -128,10 +143,7 @@ export function PlanPhases({
           />
         )
       })}
-      <p className="text-xs text-muted-foreground">
-        La fase se propone por el tipo de servicio y se puede cambiar. Cada procedimiento registrado
-        en una atención suma una sesión.
-      </p>
+      <p className="text-xs text-muted-foreground">{planPhasesNote()}</p>
     </div>
   )
 }
