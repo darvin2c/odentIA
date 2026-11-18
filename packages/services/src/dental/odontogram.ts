@@ -397,8 +397,9 @@ export async function getOdontogram(tx: Db, orgId: string, patientId: string) {
 //
 // Una sola firma, la del perfil profesional, sin trazo: nombre, título y
 // colegiatura salen del perfil de quien firma, nunca del cuerpo. El cierre de
-// una atención que cambió el gráfico lo firma solo, con su momento deducido
-// (inicio del plan, nuevos hallazgos o culminación; NTS 188, 5.10); el botón
+// la atención que llega a un momento de la norma lo firma solo, con ese momento
+// (inicio del plan, hallazgos observados hoy o culminación; NTS 188, 5.10): la
+// sesión que solo trata no firma copia; el botón
 // «Firmar odontograma» queda para lo judicial, lo personal y el reingreso
 // (5.11). Cada uno guarda su norma: cambiar el país no la reescribe.
 
@@ -598,16 +599,23 @@ export interface ClosingOdontogram {
   /** Norma con la que se firma («NTS 188-MINSA/DGIESP-2022») y su nombre corto. */
   standard: string
   shortName: string
-  /** Lo que se registró en esta atención; vacío si solo quedó tratado lo anterior. */
+  /**
+   * Los hallazgos observados en esta atención; no lo que dibujó un tratamiento al hacerse
+   * (la endodoncia no es un hallazgo nuevo). Vacío si solo cambió por lo tratado.
+   */
   findings: EncounterFindingGroup[]
 }
 
 /**
  * Si el cierre de esta atención firma el odontograma y con qué momento: solo
- * en clínicas con odontograma firmado y si la atención cambió el gráfico (un
- * hallazgo nuevo vigente, o uno anterior que su tratamiento deja tratado al
- * cerrar). La misma regla sirve al cierre (antes de firmar, para decirlo) y a
- * `finalizeEncounter` (al firmar).
+ * en clínicas con odontograma firmado, si la atención cambió el gráfico (un
+ * hallazgo vigente de hoy, o uno anterior que su tratamiento deja tratado al
+ * cerrar) y si llega a un momento de la norma (`closingOdontogramPurpose`):
+ * inicio del plan, hallazgos observados hoy o culminación. Lo que dibuja un
+ * tratamiento al hacerse (`left_by_plan_item_id`) no es un hallazgo nuevo: la
+ * sesión que solo trata no firma copia, y lo tratado queda en la atención
+ * firmada y en el gráfico (NTS 188, 5.8 y 5.10). La misma regla sirve al
+ * cierre (antes de firmar, para decirlo) y a `finalizeEncounter` (al firmar).
  */
 export async function closingOdontogramOf(
   tx: Db,
@@ -624,6 +632,7 @@ export async function closingOdontogramOf(
       condition: odontogramEntry.condition,
       toothNumber: odontogramEntry.toothNumber,
       details: odontogramEntry.details,
+      leftByPlanItemId: odontogramEntry.leftByPlanItemId,
     })
     .from(odontogramEntry)
     .where(
@@ -693,6 +702,8 @@ export async function closingOdontogramOf(
         )
     : []
   if (added.length === 0 && treated.length === 0) return null
+  // Lo observado hoy; lo que dejó dibujado un tratamiento no cuenta como hallazgo.
+  const observed = added.filter((entry) => entry.leftByPlanItemId === null)
   const previous = await tx
     .select({ purpose: odontogramAssessment.purpose })
     .from(odontogramAssessment)
@@ -722,18 +733,21 @@ export async function closingOdontogramOf(
     : []
   const stillOpen = new Set(open.map((row) => row.planId))
   const culminated = planIds.some((planId) => !stillOpen.has(planId))
+  const purpose = closingOdontogramPurpose(
+    previous.map((row) => row.purpose),
+    culminated,
+    observed.length > 0,
+  )
+  if (!purpose) return null
   const groups = new Map<string, Set<number>>()
-  for (const entry of added) {
+  for (const entry of observed) {
     const teeth = groups.get(entry.condition) ?? new Set<number>()
     const related = (entry.details as FindingDetails | null)?.relatedTeeth
     for (const tooth of related?.length ? related : [entry.toothNumber]) teeth.add(tooth)
     groups.set(entry.condition, teeth)
   }
   return {
-    purpose: closingOdontogramPurpose(
-      previous.map((row) => row.purpose),
-      culminated,
-    ),
+    purpose,
     standard: official.standard,
     shortName: official.shortName,
     findings: [...groups].map(([condition, teeth]) => ({
@@ -746,7 +760,8 @@ export async function closingOdontogramOf(
 /**
  * Al cerrar la atención (dentro de `finalizeEncounter`, después de dejar
  * tratado lo realizado): firma el odontograma con el perfil de quien cierra,
- * si la atención cambió el gráfico en una clínica de Perú. Uno por atención.
+ * en una clínica de Perú, si la atención llega a un momento de la norma
+ * (`closingOdontogramOf`). Uno por atención.
  */
 export async function signClosingOdontogram(
   tx: Db,

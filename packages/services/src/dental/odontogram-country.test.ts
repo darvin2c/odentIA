@@ -417,6 +417,94 @@ it("firmar sin responder «¿Terminaste?» termina la resina de una sesión y el
   expect(JSON.stringify(signed?.entries)).toContain("definitive_restoration")
 })
 
+// Reglas clínicas del 18 nov (punto 3, caso C3): «Nuevos hallazgos» solo con hallazgos observados.
+// Lo que dibuja un tratamiento al hacerse (el TC de la endodoncia) no es un hallazgo nuevo, y la
+// sesión que solo trata, sin hallazgos ni culminación, no firma copia (NTS 188, 5.8 y 5.10).
+it("la sesión que solo trata no firma copia; la que trae una caries nueva firma «Nuevos hallazgos» solo con ella", async () => {
+  const f = await attending("org_a")
+  await seedOdentiaCatalog(ownerDb)
+  const endodontics = await f.run(async (tx) =>
+    createService(tx, f.orgId, f.actor, {
+      name: "Endodoncia multirradicular",
+      officialCode: "D3330",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["endodoncia"])).get("endodoncia")!,
+      scope: "tooth",
+      priceCents: 60000,
+      leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+    }),
+  )
+  const crown = await f.run(async (tx) =>
+    createService(tx, f.orgId, f.actor, {
+      name: "Corona",
+      officialCode: "D2740",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
+      scope: "tooth",
+      priceCents: 50000,
+      leavesFinding: { condition: "crown" },
+    }),
+  )
+  // Sesión 1: la caries profunda de la 36, la endodoncia y la corona; firma el inicio del plan.
+  const first = await f.open()
+  const [caries36] = await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, { toothNumber: 36, condition: "caries", surfaces: ["occlusal"], encounterId: first }),
+  )
+  const endo = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: endodontics.id, sourceEncounterId: first, toothNumber: 36, odontogramEntryId: caries36!.id }),
+  )
+  const cap = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: crown.id, sourceEncounterId: first, toothNumber: 36 }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: endo.planId, itemIds: [endo.id, cap.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [
+        { planItemId: endo.id, decision: "aceptado" },
+        { planItemId: cap.id, decision: "aceptado" },
+      ],
+    }),
+  )
+  await readyToClose(f.orgId, f.actor, f.patientId, first)
+  expect((await f.run((tx) => finalizeEncounter(tx, ...f.args, first))).odontogram).toMatchObject({ purpose: "initial" })
+
+  // Sesión 2: se hace la endodoncia, que dibuja su tratamiento de conducto; la corona sigue pendiente.
+  const second = await f.open()
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: endo.id }))
+  await f.run((tx) => setPlanItemStatus(tx, ...f.args, endo.id, { status: "realizado", encounterId: second }))
+  const [drawn] = await ownerDb
+    .select()
+    .from(odontogramEntry)
+    .where(and(eq(odontogramEntry.leftByPlanItemId, endo.id), isNull(odontogramEntry.voidedAt)))
+  expect(drawn).toMatchObject({ toothNumber: 36, condition: "root_canal_treatment", encounterId: second })
+  await readyToClose(f.orgId, f.actor, f.patientId, second)
+  // Ni el cierre lo anuncia ni la firma lo firma: no hay hallazgos ni culmina el plan.
+  const closing = (await f.run((tx) => getEncounterClosing(tx, ...f.args, second))) as { odontogram?: unknown }
+  expect(closing.odontogram).toBeNull()
+  expect((await f.run((tx) => finalizeEncounter(tx, ...f.args, second))).odontogram).toBeNull()
+  expect(await f.run((tx) => listOdontogramAssessments(tx, f.orgId, f.patientId))).toHaveLength(1)
+  // Lo tratado sigue en el gráfico.
+  const chart = await f.run((tx) => getOdontogram(tx, f.orgId, f.patientId))
+  expect(chart.teeth["36"]!.entries.map((id) => chart.history.find((entry) => entry.id === id)?.condition)).toContain(
+    "root_canal_treatment",
+  )
+
+  // Sesión 3: una caries nueva en la 26 firma «Nuevos hallazgos», con ella y nada más.
+  const third = await f.open()
+  await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, { toothNumber: 26, condition: "caries", surfaces: ["occlusal"], encounterId: third }),
+  )
+  await readyToClose(f.orgId, f.actor, f.patientId, third)
+  const preview = (await f.run((tx) => getEncounterClosing(tx, ...f.args, third))) as { odontogram?: unknown }
+  expect(preview.odontogram).toMatchObject({
+    purpose: "new_findings",
+    findings: [{ condition: "caries", teeth: [26] }],
+  })
+  expect((await f.run((tx) => finalizeEncounter(tx, ...f.args, third))).odontogram).toMatchObject({
+    purpose: "new_findings",
+  })
+  expect(await f.run((tx) => listOdontogramAssessments(tx, f.orgId, f.patientId))).toHaveLength(2)
+})
+
 it("la exodoncia de un servicio directo deja la pieza ausente con su causa en Perú", async () => {
   const f = await attending("org_a")
   const draft = await f.open()

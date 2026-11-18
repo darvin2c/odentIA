@@ -245,8 +245,9 @@ export const dentalHooks: ProductHooks = {
 
   async encounterFinalized(tx, { orgId, actorUserId, patientId, encounterId, at, signer }) {
     await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, at)
-    // En Perú, la atención que cambió el gráfico firma el odontograma con el
-    // mismo perfil y en el mismo paso (NTS 188, 5.3 y 5.10).
+    // En Perú, la atención que llega a un momento de la norma (inicio, hallazgos
+    // observados hoy o culminación) firma el odontograma con el mismo perfil y en
+    // el mismo paso (NTS 188, 5.3 y 5.10). La que solo trata, no.
     const odontogram = await signClosingOdontogram(
       tx,
       orgId,

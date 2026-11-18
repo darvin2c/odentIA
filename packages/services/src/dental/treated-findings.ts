@@ -5,7 +5,9 @@
  * hallazgo se registra en la atención, con el tratamiento que lo dejó
  * (`left_by_plan_item_id`). Una sola vez por tratamiento: completar otra vez
  * no lo duplica, y si el tratamiento deja de estar realizado (se anula su
- * procedimiento) lo dibujado se anula con él.
+ * procedimiento) lo dibujado se anula con él. Lo dibujado así no es un
+ * hallazgo observado: no hace que el cierre firme «Nuevos hallazgos»
+ * (`closingOdontogramOf`; NTS 188, 5.8).
  */
 import { findingLeftByTreatment, type LeavesFinding } from "@odentia/dental"
 import type { Db } from "@odentia/db"

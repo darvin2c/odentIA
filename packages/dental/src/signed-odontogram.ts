@@ -4,7 +4,9 @@
  * al iniciar el plan de tratamiento, cuando aparecen hallazgos nuevos, al
  * culminar el plan, a pedido judicial o de la persona, y el reingreso tras
  * culminar, que abre uno nuevo. Los tres primeros los firma el cierre de la
- * atención que cambió el gráfico; los otros, el botón «Firmar odontograma».
+ * atención que llega a uno de esos momentos; los otros, el botón «Firmar
+ * odontograma». Una sesión que solo trata no es ninguno: lo tratado queda en
+ * la atención firmada y en el gráfico, y entra a la copia firmada siguiente.
  */
 
 export const SIGNED_ODONTOGRAM_PURPOSES = [
@@ -53,18 +55,23 @@ export function isSignedOdontogramPurpose(value: unknown): value is SignedOdonto
 
 /**
  * El momento del odontograma que firma el cierre de una atención que cambió
- * el gráfico. `previous` son los momentos ya firmados de la persona, del más
- * antiguo al más reciente; los pedidos (judicial, personal) no cuentan, porque
- * no abren ni cierran un plan. Sin ninguno, o tras una culminación, empieza un
- * plan («Inicio del plan»); si con esta atención no le queda nada por hacer al
- * plan, es la «Culminación»; si no, «Nuevos hallazgos».
+ * el gráfico, o null si no le toca firmar ninguno. `previous` son los momentos
+ * ya firmados de la persona, del más antiguo al más reciente; los pedidos
+ * (judicial, personal) no cuentan, porque no abren ni cierran un plan. Sin
+ * ninguno, o tras una culminación, empieza un plan («Inicio del plan»); si con
+ * esta atención no le queda nada por hacer al plan, es la «Culminación», aunque
+ * también haya hallazgos; si no, «Nuevos hallazgos» solo con hallazgos
+ * observados hoy (`newFindings`): lo que dibuja un tratamiento al hacerse no es
+ * un hallazgo (NTS 188, 5.8 y 5.10). La sesión que solo trata no firma copia.
  */
 export function closingOdontogramPurpose(
   previous: readonly string[],
   culminated: boolean,
-): ClosingOdontogramPurpose {
+  newFindings: boolean,
+): ClosingOdontogramPurpose | null {
   const clinical = previous.filter((purpose) => purpose !== "legal" && purpose !== "personal")
   const last = clinical.at(-1)
   if (!last || last === "completion") return "initial"
-  return culminated ? "completion" : "new_findings"
+  if (culminated) return "completion"
+  return newFindings ? "new_findings" : null
 }
