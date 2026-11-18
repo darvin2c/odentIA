@@ -5,6 +5,7 @@
  * comerciales y los precios pertenecen a cada clínica.
  */
 import { isValidTooth, surfacesForTooth } from "./anatomy.js"
+import { isUrgentDiagnosis } from "./diagnoses.js"
 
 /**
  * Tipos de tratamiento de la biblioteca (ADR 0069): ordenan la biblioteca,
@@ -67,8 +68,9 @@ export const TREATMENT_PHASE_LABELS: Record<TreatmentPhase, string> = {
 
 /**
  * Fase propuesta por el tipo de tratamiento del servicio; el clínico la
- * cambia. Sin tipo, la básica. La urgencia nunca se infiere: es un juicio
- * sobre el paciente, no sobre el acto.
+ * cambia. Sin tipo, la básica. El tipo nunca propone la urgencia: es un juicio
+ * sobre el paciente, no sobre el acto (la propone su diagnóstico,
+ * `phaseForTreatment`).
  */
 export function phaseForKind(kind: string | null | undefined): TreatmentPhase {
   switch (kind) {
@@ -83,6 +85,30 @@ export function phaseForKind(kind: string | null | undefined): TreatmentPhase {
     default:
       return "basica"
   }
+}
+
+/** Un diagnóstico de lo que se indica, con su lista («ICD-10-PE», «K04.0»). */
+export interface PhaseDiagnosis {
+  system: string | null
+  code: string | null
+}
+
+/**
+ * Fase propuesta para un tratamiento que se indica o se cambia: la de su tipo
+ * (`phaseForKind`), adelantada a «Urgencia» si uno de sus diagnósticos (el
+ * suyo, o uno de la atención en la misma pieza) es de dolor, infección aguda o
+ * trauma (`isUrgentDiagnosis`) y su tipo lo dejaría en la básica o la
+ * quirúrgica. La urgencia sale del paciente, no del acto: la rehabilitadora
+ * nunca se adelanta (la corona de una pieza con pulpitis va después de la
+ * endodoncia). Es una propuesta: el odontólogo la mueve con «Planificar…».
+ */
+export function phaseForTreatment(
+  kind: string | null | undefined,
+  diagnoses: readonly PhaseDiagnosis[],
+): TreatmentPhase {
+  const phase = phaseForKind(kind)
+  if (phase !== "basica" && phase !== "quirurgica") return phase
+  return diagnoses.some((diagnosis) => isUrgentDiagnosis(diagnosis.system, diagnosis.code)) ? "urgencia" : phase
 }
 
 export const TREATMENT_SCOPES = ["general", "tooth", "surfaces", "quadrant", "arch"] as const

@@ -677,8 +677,8 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-tratamiento-suspender-cancelar-fase",
         q: "¿Cómo suspendo o cancelo un tratamiento del plan?",
-        a: "En su Plan, «Ver» en el tratamiento abre su recorrido: ahí están «Suspender» y «Cancelar tratamiento», cada uno con su motivo, y «Reanudar tratamiento» para el suspendido. La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo hace quien escribe en la historia clínica.",
-        forms: ["ya no quiere el tratamiento como lo quito del plan", "reanudar un tratamiento suspendido", "pasar un tratamiento a otra fase", "cambiar el orden de los tratamientos"],
+        a: "En su Plan, «Ver» en el tratamiento abre su recorrido: ahí están «Suspender» y «Cancelar tratamiento», cada uno con su motivo, y «Reanudar tratamiento» para el suspendido. La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover. Lo hace quien escribe en la historia clínica.",
+        forms: ["ya no quiere el tratamiento como lo quito del plan", "reanudar un tratamiento suspendido", "pasar un tratamiento a otra fase", "cambiar el orden de los tratamientos", "por que el tratamiento salio en urgencia"],
         area: "plan",
         needs: "clinical.write",
       },

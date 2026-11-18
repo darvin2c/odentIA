@@ -29,7 +29,7 @@ import {
   findingDefinition,
   type PeriodontalToothRecord,
   pendingProbingWords,
-  phaseForKind,
+  phaseForTreatment,
   type SameFaceFinding,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
   TREATMENT_PHASE_LABELS,
@@ -357,7 +357,7 @@ export const dentalHooks: ProductHooks = {
   },
 
   planPhases: TREATMENT_PHASES,
-  phaseFor: (kind) => phaseForKind(kind),
+  phaseFor: (kind, diagnoses) => phaseForTreatment(kind, diagnoses),
   async treatmentFamiliesOf(tx, templateIds) {
     if (templateIds.length === 0) return new Map()
     const rows = await tx
