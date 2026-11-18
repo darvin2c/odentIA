@@ -150,6 +150,7 @@ import {
   finishesByDefault,
   finishingAtSign,
   healthGapWords,
+  odontogramReminderCovered,
   type SessionAnswers,
   needsNextControlDay,
   noNewChargesWords,
@@ -1790,10 +1791,13 @@ export function EncounterEditor({
     sections,
   })
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
-  // El odontograma tampoco cuando el cierre lo firma (decía a la vez «queda firmado» y «Sin registrar:
-  // odontograma», QA del 9 nov), ni en la sesión que solo trata (la 2 de la endodoncia): no firma copia,
-  // y lo tratado queda en el gráfico y en la atención firmada (reglas clínicas, 18 nov).
-  const odontogramCovered = Boolean(closingQuery.data?.data.odontogram) || activeProcedures > 0
+  // El odontograma tampoco cuando el cierre lo firma, ni en la sesión que solo trata con su
+  // odontograma ya firmado (`odontogramReminderCovered`).
+  const odontogramCovered = odontogramReminderCovered({
+    signsOdontogram: Boolean(closingQuery.data?.data.odontogram),
+    procedures: activeProcedures,
+    signedBefore: closingQuery.data?.data.odontogramSignedBefore === true,
+  })
   // Lo opcional del producto (el periodontograma) no se dice como algo sin registrar: no falta (P10).
   const optionalKeys = new Set(product.blocks.filter((item) => item.key !== "odontograma").map((item) => item.key))
   const unrecorded = closingSections

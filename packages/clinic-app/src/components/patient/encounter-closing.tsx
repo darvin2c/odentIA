@@ -1194,6 +1194,21 @@ function listWords(words: readonly string[]): string {
   return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
 }
 
+/**
+ * Si «Sin registrar: odontograma» sobra al cerrar: cuando el cierre lo firma (decía a la vez «queda
+ * firmado» y «Sin registrar», QA del 9 nov) o en la sesión que solo trata (la 2 de la endodoncia),
+ * que no firma copia porque ya tiene su odontograma firmado y lo tratado queda en el gráfico y en la
+ * atención firmada. En la primera atención, sin odontograma firmado antes, se recuerda aunque haya
+ * procedimientos (reglas clínicas, 18 nov).
+ */
+export function odontogramReminderCovered(input: {
+  signsOdontogram: boolean
+  procedures: number
+  signedBefore: boolean
+}): boolean {
+  return input.signsOdontogram || (input.procedures > 0 && input.signedBefore)
+}
+
 /** «sus alergias, sus enfermedades y su medicación»: lo que se le pregunta (la ASA no se pregunta, se clasifica). */
 export function healthGapWords(gaps: readonly HealthGap[]): string {
   return listWords(gaps.flatMap((gap) => (gap === "asa" ? [] : [HEALTH_GAP_WORDS[gap]])))

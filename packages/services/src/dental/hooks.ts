@@ -49,6 +49,7 @@ import {
   type ClosingOdontogram,
   closingOdontogramOf,
   getOdontogram,
+  hasSignedOdontogram,
   type OdontogramAssessmentRow,
   odontogramLines,
   signClosingOdontogram,
@@ -186,6 +187,11 @@ async function resolveTreatedFindings(
 /** Lo que odentIA agrega al «¿se puede cerrar?». */
 export interface DentalClosingParts {
   odontogram: ClosingOdontogram | null
+  /**
+   * Ya tiene su odontograma firmado en curso (`hasSignedOdontogram`): lo que hoy solo trata no
+   * pide registrar el odontograma. En la primera atención, sí.
+   */
+  odontogramSignedBefore: boolean
   periodontal: ClosingPeriodontal | null
   /** Caras con caries y restauración a la vez, alguna de hoy: un aviso suave (C41). */
   sameFace: SameFaceFinding[]
@@ -229,6 +235,7 @@ export const dentalHooks: ProductHooks = {
     const parts: DentalClosingParts = {
       // En clínicas de Perú, el odontograma que firmará este cierre, con lo que se termina al firmar.
       odontogram: await closingOdontogramOf(tx, orgId, patientId, encounterId, finishingPlanItemIds),
+      odontogramSignedBefore: await hasSignedOdontogram(tx, orgId, patientId),
       // A medias no bloquea: se firma como parcial (ADR 0054).
       periodontal: await closingPeriodontalOf(tx, orgId, encounterId),
       sameFace: await sameFaceFindings(tx, orgId, patientId, encounterId),

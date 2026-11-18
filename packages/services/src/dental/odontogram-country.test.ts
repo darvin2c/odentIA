@@ -465,6 +465,8 @@ it("la sesión que solo trata no firma copia; la que trae una caries nueva firma
     }),
   )
   await readyToClose(f.orgId, f.actor, f.patientId, first)
+  // La primera atención todavía no tiene odontograma firmado: el cierre lo recuerda si no se llena.
+  expect(await f.run((tx) => getEncounterClosing(tx, ...f.args, first))).toMatchObject({ odontogramSignedBefore: false })
   expect((await f.run((tx) => finalizeEncounter(tx, ...f.args, first))).odontogram).toMatchObject({ purpose: "initial" })
 
   // Sesión 2: se hace la endodoncia, que dibuja su tratamiento de conducto; la corona sigue pendiente.
@@ -478,8 +480,13 @@ it("la sesión que solo trata no firma copia; la que trae una caries nueva firma
   expect(drawn).toMatchObject({ toothNumber: 36, condition: "root_canal_treatment", encounterId: second })
   await readyToClose(f.orgId, f.actor, f.patientId, second)
   // Ni el cierre lo anuncia ni la firma lo firma: no hay hallazgos ni culmina el plan.
-  const closing = (await f.run((tx) => getEncounterClosing(tx, ...f.args, second))) as { odontogram?: unknown }
+  const closing = (await f.run((tx) => getEncounterClosing(tx, ...f.args, second))) as {
+    odontogram?: unknown
+    odontogramSignedBefore?: boolean
+  }
   expect(closing.odontogram).toBeNull()
+  // Ya tiene el inicio firmado: lo que hoy solo trata no pide registrar el odontograma.
+  expect(closing.odontogramSignedBefore).toBe(true)
   expect((await f.run((tx) => finalizeEncounter(tx, ...f.args, second))).odontogram).toBeNull()
   expect(await f.run((tx) => listOdontogramAssessments(tx, f.orgId, f.patientId))).toHaveLength(1)
   // Lo tratado sigue en el gráfico.

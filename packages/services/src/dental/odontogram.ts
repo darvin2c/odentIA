@@ -758,6 +758,24 @@ export async function closingOdontogramOf(
 }
 
 /**
+ * Si la persona ya tiene su odontograma firmado en curso: el inicio del plan, o hallazgos nuevos
+ * después, sin que el plan haya culminado (`closingOdontogramPurpose` ya no pediría el inicio).
+ * Con él, la sesión que solo trata no firma copia y lo tratado queda en el gráfico; sin él (la
+ * primera atención, o un plan nuevo tras la culminación), el cierre recuerda registrar el
+ * odontograma. Falso en clínicas que no firman odontogramas.
+ */
+export async function hasSignedOdontogram(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  const official = (await orgDentalProfile(tx, orgId)).odontogram
+  if (!official?.signedOdontogram) return false
+  const previous = await tx
+    .select({ purpose: odontogramAssessment.purpose })
+    .from(odontogramAssessment)
+    .where(and(eq(odontogramAssessment.organizationId, orgId), eq(odontogramAssessment.patientId, patientId)))
+    .orderBy(asc(odontogramAssessment.createdAt), asc(odontogramAssessment.id))
+  return closingOdontogramPurpose(previous.map((row) => row.purpose), false, false) !== "initial"
+}
+
+/**
  * Al cerrar la atención (dentro de `finalizeEncounter`, después de dejar
  * tratado lo realizado): firma el odontograma con el perfil de quien cierra,
  * en una clínica de Perú, si la atención llega a un momento de la norma

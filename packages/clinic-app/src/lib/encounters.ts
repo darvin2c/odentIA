@@ -33,6 +33,12 @@ export interface ClosingCheck {
    * la norma (la sesión que solo trata) o la clínica no firma odontogramas.
    */
   odontogram: ClosingOdontogram | null
+  /**
+   * odentIA en Perú: ya tiene su odontograma firmado en curso (el inicio del plan), así que lo que
+   * hoy solo trata no pide registrar el odontograma. Falso en la primera atención; los demás
+   * productos no lo traen.
+   */
+  odontogramSignedBefore?: boolean
   /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */
   periodontal: ClosingPeriodontal | null
   /**

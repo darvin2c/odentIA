@@ -46,6 +46,7 @@ it("cada momento de lo común pregunta al producto: una clínica médica no ve n
   try {
     const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
     expect(closing).not.toHaveProperty("odontogram")
+    expect(closing).not.toHaveProperty("odontogramSignedBefore")
     expect(closing).not.toHaveProperty("periodontal")
     const summary = await f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
     expect(summary).not.toHaveProperty("activeDiagnoses")
