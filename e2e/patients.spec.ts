@@ -322,32 +322,33 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   )
   // Un solo Plan: los tratamientos por fases y, al lado, el recorrido del que se abre.
   const recorrido = await openTreatment(page, "Endodoncia unirradicular")
-  const iniciarSesion = recorrido.getByRole("button", { name: "Iniciar sesión", exact: true })
-  await expect(iniciarSesion).toBeEnabled()
-  await iniciarSesion.click()
-  // Iniciar sesión crea la atención y navega a su página: el registro del
+  // Por empezar y sin atención abierta: «Hacer hoy» abre una con él.
+  await expect(recorrido.getByText("Por empezar", { exact: true })).toBeVisible()
+  const hacerHoy = recorrido.getByRole("button", { name: "Hacer hoy", exact: true })
+  await expect(hacerHoy).toBeEnabled()
+  await hacerHoy.click()
+  // «Hacer hoy» crea la atención y navega a su página: el registro del
   // procedimiento y el cierre ocurren allí, no en una pestaña del paciente.
   await expect(page).toHaveURL(/\/encounters\//)
-  // Una sola página: «Realizado hoy» está a la vista, sin agregarlo ni abrirlo.
-  const realizado = page.getByRole("region", { name: "Realizado hoy", exact: true })
-  const registrar = realizado.getByRole("button", { name: "Registrar lo de hoy", exact: true })
+  // Una sola página: el Plan está a la vista y el tratamiento llega marcado «Hoy», en su lugar.
+  const plan = page.getByRole("region", { name: "Plan de tratamiento", exact: true })
+  const fila = plan.getByRole("listitem").filter({ hasText: "Endodoncia unirradicular" }).first()
+  await expect(fila.getByText("Hoy", { exact: true })).toBeVisible()
+  await expect(fila.getByText("por hacer", { exact: true })).toBeVisible()
+  // «Registrar» abre el registro con este tratamiento ya elegido.
+  const registrar = fila.getByRole("button", { name: "Registrar", exact: true })
   await expect(registrar).toBeEnabled()
   await registrar.click()
   const procedureDrawer = surface(page, { name: "Registrar procedimiento" })
   await expect(procedureDrawer).toBeVisible()
-  await procedureDrawer.getByLabel("Tratamiento del presupuesto").click()
-  await page.getByRole("option", { name: /Endodoncia unirradicular/ }).click()
   await expect(procedureDrawer.getByText(/queda en curso/)).toBeVisible()
   await procedureDrawer
     .getByRole("button", { name: "Registrar procedimiento", exact: true })
     .click()
-  // Lo hecho hoy y «Completar» se ven en «Realizado hoy», sin abrir nada.
-  await expect(realizado.getByText("En curso desde", { exact: false }).first()).toBeVisible()
-
-  // Completar el tratamiento ocurre aquí, con la atención abierta.
-  await realizado.getByRole("button", { name: "Completar", exact: true }).click()
-  // Antes de firmar dice que queda realizado al firmar, no «Completado» (QA del 9 nov).
-  await expect(realizado.getByText("Queda realizado al firmar").first()).toBeVisible()
+  // Lo hecho hoy se ve en la misma fila, con su «Anular…»: pasa de «por hacer» a «hecha hoy».
+  await expect(fila.getByText("hecha hoy", { exact: true })).toBeVisible()
+  await expect(fila.getByRole("button", { name: "Anular…", exact: true })).toBeVisible()
+  await expect(fila.getByText("por hacer", { exact: true })).toHaveCount(0)
   // Sin evolución, «Finalizar y firmar» lleva a su campo, en la misma página, y lo marca.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")

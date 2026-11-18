@@ -1,4 +1,9 @@
-import { CHILDHOOD_DENTAL_SENTENCE, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import {
+  CHILDHOOD_DENTAL_SENTENCE,
+  type HelpFaq,
+  type HelpTopic,
+  SHARED_HELP_TOPICS,
+} from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -129,7 +134,11 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: faq.a
           .replace("por ejemplo una corona en dos", "por ejemplo una terapia visual de diez")
-          .replace("(por ejemplo, la endodoncia de la 46 en su sesión 2 de 2)", "(por ejemplo, la terapia visual en su sesión 2 de 10)")
+          .replace(
+            "(«Continúa:» con el tratamiento y la pieza)",
+            "(«Continúa:» con el tratamiento)",
+          )
+          .replace("(sesión 2 de 2)", "(sesión 2 de 10)")
           .replace(
             " Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio, y «Cambiar» un tratamiento indicado hoy por otro también las pide, con las habituales del nuevo, y lo pasa a la fase que le toca (una exodoncia cambiada por una endodoncia deja la cirugía).",
             " «Cambiar» un tratamiento indicado hoy por otro también pide sus sesiones, con las habituales del nuevo.",
@@ -259,7 +268,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
             "la diabetes, la presión alta, un medicamento o un embarazo cambian lo que se revisa en el ojo y lo que se indica",
           )
           .replace(
-            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar.",
+            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», arriba del Plan y al firmar.",
             "",
           )
           .replace(
@@ -646,8 +655,22 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       "pasar un tratamiento a otra fase",
     ),
   ],
-  "pacientes-procedimiento-registrar-anular": (faq) => [
-    { ...faq, a: swap(faq.a, "eliges un tratamiento aceptado de su plan", "eliges un tratamiento indicado de su plan") },
+  // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.
+  "atencion-donde-hacerla-hoy": (faq) => [
+    {
+      ...faq,
+      a: swaps(
+        faq.a,
+        [
+          "En el bloque «Plan de tratamiento» de la atención, que es el único lugar de cada tratamiento, por fases:",
+          "En el bloque «Plan» de la atención, que es el único lugar de cada tratamiento:",
+        ],
+        [
+          ", y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy.",
+          ".",
+        ],
+      ),
+    },
   ],
   // Cada cuánto puede repetirse un control, como el control anual de la vista (`FOLLOW_UP_REPEAT_MONTHS`).
   // Aquí un control se puede repetir (`repeatingControls`); en odentIA, no.

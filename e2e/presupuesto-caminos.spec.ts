@@ -81,7 +81,7 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   // En la atención, la exodoncia pregunta si es otro camino para la 46.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit.id}`))
   // El Plan está a la vista en la misma página, sin abrir nada.
-  const panel = page.getByRole("region", { name: "Plan", exact: true })
+  const panel = page.getByRole("region", { name: "Plan de tratamiento", exact: true })
   const question = panel.getByRole("group", { name: /es otro camino o va también/ })
   await expect(question).toBeVisible()
   await shot("atencion-pregunta")
