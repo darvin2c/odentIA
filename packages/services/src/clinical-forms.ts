@@ -3162,6 +3162,28 @@ async function proposedPersonalRisks(
 }
 
 /**
+ * Lo que el sistema propone hoy para los riesgos propios de un consentimiento (QA clínica del 18
+ * nov, H9): la misma regla que al generarlo, con su ficha de ahora. Para «Volver a proponer» cuando
+ * se borraron o cambiaron: no guarda nada, quien edita decide si lo usa.
+ */
+export async function proposeConsentPersonalRisks(tx: Db, orgId: string, documentId: string): Promise<string[]> {
+  const [doc] = await tx
+    .select({
+      patientId: consentDocument.patientId,
+      planItemId: consentDocument.planItemId,
+      sections: consentDocument.sectionsSnapshot,
+      templateKey: consentTemplate.key,
+    })
+    .from(consentDocument)
+    .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!doc) throw notFound("Consentimiento")
+  if (!doc.sections) return []
+  return proposedPersonalRisks(tx, orgId, doc.patientId, doc.templateKey, doc.planItemId)
+}
+
+/**
  * Cambia o borra los riesgos propios de un consentimiento pendiente (reglas clínicas del 18 nov),
  * una frase por línea; vacío los quita y la hoja queda como siempre. Con el mismo permiso que
  * generarlo. Solo mientras nadie lo firmó ni se envió a su enlace: lo que la persona lee en su
@@ -3173,6 +3195,12 @@ export async function setConsentPersonalRisks(
   actorUserId: string,
   documentId: string,
   text: string | null,
+  /**
+   * Los riesgos que tenía a la vista quien los editó. Si ya no son los guardados (otra pestaña o
+   * persona los cambió), no se pisan: 409. Sin ellos (una pantalla anterior mientras dura un
+   * despliegue), se guarda como antes.
+   */
+  seen?: string[] | null,
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -3196,6 +3224,14 @@ export async function setConsentPersonalRisks(
   } catch (cause) {
     throw invalidField("personalRisks", (cause as Error).message)
   }
+  const before = sections.personalRisks ?? []
+  // Lo mismo otra vez (un reintento tras perder la respuesta, un doble clic): ya está, sin otro evento.
+  if (sameRisks(before, personalRisks ?? [])) return current
+  if (seen !== undefined && !sameRisks(before, seen ?? []))
+    throw conflict(
+      "CONSENT_RISKS_CHANGED",
+      "Alguien cambió los riesgos propios mientras los editabas. Mira los de ahora y vuelve a guardar lo tuyo.",
+    )
   const { personalRisks: _before, ...rest } = sections
   const [row] = await tx
     .update(consentDocument)
@@ -3258,6 +3294,73 @@ export interface SignConsentInput {
   personalRisksShown?: string[] | null
 }
 
+/** Las mismas frases, en el mismo orden. */
+function sameRisks(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((risk, index) => risk === b[index])
+}
+
+/**
+ * La hoja pendiente salió a papel (se imprimió, se descargó o se abrió aparte): el servidor anota
+ * los riesgos propios que llevaba esa hoja, para que la firma en papel compare con ella aunque la
+ * pestaña se recargue o se firme desde otro equipo. Los dice la pantalla que la sacó: es la hoja
+ * que tenía (una pestaña vieja imprime la hoja vieja, y entonces la firma se rechaza, como debe).
+ * Vale la última que salió. No es un cambio del documento: no mueve `updatedAt` ni deja evento.
+ */
+export async function markConsentPrinted(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  printed: string[],
+): Promise<{ printedPersonalRisks: string[] }> {
+  const [current] = await tx
+    .select({
+      status: consentDocument.status,
+      personSignedAt: consentDocument.personSignedAt,
+      sectionsSnapshot: consentDocument.sectionsSnapshot,
+    })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  const sections = current.sectionsSnapshot as ConsentDocumentSections | null
+  const printedPersonalRisks = printed.map((risk) => risk.trim()).filter(Boolean)
+  // Firmado o sin secciones, la hoja ya no se firma en papel: no hay nada que anotar.
+  if (current.status !== "pendiente" || current.personSignedAt || !sections) return { printedPersonalRisks }
+  if (sections.printedPersonalRisks && sameRisks(sections.printedPersonalRisks, printedPersonalRisks))
+    return { printedPersonalRisks }
+  await tx
+    .update(consentDocument)
+    .set({ sectionsSnapshot: { ...sections, printedPersonalRisks } satisfies ConsentDocumentSections })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+  return { printedPersonalRisks }
+}
+
+/**
+ * Antes de subir la foto de la hoja firmada en papel: ¿la firmaría el servidor? Si los riesgos
+ * propios cambiaron después de imprimirla, lo dice ahora (el mismo 409 que al firmar) y la foto no
+ * se sube, así no queda una «Hoja firmada» que no firma nada.
+ */
+export async function checkConsentPaperSheet(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  shown: string[] | null | undefined,
+): Promise<void> {
+  const [current] = await tx
+    .select({
+      status: consentDocument.status,
+      personSignedAt: consentDocument.personSignedAt,
+      sectionsSnapshot: consentDocument.sectionsSnapshot,
+    })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente") throw conflict("SIGNED", "El consentimiento ya no está pendiente")
+  assertPersonalRisksShown(current.sectionsSnapshot, shown, "papel")
+}
+
 /**
  * Lo que vio quien firma es lo que queda firmado: los riesgos propios son lo único de la hoja que
  * cambia mientras está pendiente (`setConsentPersonalRisks`), así que se comparan frase a frase.
@@ -3267,9 +3370,12 @@ function assertPersonalRisksShown(
   shown: string[] | null | undefined,
   method: "clinica" | "papel",
 ): void {
-  const saved = (sections as ConsentDocumentSections | null)?.personalRisks ?? []
-  const seen = shown ?? []
-  if (saved.length === seen.length && saved.every((risk, index) => risk === seen[index])) return
+  const snapshot = sections as ConsentDocumentSections | null
+  const saved = snapshot?.personalRisks ?? []
+  // En papel vale la hoja que salió impresa, si el servidor la anotó (`markConsentPrinted`): la
+  // pestaña pudo recargarse o la hoja salir de otro equipo. Sin esa nota, la hoja a la vista.
+  const seen = (method === "papel" ? snapshot?.printedPersonalRisks : undefined) ?? shown ?? []
+  if (sameRisks(saved, seen)) return
   throw conflict(
     "CONSENT_CHANGED",
     method === "papel"

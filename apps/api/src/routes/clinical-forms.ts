@@ -8,6 +8,7 @@ import {
   archiveSpecialty,
   cancelClinicalOrder,
   cancelConsentDocument,
+  checkConsentPaperSheet,
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
@@ -47,11 +48,13 @@ import {
   listSpecialtiesOverview,
   listSpecialtyProfessionals,
   loadDocumentClinic,
+  markConsentPrinted,
   markConsentSentByLink,
   markConsentTemplateReviewed,
   markFormTemplateLooked,
   parseConsentDraft,
   prepareEncounterConsents,
+  proposeConsentPersonalRisks,
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
@@ -382,7 +385,21 @@ const consentCancel = z
   .strict()
 
 // Los riesgos propios de su caso: una frase por línea; vacío los quita. El servicio valida el tope.
-const consentPersonalRisks = z.object({ personalRisks: z.string().max(6000).nullable() }).strict()
+// `seen`: los que tenía a la vista quien los editó; si otra pestaña los cambió, 409 (no se pisan).
+const consentPersonalRisks = z
+  .object({
+    personalRisks: z.string().max(6000).nullable(),
+    seen: z.array(z.string().max(1000)).max(20).nullish(),
+  })
+  .strict()
+
+// La hoja que salió a papel: los riesgos propios que llevaba.
+const consentPrinted = z.object({ personalRisks: z.array(z.string().max(1000)).max(20) }).strict()
+
+// Antes de subir la foto de la hoja en papel: los riesgos de la hoja que se tiene a la vista.
+const consentPaperCheck = z
+  .object({ personalRisksShown: z.array(z.string().max(1000)).max(20).nullish() })
+  .strict()
 
 const orderCreate = z
   .object({
@@ -1283,9 +1300,51 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        setConsentPersonalRisks(tx, orgId, userId, formId(c), parsed.data.personalRisks),
+        setConsentPersonalRisks(tx, orgId, userId, formId(c), parsed.data.personalRisks, parsed.data.seen),
       ),
     )
+  })
+
+  // Lo que el sistema propone hoy para sus riesgos propios («Volver a proponer»): no guarda nada.
+  app.get("/consents/:id/personal-risks/proposed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para cambiar consentimientos")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => proposeConsentPersonalRisks(tx, orgId, formId(c))),
+    )
+  })
+
+  // La hoja pendiente salió a papel (imprimir, descargar o abrir aparte): el servidor anota sus
+  // riesgos propios para la firma en papel. Con el mismo permiso que prepararlo.
+  app.post("/consents/:id/printed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para preparar consentimientos")
+    }
+    const parsed = consentPrinted.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => markConsentPrinted(tx, orgId, formId(c), parsed.data.personalRisks)),
+    )
+  })
+
+  // Antes de subir la foto de la hoja firmada: si los riesgos cambiaron después de imprimirla, el
+  // mismo 409 que al firmar, y la foto no se sube.
+  app.post("/consents/:id/paper-check", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para firmar consentimientos")
+    }
+    const parsed = consentPaperCheck.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        checkConsentPaperSheet(tx, orgId, formId(c), parsed.data.personalRisksShown),
+      )
+      return { ok: true }
+    })
   })
 
   app.post("/consents/:id/cancel", async (c) => {

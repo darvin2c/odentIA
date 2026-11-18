@@ -13,7 +13,9 @@ import {
   createConsentDocument,
   createConsentTemplate,
   getConsentPrint,
+  checkConsentPaperSheet,
   listConsentEvents,
+  markConsentPrinted,
   markConsentSentByLink,
   publishConsentTemplate,
   setConsentPersonalRisks,
@@ -205,4 +207,63 @@ it("lo firmado es lo que vio: si los riesgos propios cambiaron después de mostr
     code: "CONSENT_CHANGED",
     message: "Los riesgos propios cambiaron después de imprimir la hoja: imprímela de nuevo y que la firme.",
   })
+})
+
+it("en papel vale la hoja que salió impresa, aunque la pestaña se recargue: el servidor la recuerda", async () => {
+  const f = await clinicalFixture()
+  await ownerDb
+    .insert(patientMedication)
+    .values({ organizationId: "org_a", patientId: f.patient.id, name: "Eliquis", atcCode: "B01AF02" })
+  const doc = await create(f)
+  const printed = ["Toma un anticoagulante (Eliquis): puede sangrar más tiempo después de la extracción."]
+  // Se imprime con un riesgo; después se cambia a otro (en esta u otra pestaña).
+  expect(await f.run((tx) => markConsentPrinted(tx, "org_a", doc.id, printed))).toEqual({ printedPersonalRisks: printed })
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Toma Eliquis: lo suspende 1 día."))
+  // La pestaña recargada ya no sabe qué se imprimió y manda lo que tiene a la vista: no basta.
+  const now = ["Toma Eliquis: lo suspende 1 día."]
+  await expect(f.run((tx) => checkConsentPaperSheet(tx, "org_a", doc.id, now))).rejects.toMatchObject({
+    code: "CONSENT_CHANGED",
+    message: "Los riesgos propios cambiaron después de imprimir la hoja: imprímela de nuevo y que la firme.",
+  })
+  // La nota de lo impreso no cambia la hoja ni dice que alguien la editó.
+  const [row] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, doc.id))
+  expect((row?.sectionsSnapshot as { personalRisks?: string[] } | undefined)?.personalRisks).toEqual(now)
+  // Impresa de nuevo, con lo de ahora: se puede firmar en papel.
+  await f.run((tx) => markConsentPrinted(tx, "org_a", doc.id, now))
+  await expect(f.run((tx) => checkConsentPaperSheet(tx, "org_a", doc.id, now))).resolves.toBeUndefined()
+  // Sin impresión anotada, vale la hoja a la vista (como antes).
+  const other = await create(f)
+  await expect(f.run((tx) => checkConsentPaperSheet(tx, "org_a", other.id, printed))).resolves.toBeUndefined()
+  await expect(f.run((tx) => checkConsentPaperSheet(tx, "org_a", other.id, []))).rejects.toMatchObject({
+    code: "CONSENT_CHANGED",
+  })
+})
+
+it("si otra pestaña cambió los riesgos mientras los editaba, no se pisan: 409 con un mensaje claro", async () => {
+  const f = await clinicalFixture()
+  await ownerDb
+    .insert(patientMedication)
+    .values({ organizationId: "org_a", patientId: f.patient.id, name: "Eliquis", atcCode: "B01AF02" })
+  const doc = await create(f)
+  const proposed = ["Toma un anticoagulante (Eliquis): puede sangrar más tiempo después de la extracción."]
+  // La pestaña B guarda tres riesgos.
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Uno.\nDos.\nTres.", proposed))
+  // La pestaña A todavía veía el propuesto: no pisa lo de B.
+  await expect(
+    f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Solo uno.", proposed)),
+  ).rejects.toMatchObject({
+    code: "CONSENT_RISKS_CHANGED",
+    status: 409,
+    message: "Alguien cambió los riesgos propios mientras los editabas. Mira los de ahora y vuelve a guardar lo tuyo.",
+  })
+  expect(await personalRisksOf(doc.id)).toEqual(["Uno.", "Dos.", "Tres."])
+  // El reintento de lo mismo que ya quedó (se perdió la respuesta) no falla ni deja otro evento.
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Uno.\nDos.\nTres.", proposed))
+  const changes = (await f.run((tx) => listConsentEvents(tx, "org_a", doc.id))).filter(
+    (event) => event.toStatus === "riesgos_propios",
+  )
+  expect(changes).toHaveLength(1)
+  // Con lo de ahora a la vista, guarda.
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "Solo uno.", ["Uno.", "Dos.", "Tres."]))
+  expect(await personalRisksOf(doc.id)).toEqual(["Solo uno."])
 })

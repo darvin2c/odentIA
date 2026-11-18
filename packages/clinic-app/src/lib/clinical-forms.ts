@@ -791,9 +791,27 @@ export function cancelConsent(id: string, reason: string) {
   return post<ConsentDocument>(`${BASE}/consents/${id}/cancel`, { reason })
 }
 
-/** Los riesgos propios de su caso, una frase por línea; vacío los quita (solo pendiente y sin enviar). */
-export function setConsentPersonalRisks(id: string, personalRisks: string | null) {
-  return put<ConsentDocument>(`${BASE}/consents/${id}/personal-risks`, { personalRisks })
+/**
+ * Los riesgos propios de su caso, una frase por línea; vacío los quita (solo pendiente y sin enviar).
+ * `seen`: los que tenía a la vista al editarlos; si otra pestaña los cambió, 409 y no se pisan.
+ */
+export function setConsentPersonalRisks(id: string, personalRisks: string | null, seen: string[]) {
+  return put<ConsentDocument>(`${BASE}/consents/${id}/personal-risks`, { personalRisks, seen })
+}
+
+/** Lo que el sistema propone hoy para sus riesgos propios («Volver a proponer»); no guarda nada. */
+export function fetchProposedPersonalRisks(id: string) {
+  return apiFetch<{ data: string[] }>(`${BASE}/consents/${id}/personal-risks/proposed`)
+}
+
+/** La hoja pendiente salió a papel con estos riesgos propios: el servidor los anota para la firma en papel. */
+export function markConsentPrinted(id: string, personalRisks: string[]) {
+  return post<{ printedPersonalRisks: string[] }>(`${BASE}/consents/${id}/printed`, { personalRisks })
+}
+
+/** Antes de subir la foto de la hoja en papel: 409 `CONSENT_CHANGED` si ya no se firmaría. */
+export function checkConsentPaperSheet(id: string, personalRisksShown: string[]) {
+  return post<{ ok: true }>(`${BASE}/consents/${id}/paper-check`, { personalRisksShown })
 }
 
 export function generateConsentPdf(id: string) {

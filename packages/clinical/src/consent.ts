@@ -45,6 +45,11 @@ export const CONSENT_SECTION_LABELS = {
  */
 export interface ConsentDocumentSections extends ConsentSections {
   personalRisks?: string[] | null
+  /**
+   * Los riesgos propios de la última hoja pendiente que salió a papel (`markConsentPrinted`): la
+   * firma en papel compara con ella. No se muestra ni se imprime.
+   */
+  printedPersonalRisks?: string[] | null
 }
 
 /** Declaración que la persona firmante confirma al firmar. */

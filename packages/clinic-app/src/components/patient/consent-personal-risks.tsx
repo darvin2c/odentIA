@@ -2,9 +2,15 @@ import { Button, FieldGroup, toast } from "@odentia/ui"
 import { submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
+import { useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
-import { type ConsentDocument, setConsentPersonalRisks } from "../../lib/clinical-forms"
+import { ApiError, apiFetch } from "../../lib/api"
+import {
+  type ConsentDocument,
+  fetchConsents,
+  fetchProposedPersonalRisks,
+  setConsentPersonalRisks,
+} from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull } from "../../lib/patients"
 
@@ -55,7 +61,12 @@ export function ConsentPersonalRisksField({
   })
   const person = patientQuery.data?.data.patient
   const first = (person?.givenNames ?? person?.displayName ?? "").trim().split(/\s+/)[0] ?? ""
-  const saved = (document.sectionsSnapshot?.personalRisks ?? []).join("\n")
+  const savedRisks = document.sectionsSnapshot?.personalRisks ?? []
+  const saved = savedRisks.join("\n")
+  // Lo que tenía a la vista quien edita: si otra pestaña los cambió, el servidor no los pisa (409).
+  const seen = useRef<string[]>(savedRisks)
+  // Tras ese 409, lo que dicen ahora: se ven, y lo escrito se conserva para guardarlo encima a sabiendas.
+  const [latest, setLatest] = useState<string[] | null>(null)
   const form = useAppForm({
     defaultValues: { personalRisks: saved },
     validators: {
@@ -65,14 +76,38 @@ export function ConsentPersonalRisksField({
     },
     onSubmit: async ({ value }) => {
       const text = value.personalRisks.trim()
-      await setConsentPersonalRisks(document.id, text || null)
+      try {
+        const result = await setConsentPersonalRisks(document.id, text || null, seen.current)
+        seen.current = result.data.sectionsSnapshot?.personalRisks ?? []
+      } catch (error) {
+        if (error instanceof ApiError && error.shape.code === "CONSENT_RISKS_CHANGED") {
+          const fresh = await fetchConsents({ patientId: document.patientId })
+            .then((response) => response.data.find((row) => row.id === document.id) ?? null)
+            .catch(() => null)
+          if (fresh) {
+            seen.current = fresh.sectionsSnapshot?.personalRisks ?? []
+            setLatest(seen.current)
+          }
+          void onSaved()
+        }
+        throw error
+      }
+      setLatest(null)
       toast.success(text ? "Riesgos propios guardados" : "Riesgos propios quitados de la hoja")
       await onSaved()
     },
   })
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
-  const changed = useStore(form.store, (state) => state.values.personalRisks.trim() !== saved)
+  const written = useStore(form.store, (state) => state.values.personalRisks.trim())
+  const changed = written !== saved
+  // Lo que propone hoy el sistema, con su ficha de ahora: «Volver a proponer» lo trae al campo.
+  const proposed = useQuery({
+    queryKey: ["consent-proposed-risks", document.id],
+    queryFn: () => fetchProposedPersonalRisks(document.id),
+    staleTime: 60_000,
+  })
+  const proposedText = (proposed.data?.data ?? []).join("\n")
   return (
     <form
       noValidate
@@ -102,10 +137,37 @@ export function ConsentPersonalRisksField({
             {error}
           </p>
         ) : null}
-        <div>
+        {latest ? (
+          <div className="flex flex-col gap-1 rounded-md border p-2 text-sm">
+            <p className="font-medium">Ahora dicen:</p>
+            {latest.length > 0 ? (
+              <ul className="list-disc pl-5">
+                {latest.map((risk) => (
+                  <li key={risk}>{risk}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">Ninguno: la hoja va sin riesgos propios.</p>
+            )}
+            <p className="text-muted-foreground">Si guardas otra vez, quedan los que escribiste.</p>
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
           <Button type="submit" size="sm" variant="outline" disabled={pending || !changed}>
             {pending ? "Guardando…" : "Guardar"}
           </Button>
+          {/* Borrados o cambiados por error: lo que propone el sistema vuelve al campo, sin guardar. */}
+          {proposedText && written !== proposedText ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => form.setFieldValue("personalRisks", proposedText)}
+            >
+              Volver a proponer
+            </Button>
+          ) : null}
         </div>
       </FieldGroup>
     </form>
