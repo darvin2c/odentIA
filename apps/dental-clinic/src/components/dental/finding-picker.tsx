@@ -1,8 +1,9 @@
 import { FINDINGS } from "@odentia/dental"
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@odentia/ui"
-import { common, EmptyState, normalizeSearchText } from "@odentia/ui-patterns"
+import { Button, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@odentia/ui"
+import { common, EmptyState } from "@odentia/ui-patterns"
 import { Search, SearchX, X } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { searchFindings } from "./finding-search"
 import { useOdontogramNotation } from "./odontogram-notation"
 import { ToothSVG } from "./tooth-svg"
 
@@ -40,12 +41,21 @@ export function FindingPicker({
   onChange,
   disabled = false,
   autoFocus = false,
+  elsewhere,
+  onReason,
 }: {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
   /** Al aparecer, el foco va al buscador (la pieza abierta al lado de la página). */
   autoFocus?: boolean
+  /**
+   * Lo escrito que no es un hallazgo: un diagnóstico o un tratamiento, con su botón
+   * (`FindingElsewhere`). `diagnoses` dice si ningún hallazgo coincide. Sin él, «Sin resultados».
+   */
+  elsewhere?: (search: { query: string; diagnoses: boolean }) => ReactNode
+  /** «El dolor es el motivo de consulta»: lleva al motivo y lo enfoca. Sin él, solo se dice. */
+  onReason?: () => void
 }) {
   const id = useId()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -55,10 +65,13 @@ export function FindingPicker({
   }, [])
   const official = useOdontogramNotation()
   const [search, setSearch] = useState("")
-  const query = normalizeSearchText(search.trim())
-  const visible = examples.filter(({ finding }) =>
-    normalizeSearchText(finding.label).includes(query),
-  )
+  // Por su nombre, sus variantes y cómo se dice («resina», «funda», «resto radicular»).
+  const found = searchFindings(search)
+  const order = new Map(found.findings.map((finding, index) => [finding.code, index]))
+  const visible = examples
+    .filter(({ finding }) => order.has(finding.code))
+    .sort((a, b) => (order.get(a.finding.code) ?? 0) - (order.get(b.finding.code) ?? 0))
+  const other = found.elsewhere && elsewhere ? elsewhere({ query: search, diagnoses: visible.length === 0 }) : null
   return (
     <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <legend className="text-sm font-medium">¿Qué observas?</legend>
@@ -93,13 +106,25 @@ export function FindingPicker({
           ) : null}
         </InputGroupAddon>
       </InputGroup>
-      {visible.length === 0 ? (
-        <EmptyState
-          icon={SearchX}
-          title={common.filters.noResults}
-          description="Ningún hallazgo coincide con la búsqueda. Prueba otro nombre."
-          className="p-6"
-        />
+      {found.reason && visible.length === 0 ? (
+        // Lo que cuenta el paciente no se dibuja: va en el motivo (reglas clínicas del 18 nov).
+        <div className="flex flex-col gap-2 rounded-lg border p-3">
+          <p className="text-sm">{found.reason} es el motivo de consulta.</p>
+          {onReason ? (
+            <Button type="button" variant="outline" className="min-h-11 self-start" onClick={onReason}>
+              Ir al motivo
+            </Button>
+          ) : null}
+        </div>
+      ) : visible.length === 0 ? (
+        (other ?? (
+          <EmptyState
+            icon={SearchX}
+            title={common.filters.noResults}
+            description="Ningún hallazgo coincide con la búsqueda. Prueba otro nombre."
+            className="p-6"
+          />
+        ))
       ) : (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-2">
           {visible.map(({ finding, entries }) => (
@@ -125,6 +150,8 @@ export function FindingPicker({
           ))}
         </div>
       )}
+      {/* «Endodoncia»: el tratamiento de conducto que ya tiene, arriba, y agregarla al plan. */}
+      {visible.length > 0 ? other : null}
       <p className="text-xs text-muted-foreground">
         {official ? `Simbología ${official.shortName}. ` : ""}Imágenes ilustrativas: el estado, el
         detalle y las superficies se eligen a continuación.

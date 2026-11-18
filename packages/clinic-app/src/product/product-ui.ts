@@ -314,6 +314,8 @@ export interface EncounterBlockContext {
   onChanged: () => Promise<void>
   /** El bloque está guardando (o terminó). */
   onPendingChange: (pending: boolean) => void
+  /** Lleva al motivo de consulta y lo enfoca (odentIA: «dolor» en el buscador de la pieza). */
+  focusReason: () => void
 }
 
 export interface ProductEncounterBlocks {

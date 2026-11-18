@@ -50,6 +50,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
+import { FindingElsewhere } from "./finding-elsewhere"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
 import { ToothFitNotice } from "./tooth-fit-notice"
@@ -377,6 +378,7 @@ export function ToothDrawer({
   beforeWrite,
   onPendingChange,
   onDirtyChange,
+  onReason,
 }: {
   patientId: string
   teeth: number[]
@@ -398,6 +400,8 @@ export function ToothDrawer({
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Lleva al motivo de consulta y lo enfoca: «dolor» en el buscador es el motivo, no un hallazgo. */
+  onReason?: () => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -919,7 +923,44 @@ export function ToothDrawer({
       ) : choosingFinding ? (
         // Al lado de la página, el foco va al buscador al abrir la pieza (con Enter, sin 4 Tab de por
         // medio). En el cajón de la tablet no: abriría el teclado encima de la pieza.
-        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} autoFocus={inline} />
+        <FindingPicker
+          value={condition}
+          onChange={selectCondition}
+          disabled={fieldDisabled}
+          autoFocus={inline}
+          // Lo que no es un hallazgo (pulpitis, endodoncia) se anota o se agrega desde aquí, con una pieza.
+          elsewhere={
+            singleTooth != null && encounterId
+              ? ({ query, diagnoses }) => (
+                  <FindingElsewhere
+                    patientId={patientId}
+                    encounterId={encounterId}
+                    toothNumber={singleTooth}
+                    query={query}
+                    diagnoses={diagnoses}
+                    disabled={fieldDisabled}
+                    beforeWrite={beforeWrite}
+                    onChanged={onChanged}
+                    onPendingChange={onPendingChange}
+                  />
+                )
+              : undefined
+          }
+          onReason={
+            onReason
+              ? () => {
+                  if (inline) {
+                    onReason()
+                    return
+                  }
+                  // En el cajón de la tablet, primero se cierra la pieza: el cajón devuelve el foco a
+                  // la pieza al cerrarse, y el motivo lo toma después.
+                  onOpenChange(false)
+                  window.setTimeout(onReason, 400)
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <section aria-labelledby={`${uid}-hallazgo`} className="flex flex-col gap-4 sm:col-span-2">

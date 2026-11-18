@@ -84,6 +84,7 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
                 disabled={ctx.locked}
                 readOnly={!ctx.canWrite}
                 onSelectionChange={onSelectionChange}
+                onReason={ctx.focusReason}
               />
             )}
             {/* Lo registrado hoy, debajo del dibujo: lo que se ve en la atención firmada. */}

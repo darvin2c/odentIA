@@ -1607,6 +1607,16 @@ export function EncounterEditor({
   // sin parpadear a «Sin motivo».
   const offeredReason =
     canWrite && attending && !finalizing && reason.trim() === "" ? detail.bookedReason : null
+  /** Lleva al motivo con el cursor al final: lo que cuenta el paciente («dolor») va ahí, no en la pieza. */
+  const focusReason = () => {
+    requestAnimationFrame(() => {
+      const field = document.getElementById(`${uid}-reason`) as HTMLTextAreaElement | null
+      if (!field) return
+      field.scrollIntoView({ block: "center", behavior: "smooth" })
+      field.focus({ preventScroll: true })
+      field.setSelectionRange(field.value.length, field.value.length)
+    })
+  }
   const takeOfferedReason = () => {
     if (offeredReason && !locked) editText("reason", offeredReason)
   }
@@ -1623,6 +1633,7 @@ export function EncounterEditor({
     flush,
     onChanged: handleChildChanged,
     onPendingChange: handlePendingChange,
+    focusReason,
   })
 
   const followUps = (followUpsQuery.data?.data ?? []).filter(

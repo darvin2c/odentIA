@@ -123,6 +123,8 @@ type OdontogramStudioProps = {
   onDirtyChange?: (dirty: boolean) => void
   /** Contenido enlazado a la selección, justo bajo el odontograma y antes de lo firmado. */
   belowChart?: React.ReactNode
+  /** En la atención: lleva al motivo de consulta («dolor» en el buscador de la pieza). */
+  onReason?: () => void
 }
 
 /**
@@ -155,6 +157,7 @@ function StudioBody({
   onSelectionChange,
   onDirtyChange,
   belowChart,
+  onReason,
 }: OdontogramStudioProps) {
   const canWrite = usePermission("clinical.write")
   const official = useOdontogramNotation()
@@ -730,6 +733,7 @@ function StudioBody({
                 disabled={disabled}
                 onChanged={refresh}
                 beforeWrite={beforeWrite}
+                onReason={onReason}
                 onDirtyChange={handleDirtyChange}
                 onPendingChange={(pending) => {
                   setEditorPending(pending)

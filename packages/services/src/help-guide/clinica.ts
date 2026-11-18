@@ -339,12 +339,13 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-odontograma-caries-tablet",
         q: "¿Cómo registro una caries en la tablet?",
-        a: "Dentro de la atención, toca la pieza: arriba está «¿Qué observas?» con el buscador; escribe «caries» y elígela. Toca las caras en el dibujo de la pieza (o márcalas en «Superficies comprometidas»), elige la profundidad con un toque y, si pones el diagnóstico, su tipo, «Presuntivo» o «Definitivo». «Registrar hallazgo» la deja en el odontograma. Lo que ya tiene la pieza queda abajo, plegado en una línea que dice cuántos hallazgos y procedimientos tiene: tócala para verlo. Con la pieza abierta, «Añadir un tratamiento al plan» empieza con esa pieza y su hallazgo.",
+        a: "Dentro de la atención, toca la pieza: arriba está «¿Qué observas?» con el buscador; escribe «caries» y elígela. Toca las caras en el dibujo de la pieza (o márcalas en «Superficies comprometidas»), elige la profundidad con un toque y, si pones el diagnóstico, su tipo, «Presuntivo» o «Definitivo». «Registrar hallazgo» la deja en el odontograma. Lo que ya tiene la pieza queda abajo, plegado en una línea que dice cuántos hallazgos y procedimientos tiene: tócala para verlo. Con la pieza abierta, «Añadir un tratamiento al plan» empieza con esa pieza y su hallazgo. Si escribes un diagnóstico, como «pulpitis», el buscador no lo dibuja: te ofrece anotarlo en esa pieza; con un tratamiento, como «endodoncia», agregarlo al plan; con «dolor», «Ir al motivo».",
         forms: [
           "registrar una caries en el ipad",
           "marcar caries en la tablet",
           "como pongo la profundidad de la caries",
           "donde esta la historia de la pieza",
+          "no encuentro pulpitis en el odontograma",
         ],
         area: "clinica",
         needs: "clinical.write",
