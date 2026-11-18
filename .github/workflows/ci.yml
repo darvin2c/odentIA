@@ -287,7 +287,7 @@ jobs:
           docker image ls gestoria-smoke:ci --format 'Tamaño de la imagen: {{.Size}}'
           fallos=0
           for comando in "pnpm --filter @gestoria/api start" "pnpm --filter @gestoria/db migrate"; do
-            salida=$(docker run --rm --network none gestoria-smoke:ci sh -c "timeout 25 $comando" 2>&1)
+            salida=$(docker run --rm --network none gestoria-smoke:ci sh -c "timeout 25 $comando" 2>&1) || true
             if echo "$salida" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (module|package)|ERR_PACKAGE_PATH_NOT_EXPORTED|MODULE_NOT_FOUND|not found: "; then
               echo "::error::$comando: falta un módulo en la imagen"
               echo "$salida" | tail -15
