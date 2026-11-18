@@ -184,6 +184,29 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     await enable(false)
   })
 
+  it("la cantidad sale también con «8 h», «c/8 h» o «3 veces al día», y no con «si hay dolor» ni en un jarabe", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de frecuencias")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const current = async (id: string) => (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === id)
+    const [recipe] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "8 h", duration: "7 días" } }],
+    })).suggestions
+    expect(recipe).toMatchObject({ payload: { quantity: 21, quantityCalculated: true } })
+    for (const frequency of ["c/8 h", "cada 8 hrs", "3 veces al día"]) {
+      await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency } }] })
+      expect(await current(recipe!.id)).toMatchObject({ payload: { frequency, quantity: 21, quantityCalculated: true } })
+    }
+    await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency: "c/8 h si hay dolor" } }] })
+    expect((await current(recipe!.id))?.payload).not.toHaveProperty("quantity")
+    // Un jarabe se cuenta en frascos, que dependen del frasco: no se propone.
+    const [syrup] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "paracetamol", strength: "120 mg/5 ml", dosageForm: "jarabe", dose: "5 ml", frequency: "c/8 h", duration: "3 días" } }],
+    })).suggestions
+    expect(syrup?.payload).not.toHaveProperty("quantity")
+    await enable(false)
+  })
+
   it("revisar la receta contra una alergia dictada no le quita lo que era calculado", async () => {
     await enable(true)
     const fx = await openSession("Obturación de alergia")
@@ -227,11 +250,13 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
       corrections: [{ suggestionId: ibuprofeno!.id, changes: { duration: "tres días" } }],
     })
     const completed = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === ibuprofeno!.id)
-    expect(completed).toMatchObject({ status: "lista", payload: { quantity: 9 }, voice: { before: "sin duración" } })
+    // «Si hay dolor» no propone la cantidad: la decide quien receta (la misma regla que la receta escrita).
+    expect(completed).toMatchObject({ status: "lista", voice: { before: "sin duración" } })
+    expect(completed?.payload).not.toHaveProperty("quantity")
 
     const { prescriptionId } = await fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))
     const items = await ownerDb.select().from(prescriptionItem).where(eq(prescriptionItem.prescriptionId, prescriptionId))
-    expect(items.map((item) => [item.genericName, item.route, item.quantity]).sort()).toEqual([["amoxicilina", "oral", 21], ["ibuprofeno", "oral", 9]])
+    expect(items.map((item) => [item.genericName, item.route, item.quantity]).sort()).toEqual([["amoxicilina", "oral", 21], ["ibuprofeno", "oral", null]])
     expect(await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).toEqual([])
 
     // Con alergia a las penicilinas, la amoxicilina queda con el aviso de siempre y no se emite sola.

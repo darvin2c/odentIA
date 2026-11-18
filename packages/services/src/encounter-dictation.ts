@@ -20,6 +20,7 @@ import {
   quantityWords,
   prescribingAlerts,
   type PrescribingSituation,
+  suggestedQuantity,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -895,19 +896,6 @@ function choiceSite(payload: Record<string, unknown>): Record<string, unknown> {
 
 const CHOOSE_EACH_OPTION = "Elige la prestación en cada opción."
 
-/** Números como se dictan: «8», «ocho», «una». */
-const SPOKEN_NUMBERS: Record<string, number> = {
-  un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
-  doce: 12, catorce: 14, quince: 15, veinte: 20, veinticuatro: 24, treinta: 30,
-}
-function spokenNumber(text: string, unit: RegExp): number | null {
-  const plain = normalizeForSearch(text)
-  const found = new RegExp(`(\\d+|[a-z]+)\\s+${unit.source}`).exec(plain)
-  if (!found?.[1]) return null
-  const value = /^\d+$/.test(found[1]) ? Number(found[1]) : SPOKEN_NUMBERS[found[1]]
-  return value && value > 0 ? value : null
-}
-
 /** Formas que se toman por la boca: con ellas, «vía oral» no se dicta (decisión 6 de la fase 2). */
 const ORAL_FORMS = /\b(capsula|tableta|comprimido|gragea|jarabe|suspension|sobre|solucion oral|gotas)\b/
 
@@ -952,12 +940,15 @@ function prepareMedication(payload: Record<string, unknown>, medications: Medica
   else if (!spokenRoute && ORAL_FORMS.test(form)) Object.assign(ready, { route: "oral", routeImplied: true })
   else delete ready["route"]
   if (typeof payload["quantity"] !== "number") {
-    // Solo con unidades que se cuentan: «10 mL» de jarabe no da un número de frascos.
-    const perDose = spokenNumber(text("dose"), /(capsula|tableta|comprimido|gragea|sobre)/)
-    const everyHours = spokenNumber(text("frequency"), /hora/)
-    const weeks = spokenNumber(text("duration"), /semana/)
-    const days = spokenNumber(text("duration"), /dia/) ?? (weeks ? weeks * 7 : null)
-    if (perDose && everyHours && days && 24 % everyHours === 0) Object.assign(ready, { quantity: perDose * (24 / everyHours) * days, quantityCalculated: true })
+    // La misma regla que la receta escrita: solo tabletas y cápsulas, nunca «si hay dolor».
+    const suggestion = suggestedQuantity({
+      dose: text("dose"),
+      frequency: text("frequency"),
+      duration: text("duration"),
+      dosageForm: text("dosageForm"),
+      strength: text("strength"),
+    })
+    if (suggestion) Object.assign(ready, { quantity: suggestion.quantity, quantityCalculated: true })
   }
   if (!findMedication(genericName, medications.medications)) ready["notInList"] = true
   const missing = Object.keys(MEDICATION_LABEL).filter((key) => !ready[key] || (typeof ready[key] === "string" && !String(ready[key]).trim()))
