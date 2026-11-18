@@ -770,6 +770,8 @@ export function signConsent(
     paperDocumentId?: string | null
     /** Lo firmó en su enlace y lo firma de nuevo aquí: la firma del enlace queda en la historia. */
     signAgain?: boolean
+    /** Los riesgos propios de la hoja que vio; si cambiaron después, el servidor no la firma. */
+    personalRisksShown?: string[]
   },
 ) {
   // `signerDocNotice`: el documento escrito del representante no quedó en su ficha (por qué).

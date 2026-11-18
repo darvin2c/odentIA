@@ -89,6 +89,8 @@ export interface DocumentPaperPanelProps {
   /** Abierto en su propia dirección, sin superficie lateral (los enlaces guardados). */
   page?: boolean
   onClose?: () => void
+  /** Al imprimir, descargar o abrir aparte el PDF: lo que puede terminar en papel. */
+  onTakeAway?: () => void
 }
 
 /**
@@ -110,6 +112,7 @@ export function DocumentPaperPanel({
   children,
   page = false,
   onClose,
+  onTakeAway,
 }: DocumentPaperPanelProps) {
   const mobile = useIsMobile() === true
   const pdf = usePaperPdf(paperPdfPath(patientId, type, documentId), revision)
@@ -117,6 +120,7 @@ export function DocumentPaperPanel({
   const filename = `${title.replace(/[\\/:*?"<>|]+/g, " ").trim()}.pdf`
 
   const print = () => {
+    onTakeAway?.()
     const target = frame.current?.contentWindow
     try {
       if (!target) throw new Error("Sin hoja")
@@ -145,6 +149,7 @@ export function DocumentPaperPanel({
     <a
       href={pdf.url}
       download={filename}
+      onClick={() => onTakeAway?.()}
       className={buttonVariants({ variant: "outline", className: mobile ? "min-h-11" : undefined })}
     >
       Descargar PDF
@@ -197,6 +202,7 @@ export function DocumentPaperPanel({
             href={pdf.url}
             target="_blank"
             rel="noopener"
+            onClick={() => onTakeAway?.()}
             className={buttonVariants({ className: "min-h-11 w-full" })}
           >
             Abrir PDF

@@ -5420,7 +5420,7 @@ await db.transaction(async (tx) => {
 // la foto de la hoja firmada; el pendiente se cierra con método «papel».
 {
   const [paperPending] = await db
-    .select({ id: consentDocument.id })
+    .select({ id: consentDocument.id, sections: consentDocument.sectionsSnapshot })
     .from(consentDocument)
     .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
     .where(
@@ -5448,6 +5448,8 @@ await db.transaction(async (tx) => {
       comprehensionConfirmed: true,
       method: "papel",
       paperDocumentId: sheet.id,
+      // La hoja impresa llevaba los riesgos propios que tenga.
+      personalRisksShown: (paperPending.sections as { personalRisks?: string[] } | null)?.personalRisks ?? null,
     })
   }
 }

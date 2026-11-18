@@ -41,6 +41,7 @@ import {
   signConsent,
 } from "../../lib/clinical-forms"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
+import { personalRisksOf, personalRisksOnPaper, shownRisksField } from "../../lib/consent-shown"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import {
@@ -466,6 +467,8 @@ function SigningFlow({
           method: "clinica",
           // Ya lo firmó en su enlace y prefiere firmarlo de nuevo aquí.
           ...(document.personSignedAt ? { signAgain: true } : {}),
+          // La hoja que tuvo en pantalla: si sus riesgos propios cambiaron después, no se firma.
+          ...shownRisksField(personalRisksOf(document)),
         })
         done.add(document.id)
         setSigned(new Set(done))
@@ -1075,6 +1078,8 @@ export function PaperSignDrawer({
         comprehensionConfirmed: true,
         method: "papel",
         paperDocumentId,
+        // La hoja que salió impresa: si sus riesgos propios cambiaron después, no se firma.
+        ...shownRisksField(personalRisksOnPaper(document)),
       }).catch((error: unknown) => {
         if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE")
           void queryClient.invalidateQueries({ queryKey: ["professional-profile"] })

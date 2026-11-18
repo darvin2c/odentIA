@@ -608,7 +608,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-consentimiento-riesgos-propios": (faq) => [
     {
       ...faq,
-      a: "Al generar el consentimiento, el sistema propone los riesgos propios de su caso según sus antecedentes (por ejemplo, su alergia al látex). Ábrelo desde su fila en Documentos: mientras está pendiente, en «Riesgos propios de…» (opcional) los cambias, los agregas o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Firmado o ya enviado a su enlace, no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro).",
+      a: "Al generar el consentimiento, el sistema propone los riesgos propios de su caso según sus antecedentes (por ejemplo, su alergia al látex). Ábrelo desde su fila en Documentos: mientras está pendiente, en «Riesgos propios de…» (opcional) los cambias, los agregas o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Si los cambias después de mostrarle la hoja en la tablet o de imprimirla, al firmar te pide mostrársela o imprimirla de nuevo: lo que firma es lo que leyó. Firmado o ya enviado a su enlace, no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro).",
       forms: ["riesgos propios del paciente en el consentimiento", "agregar un riesgo al consentimiento", "quitar los riesgos propios del consentimiento"],
     },
   ],

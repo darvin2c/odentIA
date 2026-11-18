@@ -3250,6 +3250,32 @@ export interface SignConsentInput {
   method?: "clinica" | "papel"
   /** En papel: la foto o el escaneo de la hoja firmada, ya en Documentos. */
   paperDocumentId?: string | null
+  /**
+   * Los riesgos propios de la hoja que la persona vio: la de la tablet o la que se imprimió para
+   * firmar en papel. Sin ellos, la hoja no tenía. Si ya no son los guardados (se cambiaron después
+   * de mostrarse), no se firma: lo firmado tiene que ser lo que leyó.
+   */
+  personalRisksShown?: string[] | null
+}
+
+/**
+ * Lo que vio quien firma es lo que queda firmado: los riesgos propios son lo único de la hoja que
+ * cambia mientras está pendiente (`setConsentPersonalRisks`), así que se comparan frase a frase.
+ */
+function assertPersonalRisksShown(
+  sections: unknown,
+  shown: string[] | null | undefined,
+  method: "clinica" | "papel",
+): void {
+  const saved = (sections as ConsentDocumentSections | null)?.personalRisks ?? []
+  const seen = shown ?? []
+  if (saved.length === seen.length && saved.every((risk, index) => risk === seen[index])) return
+  throw conflict(
+    "CONSENT_CHANGED",
+    method === "papel"
+      ? "Los riesgos propios cambiaron después de imprimir la hoja: imprímela de nuevo y que la firme."
+      : "Los riesgos propios cambiaron después de mostrarse: vuelve a mostrarle la hoja.",
+  )
 }
 
 /**
@@ -3320,6 +3346,7 @@ export async function signConsentDocument(
     throw invalidField("signerContactId", "Elige a la persona que firma: el paciente o su representante legal vigente")
   if (input.comprehensionConfirmed !== true)
     throw invalidField("comprehensionConfirmed", "La persona firmante debe confirmar que comprendió la información")
+  assertPersonalRisksShown(current.sectionsSnapshot, input.personalRisksShown, input.method === "papel" ? "papel" : "clinica")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
   // La edad con el día de la clínica: la misma regla que decide quién firma.

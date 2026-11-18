@@ -318,6 +318,8 @@ export async function seedClinicalForms(
       comprehensionConfirmed: true,
       // Un trazo con forma de firma; la del profesional se copia de la que guardó en su perfil (ADR 0131).
       signatureData: { strokes: demoSignatureStrokes(input.contactId) },
+      // La hoja de la tablet llevaba los riesgos propios que tenga.
+      personalRisksShown: (document.sectionsSnapshot as { personalRisks?: string[] } | null)?.personalRisks ?? null,
     })
     // Pendiente de firma para la exodoncia planificada: aparece en el Resumen.
     await createConsentDocument(tx, orgId, ownerUserId, {

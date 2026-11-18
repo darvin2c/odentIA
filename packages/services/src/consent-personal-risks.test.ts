@@ -3,6 +3,7 @@
  * riesgos propios de su caso, propuestos desde su ficha; se cambian o se borran mientras está
  * pendiente y no se envió a su enlace, y lo firmado no cambia.
  */
+import { randomUUID } from "node:crypto"
 import { SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { patientMedication } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
@@ -16,8 +17,10 @@ import {
   markConsentSentByLink,
   publishConsentTemplate,
   setConsentPersonalRisks,
+  signConsentDocument,
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { createPatient, getPatient } from "./patients.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -143,4 +146,61 @@ it("enviado a su enlace o firmado, ya no se cambia: el servidor lo rechaza", asy
   expect(await personalRisksOf(signed.id)).toEqual([
     "Toma un anticoagulante (Eliquis): puede sangrar más tiempo después de la extracción.",
   ])
+})
+
+it("lo firmado es lo que vio: si los riesgos propios cambiaron después de mostrarse, no se firma", async () => {
+  const f = await clinicalFixture()
+  const teresa = await f.run((tx) =>
+    createPatient(tx, "org_a", f.actor, { displayName: "Teresa Huamán", birthDate: "1950-03-12" }),
+  )
+  const self = (await f.run((tx) => getPatient(tx, "org_a", teresa.id))).contacts.find(
+    (link) => link.relationship === "self",
+  )!.contactId
+  await ownerDb
+    .insert(patientMedication)
+    .values({ organizationId: "org_a", patientId: teresa.id, name: "Eliquis", atcCode: "B01AF02" })
+  const template = await exodonciaTemplate(f)
+  const prepare = () =>
+    f.run((tx) =>
+      createConsentDocument(tx, "org_a", f.actor, {
+        patientId: teresa.id,
+        templateId: template.id,
+        procedureRef: "Exodoncia de la pieza 48",
+      }),
+    )
+  const shown = ["Toma un anticoagulante (Eliquis): puede sangrar más tiempo después de la extracción."]
+  const sign = (id: string, extra: Partial<Parameters<typeof signConsentDocument>[4]>) =>
+    f.run((tx) =>
+      signConsentDocument(tx, "org_a", f.actor, id, {
+        signerKind: "paciente",
+        signerContactId: self,
+        signatureData: { strokes: [[[1, 1], [2, 2]]] },
+        comprehensionConfirmed: true,
+        ...extra,
+      }),
+    )
+
+  // En la tablet se le mostró A y, mientras, otro lo cambió a B: no se firma B sin que lo lea.
+  const tablet = await prepare()
+  expect(await personalRisksOf(tablet.id)).toEqual(shown)
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, tablet.id, "Toma Eliquis: lo suspende 1 día."))
+  await expect(sign(tablet.id, { personalRisksShown: shown })).rejects.toMatchObject({
+    code: "CONSENT_CHANGED",
+    message: "Los riesgos propios cambiaron después de mostrarse: vuelve a mostrarle la hoja.",
+  })
+  // Sin decir lo que vio, tampoco: para el servidor, su hoja no tenía riesgos propios.
+  await expect(sign(tablet.id, {})).rejects.toMatchObject({ code: "CONSENT_CHANGED" })
+  // Con la hoja nueva a la vista, firma.
+  const signed = await sign(tablet.id, { personalRisksShown: ["Toma Eliquis: lo suspende 1 día."] })
+  expect(signed.status).toBe("firmado")
+
+  // En papel: se imprimió con A y se quitaron después; la foto de esa hoja no firma lo de ahora.
+  const paper = await prepare()
+  await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, paper.id, null))
+  await expect(
+    sign(paper.id, { method: "papel", paperDocumentId: randomUUID(), signatureData: undefined, personalRisksShown: shown }),
+  ).rejects.toMatchObject({
+    code: "CONSENT_CHANGED",
+    message: "Los riesgos propios cambiaron después de imprimir la hoja: imprímela de nuevo y que la firme.",
+  })
 })

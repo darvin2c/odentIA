@@ -340,6 +340,8 @@ const consentSign = z
     informedAt: z.iso.datetime({ offset: true }).nullish(),
     method: z.enum(["clinica", "papel"]).optional(),
     paperDocumentId: uuid.nullish(),
+    // Los riesgos propios de la hoja que vio: si cambiaron después, el servicio no la firma.
+    personalRisksShown: z.array(z.string().max(1000)).max(20).nullish(),
   })
   .strict()
   .refine(

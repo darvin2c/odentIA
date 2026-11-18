@@ -38,6 +38,7 @@ import {
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { rememberPrintedSheet } from "../../lib/consent-shown"
 import { CHANNEL_WORDS, fetchHealthDocumentSent } from "../../lib/encounter-documents"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -631,6 +632,8 @@ export function ConsentPaper({
       revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}-${document.updatedAt}`}
       page={page}
       onClose={onClose}
+      // La hoja pendiente que sale a papel: al firmarla en papel se dice qué riesgos propios llevaba.
+      onTakeAway={pending ? () => rememberPrintedSheet(document) : undefined}
       notice={
         canWrite && pending ? (
           <div className="flex flex-col gap-2 rounded-md border p-3">
