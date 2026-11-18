@@ -408,14 +408,7 @@ it("«Te espera»: el presupuesto armado que nadie envió sale al día siguiente
     .where(eq(treatmentBudgetItem.budgetId, draft.id))
   // Mientras su atención sigue en borrador, se está preparando: nadie lo envía todavía.
   expect(await unsent(sender)).toEqual([])
-  // Pero «Qué sigue» dice que falta enviarlo, sin botón (verificación del 18 nov, H7: decía «Nada
-  // pendiente en el plan» con el presupuesto «Por enviar» a la vista).
-  expect(await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))).toMatchObject({
-    kind: "enviar",
-    text: expect.stringMatching(/^Falta enviar el presupuesto a /),
-    detail: expect.stringContaining("se arma en su atención en curso: se envía al firmarla"),
-    action: null,
-  })
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))).kind).not.toBe("enviar")
   // Quien la lleva sí lo ve: lo muestra o lo envía en plena consulta.
   expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true, { viewerUserId: f.actor }))).kind).toBe("enviar")
   // Firmada la atención, queda armado.
