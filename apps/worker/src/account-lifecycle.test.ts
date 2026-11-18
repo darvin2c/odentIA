@@ -1,4 +1,6 @@
 import { createAuth, emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
+import { adminStaff } from "@odentia/db/schema/admin-core"
+import { userGlobalBlock } from "@odentia/db/schema/admin-organizations"
 import { user } from "@odentia/db/schema/auth"
 import type { MailTemplate } from "@odentia/mail"
 import { eq } from "drizzle-orm"
@@ -120,4 +122,23 @@ it("cada aviso es de la app donde se registró, y a gestorIA no le llega «crea 
   // gestorIA: ni «crea tu clínica» ni un recordatorio con la marca de otra app.
   expect(to("tienda@worker.test")).toBeUndefined()
   expect(to("tienda-sur@worker.test")).toBeUndefined()
+})
+
+it("«crea tu clínica» es de bienvenida: no a una cuenta cerrada, al personal ni a quien lleva más de 30 días", async () => {
+  const now = new Date()
+  const old = new Date(now.getTime() - 4 * DAY)
+  await ownerDb.insert(user).values([
+    { id: "w-cerrada", name: "Cerrada", email: "cerrada@worker.test", emailVerified: true, createdAt: old },
+    { id: "w-equipo", name: "Equipo", email: "equipo@worker.test", emailVerified: true, createdAt: old },
+    { id: "w-antigua", name: "Antigua", email: "antigua@worker.test", emailVerified: true, createdAt: new Date(now.getTime() - 40 * DAY) },
+    { id: "w-nueva", name: "Nueva", email: "nueva@worker.test", emailVerified: true, createdAt: old },
+  ])
+  await ownerDb.insert(userGlobalBlock).values({ userId: "w-cerrada", reason: "Cuenta cerrada por su titular" })
+  await ownerDb.insert(adminStaff).values({ userId: "w-equipo", role: "admin" })
+  const sent: Array<{ to: string } & MailTemplate> = []
+
+  await runAccountLifecycleTick(ownerDb, options(sent, now))
+  expect(sent.map((mail) => mail.to).filter((to) => to.endsWith("@worker.test")).sort()).toContain("nueva@worker.test")
+  for (const email of ["cerrada@worker.test", "equipo@worker.test", "antigua@worker.test"])
+    expect(sent.find((mail) => mail.to === email), email).toBeUndefined()
 })

@@ -92,6 +92,16 @@ const externalApps: ExternalAppEntry[] = []
 for (const app of EXTERNAL_ACCOUNT_APPS) {
   const domain = env.externalAppDomains[app]
   if (!domain) continue
+  // Un dominio de las clínicas no puede ser el de otra app: ahí dejarían de responder.
+  const clinicDomains = [env.COOKIE_DOMAIN, ...Object.values(env.productDomains)].filter(
+    (taken): taken is string => Boolean(taken),
+  )
+  const bare = (value: string) => value.trim().toLowerCase().replace(/^\./, "")
+  const overlaps = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`)
+  if (clinicDomains.some((taken) => overlaps(bare(taken), bare(domain)))) {
+    console.error(`api: el dominio de ${app} (${domain}) es o contiene uno de las clínicas: su entrada queda apagada.`)
+    continue
+  }
   const notReady = accountAppNotReady(app)
   if (notReady) console.error(`api: ${notReady}`)
   const trustedOrigins = trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin])

@@ -72,9 +72,16 @@ export async function recordAccountClosed(tx: Db, userId: string): Promise<void>
     .values(EXTERNAL_ACCOUNT_APPS.map((app) => ({ userId, type: "cuenta.cerrada" as const, app })))
 }
 
-/** Espera antes del intento siguiente: 5 s, 10 s, 20 s… hasta una hora. */
+/** Lo más que espera la respuesta de una app. */
+const ACCOUNT_EVENT_TIMEOUT_MS = 10_000
+
+/**
+ * Espera antes del intento siguiente: 30 s, 1 min, 2 min… hasta una hora. La primera es
+ * mayor que lo que puede tardar la app en responder: mientras un envío espera, nadie más
+ * toma ese aviso (la API y el trabajador no se pisan).
+ */
 export function accountEventBackoffSeconds(attempts: number): number {
-  return Math.min(5 * 2 ** Math.max(attempts - 1, 0), 3600)
+  return Math.min(30 * 2 ** Math.max(attempts - 1, 0), 3600)
 }
 
 export interface DeliverAccountEventsResult {
@@ -141,7 +148,9 @@ export async function deliverAccountEvents(
             ...signAccountEvent({ secret: sender.secret, id: row.id, body }),
           },
           body,
-          signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+          signal: AbortSignal.timeout(
+            Math.min(opts.timeoutMs ?? ACCOUNT_EVENT_TIMEOUT_MS, ACCOUNT_EVENT_TIMEOUT_MS),
+          ),
           redirect: "manual",
         })
         if (response.status < 200 || response.status >= 300)
@@ -155,7 +164,8 @@ export async function deliverAccountEvents(
         .set(
           error ? { lastError: error.slice(0, 500) } : { deliveredAt: new Date(), lastError: null },
         )
-        .where(eq(accountEvent.id, row.id))
+        // Uno ya recibido no vuelve a marcarse con error.
+        .where(and(eq(accountEvent.id, row.id), isNull(accountEvent.deliveredAt)))
       if (error) result.failed += 1
       else result.delivered += 1
     }

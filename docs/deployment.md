@@ -169,7 +169,7 @@ mientras no se configure:
 - `GESTORIA_ACCOUNT_EVENTS_URL` y `GESTORIA_ACCOUNT_EVENTS_SECRET` (API y worker): adónde
   (https) y con qué secreto (`whsec_` y al menos 24 bytes en base64) se avisa a gestorIA que
   se cerró una cuenta, firmado con Standard Webhooks. La API lo manda al cerrar; si falla, el
-  worker lo reintenta (5 s, 10 s, 20 s… hasta una hora). Vacíos, los avisos se guardan y
+  worker lo reintenta (30 s, 1 min, 2 min… hasta una hora). Vacíos, los avisos se guardan y
   esperan: al configurarlos sale también lo anterior.
 
 ### vistIA en su dominio

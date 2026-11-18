@@ -1,7 +1,14 @@
 import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
-import { type AccountApp, appOfProduct, BASE_ACCOUNT_APP, isAccountApp } from "@odentia/auth/apps"
+import {
+  ACCOUNT_APP_INFO,
+  ACCOUNT_APPS,
+  type AccountApp,
+  appOfProduct,
+  BASE_ACCOUNT_APP,
+  isAccountApp,
+} from "@odentia/auth/apps"
 import type { Db } from "@odentia/db"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import {
@@ -365,6 +372,8 @@ const appOfSignup = (value: string | null): AccountApp => (isAccountApp(value) ?
 
 /** Las apps de clínicas: el aviso «crea tu clínica» es solo de ellas. */
 const CLINIC_APPS: readonly AccountApp[] = CLINICAL_PRODUCTS.map(appOfProduct)
+/** Las apps con correos de su marca: el recordatorio de verificar sale solo con la suya. */
+const MAILED_APPS: readonly AccountApp[] = ACCOUNT_APPS.filter((app) => ACCOUNT_APP_INFO[app].mailBrand)
 
 // ---------------------------------------------------------------------------
 // Validación de borde (zod) y guards de rol interno
@@ -1926,7 +1935,14 @@ export async function findLifecycleCandidates(
   const stale = await tx
     .select({ id: user.id, email: user.email, createdAt: user.createdAt, signupApp: user.signupApp })
     .from(user)
-    .where(and(eq(user.emailVerified, false), lt(user.createdAt, reminderCutoff)))
+    .where(
+      and(
+        eq(user.emailVerified, false),
+        lt(user.createdAt, reminderCutoff),
+        // La de una app sin correos de su marca no ocupa el lugar de otra (ADR 0201).
+        or(isNull(user.signupApp), inArray(user.signupApp, [...MAILED_APPS])),
+      ),
+    )
     .orderBy(user.createdAt)
     .limit(limit * 2)
   const reminders: LifecycleCandidate[] = []
@@ -1959,7 +1975,10 @@ export async function findLifecycleCandidates(
   }
   // Verificadas sin clínica, sin invitación pendiente y sin aviso previo, registradas en una
   // app de clínicas: el aviso de otra app lo manda esa app (ADR 0201). Todo en la consulta,
-  // para que quien ya tiene clínica no ocupe el lugar de quien espera el aviso.
+  // para que quien ya tiene clínica no ocupe el lugar de quien espera el aviso. Solo quien
+  // se registró hace menos de 30 días: es un aviso de bienvenida, y quien lleva más tiempo
+  // sin clínica pudo haberla dejado (un ex empleado). Nunca a una cuenta bloqueada o
+  // cerrada, ni al personal de la administración.
   const settled = await tx
     .select({ id: user.id, email: user.email, createdAt: user.createdAt, signupApp: user.signupApp })
     .from(user)
@@ -1967,7 +1986,15 @@ export async function findLifecycleCandidates(
       and(
         eq(user.emailVerified, true),
         lt(user.createdAt, reminderCutoff),
+        gte(user.createdAt, cleanupCutoff),
         or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS])),
+        notExists(
+          tx
+            .select({ one: sql`1` })
+            .from(userGlobalBlock)
+            .where(and(eq(userGlobalBlock.userId, user.id), eq(userGlobalBlock.active, true))),
+        ),
+        notExists(tx.select({ one: sql`1` }).from(adminStaff).where(eq(adminStaff.userId, user.id))),
         notExists(tx.select({ one: sql`1` }).from(member).where(eq(member.userId, user.id))),
         notExists(
           tx

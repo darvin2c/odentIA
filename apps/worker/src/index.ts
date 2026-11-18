@@ -685,16 +685,24 @@ const isPush = (queue: QueueDef) => queue.name === "push_notices"
 const isKairos = (queue: QueueDef) => queue.name === "kairos"
 // Kairós que vende, igual: espera al modelo en cada mensaje.
 const isKairosSells = (queue: QueueDef) => queue.name === "kairos-vende"
+// Los avisos de la cuenta a otras apps (ADR 0201): esperan a otro servidor, que puede estar caído.
+const isAccountEvents = (queue: QueueDef) => queue.name === "account_events"
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 await Promise.all([
   consume(
     queues.filter(
-      (queue) => !isAgentRun(queue) && !isPush(queue) && !isKairos(queue) && !isKairosSells(queue),
+      (queue) =>
+        !isAgentRun(queue) &&
+        !isPush(queue) &&
+        !isKairos(queue) &&
+        !isKairosSells(queue) &&
+        !isAccountEvents(queue),
     ),
   ),
   consume(queues.filter(isAgentRun)),
   consume(queues.filter(isPush)),
   consume(queues.filter(isKairos)),
   consume(queues.filter(isKairosSells)),
+  consume(queues.filter(isAccountEvents)),
 ])
 process.exit(0)
