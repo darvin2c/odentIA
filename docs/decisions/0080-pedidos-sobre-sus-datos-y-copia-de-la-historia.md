@@ -1,7 +1,7 @@
 # 0080 · Pedidos sobre sus datos y copia de la historia
 
 - **Fecha:** 2026-10-22
-- **Estado:** aceptada (fase 1: copia, corregir y no recibir mensajes; fase 2: borrar y bloquear)
+- **Estado:** aceptada (fase 1: copia, corregir y no recibir mensajes; fase 2: borrar y bloquear) · Precisada por [0204](0204-la-copia-de-la-historia-completa-y-estandar.md): la copia la descarga también el odontólogo y a la persona le llega con un enlace a la copia completa
 
 ## Problema
 
