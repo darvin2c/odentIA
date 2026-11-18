@@ -128,6 +128,7 @@ jobs:
           pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
           pnpm --filter @odentia/ui-patterns exec vitest run src/scroll-policy.test.ts
           pnpm --filter @odentia/channels exec vitest run src/shared-boundaries.test.ts
+          pnpm --filter @odentia/admin-e2e exec vitest run admin-scope.test.ts
 
   # Tipos y pruebas de los paquetes afectados, repartidos en partes paralelas. La lista
   # de partes sale de `alcance`: una parte sin paquetes afectados no se ejecuta. Cada

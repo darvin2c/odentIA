@@ -25,12 +25,15 @@ function filesUnder(dir: string): string[] {
     if (entry.name === "node_modules" || entry.name === "dist") return []
     const path = join(dir, entry.name)
     if (entry.isDirectory()) return filesUnder(path)
-    return /\.(ts|tsx|mjs|js)$/.test(entry.name) ? [path] : []
+    return /\.(ts|tsx|mts|cts|mjs|cjs|js|jsx|css)$/.test(entry.name) ? [path] : []
   })
 }
 
-/** Una importación de un paquete del repositorio (`@odentia/...`) o una ruta que sale de `shared/`. */
-const IMPORT = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["']([^"']+)["']/g
+/**
+ * Lo que trae otro archivo: `from`, `import "…"` suelto, `import()`, `require()` y, en CSS,
+ * `@import` y `@source` (Tailwind lee las clases de esa carpeta).
+ */
+const IMPORT = /(?:from\s+|\bimport\s*\(?\s*|require\s*\(\s*|@import\s+(?:url\()?|@source\s+)["']([^"']+)["']/g
 
 describe("lo de uso general no conoce a ningún sistema", () => {
   it("ninguna pieza de shared importa un paquete o una carpeta de un sistema", () => {

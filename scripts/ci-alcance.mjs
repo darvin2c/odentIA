@@ -13,7 +13,8 @@
 // - Lo demás: solo los paquetes afectados según el grafo de turbo (el paquete cambiado
 //   y todo lo que depende de él).
 // - Los recorridos E2E: si todo lo que cambió está en la carpeta de la administración
-//   (admin/), solo los suyos (proyecto `admin` de Playwright), en una parte; si no, todos,
+//   (admin/), solo los suyos y los de las clínicas que abren sus pantallas (proyecto `admin`
+//   de Playwright, `ALSO_ADMIN` en e2e/playwright.config.ts), en una parte; si no, todos,
 //   en tres. El cobro y el soporte viven todavía en packages/ y apps/api, así que siguen
 //   corriendo todo (lienzo A, paso 0).
 // Las pruebas que leen el repositorio entero no van aquí: van en el job `arquitectura`.
@@ -25,11 +26,12 @@ const SHA = process.env.SHA || "HEAD"
 
 // Solo documentación y skills: no se compilan, no se prueban ni se despliegan.
 const SOLO_DOCS =
-  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|(apps|packages|admin\/apps|admin\/packages|shared\/packages)\/[^/]+\/AGENTS\.md$)/
+  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|(apps|packages|admin\/apps|shared\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
-const EN_PAQUETES = /^(apps|packages|e2e|admin|shared)\//
-// La carpeta de la administración: si todo lo cambiado está aquí, solo sus recorridos E2E.
-const SOLO_ADMIN = /^admin\//
+// En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
+const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/)/
+// La administración: si todo lo cambiado está aquí, solo sus recorridos E2E.
+const SOLO_ADMIN = /^admin\/(apps\/[^/]+|e2e)\//
 
 const SERVICIOS_EN_PARTES = 3
 const INTERFAZ = [
@@ -48,6 +50,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/web",
   "@odentia/panel",
   "@odentia/admin",
+  "@odentia/admin-e2e",
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
   "@odentia/optical-clinic",
@@ -99,7 +102,8 @@ function turbo(args) {
 }
 
 function archivosCambiados() {
-  return git(["diff", "--name-only", BASE, SHA]).split("\n").filter(Boolean)
+  // Sin detectar renombres: un archivo que se muda a admin/ cuenta también por donde estaba.
+  return git(["diff", "--name-only", "--no-renames", BASE, SHA]).split("\n").filter(Boolean)
 }
 
 function decidir() {
@@ -199,7 +203,7 @@ const salidas = {
         : [{ parte: "ninguna", tipos: "", pruebas: "", postgres: false, opciones: "" }],
   }),
   // E2E prueba la app completa; el marketing (web) no la usa.
-  e2e: String(decision.soloAdmin === true || afectados.some((n) => n !== "@odentia/web")),
+  e2e: String(afectados.some((n) => n !== "@odentia/web")),
   // Las partes de E2E: los de la administración solos, o todos en tres partes.
   e2e_partes: JSON.stringify(partesDeE2e(decision.soloAdmin === true)),
   vps: String(afectados.some((n) => VPS.includes(n))),

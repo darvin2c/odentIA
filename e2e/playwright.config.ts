@@ -1,6 +1,21 @@
 import { defineConfig } from "@playwright/test"
 import { baseUrl, RUN_ID } from "./env"
 
+/**
+ * Los recorridos de las clínicas que también abren pantallas de la administración
+ * (`hostUrl("admin")`, `ADMIN`, `enterAdmin`): corren con los de la administración.
+ * Un recorrido nuevo que la abra se suma aquí; `admin-scope.test.ts` lo exige.
+ */
+export const ALSO_ADMIN = [
+  "**/e2e/cobro.spec.ts",
+  "**/e2e/condiciones-comerciales.spec.ts",
+  "**/e2e/demos.spec.ts",
+  "**/e2e/fundadores.spec.ts",
+  "**/e2e/libro-reclamaciones.spec.ts",
+  "**/e2e/loading-unknowns.spec.ts",
+  "**/e2e/spam-y-cobros.spec.ts",
+]
+
 export default defineConfig({
   testDir: ".",
   fullyParallel: true,
@@ -26,9 +41,11 @@ export default defineConfig({
     launchOptions: { args: ["--force-prefers-reduced-motion", "--ignore-certificate-errors"] },
   },
   // Cada sistema con sus recorridos (lienzo A, paso 0): las clínicas aquí y la
-  // administración en `admin/e2e`. Comparten este arnés y el mismo entorno.
+  // administración en `admin/e2e`. Comparten este arnés y el mismo entorno. El proyecto
+  // `admin` es lo que corre un cambio solo de la administración: sus recorridos y los de
+  // aquí que también abren sus pantallas, que salen del de las clínicas para no repetirse.
   projects: [
-    { name: "chromium", use: { browserName: "chromium" } },
-    { name: "admin", testDir: "../admin/e2e", use: { browserName: "chromium" } },
+    { name: "chromium", testIgnore: ALSO_ADMIN, use: { browserName: "chromium" } },
+    { name: "admin", testDir: "..", testMatch: ["admin/e2e/**/*.spec.ts", ...ALSO_ADMIN], use: { browserName: "chromium" } },
   ],
 })

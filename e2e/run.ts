@@ -1094,7 +1094,7 @@ export async function main(args: string[]): Promise<number> {
   const outDirs = {
     panel: join(ROOT, "apps", "panel", ".cache", "e2e", runId),
     platform: join(ROOT, "apps", "dental-clinic", ".cache", "e2e", runId),
-    admin: join(ROOT, "admin", "apps", "web", ".cache", "e2e", runId),
+    admin: join(appDir("admin"), ".cache", "e2e", runId),
     ...(medicalDomain
       ? {
           latidiaPanel: join(ROOT, "apps", "panel", ".cache", "e2e", `${runId}-latidia`),
@@ -1234,7 +1234,7 @@ export async function main(args: string[]): Promise<number> {
     const tBuilds = performance.now()
     const vitePanel = resolveViteCli(join(ROOT, "apps", "panel"))
     const vitePlatform = resolveViteCli(join(ROOT, "apps", "dental-clinic"))
-    const viteAdmin = resolveViteCli(join(ROOT, "admin", "apps", "web"))
+    const viteAdmin = resolveViteCli(appDir("admin"))
     const viteLatidia = medicalDomain ? resolveViteCli(join(ROOT, "apps", "medical-clinic")) : null
     const latidiaEnv = medicalDomain ? { ...childEnv, ...latidiaBuildEnv(runtime) } : null
     const viteVistia = opticalDomain ? resolveViteCli(join(ROOT, "apps", "optical-clinic")) : null
@@ -1347,7 +1347,7 @@ export async function main(args: string[]): Promise<number> {
       adminLease,
       appPorts.admin,
       ["--import", bootstrapUrl, viteAdmin, "preview", "--outDir", outDirs.admin, "--host", "127.0.0.1", "--port", String(appPorts.admin), "--strictPort"],
-      join(ROOT, "admin", "apps", "web"),
+      appDir("admin"),
       { ...childEnv, NODE_ENV: "production" },
     )
     /** `vite preview` de un build, como el resto de las apps del run (latidIA y vistIA). */
