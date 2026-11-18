@@ -273,6 +273,8 @@ it("la Historia y la atención firmada dicen la opción elegida, sin importes, n
   expect(decided.stateText).toBe("Aceptó 1 de 2")
   // Documentos y el cajón de la respuesta dicen lo mismo que la Historia (QA del 18 nov).
   expect(decided.choiceText).toBe("Eligió la opción A")
+  // «Qué sigue» de recepción dice lo mismo, no «Aceptó 1 de 2» (verificación del 18 nov, 9).
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).text).toMatch(/^Eligió la opción A: /)
 
   // La atención firmada y su tarjeta en la Historia dicen la opción; cada tratamiento, su respuesta.
   expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))).budgets).toEqual([

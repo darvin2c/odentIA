@@ -33,7 +33,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useBudgetPapers } from "../../lib/budget-papers"
-import { type BudgetWithTotals, budgetChoiceWords, budgetNumberLabel, totalsOf, valueOption } from "../../lib/budgets"
+import { type BudgetWithTotals, budgetChoiceWords, budgetNumberLabel, budgetRowAmount } from "../../lib/budgets"
 import {
   type ClinicalOrder,
   type ConsentDocument,
@@ -645,14 +645,13 @@ export function DocumentosSection({
       }
     }),
     ...budgetPapers.budgets.map((budget): Row => {
-      // Un total por moneda de la opción que vale; sin precio de alguna, no se dice ninguno.
-      const total = orgCurrencyLocale
-        ? moneyTotalsText(
-            totalsOf(valueOption(budget) ?? budget, budget.currency),
-            (cents, unit) => formatMoney(cents, unit, orgCurrencyLocale),
-            "",
-          )
+      // Un total por moneda de la opción que vale; ya respondido, lo que aceptó. Sin precio de
+      // alguna, no se dice ninguno.
+      const amount = budgetRowAmount(budget)
+      const sum = orgCurrencyLocale
+        ? moneyTotalsText(amount.totals, (cents, unit) => formatMoney(cents, unit, orgCurrencyLocale), "")
         : ""
+      const total = sum && amount.accepted ? `aceptó ${sum}` : sum
       const date = budget.presentedAt ?? budget.createdAt
       // Sin título propio, el presupuesto se llama «Presupuesto N.º 456»: no se repite (repaso
       // final de la ficha, B3).

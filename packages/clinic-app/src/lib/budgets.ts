@@ -218,6 +218,23 @@ export function valueOption(budget: Pick<BudgetWithTotals, "options">): BudgetOp
   )
 }
 
+/**
+ * El monto de la fila de un presupuesto en Documentos: ya respondido (aceptado o parcial), lo que
+ * aceptó, con «aceptó» delante; si no, el total de la opción que vale (verificación del 18 nov, 10:
+ * «Eligió la opción A» iba junto al total de la opción, S/ 1,550, cuando aceptó S/ 650).
+ */
+export function budgetRowAmount(
+  budget: Pick<
+    BudgetWithTotals,
+    "status" | "options" | "currency" | "totals" | "totalCents" | "acceptedCents" | "tariffTotalCents" | "discountCents"
+  >,
+): { accepted: boolean; totals: Array<{ currency: string; totalCents: number | null }> } {
+  const totals = totalsOf(valueOption(budget) ?? budget, budget.currency)
+  const accepted = budget.status === "aceptado" || budget.status === "parcial"
+  if (!accepted) return { accepted, totals }
+  return { accepted, totals: totals.map((row) => ({ currency: row.currency, totalCents: row.acceptedCents })) }
+}
+
 /** Las líneas de una opción. */
 export function optionLines(
   budget: Pick<BudgetWithTotals, "items">,

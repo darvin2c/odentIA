@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -195,4 +195,32 @@ describe("revisionDroppedOptions", () => {
     const options = ana.options.map((entry) => (entry.id === "extraer" ? { ...entry, decision: "elegida" } : entry))
     expect([...revisionDroppedOptions({ ...ana, options }, new Set(["resina"]))]).toEqual([])
   })
+})
+
+// Verificación del 18 nov (10): Documentos decía «S/ 1,550.00» junto a «Eligió la opción A», y
+// había aceptado S/ 650.
+it("la fila de un presupuesto respondido dice lo que aceptó; sin responder, el total de la opción", () => {
+  const choice = (decision: string, totalCents: number, acceptedCents: number) => ({
+    id: decision,
+    decision,
+    isRecommended: false,
+    lineCount: 2,
+    totalCents,
+    acceptedCents,
+    tariffTotalCents: totalCents,
+    discountCents: 0,
+  })
+  const budget = {
+    status: "parcial",
+    currency: "PEN",
+    options: [choice("elegida", 155000, 65000), choice("no_elegida", 90000, 0)],
+    totalCents: 155000,
+    acceptedCents: 65000,
+    tariffTotalCents: 155000,
+    discountCents: 0,
+  } as unknown as Parameters<typeof budgetRowAmount>[0]
+  expect(budgetRowAmount(budget)).toEqual({ accepted: true, totals: [{ currency: "PEN", totalCents: 65000 }] })
+  expect(budgetRowAmount({ ...budget, status: "presentado" }).totals).toMatchObject([
+    { currency: "PEN", totalCents: 155000 },
+  ])
 })
