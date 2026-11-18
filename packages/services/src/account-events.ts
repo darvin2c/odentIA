@@ -1,5 +1,6 @@
 import {
   type AccountEventPayload,
+  type AccountEventType,
   isAccountEventSecret,
   signAccountEvent,
 } from "@odentia/auth/account-events"
@@ -9,10 +10,11 @@ import { accountEvent } from "@odentia/db/schema/auth"
 import { and, asc, eq, isNull, lte, sql } from "drizzle-orm"
 
 /**
- * Los avisos de la cuenta a las apps que son otro sistema (ADR 0201): hoy, que se cerró
- * una cuenta, para que cada app saque a esa persona de sus equipos y marque cerrada su
- * copia. Se escriben en la misma transacción que el cierre, para todas esas apps, estén
- * configuradas o no: la que se configure después recibe lo que pasó antes.
+ * Los avisos de la cuenta a las apps que son otro sistema (ADR 0201): que una cuenta se
+ * cerró, se bloqueó o se reabrió. Se escriben en la misma transacción que el cambio, para
+ * todas esas apps, estén configuradas o no: la que se configure después recibe lo que pasó
+ * antes. Los de una misma persona llegan en orden: uno no sale mientras otro anterior suyo
+ * a esa app no se haya recibido.
  *
  * Se mandan en el momento (la API, al terminar el cierre) y, si fallan, el trabajador los
  * reintenta: cada vuelta toma los que tocan, sin pisarse con otra (`skip locked`). Repetir
@@ -64,12 +66,42 @@ export function accountEventSendersFromEnv(env: {
   return { senders, problems }
 }
 
-/** Anota, en la transacción del cierre, el aviso a cada app que es otro sistema. */
-export async function recordAccountClosed(tx: Db, userId: string): Promise<void> {
+/**
+ * Anota, en la transacción del cambio, el aviso a cada app que es otro sistema. Toma una
+ * llave de esa cuenta hasta terminar la transacción: dos cambios de la misma cuenta se
+ * anotan uno tras otro, y su `created_at` (la hora de la base al anotarlo, no la del inicio
+ * de la transacción) sigue el orden en que quedaron hechos.
+ */
+async function recordAccountEvent(
+  tx: Db,
+  userId: string,
+  type: AccountEventType,
+  expiresAt: Date | null = null,
+): Promise<void> {
   if (EXTERNAL_ACCOUNT_APPS.length === 0) return
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`account_event:${userId}`}, 0))`)
   await tx
     .insert(accountEvent)
-    .values(EXTERNAL_ACCOUNT_APPS.map((app) => ({ userId, type: "cuenta.cerrada" as const, app })))
+    .values(EXTERNAL_ACCOUNT_APPS.map((app) => ({ userId, type, app, expiresAt })))
+}
+
+/** Se cerró la cuenta: cada app saca a esa persona de sus equipos y marca cerrada su copia. */
+export function recordAccountClosed(tx: Db, userId: string): Promise<void> {
+  return recordAccountEvent(tx, userId, "cuenta.cerrada")
+}
+
+/** Se bloqueó la cuenta, sin fecha o hasta `expiresAt`: cada app deja de dejarla entrar. */
+export function recordAccountBlocked(
+  tx: Db,
+  userId: string,
+  expiresAt: Date | null,
+): Promise<void> {
+  return recordAccountEvent(tx, userId, "cuenta.bloqueada", expiresAt)
+}
+
+/** Se quitó el bloqueo (también el de un cierre): cada app vuelve a dejarla entrar. */
+export function recordAccountReopened(tx: Db, userId: string): Promise<void> {
+  return recordAccountEvent(tx, userId, "cuenta.reabierta")
 }
 
 /** Lo más que espera la respuesta de una app. */
@@ -114,9 +146,17 @@ export async function deliverAccountEvents(
             eq(accountEvent.app, sender.app),
             isNull(accountEvent.deliveredAt),
             lte(accountEvent.nextAttemptAt, now),
+            // En orden: un bloqueo y su reapertura nunca llegan al revés.
+            sql`not exists (
+              select 1 from auth.account_event earlier
+              where earlier.app = ${accountEvent.app}
+                and earlier.user_id = ${accountEvent.userId}
+                and earlier.delivered_at is null
+                and (earlier.created_at, earlier.id) < (${accountEvent.createdAt}, ${accountEvent.id})
+            )`,
           ),
         )
-        .orderBy(asc(accountEvent.createdAt))
+        .orderBy(asc(accountEvent.createdAt), asc(accountEvent.id))
         .limit(limit)
         .for("update", { skipLocked: true })
       for (const row of rows) {
@@ -133,9 +173,12 @@ export async function deliverAccountEvents(
     })
     for (const row of due) {
       const payload: AccountEventPayload = {
-        type: row.type as AccountEventPayload["type"],
+        type: row.type as AccountEventType,
         timestamp: row.createdAt.toISOString(),
-        data: { userId: row.userId },
+        data:
+          row.type === "cuenta.bloqueada"
+            ? { userId: row.userId, expiresAt: row.expiresAt?.toISOString() ?? null }
+            : { userId: row.userId },
       }
       const body = JSON.stringify(payload)
       let error: string | null = null

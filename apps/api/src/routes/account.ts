@@ -18,7 +18,7 @@ import { runService, validationError } from "./helpers.js"
 export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {}
 
 /**
- * Tras cerrar una cuenta, el aviso a las apps que son otro sistema sale en el momento
+ * Tras cerrar, bloquear o reabrir una cuenta, el aviso a las apps que son otro sistema sale en el momento
  * (ADR 0201), sin esperar la respuesta: si falla, lo reintenta el trabajador.
  */
 export function sendAccountEventsNow(deps: Pick<AppDeps, "ownerDb" | "accountEventSenders">): void {

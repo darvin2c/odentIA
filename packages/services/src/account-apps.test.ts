@@ -1,19 +1,21 @@
 /**
  * La cuenta conoce las apps (ADR 0201, paso 2 del lienzo A), contra Better Auth y una base
  * real: recuerda la app de la entrada donde se registró cada persona, firma el token con que
- * otra app la reconoce y avisa a las apps que son otro sistema cuando se cierra una cuenta.
+ * otra app la reconoce y avisa a las apps que son otro sistema cuando se cierra, se bloquea o
+ * se reabre una cuenta.
  */
 import { createPublicKey, verify } from "node:crypto"
 import { type AccountApp, createAuth, LEGAL_VERSION, verifyAccountEvent } from "@odentia/auth"
 import { accountEvent, user } from "@odentia/db/schema/auth"
-import { eq, sql } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import {
   accountEventBackoffSeconds,
   accountEventSendersFromEnv,
   deliverAccountEvents,
 } from "./account-events.js"
-import { closeMyAccount } from "./admin-organizations.js"
+import type { AdminActor } from "./admin-core.js"
+import { closeMyAccount, removeGlobalBlock, setGlobalBlock } from "./admin-organizations.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -289,5 +291,154 @@ describe("cerrar una cuenta avisa a las apps que son otro sistema", () => {
         GESTORIA_ACCOUNT_EVENTS_SECRET: SIGNING,
       }),
     ).toEqual({ senders: [sender], problems: [] })
+  })
+})
+
+describe("bloquear y reabrir una cuenta avisa a las apps que son otro sistema", () => {
+  const SIGNING = `whsec_${Buffer.alloc(32, 5).toString("base64")}`
+  const sender = { app: "gestoria" as const, url: "https://gestoria.test/avisos", secret: SIGNING }
+  const admin: AdminActor = { userId: "", role: "admin" }
+
+  async function accountOf(email: string): Promise<string> {
+    await signUp(makeAuth("odentia"), email)
+    const [who] = await ownerDb.select({ id: user.id }).from(user).where(eq(user.email, email))
+    return who!.id
+  }
+
+  const eventsOf = (userId: string) =>
+    ownerDb
+      .select()
+      .from(accountEvent)
+      .where(eq(accountEvent.userId, userId))
+      .orderBy(asc(accountEvent.createdAt))
+
+  /** Una app de mentira que guarda lo que recibe, ya verificado, y responde lo que se le diga. */
+  function fakeApp() {
+    const received: ReturnType<typeof verifyAccountEvent>[] = []
+    const app = {
+      answer: 200,
+      received,
+      fetch: (async (url: string, init: RequestInit) => {
+        const request = new Request(url, init)
+        received.push(
+          verifyAccountEvent({
+            secret: SIGNING,
+            headers: request.headers,
+            body: await request.text(),
+          }),
+        )
+        return new Response(null, { status: app.answer })
+      }) as unknown as typeof fetch,
+    }
+    return app
+  }
+
+  it("bloquear y reabrir anotan su aviso solo para las apps que son otro sistema, firmado", async () => {
+    admin.userId = await accountOf("jefa@apps.test")
+    const who = await accountOf("bloqueo@apps.test")
+    const until = new Date("2026-12-01T00:00:00.000Z")
+    await ownerDb.transaction((tx) =>
+      setGlobalBlock(tx, admin, {
+        userId: who,
+        reason: "acceso comprometido, se investiga",
+        expiresAt: until,
+      }),
+    )
+    await ownerDb.transaction((tx) => removeGlobalBlock(tx, admin, who))
+    // Quitar un bloqueo que ya no estaba no avisa nada.
+    await ownerDb.transaction((tx) => removeGlobalBlock(tx, admin, who))
+    const events = await eventsOf(who)
+    // odentIA, latidIA y vistIA no reciben avisos: se enteran en la misma transacción.
+    expect(events.map(({ app, type }) => ({ app, type }))).toEqual([
+      { app: "gestoria", type: "cuenta.bloqueada" },
+      { app: "gestoria", type: "cuenta.reabierta" },
+    ])
+
+    const app = fakeApp()
+    const now = new Date()
+    await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now })
+    await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now })
+    expect(app.received).toEqual([
+      expect.objectContaining({
+        id: events[0]!.id,
+        type: "cuenta.bloqueada",
+        data: { userId: who, expiresAt: until.toISOString() },
+      }),
+      expect.objectContaining({
+        id: events[1]!.id,
+        type: "cuenta.reabierta",
+        data: { userId: who },
+      }),
+    ])
+  })
+
+  it("un bloqueo y su reapertura llegan en orden, aunque el primero falle", async () => {
+    admin.userId = await accountOf("jefe@apps.test")
+    const who = await accountOf("orden@apps.test")
+    await ownerDb.transaction((tx) =>
+      setGlobalBlock(tx, admin, { userId: who, reason: "acceso comprometido, se investiga" }),
+    )
+    const app = fakeApp()
+    app.answer = 503
+    const now = new Date()
+    // El bloqueo no llega: queda para su turno.
+    expect(await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now })).toEqual({
+      delivered: 0,
+      failed: 1,
+    })
+    await ownerDb.transaction((tx) => removeGlobalBlock(tx, admin, who))
+    // A los 5 segundos la reapertura ya toca y el bloqueo todavía no: no sale antes que él.
+    app.answer = 200
+    const soon = new Date(now.getTime() + 5_000)
+    expect(await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now: soon })).toEqual({
+      delivered: 0,
+      failed: 0,
+    })
+    const later = new Date(now.getTime() + 60_000)
+    expect(await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now: later })).toEqual(
+      {
+        delivered: 1,
+        failed: 0,
+      },
+    )
+    expect(await deliverAccountEvents(ownerDb, [sender], { fetch: app.fetch, now: later })).toEqual(
+      {
+        delivered: 1,
+        failed: 0,
+      },
+    )
+    expect(app.received.map((event) => event?.type)).toEqual([
+      "cuenta.bloqueada",
+      "cuenta.bloqueada",
+      "cuenta.reabierta",
+    ])
+    expect(app.received[0]?.data).toEqual({ userId: who, expiresAt: null })
+  })
+
+  it("para las apps de clínicas nada cambia: el bloqueo cierra la entrada y reabrir la devuelve", async () => {
+    admin.userId = await accountOf("jefa2@apps.test")
+    const auth = makeAuth("latidia")
+    await signUp(auth, "entra@apps.test")
+    await signIn(auth, "entra@apps.test")
+    const [who] = await ownerDb
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "entra@apps.test"))
+    await ownerDb.transaction((tx) =>
+      setGlobalBlock(tx, admin, { userId: who!.id, reason: "acceso comprometido, se investiga" }),
+    )
+    const denied = await auth.handler(
+      new Request(`${API}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: PANEL },
+        body: JSON.stringify({ email: "entra@apps.test", password: "clave-de-prueba-1" }),
+      }),
+    )
+    expect(denied.status).toBeGreaterThanOrEqual(400)
+    await ownerDb.transaction((tx) => removeGlobalBlock(tx, admin, who!.id))
+    await signIn(auth, "entra@apps.test")
+    // Sin la dirección ni el secreto de gestorIA, nada sale: los avisos esperan guardados.
+    expect(await deliverAccountEvents(ownerDb, [])).toEqual({ delivered: 0, failed: 0 })
+    expect((await eventsOf(who!.id)).every((event) => event.deliveredAt === null)).toBe(true)
   })
 })

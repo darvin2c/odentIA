@@ -139,6 +139,14 @@ const recoveryDecisionInput = z.object({
  * ejecuta recuperaciones. El personal nunca cambia roles de clínica.
  */
 export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
+  /**
+   * Tras un cambio de la cuenta (cerrar, bloquear, reabrir), el aviso a las apps sale en el
+   * momento sin esperarlo: si falla, lo reintenta el trabajador.
+   */
+  const notifyAppsNow = () => {
+    sendAccountEventsNow(deps)
+    return { ok: true }
+  }
   const app = new Hono()
   const loaders: OrganizationBillingLoaders = {
     getBillingSummary: deps.getBillingSummary,
@@ -364,7 +372,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
           reason: parsed.data.reason,
           expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined,
         }),
-      ).then(() => ({ ok: true })),
+      ).then(notifyAppsNow),
     )
   })
 
@@ -373,7 +381,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
     return runService(c, 200, () =>
-      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(() => ({ ok: true })),
+      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(notifyAppsNow),
     )
   })
   app.post("/users/:id/close", async (c) => {
@@ -385,10 +393,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     return runService(c, 200, () =>
       owner((tx) =>
         closeAccountByAdmin(tx, actor, { userId: c.req.param("id"), reason: parsed.data.reason }),
-      ).then(() => {
-        sendAccountEventsNow(deps)
-        return { ok: true }
-      }),
+      ).then(notifyAppsNow),
     )
   })
 

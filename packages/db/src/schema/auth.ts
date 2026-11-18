@@ -9,8 +9,11 @@ import { authSchema } from "./schemas.js"
  */
 export const ACCOUNT_APPS = ["odentia", "latidia", "vistia", "gestoria"] as const
 
-/** Lo que la cuenta avisa a las apps que son otro sistema (`account_event`). */
-export const ACCOUNT_EVENT_TYPES = ["cuenta.cerrada"] as const
+/**
+ * Lo que la cuenta avisa a las apps que son otro sistema (`account_event`): que se cerró,
+ * que se bloqueó y que se reabrió (se quitó el bloqueo, también el de un cierre).
+ */
+export const ACCOUNT_EVENT_TYPES = ["cuenta.cerrada", "cuenta.bloqueada", "cuenta.reabierta"] as const
 
 const appIn = (column: string) =>
   sql.raw(`${column} IN (${ACCOUNT_APPS.map((app) => `'${app}'`).join(",")})`)
@@ -193,7 +196,9 @@ export const jwks = authSchema.table("jwks", {
  * por app, escrita en la misma transacción que el cambio. Se manda firmada (Standard
  * Webhooks) y se reintenta hasta que la app responde que la recibió: la app reconoce un
  * repetido por su `id`, así que repetirla nunca duplica el efecto. `user_id` no es clave
- * foránea: el aviso es historia y no cuenta como relación de la cuenta.
+ * foránea: el aviso es historia y no cuenta como relación de la cuenta. `expires_at` es hasta
+ * cuándo dura un bloqueo (nula, sin fecha o no es un bloqueo). Los de una persona salen en el
+ * orden de `created_at` (ver `recordAccountEvent`).
  */
 export const accountEvent = authSchema.table(
   "account_event",
@@ -202,7 +207,9 @@ export const accountEvent = authSchema.table(
     userId: text("user_id").notNull(),
     type: text("type").notNull(),
     app: text("app").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // La hora al anotarlo, no la del inicio de la transacción: da el orden de llegada.
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
@@ -210,6 +217,10 @@ export const accountEvent = authSchema.table(
   },
   (table) => [
     index("account_event_pending_idx").on(table.app, table.nextAttemptAt).where(sql`delivered_at IS NULL`),
+    // El orden por persona: si hay uno anterior suyo esperando (`deliverAccountEvents`).
+    index("account_event_pending_user_idx")
+      .on(table.app, table.userId, table.createdAt)
+      .where(sql`delivered_at IS NULL`),
     check("account_event_app_check", appIn("app")),
     check(
       "account_event_type_check",
