@@ -181,23 +181,6 @@ export function signOdontogramApi(
   })
 }
 
-export function fetchSignedOdontogramPrint(
-  patientId: string,
-  assessmentId: string,
-): Promise<{
-  data: {
-    assessment: OdontogramAssessment
-    patient: PrintPatient
-    establishment: PrintEstablishment | null
-    /** La dirección del QR; null: el papel sale sin QR. */
-    checkUrl: string | null
-    /** La firma que regía al firmarlo; null: queda la línea para firmar a mano. */
-    signerStrokes: number[][][] | null
-  }
-}> {
-  return apiFetch(`${base(patientId)}/assessments/${assessmentId}/print`)
-}
-
 export function fetchOdontogramPrint(patientId: string): Promise<{
   data: {
     entries: OdontogramEntry[]

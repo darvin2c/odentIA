@@ -305,8 +305,8 @@ async function factsOf(
 /**
  * Los archivos que la clínica guardó de este documento (ADR 0132). Sus huellas dicen si
  * un PDF es ese mismo archivo, nada de lo que contiene; sus iniciales son las del papel,
- * aunque después se corrija el nombre. El odontograma firmado se imprime desde el
- * navegador: no tiene archivo con el que comparar.
+ * aunque después se corrija el nombre. El odontograma firmado también se guarda como
+ * papel emitido; firmado antes de eso, tiene su archivo desde la primera vez que se abrió.
  */
 async function storedPapersOf(
   tx: Db,
@@ -325,7 +325,6 @@ async function storedPapersOf(
       initials: null,
     }
   }
-  if (type === "signed_odontogram") return { fingerprints: [], initials: null }
   const [row] = await tx
     .select({ sha256: issuedPaper.sha256, initials: issuedPaper.patientInitials })
     .from(issuedPaper)

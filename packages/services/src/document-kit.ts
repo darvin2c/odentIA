@@ -26,6 +26,8 @@ import {
   LineCapStyle,
   PDFDocument,
   type PDFFont,
+  PDFName,
+  PDFString,
   type PDFEmbeddedPage,
   type PDFImage,
   type PDFPage,
@@ -1396,6 +1398,28 @@ export class DocumentKit {
     this.y = top - height
   }
 
+  /**
+   * Un texto suelto dentro de un dibujo (el gráfico del odontograma): centrado en `x`, sobre
+   * la línea base `baseline`, con su color. No avanza ni salta de página: lo ubica el dibujo.
+   */
+  centeredText(
+    value: string,
+    x: number,
+    baseline: number,
+    style: { size: number; face?: Face; color: RGB },
+  ): void {
+    const face = style.face ?? "sans"
+    const text = printable(value, face)
+    const width = this.fonts[face].widthOfTextAtSize(text, style.size)
+    this.page.drawText(text, {
+      x: x - width / 2,
+      y: baseline,
+      size: style.size,
+      font: this.fonts[face],
+      color: style.color,
+    })
+  }
+
   // --- QR ----------------------------------------------------------------------
 
   /** QR vectorial: nada de imágenes, se imprime nítido a cualquier tamaño. */
@@ -1706,7 +1730,16 @@ export class DocumentKit {
   }
 
   /** «Responda desde su celular»: el recuadro con el QR del enlace. */
-  qrPanel(input: { url: string | null; title: string; body: string }): void {
+  qrPanel(input: {
+    url: string | null
+    title: string
+    body: string
+    /**
+     * Un texto corto en una línea que se toca y abre la dirección (anotación de enlace del PDF): en
+     * el celular el QR está en la misma pantalla y no se puede escanear.
+     */
+    link?: { text: string; url: string }
+  }): void {
     const padX = 9
     const padY = 7.5
     const qrSize = input.url ? 54 : 0
@@ -1717,19 +1750,41 @@ export class DocumentKit {
       size: SIZE.dense,
       leading: 1.35,
     })
+    const link = input.link
+      ? this.lay(input.link.text, inner, { face: "sansBold", size: SIZE.dense, leading: 1.5 }).slice(0, 1)
+      : []
     const body = this.lay(input.body, inner, { size: SIZE.second, tone: "soft", leading: 1.4 })
-    const textHeight = [...title, ...body].reduce((sum, line) => sum + line.height, 0)
+    const textHeight = [...title, ...link, ...body].reduce((sum, line) => sum + line.height, 0)
     const height = Math.max(textHeight, qrSize) + padY * 2
     this.ensure(height + 2)
     const top = this.y
     this.frame(this.left, top - height, this.width, height, this.tones.ink, 1.5)
     if (input.url) this.qr(input.url, this.left + padX, top - (height - qrSize) / 2, qrSize)
     let cursor = top - (height - textHeight) / 2
-    for (const line of [...title, ...body]) {
+    for (const line of [...title, ...link, ...body]) {
       this.drawLineAt(line, this.left + padX + offset, cursor, inner)
       cursor -= line.height
     }
+    // Todo el recuadro abre la dirección (su texto, que va en una línea, y el QR): se toca con el dedo.
+    if (input.link) this.linkArea(input.link.url, this.left, top - height, this.width, height)
     this.y = top - height
+  }
+
+  /** Una zona que se toca y abre una dirección (anotación `Link` con acción `URI`, ISO 32000-1 §12.5.6.5). */
+  linkArea(url: string, x: number, bottom: number, width: number, height: number): void {
+    const context = this.pdf.context
+    const annotation = context.register(
+      context.obj({
+        Type: "Annot",
+        Subtype: "Link",
+        Rect: [x, bottom, x + width, bottom + height],
+        Border: [0, 0, 0],
+        A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+      }),
+    )
+    const annots = this.page.node.Annots()
+    if (annots) annots.push(annotation)
+    else this.page.node.set(PDFName.of("Annots"), context.obj([annotation]))
   }
 
   /** La grilla de un sitio: casilla por casilla, con las marcadas en tinta. */

@@ -4,6 +4,7 @@ import {
   type HelpTopic,
   SHARED_HELP_TOPICS,
 } from "../help-guide.js"
+import { COPY_TEETH_SENTENCE } from "../help-guide/clinica.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -611,6 +612,36 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       a: "Al generar el consentimiento, el sistema propone los riesgos propios de su caso según sus antecedentes (por ejemplo, su alergia al látex). En la fila de Documentos de la atención, «Riesgos propios: 2 · Revisar» dice cuántos lleva y abre el consentimiento con el foco en ellos. Mientras está pendiente, en «Riesgos propios de…» (opcional, antes de «Firmar ahora») los cambias, los agregas o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Si escribiste algo y no lo guardaste, el botón dice «Guardar y firmar» (también en la fila del Plan, en Documentos y en el cierre): guarda primero y la hoja que firma ya lo lleva. Si los borraste o cambiaste por error, «Volver a proponer» trae otra vez lo que propone el sistema (falta «Guardar»). Si los cambias después de mostrarle la hoja en la tablet, al confirmar la tablet trae la hoja nueva: que la lea y firme otra vez. Si la imprimiste, se recuerda la hoja que salió, también si recargas la página o la imprimiste en otro equipo: al subir la foto te pide imprimirla de nuevo, antes de subirla. Firmado, enviado a su enlace o mostrado con su código («Firmar en su teléfono»), no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro). En «Historia del documento» queda quién los cambió y cuándo.",
       forms: ["riesgos propios del paciente en el consentimiento", "agregar un riesgo al consentimiento", "quitar los riesgos propios del consentimiento"],
     },
+  ],
+  // La numeración de las piezas es un estándar de la copia que solo sigue odentIA: en una óptica, los demás.
+  "pacientes-copia-historia-estandares": (faq) => [
+    {
+      ...withoutForms(faq, "la tomografia sale en dicom"),
+      a: swap(
+        swap(
+          swap(faq.a, COPY_TEETH_SENTENCE, ""),
+          "; y DICOM, sus tomografías tal como salieron del equipo, solo si tiene alguna",
+          "",
+        ),
+        "Las fotos y radiografías van tal como se subieron",
+        "Sus imágenes van tal como se subieron",
+      ),
+    },
+  ],
+  // Una óptica no toma radiografías ni tomografías: la copia lleva sus imágenes.
+  "pacientes-copia-historia-enviar": (faq) => [
+    {
+      ...withoutForms(
+        faq,
+        "como le mando a una paciente toda su historia con sus radiografias",
+        "el paciente quiere sus radiografias y su tomografia",
+      ),
+      q: "¿Cómo le mando a una persona toda su historia con sus imágenes?",
+      a: swap(faq.a, "sus radiografías, fotos y tomografías", "sus imágenes"),
+    },
+  ],
+  "pacientes-copia-historia-derivar": (faq) => [
+    { ...faq, a: swap(faq.a, "sus fotos, radiografías y tomografías", "sus imágenes") },
   ],
   // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
   "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],

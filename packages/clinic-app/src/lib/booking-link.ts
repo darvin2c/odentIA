@@ -519,3 +519,63 @@ export function signLinkConsent(
 ): Promise<{ data: { signed: true } }> {
   return post(`${base(slug)}/consents/${encodeURIComponent(consentId)}/sign`, { token, ...input })
 }
+
+/**
+ * «Copia de tu historia» (`/pendientes?abre=copia`, mesa del 18 nov): lo que muestra el enlace
+ * que viajó dentro del PDF de su historia. Abrirla no descarga ni registra nada.
+ */
+export interface RecordCopyView {
+  clinicName: string
+  locale: string
+  /** La zona de la clínica: «hasta el 25 de noviembre» se dice como ella. */
+  timezone: string
+  countryCode: string | null
+  firstName: string | null
+  /** El del paciente si quien la abre decide por él: «La historia de Mateo». */
+  patientFirstName: string | null
+  until: string
+  approxBytes: number | null
+  /** Su ficha tiene su documento: sin él, la copia se entrega en la clínica. */
+  canDownload: boolean
+  documentLabel: string | null
+  downloadsLeft: number
+}
+
+export function fetchRecordCopy(slug: string, token: string): Promise<{ data: RecordCopyView }> {
+  return publicFetch(`${base(slug)}/copy?token=${encodeURIComponent(token)}`)
+}
+
+/** Antes de bajarla: si el documento no es el suyo, el error llega para su campo. */
+export function checkRecordCopy(slug: string, token: string, docNumber: string): Promise<{ data: { ok: true } }> {
+  return post(`${base(slug)}/copy/check`, { token, docNumber })
+}
+
+/**
+ * Baja la copia con un formulario del navegador, no con `fetch`: así el teléfono la guarda
+ * mientras llega, sin tenerla entera en memoria (puede pesar cientos de MB). El token y el
+ * documento van en el cuerpo, nunca en la dirección.
+ */
+export function submitRecordCopyDownload(slug: string, token: string, docNumber: string): void {
+  const form = document.createElement("form")
+  form.method = "POST"
+  form.action = `${base(slug)}/copy/download`
+  form.style.display = "none"
+  for (const [name, value] of [
+    ["token", token],
+    ["docNumber", docNumber],
+  ] as const) {
+    const input = document.createElement("input")
+    input.type = "hidden"
+    input.name = name
+    input.value = value
+    form.append(input)
+  }
+  document.body.append(form)
+  form.submit()
+  form.remove()
+}
+
+/** La clínica del enlace de la copia que ya no sirve: su nombre y un teléfono, sin nada de la persona. */
+export function fetchRecordCopyClinic(slug: string): Promise<{ data: { clinicName: string; phone: string | null } }> {
+  return publicFetch(`${base(slug)}/copy/clinic`)
+}

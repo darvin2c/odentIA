@@ -3758,8 +3758,11 @@ async function keepSignerDocument(
   }
 }
 
-/** Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. */
-function sameDocument(typed: string, stored: string): boolean {
+/**
+ * Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. La misma
+ * comprobación de la firma a distancia y de la copia de su historia por su enlace.
+ */
+export function sameDocument(typed: string, stored: string): boolean {
   const clean = (value: string) => value.replace(/[\s.-]/g, "").toUpperCase()
   return clean(typed).length > 0 && clean(typed) === clean(stored)
 }

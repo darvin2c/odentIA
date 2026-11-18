@@ -737,7 +737,8 @@ export const issuedPaper = pgTable(
     ),
     check(
       "issued_paper_type_check",
-      sql`${table.documentType} in ('prescription','order','medical_leave','attention_sheet')`,
+      // El odontograma firmado (solo odentIA) también se guarda una vez, con su huella.
+      sql`${table.documentType} in ('prescription','order','medical_leave','attention_sheet','signed_odontogram')`,
     ),
     check("issued_paper_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
   ],

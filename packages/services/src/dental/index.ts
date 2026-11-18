@@ -9,6 +9,7 @@ import "../products.js"
 
 export * from "./dictation.js"
 export * from "./odontogram.js"
+export * from "./odontogram-pdf.js"
 export * from "./periodontal.js"
 export * from "./tooth-history.js"
 export * from "./tooth-panel.js"

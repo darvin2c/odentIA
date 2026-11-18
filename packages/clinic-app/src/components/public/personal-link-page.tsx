@@ -72,7 +72,8 @@ import { capital, longDay, timeLabel } from "./week-slots"
 
 /**
  * Lo que abre cada mensaje (`?abre=`). `cuestionario` es el de antes: los enlaces ya enviados que
- * lo nombran abren «Antes de tu cita» (`datos`).
+ * lo nombran abren «Antes de tu cita» (`datos`). `copia` es la copia de su historia, que llega
+ * dentro del PDF: la abre su propia página (`RecordCopyPage`), no esta.
  */
 export const PERSONAL_LINK_OPENS = [
   "firma",
@@ -81,6 +82,7 @@ export const PERSONAL_LINK_OPENS = [
   "datos",
   "mensajes",
   "cuestionario",
+  "copia",
 ] as const
 export type PersonalLinkOpens = (typeof PERSONAL_LINK_OPENS)[number]
 

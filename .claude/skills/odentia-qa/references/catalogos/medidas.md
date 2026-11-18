@@ -497,6 +497,45 @@ En todas las tareas de Agenda, además de lo propio:
 **Ya falló:** «Sin registrar: documentos» en una atención con su ficha; la copia de la historia sin formularios.
 **Patrones:** «Se pide para» y `getEncounterConsentNeeds`.
 
+## Copia de la historia
+
+### M-COP-01 Bajar la copia para derivar
+**Quién:** el odontólogo; con cada derivación (supuesto). La propietaria y administración también la bajan.
+**Dónde:** `CA/patient/record-copy-block.tsx`, el «…» de la ficha (`CA/patient/wide-section.tsx`).
+**Medida (1440, 18 nov 2026):** desde la ficha, 3 clics; con teclado, 14 teclas (8 Tab hasta «Más acciones», Enter, ↓, Enter, 3 Tab, Enter). A mantener.
+- [ ] Antes de bajarla se sabe qué trae, con las cifras de esa persona, en una línea; los estándares, plegados.
+- [ ] El panel tiene un solo título; el contenido no lleva tarjeta propia.
+- [ ] Al cerrar con Escape o ×, el foco vuelve a «Más acciones».
+- [ ] «Descargar copia» deja la descarga al navegador, dice que puede tardar y muestra «Preparando…» y el error donde ocurre.
+- [ ] El odontólogo la encuentra desde cualquier pestaña de la ficha.
+- [ ] Los grupos del bloque, las carpetas del ZIP y el índice del PDF se llaman igual.
+**Ya falló:** siete nombres para la misma cosa; una referencia a una pantalla que no existe (18 nov).
+**Patrones:** `WideSectionProvider`, `SubmitButton`, `Collapsible` (`UI/collapsible.tsx`), `Item` (`UI/item.tsx`).
+
+### M-COP-02 Enviar la copia a quien no viene
+**Quién:** recepción o la propietaria; con cada pedido de copia (supuesto).
+**Dónde:** `CA/patient/data-requests-panel.tsx` (`SendCopy`, `RequestRow`, `AttendDrawer`), sección «pedidos» de `R/people.$personId.tsx`.
+**Medida (1440, 18 nov 2026):** desde la fila, 3 clics (Atender, Comprobé, Enviar); con teclado, 7 teclas. Reenviar, 2 clics. A mantener.
+- [ ] Tras cada paso, el foco va al siguiente.
+- [ ] El paso de envío se lee en una línea; lo demás va a la Ayuda.
+- [ ] Lo que le llega dice lo mismo que la pantalla prometió (PDF y enlace, o solo PDF).
+- [ ] Después de enviar, quien envió ve en la fila si la persona ya la bajó y si el enlace vence o ya no sirve, con icono y texto, y esa acción va destacada.
+- [ ] «Enviar de nuevo» dice antes del botón que el enlace anterior deja de servir, y se hace desde el pedido respondido sin registrar otro ni volver a comprobar.
+- [ ] Hay un solo final visible: si el envío responde el pedido, «Marcar respondida» no compite con él.
+**Ya falló:** «Le llega el PDF…» y el resto «para entregarlo en mano» a quien se mudó; «sirve otra semana» después de matar el enlace anterior (18 nov, corregidos antes de unir); no se movía el foco tras «Comprobé que es ella».
+**Patrones:** `Step` del cajón, `submitErrorMessage`.
+
+### M-COP-03 La persona baja su copia desde el enlace, en el celular
+**Quién:** paciente o su representante; una vez por pedido (supuesto).
+**Dónde:** el PDF que le llega y `CA/public/record-copy-page.tsx` (familia de `CA/public/personal-link-page.tsx` y `CA/public/document-check.tsx`).
+**Medida (390, 18 nov 2026):** 3 toques y 1 tecleo (PDF, enlace, documento, Descargar); con teclado, 2 paradas. A mantener.
+- [ ] El enlace del PDF se toca y parece un enlace.
+- [ ] Mismo armazón que «Su enlace»: clínica arriba, `h1`, botón de 44 px a todo el ancho; le habla a quien la abre («tu historia» o «la historia de Mateo» si es su representante), sin número de historia.
+- [ ] Documento mal: el error en su campo, con los intentos que quedan.
+- [ ] Dice cuánto pesa y hasta cuándo sirve; si la descarga se corta, se baja de nuevo sin recargar y dice cuántas quedan.
+- [ ] Un enlace que ya no sirve dice de qué clínica es y cómo pedir otro, con el `EmptyState` de «Su enlace» y sin datos de la persona.
+**Ya falló:** el enlace era texto partido en dos líneas, sin vínculo (18 nov, corregido antes de unir); el foco caía en `BODY` tras «Descargar».
+
 ## Soporte de odentIA
 
 ### M-SOP-01 Dar acceso a soporte de odentIA desde Ayuda
@@ -551,6 +590,9 @@ En todas las tareas de Agenda, además de lo propio:
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
 - **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
 - **Enter y la tecla «Ir»** en cada formulario del celular: ¿pasa a la pregunta siguiente o envía todo?
+- **La entrega:** de lo que se manda afuera, ¿quien lo mandó sabe si llegó, si se bajó y si venció, y puede reenviarlo desde donde lo mandó?
+- **Los nombres:** la misma cosa se llama igual en el botón, la bitácora, el mensaje, la página pública y el archivo.
+- **El estado después de la acción:** tras cada botón que desaparece (comprobar, enviar, descargar), ¿dónde quedó el foco? Si cae en `BODY`, es un hallazgo.
 
 ## Lo que se le pregunta al paciente
 

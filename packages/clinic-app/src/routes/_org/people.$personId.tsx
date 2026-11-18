@@ -28,6 +28,7 @@ import { lazy, type ReactNode, Suspense, useEffect } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { DataRequestsPanel } from "../../components/patient/data-requests-panel"
+import { RecordCopyBlock } from "../../components/patient/record-copy-block"
 import { useOpenWide, WideSectionProvider } from "../../components/patient/wide-section"
 import { SectionSideNav } from "../../components/person/section-side-nav"
 import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
@@ -442,6 +443,8 @@ function PersonPageRoute() {
       case "pedidos":
         return patientId ? (
           <div className="flex min-w-0 flex-col gap-6">
+            {/* La copia de su historia, arriba: la descarga quien lee la historia (mesa del 18 nov). */}
+            {can("clinical.read") ? <RecordCopyBlock patientId={patientId} /> : null}
             {can("patients.write") ? <DataRequestsPanel patientId={patientId} /> : null}
             {can("audit.read") ? <AccesosPanel patientId={patientId} /> : null}
           </div>

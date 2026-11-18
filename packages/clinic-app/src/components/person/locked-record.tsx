@@ -140,7 +140,7 @@ export function LockedRecordPage({ personId }: { personId: string }) {
             Abrirla con motivo
           </h2>
           <p className="text-muted-foreground">
-            Solo Administración. Queda en «Consultas a la historia» y en la Actividad del equipo, con quién y cuándo.
+            Solo Administración. Queda en «Consultas a la historia clínica» y en la Actividad del equipo, con quién y cuándo.
           </p>
         </div>
         <form.AppField name="reason">

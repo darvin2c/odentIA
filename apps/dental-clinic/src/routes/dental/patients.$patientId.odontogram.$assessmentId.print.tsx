@@ -1,35 +1,28 @@
+import { DocumentPaperPanel } from "@odentia/clinic-app/components/patient/document-paper-panel"
 import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
-import { hcLabel } from "@odentia/clinic-app/lib/patients"
 import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
-import { Button } from "@odentia/ui"
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { OdontogramDocument } from "../../components/dental/odontogram-document"
-import {
-  SheetArticle,
-  SheetLetterhead,
-  SheetPageStyle,
-  SheetSignature,
-} from "../../components/dental/odontogram-sheet"
-import { fetchSignedOdontogramPrint } from "../../lib/dental/odontogram"
+import { fetchSignedOdontograms } from "../../lib/dental/odontogram"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/$assessmentId/print")({
   component: SignedOdontogramPrintPage,
 })
 
 /**
- * Hoja de un odontograma firmado (solo en clínicas de Perú, NTS 188; ADR 0036)
- * para imprimir y entregar: la clínica, la persona, el momento y su instantánea
- * en el gráfico de la norma, en negro (5.17), con la firma electrónica de quien
+ * Un odontograma firmado (solo en clínicas de Perú, NTS 188; ADR 0036) para ver,
+ * imprimir y descargar: su PDF, el papel emitido que se guardó al firmarlo, como la
+ * receta (ADR 0132). Es el mismo archivo que va en la copia de la historia, con la
+ * clínica, la persona, el momento, el gráfico de la norma a color, la firma de quien
  * lo firmó y el QR para comprobarlo (ADR 0115).
  */
 function SignedOdontogramPrintPage() {
   const { patientId, assessmentId } = Route.useParams()
   const query = useQuery({
-    queryKey: ["odontogram-print", patientId, assessmentId],
-    queryFn: () => fetchSignedOdontogramPrint(patientId, assessmentId),
+    queryKey: ["odontogram-assessments", patientId],
+    queryFn: () => fetchSignedOdontograms(patientId),
   })
   if (query.isPending)
     return (
@@ -43,62 +36,29 @@ function SignedOdontogramPrintPage() {
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       </PageShell>
     )
-  const { assessment, patient, establishment, checkUrl, signerStrokes } = query.data.data
-  return (
-    <PageShell className="flex flex-col gap-4">
-      <SheetPageStyle establishment={establishment} />
-      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <p className="text-sm text-muted-foreground">
-          Odontograma firmado. Usa «Imprimir» para llevarlo en papel o guardarlo como PDF; a color,
-          porque los seguros lo piden en rojo y azul.
-        </p>
-        <Button type="button" onClick={() => window.print()}>
-          Imprimir
-        </Button>
-      </div>
-      <SheetArticle establishment={establishment} className="flex flex-col gap-3 p-6">
-        <SheetLetterhead establishment={establishment} />
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-bold tracking-wide">ODONTOGRAMA</h1>
-            <p className="text-[11px] text-gray-700">{assessment.standard} · Gráfico oficial</p>
-            <p className="font-semibold">{SIGNED_ODONTOGRAM_PURPOSE_LABELS[assessment.purpose]}</p>
-          </div>
-          <div className="text-right">
-            <p className="font-semibold">Paciente: {assessment.patientName}</p>
-            <p>Historia clínica: {hcLabel(patient.patientNumber)}</p>
-            {patient.docNumber ? (
-              <p>
-                {patient.docType ?? "Documento"}: {patient.docNumber}
-              </p>
-            ) : null}
-            <p>Fecha: {formatDate(assessment.createdAt)}</p>
-          </div>
-        </div>
-        <OdontogramDocument
-          entries={assessment.entries}
-          standard={assessment.standard}
-          date={assessment.createdAt}
-          specifications={assessment.specifications}
-          observations={assessment.observations}
-          examinerName={assessment.examinerName}
-          examinerTitle={assessment.examinerTitle}
-          registrationNumber={assessment.registrationNumber}
-          patientName={assessment.patientName}
-          embedded={{
-            signature: (
-              <SheetSignature
-                name={assessment.examinerName}
-                title={assessment.examinerTitle}
-                registration={assessment.registrationNumber}
-                at={assessment.createdAt}
-                checkUrl={checkUrl}
-                strokes={signerStrokes}
-              />
-            ),
-          }}
+  const assessment = query.data.data.find((item) => item.id === assessmentId)
+  if (!assessment)
+    return (
+      <PageShell>
+        <QueryErrorState
+          error={new Error("No encontramos este odontograma firmado.")}
+          onRetry={() => void query.refetch()}
         />
-      </SheetArticle>
-    </PageShell>
+      </PageShell>
+    )
+  const signer = [assessment.examinerName, assessment.registrationNumber]
+    .filter(Boolean)
+    .join(" · ")
+  return (
+    <DocumentPaperPanel
+      page
+      patientId={patientId}
+      pdfPath={`/api/patients/${patientId}/odontogram/assessments/${assessmentId}/pdf`}
+      title={`Odontograma firmado · ${SIGNED_ODONTOGRAM_PURPOSE_LABELS[assessment.purpose]}`}
+      // A color: los seguros lo piden en rojo y azul.
+      status={`Firmado el ${formatDate(assessment.createdAt)}${signer ? ` · ${signer}` : ""} · se imprime a color`}
+      send={null}
+      revision="firmado"
+    />
   )
 }

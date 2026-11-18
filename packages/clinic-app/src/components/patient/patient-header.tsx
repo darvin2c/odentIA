@@ -693,6 +693,8 @@ export function PersonHeader({
   const canRegisterResponsible = usePermission("patients.write")
   // El portal lo dan recepción y quien ve la historia, todos igual (ADR 0156).
   const canPortal = usePermission("clinical.read") || canRegisterResponsible
+  // La copia de su historia la descarga quien lee la historia (mesa del 18 nov).
+  const canCopy = usePermission("clinical.read")
   const openWide = useOpenWide()
   const openPanel = useOpenRecordPanel()
   const patient = person.patient
@@ -861,7 +863,7 @@ export function PersonHeader({
                 openFromSearch
               />
             ) : null}
-            {canEdit || (canPortal && patient && !person.archived && openWide) ? (
+            {canEdit || (canPortal && patient && !person.archived && openWide) || (canCopy && patient && openWide) ? (
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger
                   render={<Button variant="outline" size="icon" aria-label="Más acciones" />}
@@ -890,6 +892,17 @@ export function PersonHeader({
                       }}
                     >
                       Portal del paciente
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canCopy && patient && openWide ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false)
+                        // El mismo bloque de arriba de Datos › Privacidad y pedidos.
+                        openWide({ id: "copia" })
+                      }}
+                    >
+                      Copia de su historia
                     </DropdownMenuItem>
                   ) : null}
                   {canEdit ? (

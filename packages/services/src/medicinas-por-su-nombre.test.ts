@@ -1,6 +1,6 @@
 /**
  * Reglas clínicas del 18 nov (punto 1): lo escrito a mano antes del cambio («alendronato 70 mg
- * semanal», guardado con `atc_code` nulo) recibe el código de su DCI con la migración 0148, y lo
+ * semanal», guardado con `atc_code` nulo) recibe el código de su DCI con la migración 0150, y lo
  * escrito no cambia. La lista de nombres de la migración es la de `HABITUAL_MEDICATIONS`.
  */
 import { readFileSync } from "node:fs"
@@ -20,7 +20,7 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 const migration = readFileSync(
-  fileURLToPath(new URL("../../db/drizzle/0148_medicinas_por_su_nombre.sql", import.meta.url)),
+  fileURLToPath(new URL("../../db/drizzle/0150_medicinas_por_su_nombre.sql", import.meta.url)),
   "utf8",
 )
 

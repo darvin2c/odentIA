@@ -1,4 +1,4 @@
-# 0204 · La clase de una medicina se reconoce por sus nombres estándar
+# 0205 · La clase de una medicina se reconoce por sus nombres estándar
 
 Fecha: 2026-11-18 · Estado: aceptada · Precisa ADR 0072 (la sustancia de la lista o «sin codificar») y ADR 0143 (el aviso de la receta por código ATC)
 
@@ -10,7 +10,7 @@ Las marcas «Anticoagulante» y «Medicina para los huesos», el aviso de la cir
 
 - **Cada medicina de la lista habitual lleva sus otros nombres estándar como datos** (`HabitualMedicationEntry.names`), igual que las alergias llevan sus sinónimos: la DCI de la OMS, el nombre con que se escribe en el Perú y Latinoamérica («alendronato») y la marca registrada («Fosamax»). Todos llevan al código ATC de la DCI. Por ahora, los anticoagulantes, los antiagregantes y las medicinas para los huesos de la lista (grupos ATC B01A y M05B).
 - **Lo escrito se reconoce si empieza por uno de esos nombres, entero, seguido de lo que no es una letra** (la dosis o la frecuencia), con `matchHabitualMedication`. Gana el nombre más largo. Un trozo («alendro», «ácido»), un nombre dentro de otro texto o un texto cualquiera no se reconoce: queda «sin código», como antes.
-- **Lo escrito se conserva siempre**; solo se llena el código. Lo guardado antes del cambio recibe su código con la migración 0148, con los mismos nombres (una prueba compara las dos listas). Lo que la persona declaró (`patient_health_declaration`) no se toca.
+- **Lo escrito se conserva siempre**; solo se llena el código. Lo guardado antes del cambio recibe su código con la migración 0150, con los mismos nombres (una prueba compara las dos listas). Lo que la persona declaró (`patient_health_declaration`) no se toca.
 - Es la misma regla para guardar los antecedentes, lo que declara la persona, la receta y la pantalla de elegir la medicina.
 
 ## Alternativas descartadas
@@ -28,5 +28,5 @@ Las marcas «Anticoagulante» y «Medicina para los huesos», el aviso de la cir
 ## Referencias
 
 - `packages/clinical/src/allergens.ts` (`HABITUAL_MEDICATIONS`, `matchHabitualMedication`).
-- `packages/db/drizzle/0148_medicinas_por_su_nombre.sql`.
+- `packages/db/drizzle/0150_medicinas_por_su_nombre.sql`.
 - WHO Collaborating Centre for Drug Statistics Methodology, *ATC/DDD Index*; Ruggiero SL y col., *J Oral Maxillofac Surg* 2022;80:920-943 (AAOMS 2022).

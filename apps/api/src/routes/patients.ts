@@ -134,7 +134,7 @@ import { createPatientPaymentsRoute } from "./patient-payments.js"
 import { createPatientPrescriptionsRoute } from "./patient-prescriptions.js"
 import { createPatientResponsibilitiesRoute } from "./patient-responsibilities.js"
 import { createPatientTreatmentsRoute } from "./patient-treatments.js"
-import { patientProductRoutes } from "./products.js"
+import { keepFinalizedProductPapers, patientProductRoutes } from "./products.js"
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -631,6 +631,8 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/lens-prescriptions", "recetas"],
   ["/documents", "documentos"],
   ["/imaging/studies", "documentos"],
+  // Lo que trae la copia (sus cifras) no es bajarla: no se anota como «Descargó la copia».
+  ["/record/summary", "documentos"],
   ["/record", "descarga"],
 ]
 
@@ -768,7 +770,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       }
     }
     // Descargar la historia completa no es mirar: soporte no se la lleva (y no se anota lo que no pasa).
-    if (isSupportRequest(c) && remainder.startsWith("/record")) {
+    if (isSupportRequest(c) && remainder.startsWith("/record") && !remainder.startsWith("/record/summary")) {
       const session = supportSessionOf(c)
       // El intento queda en la auditoría del permiso (el rol de la app la escribe en la clínica).
       if (session) await auditDenied(deps.db, session, session.organizationId)
@@ -1692,6 +1694,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         type: "attention_sheet",
         documentId: c.req.param("encounterId"),
       })
+      await keepFinalizedProductPapers(deps, { orgId, patientId: c.req.param("id"), finalized })
       return finalized
     })
   })
