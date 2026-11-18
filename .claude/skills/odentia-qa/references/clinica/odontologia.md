@@ -353,6 +353,7 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 - [ ] La reevaluación se compara con el sondaje inicial y no baja el estadio.
 - [ ] El plan periodontal tiene fase I (raspado por cuadrantes), reevaluación y mantenimiento.
 - [ ] Lo incompleto se firma como parcial.
+- [ ] La copia trae el periodontograma inicial y el último con la tabla de 6 sitios y la diferencia (sangrado, placa, bolsas de 6 mm o más, sitios que empeoraron), con la clasificación AAP/EFP junto al CIE-10, en PDF y FHIR; el de una atención no firmada dice «sin firmar» (`S/dental/record-sections.ts`).
 
 **Huecos conocidos:** solo dentición permanente; sin encía queratinizada ni datos mucogingivales.
 **Fuentes:** clasificación AAP/EFP 2017 (Papapanou y colaboradores, Tonetti y colaboradores); ADR 0054 y 0142.
@@ -440,7 +441,7 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 
 ## P-ODO-17 Historia clínica y papeles
 
-**Dónde:** la Historia (`CA/historia-tab.tsx`, `encounter-history-card.tsx`; `S/patient-history.ts`), la hoja para el seguro (`S/attention-sheet.ts`) y el odontograma impreso.
+**Dónde:** la Historia (`CA/historia-tab.tsx`, `encounter-history-card.tsx`; `S/patient-history.ts`), la hoja para el seguro (`S/attention-sheet.ts`), el odontograma impreso y la copia (`S/patient-record.ts`, `S/patient-record-copy.ts`, `S/dental/record-sections.ts`).
 
 - [ ] Una tarjeta por atención, con lo que se hizo, los hallazgos bajo el odontograma, el precio acordado y quién firmó.
 - [ ] «Piezas tratadas» cuenta solo lo hecho o hallado hoy, no las piezas de una imagen adjunta.
@@ -450,10 +451,19 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 - [ ] La copia de la historia y la exportación FHIR traen todo (ADR 0080).
 - [ ] La copia marca como anulado lo que viene de una atención anulada, también sus fichas, y el FHIR lo dice en el recurso (`entered-in-error`), no solo en el `Encounter`.
 - [ ] Una medicina suspendida sale en la copia con hasta cuándo la tomó, no como vigente.
-- [ ] La copia dice el tipo de diagnóstico (presuntivo o definitivo) y quién firmó cada atención, con su título, colegiatura y hora, como la pantalla.
+- [ ] La copia dice el diagnóstico con su calificativo («irreversible sintomática») y su tipo (presuntivo o definitivo), y quién firmó cada atención, con su título, colegiatura y hora, como la pantalla. El FHIR marca `resolved` lo que la app da por tratado.
+- [ ] La copia abre con «Antes de atenderla» (alergias con su estado, ASA, medicación de riesgo, embarazo y quién decide si es menor) y «Lo que sigue» (lo aceptado sin hacer, sesiones, controles con su fecha, órdenes y derivaciones sin resultado, consentimientos que faltan), también en el FHIR (`ServiceRequest`, `CarePlan`).
+- [ ] Sin ninguna revisión de antecedentes, la copia dice «no se le preguntó» (alergias, enfermedades, medicación) como la franja; nunca «Sin registros».
+- [ ] El plan de la copia dice la decisión con la palabra del Plan («Aceptó», «Lo piensa», «No aceptó») y sus sesiones. El mismo tratamiento de la misma pieza va en una línea con su última decisión; las opciones por decidir salen una vez, fuera de las fases, como caminos que no se suman; lo que otro presupuesto dejó en «lo piensa» conserva su decisión. Ficha, PDF y FHIR cuentan los mismos tratamientos.
+- [ ] Trae el odontograma gráfico de la norma, cada firmado con su momento (NTS 188), y el de hoy aparte, «Dibujado al armar esta copia, sin firmar», que no es un papel emitido.
+- [ ] Trae el ASA y la anestesia que guardó la firma (ASA, peso, anestésico y máximo), en la atención y en su FHIR.
+- [ ] Un consentimiento firmado por enlace y por confirmar no se lee como «pendiente»; cada uno dice su pieza y el FHIR enlaza su PDF.
+- [ ] Todo papel anulado o revocado va con «ANULADA» o «REVOCADO» y su motivo en su propia hoja, y la receta anulada también en el FHIR (`statusReason`). Un papel emitido antes dice su estado de hoy sin cambiar su huella ni su número.
+- [ ] El FHIR dice qué clínica y quién atendió (`Organization`, `Practitioner`, `Encounter.participant`), con las piezas codificadas y las alergias con código y `criticality`.
+- [ ] La atención en curso dice «Sigue en curso: lo que dice puede cambiar».
 - [ ] La tarjeta plegada dice la sesión y el estado (sesión 2 de 2 · tratamiento terminado; pulpitis resuelta). Lo quitado figura igual plegado y abierto, y una receta cuenta como indicación registrada.
 
-**Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar»; la copia daba por vigentes la ficha de una atención anulada y una medicina suspendida (QA de la entrega 2, 14 nov).
+**Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar»; la copia daba por vigentes la ficha de una atención anulada y una medicina suspendida (QA de la entrega 2, 14 nov); la copia decía «Sin registros» en alergias a quien nunca le preguntaron, no traía el odontograma firmado ni el PDF de recetas y órdenes, y el plan perdía la decisión; la receta anulada de una alérgica salía sin motivo; las opciones de la 46 salían en dos fases y la corona «lo piensa» desaparecía del PDF (mesa y QA de la copia, 18 nov, corregidos).
 **Fuentes:** NTS 139-MINSA; HL7 FHIR R4; ADR 0080, 0115 y 0133.
 
 **Sumado por el estudio de la atención (16 nov 2026):**
@@ -532,6 +542,7 @@ No tienen pantalla propia: viven en el plan, las sesiones, los controles y los p
 - [ ] Se ve en la Historia junto a las atenciones y entra en la copia de la historia y en el FHIR.
 - [ ] Una indicación clínica dada por teléfono se puede anotar ahí sin abrir una atención.
 
+**Ya falló:** la nota suelta no entraba en la copia: solo salían las adendas (mesa de la copia, 18 nov, corregido).
 **Caso:** el paciente llama dos días después de la endodoncia con dolor leve y se le indica paracetamol.
 **Fuentes:** NTS 139-MINSA (cada anotación con firma; nada se borra).
 
@@ -612,6 +623,8 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C17 | Niño de 6 años con pulpitis en la 75 a quien se le indica «Endodoncia posterior vital». | 05, 06, 07 | Avisa que la pieza es temporal; ofrece la pulpectomía si la clínica la tiene. |
 | C16 | Adulto con necrosis en la 14, a quien se le indica «Endodoncia posterior no vital». | 05, 06, 07, 09 | Avisa y ofrece la de bicúspide no vital; el consentimiento dice premolar. |
 | C18 | Gestante de 30 semanas, alérgica al látex, que se registra sola en el enlace público y viene por dolor. | 01, 02, 10, 13 | El embarazo y sus semanas en la franja y al abrir la atención; el látex a la vista. |
+| C19 | Adulta con alergia severa a penicilinas, HTA con losartán, ASA II, endodoncia de la 46 aceptada y por empezar, corona «lo piensa» y una receta de amoxicilina anulada por la alergia; pide su copia para seguir en otra clínica. | 02, 07, 08, 09, 13, 16, 17, 18 y P-COM-06, P-COM-26 | La copia dice lo mismo que la ficha: alergias con su estado, ASA, la decisión de cada tratamiento, el control que toca, la orden sin resultado, la receta anulada con su motivo y el odontograma de la norma. |
+| C20 | Adulto con periodontitis estadio III grado B, dos periodontogramas, a quien nunca se le preguntaron alergias; pide su copia. | 02, 12, 17 | La copia trae los dos sondajes para comparar y dice «Alergias: no se le preguntó». |
 
 ### El recorrido largo
 

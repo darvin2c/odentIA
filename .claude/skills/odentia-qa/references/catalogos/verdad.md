@@ -174,8 +174,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] El consentimiento firmado por enlace aparece en la atención a la que corresponde, como pendiente de confirmar.
 - [ ] Enlace, tablet y PDF muestran la misma hoja, con la pieza y la declaración.
 - [ ] En una demo, lo simulado no se presenta como entregado de verdad.
+- [ ] Enviar la copia de la historia responde el pedido solo cuando el mensaje salió; en cola no es respondido y, si falla, el pedido sigue pendiente.
 
-**Ya falló:** la tarea se cerraba al poner el mensaje en cola, aunque después no saliera.
+**Ya falló:** la tarea se cerraba al poner el mensaje en cola, aunque después no saliera; «Enviar por WhatsApp» la copia marcaba el pedido «Respondida» al encolar (mesa del 18 nov).
 **Caso:** el 16 de marzo a las 18:00 se envía el consentimiento de la exodoncia de la 48. El paciente lo firma a las 21:30. El 17 a las 09:00 la atención lo muestra firmado por enlace y pendiente de confirmar; tras confirmarlo, el PDF dice quién y cuándo.
 
 ## V-EST-08 El cuestionario antes de la cita: cuál y cuándo
@@ -295,6 +296,18 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** recepción veía «Niega alergias» arriba y «Alergias: Sin alergias registradas» en la tarjeta (16 nov).
 
+## V-DAT-09 Lo que trae la copia, contado igual en todas partes
+**Aparece en:** el bloque «Copia de su historia» (`CA/patient/record-copy-block.tsx`), el ZIP (`S/patient-record-copy.ts`, `patientRecordSummary`), el PDF (`S/patient-record.ts`) y el LÉEME, la página del enlace (`CA/public/record-copy-page.tsx`), la fila del pedido (`CA/patient/data-requests-panel.tsx`), ficha › Documentos (`CA/patient/documentos-panel.tsx`) y «Tus documentos» del portal (`S/portal-papers.ts`).
+**A mano:** se baja el ZIP, se abre y se cuenta por tipo en `papeles/` y `documentos/`: odontogramas firmados, recetas, órdenes (con y sin resultado), consentimientos (firmado, por enlace sin confirmar, pendiente), imágenes (JPG y DICOM aparte) y tomografías. Un consentimiento y su hoja escaneada son un papel. El tamaño, sumado desde los archivos. El Plan de la ficha se compara renglón por renglón con la página «Plan de tratamiento» del PDF y con `CarePlan.activity`.
+- [ ] Cada número del bloque es el del ZIP de esa persona, por tipo; «12 fotos y radiografías» no cuenta informes ni consentimientos, y lo que el ZIP trae y no es emitido (el odontograma de hoy) se nombra aparte.
+- [ ] Los estándares del bloque son los del LÉEME de esa persona, y cada uno se cumple en ese producto (FDI solo en odentIA; DICOM solo lo que es DICOM).
+- [ ] El plan de la copia tiene los renglones de la ficha › Plan: los caminos una vez y fuera de las fases, cada decisión («lo piensa», «no aceptó») presente; nada «rechazado» sale «pendiente».
+- [ ] Una receta anulada dice su motivo en el PDF del papel y en el FHIR (`statusReason`).
+- [ ] Una alergia «Registrada por…» en la ficha no sale `unconfirmed` en el FHIR y conserva su grupo codificado.
+- [ ] El pie del PDF dice cómo salió: a pedido de la persona o descargada por el equipo.
+**Ya falló:** el tablero prometía para una paciente «1 odontograma, 1 orden, 12 fotos y radiografías» y tenía 2, 2 y 6; la corona de la 46 «lo piensa» no estaba en el PDF y los caminos salían dos veces (mesa y QA del 18 nov, corregidos).
+**Caso:** una paciente con 2 odontogramas firmados, la panorámica pedida sin resultado y una derivación, la receta N.º 2 anulada «por su alergia», la CBCT y 5 radiografías JPG. El bloque dice 2, 2 órdenes, 6 imágenes y su tomografía; el ZIP trae exactamente eso.
+
 ## V-VAL-01 Cuántas veces dice lo mismo la atención
 **Aparece en:** la atención en borrador (`CA/patient/encounter-editor.tsx` y sus bloques), en tres estados: nueva vacía, primera consulta cargada y sesión siguiente.
 **A mano:** se cuenta cuántas veces aparece en la página el nombre de un mismo tratamiento, su consentimiento pendiente y cada requisito para firmar, y cuántas frases grises explican una regla.
@@ -315,6 +328,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] «Deshacer» aparece solo si el servidor puede deshacer (archivar y volver a usar una plantilla).
 - [ ] «Si sales, sigue aquí al volver» se cumple también al cerrar el navegador del celular y volver a abrir el enlace.
 
+- [ ] «Enviar de nuevo» deja un enlace que funciona, con sus descargas completas, aunque el anterior se haya agotado.
+- [ ] Un enlace que va dentro de un PDF se puede tocar y no se parte en dos líneas; se abre el PDF en el formato en que llega.
+
 **Ya falló:** la barra de un mes abría los gastos de otro mes, sin filtro.
 **Caso:** en Reportes de febrero, sede Centro, la barra «Personal S/ 5,700». «Ver los gastos» abre Gastos de febrero, Centro, tipo Personal, y sus filas suman 5,700.
 
@@ -333,9 +349,11 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] «Se guarda al volver la conexión» se cumple también si la persona sale o recarga.
 - [ ] Dos avisos del mismo cajón no dicen cosas opuestas ni dejan cifras de antes al cambiar de moneda.
 - [ ] El enlace del paciente no dice «Recordatorios de tus citas: sí» si la clínica no los envía.
+- [ ] Lo que se promete enviar «a quien no viene» se cumple también pasadas 24 horas sin que escriba; si no puede salir, la causa se ve en la pantalla, no solo al pasar el ratón.
 
 **Ya falló:** «El agente le avisa por su conversación» a quien pidió no recibir mensajes.
 **Caso:** el 13 de marzo se reserva una cita a un paciente que pidió ningún mensaje. El aviso dice que no se le escribirá y la conversación no tiene mensaje nuevo. Con otro paciente que sí acepta, el mensaje está en el hilo.
+**Caso:** pidió la copia por WhatsApp el lunes 16 y no volvió a escribir; el jueves 19 se envía: le llega el PDF con su enlace, o la pantalla dice por qué no y qué hacer.
 
 ## V-PRO-03 La Ayuda dice lo que la app hace
 **Aparece en:** el panel de Ayuda (`CA/help-panel.tsx`), con la guía de `S/help-guide.ts` y la de cada producto (`S/medical/help.ts`, `S/optical/help.ts`).
