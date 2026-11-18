@@ -248,7 +248,16 @@
     {"q":"como le doy acceso a soporte","expected":["inicio"],"producto":"odentia","faqs":["¿Cómo le doy acceso a soporte?"]},
     {"q":"como le quito el acceso a soporte","expected":["inicio"],"producto":"odentia","faqs":["¿Cómo le quito el acceso a soporte?"]},
     {"q":"soporte puede ver a mis pacientes y su historia","expected":["inicio"],"producto":"odentia","faqs":["¿Soporte puede ver a mis pacientes?"]},
-    {"q":"subi el comprobante del pago y me sale rechazado","expected":["plan-y-pagos"],"producto":"odentia","faqs":["Mi comprobante dice Rechazado, ¿qué hago?"]}
+    {"q":"subi el comprobante del pago y me sale rechazado","expected":["plan-y-pagos"],"producto":"odentia","faqs":["Mi comprobante dice Rechazado, ¿qué hago?"]},
+    {"q":"Viene a su segunda sesión de endodoncia, ¿cómo lo atiendo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo hago hoy algo del plan?"]},
+    {"q":"El paciente aceptó una resina y vino sin cita, ¿cómo la hago hoy y la registro?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo hago hoy algo del plan?"]},
+    {"q":"Registré algo en la pieza equivocada, ¿cómo lo corrijo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde anulo algo que registré mal?"]},
+    {"q":"Encontré una caries en la primera consulta, ¿cómo la agrego al plan y la hago hoy?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo hago hoy algo del plan?"]},
+    {"q":"Al paciente le toca un control, ¿cómo lo atiendo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cuándo queda hecho un control si vino por otra cosa?"]},
+    {"q":"¿Cómo emito una receta?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde hago la receta, el consentimiento o la orden de la atención?"]},
+    {"q":"Quiero leer el consentimiento antes de pasarle la tablet","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo firma la persona su consentimiento?"]},
+    {"q":"¿Dónde veo cómo le fue en su sesión anterior sin perder lo que estoy haciendo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde veo cómo le fue en la sesión anterior?"]},
+    {"q":"Llegó una persona nueva que no está registrada, ¿qué hago?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué no puedo registrar a un paciente nuevo?"]}
   ],
   "control": [
     {"q":"como le contesto a un paciente que escribio por wasap","expected":["bandeja"],"producto":"odentia","faqs":["¿Cómo respondo yo en vez de Sofi?"],"temas":["bandeja"]},
@@ -625,8 +634,8 @@
     {"q":"¿Cuándo se le carga el tratamiento, al registrar el procedimiento o al firmar? ¿Y en la segunda sesión se cobra otra vez?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["Al firmar, ¿qué es «Se cargó hoy a su cuenta» y qué es «Debe en total»?"]},
     {"q":"Me sale la ficha odontoestomatológica, ¿tengo que llenarla para firmar?","expected":["pacientes","fichas"],"producto":"odentia","rol":"owner","faqs":["¿Cuándo lleno la ficha odontoestomatológica?","¿Por qué me aparece esta ficha?"]},
     {"q":"¿Cómo anulo una atención en borrador si ya le anoté qué opción del presupuesto eligió?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Puedo anular una atención si ya preparé su presupuesto?"]},
-    {"q":"En «Hoy viene a…» me ofrece «Hacerla hoy» para la corona aunque dice que va después, ¿qué pasa si la pulso?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Por qué la corona dice «va después de terminar» la endodoncia?","¿Por qué lo que indiqué hoy no sale en «Hoy viene a…»?"]},
-    {"q":"¿Para qué sirve el botón «Completar» en Realizado hoy?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Para qué sirve «Completar» en «Realizado hoy»?"]},
+    {"q":"En el plan me ofrece «Hacer hoy» para la corona aunque dice que va después, ¿qué pasa si la pulso?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Por qué la corona dice «va después de terminar» la endodoncia?","¿Cómo hago hoy algo del plan?"]},
+    {"q":"¿Para qué sirve el botón «Completar» al terminar un tratamiento?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Cómo doy por terminado un tratamiento antes de las sesiones previstas?"]},
     {"q":"¿Dónde veo lo que el doctor dejó para cobrar cuando termina la atención?","expected":["inicio"],"producto":"odentia","rol":"cashier","faqs":["¿Dónde veo a quién falta cobrar de lo atendido hoy?"]},
     {"q":"¿Cómo le reservo la cita de la corona que aceptó?","expected":["pacientes"],"producto":"odentia","rol":"reception","faqs":["¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?"]},
     {"q":"¿Puedo ver lo que el doctor hizo en la atención de hoy?","expected":["pacientes"],"producto":"odentia","rol":"reception","faqs":["¿Puedo ver la atención de un paciente?"]},

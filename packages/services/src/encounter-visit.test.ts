@@ -8,6 +8,7 @@
 
 import { randomUUID } from "node:crypto"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { user } from "@odentia/db/schema/auth"
 import { clinicalFollowUp, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
@@ -33,8 +34,8 @@ import {
   getEncounterClosing,
   getEncounterDetail,
 } from "./encounters.js"
-import { budgetLine } from "./plan-next.js"
 import { addPlanItem, listPlanItems } from "./plan.js"
+import { budgetLine } from "./plan-next.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -336,15 +337,17 @@ it("lo que la persona dejó fuera no se prepara por el tratamiento", async () =>
   ).rejects.toMatchObject({ code: "ITEM_NOT_READY" })
 })
 
-// Estudio de la atención (16 nov, P11, D6): «Hoy viene a…» lleva solo lo de antes. Lo indicado y
-// aceptado en esta misma atención no se repite ahí (su «Hacerla hoy» está en su fila del Plan); traído
-// a hoy, sí, con su «Hoy no». En la sesión siguiente vuelve a ser «de antes».
-it("lo indicado en esta misma atención no se repite en «Hoy viene a…»; traído a hoy, sí; en la siguiente, también", async () => {
+// La atención agrupada (17 nov): el Plan de la atención es el único lugar de cada tratamiento, y su
+// fila dice si se hace hoy. Lo aceptado está siempre, también lo indicado en esta misma atención,
+// antes y después de traerlo a hoy, y en la sesión siguiente.
+it("lo aceptado está en la atención, también lo indicado en ella; traído a hoy y en la siguiente, también", async () => {
   const f = await clinicalFixture()
   const item = await accepted(f, 2)
   const visitOf = async (id: string) =>
-    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map((row) => row.planItemId)
-  expect(await visitOf(f.encounter.id)).toEqual([])
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map(
+      (row) => row.planItemId,
+    )
+  expect(await visitOf(f.encounter.id)).toEqual([item.id])
   await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id))
   expect(await visitOf(f.encounter.id)).toEqual([item.id])
   await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, f.encounter.id, item.id))
@@ -440,10 +443,62 @@ it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otr
   const brought = await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, item.id))
   // Sin empezar: el diagnóstico de la atención donde se indicó no se copia (la corona no hereda la pulpitis).
   expect(brought).toEqual({ reasonSet: true, diagnosisAdded: false })
+  // Y el motivo es su nombre: «Continúa: …» diría que hubo una sesión antes (QA en pantalla del 17 nov, D9).
+  const marked = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect(marked.encounter.reason).toBe(item.title.trim())
   await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, today, item.id))
   const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
   expect(detail.encounter.reason).toBeNull()
   expect(detail.diagnoses).toEqual([])
+})
+
+it("«Hacer hoy» de un control no pone su nombre de motivo si la cita ofrece el suyo (QA en pantalla del 17 nov, D4)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Resinas de la 16 y la 26",
+    })
+    .returning()
+  // Un control vencido que no trae la cita: se puede cumplir hoy.
+  const [control] = await ownerDb
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      kind: "mantenimiento",
+      title: "Control de mantenimiento",
+      dueAt: new Date(Date.now() - 30 * 86_400_000),
+      createdAt: new Date(Date.now() - 200 * 86_400_000),
+    })
+    .returning()
+  const today = await secondVisit(f)
+  await ownerDb.update(encounter).set({ appointmentId: visitAt!.id }).where(eq(encounter.id, today))
+  const chose = await f.run((tx) => chooseVisitControl(tx, ...f.args, today, control!.id))
+  // Antes llenaba el motivo con «Control de mantenimiento» y la cita decía «Ya es el motivo de hoy».
+  expect(chose.reasonSet).toBe(false)
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect(detail.encounter.reason ?? null).toBeNull()
+  expect(detail.bookedReason).toBe("Resinas de la 16 y la 26")
+  expect(detail.visit?.controls).toEqual([expect.objectContaining({ id: control!.id, chosen: true })])
 })
 
 it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cuál se cumple (QA del 9 nov, repaso 3)", async () => {
@@ -497,5 +552,62 @@ it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cu�
   )
   expect(closing.controls.byAppointment).toEqual([
     expect.objectContaining({ id: control!.id, title: "Limpieza y control" }),
+  ])
+})
+
+it("la cita de esta atención llega con su hora y su profesional, para ofrecer su motivo (B6)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
+  // La sesión 2 se adelantó en la agenda de otra doctora.
+  const colleague = randomUUID()
+  await ownerDb
+    .insert(user)
+    .values({ id: colleague, name: "Dra. Vela", email: `${colleague}@example.test` })
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: colleague,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Endodoncia, sesión 2",
+    })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ appointmentId: visitAt!.id })
+    .where(eq(encounter.id, f.encounter.id))
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))
+  expect(detail.bookedReason).toBe("Endodoncia, sesión 2")
+  expect(detail.visit?.appointment).toEqual({ startsAt, professionalName: "Dra. Vela" })
+  expect(detail.visit?.booked).toBeNull()
+})
+
+it("la sesión lleva el día de la atención, no el de la firma (atendida el lunes, firmada el jueves)", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f, 2)
+  const monday = new Date(Date.now() - 3 * 86_400_000)
+  await ownerDb.update(encounter).set({ startedAt: monday }).where(eq(encounter.id, f.encounter.id))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const listed = await f.run((tx) =>
+    listPlanItems(tx, "org_a", f.patient.id, undefined, { sessions: true }),
+  )
+  expect(listed.find((row) => row.id === item.id)?.sessions).toEqual([
+    expect.objectContaining({ encounterId: f.encounter.id, at: monday, signed: true }),
   ])
 })

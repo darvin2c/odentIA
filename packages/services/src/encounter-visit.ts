@@ -1,10 +1,11 @@
 /**
- * «Hoy viene a…» (QA de la atención del 8 nov, propuesta 4.1): a qué viene la
- * persona, con o sin cita, calculado aquí y no en la pantalla. Lo que trae su
- * cita de hoy, los tratamientos aceptados que tiene por hacer (con la sesión
- * que le toca hoy) y los controles por cumplir.
+ * Lo que se puede hacer hoy (QA de la atención del 8 nov, propuesta 4.1; la atención agrupada,
+ * 17 nov): a qué viene la persona, con o sin cita, calculado aquí y no en la pantalla. Lo que trae
+ * su cita, la cita misma (su hora y su profesional), los tratamientos aceptados que tiene por
+ * hacer (con la sesión que le toca hoy) y los controles por cumplir. La atención lo dice en la
+ * fila de cada tratamiento del Plan.
  *
- * Elegir es preparar, no hacer: «Hacerla hoy» une el tratamiento a la atención
+ * Elegir es preparar, no hacer: «Hacer hoy» une el tratamiento a la atención
  * (como la cita que lo trae) y propone el motivo y el diagnóstico que sigue; la
  * sesión cuenta recién al registrar su procedimiento. «Viene a su control»
  * deja anotado cuál es: el cierre lo trae marcado y se cumple al firmar.
@@ -19,13 +20,14 @@ import {
   encounterSite,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { auditEvent } from "@odentia/db/schema/org"
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { getDiagnosisSuggestions } from "./diagnosis-codes.js"
 import { recordEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   assertLinkablePlans,
   assertOpenDraft,
+  bookedReasonOf,
   dueControlsOf,
   type EncounterRow,
   lockEncounter,
@@ -54,7 +56,7 @@ export interface VisitTreatment {
   m: number
   /** Ya empezó (alguna sesión hecha en otra atención, o en curso). */
   started: boolean
-  /** Unido a esta atención (por su cita o por «Hacerla hoy»). */
+  /** Unido a esta atención (por su cita o por «Hacer hoy»). */
   linked: boolean
   /** Ya tiene un procedimiento vigente en esta atención: la sesión de hoy está registrada. */
   registered: boolean
@@ -98,21 +100,26 @@ export interface VisitControl {
 }
 
 export interface EncounterVisit {
+  /**
+   * Todo lo aceptado que se puede hacer hoy, sin tope y también lo indicado en esta misma
+   * atención: el Plan de la atención es el único lugar de cada tratamiento, y cada fila dice con
+   * esto si se hace hoy, si ya se registró, su sesión, su espera y su consentimiento.
+   */
   treatments: VisitTreatment[]
-  /** Cuántos tratamientos aceptados más tiene por hacer, fuera de los que se muestran. */
-  moreTreatments: number
   controls: VisitControl[]
   /**
    * Sin cita hoy: su próxima cita ya reservada, para no reservarle otra ni hacer hoy lo que esa
    * viene a hacer sin saberlo (QA del 9 nov). Nula con cita o sin ninguna por venir.
    */
   booked: { startsAt: Date; serviceName: string | null } | null
+  /**
+   * La cita de esta atención: su hora y con quién. «Su cita» la dice al ofrecer su motivo, porque
+   * puede ser la de otra profesional (la sesión 2 adelantada en la agenda de la Dra. Vela).
+   */
+  appointment: { startsAt: Date; professionalName: string | null } | null
 }
 
-/** Los tratamientos que se muestran: con más, se dice cuántos quedan en el Plan. */
-const VISIT_TREATMENTS = 4
-
-/** Lo que se le ofrece «Hacerla hoy»: aceptado y por hacer, y donde hace falta, con su presupuesto aceptado. */
+/** Lo que se le ofrece «Hacer hoy»: aceptado y por hacer, y donde hace falta, con su presupuesto aceptado. */
 function linkableSql(orgId: string, patientId: string, budgetRequired: boolean) {
   return sql`i.organization_id = ${orgId} and i.patient_id = ${patientId}
     and i.decision_status = 'aceptado' and i.status in (${sql.join(
@@ -144,7 +151,7 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 }
 
-/** «Hoy viene a…» de un borrador. Una atención firmada o anulada no lo tiene. */
+/** Lo que se puede hacer hoy en un borrador. Una atención firmada o anulada no lo tiene. */
 export async function encounterVisitOf(
   tx: Db,
   orgId: string,
@@ -192,12 +199,6 @@ export async function encounterVisitOf(
         order by (before_item.status = 'en_curso') desc, before_item.sort_order, before_item.created_at limit 1) as after_today
     from treatment_plan_item i
     where ${linkableSql(orgId, row.patientId, budgetRequired)}
-      -- «Hoy viene a…» lleva solo lo que viene de antes (P11, decisión D6 del estudio de la atención,
-      -- ADR 0199): lo indicado en esta misma atención no es «a qué viene», en ningún producto. Su
-      -- «Hacerla hoy» está en su fila del Plan, para que el consentimiento se pida antes del acto;
-      -- lo que ya se trajo con él (o con su cita) sigue aquí.
-      and (i.source_encounter_id is distinct from ${row.id} or exists (select 1 from encounter_plan_item kept
-        where kept.organization_id = i.organization_id and kept.plan_item_id = i.id and kept.encounter_id = ${row.id}))
     order by linked desc, (i.status = 'en_curso') desc, i.sort_order, i.created_at, i.id`)
   // Lo que va después de otro, al final (salvo que ya se eligió para hoy): primero lo que toca.
   const place = (item: (typeof rows)[number]) => (item.linked ? 0 : item.after_title ? 2 : 1)
@@ -205,7 +206,7 @@ export async function encounterVisitOf(
   const { timezone } = await findOrgLocale(tx, orgId)
   // La espera entre sesiones de lo que ya empezó y aún no se registra hoy (B6): la misma regla
   // con que la reserva busca la próxima sesión.
-  const shown = ordered.slice(0, VISIT_TREATMENTS)
+  const shown = ordered
   const gaps = await nextSessionGapOf(
     tx,
     orgId,
@@ -286,6 +287,12 @@ export async function encounterVisitOf(
       )
     : new Map<string, string>()
   const now = Date.now()
+  const [mine] = row.appointmentId
+    ? await tx.execute<{ startsAt: Date; professionalName: string | null }>(sql`
+      select a.starts_at as "startsAt", u.name as "professionalName" from appointment a
+      left join "user" u on u.id = a.professional_user_id
+      where a.organization_id = ${orgId} and a.id = ${row.appointmentId} limit 1`)
+    : []
   const [next] = row.appointmentId
     ? []
     : await tx.execute<{ startsAt: Date; serviceName: string | null }>(sql`
@@ -295,8 +302,10 @@ export async function encounterVisitOf(
       order by starts_at limit 1`)
   return {
     booked: next ? { startsAt: new Date(next.startsAt), serviceName: next.serviceName } : null,
+    appointment: mine
+      ? { startsAt: new Date(mine.startsAt), professionalName: mine.professionalName }
+      : null,
     treatments,
-    moreTreatments: Math.max(0, rows.length - treatments.length),
     controls: [
       ...booked.map((control) => ({
         id: control.id,
@@ -370,7 +379,15 @@ function siteInput(site: Record<string, unknown>): {
 
 /** «Continúa: Endodoncia anterior vital de la 46», como lo dice la cita que lo trae. */
 function continuesWords(title: string, tooth: number | null): string {
-  return tooth != null ? `Continúa: ${title.trim()} de la ${tooth}` : `Continúa: ${title.trim()}`
+  return `Continúa: ${startWords(title, tooth)}`
+}
+
+/**
+ * Lo que aún no empezó se nombra tal cual: «Resina fotocurable de la 16», no «Continúa: …», que
+ * diría que hubo una sesión antes (QA en pantalla del 17 nov, D9).
+ */
+function startWords(title: string, tooth: number | null): string {
+  return tooth != null ? `${title.trim()} de la ${tooth}` : title.trim()
 }
 
 /**
@@ -503,8 +520,9 @@ async function continuingDiagnosis(
 }
 
 /**
- * «Hacerla hoy» / «Continuar hoy»: el tratamiento aceptado pasa a esta atención,
- * como si lo trajera su cita. Si el motivo está vacío, queda «Continúa: …»; el
+ * «Hacer hoy»: el tratamiento aceptado pasa a esta atención,
+ * como si lo trajera su cita. Si el motivo está vacío, queda «Continúa: …» (o su
+ * nombre, si aún no empezó); el
  * diagnóstico que sigue se registra con su tipo (nunca lo sube a definitivo) y
  * lo ya escrito no se toca. No cuenta la sesión ni cambia el tratamiento: eso
  * es registrar su procedimiento. El consentimiento que pide ya se ve.
@@ -539,20 +557,7 @@ export async function bringTreatmentToEncounter(
         .values({ organizationId: orgId, encounterId, siteSystem: site.system, siteCode: code })
         .onConflictDoNothing()
   }
-  let reasonSet = false
-  if (!row.reason?.trim()) {
-    await tx
-      .update(encounter)
-      .set({
-        reason: continuesWords(item.title, linkable.toothNumber).slice(0, 2000),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
-    reasonSet = true
-  }
-  // El diagnóstico sigue solo con lo que ya empezó (la sesión 2 de la endodoncia): la corona que
-  // se empieza semanas después no hereda la pulpitis (segunda mesa del 9 nov); su diagnóstico
-  // propio, si lo tiene, se propone con «Usar».
+  // Ya empezó: tiene una sesión hecha en otra atención (la sesión 2 de la endodoncia).
   const started =
     item.status === "en_curso" ||
     (
@@ -562,6 +567,20 @@ export async function bringTreatmentToEncounter(
         where done.organization_id = ${orgId} and done.plan_item_id = ${planItemId} and done.voided_at is null
           and done_encounter.status <> 'anulada' and done_encounter.id <> ${encounterId} limit 1`)
     ).length > 0
+  let reasonSet = false
+  if (!row.reason?.trim()) {
+    await tx
+      .update(encounter)
+      .set({
+        reason: (started ? continuesWords : startWords)(item.title, linkable.toothNumber).slice(0, 2000),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
+    reasonSet = true
+  }
+  // El diagnóstico sigue solo con lo que ya empezó (la sesión 2 de la endodoncia): la corona que
+  // se empieza semanas después no hereda la pulpitis (segunda mesa del 9 nov); su diagnóstico
+  // propio, si lo tiene, se propone con «Usar».
   const diagnosisAdded = started && await continuingDiagnosis(
     tx,
     orgId,
@@ -578,7 +597,7 @@ export async function bringTreatmentToEncounter(
 }
 
 /**
- * Deshace «Hacerla hoy» mientras no tenga su sesión registrada aquí: el
+ * «Hoy no»: deshace «Hacer hoy» mientras no tenga su sesión registrada aquí: el
  * tratamiento deja de estar en esta atención. Lo escrito (motivo, diagnóstico)
  * queda como está: se corrige donde se ve.
  */
@@ -620,7 +639,7 @@ export async function leaveTreatmentFromEncounter(
         eq(encounterPlanItem.planItemId, planItemId),
       ),
     )
-  // El motivo que puso «Continuar hoy», si nadie lo cambió, se va con él; lo escrito se queda.
+  // El motivo que puso «Hacer hoy», si nadie lo cambió, se va con él; lo escrito se queda.
   const [item] = await tx
     .select({ title: treatmentPlanItem.title, siteSystem: treatmentPlanItem.siteSystem, siteCode: treatmentPlanItem.siteCode })
     .from(treatmentPlanItem)
@@ -629,7 +648,8 @@ export async function leaveTreatmentFromEncounter(
   if (item && row.reason) {
     const { site } = await productHooks(tx, orgId)
     const tooth = item.siteSystem === site.system ? site.value(item.siteCode) : null
-    if (row.reason === continuesWords(item.title, tooth).slice(0, 2000))
+    const put = [continuesWords(item.title, tooth), startWords(item.title, tooth)].map((words) => words.slice(0, 2000))
+    if (put.includes(row.reason))
       await tx
         .update(encounter)
         .set({ reason: null, updatedAt: new Date() })
@@ -643,8 +663,10 @@ export async function leaveTreatmentFromEncounter(
 
 /**
  * «Viene a su control»: el control por cumplir que es el de hoy (o ninguno con
- * `null`). Con el motivo vacío, queda el nombre del control. Se cumple recién
- * al firmar, como lo demás del cierre (ADR 0152).
+ * `null`). Con el motivo vacío, queda el nombre del control, salvo que la cita de
+ * esta atención ofrezca el suyo: ese sigue ofreciéndose con «Usar como motivo»
+ * (QA en pantalla del 17 nov, D4). Se cumple recién al firmar, como lo demás del
+ * cierre (ADR 0152).
  */
 export async function chooseVisitControl(
   tx: Db,
@@ -667,7 +689,8 @@ export async function chooseVisitControl(
       )
     title = control.title
   }
-  const reasonSet = Boolean(title && !row.reason?.trim())
+  const offered = title && !row.reason?.trim() ? await bookedReasonOf(tx, orgId, row.appointmentId) : null
+  const reasonSet = Boolean(title && !row.reason?.trim() && !offered?.trim())
   await tx
     .update(encounter)
     .set({

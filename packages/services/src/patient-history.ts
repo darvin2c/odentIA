@@ -39,8 +39,8 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { diagnosisTitlesOf, namedDiagnosis } from "./diagnosis-codes.js"
 import { validation } from "./errors.js"
 import { formDiagnosesOf, formDiagnosisKey } from "./form-diagnoses.js"
-import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
-import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
+import { findOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
+import { checkEncounterClosing, type ClosingRequirement, encounterOpenedToday } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
 import { addedWords, formRecordAt, formRecordAtSql, loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
@@ -272,6 +272,11 @@ export interface OpenEncounterBrief {
   id: string
   reason: string | null
   startedAt: Date
+  /**
+   * Es de hoy, en el día de la clínica (`encounterOpenedToday`): «Hacer hoy» desde la ficha no
+   * marca nada en un borrador de otro día; dice de qué día es y ofrece abrirlo.
+   */
+  today: boolean
   professionalUserId: string
   appointmentId: string | null
   diagnosisCount: number
@@ -324,7 +329,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
   // firma de quien la atiende (no de quien consulta el resumen).
   let openEncounter: OpenEncounterBrief | null = null
   if (draft) {
-    const [[dx], [proc], closing] = await Promise.all([
+    const [[dx], [proc], closing, { timezone }] = await Promise.all([
       tx
         .select({ n: sql<number>`count(*)::int` })
         .from(encounterDiagnosis)
@@ -346,11 +351,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
           ),
         ),
       checkEncounterClosing(tx, orgId, draft.professionalUserId, draft),
+      findOrgLocale(tx, orgId),
     ])
     openEncounter = {
       id: draft.id,
       reason: draft.reason,
       startedAt: draft.startedAt,
+      today: encounterOpenedToday(draft, timezone),
       professionalUserId: draft.professionalUserId,
       appointmentId: draft.appointmentId,
       diagnosisCount: dx?.n ?? 0,

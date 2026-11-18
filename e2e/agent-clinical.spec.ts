@@ -219,8 +219,16 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(block("Diagnóstico (0)")).toContainText("Sin diagnósticos registrados.")
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
   // Indicaciones y controles se revisan en el Plan (ADR 0034).
-  await expect(block("Plan").getByRole("list", { name: "Sugerencias de Clío: Plan de tratamiento" })).toBeVisible()
-  await expect(block("Plan").getByRole("list", { name: "Sugerencias de Clío: Controles" }).getByRole("listitem")).toHaveCount(1)
+  await expect(
+    block("Plan de tratamiento").getByRole("list", {
+      name: "Sugerencias de Clío: Plan de tratamiento",
+    }),
+  ).toBeVisible()
+  await expect(
+    block("Plan de tratamiento")
+      .getByRole("list", { name: "Sugerencias de Clío: Controles" })
+      .getByRole("listitem"),
+  ).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // La atención ya tiene motivo: se dice antes de confirmar que lo dictado se agrega.
   await expect(suggested("Consulta")).toContainText("Se agrega a lo que ya hay en Motivo de consulta.")

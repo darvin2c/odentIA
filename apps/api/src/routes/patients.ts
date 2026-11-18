@@ -21,6 +21,9 @@ import {
   addPatientAllergy,
   addPlanItem,
   addPlanItemsBatch,
+  allergiesSaidNoByPatient,
+  allergiesSaidUnknownByPatient,
+  allergyAlertsOf,
   assembleEncounterBudget,
   bringTreatmentToEncounter,
   type ClinicalAccessResource,
@@ -29,31 +32,28 @@ import {
   correctEncounterMaterial,
   createEncounter,
   createTreatmentPlan,
+  declaredAllergiesByPatient,
+  discardEmptyEncounter,
   documentPortalState,
   ENCOUNTER_TEXT_FIELDS,
   finalizeEncounter,
   findEarlierTreatment,
   findPatientDuplicates,
   getAnamnesisVersion,
+  getCorrectionPreview,
   getEncounterClosing,
   getEncounterDetail,
   getEncounterMaterials,
+  getEncounterNextSteps,
   getEncounterVoidPreview,
   getLatestAnamnesis,
   getOpenEncounterRef,
-  discardEmptyEncounter,
   getPatient,
   getPatientDocument,
   getPatientHealth,
-  getCorrectionPreview,
   getPatientSummary,
-  getEncounterNextSteps,
   getPlanNextStep,
   getPlanNextSteps,
-  allergiesSaidNoByPatient,
-  allergyAlertsOf,
-  allergiesSaidUnknownByPatient,
-  declaredAllergiesByPatient,
   getStaffMissingData,
   getTimeline,
   getTreatmentCoordination,
@@ -75,7 +75,6 @@ import {
   makeImageThumbnail,
   markAllergiesReviewed,
   markHealthDenied,
-  reviewDeclaredHealth,
   operationBodySchema,
   operationBodyShape,
   PATIENT_AVATAR_MAX_BYTES,
@@ -92,14 +91,15 @@ import {
   restorePatientAllergy,
   restoreRemovedInEncounter,
   retirePatientDocument,
+  reviewDeclaredHealth,
   revokeDataConsent,
   ServiceError,
   savePatientHealth,
-  setPatientAsa,
   scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
   setDocumentPortalVisibility,
   setDocumentReportStatus,
+  setPatientAsa,
   setPatientAvatar,
   setPatientContact,
   setPlanItemStatus,
@@ -111,17 +111,17 @@ import {
   updatePlanItem,
   updatePlanItemPlanning,
   voidEncounter,
-  voidWithCorrection,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
+  voidWithCorrection,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead, traceClinicalReadOrFail } from "../lib/clinical-trace.js"
-import { auditDenied, isSupportRequest, supportSessionOf } from "../lib/support-session.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
+import { auditDenied, isSupportRequest, supportSessionOf } from "../lib/support-session.js"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
@@ -2051,7 +2051,13 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     const planId = c.req.query("planId") || undefined
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId, { withoutVoided: true, extractionRisks: true })),
+      withOrgContext(deps.db, orgId, (tx) =>
+        listPlanItems(tx, orgId, c.req.param("id"), planId, {
+          withoutVoided: true,
+          extractionRisks: true,
+          sessions: true,
+        }),
+      ),
     )
   })
   app.post("/:id/plan/items", async (c) => {

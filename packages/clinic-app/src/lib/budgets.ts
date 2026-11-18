@@ -794,6 +794,10 @@ export interface PlanNextStep {
     appointmentVersion?: number
     appointmentStartsAt?: string
     reuse?: { planItemId: string; title: string }
+    /** La sesión siguiente: quien hizo la anterior y la sede de esa atención, primero en la reserva. */
+    professionalUserId?: string
+    professionalName?: string | null
+    branchId?: string
   } | null
   /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
   alsoToSchedule?: string[]

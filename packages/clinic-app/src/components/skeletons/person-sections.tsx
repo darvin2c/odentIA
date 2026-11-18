@@ -3,12 +3,20 @@
  * clases del componente real (dicho en su comentario) y pinta reales sus títulos
  * y rótulos. Se usan al esperar la página, el código de la sección y sus datos.
  */
-import { ParamTabs } from "./param-tabs"
+
 import { Skeleton, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import { ScrollingTabsList } from "@odentia/ui-patterns"
 import { ChevronDown } from "lucide-react"
 import type { ReactNode } from "react"
-import { ButtonBar, Line, RowsShape, SummaryCardShape, TableShape, WaitingButton } from "./person-parts"
+import { ParamTabs } from "./param-tabs"
+import {
+  ButtonBar,
+  Line,
+  RowsShape,
+  SummaryCardShape,
+  TableShape,
+  WaitingButton,
+} from "./person-parts"
 
 /** Lo que el rol de quien mira decide en las secciones. */
 export type SkeletonCan = (permission: string) => boolean
@@ -524,8 +532,8 @@ export function PlanSkeleton({ can, budgetOptional }: { can: SkeletonCan; budget
               <div className="flex flex-col gap-1.5">
                 <h3 className="font-heading text-base font-medium">Controles</h3>
                 <p className="text-sm text-muted-foreground">
-                  Un control programado no equivale a un control realizado: se completa contra una atención finalizada y deja su
-                  resultado en la historia.
+                  El control se hace cuando el paciente vuelve: en su atención aparece cuando falta
+                  poco para su fecha y queda hecho al firmar.
                 </p>
               </div>
             </div>

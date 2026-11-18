@@ -54,7 +54,7 @@ export function offerRemoval(
 /**
  * Las fichas que la atención ofrece solas (ADR 0117): por la especialidad de la
  * cita, por la edad o, sin servicio, por la de quien atiende. Va arriba, debajo
- * de «Hoy viene a…» (dibujo 18), como las demás partes de la atención: con por
+ * de la cabecera, arriba de Consulta (dibujo 18), como las demás partes de la atención: con por
  * qué aparece cada una y un solo botón; «Otra ficha…» abre las demás. La ficha
  * se abre en el panel sin salir de la atención. Ofrecer no es pedir: nada de
  * esto se exige para firmar ni para cobrar. La de hoy agregada por error se
@@ -241,7 +241,7 @@ export function FormOffersBox({
   )
 
   return (
-    // Como las demás partes de la atención («Hoy viene a…», «Consulta»): su título y, a la derecha, lo que agrega.
+    // Como las demás partes de la atención («Consulta», «Plan»): su título y, a la derecha, lo que agrega.
     <section
       ref={sectionRef}
       aria-labelledby={titleId}

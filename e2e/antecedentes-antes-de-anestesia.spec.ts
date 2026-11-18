@@ -93,8 +93,10 @@ test("la atención pide sus enfermedades y su medicación, y el cierre avisa la 
   await side.getByRole("button", { name: "Cerrar" }).click()
   await expect(page.getByText("ASA sin clasificar.")).toHaveCount(0)
 
-  // Con lidocaína, la línea de anestesia ya está en «Realizado hoy», antes de anestesiar (QA del 16 nov).
-  await expect(page.getByRole("region", { name: "Anestesia local · Lidocaína 2 % con epinefrina" })).toBeVisible()
+  // Con lidocaína, la línea de anestesia ya está arriba del Plan, antes de anestesiar (QA del 16 nov).
+  await expect(
+    page.getByRole("region", { name: "Anestesia local · Lidocaína 2 % con epinefrina" }),
+  ).toBeVisible()
   // Al firmar, sin saber su medicación ni su ASA, el cierre lo repite: avisa y no frena.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Finalizar y firmar" })

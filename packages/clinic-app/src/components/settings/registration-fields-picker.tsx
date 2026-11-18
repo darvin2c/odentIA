@@ -7,8 +7,8 @@ import type {
 import { Badge, FieldError } from "@odentia/ui"
 import { Lock } from "lucide-react"
 import { useId } from "react"
-import { ChoiceButtons } from "../choice-buttons"
 import { productUi } from "../../product/product-ui"
+import { ChoiceButtons } from "../choice-buttons"
 
 /**
  * Qué se le pide al paciente, dato por dato, con tres botones que dicen lo que
@@ -408,7 +408,7 @@ export function RegistrationFieldsPicker({
       ) : null}
       <Group
         title="Antes de cada cita"
-        help="Se le pide en su enlace o su portal antes de cada cita y llega a «Hoy viene a…» de esa atención. Nunca es obligatorio."
+        help="Se le pide en su enlace o su portal antes de cada cita y llega a Consulta, en esa atención. Nunca es obligatorio."
         items={VISIT}
         newKeys={newKeys}
         fields={fields}

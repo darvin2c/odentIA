@@ -222,13 +222,19 @@ it("una sesión anulada no deja completar el tratamiento, y anular la atención 
   const statusOf = async () =>
     (await run((tx) => listPlanItems(tx, "org_a", patient!.id))).find((i) => i.id === item.id)?.status
 
-  // La única sesión se anula: «Completar» ya no puede cerrarlo.
-  const session = await run((tx) => addEncounterProcedure(tx, ...args, first, { planItemId: item.id }))
-  await run((tx) => voidEncounterProcedure(tx, ...args, first, session.id, { reason: "Era otra pieza" }))
-  expect(await statusOf()).toBe("programado")
+  // La única sesión se anula: vuelve a por empezar (ninguna cita lo lleva) y «Completar» ya no puede cerrarlo.
+  const session = await run((tx) =>
+    addEncounterProcedure(tx, ...args, first, { planItemId: item.id }),
+  )
+  await run((tx) =>
+    voidEncounterProcedure(tx, ...args, first, session.id, { reason: "Era otra pieza" }),
+  )
+  expect(await statusOf()).toBe("pendiente")
   await expect(
-    run((tx) => setPlanItemStatus(tx, ...args, item.id, { status: "realizado", encounterId: first })),
-  ).rejects.toMatchObject({ code: "ATTENTION_REQUIRED" })
+    run((tx) =>
+      setPlanItemStatus(tx, ...args, item.id, { status: "realizado", encounterId: first }),
+    ),
+  ).rejects.toMatchObject({ code: "INVALID_TRANSITION" })
 
   // Con una sesión válida, se completa en otra atención sin sesión propia; anular esa atención lo reabre.
   await run((tx) => addEncounterProcedure(tx, ...args, first, { planItemId: item.id }))
