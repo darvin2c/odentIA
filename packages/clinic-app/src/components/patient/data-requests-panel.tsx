@@ -657,12 +657,12 @@ function AttendDrawer({
               ) : null}
             </div>
             {again ? (
-              <section className="flex flex-col gap-2 rounded-lg border p-3" aria-labelledby="data-request-again">
+              <div role="group" className="flex flex-col gap-2 rounded-lg border p-3" aria-labelledby="data-request-again">
                 <p id="data-request-again" className="font-medium">
                   Enviar de nuevo
                 </p>
                 <SendCopy patientId={patientId} request={request} canReadClinical={canReadClinical} again onSent={onClose} />
-              </section>
+              </div>
             ) : null}
           </>
         ) : denying ? (
@@ -1049,8 +1049,11 @@ function Step({
   children: React.ReactNode
 }) {
   return (
-    <section
-      ref={sectionRef}
+    // Un grupo y no una región: el paso vive dentro del cajón, que ya es la región (la prueba de
+    // Inicio busca una sola superficie con «Comprueba que»).
+    <div
+      role="group"
+      ref={sectionRef as React.Ref<HTMLDivElement>}
       tabIndex={sectionRef ? -1 : undefined}
       aria-label={sectionRef ? `Paso ${number}: ${title}` : undefined}
       className={`flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 ${disabled ? "opacity-60" : ""}`}
@@ -1066,6 +1069,6 @@ function Step({
         {title}
       </p>
       {children}
-    </section>
+    </div>
   )
 }
