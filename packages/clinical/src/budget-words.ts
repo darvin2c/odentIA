@@ -94,18 +94,21 @@ export function budgetStateText(budget: {
 /**
  * Lo que dice la Historia de un presupuesto, en su línea y en la atención firmada: con varias
  * opciones y una elegida, cuál («Eligió la opción A»), sin importes (la respuesta de cada
- * tratamiento va en su renglón); si no, su estado de siempre. `budgetStateText` no cambia: lo
- * leen Sofi y Argos.
+ * tratamiento va en su renglón), cuando ya respondió: aceptado, o parcial sin nada por responder.
+ * Si no, su estado de siempre («No aceptó», «Aceptó 1 · 1 por responder», «Reemplazado»).
+ * `budgetStateText` no cambia: lo leen Sofi y Argos.
  */
 export function budgetChoiceText(budget: {
   status: string
   items: readonly WordLine[]
   options?: readonly WordOption[]
 }): string {
-  // Reemplazado o anulado, eso es lo que vale.
-  const retired = budget.status === "cancelado" || budget.status === "sustituido"
+  const answered =
+    budget.status === "aceptado" ||
+    (budget.status === "parcial" &&
+      !decidedLines(budget.items, budget.options).some((line) => line.decision === "pendiente"))
   const chosen =
-    !retired && budget.options && budget.options.length > 1
+    answered && budget.options && budget.options.length > 1
       ? budget.options.find((option) => option.decision === "elegida")
       : undefined
   if (chosen) return chosen.position ? `Eligió la ${inSentence(budgetOptionLabel(chosen.position))}` : "Eligió una opción"

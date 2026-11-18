@@ -142,4 +142,13 @@ describe("lo que dice la Historia de un presupuesto", () => {
     expect(budgetChoiceText(single)).toBe(budgetStateText(single))
     expect(budgetChoiceText({ status: "sustituido", items, options })).toBe("Reemplazado")
   })
+
+  // Revisión de las reglas clínicas del 18 nov: «Eligió» solo cuando ya respondió.
+  it("con la opción elegida pero sin responder del todo, o sin aceptar, dice su estado", () => {
+    expect(budgetChoiceText({ status: "aceptado", items, options })).toBe("Eligió la opción A")
+    expect(budgetChoiceText({ status: "rechazado", items, options })).toBe("No aceptó")
+    const asked = [{ decision: "pendiente", optionId: "a", planItemId: "profilaxis" }, ...items.filter((line) => line.planItemId !== "profilaxis")]
+    expect(budgetChoiceText({ status: "parcial", items: asked, options })).toBe("Aceptó 1 · 1 por responder")
+    expect(budgetChoiceText({ status: "presentado", items, options })).toBe("Entregado · espera respuesta")
+  })
 })
