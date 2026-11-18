@@ -15,6 +15,16 @@ describe("la cantidad total que propone el dictado", () => {
     expect(suggestion).toEqual({ quantity: 21, perDose: 1, perDay: 3, days: 7 })
   })
 
+  // Revisión de las reglas clínicas del 18 nov: el dictado lo calculaba con la palabra de la dosis.
+  it("sin la forma farmacéutica dicha, la dosis con su unidad cuenta: «1 tableta» cada 8 horas por 7 días son 21", () => {
+    const said = { dose: "1 tableta", frequency: "cada 8 horas", duration: "7 días", dosageForm: "" }
+    expect(suggestedQuantity(said)?.quantity).toBe(21)
+    expect(suggestedQuantity({ ...said, dose: "dos cápsulas" })?.quantity).toBe(42)
+    // Sin unidad que se cuente, nada; con una forma que no se cuenta, tampoco.
+    expect(suggestedQuantity({ ...said, dose: "10 mL" })).toBeNull()
+    expect(suggestedQuantity({ ...said, dosageForm: "jarabe" })).toBeNull()
+  })
+
   it("se lee como se escribe o se dicta: «8 h», «c/8 hrs», «cada ocho horas», «3 veces al día», semanas", () => {
     expect(suggestedQuantity({ ...amoxicilina, frequency: "8 h" })?.quantity).toBe(21)
     expect(suggestedQuantity({ ...amoxicilina, frequency: "c/8h" })?.quantity).toBe(21)
@@ -104,6 +114,7 @@ describe("la cantidad total que propone el dictado", () => {
     expect(suggestedQuantity({ ...amoxicilina, duration: "uso continuo" })).toBeNull()
     expect(suggestedQuantity({ ...amoxicilina, dose: "15 mg/kg" })).toBeNull()
     expect(suggestedQuantity({ ...amoxicilina, frequency: "cada 5 horas" })).toBeNull()
-    expect(suggestedQuantity({ ...amoxicilina, dosageForm: "" })).toBeNull()
+    // Sin forma dicha y con la dosis en mg, no se sabe qué se cuenta.
+    expect(suggestedQuantity({ ...amoxicilina, dosageForm: "", dose: "500 mg" })).toBeNull()
   })
 })

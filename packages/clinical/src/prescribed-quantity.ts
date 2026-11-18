@@ -5,7 +5,8 @@
  * propone, y lo que dice quien receta manda.
  *
  * Lo que se toma «si hay dolor» con frecuencia y duración dichas («cada 8 h por 3 días») propone
- * el máximo, como hacía el dictado; sin una de las dos, nada.
+ * el máximo, como hacía el dictado; sin una de las dos, nada. Sin la forma farmacéutica dicha,
+ * cuenta la dosis dicha con su unidad («1 tableta», «2 cápsulas»), como hacía el dictado.
  *
  * No propone nada si no se puede contar con certeza:
  * - una forma que no se cuenta por unidades (jarabe, suspensión, gotas, crema,
@@ -157,7 +158,10 @@ export interface SuggestedQuantity {
 /** La cantidad total que se propone; null si no se puede contar con certeza. */
 export function suggestedQuantity(input: QuantityInput): SuggestedQuantity | null {
   const dose = fold(input.dose)
-  if (!COUNTED_FORMS.test(fold(input.dosageForm)) && !SACHET_DOSE.test(dose)) return null
+  const form = fold(input.dosageForm)
+  // Sin forma dicha, la dosis con su unidad dice que se cuenta («1 tableta»).
+  const countedDose = !form && new RegExp(`${NUMBER}\\s*${UNIT_WORD}\\b`).test(dose)
+  if (!COUNTED_FORMS.test(form) && !SACHET_DOSE.test(dose) && !countedDose) return null
   const frequency = fold(input.frequency)
   const duration = fold(input.duration)
   const perDose = unitsPerDose(dose, fold(input.strength ?? ""))

@@ -940,7 +940,9 @@ function prepareMedication(payload: Record<string, unknown>, medications: Medica
   else if (!spokenRoute && ORAL_FORMS.test(form)) Object.assign(ready, { route: "oral", routeImplied: true })
   else delete ready["route"]
   if (typeof payload["quantity"] !== "number") {
-    // La misma regla que la receta escrita: solo tabletas y cápsulas, nunca «si hay dolor».
+    // Lo propone solo el dictado (la receta escrita no: la cantidad la escribe quien receta), con
+    // `suggestedQuantity`: tabletas, cápsulas y sobres, o la dosis dicha con su unidad si no se dijo
+    // la forma; «si hay dolor» con frecuencia y duración propone el máximo.
     const suggestion = suggestedQuantity({
       dose: text("dose"),
       frequency: text("frequency"),
