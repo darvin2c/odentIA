@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { isAccountEventSecret, signAccountEvent, verifyAccountEvent } from "./account-events.js"
+import {
+  isAccountEventSecret,
+  signAccountEvent,
+  verifyAccountEvent,
+  verifySignedMessage,
+} from "./account-events.js"
 
 // El ejemplo de la especificación de Standard Webhooks (el mismo de sus bibliotecas oficiales).
 const SPEC = {
@@ -55,6 +60,18 @@ describe("los avisos de la cuenta, firmados (Standard Webhooks)", () => {
     expect(verifyAccountEvent({ secret: other, headers, body, now })).toBeNull()
     // Sin firma.
     expect(verifyAccountEvent({ secret: SECRET, headers: new Headers(), body, now })).toBeNull()
+  })
+
+  it("la misma firma sirve para lo que la app le pregunta a la cuenta, con cualquier cuerpo", () => {
+    const now = new Date("2026-11-17T20:00:30Z")
+    const question = JSON.stringify({ userIds: ["u-1", "u-2"] })
+    const headers = new Headers(
+      signAccountEvent({ secret: SECRET, id: "rev-1", body: question, timestamp: Math.floor(now.getTime() / 1000) }),
+    )
+    expect(verifySignedMessage({ secret: SECRET, headers, body: question, now })).toBe("rev-1")
+    // No es un aviso de la cuenta: no pasa por el lector de avisos.
+    expect(verifyAccountEvent({ secret: SECRET, headers, body: question, now })).toBeNull()
+    expect(verifySignedMessage({ secret: SECRET, headers, body: `${question} `, now })).toBeNull()
   })
 
   it("la app reconoce el bloqueo, con su fecha, y la reapertura; un tipo desconocido no vale", () => {

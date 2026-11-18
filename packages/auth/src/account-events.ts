@@ -73,16 +73,17 @@ export function signAccountEvent(input: {
 }
 
 /**
- * Lo que hace la app que recibe: el aviso es de la cuenta si la firma coincide y su hora
- * está dentro de la tolerancia (un aviso viejo repetido no vale). Devuelve el aviso leído,
- * o null si no es de la cuenta.
+ * La firma de un mensaje según Standard Webhooks: el id del mensaje si la firma coincide y
+ * su hora está dentro de la tolerancia (uno viejo repetido no vale); null si no. Sirve en los
+ * dos sentidos: la app comprueba un aviso de la cuenta, y la cuenta comprueba lo que la app le
+ * pregunta con el mismo secreto (la revisión diaria de su copia, `reviewAccounts`).
  */
-export function verifyAccountEvent(input: {
+export function verifySignedMessage(input: {
   secret: string
   headers: Headers
   body: string
   now?: Date
-}): (AccountEventPayload & { id: string }) | null {
+}): string | null {
   const id = input.headers.get("webhook-id") ?? ""
   const timestamp = Number(input.headers.get("webhook-timestamp") ?? "")
   const sent = input.headers.get("webhook-signature") ?? ""
@@ -97,7 +98,22 @@ export function verifyAccountEvent(input: {
     const got = Buffer.from(value)
     return got.length === expected.length && timingSafeEqual(got, expected)
   })
-  if (!matches) return null
+  return matches ? id : null
+}
+
+/**
+ * Lo que hace la app que recibe: el aviso es de la cuenta si la firma coincide y su hora
+ * está dentro de la tolerancia (un aviso viejo repetido no vale). Devuelve el aviso leído,
+ * o null si no es de la cuenta.
+ */
+export function verifyAccountEvent(input: {
+  secret: string
+  headers: Headers
+  body: string
+  now?: Date
+}): (AccountEventPayload & { id: string }) | null {
+  const id = verifySignedMessage(input)
+  if (!id) return null
   try {
     const payload = JSON.parse(input.body) as AccountEventPayload
     if (!(ACCOUNT_EVENT_TYPES as readonly string[]).includes(payload.type)) return null

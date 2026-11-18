@@ -6,8 +6,9 @@ import {
 } from "@odentia/auth/account-events"
 import { type AccountApp, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth/apps"
 import type { Db } from "@odentia/db"
-import { accountEvent } from "@odentia/db/schema/auth"
-import { and, asc, eq, isNull, lte, sql } from "drizzle-orm"
+import { userGlobalBlock } from "@odentia/db/schema/admin-organizations"
+import { accountEvent, user } from "@odentia/db/schema/auth"
+import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm"
 
 /**
  * Los avisos de la cuenta a las apps que son otro sistema (ADR 0201): que una cuenta se
@@ -214,4 +215,68 @@ export async function deliverAccountEvents(
     }
   }
   return result
+}
+
+/** Lo más que una app puede preguntar de una vez en la revisión de su copia. */
+export const ACCOUNT_REVIEW_LIMIT = 500
+
+/** Lo que la cuenta le dice a una app de una persona que ya conoce. */
+export interface ReviewedAccount {
+  userId: string
+  /** No existe: la app no la conoce de esta cuenta. */
+  found: boolean
+  /** Cerrada o bloqueada: no puede entrar. Cerrar avisa aparte (`cuenta.cerrada`). */
+  blocked: boolean
+  name: string | null
+  email: string | null
+  emailVerified: boolean
+  image: string | null
+}
+
+/**
+ * La revisión de la copia de las cuentas en una app que es otro sistema (decisión 11 del
+ * lienzo A, ADR 0201): la app pregunta por las personas que ya conoce (por id, nunca por
+ * correo: no sirve para buscar a nadie) y la cuenta responde lo vigente. Es la última red de
+ * los avisos: lo que no llegó por aviso, llega aquí una vez al día. Solo lectura.
+ */
+export async function reviewAccounts(ownerDb: Db, userIds: readonly string[]): Promise<ReviewedAccount[]> {
+  const ids = [...new Set(userIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 200))]
+  if (ids.length === 0) return []
+  if (ids.length > ACCOUNT_REVIEW_LIMIT)
+    throw new Error(`La revisión pregunta por ${ACCOUNT_REVIEW_LIMIT} cuentas como mucho`)
+  const now = new Date()
+  const rows = await ownerDb
+    .select({
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      image: user.image,
+      blockedBy: userGlobalBlock.userId,
+    })
+    .from(user)
+    .leftJoin(
+      userGlobalBlock,
+      and(
+        eq(userGlobalBlock.userId, user.id),
+        eq(userGlobalBlock.active, true),
+        or(isNull(userGlobalBlock.expiresAt), gt(userGlobalBlock.expiresAt, now)),
+      ),
+    )
+    .where(inArray(user.id, ids))
+  const byId = new Map(rows.map((row) => [row.userId, row]))
+  return ids.map((userId) => {
+    const row = byId.get(userId)
+    if (!row)
+      return { userId, found: false, blocked: false, name: null, email: null, emailVerified: false, image: null }
+    return {
+      userId,
+      found: true,
+      blocked: row.blockedBy !== null,
+      name: row.name,
+      email: row.email,
+      emailVerified: row.emailVerified,
+      image: row.image,
+    }
+  })
 }

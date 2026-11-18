@@ -13,6 +13,7 @@ import {
   accountEventBackoffSeconds,
   accountEventSendersFromEnv,
   deliverAccountEvents,
+  reviewAccounts,
 } from "./account-events.js"
 import type { AdminActor } from "./admin-core.js"
 import { closeMyAccount, removeGlobalBlock, setGlobalBlock } from "./admin-organizations.js"
@@ -291,6 +292,33 @@ describe("cerrar una cuenta avisa a las apps que son otro sistema", () => {
         GESTORIA_ACCOUNT_EVENTS_SECRET: SIGNING,
       }),
     ).toEqual({ senders: [sender], problems: [] })
+  })
+})
+
+describe("la revisión diaria de la copia en otra app", () => {
+  it("dice lo vigente de quien la app ya conoce: nombre, correo, si puede entrar y si existe", async () => {
+    await signUp(makeAuth("odentia"), "revisa@apps.test")
+    await signUp(makeAuth("odentia"), "cerrada@apps.test")
+    const people = await ownerDb
+      .select({ id: user.id, email: user.email })
+      .from(user)
+      .where(sql`${user.email} in ('revisa@apps.test', 'cerrada@apps.test')`)
+    const active = people.find((p) => p.email === "revisa@apps.test")!
+    const closed = people.find((p) => p.email === "cerrada@apps.test")!
+    await ownerDb.update(user).set({ name: "Rosa Quispe" }).where(eq(user.id, active.id))
+    await ownerDb.transaction((tx) => closeMyAccount(tx, closed.id))
+    // El cierre deja su aviso a gestorIA pendiente; aquí no se mide la entrega, y otras pruebas
+    // del archivo entregan todo lo que espera.
+    await ownerDb.delete(accountEvent).where(eq(accountEvent.userId, closed.id))
+
+    const reviewed = await reviewAccounts(ownerDb, [active.id, closed.id, "no-existe", active.id])
+    expect(reviewed).toEqual([
+      expect.objectContaining({ userId: active.id, found: true, blocked: false, name: "Rosa Quispe", email: "revisa@apps.test" }),
+      expect.objectContaining({ userId: closed.id, found: true, blocked: true }),
+      { userId: "no-existe", found: false, blocked: false, name: null, email: null, emailVerified: false, image: null },
+    ])
+    expect(await reviewAccounts(ownerDb, [])).toEqual([])
+    await expect(reviewAccounts(ownerDb, Array.from({ length: 501 }, (_, i) => `u-${i}`))).rejects.toThrow(/500/)
   })
 })
 

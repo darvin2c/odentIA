@@ -30,6 +30,7 @@ jobs:
       e2e: ${{ steps.calcular.outputs.e2e }}
       e2e_partes: ${{ steps.calcular.outputs.e2e_partes }}
       vps: ${{ steps.calcular.outputs.vps }}
+      gestoria_vps: ${{ steps.calcular.outputs.gestoria_vps }}
       cloudflare: ${{ steps.calcular.outputs.cloudflare }}
       arquitectura: ${{ steps.calcular.outputs.arquitectura }}
     steps:
@@ -129,6 +130,7 @@ jobs:
           pnpm --filter @odentia/ui-patterns exec vitest run src/scroll-policy.test.ts
           pnpm --filter @odentia/channels exec vitest run src/shared-boundaries.test.ts
           pnpm --filter @odentia/admin-e2e exec vitest run admin-scope.test.ts
+          pnpm --filter @gestoria/api exec vitest run src/gestoria-boundaries.test.ts
 
   # Tipos y pruebas de los paquetes afectados, repartidos en partes paralelas. La lista
   # de partes sale de `alcance`: una parte sin paquetes afectados no se ejecuta. Cada
@@ -261,6 +263,41 @@ jobs:
           docker image ls odentia-smoke:ci --format 'Tamaño de la imagen: {{.Size}}'
           bash scripts/smoke-image.sh odentia-smoke:ci
 
+  # El servidor de gestorIA (ADR 0203) es otra imagen (gestoria/Dockerfile): se comprueba que se
+  # arma y que cada servicio arranca con lo que quedó, solo si cambia lo suyo.
+  docker-build-gestoria:
+    needs: [alcance, ya-probado]
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.gestoria_vps == 'true' && needs.ya-probado.outputs.probado != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: gestoria/Dockerfile
+          push: false
+          load: true
+          tags: gestoria-smoke:ci
+          cache-from: type=gha,scope=gestoria
+          cache-to: type=gha,mode=max,scope=gestoria
+      # Sin base ni claves terminan por falta de configuración: eso se espera. Un módulo que falta, no.
+      - name: Arrancar cada servicio de la imagen
+        run: |
+          docker image ls gestoria-smoke:ci --format 'Tamaño de la imagen: {{.Size}}'
+          fallos=0
+          for comando in "pnpm --filter @gestoria/api start" "pnpm --filter @gestoria/db migrate"; do
+            salida=$(docker run --rm --network none gestoria-smoke:ci sh -c "timeout 25 $comando" 2>&1) || true
+            if echo "$salida" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (module|package)|ERR_PACKAGE_PATH_NOT_EXPORTED|MODULE_NOT_FOUND|not found: "; then
+              echo "::error::$comando: falta un módulo en la imagen"
+              echo "$salida" | tail -15
+              fallos=$((fallos + 1))
+            else
+              echo "ok  $comando: $(echo "$salida" | grep -v '^$' | tail -1 | cut -c1-140)"
+            fi
+          done
+          exit "$fallos"
+
   deploy:
     # Solo si cambia lo que va al VPS. Con lo probado en el PR, o con todo en verde aquí.
     if: >-
@@ -312,6 +349,50 @@ jobs:
         if: steps.punta.outputs.omitir != 'true'
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 2400000
 
+  # El servidor de gestorIA, en su propio proyecto de OpenShip (ADR 0203). Apagado mientras ese
+  # proyecto no exista: sin `GESTORIA_OPENSHIP_PROJECT_ID` en el repositorio, no se despliega nada.
+  deploy-gestoria:
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      vars.GESTORIA_OPENSHIP_PROJECT_ID != '' &&
+      needs.alcance.result == 'success' && needs.alcance.outputs.gestoria_vps == 'true' &&
+      (needs.ya-probado.outputs.probado == 'true' ||
+      (needs.check.result == 'success' && needs.docker-build-gestoria.result == 'success' && needs.arquitectura.result == 'success')) }}
+    needs: [alcance, ya-probado, check, docker-build-gestoria, arquitectura]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-gestoria-production
+      cancel-in-progress: false
+    env:
+      OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
+      OPENSHIP_PROJECT_ID: ${{ vars.GESTORIA_OPENSHIP_PROJECT_ID }}
+      OPENSHIP_DEPLOY_TOKEN: ${{ secrets.GESTORIA_OPENSHIP_DEPLOY_TOKEN }}
+    steps:
+      - name: Comprobar que es la punta de main
+        id: punta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          punta=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$punta" != "$GITHUB_SHA" ]; then
+            echo "main ya avanzó a $punta; la corrida de ese commit desplegará gestorIA."
+            echo "omitir=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.punta.outputs.omitir != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Instalar CLI oficial de OpenShip
+        if: steps.punta.outputs.omitir != 'true'
+        run: npm install --global openship@0.8.1
+      - name: Conectar con OpenShip
+        if: steps.punta.outputs.omitir != 'true'
+        run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN" --use
+      - name: Desplegar gestorIA
+        if: steps.punta.outputs.omitir != 'true'
+        run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --watch --timeout 1800000
+
   # Las webs de marketing (ADR 0136), la administración y el panel (ADR 0137) y la app de las
   # clínicas (ADR 0138) van en Cloudflare Workers, aparte de OpenShip: un cambio llega en unos
   # minutos. En un PR solo se comprueba que se arman para Workers (`--dry-run`, sin claves); en
@@ -357,7 +438,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - if: env.OMITIR != 'true'
-        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic...
+        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic... --filter @gestoria/web...
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
       # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
       # `SALES_WHATSAPP` (variable del repositorio, E.164) es el WhatsApp de ventas del Grupo Sallca:
@@ -540,6 +621,24 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
 
+      # La app de gestorIA (ADR 0203): solo archivos. Se arma siempre que cambia; se publica solo con
+      # sus direcciones puestas en el repositorio (GESTORIA_ACCOUNT_URL y GESTORIA_API_URL). Sin ellas,
+      # gestorIA queda apagado.
+      - name: Armar la app de gestorIA
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/web')
+        working-directory: gestoria/apps/web
+        env:
+          VITE_ACCOUNT_URL: ${{ vars.GESTORIA_ACCOUNT_URL || 'https://api.gestoria24.com' }}
+          VITE_API_URL: ${{ vars.GESTORIA_API_URL || 'https://servidor.gestoria24.com' }}
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la app de gestorIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && vars.GESTORIA_API_URL != '' && vars.GESTORIA_ACCOUNT_URL != '' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/web')
+        working-directory: gestoria/apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+
   # En un PR con todo en verde, anota el árbol que se probó (la unión del PR con main
   # de ese momento) en su último commit: al unirlo, `ya-probado` lo compara con main.
   # Lo que no aplica al cambio (job saltado) cuenta como correcto; un fallo no. Un PR
@@ -552,9 +651,10 @@ jobs:
       (needs.check.result == 'success' || needs.check.result == 'skipped') &&
       (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
       (needs.docker-build.result == 'success' || needs.docker-build.result == 'skipped') &&
+      (needs.docker-build-gestoria.result == 'success' || needs.docker-build-gestoria.result == 'skipped') &&
       (needs.arquitectura.result == 'success' || needs.arquitectura.result == 'skipped') &&
       (needs.deploy-web.result == 'success' || needs.deploy-web.result == 'skipped') }}
-    needs: [alcance, check, e2e, docker-build, arquitectura, deploy-web]
+    needs: [alcance, check, e2e, docker-build, docker-build-gestoria, arquitectura, deploy-web]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -578,8 +678,9 @@ jobs:
       ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.alcance.result == 'success' &&
       (needs.deploy.result == 'success' || (needs.deploy.result == 'skipped' && needs.alcance.outputs.vps != 'true')) &&
-      (needs.deploy-web.result == 'success' || (needs.deploy-web.result == 'skipped' && needs.alcance.outputs.cloudflare == '[]')) }}
-    needs: [alcance, deploy, deploy-web]
+      (needs.deploy-web.result == 'success' || (needs.deploy-web.result == 'skipped' && needs.alcance.outputs.cloudflare == '[]')) &&
+      (needs.deploy-gestoria.result == 'success' || (needs.deploy-gestoria.result == 'skipped' && (needs.alcance.outputs.gestoria_vps != 'true' || vars.GESTORIA_OPENSHIP_PROJECT_ID == ''))) }}
+    needs: [alcance, deploy, deploy-web, deploy-gestoria]
     runs-on: ubuntu-latest
     permissions:
       contents: read
