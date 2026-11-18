@@ -7,7 +7,7 @@
  * el servidor respondía 400: la línea viajaba sin respuesta.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeAll, expect, it, vi } from "vitest"
 import type { BudgetLine, BudgetOption, BudgetWithTotals } from "../../../lib/budgets"
 import { bareProduct, declareProduct } from "../../../product/product-ui"
@@ -232,4 +232,16 @@ it("si el servidor dice que lo enviado ya no coincide, vuelve a leer el presupue
   expect(screen.queryByText("Debe decidir cada línea exactamente una vez")).toBeNull()
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["budget", "p-paola"] })
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["budgets", "p-paola"] })
+})
+
+it("con la opción elegida y algo que lo piensa, anuncia «Eligió la opción A», como Documentos y la Historia", async () => {
+  const client = new QueryClient()
+  render(panel(client, budgetOf(true)))
+  await ready()
+  fireEvent.click(screen.getByRole("radio", { name: /^Opción A/ }))
+  // La endodoncia la acepta y la resina la piensa: antes decía «Aceptó 1 de 2» (QA del 18 nov).
+  const resin = await screen.findByRole("group", { name: "Respuesta para Resina compuesta" })
+  fireEvent.click(within(resin).getByRole("button", { name: "Lo piensa" }))
+  await waitFor(() => expect(screen.getByText(/Quedará como «Eligió la opción A»/)).toBeTruthy())
+  expect(screen.queryByText(/Aceptó 1 de 2/)).toBeNull()
 })

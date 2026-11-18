@@ -18,6 +18,7 @@ import { z } from "zod"
 import {
   BUDGET_SENDABLE_STATUSES,
   type BudgetWithTotals,
+  budgetChoiceWords,
   budgetNumberLabel,
 } from "../../lib/budgets"
 import {
@@ -756,7 +757,7 @@ export function BudgetPaper({
       type="budget"
       documentId={budget.id}
       title={budgetNumberLabel(budget.budgetNumber)}
-      status={`${budget.stateText} · ${formatDate(budget.presentedAt ?? budget.createdAt)}`}
+      status={`${budgetChoiceWords(budget)} · ${formatDate(budget.presentedAt ?? budget.createdAt)}`}
       send={
         !canSend
           ? null
@@ -774,7 +775,7 @@ export function BudgetPaper({
                     />
                   ),
                 }
-              : { kind: "blocked", reason: `${budget.stateText}: ya no se envía.` }
+              : { kind: "blocked", reason: `${budgetChoiceWords(budget)}: ya no se envía.` }
       }
       menu={[
         ...(draft

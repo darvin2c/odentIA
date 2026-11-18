@@ -33,7 +33,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useBudgetPapers } from "../../lib/budget-papers"
-import { type BudgetWithTotals, budgetNumberLabel, totalsOf, valueOption } from "../../lib/budgets"
+import { type BudgetWithTotals, budgetChoiceWords, budgetNumberLabel, totalsOf, valueOption } from "../../lib/budgets"
 import {
   type ClinicalOrder,
   type ConsentDocument,
@@ -663,7 +663,7 @@ export function DocumentosSection({
         title: budget.title && budget.title !== number ? `${number} · ${budget.title}` : number,
         detail: [formatDate(date), total || null].filter(Boolean).join(" · "),
         date,
-        status: { label: budget.stateText, tone: budgetStatusTone(budget.status) as Tone },
+        status: { label: budgetChoiceWords(budget), tone: budgetStatusTone(budget.status) as Tone },
         needsAction: false,
         action: { type: "ver" },
         open: { kind: "presupuesto", budget },
