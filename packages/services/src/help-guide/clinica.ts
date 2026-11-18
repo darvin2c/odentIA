@@ -303,8 +303,14 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-antecedentes-enfermedades-medicacion",
         q: "¿Dónde anoto sus enfermedades y los medicamentos que toma?",
-        a: "En su página › Clínica › Antecedentes, «Registrar antecedentes» (o «Editar antecedentes» si ya tiene): «Condiciones» para sus enfermedades, «Medicación vigente» para lo que toma (con «Fin (suspender)» dejas de contarlo) y «Entrevista de salud» para el «Embarazo» y los antecedentes familiares, con «Agregar antecedente familiar». Lo cambia quien escribe en la historia clínica.",
-        forms: ["donde anoto que es diabetica", "donde pongo que esta embarazada", "donde registro la medicacion que toma", "antecedentes familiares"],
+        a: "En su página › Clínica › Antecedentes, «Registrar antecedentes» (o «Editar antecedentes» si ya tiene): «Condiciones» para sus enfermedades, «Medicación vigente» para lo que toma (con «Fin (suspender)» dejas de contarlo) y «Entrevista de salud» para el «Embarazo» y los antecedentes familiares, con «Agregar antecedente familiar». Lo cambia quien escribe en la historia clínica. El medicamento se elige de la lista o se escribe: la lista lo reconoce por su nombre, su nombre común o su marca, también con la dosis, y lo guarda con su código («alendronato 70 mg semanal», «Fosamax» o «Eliquis» quedan como medicina para los huesos o anticoagulante, con su marca arriba de la ficha). Lo que no está en la lista queda escrito tal cual, sin código.",
+        forms: [
+          "donde anoto que es diabetica",
+          "donde pongo que esta embarazada",
+          "donde registro la medicacion que toma",
+          "antecedentes familiares",
+          "escribo la marca del medicamento",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -550,9 +556,15 @@ export const CLINICA: readonly HelpMore[] = [
       {
         // Revisión final de formularios del 15 nov: el aviso de la exodoncia (Y2 de clínica, `extractionRisksOf`).
         id: "pacientes-exodoncia-aviso-medicinas",
-        q: "¿Por qué la exodoncia dice «pide su INR del día» o «riesgo de osteonecrosis»?",
-        a: "Porque toma algo que cambia una extracción: en la atención, en el plan, la fila de la exodoncia por hacer lo dice con quién lo contó y cuándo. Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
-        forms: ["por que la exodoncia me dice que pida su inr", "aviso de warfarina en la extraccion", "riesgo de osteonecrosis en la exodoncia"],
+        q: "¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?",
+        a: "Porque toma algo que cambia una cirugía: en la atención, en el plan, la fila de la exodoncia, el implante o la cirugía oral por hacer lo dice con quién lo contó y cuándo. Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo, o denosumab), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. La medicina cuenta escrita por su nombre, su nombre común o su marca, también con la dosis: «alendronato 70 mg semanal», «Fosamax» o «Eliquis 5 mg». Lo escrito de otra forma («la pastilla del hueso») no se reconoce: elígelo de la lista en Antecedentes. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
+        forms: [
+          "por que la exodoncia me dice que pida su inr",
+          "aviso de warfarina en la extraccion",
+          "riesgo de osteonecrosis en la exodoncia",
+          "riesgo de osteonecrosis en el implante",
+          "escribi alendronato y no me avisa",
+        ],
         area: "plan",
         needs: "clinical.read",
         own: true,

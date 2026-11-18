@@ -3,7 +3,8 @@
  * exodoncia a quien toma warfarina o un bisfosfonato no avisaba nada. Ahora la fila de la exodoncia
  * dice lo que toma y qué pedir, con quién lo dijo, sin frenar nada.
  */
-import { patientMedication } from "@odentia/db/schema/clinical"
+import { randomUUID } from "node:crypto"
+import { patientMedication, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { serviceFinding } from "@odentia/db/schema/dental"
 import { expect, it } from "vitest"
 import { addDeclaredHealth, getPatientHealth, recordHealthDeclaration, savePatientHealth } from "../clinical.js"
@@ -74,4 +75,78 @@ it("sin anticoagulante ni medicina para los huesos, la exodoncia no dice nada", 
     (row) => row.id === item.id,
   )
   expect(listed).not.toHaveProperty("extractionRisks")
+})
+
+/** Un tratamiento de la biblioteca de ese tipo y el servicio de la clínica que lo usa. */
+async function libraryService(kind: string, name: string) {
+  const [template] = await ownerDb
+    .insert(treatmentTemplate)
+    .values({ key: `prueba-cirugia-${randomUUID()}`, name: `${name} ${randomUUID()}`, kind, scope: "general" })
+    .returning()
+  const [service] = await ownerDb
+    .insert(serviceCatalog)
+    .values({
+      organizationId: "org_a",
+      templateId: template!.id,
+      source: "template",
+      name,
+      scope: "general",
+      priceCents: 150_000,
+      currency: "PEN",
+    })
+    .returning()
+  return service!
+}
+
+// Reglas clínicas del 18 nov (caso C1, Teresa): «alendronato 70 mg semanal» escrito a mano en
+// Antecedentes, sin elegirlo de la lista. Antes quedaba sin código: la franja decía «no se le
+// preguntó» y la exodoncia no avisaba nada.
+it("la medicina escrita con su nombre estándar y la dosis cuenta: la exodoncia avisa la osteonecrosis", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(serviceFinding).values({ serviceId: f.service.id, organizationId: "org_a", condition: "missing_tooth" })
+  const health = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await f.run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "alendronato 70 mg semanal" }, { name: "Eliquis 5 mg" }],
+    }),
+  )
+  const saved = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  // Lo escrito queda tal cual, con el código de su DCI.
+  expect(saved.medications.map((row) => [row.name, row.atcCode])).toEqual([
+    ["alendronato 70 mg semanal", "M05BA04"],
+    ["Eliquis 5 mg", "B01AF02"],
+  ])
+  expect(saved.medicineClasses.boneMedicines.answer).toBe("yes")
+  expect(saved.medicineClasses.anticoagulants.answer).toBe("yes")
+  const item = await f.run((tx) => addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id }))
+  const listed = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { extractionRisks: true }))).find(
+    (row) => row.id === item.id,
+  )
+  expect(listed?.extractionRisks).toEqual([
+    "Toma alendronato 70 mg semanal: riesgo de osteonecrosis de los maxilares.",
+    "Toma Eliquis 5 mg: riesgo de sangrado.",
+  ])
+})
+
+// AAOMS 2022: el riesgo de osteonecrosis es de toda cirugía que expone hueso, no solo de la exodoncia.
+it("el implante y la cirugía oral avisan lo mismo que la exodoncia; la endodoncia, no", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(patientMedication).values({ organizationId: "org_a", patientId: f.patient.id, name: "Prolia", atcCode: "M05BX04" })
+  const implant = await libraryService("implantologia", "Implante dental")
+  const surgery = await libraryService("cirugia", "Frenectomía")
+  const rootCanal = await libraryService("endodoncia", "Endodoncia")
+  const items = await f.run(async (tx) => ({
+    implant: await addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: implant.id, sourceEncounterId: f.encounter.id }),
+    surgery: await addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: surgery.id, sourceEncounterId: f.encounter.id }),
+    rootCanal: await addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: rootCanal.id, sourceEncounterId: f.encounter.id }),
+  }))
+  const listed = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { extractionRisks: true }))
+  const risks = (id: string) => listed.find((row) => row.id === id)?.extractionRisks
+  const osteonecrosis = [expect.stringMatching(/^Toma Prolia( \([^)]*\))?: riesgo de osteonecrosis de los maxilares\.$/)]
+  expect(risks(items.implant.id)).toEqual(osteonecrosis)
+  expect(risks(items.surgery.id)).toEqual(osteonecrosis)
+  expect(risks(items.rootCanal.id)).toBeUndefined()
 })

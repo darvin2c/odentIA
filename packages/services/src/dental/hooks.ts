@@ -37,6 +37,7 @@ import {
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
+import { serviceKindOf } from "../specialties.js"
 import type { TimelineItem } from "../patient-history.js"
 import { DENTAL_PRESCRIBING, type DiagnosisCandidate, type ProductHooks } from "../product-hooks.js"
 import { DENTAL_FORMS } from "./forms.js"
@@ -199,6 +200,13 @@ export interface DentalFinalizeParts {
 export interface DentalEncounterDetailParts {
   odontogramEntries: Array<typeof odontogramEntry.$inferSelect>
 }
+
+/**
+ * Los tipos de la biblioteca que son cirugía sobre el hueso de los maxilares: la cirugía oral y el
+ * implante. Con la exodoncia, son lo que avisa de lo que toma (anticoagulante, medicina para los
+ * huesos) en la fila del plan.
+ */
+const SURGICAL_KINDS: ReadonlySet<string | null> = new Set(["cirugia", "implantologia"])
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
@@ -374,7 +382,10 @@ export const dentalHooks: ProductHooks = {
       ]),
     )
   },
-  // La exodoncia es el servicio que deja la pieza ausente (`dental.service_finding`).
+  // La cirugía que cambia lo que toma: la exodoncia, el servicio que deja la pieza ausente
+  // (`dental.service_finding`), y el implante y la cirugía oral, por su tipo en la biblioteca
+  // (`SURGICAL_KINDS`). AAOMS 2022: el riesgo de osteonecrosis es de la cirugía dentoalveolar que
+  // expone hueso, no solo de la extracción; SDCEP 2022: el implante y el colgajo sangran más.
   async extractionServiceIds(tx, orgId, serviceIds) {
     if (serviceIds.length === 0) return new Set()
     const rows = await tx
@@ -387,7 +398,16 @@ export const dentalHooks: ProductHooks = {
           eq(serviceFinding.condition, "missing_tooth"),
         ),
       )
-    return new Set(rows.map((row) => row.serviceId))
+    const out = new Set(rows.map((row) => row.serviceId))
+    const services = await tx
+      .select({ id: serviceCatalog.id, templateId: serviceCatalog.templateId, specialtyId: serviceCatalog.specialtyId })
+      .from(serviceCatalog)
+      .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, [...serviceIds])))
+    for (const service of services) {
+      if (out.has(service.id)) continue
+      if (SURGICAL_KINDS.has(await serviceKindOf(tx, orgId, service))) out.add(service.id)
+    }
+    return out
   },
   // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
   oneOffKinds: ["diagnostico"],

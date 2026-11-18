@@ -5232,6 +5232,7 @@ for (const seed of [
     givenNames: "Gloria",
     familyName: "Huamán Rivas",
     birthDate: "1964-03-08",
+    sex: "F",
     phone: "+51987650733",
     registeredBranchId: miraflores.id,
   })
@@ -5247,6 +5248,16 @@ for (const seed of [
     outsideSchedule: true,
     overrideBusy: true,
     notice: false,
+  })
+  // Reglas clínicas del 18 nov: toma alendronato y en recepción lo escribieron a mano, con la dosis,
+  // sin elegirlo de la lista. Se reconoce por su nombre estándar (ácido alendrónico, M05BA04): arriba
+  // de su ficha sale «Medicina para los huesos», la exodoncia de la 48 avisa del riesgo de
+  // osteonecrosis y su consentimiento nace con ese riesgo propio.
+  await savePatientHealth(db, ORG_A, ANA_ID, gloria.id, {
+    expectedRevision: 0,
+    reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+    conditions: [],
+    medications: [{ name: "alendronato 70 mg semanal" }],
   })
 
   const mateo = await createPatient(db, ORG_A, ANA_ID, {
