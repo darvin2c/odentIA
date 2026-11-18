@@ -1152,6 +1152,28 @@ function encounterSignerWords(row: PatientRecord["encounters"][number]["row"], z
   return `${who}${when}${skip}`
 }
 
+/**
+ * La anestesia que guardó la firma de la atención (`anesthesia_at_signing`), con las palabras del
+ * detalle de la atención: para qué, la ASA de entonces y quién la clasificó, la dosis máxima por su
+ * peso y los avisos. Para quien sigue atendiendo a un niño o a un cardiópata (QA, 18 nov).
+ */
+function anesthesiaLines(value: NonNullable<PatientRecord["encounters"][number]["row"]["anesthesiaAtSigning"]>, zone: Zone): string[] {
+  const uses = value.uses.length > 1 ? `${value.uses.slice(0, -1).join(", ")} y ${value.uses.at(-1)}` : (value.uses[0] ?? "")
+  const asa = value.asaClass ? asaLabel(value.asaClass) : null
+  const before =
+    value.asaBefore !== undefined && value.asaBefore !== value.asaClass
+      ? ` (antes: ${value.asaBefore ? `ASA ${value.asaBefore}` : "sin clasificar"})`
+      : ""
+  const who = value.asaSetBy && value.asaSetAt ? ` · la clasificó ${value.asaSetBy} el ${dayWords(new Date(value.asaSetAt), zone)}` : ""
+  return [
+    ...(uses ? [`Para ${uses}`] : []),
+    ...(asa ? [`${asa}${before}${who}`] : []),
+    ...(value.anesthetic ? [`Anestésico: ${value.anesthetic}`] : []),
+    value.dose ?? (value.weightKg === null ? "Sin peso anotado: sin dosis máxima" : `Peso: ${value.weightKg} kg`),
+    ...value.warnings,
+  ]
+}
+
 /** «18 nov 2026, 10:32 · Ana Torres · pieza 46: Control post-obturación…». */
 function noteWords(n: PatientRecord["clinicalNotes"][number], zone: Zone): string {
   return `${dayTimeWords(n.createdAt, zone)} · ${n.authorName ?? "el equipo"}${n.siteWords ? ` · ${n.siteWords}` : ""}: ${n.note}`
@@ -1222,24 +1244,18 @@ const LEFT_OUT = (item: RecordPlanItem) =>
   item.decision === "rechazado" || item.decision === "no_elegida" || item.status === "cancelado" || item.status === "reemplazado"
 
 /**
- * El plan como lo lee la ficha, sin repetir: lo que compite en un presupuesto y la persona aún no
- * elige va junto, como caminos que no se suman («resina o corona»); el mismo tratamiento de la
- * misma pieza que sigue abierto en dos presupuestos va una vez, con su última decisión, sin borrar
- * el otro camino (voz clínica, 18 nov: la corona de la 46 de Rosa estaba dos veces).
+ * El plan como lo lee la ficha y como lo dice el FHIR: cada tratamiento una sola vez, con su propia
+ * decisión. Lo que compite en un presupuesto y la persona aún no elige va junto, una vez y fuera de
+ * las fases («Por decidir entre dos opciones», como el Plan), como caminos que no se suman. Nada se
+ * junta por título ni pieza: la corona de otro presupuesto que «lo piensa» sigue en su fase con su
+ * decisión, y dos limpiezas son dos (QA antes de entregar, 18 nov).
  */
 function planView(record: Pick<PatientRecord, "planItems">): {
   paths: Array<{ budgetId: string; options: Array<{ position: number; name: string | null; items: Array<{ item: RecordPlanItem; state: string }> }> }>
   items: RecordPlanItem[]
 } {
-  const keyOf = (item: RecordPlanItem) => `${item.title.toLocaleLowerCase("es")}|${item.siteWords ?? ""}`
   const open = (item: RecordPlanItem) => OPEN_PLAN_STATUSES.includes(item.status) && !LEFT_OUT(item)
   const competing = record.planItems.filter((item) => open(item) && item.path && !item.path.chosen && item.path.pathCount > 1)
-  const latest = new Map<string, RecordPlanItem>()
-  for (const item of record.planItems.filter(open)) {
-    const known = latest.get(keyOf(item))
-    if (!known || item.updatedAt.getTime() > known.updatedAt.getTime()) latest.set(keyOf(item), item)
-  }
-  const inPaths = new Set(competing.map(keyOf))
   const paths = [...new Set(competing.map((item) => item.path!.budgetId))].map((budgetId) => {
     const own = competing.filter((item) => item.path!.budgetId === budgetId)
     const positions = [...new Set(own.flatMap((item) => item.path!.positions))].sort((a, b) => a - b)
@@ -1250,22 +1266,12 @@ function planView(record: Pick<PatientRecord, "planItems">): {
         return {
           position,
           name: items.map((item) => item.path?.name).find((name) => !!name) ?? null,
-          // Si el mismo tratamiento sigue abierto en otro presupuesto, vale su última decisión.
-          items: items.map((item) => ({ item, state: latest.get(keyOf(item))?.stateWords ?? item.stateWords })),
+          items: items.map((item) => ({ item, state: item.stateWords })),
         }
       }),
     }
   })
-  const seen = new Set<string>()
-  const items = record.planItems.filter((item) => {
-    if (competing.includes(item)) return false
-    if (!open(item)) return true
-    const key = keyOf(item)
-    if (inPaths.has(key) || seen.has(key) || latest.get(key) !== item) return false
-    seen.add(key)
-    return true
-  })
-  return { paths, items }
+  return { paths, items: record.planItems.filter((item) => !competing.includes(item)) }
 }
 
 /** «Caminos que no se suman (elige uno): Opción A · resina · 46 · por responder — o — Opción B …». */
@@ -1279,18 +1285,16 @@ function pathWords(path: ReturnType<typeof planView>["paths"][number], zone: Zon
 }
 
 /** El plan por fases, en su orden, más «No se hará»; cada línea con la decisión de la persona. */
-function planLines(record: PatientRecord, zone: Zone): Array<{ title: string; lines: string[] }> {
+export function planLines(record: PatientRecord, zone: Zone): Array<{ title: string; lines: string[] }> {
   const view = planView(record)
   const groups: Array<{ title: string; lines: string[] }> = []
+  // Lo que espera que elija un camino va una sola vez y fuera de las fases, como en el Plan.
+  if (view.paths.length)
+    groups.push({ title: "Por decidir entre opciones, fuera de las fases hasta que elija", lines: view.paths.map((path) => pathWords(path, zone)) })
   const phases = record.planPhases.length > 1 ? record.planPhases : [{ key: null as string | null, words: null }]
   for (const [index, phase] of phases.entries()) {
     const own = (item: RecordPlanItem) => phase.key === null || item.phase === phase.key || (index === 0 && !record.planPhases.some((p) => p.key === item.phase))
-    const lines = [
-      ...view.items.filter((item) => !LEFT_OUT(item) && own(item)).map((item) => planItemWords(item, zone)),
-      ...view.paths
-        .filter((path) => path.options.some((option) => option.items.some(({ item }) => own(item))))
-        .map((path) => pathWords(path, zone)),
-    ]
+    const lines = view.items.filter((item) => !LEFT_OUT(item) && own(item)).map((item) => planItemWords(item, zone))
     if (lines.length)
       groups.push({ title: phase.key === null ? "Tratamientos" : `Fase ${index + 1}${phase.words ? ` · ${phase.words}` : ""}`, lines })
   }
@@ -1322,6 +1326,16 @@ function rowMark(record: PatientRecord, topic: HealthTopic, id: string, zone: Zo
   if (changed) return lowerFirst(changed)
   const group = declaredGroupOf(record, topic, id)
   return group ? unreviewedWords(group, record.person.sex, zone) : null
+}
+
+/** «Antes de atenderla», «Antes de atenderlo» o, sin saber su sexo, «Antes de atender a la persona». */
+export function beforeCareTitle(sex: string | null): string {
+  return sex === "F" ? "Antes de atenderla" : sex === "M" ? "Antes de atenderlo" : "Antes de atender a la persona"
+}
+
+/** «La representa», «Lo representa» o «Su representante». */
+function representsWords(sex: string | null): string {
+  return sex === "F" ? "La representa" : sex === "M" ? "Lo representa" : "Su representante"
 }
 
 /**
@@ -1382,7 +1396,7 @@ function beforeCareLines(record: PatientRecord, zone: Zone): string[] {
         : `Embarazo por confirmar${pregnancy.saidOn ? ` · lo dijo el ${civilDay(pregnancy.saidOn)}` : ""}`,
     )
   for (const c of record.contacts.filter((row) => row.relationship === "guardian"))
-    lines.push(`La representa: ${c.displayName}${c.detail ? ` (${c.detail})` : ""}${c.phone ? ` · ${c.phone}` : ""}`)
+    lines.push(`${representsWords(sex)}: ${c.displayName}${c.detail ? ` (${c.detail})` : ""}${c.phone ? ` · ${c.phone}` : ""}`)
   return lines
 }
 
@@ -1593,7 +1607,14 @@ function visitRows(told: PatientRecord["visitAnswers"][number]): Array<[string, 
 export async function renderPatientRecordPdf(
   record: PatientRecord,
   clinic: DocumentClinic,
-  options: { copyLink?: { url: string; until: Date } } = {},
+  options: {
+    copyLink?: { url: string; until: Date }
+    /**
+     * Quién del equipo la descargó (para derivar, para la clínica). Sin él, es la copia que se le
+     * entrega a la persona: por su pedido o por su enlace.
+     */
+    downloadedBy?: string | null
+  } = {},
 ): Promise<Uint8Array> {
   const zone = clinic
   const p = record.person
@@ -1602,7 +1623,10 @@ export async function renderPatientRecordPdf(
     title: "Historia clínica",
     docLabel: "Historia clínica",
     patientLabel: `${p.displayName} · ${chart}`,
-    legalNote: `Copia entregada por ${clinic.tradeName || "la clínica"} a pedido de la persona.`,
+    // Lo que es: la que baja el equipo no se entregó «a pedido de la persona» (auditor, 18 nov).
+    legalNote: options.downloadedBy
+      ? `Copia generada por ${options.downloadedBy} el ${dayTimeWords(record.generatedAt, clinic)}.`
+      : `Copia entregada por ${clinic.tradeName || "la clínica"} a pedido de la persona.`,
     createdAt: record.generatedAt,
   })
   // El título lleva consigo el comienzo de lo suyo: lo primero de una atención o una ficha pide
@@ -1652,13 +1676,15 @@ export async function renderPatientRecordPdf(
   // está a medias (mesa del 18 nov). La crónica de atenciones viene después.
   if (options.copyLink) {
     kit.gap(10)
+    // Un vínculo que se toca (en el celular el QR está en la misma pantalla) y el QR para otro equipo.
     kit.qrPanel({
       url: options.copyLink.url,
       title: "Su copia completa, con sus imágenes y cada papel",
-      body: `Se baja con este enlace hasta el ${dayWords(options.copyLink.until, zone)}: ${options.copyLink.url}`,
+      link: { text: "Bajar mi copia completa", url: options.copyLink.url },
+      body: `Toca «Bajar mi copia completa» o escanea el código desde otro equipo. Se baja con este enlace hasta el ${dayWords(options.copyLink.until, zone)}.`,
     })
   }
-  section("Antes de atenderla")
+  section(beforeCareTitle(p.sex))
   kit.bullets(beforeCareLines(record, zone))
   section("Lo que sigue")
   const next = nextStepLines(record, zone)
@@ -1883,6 +1909,7 @@ export async function renderPatientRecordPdf(
       ["Diagnóstico", diagnosisLines],
       ["Se hizo", procedures.map((pr) => `${pr.description}${siteText(pr)}`)],
       ["Notas clínicas", record.clinicalNotes.filter((n) => n.encounterId === row.id).map((n) => noteWords(n, zone))],
+      ["Anestesia al firmar", row.anesthesiaAtSigning ? anesthesiaLines(row.anesthesiaAtSigning, zone) : null],
       ["Anulado en esta atención", voided],
       // Lo que se anotó en una ficha durante la atención, o lo que respondió para ella; sus
       // respuestas van en su apartado.
@@ -1993,20 +2020,24 @@ export async function renderPatientRecordPdf(
   else kit.bullets(record.consents.map((c) => consentWords(c, zone)))
 
   // Cada papel emitido va en su PDF, el mismo que se envía y se imprime (mesa del 18 nov).
+  // El odontograma de hoy no se emitió ni se entregó: va aparte, con su nombre (auditor, 18 nov).
+  const emitted = record.papers.filter((paper) => !UNISSUED_PAPER_KINDS.includes(paper.kind))
+  const drawn = record.papers.filter((paper) => UNISSUED_PAPER_KINDS.includes(paper.kind))
+  const paperLine = (paper: RecordPaperEntry) =>
+    `${paper.label} · ${dayWords(paper.at, zone)}${paper.mark ? ` · ${paper.mark}` : ""}${paper.signer ? ` · ${paper.signer}` : ""}`
   if (record.papers.length) {
-    section(`Papeles emitidos (${record.papers.length})`)
+    section(`Papeles emitidos (${emitted.length})`)
     kit.text(
       options.copyLink
         ? "Cada uno va en su PDF, en la copia completa que se baja con el enlace de la primera página."
         : "Cada uno va en su PDF, en la carpeta «papeles» de esta copia.",
       { size: SIZE.second, tone: "gray" },
     )
-    kit.bullets(
-      record.papers.map(
-        (paper) =>
-          `${paper.label} · ${dayWords(paper.at, zone)}${paper.mark ? ` · ${paper.mark}` : ""}${paper.signer ? ` · ${paper.signer}` : ""}`,
-      ),
-    )
+    if (emitted.length) kit.bullets(emitted.map(paperLine))
+    if (drawn.length) {
+      kit.subheading("Dibujado al armar esta copia, sin firmar")
+      kit.bullets(drawn.map(paperLine))
+    }
   }
 
   // Las fichas del equipo y lo que respondió la persona, cada uno con su nombre, como en la Historia.
@@ -2650,6 +2681,29 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     // Observation con el código LOINC de la nota de evolución (11506-3, «Progress note»).
     for (const note of record.clinicalNotes.filter((n) => n.encounterId === row.id))
       resources.push(clinicalNoteObservation(note, patientRef, encounterRef, observationStatus))
+    // La anestesia que guardó la firma: una Observation de la atención, en palabras (no hay un código
+    // estándar para «lo que se calculó al firmar»), con el peso de entonces en UCUM.
+    if (row.anesthesiaAtSigning)
+      resources.push({
+        resourceType: "Observation",
+        id: `${row.id}-anestesia`,
+        status: observationStatus,
+        code: { text: "Anestesia local al firmar la atención" },
+        subject: patientRef,
+        encounter: encounterRef,
+        effectiveDateTime: (row.endedAt ?? row.startedAt).toISOString(),
+        valueString: anesthesiaLines(row.anesthesiaAtSigning, record.clinic).join(" · "),
+        ...(row.anesthesiaAtSigning.weightKg !== null
+          ? {
+              component: [
+                {
+                  code: { coding: [{ system: FHIR_LOINC_SYSTEM, code: "29463-7", display: "Body weight" }], text: "Peso" },
+                  valueQuantity: { value: row.anesthesiaAtSigning.weightKg, unit: "kg", system: FHIR_UCUM_SYSTEM, code: "kg" },
+                },
+              ],
+            }
+          : {}),
+      })
     for (const d of diagnoses)
       resources.push({
         resourceType: "Condition",
@@ -3141,8 +3195,8 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       type: { text: d.typeWords },
       subject: patientRef,
       date: d.retiredAt.toISOString(),
-      description: `${d.typeWords} retirado de su ficha${d.reason ? `: ${d.reason}` : ""}`,
-      content: [{ attachment: { title: `${d.typeWords} retirado: el archivo no va en la copia` } }],
+      description: `Retirado de su ficha (${d.typeWords.toLocaleLowerCase("es")})${d.reason ? `: ${d.reason}` : ""}`,
+      content: [{ attachment: { title: `Retirado de su ficha (${d.typeWords.toLocaleLowerCase("es")}): el archivo no va en la copia` } }],
     })
   // Cada papel emitido, en su PDF dentro del ZIP: lo que documenta va en `context.related`.
   for (const paper of record.papers)
@@ -3198,6 +3252,9 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
 export function zipUrl(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/")
 }
+
+/** Lo que va en «papeles» y no es un papel emitido: se dibuja al armar la copia (odentIA: el odontograma de hoy). */
+export const UNISSUED_PAPER_KINDS: readonly string[] = ["odontogram_today"]
 
 /** Qué es cada papel, como categoría de su DocumentReference. */
 const PAPER_KIND_WORDS: Record<string, string> = {
@@ -3487,13 +3544,27 @@ export async function sendPatientRecordCopy(
   actorUserId: string,
   patientId: string,
   requestId: string,
-  input: { connectionId: string },
+  /** `again`: «Enviar de nuevo», dicho por quien lo pulsa; nunca se deduce de lo guardado. */
+  input: { connectionId: string; again?: boolean },
   deps: SendDeps,
 ): Promise<{ request: DataRequestItem; conversationId: string; channel: string }> {
   const request = await copyRequest(tx, orgId, patientId, requestId)
-  const again = request.status === "respondida" && request.copy !== null
-  if (request.status !== "pendiente" && !again)
-    throw new ServiceError("DATA_REQUEST_CLOSED", 409, "Este pedido ya se respondió")
+  const again = input.again === true
+  // Una pestaña vieja que vuelve a «Enviar» no reenvía: el reenvío es explícito y solo de una copia enviada con su enlace.
+  if (!again && request.status !== "pendiente")
+    throw new ServiceError(
+      "DATA_REQUEST_CLOSED",
+      409,
+      "Este pedido ya se respondió y su copia ya salió. Si hay que mandarla otra vez, usa «Enviar de nuevo».",
+    )
+  if (again && (request.status !== "respondida" || request.copy === null))
+    throw new ServiceError(
+      "DATA_REQUEST_CLOSED",
+      409,
+      request.status === "pendiente"
+        ? "Esta copia todavía no se envió: usa «Enviar la copia»."
+        : "Este pedido no tiene una copia enviada con su enlace para enviar de nuevo.",
+    )
   if (!request.verifiedAt)
     throw new ServiceError(
       "DATA_REQUEST_NOT_VERIFIED",

@@ -62,7 +62,8 @@ const denyInput = z
       .max(1000, "El motivo admite hasta 1000 caracteres"),
   })
   .strict()
-const sendInput = z.object({ connectionId: z.uuid() }).strict()
+// `again`: «Enviar de nuevo», explícito (una pestaña vieja no reenvía por el estado guardado).
+const sendInput = z.object({ connectionId: z.uuid(), again: z.boolean().optional() }).strict()
 
 export function createPatientDataRequestsRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -212,7 +213,7 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     let copy: PatientRecordCopy
     try {
       copy = await withOrgContext(deps.db, orgId, async (tx) => {
-        const built = await buildPatientRecordCopy(tx, orgId, patientId, { storage: deps.storage })
+        const built = await buildPatientRecordCopy(tx, orgId, patientId, { storage: deps.storage }, { downloadedBy: { userId } })
         // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora), con lo que trae.
         await tx.insert(auditEvent).values({
           organizationId: orgId,

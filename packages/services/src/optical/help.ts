@@ -4,6 +4,7 @@ import {
   type HelpTopic,
   SHARED_HELP_TOPICS,
 } from "../help-guide.js"
+import { COPY_TEETH_SENTENCE } from "../help-guide/clinica.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -604,6 +605,36 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // La numeración de las piezas es un estándar de la copia que solo sigue odentIA: en una óptica, los demás.
+  "pacientes-copia-historia-estandares": (faq) => [
+    {
+      ...withoutForms(faq, "la tomografia sale en dicom"),
+      a: swap(
+        swap(
+          swap(faq.a, COPY_TEETH_SENTENCE, ""),
+          "; y DICOM, sus tomografías tal como salieron del equipo, solo si tiene alguna",
+          "",
+        ),
+        "Las fotos y radiografías van tal como se subieron",
+        "Sus imágenes van tal como se subieron",
+      ),
+    },
+  ],
+  // Una óptica no toma radiografías ni tomografías: la copia lleva sus imágenes.
+  "pacientes-copia-historia-enviar": (faq) => [
+    {
+      ...withoutForms(
+        faq,
+        "como le mando a una paciente toda su historia con sus radiografias",
+        "el paciente quiere sus radiografias y su tomografia",
+      ),
+      q: "¿Cómo le mando a una persona toda su historia con sus imágenes?",
+      a: swap(faq.a, "sus radiografías, fotos y tomografías", "sus imágenes"),
+    },
+  ],
+  "pacientes-copia-historia-derivar": (faq) => [
+    { ...faq, a: swap(faq.a, "sus fotos, radiografías y tomografías", "sus imágenes") },
+  ],
   // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
   "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).

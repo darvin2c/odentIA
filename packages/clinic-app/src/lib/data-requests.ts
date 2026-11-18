@@ -1,4 +1,4 @@
-import { apiFetch, saveDownload } from "./api"
+import { apiFetch } from "./api"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
@@ -36,8 +36,11 @@ export interface DataRequest {
 
 export interface DataRequestCopy {
   until: string
+  /** Las descargas que terminaron. */
   downloads: number
   lastDownloadAt: string | null
+  /** El enlace ya no sirve antes de vencer: mal su documento demasiadas veces, o ya se bajó el tope. */
+  closed: "intentos" | "descargas" | null
 }
 
 export const DATA_REQUEST_KIND_TEXT: Record<DataRequestKind, { title: string; detail: string }> = {
@@ -180,11 +183,17 @@ export async function fetchRecordSendOptions(
   )).data
 }
 
-export async function sendRecordCopyApi(patientId: string, id: string, connectionId: string): Promise<{ request: DataRequest; channel: string }> {
+/** `again`: «Enviar de nuevo» de un pedido ya respondido; sin él, el servidor no reenvía. */
+export async function sendRecordCopyApi(
+  patientId: string,
+  id: string,
+  connectionId: string,
+  again = false,
+): Promise<{ request: DataRequest; channel: string }> {
   return (
     await apiFetch<{ data: { request: DataRequest; channel: string } }>(`${base(patientId)}/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ connectionId }),
+      body: JSON.stringify({ connectionId, ...(again ? { again: true } : {}) }),
     })
   ).data
 }
@@ -203,6 +212,16 @@ export interface PatientRecordSummary {
   tomographies: number
   otherFiles: number
   approxBytes: number | null
+  /** Las hojas de atención emitidas. */
+  attentionSheets?: number
+  /** Trae el odontograma de hoy, sin firmar. */
+  odontogramToday?: boolean
+  /** Los papeles propios del producto (vistIA: la receta de lentes). */
+  productPapers?: number
+  /** Las listas de diagnóstico que de verdad usa («CIE-10», «CIE-11»). */
+  diagnosisSystems?: string[]
+  /** Las piezas van con su número FDI (ISO 3950). */
+  toothNumbers?: boolean
 }
 
 export const recordSummaryKey = (patientId: string) => ["patient-record-summary", patientId] as const
@@ -211,10 +230,18 @@ export async function fetchRecordSummary(patientId: string): Promise<PatientReco
   return (await apiFetch<{ data: PatientRecordSummary }>(`/api/patients/${patientId}/record/summary`)).data
 }
 
-/** «Descargar copia»: baja el ZIP con la sesión; si el servidor lo rechaza, lanza su error. */
-export async function downloadPatientRecord(patientId: string): Promise<void> {
-  const response = await fetch(patientRecordDownloadUrl(patientId), { credentials: "include" })
-  await saveDownload(response, "Copia de su historia.zip")
+/**
+ * «Descargar copia»: el navegador baja el ZIP por su cuenta (un enlace con la sesión), así
+ * se guarda mientras llega y no queda entero en la memoria de la página: con tomografías
+ * pesa cientos de MB. La página no sabe cuándo termina; lo dice el navegador en sus descargas.
+ */
+export function startPatientRecordDownload(patientId: string): void {
+  const anchor = document.createElement("a")
+  anchor.href = patientRecordDownloadUrl(patientId)
+  anchor.rel = "noreferrer"
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
 }
 
 /** «unos 90 MB», «unos 800 KB»: lo que pesa, redondeado, para decidir si bajarla con wifi. */

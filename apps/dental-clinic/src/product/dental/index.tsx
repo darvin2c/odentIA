@@ -118,10 +118,6 @@ export const dentalUi: ProductUi = {
         ),
       },
     ],
-    // La copia de su historia numera cada pieza con FDI en el odontograma y en el FHIR.
-    copyStandards: [
-      { name: "FDI (ISO 3950)", detail: "La numeración de las piezas, en el odontograma y en cada hallazgo." },
-    ],
   },
   site: dentalSite,
   useFindings: useActiveFindings,

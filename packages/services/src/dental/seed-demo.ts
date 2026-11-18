@@ -45,6 +45,7 @@ import {
   patientCharge,
   patientCondition,
   patientContact,
+  patientDataRequest,
   patientDocument,
   patientDocumentContext,
   patientHealthDeclaration,
@@ -2114,12 +2115,16 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
 await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 1,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+  // Con su tipo, su criticidad y su verificación: sin ellos, la segunda revisión los borraba.
   allergies: rosaHealthV1.allergies.map((a) => ({
     id: a.id,
     substance: a.substance,
     category: a.category,
     reaction: a.reaction,
     severity: a.severity,
+    kind: a.kind,
+    criticality: a.criticality,
+    verification: a.verification,
   })),
   conditions: rosaHealthV1.conditions.map((c) => ({
     id: c.id,
@@ -2792,7 +2797,7 @@ await voidOdontogramEntry(
   ANA_ID,
   wearId,
   rosaPatientId,
-  "Registro de prueba anulado en seed",
+  "Anotado en la pieza equivocada: el desgaste es de la 27",
 )
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
@@ -3982,9 +3987,10 @@ await db.transaction(async (tx) => {
   })
 })
 // La copia ya enviada (mesa del 18 nov): Carlos Paredes la pidió en la clínica antes de
-// mudarse, recepción se la envió ayer por WhatsApp con el enlace en el PDF (sirve unos días
-// más) y la bajó una vez anoche. Su fila dice «La bajó el…» y ofrece «Enviar de nuevo»; la
-// descarga sale en «Consultas a la historia clínica». El enlace se abre con su DNI, 45678903.
+// mudarse, recepción se la envió ayer por WhatsApp con el enlace en el PDF (vence al final del
+// día de ayer + 7) y se bajó entera anoche, después del envío. Su fila dice «Se bajó el…» y
+// ofrece «Enviar de nuevo»; la descarga sale en «Consultas a la historia clínica». El enlace se
+// abre con su DNI, 45678903.
 await withOrgContext(db, ORG_A, async (tx) => {
   const today = await clinicToday(tx, ORG_A)
   const carlosPatientId = patientIdByName.get("Carlos Paredes")!
@@ -4000,21 +4006,47 @@ await withOrgContext(db, ORG_A, async (tx) => {
   await respondDataRequest(tx, ORG_A, ANA_ID, carlosPatientId, copy.id, {
     resolution: "Se le envió por WhatsApp el PDF de su historia, con el enlace para bajar la copia completa.",
   })
+  // Se envió ayer: el pedido se respondió entonces y el envío queda en la auditoría, de donde el tope de
+  // descargas toma desde cuándo contar.
+  const sentAt = new Date(Date.now() - 24 * 3_600_000)
+  await tx
+    .update(patientDataRequest)
+    .set({ resolvedAt: sentAt })
+    .where(and(eq(patientDataRequest.organizationId, ORG_A), eq(patientDataRequest.id, copy.id)))
+  await tx.insert(auditEvent).values({
+    organizationId: ORG_A,
+    actorUserId: RECEPCION_ID,
+    action: "patient_record.sent",
+    entity: "patient",
+    entityId: carlosPatientId,
+    metadata: { patientId: carlosPatientId, requestId: copy.id, channel: "whatsapp", again: false },
+    createdAt: sentAt,
+  })
   // Su enlace propio, el que viajó dentro del PDF (no «Su enlace»), vigente hasta el final del día del envío + 7.
   // Necesita la dirección pública de la clínica, como el QR de los papeles.
   if (process.env.WEB_URL && process.env.COOKIE_DOMAIN)
     configurePublicLinks({ webURL: process.env.WEB_URL, cookieDomain: process.env.COOKIE_DOMAIN })
   const link = await issueRecordCopyLink(tx, ORG_A, { requestId: copy.id })
   configurePublicLinks(null)
-  if (link) console.log(`copia de Carlos Paredes (demo, DNI 45678903): ${link.url}`)
-  await tx.insert(patientRecordDownload).values({
-    organizationId: ORG_A,
-    patientId: carlosPatientId,
-    dataRequestId: copy.id,
-    ip: "192.0.2.10",
-    userAgent: "Mozilla/5.0 (Linux; Android 14) demostración",
-    createdAt: new Date(Date.now() - 14 * 3_600_000),
-  })
+  if (link) {
+    // Se envió ayer: vence un día antes que si se enviara hoy.
+    await tx
+      .update(patientDataRequest)
+      .set({ copyUntil: new Date(link.until.getTime() - 24 * 3_600_000) })
+      .where(and(eq(patientDataRequest.organizationId, ORG_A), eq(patientDataRequest.id, copy.id)))
+    console.log(`copia de Carlos Paredes (demo, DNI 45678903): ${link.url}`)
+    // Se bajó entera anoche, con el enlace de ese envío.
+    const startedAt = new Date(Date.now() - 14 * 3_600_000)
+    await tx.insert(patientRecordDownload).values({
+      organizationId: ORG_A,
+      patientId: carlosPatientId,
+      dataRequestId: copy.id,
+      ip: "192.0.2.10",
+      userAgent: "Mozilla/5.0 (Linux; Android 14) demostración",
+      createdAt: startedAt,
+      completedAt: new Date(startedAt.getTime() + 90_000),
+    })
+  }
 })
 // Historia bloqueada (ADR 0080, fase 2): Elena Huamán pidió en la clínica
 // borrar sus datos. Lo no clínico se borró y su historia quedó bloqueada:

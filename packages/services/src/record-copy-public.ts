@@ -19,10 +19,15 @@ import { documentText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { and, eq, gt, lt, lte, sql } from "drizzle-orm"
+import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm"
 import { clinicNameOf } from "./booking-links.js"
 import { sameDocument } from "./clinical-forms.js"
-import { RECORD_COPY_ATTEMPTS, RECORD_COPY_DOWNLOADS } from "./data-requests.js"
+import {
+  RECORD_COPY_ATTEMPTS,
+  RECORD_COPY_DOWNLOADS,
+  recordCopySentAt,
+  recordCopyStartsSince,
+} from "./data-requests.js"
 import { notFound, ServiceError } from "./errors.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import {
@@ -68,6 +73,8 @@ interface LiveCopy {
   requesterContactId: string
   until: Date
   self: boolean
+  /** Los intentos con documento ya contados (con el de esta petición, si se reservó). */
+  failed: number
 }
 
 /**
@@ -87,6 +94,7 @@ async function liveCopyOf(
       patientId: patientDataRequest.patientId,
       requesterContactId: patientDataRequest.requesterContactId,
       copyUntil: patientDataRequest.copyUntil,
+      failed: patientDataRequest.copyFailedAttempts,
     })
     .from(patientDataRequest)
     .where(
@@ -118,6 +126,7 @@ async function liveCopyOf(
     requesterContactId: request.requesterContactId,
     until: request.copyUntil,
     self: self?.self === true,
+    failed: request.failed,
   }
 }
 
@@ -135,17 +144,10 @@ async function requesterOf(tx: Db, orgId: string, contactId: string) {
   return row ?? null
 }
 
+/** Las descargas que empezaron con el enlace del último envío: el tope es de cada envío. */
 async function downloadsOf(tx: Db, orgId: string, requestId: string): Promise<number> {
-  const [row] = await tx
-    .select({ count: sql<number>`count(*)::int` })
-    .from(patientRecordDownload)
-    .where(
-      and(
-        eq(patientRecordDownload.organizationId, orgId),
-        eq(patientRecordDownload.dataRequestId, requestId),
-      ),
-    )
-  return row?.count ?? 0
+  const sentAt = (await recordCopySentAt(tx, orgId, [requestId])).get(requestId) ?? null
+  return recordCopyStartsSince(tx, orgId, requestId, sentAt)
 }
 
 const LIMIT = `Ya la bajaste ${RECORD_COPY_DOWNLOADS} veces con este enlace. Si la necesitas otra vez, pídele a la clínica que te la envíe de nuevo.`
@@ -244,10 +246,15 @@ async function requireDocument(
     throw new ServiceError("VALIDATION", 400, "Escribe tu número de documento.", {
       docNumber: "Escribe tu número de documento.",
     })
-  if (text.length > 40 || !sameDocument(text, requester.docNumber))
-    throw new ServiceError("RECORD_COPY_DOCUMENT", 400, WRONG_DOCUMENT, {
-      docNumber: WRONG_DOCUMENT,
-    })
+  if (text.length > 40 || !sameDocument(text, requester.docNumber)) {
+    // El intento de esta petición ya está contado: quedan los que faltan para el tope.
+    const left = Math.max(0, RECORD_COPY_ATTEMPTS - copy.failed)
+    const message =
+      left === 0
+        ? `${WRONG_DOCUMENT} Ya no quedan intentos: pídele a la clínica que te la envíe de nuevo.`
+        : `${WRONG_DOCUMENT} ${left === 1 ? "Te queda 1 intento." : `Te quedan ${left} intentos.`}`
+    throw new ServiceError("RECORD_COPY_DOCUMENT", 400, message, { docNumber: message })
+  }
   await tx
     .update(patientDataRequest)
     .set({ copyFailedAttempts: sql`greatest(${patientDataRequest.copyFailedAttempts} - 1, 0)` })
@@ -273,9 +280,10 @@ export async function checkRecordCopyDocument(
 }
 
 /**
- * «Descargar»: comprueba otra vez su documento y el tope, anota la descarga y arma la
- * copia, la misma de la clínica (`buildPatientRecordCopy`). Quien llama la entrega en
- * streaming después de confirmar la transacción. Antes, `reserveRecordCopyAttempt`.
+ * «Descargar»: comprueba otra vez su documento y el tope, anota que empezó (el tope cuenta
+ * los inicios) y arma la copia, la misma de la clínica (`buildPatientRecordCopy`). Quien
+ * llama la entrega en streaming después de confirmar la transacción y, si termina de
+ * enviarse, lo anota con `finishRecordCopyDownload`. Antes, `reserveRecordCopyAttempt`.
  */
 export async function startRecordCopyDownload(
   tx: Db,
@@ -284,16 +292,40 @@ export async function startRecordCopyDownload(
   input: { docNumber: string },
   evidence: { ip?: string | null; userAgent?: string | null },
   deps: { storage: Storage },
-): Promise<PatientRecordCopy> {
+): Promise<{ copy: PatientRecordCopy; downloadId: string }> {
   const copy = await liveCopyOf(tx, orgId, token, { lock: true, reserved: true })
   await requireDownloadsLeft(tx, orgId, copy)
   await requireDocument(tx, orgId, copy, input.docNumber)
-  await tx.insert(patientRecordDownload).values({
-    organizationId: orgId,
-    patientId: copy.patientId,
-    dataRequestId: copy.requestId,
-    ip: evidence.ip?.slice(0, 100) ?? null,
-    userAgent: evidence.userAgent?.slice(0, 500) ?? null,
-  })
-  return buildPatientRecordCopy(tx, orgId, copy.patientId, deps)
+  const [download] = await tx
+    .insert(patientRecordDownload)
+    .values({
+      organizationId: orgId,
+      patientId: copy.patientId,
+      dataRequestId: copy.requestId,
+      ip: evidence.ip?.slice(0, 100) ?? null,
+      userAgent: evidence.userAgent?.slice(0, 500) ?? null,
+    })
+    .returning({ id: patientRecordDownload.id })
+  return {
+    copy: await buildPatientRecordCopy(tx, orgId, copy.patientId, deps),
+    downloadId: download!.id,
+  }
+}
+
+/** El ZIP terminó de enviarse: desde ahora «Se bajó» y sale en «Consultas a la historia clínica». Una vez. */
+export async function finishRecordCopyDownload(
+  tx: Db,
+  orgId: string,
+  downloadId: string,
+): Promise<void> {
+  await tx
+    .update(patientRecordDownload)
+    .set({ completedAt: new Date() })
+    .where(
+      and(
+        eq(patientRecordDownload.organizationId, orgId),
+        eq(patientRecordDownload.id, downloadId),
+        isNull(patientRecordDownload.completedAt),
+      ),
+    )
 }

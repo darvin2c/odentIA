@@ -896,8 +896,9 @@ export const patientDataRequest = pgTable(
 /**
  * Cada vez que quien pidió la copia la bajó desde su enlace (mesa del 18 nov):
  * quién es lo dice el pedido (`requester_contact_id`), cuándo y desde dónde,
- * esta fila. La aplicación solo agrega y lee: es la traza de quién se llevó la
- * historia, como `clinical_access_log`, y por eso no la borra `erase_person_data`.
+ * esta fila. La aplicación solo agrega, lee y anota una vez cuándo terminó: es la traza
+ * de quién se llevó la historia, como `clinical_access_log`, y por eso no la borra
+ * `erase_person_data`.
  * Se ve en «Consultas a la historia clínica» y en la fila del pedido.
  */
 export const patientRecordDownload = pgTable(
@@ -907,6 +908,11 @@ export const patientRecordDownload = pgTable(
     organizationId: orgFk("organization_id"),
     patientId: uuid("patient_id").notNull(),
     dataRequestId: uuid("data_request_id").notNull(),
+    /**
+     * Cuándo terminó de enviarse el ZIP; nulo si la descarga se cortó. Se anota una vez (el
+     * tope cuenta los inicios; «Se bajó» y «Consultas a la historia clínica», las terminadas).
+     */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     /** Desde dónde la bajó, como la evidencia de una firma a distancia. */
     ip: text("ip"),
     userAgent: text("user_agent"),

@@ -10,6 +10,7 @@ import {
   confirmBookingLinkAppointment,
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
+  finishRecordCopyDownload,
   getBookingLinkCalendar,
   getBookingLinkRegistrationForm,
   getBranchDirections,
@@ -482,9 +483,9 @@ export function createPublicBookingRoute(deps: {
     const body = copyBody.safeParse(json ? await bodyOf(c) : await c.req.parseBody().catch(() => null))
     if (!body.success) return unavailable(c)
     const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
-    let copy: Awaited<ReturnType<typeof startRecordCopyDownload>>
+    let started: Awaited<ReturnType<typeof startRecordCopyDownload>>
     try {
-      copy = await withAttempt(c, body.data.token, () =>
+      started = await withAttempt(c, body.data.token, () =>
         inOrg(c, (tx, orgId) =>
           startRecordCopyDownload(tx, orgId, body.data.token, { docNumber: body.data.docNumber }, evidence, { storage }),
         ),
@@ -497,7 +498,21 @@ export function createPublicBookingRoute(deps: {
       throw error
     }
     // La misma copia de la clínica, con el mismo armado: el LÉEME último nombra lo que no se leyó.
-    return c.body(recordCopyZip(copy, stream), 200, {
+    // «Se bajó» se anota cuando el ZIP terminó de enviarse; si se corta, queda solo el inicio.
+    const { copy, downloadId } = started
+    const zip = recordCopyZip(copy, stream).getReader()
+    const response = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await zip.read()
+        if (!done) return controller.enqueue(value)
+        await inOrg(c, (tx, orgId) => finishRecordCopyDownload(tx, orgId, downloadId)).catch(() => {
+          console.error("public-booking: no se pudo anotar que la copia terminó de bajarse")
+        })
+        controller.close()
+      },
+      cancel: (reason) => zip.cancel(reason),
+    })
+    return c.body(response, 200, {
       "content-type": "application/zip",
       "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(copy.fileName)}`,
     })

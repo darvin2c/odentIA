@@ -51,7 +51,6 @@ import {
   dataRequestsKey,
   dayWords,
   denyDataRequestApi,
-  downloadPatientRecord,
   dueWords,
   eraseDataApi,
   type ErasurePreview,
@@ -66,6 +65,7 @@ import {
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
 import { appWords } from "../../lib/product-words"
 import { DataRequestsSkeleton } from "../skeletons/person-sections"
+import { DownloadCopyButton } from "./record-copy-block"
 
 /** Por qué no se pudo cargar algo (la lista, el resumen de lo que se borra). */
 function problemOf(error: unknown): string | null {
@@ -246,17 +246,21 @@ function statusVariant(status: DataRequest["status"]) {
 }
 
 /**
- * Lo que pasó con la copia enviada (mesa del 18 nov): «La bajó el 19 nov» o «Todavía no la
- * baja · vence el 25 nov». Recepción lo ve aquí, sin la bitácora de quien audita.
+ * Lo que pasó con la copia enviada (mesa del 18 nov): «Se bajó el 19 nov», «Todavía no se
+ * baja · vence el 25 nov» o por qué el enlace ya no sirve. Recepción lo ve aquí, sin la
+ * bitácora de quien audita. No dice «la bajó ella»: quien abre el PDF podría no ser ella.
  */
 export function copyStateWords(copy: NonNullable<DataRequest["copy"]>, now: Date, locale: string, timeZone?: string): string {
   const day = (at: string) => shortDayWords(at, locale, timeZone)
   const live = new Date(copy.until).getTime() > now.getTime()
-  if (copy.lastDownloadAt) {
-    const times = copy.downloads > 1 ? ` (${copy.downloads} veces)` : ""
-    return `La bajó el ${day(copy.lastDownloadAt)}${times}${live ? ` · su enlace vence el ${day(copy.until)}` : ""}`
-  }
-  return live ? `Todavía no la baja · vence el ${day(copy.until)}` : `No la bajó · su enlace venció el ${day(copy.until)}`
+  const done = copy.lastDownloadAt
+    ? `Se bajó el ${day(copy.lastDownloadAt)}${copy.downloads > 1 ? ` (${copy.downloads} veces)` : ""}`
+    : null
+  const before = done ? `${done} · ` : ""
+  if (live && copy.closed === "intentos") return `${before}El enlace ya no sirve: se escribió mal su documento varias veces`
+  if (live && copy.closed === "descargas") return `${before}El enlace ya no sirve: ya se bajó 5 veces`
+  if (done) return `${done}${live ? ` · su enlace vence el ${day(copy.until)}` : ""}`
+  return live ? `Todavía no se baja · vence el ${day(copy.until)}` : `No se bajó · su enlace venció el ${day(copy.until)}`
 }
 
 /** Un pedido de copia ya enviado con su enlace se puede enviar de nuevo, con la misma operación. */
@@ -777,22 +781,26 @@ function SendCopy({
   onSent: () => void
 }) {
   const queryClient = useQueryClient()
+  const locale = useOrgLocale() ?? "es"
   const sendOptions = useQuery({
     queryKey: ["data-request-send-options", request.id],
     queryFn: () => fetchRecordSendOptions(patientId, request.id),
   })
   const send = useMutation({
-    mutationFn: (connectionId: string) => sendRecordCopyApi(patientId, request.id, connectionId),
+    mutationFn: (connectionId: string) => sendRecordCopyApi(patientId, request.id, connectionId, again),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: dataRequestsKey(patientId) })
       const via = result.channel === "email" ? "correo" : "WhatsApp"
       toast.success(
-        again ? `Copia enviada de nuevo por ${via}: su enlace sirve otra semana` : `Copia enviada por ${via}: el pedido quedó respondido`,
+        again
+          ? `Copia enviada de nuevo por ${via}. El enlace anterior ya no sirve; el nuevo vale hasta el ${
+              result.request.copy ? shortDayWords(result.request.copy.until, locale, activeOrgTimeZone()) : "final de la semana"
+            }.`
+          : `Copia enviada por ${via}: el pedido quedó respondido`,
       )
       onSent()
     },
   })
-  const download = useMutation({ mutationFn: () => downloadPatientRecord(patientId) })
   const channels = sendOptions.data?.channels ?? []
   // Lo que cambia pasadas las 24 horas (sale con el mensaje aprobado para documentos); lo de siempre ya lo dice el texto de abajo.
   const note = channels.find((option) => option.usable && option.isProposed && option.viaTemplate)?.note ?? null
@@ -822,11 +830,7 @@ function SendCopy({
               : `Enviar por ${option.channel === "email" ? "correo" : "WhatsApp"}`}
           </Button>
         ))}
-        {canReadClinical ? (
-          <SubmitButton size="sm" variant="outline" pending={download.isPending} onClick={() => download.mutate()}>
-            {download.isPending ? "Preparando la copia…" : "Descargar copia"}
-          </SubmitButton>
-        ) : null}
+        {canReadClinical ? <DownloadCopyButton patientId={patientId} size="sm" /> : null}
       </div>
       {channels
         .filter((option) => !option.usable && option.reason)
@@ -845,11 +849,6 @@ function SendCopy({
       {send.error ? (
         <p role="alert" className="text-destructive">
           {submitErrorMessage(send.error)}
-        </p>
-      ) : null}
-      {download.error ? (
-        <p role="alert" className="text-destructive">
-          {submitErrorMessage(download.error)}
         </p>
       ) : null}
     </div>

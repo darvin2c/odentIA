@@ -28,6 +28,7 @@ import { configurePublicLinks } from "./public-links.js"
 import { issueRecordCopyLink } from "./record-copy-link.js"
 import {
   checkRecordCopyDocument,
+  finishRecordCopyDownload,
   getRecordCopyView,
   reserveRecordCopyAttempt,
   startRecordCopyDownload,
@@ -114,7 +115,7 @@ async function sentCopy() {
     verifyDataRequest(tx, "org_a", f.actor, f.patient.id, request.id, { how: "documento" }),
   )
   const { storage, stored } = sendStorage()
-  const send = () =>
+  const send = (again = false) =>
     run((tx) =>
       sendPatientRecordCopy(
         tx,
@@ -122,7 +123,7 @@ async function sentCopy() {
         f.actor,
         f.patient.id,
         request.id,
-        { connectionId: conn!.id },
+        { connectionId: conn!.id, ...(again ? { again: true } : {}) },
         { storage, secretsKey },
       ),
     )
@@ -220,7 +221,10 @@ it("el envío pone un token propio en el PDF y no en el mensaje, hasta el final 
     .select()
     .from(patientDataRequest)
     .where(eq(patientDataRequest.id, request.id))
-  const again = await send()
+  // Sin decir que es un reenvío (una pestaña vieja), no sale nada.
+  await expect(send()).rejects.toMatchObject({ code: "DATA_REQUEST_CLOSED", status: 409 })
+  expect(stored).toHaveLength(1)
+  const again = await send(true)
   expect(again.request.status).toBe("respondida")
   expect(again.request.resolution).toBe(sent.request.resolution)
   expect(stored).toHaveLength(2)
@@ -271,7 +275,7 @@ it("la página: abrir no registra; su documento abre la descarga, que queda regi
   ).resolves.toEqual({ ok: true })
   expect(await failed()).toBe(1)
 
-  const copy = await attempt((tx) =>
+  const { copy, downloadId } = await attempt((tx) =>
     startRecordCopyDownload(
       tx,
       "org_a",
@@ -282,6 +286,17 @@ it("la página: abrir no registra; su documento abre la descarga, que queda regi
     ),
   )
   expect(copy.entries.length).toBeGreaterThan(0)
+  // Empezó, pero mientras el ZIP no termine de enviarse no «se bajó».
+  const [started] = await run((tx) =>
+    listDataRequests(tx, "org_a", f.patient.id, { id: request.id }),
+  )
+  expect(started!.copy).toMatchObject({ downloads: 0, lastDownloadAt: null })
+  expect(
+    (await run((tx) => listClinicalAccess(tx, "org_a", f.patient.id))).filter(
+      (a) => a.resource === "descarga_enlace",
+    ),
+  ).toEqual([])
+  await run((tx) => finishRecordCopyDownload(tx, "org_a", downloadId))
   expect(await failed()).toBe(1)
   const downloads = await ownerDb
     .select()
@@ -297,11 +312,7 @@ it("la página: abrir no registra; su documento abre la descarga, que queda regi
   const access = await run((tx) => listClinicalAccess(tx, "org_a", f.patient.id))
   expect(access).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({
-        resource: "descarga_enlace",
-        userId: null,
-        personName: "Rosa Quispe",
-      }),
+      expect.objectContaining({ resource: "descarga_enlace", userId: null, userName: null }),
     ]),
   )
   await expect(
@@ -338,6 +349,9 @@ it("tope de descargas (también al comprobar); vencida, bloqueada o inválida re
   expect(
     (await run((tx) => getRecordCopyView(tx, "org_a", token, { storage }))).downloadsLeft,
   ).toBe(0)
+  // La fila del pedido dice por qué ya no sirve, antes de vencer.
+  const [used] = await run((tx) => listDataRequests(tx, "org_a", f.patient.id, { id: request.id }))
+  expect(used!.copy?.closed).toBe("descargas")
   await ownerDb
     .delete(patientRecordDownload)
     .where(eq(patientRecordDownload.dataRequestId, request.id))
@@ -403,4 +417,58 @@ it("sin documento en su ficha, la copia se recibe en la clínica", async () => {
         ),
       ),
   ).toEqual([])
+})
+
+it("el tope de descargas es de cada envío: «Enviar de nuevo» tras agotarlas manda un enlace que sirve", async () => {
+  const { f, run, request, storage, doc, send } = await sentCopy()
+  // Con el enlace del envío (el que se le pide a la misma operación), se agotan las descargas.
+  const first = await run((tx) => issueRecordCopyLink(tx, "org_a", { requestId: request.id }))
+  const token = new URL(first!.url).searchParams.get("token")!
+  for (let i = 0; i < RECORD_COPY_DOWNLOADS; i++) {
+    await run((tx) => reserveRecordCopyAttempt(tx, "org_a", token))
+    await run((tx) =>
+      startRecordCopyDownload(tx, "org_a", token, { docNumber: doc }, {}, { storage }),
+    )
+  }
+  await expect(run((tx) => reserveRecordCopyAttempt(tx, "org_a", token))).rejects.toMatchObject({
+    code: "RECORD_COPY_LIMIT",
+  })
+  // Diez documentos mal escritos también cierran el enlace, y la fila lo dice.
+  await ownerDb
+    .update(patientDataRequest)
+    .set({ copyFailedAttempts: RECORD_COPY_ATTEMPTS })
+    .where(eq(patientDataRequest.id, request.id))
+  const [closed] = await run((tx) =>
+    listDataRequests(tx, "org_a", f.patient.id, { id: request.id }),
+  )
+  expect(closed!.copy?.closed).toBe("intentos")
+  // «Enviar de nuevo»: un envío nuevo cuenta sus propias descargas e intentos desde cero.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await send(true)
+  const fresh = await run((tx) => issueRecordCopyLink(tx, "org_a", { requestId: request.id }))
+  const next = new URL(fresh!.url).searchParams.get("token")!
+  const view = await run((tx) => getRecordCopyView(tx, "org_a", next, { storage }))
+  expect(view.downloadsLeft).toBe(RECORD_COPY_DOWNLOADS)
+  const [open] = await run((tx) => listDataRequests(tx, "org_a", f.patient.id, { id: request.id }))
+  expect(open!.copy?.closed).toBeNull()
+  await run((tx) => reserveRecordCopyAttempt(tx, "org_a", next))
+  await expect(
+    run((tx) => startRecordCopyDownload(tx, "org_a", next, { docNumber: doc }, {}, { storage })),
+  ).resolves.toBeTruthy()
+})
+
+it("el documento mal escrito dice cuántos intentos quedan", async () => {
+  const { run, token, attempt } = await sentCopy()
+  await expect(
+    attempt((tx) => checkRecordCopyDocument(tx, "org_a", token, "11111111")),
+  ).rejects.toMatchObject({
+    message: expect.stringContaining(`Te quedan ${RECORD_COPY_ATTEMPTS - 1} intentos.`),
+  })
+  for (let i = 0; i < RECORD_COPY_ATTEMPTS - 2; i++)
+    await run((tx) => reserveRecordCopyAttempt(tx, "org_a", token))
+  await expect(
+    attempt((tx) => checkRecordCopyDocument(tx, "org_a", token, "11111111")),
+  ).rejects.toMatchObject({
+    message: expect.stringContaining("Ya no quedan intentos"),
+  })
 })

@@ -6,9 +6,8 @@
  */
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { clinicalAccessLog, patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
-import { contact } from "@odentia/db/schema/crm"
-import { and, desc, eq, sql } from "drizzle-orm"
+import { clinicalAccessLog, patientRecordDownload } from "@odentia/db/schema/clinical"
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 
@@ -72,11 +71,9 @@ export async function recordClinicalAccess(
 }
 
 export interface ClinicalAccessItem {
-  /** Quien la consultó del equipo; null si es la persona que bajó su copia desde su enlace. */
+  /** Quien la consultó del equipo; null si se bajó la copia desde el enlace de su PDF (`descarga_enlace`). */
   userId: string | null
   userName: string | null
-  /** Quien pidió la copia y la bajó desde su enlace (`descarga_enlace`): no es del equipo. */
-  personName?: string | null
   /** Quien consultó no es del equipo de la clínica: soporte de odentIA con el permiso de la clínica. */
   outsideClinic: boolean
   resource: string
@@ -116,37 +113,35 @@ export async function listClinicalAccess(
     // misma hora, lo último consultado primero.
     .orderBy(desc(clinicalAccessLog.bucket), desc(clinicalAccessLog.lastAt))
     .limit(limit)
-  // Cada vez que quien pidió la copia la bajó desde su enlace, con su nombre (mesa del 18 nov).
+  // Cada vez que se terminó de bajar la copia con el enlace de su PDF (mesa del 18 nov). No se
+  // nombra a nadie: quien abre el PDF podría no ser ella.
   const person = (
     await tx
-      .select({ at: patientRecordDownload.createdAt, personName: contact.displayName })
+      .select({ at: patientRecordDownload.completedAt })
       .from(patientRecordDownload)
-      .innerJoin(
-        patientDataRequest,
+      .where(
         and(
-          eq(patientDataRequest.organizationId, patientRecordDownload.organizationId),
-          eq(patientDataRequest.id, patientRecordDownload.dataRequestId),
+          eq(patientRecordDownload.organizationId, orgId),
+          eq(patientRecordDownload.patientId, patientId),
+          isNotNull(patientRecordDownload.completedAt),
         ),
       )
-      .leftJoin(
-        contact,
-        and(eq(contact.organizationId, patientDataRequest.organizationId), eq(contact.id, patientDataRequest.requesterContactId)),
-      )
-      .where(and(eq(patientRecordDownload.organizationId, orgId), eq(patientRecordDownload.patientId, patientId)))
-      .orderBy(desc(patientRecordDownload.createdAt))
+      .orderBy(desc(patientRecordDownload.completedAt))
       .limit(limit)
-  ).map((row) => ({
-    // La misma franja que la bitácora del equipo, para ordenarlas juntas.
-    bucket: new Date(Math.floor(row.at.getTime() / 3_600_000) * 3_600_000),
-    userId: null,
-    userName: null,
-    personName: row.personName,
-    outsideClinic: false,
-    resource: "descarga_enlace",
-    firstAt: row.at,
-    lastAt: row.at,
-    hits: 1,
-  }))
+  ).map((row) => {
+    const at = row.at as Date
+    return {
+      // La misma franja que la bitácora del equipo, para ordenarlas juntas.
+      bucket: new Date(Math.floor(at.getTime() / 3_600_000) * 3_600_000),
+      userId: null,
+      userName: null,
+      outsideClinic: false,
+      resource: "descarga_enlace",
+      firstAt: at,
+      lastAt: at,
+      hits: 1,
+    }
+  })
   // Como la bitácora: la franja más reciente primero y, dentro de la misma hora, lo último primero.
   return [...team, ...person]
     .sort((a, b) => b.bucket.getTime() - a.bucket.getTime() || b.lastAt.getTime() - a.lastAt.getTime())

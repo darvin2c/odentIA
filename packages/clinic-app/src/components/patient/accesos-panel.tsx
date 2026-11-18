@@ -12,10 +12,9 @@ import { AccessLogSkeleton } from "../skeletons/person-sections"
 
 /** Sin identificador propio: la franja es la clave y la tabla usa el índice de fila. */
 interface AccessItem {
-  /** Null si es quien pidió la copia y la bajó desde su enlace (`personName`). */
+  /** Null si se bajó la copia desde el enlace de su PDF: no se sabe quién lo abrió. */
   userId: string | null
   userName: string | null
-  personName?: string | null
   /** Soporte de odentIA, con el permiso de la clínica: no es del equipo. */
   outsideClinic?: boolean
   resource: string
@@ -42,8 +41,8 @@ const RESOURCE_LABELS: Record<string, string> = {
   consentimientos: "Consentimientos",
   ordenes: "Órdenes",
   descarga: "Descargó la copia de su historia",
-  // Quien la pidió la bajó desde el enlace que le llegó en el PDF (mesa del 18 nov).
-  descarga_enlace: "La bajó desde su enlace",
+  // Se bajó con el enlace del PDF que se le envió: no se nombra a nadie (mesa del 18 nov).
+  descarga_enlace: "Se bajó desde el enlace de su copia",
   apertura: "Abrió la historia bloqueada",
   descansos: "Descansos médicos",
 }
@@ -112,8 +111,8 @@ function AccessTable({ rows, isFetching }: { rows: AccessItem[]; isFetching: boo
         cell: ({ row }) =>
           row.original.userId === null ? (
             <span className="flex flex-col">
-              <span>{row.original.personName ?? "Quien la pidió"}</span>
-              <span className="text-xs text-muted-foreground">desde el enlace de su copia</span>
+              <span>Enlace de su copia</span>
+              <span className="text-xs text-muted-foreground">fuera de la clínica, con su documento</span>
             </span>
           ) : row.original.outsideClinic ? (
             <span className="flex flex-col">

@@ -8,6 +8,7 @@ const DOC = "45678903"
 const calls = {
   view: 0,
   attempts: 0,
+  finished: [] as string[],
   exhausted: false,
   downloads: [] as Array<{ docNumber: string; ip: string | null | undefined }>,
 }
@@ -48,16 +49,22 @@ vi.mock("@odentia/services", async (original) => ({
       })
     calls.downloads.push({ docNumber: input.docNumber, ip: evidence.ip })
     return {
-      fileName: "Historia de Rosa Quispe.zip",
-      generatedAt: new Date("2026-11-18T15:00:00Z"),
-      entries: [
-        { name: "Historia de Rosa Quispe.pdf", bytes: new TextEncoder().encode("%PDF-1.7") },
-        { name: "imagenes/Panorámica.jpg", storageKey: "org/panoramica.jpg" },
-        { name: "LÉEME.txt", bytes: new TextEncoder().encode("Qué trae") },
-      ],
-      summary: {},
-      readme: () => new TextEncoder().encode("Qué trae, y lo que no se pudo incluir"),
+      downloadId: "descarga-1",
+      copy: {
+        fileName: "Historia de Rosa Quispe.zip",
+        generatedAt: new Date("2026-11-18T15:00:00Z"),
+        entries: [
+          { name: "Historia de Rosa Quispe.pdf", bytes: new TextEncoder().encode("%PDF-1.7") },
+          { name: "imagenes/Panorámica.jpg", storageKey: "org/panoramica.jpg" },
+          { name: "LÉEME.txt", bytes: new TextEncoder().encode("Qué trae") },
+        ],
+        summary: {},
+        readme: () => new TextEncoder().encode("Qué trae, y lo que no se pudo incluir"),
+      },
     }
+  },
+  finishRecordCopyDownload: async (_tx: Db, _orgId: string, downloadId: string) => {
+    calls.finished.push(downloadId)
   },
 }))
 
@@ -155,6 +162,8 @@ describe("«Copia de tu historia» por su enlace", () => {
     expect(zip.headers.get("content-disposition")).toContain("Historia%20de%20Rosa%20Quispe.zip")
     const bytes = new Uint8Array(await zip.arrayBuffer())
     expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
+    // «Se bajó» se anota cuando el ZIP terminó de enviarse.
+    expect(calls.finished).toEqual(["descarga-1"])
     expect(calls.downloads).toEqual([{ docNumber: DOC, ip: "203.0.113.42" }])
     // Con otro documento no baja nada y el intento queda contado.
     calls.attempts = 0

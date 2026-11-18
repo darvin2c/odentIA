@@ -127,7 +127,7 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
       {
         id: "pacientes-pedidos-sobre-sus-datos",
         q: "Un paciente pide una copia de su historia o que corrijamos sus datos, ¿cómo lo registro?",
-        a: "En su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», «Registrar un pedido»: qué pide (una copia, corregir un dato, no recibir mensajes o borrar sus datos), quién lo pide, por dónde llegó y cuándo. Al abrirlo, primero «Comprobé que es ella»; después envías la copia por WhatsApp o por correo, o haces lo que pidió, y «Marcar respondida»; «Denegar…» pide el porqué. Cada pedido se responde en 10 días. Lo atienden recepción y Administración. La copia le llega con el PDF de su historia y, en su primera página, el enlace para bajar la copia completa; recepción la envía sin abrirla. «Descargar copia» lo ven quienes atienden y Administración.",
+        a: "En su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», «Registrar un pedido»: qué pide (una copia, corregir un dato, no recibir mensajes o borrar sus datos), quién lo pide, por dónde llegó y cuándo. Al abrirlo, primero «Comprobé que es ella»; después «Enviar la copia» por WhatsApp o por correo, y el pedido queda respondido solo; en los demás pedidos haces lo que pidió y «Marcar respondida»; «Denegar…» pide el porqué. Cada pedido se responde en 10 días. Lo atienden recepción y Administración. La copia le llega con el PDF de su historia y, en su primera página, el enlace para bajar la copia completa; recepción la envía sin abrirla. «Descargar copia» lo ven quienes atienden y Administración.",
         forms: [
           "el paciente pide copia de su historia clinica",
           "donde registro que pidio corregir sus datos",
@@ -135,6 +135,7 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
           "que le doy al paciente si me pide su historia",
           "el paciente quiere su historia clinica",
           "como le entrego la copia de su historia",
+          "enviar la historia completa al paciente",
         ],
         area: "ficha",
         needs: "patients.write",
@@ -142,7 +143,7 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
       {
         id: "pacientes-copia-historia-enviar",
         q: "¿Cómo le mando a una paciente toda su historia con sus radiografías?",
-        a: "Con su pedido de copia, sin que venga. En su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», registra lo que pidió (o ábrelo si ya está) y «Atender»: primero «Comprobé que es ella» y después «Enviar por WhatsApp» o «Enviar por correo». Le llega el PDF de su historia y, en su primera página, el enlace para bajar la copia completa: sus radiografías, fotos y tomografías, cada papel que se le emitió y el archivo para el sistema de otra clínica. Para bajarla escribe su número de documento; si su ficha no tiene documento, la copia se le entrega en la clínica. El enlace sirve 7 días, y la fila del pedido dice «La bajó el…» o «Todavía no la baja · vence el…», con «Enviar de nuevo». Si no te escribió en las últimas 24 horas, por WhatsApp sale con el mensaje aprobado para documentos. Recepción la envía sin abrirla, y en la conversación el PDF solo lo abre quien atiende.",
+        a: "Con su pedido de copia, sin que venga, aunque tú no puedas descargarla: en su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», registra lo que pidió (o ábrelo si ya está), «Copia de su historia» › «Atender»: primero «Comprobé que es ella» y después «Enviar por WhatsApp» o «Enviar por correo». Le llega el PDF de su historia y, en su primera página, el enlace para bajar la copia completa: sus radiografías, fotos y tomografías, cada papel que se le emitió y el archivo para el sistema de otra clínica. Para bajarla escribe su número de documento; si su ficha no tiene documento, la copia se le entrega en la clínica. El enlace sirve hasta el final del séptimo día, y la fila del pedido dice «Se bajó el…», «Todavía no se baja · vence el…» o por qué el enlace ya no sirve, con «Enviar de nuevo», que manda un enlace nuevo y deja sin efecto el anterior. Si no te escribió en las últimas 24 horas, por WhatsApp sale con el mensaje aprobado para documentos. Recepción la envía sin abrirla, y en la conversación el PDF solo lo abre quien atiende.",
         forms: [
           "como le mando a una paciente toda su historia con sus radiografias",
           "como le envio la historia completa al paciente que se muda",

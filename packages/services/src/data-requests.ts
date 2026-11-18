@@ -18,7 +18,7 @@ import { user } from "@odentia/db/schema/auth"
 import { patient, patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm"
 import { setMessageChoice } from "./automation.js"
 import { SWITCHABLE_PURPOSES } from "./automation-messages.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -55,12 +55,56 @@ export const RECORD_COPY_DAYS = 7
 export const RECORD_COPY_DOWNLOADS = 5
 export const RECORD_COPY_ATTEMPTS = 10
 
-/** Lo que dice la fila de un pedido de copia enviado: hasta cuándo sirve su enlace y si ya la bajó. */
+/** Lo que dice la fila de un pedido de copia enviado: hasta cuándo sirve su enlace, si se bajó y si ya no sirve. */
 export interface DataRequestCopy {
   until: string
+  /** Las descargas que terminaron, de todos sus envíos. */
   downloads: number
+  /** Cuándo terminó la última. */
   lastDownloadAt: string | null
+  /**
+   * El enlace del último envío ya no sirve antes de vencer: `intentos`, se escribió mal su
+   * documento `RECORD_COPY_ATTEMPTS` veces; `descargas`, se bajó (o empezó a bajarse)
+   * `RECORD_COPY_DOWNLOADS` veces. Se arregla con «Enviar de nuevo».
+   */
+  closed: "intentos" | "descargas" | null
 }
+
+/**
+ * Cuándo salió el último envío de la copia de cada pedido (`patient_record.sent`): el tope de
+ * descargas cuenta las de ese envío, no las de los anteriores.
+ */
+export async function recordCopySentAt(tx: Db, orgId: string, requestIds: string[]): Promise<Map<string, Date>> {
+  if (!requestIds.length) return new Map()
+  const rows = await tx
+    .select({ requestId: sql<string>`${auditEvent.metadata}->>'requestId'`, at: sql<string>`max(${auditEvent.createdAt})` })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, "patient_record.sent"),
+        inArray(sql<string>`${auditEvent.metadata}->>'requestId'`, requestIds),
+      ),
+    )
+    .groupBy(sql`${auditEvent.metadata}->>'requestId'`)
+  return new Map(rows.map((row) => [row.requestId, new Date(row.at)]))
+}
+
+/** Las descargas que empezaron con el enlace del último envío (todas, si no se sabe cuándo salió). */
+export async function recordCopyStartsSince(tx: Db, orgId: string, requestId: string, since: Date | null): Promise<number> {
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(patientRecordDownload)
+    .where(
+      and(
+        eq(patientRecordDownload.organizationId, orgId),
+        eq(patientRecordDownload.dataRequestId, requestId),
+        since ? gte(patientRecordDownload.createdAt, since) : undefined,
+      ),
+    )
+  return row?.count ?? 0
+}
+
 
 /** Lo que dice la respuesta de «No recibir mensajes», que se cumple al registrarlo. */
 export const MESSAGES_OFF_RESOLUTION =
@@ -327,14 +371,15 @@ export async function listDataRequests(
       : [],
   )
   const sent = rows.filter((r) => r.copyUntil !== null).map((r) => r.id)
+  const sentAt = await recordCopySentAt(tx, orgId, sent)
   const downloads = new Map(
     sent.length
       ? (
           await tx
             .select({
               requestId: patientRecordDownload.dataRequestId,
-              count: sql<number>`count(*)::int`,
-              last: sql<string>`max(${patientRecordDownload.createdAt})`,
+              done: sql<number>`(count(*) filter (where ${patientRecordDownload.completedAt} is not null))::int`,
+              last: sql<string | null>`max(${patientRecordDownload.completedAt})`,
             })
             .from(patientRecordDownload)
             .where(and(eq(patientRecordDownload.organizationId, orgId), inArray(patientRecordDownload.dataRequestId, sent)))
@@ -342,6 +387,8 @@ export async function listDataRequests(
         ).map((d) => [d.requestId, d])
       : [],
   )
+  const starts = new Map<string, number>()
+  for (const id of sent) starts.set(id, await recordCopyStartsSince(tx, orgId, id, sentAt.get(id) ?? null))
   const items = rows.map(
     (row): DataRequestItem => ({
       id: row.id,
@@ -362,7 +409,12 @@ export async function listDataRequests(
       resolvedAt: row.resolvedAt?.toISOString() ?? null,
       resolvedByName: row.resolvedBy ? (users.get(row.resolvedBy) ?? null) : null,
       createdAt: row.createdAt.toISOString(),
-      copy: row.copyUntil ? copyOf(row.copyUntil, downloads.get(row.id)) : null,
+      copy: row.copyUntil
+        ? copyOf(row.copyUntil, downloads.get(row.id), {
+            failed: row.copyFailedAttempts,
+            starts: starts.get(row.id) ?? 0,
+          })
+        : null,
     }),
   )
   // Pendientes primero (el plazo más cercano arriba), después los resueltos del más nuevo.
@@ -372,12 +424,18 @@ export async function listDataRequests(
   ]
 }
 
-function copyOf(until: Date, downloaded: { count: number; last: Date | string } | undefined): DataRequestCopy {
+function copyOf(
+  until: Date,
+  downloaded: { done: number; last: Date | string | null } | undefined,
+  link: { failed: number; starts: number },
+): DataRequestCopy {
   return {
     until: until.toISOString(),
-    downloads: downloaded?.count ?? 0,
+    downloads: downloaded?.done ?? 0,
     // `max()` llega como texto por el controlador: se pasa por Date.
-    lastDownloadAt: downloaded ? new Date(downloaded.last).toISOString() : null,
+    lastDownloadAt: downloaded?.last ? new Date(downloaded.last).toISOString() : null,
+    closed:
+      link.failed >= RECORD_COPY_ATTEMPTS ? "intentos" : link.starts >= RECORD_COPY_DOWNLOADS ? "descargas" : null,
   }
 }
 

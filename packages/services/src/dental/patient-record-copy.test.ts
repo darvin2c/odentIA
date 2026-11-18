@@ -41,6 +41,8 @@ import { createFollowUp } from "../follow-ups.js"
 import { addPlanItem } from "../plan.js"
 import {
   buildPatientRecordCopy,
+  loadPatientRecord,
+  planLines,
   type PatientRecordCopy,
   patientRecordSummary,
   RECORD_README,
@@ -186,7 +188,8 @@ it("C1 · Rosa: la receta anulada va en su PDF con su sello y su motivo, lo reti
   expect(text).toMatch(
     /Receta N\.º \d+ · [^"]+ · anulada el [^"]+: Alergia a penicilina registrada/,
   )
-  expect(text).toContain("Antes de atenderla")
+  // Sin sexo en su ficha, el título no supone uno.
+  expect(text).toContain("Antes de atender a la persona")
   expect(text).toContain("Alergia severa: Penicilinas (grupo) · Urticaria")
   // «Lo que sigue»: la orden sin resultado y el control por venir.
   expect(text).toContain("Lo que sigue")
@@ -195,8 +198,12 @@ it("C1 · Rosa: la receta anulada va en su PDF con su sello y su motivo, lo reti
   )
   expect(text).toMatch(/Control de evolución endodóntica · toca el /)
   // El enlace va en la primera página, con hasta cuándo.
-  expect(text).toContain("https://clinica.test/pendientes?abre=copia#t")
+  expect(text).toContain("Bajar mi copia completa")
   expect(text).toMatch(/Se baja con este enlace hasta el /)
+  // Un vínculo de verdad: la anotación de enlace del PDF con su dirección, además del QR.
+  const readingPdf = new TextDecoder("latin1").decode(copy.entries[0]?.bytes)
+  expect(readingPdf).toMatch(/\/Subtype \/Link/)
+  expect(readingPdf).toContain("(https://clinica.test/pendientes?abre=copia#t)")
 
   // Lo retirado: su tipo, su fecha y su motivo; ni su nombre ni su archivo, en ningún lado.
   expect(text).toMatch(
@@ -353,9 +360,30 @@ it("C3 · Lucía: el plan dice lo que decidió, y la 46 sus dos caminos que no s
     }),
   )
 
+  // Otra corona de la 46, de otro presupuesto y con su propia decisión, y dos limpiezas: van todas.
+  const corona2 = await indicate((await service("Corona", 90000)).id, 46)
+  const limpieza = await service("Limpieza", 12000, "general")
+  await indicate(limpieza.id, null)
+  await indicate(limpieza.id, null)
+
   const { copy, text } = await copyWithText(f)
   expect(text).toMatch(/Resina · pieza 16 · aceptado/)
-  // Los dos caminos juntos, una sola vez, como opciones que no se suman.
+  // El plan del PDF tiene cada tratamiento una sola vez, como la ficha y el FHIR (QA antes de entregar).
+  const record = await f.run((tx) => loadPatientRecord(tx, ORG, f.patient.id))
+  const groups = planLines(record, record.clinic)
+  const lines = groups.flatMap((group) => group.lines)
+  expect(groups[0]?.title).toBe("Por decidir entre opciones, fuera de las fases hasta que elija")
+  expect(lines.filter((line) => line.startsWith("Caminos que no se suman"))).toHaveLength(1)
+  expect(lines.filter((line) => line.startsWith("Corona · pieza 46 · por responder"))).toHaveLength(
+    1,
+  )
+  expect(lines.filter((line) => line.startsWith("Limpieza ·"))).toHaveLength(2)
+  // Nada se pierde: cada tratamiento del plan está en una línea o en un camino.
+  const shown = lines.join(" | ")
+  for (const item of record.planItems)
+    expect(shown.split(item.title).length - 1, item.title).toBeGreaterThan(0)
+  expect(record.planItems.map((item) => item.id)).toEqual(expect.arrayContaining([corona2.id]))
+  // Los dos caminos juntos, como opciones que no se suman.
   const paths = text.match(/Caminos que no se suman, falta que elija uno: [^"]+/g) ?? []
   expect(paths.length).toBeGreaterThanOrEqual(1)
   expect(paths[0]).toMatch(/A: Endodoncia · pieza 46 · [^"]*lo piensa[^"]* \+ Corona · pieza 46/)

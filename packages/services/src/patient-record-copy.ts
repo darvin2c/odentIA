@@ -15,11 +15,11 @@
 import { createHash } from "node:crypto"
 import {
   DIAGNOSIS_SYSTEM_INFO,
-  isDiagnosisSystem,
   isImageDocumentCategory,
   signerWords,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
 import { issuedPaper } from "@odentia/db/schema/clinical-forms"
 import { and, eq, inArray } from "drizzle-orm"
 import { dayTimeWords, dayWords } from "./document-kit.js"
@@ -31,8 +31,10 @@ import {
   patientRecordFhirBundle,
   patientRecordFileName,
   patientRecordFiles,
+  beforeCareTitle,
   type RecordPaperEntry,
   renderPatientRecordPdf,
+  UNISSUED_PAPER_KINDS,
 } from "./patient-record.js"
 import type { ProductHooks } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -49,6 +51,16 @@ export interface PatientRecordSummary {
   otherFiles: number
   /** Lo que pesa, más o menos (los archivos, las tomografías y los papeles); null si no se sabe. */
   approxBytes: number | null
+  /** Las hojas de atención emitidas: son papeles de la clínica, no algo que se le entregó. */
+  attentionSheets: number
+  /** Trae el odontograma de hoy, sin firmar: se dibuja al armarla, no es un papel emitido. */
+  odontogramToday: boolean
+  /** Los papeles propios del producto que se ven en su portal (vistIA: la receta de lentes). */
+  productPapers: number
+  /** Las listas de diagnóstico que de verdad usa esta copia («CIE-10», «CIE-11»): las que se nombran. */
+  diagnosisSystems: string[]
+  /** Las piezas van con su número FDI (ISO 3950): solo si la copia las trae. */
+  toothNumbers: boolean
 }
 
 export interface PatientRecordCopy {
@@ -366,36 +378,83 @@ function summaryOf(
     tomographies,
     otherFiles: files.length - images - tomographies,
     approxBytes: known.some((size) => size !== null) || extraBytes ? sum + extraBytes : null,
+    attentionSheets: count("hoja"),
+    odontogramToday: papers.some((paper) => UNISSUED_PAPER_KINDS.includes(paper.kind)),
+    productPapers: count("producto"),
+    diagnosisSystems: usedDiagnosisSystems(record),
+    toothNumbers: usesToothNumbers(record),
   }
+}
+
+/** Las listas de diagnóstico que usa la copia, con su nombre corto, en el orden de la lista común. */
+function usedDiagnosisSystems(record: PatientRecord): string[] {
+  const systems = new Set<string>([
+    ...record.encounters.flatMap((entry) => entry.diagnoses.map((d) => d.diagnosisSystem)),
+    ...record.conditions.map((c) => c.diagnosisSystem ?? ""),
+    ...record.familyHistory.map((row) => row.diagnosisSystem ?? ""),
+    ...record.orders.map((o) => o.diagnosisSystem ?? ""),
+    ...record.leaves.filter((l) => l.showDiagnosis).map((l) => l.diagnosisSystem ?? ""),
+    ...record.planItems.map((item) => item.diagnosisSystem ?? ""),
+  ])
+  return [
+    ...new Set(
+      (Object.keys(DIAGNOSIS_SYSTEM_INFO) as Array<keyof typeof DIAGNOSIS_SYSTEM_INFO>)
+        .filter((system) => systems.has(system))
+        .map((system) => DIAGNOSIS_SYSTEM_INFO[system].short),
+    ),
+  ]
+}
+
+/** Si alguna pieza va con su código FDI (`ex-tooth`): en lo de la atención, el plan o lo del producto. */
+function usesToothNumbers(record: PatientRecord): boolean {
+  return JSON.stringify([
+    record.productSections.map((section) => section.fhir ?? []),
+    record.planItems.map((item) => item.bodySite),
+    record.encounters.map((entry) => [
+      entry.diagnoses.map((d) => d.bodySite),
+      entry.procedures.map((p) => p.bodySite),
+    ]),
+  ]).includes("http://terminology.hl7.org/CodeSystem/ex-tooth")
 }
 
 /** El LÉEME: qué trae cada carpeta, los estándares que de verdad cumple y lo que no se pudo incluir. */
 function readmeText(
   record: PatientRecord,
-  input: { base: string; fhir: string; papers: number; files: number; missing: readonly string[] },
+  input: {
+    base: string
+    summary: PatientRecordSummary
+    papers: number
+    files: number
+    missing: readonly string[]
+  },
 ): string {
   const zone = record.clinic
-  const lists = [
-    ...new Set(
-      record.encounters
-        .flatMap((entry) => entry.diagnoses.map((d) => d.diagnosisSystem))
-        .concat(record.conditions.map((c) => c.diagnosisSystem ?? ""))
-        .filter((system) => isDiagnosisSystem(system))
-        .map((system) => DIAGNOSIS_SYSTEM_INFO[system as keyof typeof DIAGNOSIS_SYSTEM_INFO].short),
-    ),
-  ]
-  const teeth = input.fhir.includes("http://terminology.hl7.org/CodeSystem/ex-tooth")
+  // Lo mismo que cuenta la pantalla (`summary`): las listas usadas y las piezas, si las trae.
+  const lists = input.summary.diagnosisSystems
+  const teeth = input.summary.toothNumbers
+  const emitted =
+    input.papers - (input.summary.odontogramToday ? 1 : 0) - input.summary.attentionSheets
   const dicom = record.imagingStudies.length > 0
   const lines = [
     `Copia de la historia de ${record.person.displayName}`,
     `${record.clinic.tradeName} · generada el ${dayTimeWords(record.generatedAt, zone)}`,
     "",
     "QUÉ TRAE",
-    `- «${input.base}.pdf»: la historia para leer, de principio a fin. La primera página dice lo que no se puede pasar por alto antes de atenderla y lo que sigue.`,
+    `- «${input.base}.pdf»: la historia para leer, de principio a fin. La primera página dice lo que no se puede pasar por alto («${beforeCareTitle(record.person.sex)}») y lo que sigue.`,
     `- «${input.base}.fhir.json»: la misma historia para cargarla en el sistema de otra clínica.`,
-    ...(input.papers
+    ...(emitted > 0
       ? [
-          `- «${PAPERS}»: cada papel emitido en su PDF, el mismo que se entregó (${input.papers}). Lo anulado o revocado lleva su marca y su motivo en la hoja.`,
+          `- «${PAPERS}»: cada papel emitido en su PDF, el mismo que se entregó (${emitted}). Lo anulado o revocado lleva su marca y su motivo en la hoja.`,
+        ]
+      : []),
+    ...(input.summary.attentionSheets
+      ? [
+          `- En «${PAPERS}» va también la hoja de atención que emitió la clínica (${input.summary.attentionSheets}).`,
+        ]
+      : []),
+    ...(input.summary.odontogramToday
+      ? [
+          `- En «${PAPERS}» va también el odontograma de hoy, sin firmar: lo vigente al armar esta copia; no se emitió ni se entregó.`,
         ]
       : []),
     ...(input.files
@@ -440,7 +499,11 @@ async function assemble(
   orgId: string,
   patientId: string,
   deps: RecordCopyDeps,
-  options: { copyLink?: { url: string; until: Date }; render: boolean },
+  options: {
+    copyLink?: { url: string; until: Date }
+    downloadedBy?: { userId: string }
+    render: boolean
+  },
 ): Promise<{ copy: PatientRecordCopy | null; summary: PatientRecordSummary }> {
   const record = await loadPatientRecord(tx, orgId, patientId)
   const hooks = await productHooks(tx, orgId)
@@ -488,11 +551,18 @@ async function assemble(
     papers,
     missing,
   }
-  const pdf = await renderPatientRecordPdf(
-    copyRecord,
-    copyRecord.clinic,
-    options.copyLink ? { copyLink: options.copyLink } : {},
-  )
+  const downloadedBy = options.downloadedBy
+    ? ((
+        await tx
+          .select({ name: user.name })
+          .from(user)
+          .where(eq(user.id, options.downloadedBy.userId))
+      )[0]?.name ?? "el equipo de la clínica")
+    : null
+  const pdf = await renderPatientRecordPdf(copyRecord, copyRecord.clinic, {
+    ...(options.copyLink ? { copyLink: options.copyLink } : {}),
+    downloadedBy,
+  })
   const fhir = JSON.stringify(patientRecordFhirBundle(copyRecord), null, 2)
   const fhirBytes = new TextEncoder().encode(fhir)
   const fileName = patientRecordFileName(copyRecord, "zip")
@@ -508,7 +578,7 @@ async function assemble(
     new TextEncoder().encode(
       readmeText(copyRecord, {
         base,
-        fhir,
+        summary,
         papers: papers.length,
         files: files.length,
         missing: [
@@ -551,7 +621,11 @@ export async function buildPatientRecordCopy(
   orgId: string,
   patientId: string,
   deps: RecordCopyDeps,
-  options: { copyLink?: { url: string; until: Date } } = {},
+  /**
+   * `copyLink`: la primera página lleva el enlace para bajarla. `downloadedBy`: la descarga alguien
+   * del equipo; el pie lo dice («Copia generada por …»), no «a pedido de la persona».
+   */
+  options: { copyLink?: { url: string; until: Date }; downloadedBy?: { userId: string } } = {},
 ): Promise<PatientRecordCopy> {
   const { copy } = await assemble(tx, orgId, patientId, deps, { ...options, render: true })
   return copy as PatientRecordCopy

@@ -1,5 +1,12 @@
 import type { HelpMore } from "../help-guide.js"
 
+/**
+ * El estándar de la copia de la historia que es solo de odentIA (la numeración de las piezas): las guías de latidIA
+ * y vistIA lo quitan de su respuesta.
+ */
+export const COPY_TEETH_SENTENCE =
+  " La numeración de las piezas sigue FDI (ISO 3950), en el odontograma y en cada hallazgo."
+
 export const CLINICA: readonly HelpMore[] = [
   {
     topic: "pacientes",
@@ -642,13 +649,13 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-copia-historia-derivar",
         q: "¿Puedo descargar la historia para derivar?",
-        a: "Sí, si atiendes o administras. En su página, «…» › «Copia de su historia» (es el bloque de arriba de Datos › Privacidad y pedidos) y «Descargar copia»: baja un ZIP con su historia en PDF para leer, cada papel emitido en su PDF (odontogramas firmados, recetas, órdenes, consentimientos), sus fotos, radiografías y tomografías, y el archivo para el sistema de otra clínica. El bloque dice qué trae con las cifras de esa persona. No trae presupuestos ni cobros, porque no son parte de la historia clínica. Cada descarga queda en «Consultas a la historia clínica». Si es la persona quien la pide para llevársela, mejor regístralo como su pedido: así le llega con su enlace.",
+        a: "Sí, si atiendes o administras. En su página, «…» › «Copia de su historia» (es el bloque de arriba de Datos › Privacidad y pedidos) y «Descargar copia»: baja un ZIP con su historia en PDF para leer, cada papel emitido en su PDF (recetas, órdenes, consentimientos y lo que se firmó), sus fotos, radiografías y tomografías, y el archivo para el sistema de otra clínica. El bloque dice qué trae con las cifras de esa persona. No trae presupuestos ni cobros, porque no son parte de la historia clínica. Cada descarga queda en «Consultas a la historia clínica». Si es la persona quien la pide para llevársela, mejor regístralo como su pedido: así le llega con su enlace.",
         forms: [
           "puedo descargar la historia para derivar",
           "como descargo la historia del paciente para mandarla a otro especialista",
           "quiero derivar al paciente con toda su historia",
           "donde esta descargar copia de la historia",
-          "el odontologo puede bajar la historia completa",
+          "quien atiende puede bajar la historia completa",
         ],
         area: "clinica",
         needs: "clinical.read",
@@ -656,7 +663,8 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-copia-historia-estandares",
         q: "¿Qué estándares sigue la copia?",
-        a: "Los que cumple de verdad, y el bloque «Copia de su historia» de cada persona los dice a la vista: HL7 FHIR R4, el formato internacional para pasar una historia clínica de un sistema a otro (el archivo «.fhir.json» del ZIP); CIE-10 y CIE-11, el código de cada diagnóstico; FDI (ISO 3950), la numeración de las piezas en el odontograma y en cada hallazgo; y DICOM, sus tomografías tal como salieron del equipo, solo si tiene alguna. Las fotos y radiografías van tal como se subieron. El ZIP trae un «LÉEME» que explica cómo se carga en otro sistema y qué no se pudo incluir.",
+        a: `Los que cumple de verdad, y el bloque «Copia de su historia» de cada persona los dice a la vista: HL7 FHIR R4, el formato internacional para pasar una historia clínica de un sistema a otro (el archivo «.fhir.json» del ZIP: si el sistema de la otra clínica lo lee, la carga sin volver a escribir nada); la lista de diagnósticos que usa la clínica (CIE-10 o CIE-11), con el código de cada diagnóstico; y DICOM, sus tomografías tal como salieron del equipo, solo si tiene alguna. Las fotos y radiografías van tal como se subieron.${COPY_TEETH_SENTENCE} El ZIP trae un «LÉEME» que explica cómo se carga en otro sistema y qué no se pudo incluir.`,
+        general: true,
         forms: [
           "que estandares sigue la copia",
           "la copia de la historia es fhir",
@@ -665,7 +673,7 @@ export const CLINICA: readonly HelpMore[] = [
           "la tomografia sale en dicom",
         ],
         area: "clinica",
-        needs: "clinical.read",
+        
       },
       {
         id: "pacientes-documentos-buscar-retirar",
