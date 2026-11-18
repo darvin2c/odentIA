@@ -16,24 +16,31 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 const metaSignup = metaSignupFromEnv(env)
 // Términos, Privacidad y Ayuda del pie de cada correo.
-// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, mailBrandDomains(env.productDomains))
+// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229), y la
+// de gestorIA en el suyo.
+configureMailLinks(env.WEB_URL, {
+  ...mailBrandDomains(env.productDomains),
+  gestoria: env.externalAppDomains.gestoria,
+})
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 // Sin la clave de Jev el agente sigue, pero lo ajeno se cobra: que se vea en el registro (ADR 0047).
 const decisionKeyProblem = decisionKeyStartProblem(env)
 if (decisionKeyProblem) console.error(`api: ${decisionKeyProblem}`)
+// El remitente de cada otra marca; la que no tiene el suyo sale con SMTP_FROM y su nombre.
+const fromByBrand = {
+  ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+  ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+  ...(env.GESTORIA_SMTP_FROM ? { gestoria: env.GESTORIA_SMTP_FROM } : {}),
+}
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
-  fromByBrand: {
-    ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
-    ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
-  },
+  fromByBrand,
 })
 // Las conversaciones de la administración («Escribir» y las respuestas) por su propio canal de
 // ZeptoMail, con el mismo servidor y remitentes; sin él, por el de siempre.
@@ -45,10 +52,7 @@ const conversationMailer =
         user: env.CONVERSATION_SMTP_USER,
         pass: env.CONVERSATION_SMTP_PASS,
         from: env.SMTP_FROM,
-        fromByBrand: {
-          ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
-          ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
-        },
+        fromByBrand,
       })
     : undefined
 if (Boolean(env.CONVERSATION_SMTP_USER) !== Boolean(env.CONVERSATION_SMTP_PASS)) {

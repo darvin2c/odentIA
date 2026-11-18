@@ -45,9 +45,7 @@ export const ACCOUNT_APP_INFO: Record<AccountApp, AccountAppInfo> = {
   odentia: clinicApp("dental"),
   latidia: clinicApp("medical"),
   vistia: clinicApp("optical"),
-  // La marca de sus correos va en `shared/packages/mail`, en un cambio aparte: hasta
-  // entonces su entrada queda apagada aunque se configure su dominio.
-  gestoria: { name: "gestorIA", product: null, mailBrand: null },
+  gestoria: { name: "gestorIA", product: null, mailBrand: "gestoria" },
 }
 
 /** La app de las clínicas de un producto. */

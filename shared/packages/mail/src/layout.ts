@@ -81,8 +81,11 @@ export interface EmailContent {
 
 /* ---------- Marcas ---------- */
 
-/** Las marcas de la plataforma: odentIA, el producto dental, y latidIA, el médico. */
-export type MailBrand = "odentia" | "latidia" | "vistia"
+/**
+ * Las marcas del grupo: odentIA (dental), latidIA (médico) y vistIA (ópticas), las de
+ * clínicas, y gestorIA, la de las tiendas, que es otro sistema y solo comparte la cuenta.
+ */
+export type MailBrand = "odentia" | "latidia" | "vistia" | "gestoria"
 
 /**
  * La marca base, odentIA: la de los correos internos del equipo y la de lo que
@@ -97,25 +100,47 @@ export type MailBrandDomains = Record<Exclude<MailBrand, typeof BASE_MAIL_BRAND>
 /** Lo que cambia de una marca a otra; el resto del correo es el mismo molde. */
 const MAIL_BRANDS: Record<
   MailBrand,
-  { name: string; marca: string; marcaTinta: string; oscuro: { boton: string; botonTinta: string; enlace: string } }
+  {
+    name: string
+    /** Dónde trabaja quien la usa: «tu clínica», «tu tienda». */
+    lugar: string
+    /** Una línea bajo el nombre, en la firma del pie, junto a la web. */
+    firma?: string
+    marca: string
+    marcaTinta: string
+    oscuro: { boton: string; botonTinta: string; enlace: string }
+  }
 > = {
   odentia: {
     name: "odentIA",
+    lugar: "clínica",
     marca: "#0e7490",
     marcaTinta: "#0b5568",
     oscuro: { boton: "#4fc3d7", botonTinta: "#03252e", enlace: "#8ad8e6" },
   },
   latidia: {
     name: "latidIA",
+    lugar: "clínica",
     marca: "#6d3fc0",
     marcaTinta: "#4c2a8a",
     oscuro: { boton: "#b79cf0", botonTinta: "#1e0b3d", enlace: "#d6c6f7" },
   },
   vistia: {
     name: "vistIA",
+    lugar: "clínica",
     marca: "#147c3b",
     marcaTinta: "#166534",
     oscuro: { boton: "#4ade80", botonTinta: "#052e16", enlace: "#bbf7d0" },
+  },
+  // El naranja de botones y enlaces (#cc4604, 4,7:1 con letra blanca) en claro y en oscuro,
+  // como decidió el lienzo de su marca; el más vivo (#ea580c) queda para el logo.
+  gestoria: {
+    name: "gestorIA",
+    lugar: "tienda",
+    firma: "Una marca del Grupo Sallca",
+    marca: "#cc4604",
+    marcaTinta: "#9a3412",
+    oscuro: { boton: "#cc4604", botonTinta: "#ffffff", enlace: "#fed7aa" },
   },
 }
 
@@ -137,6 +162,11 @@ export interface MailAccent {
 /** El nombre de la marca, como se escribe: para los textos de cada plantilla. */
 export function mailBrandName(brand: MailBrand = BASE_MAIL_BRAND): string {
   return MAIL_BRANDS[brand].name
+}
+
+/** Dónde trabaja quien usa la marca, sin artículo: «clínica» o «tienda». */
+export function mailBrandPlace(brand: MailBrand = BASE_MAIL_BRAND): string {
+  return MAIL_BRANDS[brand].lugar
 }
 
 /**
@@ -214,6 +244,9 @@ export const LOGO_CIDS: Record<keyof typeof LOGOS, string> = {
   vistiaLogotipoOscuro: "logotipo-oscuro@vistia",
   vistiaIsotipoClaro: "isotipo-claro@vistia",
   vistiaIsotipoOscuro: "isotipo-oscuro@vistia",
+  gestoriaLogotipoClaro: "logotipo-claro@gestoria",
+  gestoriaLogotipoOscuro: "logotipo-oscuro@gestoria",
+  gestoriaIsotipo: "isotipo@gestoria",
 }
 
 /** Las imágenes de cada marca en `LOGOS`, por tipo y tono. */
@@ -229,6 +262,10 @@ const BRAND_LOGOS: Record<MailBrand, Record<"logotipo" | "isotipo", Record<"Clar
   vistia: {
     logotipo: { Claro: "vistiaLogotipoClaro", Oscuro: "vistiaLogotipoOscuro" },
     isotipo: { Claro: "vistiaIsotipoClaro", Oscuro: "vistiaIsotipoOscuro" },
+  },
+  gestoria: {
+    logotipo: { Claro: "gestoriaLogotipoClaro", Oscuro: "gestoriaLogotipoOscuro" },
+    isotipo: { Claro: "gestoriaIsotipo", Oscuro: "gestoriaIsotipo" },
   },
 }
 
@@ -497,11 +534,12 @@ export function renderEmail(content: EmailContent): MailTemplate {
   }
 
   // Pie: por qué lo recibes, la firma y, salvo en los internos, Términos, Privacidad, Ayuda y el ©.
+  const signedBy = [links?.domain, B.firma].filter(Boolean).join(" · ")
   const signature =
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>` +
     `<td valign="middle" style="padding:0 12px 0 0;">${logo(brand, "isotipo", "")}</td>` +
     `<td valign="middle" style="${FONT}"><p class="t1" style="margin:0;${FONT}font-size:14px;line-height:18px;font-weight:bold;color:${C.tinta};">${B.name}</p>` +
-    (links ? `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:18px;color:${C.suave};">${escapeHtml(links.domain)}</p>` : "") +
+    (signedBy ? `<p class="t3" style="margin:0;${FONT}font-size:13px;line-height:18px;color:${C.suave};">${escapeHtml(signedBy)}</p>` : "") +
     `</td></tr></table>`
   const linkCell = links
     ? `<td class="enlaces" align="right" valign="middle" style="padding:16px 0 0 0;${FONT}font-size:12px;line-height:18px;">` +
@@ -573,7 +611,7 @@ ${body.join("\n")}
   if (content.notices?.length) text.push(...content.notices, "")
   text.push("--", reasonText)
   if (content.unsubscribe) text.push(`${content.unsubscribe.label}: ${content.unsubscribe.url}`)
-  text.push(links ? `${B.name} · ${links.domain}` : B.name)
+  text.push(signedBy ? `${B.name} · ${signedBy}` : B.name)
   if (links) text.push(links.links.map((link) => `${link.label}: ${link.url}`).join(" · "))
 
   return {

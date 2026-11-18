@@ -280,10 +280,11 @@ describe("variantes", () => {
 
 describe("adjuntos", () => {
   it("adjunta solo las imágenes que el HTML nombra, en PNG: las de su marca", () => {
-    for (const brand of ["odentia", "latidia"] as const) {
+    // gestorIA lleva un solo isotipo: el mismo naranja en claro y en oscuro.
+    for (const [brand, images] of [["odentia", 4], ["latidia", 4], ["vistia", 4], ["gestoria", 3]] as const) {
       const files = logoAttachments(verifyEmailTemplate({ url: URL, brand }).html)
       const own = Object.values(LOGO_CIDS).filter((cid) => cid.endsWith(`@${brand}`))
-      expect(own).toHaveLength(4)
+      expect(own).toHaveLength(images)
       expect(files.map((file) => file.cid).sort()).toEqual(own.sort())
       for (const file of files) {
         expect(file.contentType).toBe("image/png")
@@ -311,5 +312,49 @@ describe("adjuntos", () => {
     } finally {
       resetMailLinks()
     }
+  })
+
+  it("gestorIA: su naranja, su remitente, su web y la firma del Grupo Sallca", () => {
+    configureMailLinks("https://app.odentia32.com", { gestoria: "gestoria24.com" })
+    try {
+      const mail = verifyEmailTemplate({ url: URL, brand: "gestoria" })
+      expect(mail.brand).toBe("gestoria")
+      expect(mail.html).toContain("Gracias por registrarte en gestorIA.")
+      expect(mail.html).toContain("#cc4604")
+      expect(mail.html).toContain(`cid:${LOGO_CIDS.gestoriaLogotipoClaro}`)
+      expect(mail.text).toContain("gestorIA · gestoria24.com · Una marca del Grupo Sallca")
+      expect(mail.text).toContain("https://gestoria24.com/terminos")
+      expect(senderFor("odentIA <no-reply@odentia32.com>", "gestoria")).toBe("gestorIA <no-reply@odentia32.com>")
+      // Las clínicas no llevan esa firma.
+      expect(verifyEmailTemplate({ url: URL, brand: "vistia" }).text).not.toContain("Grupo Sallca")
+    } finally {
+      resetMailLinks()
+    }
+  })
+
+  it("ningún correo de la cuenta le habla a gestorIA de clínicas ni de otra marca", () => {
+    const brand = "gestoria" as const
+    const URL = "https://api.gestoria24.com/api/auth/verify-email?token=abc"
+    const account = [
+      verifyEmailTemplate({ url: URL, brand }),
+      changeEmailVerificationTemplate({ url: URL, brand }),
+      changeEmailConfirmationTemplate({ newEmail: "ana@tienda.test", url: URL, brand }),
+      accessLinkTemplate({ firstName: "Ana", url: URL, brand }),
+      passwordChangedTemplate({ whenText: "9:12", url: URL, brand }),
+      legalUpdateTemplate({ effectiveText: "1 de marzo", changes: ["a"], url: URL, brand }),
+      invitationTemplate({ organizationName: "Tienda Lima", inviterName: "María", url: URL, brand }),
+      accountReminderTemplate({ kind: "sin_verificar", url: URL, days: 7, brand }),
+      accountReminderTemplate({ kind: "sin_clinica", url: URL, brand }),
+    ]
+    for (const mail of account) {
+      const all = `${mail.subject}
+${mail.html}
+${mail.text}`
+      expect(all, mail.subject).not.toMatch(/[Cc]l[íi]nica|odentIA|latidIA|vistIA|odentia/)
+    }
+    expect(accessLinkTemplate({ url: URL, brand }).text).toContain("entras a tu tienda")
+    expect(accountReminderTemplate({ kind: "sin_clinica", url: URL, brand }).subject).toBe(
+      "Tu cuenta de gestorIA está verificada: crea o acepta tu tienda",
+    )
   })
 })
