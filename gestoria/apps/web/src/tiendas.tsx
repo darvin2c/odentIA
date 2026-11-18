@@ -17,7 +17,13 @@ import {
   Input,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, PersonAvatar, SectionNav, SubmitButton } from "@odentia/ui-patterns"
+import {
+  EmptyState,
+  ErrorState,
+  PersonAvatar,
+  SectionNav,
+  SubmitButton,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {

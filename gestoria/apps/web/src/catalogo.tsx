@@ -26,15 +26,7 @@ import {
   readMoney,
   valuesSummary,
 } from "./lib/tienda"
-import {
-  download,
-  fieldErrors,
-  FormAlert,
-  FormSheet,
-  MoneyField,
-  Photo,
-  TextField,
-} from "./piezas"
+import { download, FormAlert, FormSheet, fieldErrors, MoneyField, Photo, TextField } from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
 
 /**
@@ -93,8 +85,12 @@ export function CatalogPage() {
         ) : null}
       </div>
 
-      {catalog.isPending ? <p className="text-sm text-muted-foreground">Cargando el catálogo…</p> : null}
-      {catalog.isError ? <ErrorBlock error={catalog.error} onRetry={() => void catalog.refetch()} /> : null}
+      {catalog.isPending ? (
+        <p className="text-sm text-muted-foreground">Cargando el catálogo…</p>
+      ) : null}
+      {catalog.isError ? (
+        <ErrorBlock error={catalog.error} onRetry={() => void catalog.refetch()} />
+      ) : null}
       {catalog.data && products.length === 0 ? (
         <EmptyState
           icon={Package}
@@ -123,11 +119,18 @@ export function CatalogPage() {
                   params={{ id: store.id, productId: item.id }}
                   className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1 px-4 py-3 transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_8rem]"
                 >
-                  <Photo storeId={store.id} photoId={item.photoId} alt="" className="row-span-3 size-11 md:row-span-1" />
+                  <Photo
+                    storeId={store.id}
+                    photoId={item.photoId}
+                    alt=""
+                    className="row-span-3 size-11 md:row-span-1"
+                  />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-semibold">{item.name}</span>
                     {item.category ? (
-                      <span className="truncate text-xs text-muted-foreground">{item.category}</span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {item.category}
+                      </span>
                     ) : null}
                   </span>
                   <span className="text-sm">{priceSpan(item, store.currency)}</span>
@@ -206,8 +209,11 @@ export function OptionsEditor({
       </FieldDescription>
       <div className="flex flex-col gap-2">
         {drafts.map((draft, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: el orden de las opciones es su identidad
-          <div key={i} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_auto] items-end gap-2">
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: el orden de las opciones es su identidad
+            key={i}
+            className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_auto] items-end gap-2"
+          >
             <TextField
               label={`Opción ${i + 1}`}
               value={draft.name}
@@ -218,7 +224,9 @@ export function OptionsEditor({
             <TextField
               label="Valores"
               value={draft.values}
-              onChange={(values) => onChange(drafts.map((d, j) => (j === i ? { ...d, values } : d)))}
+              onChange={(values) =>
+                onChange(drafts.map((d, j) => (j === i ? { ...d, values } : d)))
+              }
               placeholder={["blanca, negra", "35 a 42", "cuero, gamuza"][i]}
             />
             <Button
@@ -259,8 +267,10 @@ export function OptionsEditor({
 
 /** El primer error de las opciones que dice el servidor (`options.0.values`). */
 export function optionsError(errors: Record<string, string>): string | undefined {
-  return Object.entries(errors).find(([key]) => key === "options" || key.startsWith("options."))?.[1] ??
+  return (
+    Object.entries(errors).find(([key]) => key === "options" || key.startsWith("options."))?.[1] ??
     errors[""]
+  )
 }
 
 function NewProduct({ onClose }: { onClose: () => void }) {
@@ -276,16 +286,24 @@ function NewProduct({ onClose }: { onClose: () => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const categoriesId = useId()
   const descriptionId = useId()
-  const categories = [...new Set((catalog.data?.products ?? []).map((p) => p.category).filter(Boolean))]
+  const categories = [
+    ...new Set((catalog.data?.products ?? []).map((p) => p.category).filter(Boolean)),
+  ]
 
   const create = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      api<{ product: { id: string } }>(`/api/tiendas/${store.id}/productos`, { method: "POST", body }),
+      api<{ product: { id: string } }>(`/api/tiendas/${store.id}/productos`, {
+        method: "POST",
+        body,
+      }),
     onSuccess: async ({ product }) => {
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
       toast.success("Producto agregado. Ahora suma sus fotos y su stock.")
       onClose()
-      await navigate({ to: "/tiendas/$id/catalogo/$productId", params: { id: store.id, productId: product.id } })
+      await navigate({
+        to: "/tiendas/$id/catalogo/$productId",
+        params: { id: store.id, productId: product.id },
+      })
     },
     onError: (error) => setErrors(fieldErrors(error)),
   })
@@ -420,7 +438,8 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
     },
   })
   const example = useMutation({
-    mutationFn: () => api<Blob>(`/api/tiendas/${store.id}/catalogo/hoja-de-ejemplo`, { as: "blob" }),
+    mutationFn: () =>
+      api<Blob>(`/api/tiendas/${store.id}/catalogo/hoja-de-ejemplo`, { as: "blob" }),
     onSuccess: (blob) => download(blob, "catalogo-ejemplo.csv"),
     onError: (error) => toast.error(error.message),
   })
@@ -464,7 +483,8 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
           </Button>
           {ready ? (
             <SubmitButton type="submit" pending={save.isPending}>
-              Crear {result.products.length} {result.products.length === 1 ? "producto" : "productos"}
+              Crear {result.products.length}{" "}
+              {result.products.length === 1 ? "producto" : "productos"}
             </SubmitButton>
           ) : (
             <Button type="submit" variant={file ? "outline" : "default"}>
@@ -478,8 +498,8 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2 rounded-lg border bg-surface-muted p-4 text-sm">
           <p>
-            Empieza con la hoja de ejemplo: ábrela en Excel o Google Sheets, reemplaza las filas
-            por las tuyas y guárdala como CSV.
+            Empieza con la hoja de ejemplo: ábrela en Excel o Google Sheets, reemplaza las filas por
+            las tuyas y guárdala como CSV.
           </p>
           <Button
             type="button"
@@ -511,12 +531,15 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
           </p>
         ) : null}
         {file ? <p className="text-sm font-medium">{file.name}</p> : null}
-        {preview.isPending ? <p className="text-sm text-muted-foreground">Revisando la hoja…</p> : null}
+        {preview.isPending ? (
+          <p className="text-sm text-muted-foreground">Revisando la hoja…</p>
+        ) : null}
         <FormAlert error={preview.error ?? save.error} />
         {result && result.errors.length > 0 ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-danger/40 p-4">
             <p className="text-sm font-semibold">
-              {result.errors.length === 1 ? "Hay un error" : `Hay ${result.errors.length} errores`}: corrígelos en tu hoja y súbela otra vez. No se guardó nada.
+              {result.errors.length === 1 ? "Hay un error" : `Hay ${result.errors.length} errores`}:
+              corrígelos en tu hoja y súbela otra vez. No se guardó nada.
             </p>
             <ul className="flex max-h-60 flex-col gap-1 overflow-y-auto text-sm">
               {result.errors.map((e) => (

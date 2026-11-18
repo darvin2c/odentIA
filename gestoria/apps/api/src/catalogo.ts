@@ -3,8 +3,8 @@ import {
   MAX_PHOTO_BYTES,
   MAX_PRODUCT_OPTIONS,
   MAX_PRODUCT_PHOTOS,
-  PRODUCT_RELATIONS,
   type PhotoType,
+  PRODUCT_RELATIONS,
   type ProductOption,
   product,
   productLink,
@@ -34,7 +34,11 @@ import { inStore, StoreError } from "./tiendas.js"
 export const MAX_VARIANTS = 200
 export const MAX_PRODUCTS = 2000
 
-const money = z.number().int("Escribe un monto válido").min(1, "Debe ser mayor que 0").max(100_000_000)
+const money = z
+  .number()
+  .int("Escribe un monto válido")
+  .min(1, "Debe ser mayor que 0")
+  .max(100_000_000)
 const label = (what: string, max: number) =>
   z.string().trim().min(1, `Escribe ${what}`).max(max, `Máximo ${max} caracteres`)
 
@@ -57,7 +61,11 @@ const options = z
         ctx.addIssue({ code: "custom", path: [i, "name"], message: "Esa opción ya está" })
       option.values.forEach((value, j) => {
         if (option.values.findIndex((v) => sameText(v, value)) !== j)
-          ctx.addIssue({ code: "custom", path: [i, "values"], message: `«${value}» está dos veces` })
+          ctx.addIssue({
+            code: "custom",
+            path: [i, "values"],
+            message: `«${value}» está dos veces`,
+          })
       })
     })
     const combinations = list.reduce((n, o) => n * o.values.length, 1)
@@ -132,12 +140,20 @@ export const productPatch = z
     const tiers = p.quantityPrices ?? []
     tiers.forEach((tier, i) => {
       if (tiers.findIndex((t) => t.minQuantity === tier.minQuantity) !== i)
-        ctx.addIssue({ code: "custom", path: ["quantityPrices", i, "minQuantity"], message: "Esa cantidad ya está" })
+        ctx.addIssue({
+          code: "custom",
+          path: ["quantityPrices", i, "minQuantity"],
+          message: "Esa cantidad ya está",
+        })
     })
     const promos = p.promotions ?? []
     promos.forEach((promo, i) => {
       if (promo.endsOn < promo.startsOn)
-        ctx.addIssue({ code: "custom", path: ["promotions", i, "endsOn"], message: "Termina antes de empezar" })
+        ctx.addIssue({
+          code: "custom",
+          path: ["promotions", i, "endsOn"],
+          message: "Termina antes de empezar",
+        })
       promos.forEach((other, j) => {
         if (j < i && promo.startsOn <= other.endsOn && other.startsOn <= promo.endsOn)
           ctx.addIssue({
@@ -171,7 +187,10 @@ function codePart(text: string, max: number): string {
 
 /** Arma un código único para la variante: «ZAPATILLAU-BLANCA-38». */
 export function makeSku(productName: string, values: string[], taken: Set<string>): string {
-  const base = [codePart(productName, 10) || "PROD", ...values.map((v) => codePart(v, 8)).filter(Boolean)]
+  const base = [
+    codePart(productName, 10) || "PROD",
+    ...values.map((v) => codePart(v, 8)).filter(Boolean),
+  ]
     .join("-")
     .slice(0, 36)
   let sku = base
@@ -204,7 +223,11 @@ async function takenSkus(tx: Db, storeId: string): Promise<Set<string>> {
 }
 
 function nameTaken(error: unknown): boolean {
-  const e = error as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } }
+  const e = error as {
+    code?: string
+    constraint_name?: string
+    cause?: { code?: string; constraint_name?: string }
+  }
   return (
     (e.code ?? e.cause?.code) === "23505" &&
     (e.constraint_name ?? e.cause?.constraint_name) === "product_store_name_uidx"
@@ -247,7 +270,11 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
       .from(productVariant)
       .where(and(eq(productVariant.storeId, storeId), isNull(productVariant.removedAt)))
     const photos = await tx
-      .select({ id: productPhoto.id, productId: productPhoto.productId, position: productPhoto.position })
+      .select({
+        id: productPhoto.id,
+        productId: productPhoto.productId,
+        position: productPhoto.position,
+      })
       .from(productPhoto)
       .where(eq(productPhoto.storeId, storeId))
       .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
@@ -298,7 +325,10 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
     .where(eq(productPhoto.productId, productId))
     .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
   const quantityPrices = await tx
-    .select({ minQuantity: productQuantityPrice.minQuantity, unitPriceCents: productQuantityPrice.unitPriceCents })
+    .select({
+      minQuantity: productQuantityPrice.minQuantity,
+      unitPriceCents: productQuantityPrice.unitPriceCents,
+    })
     .from(productQuantityPrice)
     .where(eq(productQuantityPrice.productId, productId))
     .orderBy(asc(productQuantityPrice.minQuantity))
@@ -392,11 +422,20 @@ export async function createProductIn(
         sku: makeSku(input.name, values, skus),
       })),
     )
-    .returning({ id: productVariant.id, optionValues: productVariant.optionValues, sku: productVariant.sku })
+    .returning({
+      id: productVariant.id,
+      optionValues: productVariant.optionValues,
+      sku: productVariant.sku,
+    })
   return { id: row!.id, variants }
 }
 
-export async function createProduct(appDb: Db, person: Person, storeId: string, input: z.infer<typeof productInput>) {
+export async function createProduct(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof productInput>,
+) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [{ value }] = (await tx
       .select({ value: sql<number>`count(*)::int` })
@@ -410,7 +449,11 @@ export async function createProduct(appDb: Db, person: Person, storeId: string, 
       actorUserId: person.userId,
       action: "catalogo.producto",
       subject: input.name,
-      detail: { creado: created.id, listPriceCents: input.listPriceCents, minPriceCents: input.minPriceCents },
+      detail: {
+        creado: created.id,
+        listPriceCents: input.listPriceCents,
+        minPriceCents: input.minPriceCents,
+      },
     })
     return { id: created.id }
   })
@@ -428,12 +471,18 @@ async function applyOptions(
   next: ProductOption[],
 ) {
   const active = await tx
-    .select({ id: productVariant.id, optionValues: productVariant.optionValues, stock: productVariant.stock })
+    .select({
+      id: productVariant.id,
+      optionValues: productVariant.optionValues,
+      stock: productVariant.stock,
+    })
     .from(productVariant)
     .where(and(eq(productVariant.productId, current.id), isNull(productVariant.removedAt)))
   const wanted = combinations(next)
   const reshaped = current.options.length !== next.length
-  const gone = active.filter((v) => reshaped || !wanted.some((combo) => sameCombo(combo, v.optionValues)))
+  const gone = active.filter(
+    (v) => reshaped || !wanted.some((combo) => sameCombo(combo, v.optionValues)),
+  )
   const stocked = gone.filter((v) => v.stock > 0)
   if (stocked.length > 0) {
     const names = stocked
@@ -452,7 +501,12 @@ async function applyOptions(
     await tx
       .update(productVariant)
       .set({ removedAt: now, updatedAt: now })
-      .where(inArray(productVariant.id, gone.map((v) => v.id)))
+      .where(
+        inArray(
+          productVariant.id,
+          gone.map((v) => v.id),
+        ),
+      )
   const kept = active.filter((v) => !gone.includes(v))
   const fresh = wanted.filter((combo) => !kept.some((v) => sameCombo(combo, v.optionValues)))
   if (fresh.length > 0) {
@@ -478,11 +532,17 @@ export async function updateProduct(
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const current = await productRow(tx, storeId, productId)
     const listPriceCents = patch.listPriceCents ?? current.listPriceCents
-    const minPriceCents = patch.minPriceCents !== undefined ? patch.minPriceCents : current.minPriceCents
+    const minPriceCents =
+      patch.minPriceCents !== undefined ? patch.minPriceCents : current.minPriceCents
     if (minPriceCents !== null && minPriceCents > listPriceCents)
-      throw new StoreError(400, "VALIDATION_ERROR", "El precio mínimo no puede ser mayor que el de lista", {
-        minPriceCents: "El precio mínimo no puede ser mayor que el de lista",
-      })
+      throw new StoreError(
+        400,
+        "VALIDATION_ERROR",
+        "El precio mínimo no puede ser mayor que el de lista",
+        {
+          minPriceCents: "El precio mínimo no puede ser mayor que el de lista",
+        },
+      )
     if (patch.options) await applyOptions(tx, storeId, current, patch.options)
     const changes = {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -497,9 +557,14 @@ export async function updateProduct(
     if (patch.quantityPrices) {
       for (const tier of patch.quantityPrices)
         if (tier.unitPriceCents >= listPriceCents)
-          throw new StoreError(400, "VALIDATION_ERROR", "El precio por cantidad es menor que el de lista", {
-            quantityPrices: "Cada precio por cantidad es menor que el de lista",
-          })
+          throw new StoreError(
+            400,
+            "VALIDATION_ERROR",
+            "El precio por cantidad es menor que el de lista",
+            {
+              quantityPrices: "Cada precio por cantidad es menor que el de lista",
+            },
+          )
       await tx.delete(productQuantityPrice).where(eq(productQuantityPrice.productId, productId))
       if (patch.quantityPrices.length > 0)
         await tx
@@ -514,7 +579,9 @@ export async function updateProduct(
           .values(patch.promotions.map((promo) => ({ storeId, productId, ...promo })))
     }
     if (patch.links) {
-      const others = [...new Set(patch.links.map((l) => l.productId))].filter((id) => id !== productId)
+      const others = [...new Set(patch.links.map((l) => l.productId))].filter(
+        (id) => id !== productId,
+      )
       const found = others.length
         ? await tx
             .select({ id: product.id })
@@ -532,7 +599,12 @@ export async function updateProduct(
           const [a, b] = [productId, l.productId].sort()
           return { storeId, productA: a!, productB: b!, kind: l.kind }
         })
-        .filter((r, i, all) => all.findIndex((o) => o.productA === r.productA && o.productB === r.productB && o.kind === r.kind) === i)
+        .filter(
+          (r, i, all) =>
+            all.findIndex(
+              (o) => o.productA === r.productA && o.productB === r.productB && o.kind === r.kind,
+            ) === i,
+        )
       if (rows.length > 0) await tx.insert(productLink).values(rows)
     }
     if (
@@ -588,7 +660,11 @@ async function variantRow(tx: Db, storeId: string, variantId: string) {
     .select()
     .from(productVariant)
     .where(
-      and(eq(productVariant.id, variantId), eq(productVariant.storeId, storeId), isNull(productVariant.removedAt)),
+      and(
+        eq(productVariant.id, variantId),
+        eq(productVariant.storeId, storeId),
+        isNull(productVariant.removedAt),
+      ),
     )
   if (!row) throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
   return row
@@ -608,7 +684,9 @@ export async function updateVariant(
       const [photo] = await tx
         .select({ id: productPhoto.id })
         .from(productPhoto)
-        .where(and(eq(productPhoto.id, patch.photoId), eq(productPhoto.productId, variant.productId)))
+        .where(
+          and(eq(productPhoto.id, patch.photoId), eq(productPhoto.productId, variant.productId)),
+        )
       if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está en el producto")
     }
     if (patch.sku && patch.sku.toLowerCase() !== variant.sku.toLowerCase()) {
@@ -655,18 +733,28 @@ export async function removeVariant(appDb: Db, person: Person, storeId: string, 
 export function imageType(bytes: Uint8Array): PhotoType | null {
   const at = (i: number) => bytes[i]
   if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return "image/jpeg"
-  if ([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => at(i) === b)) return "image/png"
+  if ([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => at(i) === b))
+    return "image/png"
   const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to))
   if (bytes.length > 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp"
   return null
 }
 
-export async function addPhoto(appDb: Db, person: Person, storeId: string, productId: string, bytes: Uint8Array) {
+export async function addPhoto(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  productId: string,
+  bytes: Uint8Array,
+) {
   if (bytes.length === 0 || bytes.length > MAX_PHOTO_BYTES)
-    throw new StoreError(400, "PHOTO_TOO_LARGE", "La foto pesa demasiado. Prueba con otra más chica.")
+    throw new StoreError(
+      400,
+      "PHOTO_TOO_LARGE",
+      "La foto pesa demasiado. Prueba con otra más chica.",
+    )
   const contentType = imageType(bytes)
-  if (!contentType)
-    throw new StoreError(400, "PHOTO_TYPE", "Sube una foto en JPG, PNG o WebP")
+  if (!contentType) throw new StoreError(400, "PHOTO_TYPE", "Sube una foto en JPG, PNG o WebP")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await productRow(tx, storeId, productId)
     const existing = await tx

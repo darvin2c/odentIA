@@ -33,7 +33,11 @@ export const movementInput = z.discriminatedUnion("kind", [
 ])
 
 function isStockError(error: unknown): boolean {
-  const e = error as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } }
+  const e = error as {
+    code?: string
+    constraint_name?: string
+    cause?: { code?: string; constraint_name?: string }
+  }
   const code = e.code ?? e.cause?.code
   const constraint = e.constraint_name ?? e.cause?.constraint_name
   return code === "23514" && constraint === "product_variant_stock_check"
@@ -54,7 +58,11 @@ async function variantIn(tx: Db, storeId: string, variantId: string) {
   if (!z.uuid().safeParse(variantId).success)
     throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
   const [row] = await tx
-    .select({ id: productVariant.id, stock: productVariant.stock, removedAt: productVariant.removedAt })
+    .select({
+      id: productVariant.id,
+      stock: productVariant.stock,
+      removedAt: productVariant.removedAt,
+    })
     .from(productVariant)
     .where(and(eq(productVariant.id, variantId), eq(productVariant.storeId, storeId)))
     .for("update")

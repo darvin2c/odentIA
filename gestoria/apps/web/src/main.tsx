@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import { CatalogPage } from "./catalogo"
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -21,7 +22,6 @@ import {
 } from "./entrada"
 import { SignedOut } from "./lib/api"
 import { authClient, authFetch, safeNext } from "./lib/cuenta"
-import { CatalogPage } from "./catalogo"
 import { PaymentsPage } from "./pagos"
 import { ProductPage } from "./producto"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
@@ -113,7 +113,11 @@ const storeChildren = [
     path: "/catalogo/$productId",
     component: ProductPage,
   }),
-  createRoute({ getParentRoute: () => storeRoute, path: "/pagos-y-entregas", component: PaymentsPage }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/pagos-y-entregas",
+    component: PaymentsPage,
+  }),
   createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
 ]
 

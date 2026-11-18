@@ -8,9 +8,9 @@ import {
   storeEvent,
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
+import { MAX_PRODUCTS, makeSku } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { parseMoney } from "./dinero.js"
-import { makeSku, MAX_PRODUCTS } from "./catalogo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -46,10 +46,66 @@ type Column = keyof typeof COLUMNS
 const REQUIRED: Column[] = ["producto", "precio", "stock"]
 
 const EXAMPLE_ROWS: string[][] = [
-  ["Zapatilla urbana", "Zapatillas", "Color", "blanca", "Talla", "38", "", "", "", "129", "3", "68", "Cuero sintético, planta de goma."],
-  ["Zapatilla urbana", "Zapatillas", "Color", "blanca", "Talla", "39", "", "", "", "129", "2", "68", ""],
-  ["Zapatilla urbana", "Zapatillas", "Color", "negra", "Talla", "38", "", "", "", "89", "4", "55", ""],
-  ["Sandalia", "Sandalias", "Talla", "36", "", "", "", "", "SAN-36", "89", "5", "", "Taco bajo, correa ajustable."],
+  [
+    "Zapatilla urbana",
+    "Zapatillas",
+    "Color",
+    "blanca",
+    "Talla",
+    "38",
+    "",
+    "",
+    "",
+    "129",
+    "3",
+    "68",
+    "Cuero sintético, planta de goma.",
+  ],
+  [
+    "Zapatilla urbana",
+    "Zapatillas",
+    "Color",
+    "blanca",
+    "Talla",
+    "39",
+    "",
+    "",
+    "",
+    "129",
+    "2",
+    "68",
+    "",
+  ],
+  [
+    "Zapatilla urbana",
+    "Zapatillas",
+    "Color",
+    "negra",
+    "Talla",
+    "38",
+    "",
+    "",
+    "",
+    "89",
+    "4",
+    "55",
+    "",
+  ],
+  [
+    "Sandalia",
+    "Sandalias",
+    "Talla",
+    "36",
+    "",
+    "",
+    "",
+    "",
+    "SAN-36",
+    "89",
+    "5",
+    "",
+    "Taco bajo, correa ajustable.",
+  ],
   ["Correa de cuero", "Accesorios", "", "", "", "", "", "", "", "45,50", "10", "", ""],
 ]
 
@@ -64,12 +120,7 @@ function quote(cell: string): string {
 }
 
 const fold = (text: string) =>
-  text
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
+  text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim()
 
 /** Lee un CSV: comillas dobles, saltos de línea dentro de comillas y el separador de la cabecera. */
 export function parseCsv(text: string): string[][] {
@@ -153,9 +204,15 @@ export function planSheet(
   const errors: SheetError[] = []
   const rows = parseCsv(text)
   if (rows.length < 2)
-    return { products: [], errors: [{ row: 0, message: "La hoja está vacía: deja la cabecera y una fila por variante" }] }
+    return {
+      products: [],
+      errors: [{ row: 0, message: "La hoja está vacía: deja la cabecera y una fila por variante" }],
+    }
   if (rows.length - 1 > MAX_SHEET_ROWS)
-    return { products: [], errors: [{ row: 0, message: `Hasta ${MAX_SHEET_ROWS} filas por hoja: divídela en partes` }] }
+    return {
+      products: [],
+      errors: [{ row: 0, message: `Hasta ${MAX_SHEET_ROWS} filas por hoja: divídela en partes` }],
+    }
   const header = rows[0]!.map(fold)
   const index = {} as Record<Column, number>
   for (const [key, title] of Object.entries(COLUMNS) as [Column, string][])
@@ -173,15 +230,20 @@ export function planSheet(
     }
   const cell = (r: string[], key: Column) => (index[key] >= 0 ? (r[index[key]] ?? "").trim() : "")
 
+  // Los nombres del catálogo, una vez: compararlos fila por fila tardaba segundos con 2000.
+  const taken = new Set([...existing].map(fold))
   const byName = new Map<string, PlannedProduct>()
   const sheetSkus = new Set<string>()
-  rows.slice(1).forEach((r, i) => {
-    const row = i + 2
-    const fail = (message: string) => errors.push({ row, message })
+  // Cada fila, con su número en la hoja (la cabecera es la 1).
+  const readRow = (r: string[], row: number): boolean => {
+    const fail = (message: string): boolean => {
+      errors.push({ row, message })
+      return false
+    }
     const name = cell(r, "producto")
     if (!name) return fail("Falta el nombre del producto")
     if (name.length > 120) return fail("El nombre del producto tiene más de 120 caracteres")
-    if ([...existing].some((n) => sameText(n, name)))
+    if (taken.has(fold(name)))
       return fail(`«${name}» ya está en tu catálogo: cámbialo en su página`)
     const options: ProductOption[] = []
     const values: string[] = []
@@ -190,7 +252,8 @@ export function planSheet(
       const value = cell(r, `valor${n}`)
       if (!option && !value) continue
       if (!option || !value) return fail(`La opción ${n} necesita su nombre y su valor`)
-      if (option.length > 30 || value.length > 30) return fail("Una opción o un valor tiene más de 30 caracteres")
+      if (option.length > 30 || value.length > 30)
+        return fail("Una opción o un valor tiene más de 30 caracteres")
       options.push({ name: option, values: [value] })
       values.push(value)
     }
@@ -239,7 +302,9 @@ export function planSheet(
     })
     if (!planned.description) planned.description = cell(r, "descripcion").slice(0, 2000)
     planned.variants.push({ row, values, sku, priceCents, stock: Number(stockText), costCents })
-  })
+    return true
+  }
+  for (const [i, r] of rows.slice(1).entries()) readRow(r, i + 2)
   if (existing.size + byName.size > MAX_PRODUCTS)
     errors.push({ row: 0, message: `Tu catálogo pasaría de ${MAX_PRODUCTS} productos` })
   return { products: [...byName.values()], errors }
@@ -279,7 +344,10 @@ export async function uploadSheet(
       .select({ currency: store.currency })
       .from(store)
       .where(eq(store.id, storeId))) as [{ currency: string }]
-    const names = await tx.select({ name: product.name }).from(product).where(eq(product.storeId, storeId))
+    const names = await tx
+      .select({ name: product.name })
+      .from(product)
+      .where(eq(product.storeId, storeId))
     const skus = new Set(
       (
         await tx
@@ -293,7 +361,8 @@ export async function uploadSheet(
     if (!confirm || plan.errors.length > 0 || plan.products.length === 0)
       return { ...result, saved: false }
     // Los códigos que trae la hoja quedan tomados antes de armar los que faltan.
-    for (const p of plan.products) for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
+    for (const p of plan.products)
+      for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
     for (const p of plan.products) {
       const [row] = await tx
         .insert(product)

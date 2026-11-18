@@ -27,18 +27,19 @@ import {
   type DeliveryType,
   money,
   moneyInput,
+  PAYMENT_TYPES,
   type PaymentCollection,
   type PaymentMethod,
-  PAYMENT_TYPES,
   type PaymentTypeCode,
   readMoney,
 } from "./lib/tienda"
 import {
-  fieldErrors,
   FormAlert,
   FormSheet,
+  fieldErrors,
   MoneyField,
   SELECT_CLASSES,
+  SwitchField,
   TextField,
 } from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
@@ -74,7 +75,9 @@ export function PaymentsPage() {
           Con qué te pagan y cómo llega el pedido. Lo que apagues, Sofi deja de ofrecerlo.
         </p>
       </div>
-      {lists.isError ? <ErrorBlock error={lists.error} onRetry={() => void lists.refetch()} /> : null}
+      {lists.isError ? (
+        <ErrorBlock error={lists.error} onRetry={() => void lists.refetch()} />
+      ) : null}
       <Section
         title="Medios de pago"
         action={canEdit ? "Agregar medio" : null}
@@ -203,7 +206,7 @@ function ActiveSwitch({
   const shown = toggle.isPending ? Boolean(toggle.variables) : active
   if (!canEdit) return <Badge variant="outline">{active ? "Encendido" : "Apagado"}</Badge>
   return (
-    <label className="flex items-center gap-2 text-sm">
+    <div className="flex items-center gap-2 text-sm">
       <Switch
         checked={shown}
         disabled={toggle.isPending}
@@ -211,7 +214,7 @@ function ActiveSwitch({
         aria-label={`${name}: ${shown ? "encendido" : "apagado"}`}
       />
       <span aria-hidden>{shown ? "Encendido" : "Apagado"}</span>
-    </label>
+    </div>
   )
 }
 
@@ -275,7 +278,9 @@ function deliveryCostText(method: DeliveryMethod, currency: string): string {
 
 function dealText(method: DeliveryMethod, currency: string): string | null {
   const parts = [
-    method.maxDiscountCents ? `Sofi puede rebajarlo hasta ${money(method.maxDiscountCents, currency)}` : null,
+    method.maxDiscountCents
+      ? `Sofi puede rebajarlo hasta ${money(method.maxDiscountCents, currency)}`
+      : null,
     method.freeFromCents ? `gratis desde ${money(method.freeFromCents, currency)}` : null,
   ].filter(Boolean)
   if (parts.length === 0) return null
@@ -313,7 +318,9 @@ function DeliveryRow({
         <span>{deliveryCostText(method, currency)}</span>
         {deal ? <span className="text-muted-foreground">{deal}</span> : null}
       </div>
-      <div className="text-sm">{method.eta || <span className="text-muted-foreground">—</span>}</div>
+      <div className="text-sm">
+        {method.eta || <span className="text-muted-foreground">—</span>}
+      </div>
       <div className="flex items-center gap-2">
         <ActiveSwitch
           path={`/api/tiendas/${store.id}/formas-de-entrega/${method.id}`}
@@ -333,7 +340,17 @@ function DeliveryRow({
 }
 
 /** Borrar, con su confirmación: lo que ya se cobró o entregó conserva lo suyo. */
-function DeleteButton({ what, path, storeId, onDone }: { what: string; path: string; storeId: string; onDone: () => void }) {
+function DeleteButton({
+  what,
+  path,
+  storeId,
+  onDone,
+}: {
+  what: string
+  path: string
+  storeId: string
+  onDone: () => void
+}) {
   const queryClient = useQueryClient()
   const [asking, setAsking] = useState(false)
   const remove = useMutation({
@@ -347,7 +364,12 @@ function DeleteButton({ what, path, storeId, onDone }: { what: string; path: str
   })
   return (
     <>
-      <Button type="button" variant="ghost" className="mr-auto text-danger" onClick={() => setAsking(true)}>
+      <Button
+        type="button"
+        variant="ghost"
+        className="mr-auto text-danger"
+        onClick={() => setAsking(true)}
+      >
         <Trash2 aria-hidden />
         Borrar
       </Button>
@@ -377,7 +399,9 @@ function PaymentForm({
   const queryClient = useQueryClient()
   const [name, setName] = useState(method?.name ?? "")
   const [typeCode, setTypeCode] = useState<PaymentTypeCode>(method?.typeCode ?? "68")
-  const [collection, setCollection] = useState<PaymentCollection>(method?.collection ?? "comprobante")
+  const [collection, setCollection] = useState<PaymentCollection>(
+    method?.collection ?? "comprobante",
+  )
   const [details, setDetails] = useState(method?.details ?? "")
   const [isActive, setIsActive] = useState(method?.isActive ?? true)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -480,7 +504,9 @@ function PaymentForm({
                   />
                   <span className="flex flex-col">
                     <span className="text-sm font-semibold">{COLLECTIONS[option].name}</span>
-                    <span className="text-sm text-muted-foreground">{COLLECTIONS[option].hint}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {COLLECTIONS[option].hint}
+                    </span>
                   </span>
                 </label>
               )
@@ -509,10 +535,11 @@ function PaymentForm({
             </FieldDescription>
           )}
         </Field>
-        <label className="flex items-center gap-3 text-sm">
-          <Switch checked={isActive} onCheckedChange={setIsActive} />
-          {isActive ? "Encendido: Sofi lo ofrece" : "Apagado: Sofi no lo ofrece"}
-        </label>
+        <SwitchField
+          checked={isActive}
+          onChange={setIsActive}
+          label={isActive ? "Encendido: Sofi lo ofrece" : "Apagado: Sofi no lo ofrece"}
+        />
         <FormAlert error={save.error} />
       </FieldGroup>
     </FormSheet>
@@ -544,11 +571,14 @@ function DeliveryForm({
   )
   const [eta, setEta] = useState(method?.eta ?? "")
   const [payOnDelivery, setPayOnDelivery] = useState(method?.acceptsPayOnDelivery ?? false)
-  const [maxDiscount, setMaxDiscount] = useState(moneyInput(method?.maxDiscountCents ?? null, currency))
+  const [maxDiscount, setMaxDiscount] = useState(
+    moneyInput(method?.maxDiscountCents ?? null, currency),
+  )
   const [freeFrom, setFreeFrom] = useState(moneyInput(method?.freeFromCents ?? null, currency))
   const [isActive, setIsActive] = useState(method?.isActive ?? true)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const negotiable = cost === "fijo" || cost === "por_zona"
+  const payId = useId()
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -568,7 +598,10 @@ function DeliveryForm({
     if (!name.trim()) next.name = "Escribe cómo lo dirá Sofi"
     const priceCents = cost === "fijo" ? readMoney(price, currency) : null
     if (cost === "fijo" && priceCents === null) next.priceCents = "Escribe el precio, como 8 o 8.50"
-    const zoneValues = zones.map((z) => ({ name: z.name.trim(), priceCents: readMoney(z.price, currency) }))
+    const zoneValues = zones.map((z) => ({
+      name: z.name.trim(),
+      priceCents: readMoney(z.price, currency),
+    }))
     if (cost === "por_zona" && zoneValues.some((z) => !z.name || z.priceCents === null))
       next.zones = "Cada zona necesita su nombre y su precio"
     const read = (text: string, key: string) => {
@@ -747,10 +780,14 @@ function DeliveryForm({
           placeholder="El mismo día si pides antes de las 2 p. m."
           maxLength={120}
         />
-        <label className="flex items-center gap-3 text-sm">
-          <Checkbox checked={payOnDelivery} onCheckedChange={(v) => setPayOnDelivery(Boolean(v))} />
-          Acepta pago al recibir
-        </label>
+        <div className="flex items-center gap-3 text-sm">
+          <Checkbox
+            id={payId}
+            checked={payOnDelivery}
+            onCheckedChange={(v) => setPayOnDelivery(Boolean(v))}
+          />
+          <label htmlFor={payId}>Acepta pago al recibir</label>
+        </div>
         {negotiable ? (
           <FieldSet>
             <FieldLegend variant="label">Lo que Sofi puede negociar del envío</FieldLegend>
@@ -774,10 +811,11 @@ function DeliveryForm({
             </div>
           </FieldSet>
         ) : null}
-        <label className="flex items-center gap-3 text-sm">
-          <Switch checked={isActive} onCheckedChange={setIsActive} />
-          {isActive ? "Encendida: Sofi la ofrece" : "Apagada: Sofi no la ofrece"}
-        </label>
+        <SwitchField
+          checked={isActive}
+          onChange={setIsActive}
+          label={isActive ? "Encendida: Sofi la ofrece" : "Apagada: Sofi no la ofrece"}
+        />
         <FormAlert error={save.error} />
       </FieldGroup>
     </FormSheet>

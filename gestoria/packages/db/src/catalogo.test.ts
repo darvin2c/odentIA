@@ -97,9 +97,7 @@ describe("el kardex", () => {
     expect(await move({ kind: "entrada", quantity: 4, unitCostCents: 6800 })).toEqual([
       { balance: 4 },
     ])
-    expect(await move({ kind: "venta", quantity: -1, reference: "0142" })).toEqual([
-      { balance: 3 },
-    ])
+    expect(await move({ kind: "venta", quantity: -1, reference: "0142" })).toEqual([{ balance: 3 }])
     expect(await move({ kind: "ajuste", quantity: -1, reason: "par dañado" })).toEqual([
       { balance: 2 },
     ])
@@ -122,9 +120,13 @@ describe("el kardex", () => {
     await expect(
       inRosa(async (tx) => {
         const [p] = await tx.select({ id: product.id }).from(product)
-        await tx
-          .insert(productVariant)
-          .values({ storeId: calzados, productId: p!.id, optionValues: ["39"], sku: "Z-39", stock: 9 })
+        await tx.insert(productVariant).values({
+          storeId: calzados,
+          productId: p!.id,
+          optionValues: ["39"],
+          sku: "Z-39",
+          stock: 9,
+        })
       }),
     ).rejects.toThrow()
   })

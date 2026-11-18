@@ -85,7 +85,8 @@ const CATALOG: SeedProduct[] = [
       { name: "Talla", values: sizes(35, 42) },
     ],
     priceBy: { negra: 8900 },
-    stock: ([color, size]) => (color === "blanca" ? (size === "42" ? 0 : 3) : size === "35" ? 0 : 2),
+    stock: ([color, size]) =>
+      color === "blanca" ? (size === "42" ? 0 : 3) : size === "35" ? 0 : 2,
     costCents: ([color]) => (color === "blanca" ? 6800 : 5500),
     colors: [
       [254, 215, 170],
@@ -108,7 +109,8 @@ const CATALOG: SeedProduct[] = [
   {
     name: "Botín de cuero marrón",
     category: "Botines",
-    description: "Cuero natural, cierre lateral y forro térmico. Horma un poco ajustada: si dudas, una talla más.",
+    description:
+      "Cuero natural, cierre lateral y forro térmico. Horma un poco ajustada: si dudas, una talla más.",
     listPriceCents: 21900,
     options: [{ name: "Talla", values: sizes(39, 43) }],
     stock: ([size]) => (size === "43" ? 0 : size === "39" ? 3 : 1),
@@ -135,8 +137,20 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
     .limit(1)
   if (!anyPayment)
     await tx.insert(storePaymentMethod).values([
-      { storeId, name: "Yape", typeCode: "68", collection: "comprobante", details: "987 654 321 · Rosa Quispe" },
-      { storeId, name: "Plin", typeCode: "68", collection: "comprobante", details: "987 654 321 · Rosa Quispe" },
+      {
+        storeId,
+        name: "Yape",
+        typeCode: "68",
+        collection: "comprobante",
+        details: "987 654 321 · Rosa Quispe",
+      },
+      {
+        storeId,
+        name: "Plin",
+        typeCode: "68",
+        collection: "comprobante",
+        details: "987 654 321 · Rosa Quispe",
+      },
       {
         storeId,
         name: "Transferencia BCP",
@@ -144,7 +158,13 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
         collection: "comprobante",
         details: "Cuenta 191-2345678-0-12 a nombre de Rosa Quispe. CCI al pedirlo.",
       },
-      { storeId, name: "Efectivo al recibir", typeCode: "10", collection: "al_recibir", details: "Solo con reparto propio" },
+      {
+        storeId,
+        name: "Efectivo al recibir",
+        typeCode: "10",
+        collection: "al_recibir",
+        details: "Solo con reparto propio",
+      },
       {
         storeId,
         name: "Tarjeta con enlace",
@@ -251,15 +271,32 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
       if (seed.name === "Mocasín azul") {
         // Agotado: entró uno de cada talla y se vendieron todos.
         moves.push(
-          { storeId, variantId, kind: "entrada", quantity: 1, unitCostCents: seed.costCents(values), actorUserId: ADMIN, createdAt: daysAgo(13) },
-          { storeId, variantId, kind: "venta", quantity: -1, reference: `01${values[0]}`, actorUserId: OWNER, createdAt: daysAgo(4) },
+          {
+            storeId,
+            variantId,
+            kind: "entrada",
+            quantity: 1,
+            unitCostCents: seed.costCents(values),
+            actorUserId: ADMIN,
+            createdAt: daysAgo(13),
+          },
+          {
+            storeId,
+            variantId,
+            kind: "venta",
+            quantity: -1,
+            reference: `01${values[0]}`,
+            actorUserId: OWNER,
+            createdAt: daysAgo(4),
+          },
         )
       } else if (entered > 0) {
         moves.push({
           storeId,
           variantId,
           kind: "entrada",
-          quantity: seed.name === "Zapatilla urbana" && values.join(" ") === "blanca 38" ? 4 : entered,
+          quantity:
+            seed.name === "Zapatilla urbana" && values.join(" ") === "blanca 38" ? 4 : entered,
           unitCostCents: seed.costCents(values),
           reason: "Compra al proveedor",
           actorUserId: ADMIN,
@@ -267,8 +304,24 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
         })
         if (seed.name === "Zapatilla urbana" && values.join(" ") === "blanca 38")
           moves.push(
-            { storeId, variantId, kind: "ajuste", quantity: -1, reason: "par dañado", actorUserId: OWNER, createdAt: daysAgo(2) },
-            { storeId, variantId, kind: "venta", quantity: -1, reference: "0142", actorUserId: OWNER, createdAt: daysAgo(1) },
+            {
+              storeId,
+              variantId,
+              kind: "ajuste",
+              quantity: -1,
+              reason: "par dañado",
+              actorUserId: OWNER,
+              createdAt: daysAgo(2),
+            },
+            {
+              storeId,
+              variantId,
+              kind: "venta",
+              quantity: -1,
+              reference: "0142",
+              actorUserId: OWNER,
+              createdAt: daysAgo(1),
+            },
           )
       }
       // En orden: la base anota el saldo de cada uno.

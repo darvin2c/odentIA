@@ -12,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@odentia/ui"
+import { Switch } from "@odentia/ui/components/switch"
 import { useQuery } from "@tanstack/react-query"
 import { ImageOff } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react"
@@ -156,7 +157,9 @@ export function FormSheet({
             {description ? <SheetDescription>{description}</SheetDescription> : null}
           </SheetHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">{children}</div>
-          <SheetFooter className="flex-row flex-wrap justify-end border-t py-4">{footer}</SheetFooter>
+          <SheetFooter className="flex-row flex-wrap justify-end border-t py-4">
+            {footer}
+          </SheetFooter>
         </form>
       </SheetContent>
     </Sheet>
@@ -197,7 +200,11 @@ export function Photo({
         <span className="sr-only">Sin foto</span>
       </span>
     )
-  return url ? <img src={url} alt={alt} className={cn(box, "object-cover")} /> : <span className={box} />
+  return url ? (
+    <img src={url} alt={alt} className={cn(box, "object-cover")} />
+  ) : (
+    <span className={box} />
+  )
 }
 
 /**
@@ -230,4 +237,23 @@ export function download(blob: Blob, name: string) {
   link.download = name
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** Un interruptor con su texto, que también lo enciende o apaga. */
+export function SwitchField({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+}) {
+  const id = useId()
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+      <label htmlFor={id}>{label}</label>
+    </div>
+  )
 }

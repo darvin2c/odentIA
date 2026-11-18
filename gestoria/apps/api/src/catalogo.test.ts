@@ -60,10 +60,15 @@ async function call(
     ...(raw ? { body: raw.data } : body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   const type = response.headers.get("content-type") ?? ""
-  if (!type.includes("json")) return { status: response.status, json: {} as Record<string, any>, response }
+  if (!type.includes("json"))
+    return { status: response.status, json: {} as Record<string, any>, response }
   const text = await response.text()
   // biome-ignore lint/suspicious/noExplicitAny: las pruebas leen respuestas JSON de forma libre
-  return { status: response.status, json: text ? (JSON.parse(text) as Record<string, any>) : {}, response }
+  return {
+    status: response.status,
+    json: text ? (JSON.parse(text) as Record<string, any>) : {},
+    response,
+  }
 }
 
 beforeAll(async () => {
@@ -122,13 +127,24 @@ describe("medios de pago (tablero 6)", () => {
       "Efectivo al recibir",
     ])
     expect(
-      (await call("lucia", "POST", `${base}/medios-de-pago`, { name: "X", typeCode: "68", collection: "comprobante" }))
-        .status,
+      (
+        await call("lucia", "POST", `${base}/medios-de-pago`, {
+          name: "X",
+          typeCode: "68",
+          collection: "comprobante",
+        })
+      ).status,
     ).toBe(403)
     expect(
-      (await call("lucia", "PATCH", `${base}/medios-de-pago/${yape.json.method.id}`, { isActive: false })).status,
+      (
+        await call("lucia", "PATCH", `${base}/medios-de-pago/${yape.json.method.id}`, {
+          isActive: false,
+        })
+      ).status,
     ).toBe(403)
-    expect((await call("lucia", "DELETE", `${base}/medios-de-pago/${yape.json.method.id}`)).status).toBe(403)
+    expect(
+      (await call("lucia", "DELETE", `${base}/medios-de-pago/${yape.json.method.id}`)).status,
+    ).toBe(403)
   })
 
   it("el efectivo se cobra al recibir; apagar un medio guarda solo eso", async () => {
@@ -141,8 +157,14 @@ describe("medios de pago (tablero 6)", () => {
     expect(cash.json.error.fields).toHaveProperty("collection")
     const list = await call("rosa", "GET", `${base}/pagos-y-entregas`)
     const yape = list.json.payments.find((m: { name: string }) => m.name === "Yape")
-    const off = await call("rosa", "PATCH", `${base}/medios-de-pago/${yape.id}`, { isActive: false })
-    expect(off.json.method).toMatchObject({ name: "Yape", isActive: false, details: "987 654 321 · Rosa Díaz" })
+    const off = await call("rosa", "PATCH", `${base}/medios-de-pago/${yape.id}`, {
+      isActive: false,
+    })
+    expect(off.json.method).toMatchObject({
+      name: "Yape",
+      isActive: false,
+      details: "987 654 321 · Rosa Díaz",
+    })
   })
 })
 
@@ -162,7 +184,11 @@ describe("formas de entrega (tablero 6 y decisión 1)", () => {
       freeFromCents: 25000,
     })
     expect(reparto.status).toBe(201)
-    expect(reparto.json.method).toMatchObject({ cost: "por_zona", maxDiscountCents: 1000, freeFromCents: 25000 })
+    expect(reparto.json.method).toMatchObject({
+      cost: "por_zona",
+      maxDiscountCents: 1000,
+      freeFromCents: 25000,
+    })
     // Gratis no se negocia; precio fijo pide el precio; un tipo fuera de la lista, no.
     for (const bad of [
       { cost: "gratis", maxDiscountCents: 500 },
@@ -171,7 +197,13 @@ describe("formas de entrega (tablero 6 y decisión 1)", () => {
       { cost: "gratis", type: "Drone" },
     ])
       expect(
-        (await call("rosa", "POST", `${base}/formas-de-entrega`, { name: "X", type: "OnSitePickup", ...bad })).status,
+        (
+          await call("rosa", "POST", `${base}/formas-de-entrega`, {
+            name: "X",
+            type: "OnSitePickup",
+            ...bad,
+          })
+        ).status,
         JSON.stringify(bad),
       ).toBe(400)
     const recojo = await call("rosa", "POST", `${base}/formas-de-entrega`, {
@@ -184,15 +216,22 @@ describe("formas de entrega (tablero 6 y decisión 1)", () => {
     // Lo que no aplica al costo elegido no se guarda.
     expect(recojo.json.method).toMatchObject({ priceCents: null, zones: [] })
     expect(
-      (await call("lucia", "POST", `${base}/formas-de-entrega`, { name: "X", type: "OnSitePickup", cost: "gratis" }))
-        .status,
+      (
+        await call("lucia", "POST", `${base}/formas-de-entrega`, {
+          name: "X",
+          type: "OnSitePickup",
+          cost: "gratis",
+        })
+      ).status,
     ).toBe(403)
   })
 })
 
 let zapatilla = ""
-const variantOf = (product: { variants: { id: string; optionValues: string[] }[] }, ...values: string[]) =>
-  product.variants.find((v) => v.optionValues.join("/") === values.join("/"))!.id
+const variantOf = (
+  product: { variants: { id: string; optionValues: string[] }[] },
+  ...values: string[]
+) => product.variants.find((v) => v.optionValues.join("/") === values.join("/"))!.id
 
 describe("el catálogo con variantes (tablero 7)", () => {
   it("un producto arma todas las combinaciones de sus opciones, cada una con su código y stock 0", async () => {
@@ -210,12 +249,24 @@ describe("el catálogo con variantes (tablero 7)", () => {
     zapatilla = created.json.product.id
     const detail = await call("lucia", "GET", `${base}/productos/${zapatilla}`)
     expect(detail.json.product.variants).toHaveLength(4)
-    expect(detail.json.product.variants[0]).toMatchObject({ sku: "ZAPATILLAU-BLANCA-38", stock: 0, priceCents: null })
+    expect(detail.json.product.variants[0]).toMatchObject({
+      sku: "ZAPATILLAU-BLANCA-38",
+      stock: 0,
+      priceCents: null,
+    })
     // El mismo nombre, dos veces no; Ventas no crea.
     expect(
-      (await call("rosa", "POST", `${base}/productos`, { name: "zapatilla URBANA", listPriceCents: 100 })).status,
+      (
+        await call("rosa", "POST", `${base}/productos`, {
+          name: "zapatilla URBANA",
+          listPriceCents: 100,
+        })
+      ).status,
     ).toBe(409)
-    expect((await call("lucia", "POST", `${base}/productos`, { name: "Otro", listPriceCents: 100 })).status).toBe(403)
+    expect(
+      (await call("lucia", "POST", `${base}/productos`, { name: "Otro", listPriceCents: 100 }))
+        .status,
+    ).toBe(403)
     // Más de tres opciones o una combinación de más, no.
     expect(
       (
@@ -231,14 +282,19 @@ describe("el catálogo con variantes (tablero 7)", () => {
   it("la variante puede tener su propio precio y entonces Sofi dice «desde»", async () => {
     const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
     const negra38 = variantOf(detail, "negra", "38")
-    const changed = await call("rosa", "PATCH", `${base}/variantes/${negra38}`, { priceCents: 8900 })
+    const changed = await call("rosa", "PATCH", `${base}/variantes/${negra38}`, {
+      priceCents: 8900,
+    })
     expect(changed.json.product).toMatchObject({ fromCents: 8900, toCents: 12900 })
-    expect((await call("lucia", "PATCH", `${base}/variantes/${negra38}`, { priceCents: 100 })).status).toBe(403)
+    expect(
+      (await call("lucia", "PATCH", `${base}/variantes/${negra38}`, { priceCents: 100 })).status,
+    ).toBe(403)
     // Un código ya usado, no.
     const blanca38 = variantOf(detail, "blanca", "38")
-    expect((await call("rosa", "PATCH", `${base}/variantes/${negra38}`, { sku: "zapatillau-blanca-38" })).status).toBe(
-      409,
-    )
+    expect(
+      (await call("rosa", "PATCH", `${base}/variantes/${negra38}`, { sku: "zapatillau-blanca-38" }))
+        .status,
+    ).toBe(409)
     expect(blanca38).toBeTruthy()
   })
 })
@@ -269,19 +325,40 @@ describe("el stock y su kardex (decisión 3)", () => {
     })
     expect(ajuste.json.movement).toMatchObject({ kind: "ajuste", quantity: -1, balance: 3 })
     expect(
-      (await call("rosa", "POST", `${base}/variantes/${blanca38}/movimientos`, { kind: "ajuste", counted: 3, reason: "conteo" }))
-        .status,
+      (
+        await call("rosa", "POST", `${base}/variantes/${blanca38}/movimientos`, {
+          kind: "ajuste",
+          counted: 3,
+          reason: "conteo",
+        })
+      ).status,
     ).toBe(409)
     // Ventas ve el kardex, pero no mueve el stock a mano.
     const seen = await call("lucia", "GET", `${base}/variantes/${blanca38}/kardex`)
     expect(seen.json.stock).toBe(3)
     expect(seen.json.movements).toEqual([
-      expect.objectContaining({ kind: "ajuste", quantity: -1, balance: 3, reason: "par dañado", actorName: "Rosa Quispe" }),
-      expect.objectContaining({ kind: "entrada", quantity: 4, balance: 4, unitCostCents: 6800, actorName: "Mario Huamán" }),
+      expect.objectContaining({
+        kind: "ajuste",
+        quantity: -1,
+        balance: 3,
+        reason: "par dañado",
+        actorName: "Rosa Quispe",
+      }),
+      expect.objectContaining({
+        kind: "entrada",
+        quantity: 4,
+        balance: 4,
+        unitCostCents: 6800,
+        actorName: "Mario Huamán",
+      }),
     ])
     expect(
-      (await call("lucia", "POST", `${base}/variantes/${blanca38}/movimientos`, { kind: "entrada", quantity: 9 }))
-        .status,
+      (
+        await call("lucia", "POST", `${base}/variantes/${blanca38}/movimientos`, {
+          kind: "entrada",
+          quantity: 9,
+        })
+      ).status,
     ).toBe(403)
   })
 
@@ -296,9 +373,18 @@ describe("el stock y su kardex (decisión 3)", () => {
         return fn(tx)
       })
     const stock = async (id: string) =>
-      (await db.ownerDb.select({ s: productVariant.stock }).from(productVariant).where(eq(productVariant.id, id)))[0]!.s
-    await inStoreTx((tx) => recordSale(tx, storeId, "u-lucia", "0142", [{ variantId: blanca38, quantity: 1 }]))
-    await inStoreTx((tx) => recordSale(tx, storeId, "u-lucia", "0142", [{ variantId: blanca38, quantity: 1 }]))
+      (
+        await db.ownerDb
+          .select({ s: productVariant.stock })
+          .from(productVariant)
+          .where(eq(productVariant.id, id))
+      )[0]!.s
+    await inStoreTx((tx) =>
+      recordSale(tx, storeId, "u-lucia", "0142", [{ variantId: blanca38, quantity: 1 }]),
+    )
+    await inStoreTx((tx) =>
+      recordSale(tx, storeId, "u-lucia", "0142", [{ variantId: blanca38, quantity: 1 }]),
+    )
     expect(await stock(blanca38)).toBe(2)
     // La 39 no tiene stock: el pedido entero no descuenta.
     await expect(
@@ -313,7 +399,9 @@ describe("el stock y su kardex (decisión 3)", () => {
     expect(await inStoreTx((tx) => cancelSale(tx, storeId, "u-lucia", "0142"))).toBe(1)
     expect(await inStoreTx((tx) => cancelSale(tx, storeId, "u-lucia", "0142"))).toBe(0)
     expect(await stock(blanca38)).toBe(3)
-    const kinds = (await call("rosa", "GET", `${base}/variantes/${blanca38}/kardex`)).json.movements.map(
+    const kinds = (
+      await call("rosa", "GET", `${base}/variantes/${blanca38}/kardex`)
+    ).json.movements.map(
       (m: { kind: string; reference: string | null }) => `${m.kind}:${m.reference ?? ""}`,
     )
     expect(kinds.slice(0, 2)).toEqual(["anulacion:0142", "venta:0142"])
@@ -339,9 +427,11 @@ describe("el stock y su kardex (decisión 3)", () => {
       ],
     })
     expect(changed.status).toBe(200)
-    expect(changed.json.product.variants.map((v: { optionValues: string[] }) => v.optionValues.join(" ")).sort()).toEqual(
-      ["blanca 38", "blanca 40", "negra 38", "negra 40"],
-    )
+    expect(
+      changed.json.product.variants
+        .map((v: { optionValues: string[] }) => v.optionValues.join(" "))
+        .sort(),
+    ).toEqual(["blanca 38", "blanca 40", "negra 38", "negra 40"])
     const negra40 = variantOf(changed.json.product, "negra", "40")
     const removed = await call("rosa", "DELETE", `${base}/variantes/${negra40}`)
     expect(removed.json.product.variants).toHaveLength(3)
@@ -352,29 +442,53 @@ describe("el precio mínimo y el aviso del costo (tablero 14)", () => {
   it("avisa si queda cerca o bajo el último costo del kardex, y deja guardar igual", async () => {
     // La negra entró después y más barata: el aviso usa la variante que más costó.
     const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
-    await call("rosa", "POST", `${base}/variantes/${variantOf(detail, "negra", "38")}/movimientos`, {
-      kind: "entrada",
-      quantity: 1,
-      unitCostCents: 5500,
+    await call(
+      "rosa",
+      "POST",
+      `${base}/variantes/${variantOf(detail, "negra", "38")}/movimientos`,
+      {
+        kind: "entrada",
+        quantity: 1,
+        unitCostCents: 5500,
+      },
+    )
+    const near = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
+      minPriceCents: 7000,
     })
-    const near = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 7000 })
     expect(near.status).toBe(200)
     expect(near.json.product).toMatchObject({
       minPriceCents: 7000,
       lastCostCents: 6800,
       costWarning: { kind: "cerca", marginCents: 200 },
     })
-    const loss = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 6000 })
-    expect(loss.json.product.costWarning).toEqual({ kind: "perdida", costCents: 6800, lossCents: 800 })
-    const fine = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 10000 })
+    const loss = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
+      minPriceCents: 6000,
+    })
+    expect(loss.json.product.costWarning).toEqual({
+      kind: "perdida",
+      costCents: 6800,
+      lossCents: 800,
+    })
+    const fine = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
+      minPriceCents: 10000,
+    })
     expect(fine.json.product.costWarning).toBeNull()
-    expect((await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 13000 })).status).toBe(400)
+    expect(
+      (await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 13000 }))
+        .status,
+    ).toBe(400)
     // Ventas no cambia precios ni el mínimo.
-    expect((await call("lucia", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 5000 })).status).toBe(403)
+    expect(
+      (await call("lucia", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 5000 }))
+        .status,
+    ).toBe(403)
   })
 
   it("precio por cantidad y promociones que no se pisan; lo parecido y lo que combina", async () => {
-    const sandalia = await call("rosa", "POST", `${base}/productos`, { name: "Sandalia", listPriceCents: 8900 })
+    const sandalia = await call("rosa", "POST", `${base}/productos`, {
+      name: "Sandalia",
+      listPriceCents: 8900,
+    })
     const saved = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
       quantityPrices: [{ minQuantity: 2, unitPriceCents: 11000 }],
       promotions: [{ name: "Cyber", percentOff: 15, startsOn: "2026-11-20", endsOn: "2026-11-23" }],
@@ -387,7 +501,9 @@ describe("el precio mínimo y el aviso del costo (tablero 14)", () => {
     })
     // Desde la sandalia también se ve.
     const fromSandalia = await call("lucia", "GET", `${base}/productos/${sandalia.json.product.id}`)
-    expect(fromSandalia.json.product.links).toEqual([expect.objectContaining({ productId: zapatilla, kind: "combina" })])
+    expect(fromSandalia.json.product.links).toEqual([
+      expect.objectContaining({ productId: zapatilla, kind: "combina" }),
+    ])
     const overlap = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
       promotions: [
         { name: "Cyber", percentOff: 15, startsOn: "2026-11-20", endsOn: "2026-11-23" },
@@ -396,16 +512,26 @@ describe("el precio mínimo y el aviso del costo (tablero 14)", () => {
     })
     expect(overlap.status).toBe(400)
     expect(
-      (await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { quantityPrices: [{ minQuantity: 2, unitPriceCents: 13000 }] }))
-        .status,
+      (
+        await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
+          quantityPrices: [{ minQuantity: 2, unitPriceCents: 13000 }],
+        })
+      ).status,
     ).toBe(400)
   })
 
   it("un producto que ya movió stock no se borra; uno recién creado, sí", async () => {
     expect((await call("rosa", "DELETE", `${base}/productos/${zapatilla}`)).status).toBe(409)
-    const nuevo = await call("rosa", "POST", `${base}/productos`, { name: "Por error", listPriceCents: 100 })
-    expect((await call("lucia", "DELETE", `${base}/productos/${nuevo.json.product.id}`)).status).toBe(403)
-    expect((await call("rosa", "DELETE", `${base}/productos/${nuevo.json.product.id}`)).status).toBe(204)
+    const nuevo = await call("rosa", "POST", `${base}/productos`, {
+      name: "Por error",
+      listPriceCents: 100,
+    })
+    expect(
+      (await call("lucia", "DELETE", `${base}/productos/${nuevo.json.product.id}`)).status,
+    ).toBe(403)
+    expect(
+      (await call("rosa", "DELETE", `${base}/productos/${nuevo.json.product.id}`)).status,
+    ).toBe(204)
   })
 })
 
@@ -426,8 +552,12 @@ describe("las fotos", () => {
     })
     expect(fake.status).toBe(400)
     expect(
-      (await call("lucia", "POST", `${base}/productos/${zapatilla}/fotos`, undefined, { type: "image/png", data: png }))
-        .status,
+      (
+        await call("lucia", "POST", `${base}/productos/${zapatilla}/fotos`, undefined, {
+          type: "image/png",
+          data: png,
+        })
+      ).status,
     ).toBe(403)
     const seen = await call("lucia", "GET", `${base}/fotos/${up.json.photo.id}`)
     expect(seen.status).toBe(200)
@@ -448,7 +578,10 @@ describe("las fotos", () => {
 
 describe("subir una hoja (decisión 10)", () => {
   const csv = (rows: string[]) =>
-    ["Producto;Categoría;Opción 1;Valor 1;Opción 2;Valor 2;Código;Precio;Stock;Costo", ...rows].join("\n")
+    [
+      "Producto;Categoría;Opción 1;Valor 1;Opción 2;Valor 2;Código;Precio;Stock;Costo",
+      ...rows,
+    ].join("\n")
   const sheet = (who: Who, text: string, confirm: boolean) =>
     call(who, "POST", `${base}/catalogo/hoja${confirm ? "?confirmar=1" : ""}`, undefined, {
       type: "text/csv",
@@ -473,9 +606,11 @@ describe("subir una hoja (decisión 10)", () => {
       { row: 4, message: expect.stringContaining("ya está en otra fila") },
       { row: 5, message: expect.stringContaining("ya está en tu catálogo") },
     ])
-    expect((await call("rosa", "GET", `${base}/catalogo`)).json.products.map((p: { name: string }) => p.name)).not.toContain(
-      "Botín",
-    )
+    expect(
+      (await call("rosa", "GET", `${base}/catalogo`)).json.products.map(
+        (p: { name: string }) => p.name,
+      ),
+    ).not.toContain("Botín")
   })
 
   it("sin errores, crea los productos con sus variantes y el stock entra al kardex", async () => {
@@ -505,7 +640,12 @@ describe("subir una hoja (decisión 10)", () => {
     expect(detail.lastCostCents).toBe(15000)
     const kardexOf = await call("rosa", "GET", `${base}/variantes/${detail.variants[0].id}/kardex`)
     expect(kardexOf.json.movements).toEqual([
-      expect.objectContaining({ kind: "entrada", quantity: 2, reason: "Hoja subida", actorName: "Mario Huamán" }),
+      expect.objectContaining({
+        kind: "entrada",
+        quantity: 2,
+        reason: "Hoja subida",
+        actorName: "Mario Huamán",
+      }),
     ])
     // La misma hoja otra vez no duplica: los productos ya están.
     expect((await sheet("mario", text, true)).json.saved).toBe(false)
@@ -522,6 +662,8 @@ describe("cada tienda, lo suyo", () => {
   it("quien no es del equipo no ve ni toca el catálogo ni la configuración", async () => {
     for (const path of ["/catalogo", "/pagos-y-entregas", `/productos/${zapatilla}`])
       expect((await call("ajena", "GET", `${base}${path}`)).status).toBe(404)
-    expect((await call("ajena", "POST", `${base}/productos`, { name: "X", listPriceCents: 1 })).status).toBe(404)
+    expect(
+      (await call("ajena", "POST", `${base}/productos`, { name: "X", listPriceCents: 1 })).status,
+    ).toBe(404)
   })
 })

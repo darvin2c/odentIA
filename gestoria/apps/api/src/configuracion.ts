@@ -1,7 +1,7 @@
 import {
+  type Db,
   DELIVERY_COSTS,
   DELIVERY_TYPES,
-  type Db,
   PAYMENT_COLLECTIONS,
   PAYMENT_TYPE_CODES,
   storeDeliveryMethod,
@@ -30,7 +30,11 @@ const COLLECTION_RANK: Record<(typeof PAYMENT_COLLECTIONS)[number], number> = {
 }
 
 const cents = z.number().int("Escribe un monto válido").min(0).max(100_000_000)
-const positive = z.number().int("Escribe un monto válido").min(1, "Debe ser mayor que 0").max(100_000_000)
+const positive = z
+  .number()
+  .int("Escribe un monto válido")
+  .min(1, "Debe ser mayor que 0")
+  .max(100_000_000)
 
 export const paymentInput = z
   .object({
@@ -116,16 +120,32 @@ export async function paymentsAndDeliveries(appDb: Db, person: Person, storeId: 
   })
 }
 
-async function underLimit(tx: Db, table: typeof storePaymentMethod | typeof storeDeliveryMethod, storeId: string) {
+async function underLimit(
+  tx: Db,
+  table: typeof storePaymentMethod | typeof storeDeliveryMethod,
+  storeId: string,
+) {
   const rows = await tx.select({ id: table.id }).from(table).where(eq(table.storeId, storeId))
   if (rows.length >= MAX_METHODS)
-    throw new StoreError(409, "TOO_MANY", `Hasta ${MAX_METHODS} por tienda. Borra los que ya no usas.`)
+    throw new StoreError(
+      409,
+      "TOO_MANY",
+      `Hasta ${MAX_METHODS} por tienda. Borra los que ya no usas.`,
+    )
 }
 
-export async function createPayment(appDb: Db, person: Person, storeId: string, input: z.infer<typeof paymentInput>) {
+export async function createPayment(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof paymentInput>,
+) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await underLimit(tx, storePaymentMethod, storeId)
-    const [row] = await tx.insert(storePaymentMethod).values({ storeId, ...input }).returning()
+    const [row] = await tx
+      .insert(storePaymentMethod)
+      .values({ storeId, ...input })
+      .returning()
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
@@ -137,7 +157,13 @@ export async function createPayment(appDb: Db, person: Person, storeId: string, 
   })
 }
 
-export async function updatePayment(appDb: Db, person: Person, storeId: string, id: string, patch: z.infer<typeof paymentPatch>) {
+export async function updatePayment(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  id: string,
+  patch: z.infer<typeof paymentPatch>,
+) {
   idOf(id, "medio de pago")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [row] = await tx
@@ -175,10 +201,18 @@ export async function deletePayment(appDb: Db, person: Person, storeId: string, 
   })
 }
 
-export async function createDelivery(appDb: Db, person: Person, storeId: string, input: z.infer<typeof deliveryInput>) {
+export async function createDelivery(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof deliveryInput>,
+) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await underLimit(tx, storeDeliveryMethod, storeId)
-    const [row] = await tx.insert(storeDeliveryMethod).values({ storeId, ...input }).returning()
+    const [row] = await tx
+      .insert(storeDeliveryMethod)
+      .values({ storeId, ...input })
+      .returning()
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
@@ -190,7 +224,13 @@ export async function createDelivery(appDb: Db, person: Person, storeId: string,
   })
 }
 
-export async function updateDelivery(appDb: Db, person: Person, storeId: string, id: string, patch: z.infer<typeof deliveryPatch>) {
+export async function updateDelivery(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  id: string,
+  patch: z.infer<typeof deliveryPatch>,
+) {
   idOf(id, "forma de entrega")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [row] = await tx

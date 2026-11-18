@@ -35,15 +35,15 @@ import {
   type ProductDetail,
   type Promotion,
   priceRange,
-  readMoney,
   type Relation,
+  readMoney,
   type Variant,
   variantName,
 } from "./lib/tienda"
 import {
-  fieldErrors,
   FormAlert,
   FormSheet,
+  fieldErrors,
   MoneyField,
   Photo,
   SELECT_CLASSES,
@@ -60,10 +60,23 @@ import { ErrorBlock, useStoreContext } from "./tiendas"
 
 const PRODUCT_KEY = (storeId: string, productId: string) => ["producto", storeId, productId]
 
-function Card({ title, description, action, children }: { title: string; description?: ReactNode; action?: ReactNode; children: ReactNode }) {
+function Card({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string
+  description?: ReactNode
+  action?: ReactNode
+  children: ReactNode
+}) {
   const id = useId()
   return (
-    <section aria-labelledby={id} className="elevated flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-5">
+    <section
+      aria-labelledby={id}
+      className="elevated flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-5"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <h3 id={id} className="text-base font-semibold">
@@ -84,7 +97,8 @@ export function ProductPage() {
   const canEdit = store.permissions.includes("configuracion")
   const product = useQuery({
     queryKey: PRODUCT_KEY(store.id, productId),
-    queryFn: () => api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/productos/${productId}`),
+    queryFn: () =>
+      api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/productos/${productId}`),
   })
   const back = (
     <Link
@@ -96,7 +110,13 @@ export function ProductPage() {
       Catálogo
     </Link>
   )
-  if (product.isPending) return <>{back}<p className="text-sm text-muted-foreground">Cargando el producto…</p></>
+  if (product.isPending)
+    return (
+      <>
+        {back}
+        <p className="text-sm text-muted-foreground">Cargando el producto…</p>
+      </>
+    )
   if (product.isError)
     return (
       <>
@@ -111,12 +131,19 @@ export function ProductPage() {
       <div className="flex flex-col gap-1">
         <h2 className="text-xl font-bold">{p.name}</h2>
         <p className="text-sm text-muted-foreground">
-          {[p.category, priceRange(p.fromCents, p.toCents, store.currency), `${p.variants.length} ${p.variants.length === 1 ? "variante" : "variantes"}`, `${p.variants.reduce((n, v) => n + v.stock, 0)} en stock`]
+          {[
+            p.category,
+            priceRange(p.fromCents, p.toCents, store.currency),
+            `${p.variants.length} ${p.variants.length === 1 ? "variante" : "variantes"}`,
+            `${p.variants.reduce((n, v) => n + v.stock, 0)} en stock`,
+          ]
             .filter(Boolean)
             .join(" · ")}
         </p>
         {canEdit ? null : (
-          <p className="text-sm text-muted-foreground">Lo ves como Ventas: los cambios los hacen el dueño o un administrador.</p>
+          <p className="text-sm text-muted-foreground">
+            Lo ves como Ventas: los cambios los hacen el dueño o un administrador.
+          </p>
         )}
       </div>
       <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:items-start">
@@ -165,7 +192,9 @@ function DataCard({ product, canEdit }: { product: ProductDetail; canEdit: boole
   const [local, setLocal] = useState<Record<string, string>>({})
   const descriptionId = useId()
   const categoriesId = useId()
-  const categories = [...new Set((catalog.data?.products ?? []).map((c) => c.category).filter(Boolean))]
+  const categories = [
+    ...new Set((catalog.data?.products ?? []).map((c) => c.category).filter(Boolean)),
+  ]
 
   function submit() {
     const options = optionsOf(drafts)
@@ -190,7 +219,13 @@ function DataCard({ product, canEdit }: { product: ProductDetail; canEdit: boole
       >
         <fieldset disabled={!canEdit} className="contents">
           <FieldGroup className="gap-5">
-            <TextField label="Nombre" value={name} onChange={setName} error={shown.name} maxLength={120} />
+            <TextField
+              label="Nombre"
+              value={name}
+              onChange={setName}
+              error={shown.name}
+              maxLength={120}
+            />
             <Field>
               <FieldLabel htmlFor={`${categoriesId}-input`}>Categoría</FieldLabel>
               <Input
@@ -215,9 +250,16 @@ function DataCard({ product, canEdit }: { product: ProductDetail; canEdit: boole
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
-              <FieldDescription>Material, horma, cuidados. Sofi no inventa lo que no está aquí.</FieldDescription>
+              <FieldDescription>
+                Material, horma, cuidados. Sofi no inventa lo que no está aquí.
+              </FieldDescription>
             </Field>
-            <OptionsEditor drafts={drafts} onChange={setDrafts} error={optionsError(shown)} disabled={!canEdit} />
+            <OptionsEditor
+              drafts={drafts}
+              onChange={setDrafts}
+              error={optionsError(shown)}
+              disabled={!canEdit}
+            />
             <FormAlert error={save.error} />
             {canEdit ? (
               <SubmitButton type="submit" pending={save.isPending} className="self-start">
@@ -243,7 +285,10 @@ function CostNotice({ product }: { product: ProductDetail }) {
         ? `Es justo lo que te costó (${money(w.costCents, store.currency)}, la última entrada del kardex). Si es una liquidación, déjalo así.`
         : `Está a ${money(w.marginCents, store.currency)} de lo que te costó (${money(w.costCents, store.currency)}, la última entrada del kardex). Si es una liquidación, déjalo así.`
   return (
-    <p role="status" className="rounded-lg border border-warning/50 bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
+    <p
+      role="status"
+      className="rounded-lg border border-warning/50 bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground"
+    >
       {text}
     </p>
   )
@@ -255,7 +300,10 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
   const [list, setList] = useState(moneyInput(product.listPriceCents, currency))
   const [min, setMin] = useState(moneyInput(product.minPriceCents, currency))
   const [tiers, setTiers] = useState(
-    product.quantityPrices.map((t) => ({ quantity: String(t.minQuantity), price: moneyInput(t.unitPriceCents, currency) })),
+    product.quantityPrices.map((t) => ({
+      quantity: String(t.minQuantity),
+      price: moneyInput(t.unitPriceCents, currency),
+    })),
   )
   const [promos, setPromos] = useState<Promotion[]>(product.promotions)
   const save = useSaveProduct(product, "Precios guardados")
@@ -269,15 +317,34 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
     const next: Record<string, string> = {}
     if (!listCents) next.listPriceCents = "Escribe el precio, como 129 o 129.90"
     if (min.trim() && !minCents) next.minPriceCents = "Escribe el precio mínimo, o déjalo vacío"
-    if (listCents && minCents && minCents > listCents) next.minPriceCents = "El mínimo no puede ser mayor que el de lista"
-    const quantityPrices = tiers.map((t) => ({ minQuantity: Number(t.quantity), unitPriceCents: readMoney(t.price, currency) }))
-    if (quantityPrices.some((t) => !Number.isInteger(t.minQuantity) || t.minQuantity < 2 || !t.unitPriceCents))
-      next.quantityPrices = "Cada precio por cantidad necesita desde cuántas unidades (2 o más) y su precio"
-    if (promos.some((p) => !p.name.trim() || !p.startsOn || !p.endsOn || !(p.percentOff >= 1 && p.percentOff <= 90)))
+    if (listCents && minCents && minCents > listCents)
+      next.minPriceCents = "El mínimo no puede ser mayor que el de lista"
+    const quantityPrices = tiers.map((t) => ({
+      minQuantity: Number(t.quantity),
+      unitPriceCents: readMoney(t.price, currency),
+    }))
+    if (
+      quantityPrices.some(
+        (t) => !Number.isInteger(t.minQuantity) || t.minQuantity < 2 || !t.unitPriceCents,
+      )
+    )
+      next.quantityPrices =
+        "Cada precio por cantidad necesita desde cuántas unidades (2 o más) y su precio"
+    if (
+      promos.some(
+        (p) =>
+          !p.name.trim() || !p.startsOn || !p.endsOn || !(p.percentOff >= 1 && p.percentOff <= 90),
+      )
+    )
       next.promotions = "Cada promoción necesita su nombre, el porcentaje (1 a 90) y sus fechas"
     setLocal(next)
     if (Object.keys(next).length > 0) return
-    save.mutate({ listPriceCents: listCents, minPriceCents: minCents, quantityPrices, promotions: promos })
+    save.mutate({
+      listPriceCents: listCents,
+      minPriceCents: minCents,
+      quantityPrices,
+      promotions: promos,
+    })
   }
 
   const firstError = (prefix: string) =>
@@ -325,7 +392,9 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
             <CostNotice product={product} />
             <FieldSet>
               <FieldLegend variant="label">Precio por cantidad</FieldLegend>
-              <FieldDescription>No se suma con una promoción: va el mejor para el cliente.</FieldDescription>
+              <FieldDescription>
+                No se suma con una promoción: va el mejor para el cliente.
+              </FieldDescription>
               {tiers.map((tier, i) => {
                 const unit = readMoney(tier.price, currency)
                 const qty = Number(tier.quantity)
@@ -336,15 +405,21 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                       label="Desde"
                       inputMode="numeric"
                       value={tier.quantity}
-                      onChange={(quantity) => setTiers(tiers.map((t, j) => (j === i ? { ...t, quantity } : t)))}
+                      onChange={(quantity) =>
+                        setTiers(tiers.map((t, j) => (j === i ? { ...t, quantity } : t)))
+                      }
                       help="unidades"
                     />
                     <MoneyField
                       label="Cada una a"
                       currency={currency}
                       value={tier.price}
-                      onChange={(price) => setTiers(tiers.map((t, j) => (j === i ? { ...t, price } : t)))}
-                      help={unit && qty >= 2 ? `${qty} cuestan ${money(unit * qty, currency)}` : " "}
+                      onChange={(price) =>
+                        setTiers(tiers.map((t, j) => (j === i ? { ...t, price } : t)))
+                      }
+                      help={
+                        unit && qty >= 2 ? `${qty} cuestan ${money(unit * qty, currency)}` : " "
+                      }
                     />
                     {canEdit ? (
                       <Button
@@ -362,17 +437,29 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                 )
               })}
               {canEdit && tiers.length < 5 ? (
-                <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setTiers([...tiers, { quantity: "2", price: "" }])}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => setTiers([...tiers, { quantity: "2", price: "" }])}
+                >
                   <Plus aria-hidden />
                   Precio por cantidad
                 </Button>
               ) : null}
-              {tiers.length === 0 && !canEdit ? <p className="text-sm text-muted-foreground">Sin precio por cantidad.</p> : null}
-              {firstError("quantityPrices") ? <FieldError>{firstError("quantityPrices")}</FieldError> : null}
+              {tiers.length === 0 && !canEdit ? (
+                <p className="text-sm text-muted-foreground">Sin precio por cantidad.</p>
+              ) : null}
+              {firstError("quantityPrices") ? (
+                <FieldError>{firstError("quantityPrices")}</FieldError>
+              ) : null}
             </FieldSet>
             <FieldSet>
               <FieldLegend variant="label">Promociones</FieldLegend>
-              <FieldDescription>Un porcentaje menos, de un día a otro. No se pisan ni se suman.</FieldDescription>
+              <FieldDescription>
+                Un porcentaje menos, de un día a otro. No se pisan ni se suman.
+              </FieldDescription>
               {promos.map((promo, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id hasta guardarse
                 <div key={i} className="flex flex-col gap-2 rounded-lg border p-3">
@@ -380,7 +467,9 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                     <TextField
                       label="Nombre"
                       value={promo.name}
-                      onChange={(name) => setPromos(promos.map((p, j) => (j === i ? { ...p, name } : p)))}
+                      onChange={(name) =>
+                        setPromos(promos.map((p, j) => (j === i ? { ...p, name } : p)))
+                      }
                       maxLength={60}
                       placeholder="Cyber"
                     />
@@ -388,7 +477,13 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                       label="% menos"
                       inputMode="numeric"
                       value={promo.percentOff ? String(promo.percentOff) : ""}
-                      onChange={(v) => setPromos(promos.map((p, j) => (j === i ? { ...p, percentOff: Number(v.replace(/\D/g, "")) } : p)))}
+                      onChange={(v) =>
+                        setPromos(
+                          promos.map((p, j) =>
+                            j === i ? { ...p, percentOff: Number(v.replace(/\D/g, "")) } : p,
+                          ),
+                        )
+                      }
                     />
                     {canEdit ? (
                       <Button
@@ -408,7 +503,9 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                       <DatePickerButton
                         value={promo.startsOn}
                         disabled={!canEdit}
-                        onChange={(startsOn) => setPromos(promos.map((p, j) => (j === i ? { ...p, startsOn } : p)))}
+                        onChange={(startsOn) =>
+                          setPromos(promos.map((p, j) => (j === i ? { ...p, startsOn } : p)))
+                        }
                       />
                     </Field>
                     <Field>
@@ -417,13 +514,20 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                         value={promo.endsOn}
                         min={promo.startsOn || undefined}
                         disabled={!canEdit}
-                        onChange={(endsOn) => setPromos(promos.map((p, j) => (j === i ? { ...p, endsOn } : p)))}
+                        onChange={(endsOn) =>
+                          setPromos(promos.map((p, j) => (j === i ? { ...p, endsOn } : p)))
+                        }
                       />
                     </Field>
                   </div>
-                  {promo.percentOff >= 1 && listCents && minCents && Math.round(listCents * (1 - promo.percentOff / 100)) < minCents ? (
+                  {promo.percentOff >= 1 &&
+                  listCents &&
+                  minCents &&
+                  Math.round(listCents * (1 - promo.percentOff / 100)) < minCents ? (
                     <p className="text-sm text-muted-foreground">
-                      Con esta promoción cuesta {money(Math.round(listCents * (1 - promo.percentOff / 100)), currency)}, menos que el mínimo.
+                      Con esta promoción cuesta{" "}
+                      {money(Math.round(listCents * (1 - promo.percentOff / 100)), currency)}, menos
+                      que el mínimo.
                     </p>
                   ) : null}
                 </div>
@@ -434,14 +538,20 @@ function PriceCard({ product, canEdit }: { product: ProductDetail; canEdit: bool
                   variant="outline"
                   size="sm"
                   className="self-start"
-                  onClick={() => setPromos([...promos, { name: "", percentOff: 10, startsOn: "", endsOn: "" }])}
+                  onClick={() =>
+                    setPromos([...promos, { name: "", percentOff: 10, startsOn: "", endsOn: "" }])
+                  }
                 >
                   <Plus aria-hidden />
                   Promoción
                 </Button>
               ) : null}
-              {promos.length === 0 && !canEdit ? <p className="text-sm text-muted-foreground">Sin promociones.</p> : null}
-              {firstError("promotions") ? <FieldError>{firstError("promotions")}</FieldError> : null}
+              {promos.length === 0 && !canEdit ? (
+                <p className="text-sm text-muted-foreground">Sin promociones.</p>
+              ) : null}
+              {firstError("promotions") ? (
+                <FieldError>{firstError("promotions")}</FieldError>
+              ) : null}
             </FieldSet>
             <FormAlert error={save.error} />
             {canEdit ? (
@@ -460,7 +570,8 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
-  const refresh = () => queryClient.invalidateQueries({ queryKey: PRODUCT_KEY(store.id, product.id) })
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: PRODUCT_KEY(store.id, product.id) })
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
       for (const file of files) {
@@ -482,7 +593,8 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
     },
   })
   const remove = useMutation({
-    mutationFn: (photoId: string) => api(`/api/tiendas/${store.id}/fotos/${photoId}`, { method: "DELETE" }),
+    mutationFn: (photoId: string) =>
+      api(`/api/tiendas/${store.id}/fotos/${photoId}`, { method: "DELETE" }),
     onSuccess: async () => {
       await refresh()
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
@@ -492,11 +604,23 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
   })
   const full = product.photos.length >= 8
   return (
-    <Card title="Fotos" description={product.photos.length === 0 ? "La primera es la que se ve en el catálogo. Hasta 8." : undefined}>
+    <Card
+      title="Fotos"
+      description={
+        product.photos.length === 0
+          ? "La primera es la que se ve en el catálogo. Hasta 8."
+          : undefined
+      }
+    >
       <div className="flex flex-wrap gap-2">
         {product.photos.map((photo, i) => (
           <div key={photo.id} className="relative">
-            <Photo storeId={store.id} photoId={photo.id} alt={`Foto ${i + 1} de ${product.name}`} className="size-20" />
+            <Photo
+              storeId={store.id}
+              photoId={photo.id}
+              alt={`Foto ${i + 1} de ${product.name}`}
+              className="size-20"
+            />
             {canEdit ? (
               <Button
                 type="button"
@@ -524,7 +648,9 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
             {upload.isPending ? "Subiendo…" : "Subir"}
           </Button>
         ) : null}
-        {!canEdit && product.photos.length === 0 ? <p className="text-sm text-muted-foreground">Sin fotos.</p> : null}
+        {!canEdit && product.photos.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Sin fotos.</p>
+        ) : null}
       </div>
       <input
         ref={input}
@@ -552,7 +678,9 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
   const queryClient = useQueryClient()
   const remove = useMutation({
     mutationFn: (variant: Variant) =>
-      api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/variantes/${variant.id}`, { method: "DELETE" }),
+      api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/variantes/${variant.id}`, {
+        method: "DELETE",
+      }),
     onSuccess: async (result) => {
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
@@ -577,11 +705,18 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
             <div className="flex min-w-32 flex-1 flex-col">
               <span className="truncate text-sm font-medium">{variantName(variant)}</span>
               <span className="truncate text-xs text-muted-foreground">
-                {variant.sku} · {variant.priceCents ? money(variant.priceCents, store.currency) : "precio del producto"}
+                {variant.sku} ·{" "}
+                {variant.priceCents
+                  ? money(variant.priceCents, store.currency)
+                  : "precio del producto"}
               </span>
             </div>
             <span className="w-20 text-right text-sm tabular-nums">
-              {variant.stock === 0 ? <Badge variant="outline">Agotado</Badge> : `${variant.stock} en stock`}
+              {variant.stock === 0 ? (
+                <Badge variant="outline">Agotado</Badge>
+              ) : (
+                `${variant.stock} en stock`
+              )}
             </span>
             <div className="flex gap-1">
               <Button variant="outline" size="sm" onClick={() => setKardexOf(variant)}>
@@ -607,9 +742,16 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
         ))}
       </ul>
       {kardexOf ? (
-        <KardexSheet product={product} variant={kardexOf} canEdit={canEdit} onClose={() => setKardexOf(null)} />
+        <KardexSheet
+          product={product}
+          variant={kardexOf}
+          canEdit={canEdit}
+          onClose={() => setKardexOf(null)}
+        />
       ) : null}
-      {editing ? <VariantSheet product={product} variant={editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? (
+        <VariantSheet product={product} variant={editing} onClose={() => setEditing(null)} />
+      ) : null}
       <ConfirmDialog
         open={Boolean(removing)}
         title={`¿Quitar «${removing ? variantName(removing) : ""}»?`}
@@ -632,7 +774,15 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
   )
 }
 
-function VariantSheet({ product, variant, onClose }: { product: ProductDetail; variant: Variant; onClose: () => void }) {
+function VariantSheet({
+  product,
+  variant,
+  onClose,
+}: {
+  product: ProductDetail
+  variant: Variant
+  onClose: () => void
+}) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   const [sku, setSku] = useState(variant.sku)
@@ -641,7 +791,10 @@ function VariantSheet({ product, variant, onClose }: { product: ProductDetail; v
   const [local, setLocal] = useState<Record<string, string>>({})
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/variantes/${variant.id}`, { method: "PATCH", body }),
+      api<{ product: ProductDetail }>(`/api/tiendas/${store.id}/variantes/${variant.id}`, {
+        method: "PATCH",
+        body,
+      }),
     onSuccess: async (result) => {
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
@@ -654,8 +807,10 @@ function VariantSheet({ product, variant, onClose }: { product: ProductDetail; v
   function submit() {
     const priceCents = price.trim() ? readMoney(price, store.currency) : null
     const next: Record<string, string> = {}
-    if (price.trim() && !priceCents) next.priceCents = "Escribe el precio, o déjalo vacío para usar el del producto"
-    if (!/^[A-Za-z0-9._/-]{1,40}$/.test(sku.trim())) next.sku = "Hasta 40 letras, números, puntos o guiones, sin espacios"
+    if (price.trim() && !priceCents)
+      next.priceCents = "Escribe el precio, o déjalo vacío para usar el del producto"
+    if (!/^[A-Za-z0-9._/-]{1,40}$/.test(sku.trim()))
+      next.sku = "Hasta 40 letras, números, puntos o guiones, sin espacios"
     setLocal(next)
     if (Object.keys(next).length > 0) return
     save.mutate({ sku: sku.trim(), priceCents, photoId: photoId || null })
@@ -679,7 +834,14 @@ function VariantSheet({ product, variant, onClose }: { product: ProductDetail; v
       }
     >
       <FieldGroup className="gap-5">
-        <TextField label="Código" value={sku} onChange={setSku} error={shown.sku} maxLength={40} help="El de tu inventario o el de Meta. Único en la tienda." />
+        <TextField
+          label="Código"
+          value={sku}
+          onChange={setSku}
+          error={shown.sku}
+          maxLength={40}
+          help="El de tu inventario o el de Meta. Único en la tienda."
+        />
         <MoneyField
           label="Precio propio (opcional)"
           currency={store.currency}
@@ -690,7 +852,12 @@ function VariantSheet({ product, variant, onClose }: { product: ProductDetail; v
         />
         <Field>
           <FieldLabel htmlFor={photoSelect}>Foto</FieldLabel>
-          <select id={photoSelect} className={SELECT_CLASSES} value={photoId} onChange={(e) => setPhotoId(e.target.value)}>
+          <select
+            id={photoSelect}
+            className={SELECT_CLASSES}
+            value={photoId}
+            onChange={(e) => setPhotoId(e.target.value)}
+          >
             <option value="">La del producto</option>
             {product.photos.map((photo, i) => (
               <option key={photo.id} value={photo.id}>
@@ -698,8 +865,12 @@ function VariantSheet({ product, variant, onClose }: { product: ProductDetail; v
               </option>
             ))}
           </select>
-          {photoId ? <Photo storeId={store.id} photoId={photoId} alt="La foto elegida" className="size-20" /> : null}
-          {product.photos.length === 0 ? <FieldDescription>Sube fotos en el producto para elegir una aquí.</FieldDescription> : null}
+          {photoId ? (
+            <Photo storeId={store.id} photoId={photoId} alt="La foto elegida" className="size-20" />
+          ) : null}
+          {product.photos.length === 0 ? (
+            <FieldDescription>Sube fotos en el producto para elegir una aquí.</FieldDescription>
+          ) : null}
         </Field>
         <FormAlert error={save.error} />
       </FieldGroup>
@@ -723,7 +894,10 @@ function KardexSheet({
   const key = ["kardex", store.id, variant.id]
   const kardex = useQuery({
     queryKey: key,
-    queryFn: () => api<{ stock: number; movements: Movement[] }>(`/api/tiendas/${store.id}/variantes/${variant.id}/kardex`),
+    queryFn: () =>
+      api<{ stock: number; movements: Movement[] }>(
+        `/api/tiendas/${store.id}/variantes/${variant.id}/kardex`,
+      ),
   })
   const [kind, setKind] = useState<"entrada" | "ajuste">("entrada")
   const [quantity, setQuantity] = useState("")
@@ -755,12 +929,19 @@ function KardexSheet({
     if (kind === "entrada") {
       if (!Number.isInteger(n) || n < 1) next.quantity = "Escribe cuántas entran"
       const costCents = cost.trim() ? readMoney(cost, store.currency) : null
-      if (cost.trim() && costCents === null) next.unitCostCents = "Escribe el costo, como 68 o 68.50, o déjalo vacío"
+      if (cost.trim() && costCents === null)
+        next.unitCostCents = "Escribe el costo, como 68 o 68.50, o déjalo vacío"
       setLocal(next)
       if (Object.keys(next).length > 0) return
-      move.mutate({ kind, quantity: n, unitCostCents: costCents, reason: reason.trim() || undefined })
+      move.mutate({
+        kind,
+        quantity: n,
+        unitCostCents: costCents,
+        reason: reason.trim() || undefined,
+      })
     } else {
-      if (quantity.trim() === "" || !Number.isInteger(n) || n < 0) next.counted = "Escribe cuántas hay de verdad, 0 o más"
+      if (quantity.trim() === "" || !Number.isInteger(n) || n < 0)
+        next.counted = "Escribe cuántas hay de verdad, 0 o más"
       if (reason.trim().length < 3) next.reason = "Escribe el motivo del ajuste, como «par dañado»"
       setLocal(next)
       if (Object.keys(next).length > 0) return
@@ -768,7 +949,8 @@ function KardexSheet({
     }
   }
 
-  const when = (iso: string) => new Date(iso).toLocaleDateString("es", { day: "numeric", month: "short" })
+  const when = (iso: string) =>
+    new Date(iso).toLocaleDateString("es", { day: "numeric", month: "short" })
 
   return (
     <FormSheet
@@ -830,7 +1012,13 @@ function KardexSheet({
             </FieldSet>
             {kind === "entrada" ? (
               <div className="grid grid-cols-2 gap-3">
-                <TextField label="Cuántas entran" inputMode="numeric" value={quantity} onChange={setQuantity} error={shown.quantity} />
+                <TextField
+                  label="Cuántas entran"
+                  inputMode="numeric"
+                  value={quantity}
+                  onChange={setQuantity}
+                  error={shown.quantity}
+                />
                 <MoneyField
                   label="Costo por unidad"
                   currency={store.currency}
@@ -851,14 +1039,18 @@ function KardexSheet({
               />
             )}
             <Field data-invalid={shown.reason ? true : undefined}>
-              <FieldLabel htmlFor={reasonId}>{kind === "ajuste" ? "Motivo" : "Nota (opcional)"}</FieldLabel>
+              <FieldLabel htmlFor={reasonId}>
+                {kind === "ajuste" ? "Motivo" : "Nota (opcional)"}
+              </FieldLabel>
               <Textarea
                 id={reasonId}
                 rows={2}
                 maxLength={300}
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder={kind === "ajuste" ? "par dañado, conteo de fin de mes" : "compra al proveedor"}
+                placeholder={
+                  kind === "ajuste" ? "par dañado, conteo de fin de mes" : "compra al proveedor"
+                }
                 aria-invalid={shown.reason ? true : undefined}
               />
               {shown.reason ? <FieldError>{shown.reason}</FieldError> : null}
@@ -869,7 +1061,9 @@ function KardexSheet({
         <div className="flex flex-col gap-2">
           <h4 className="text-sm font-semibold">Movimientos</h4>
           {kardex.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-          {kardex.isError ? <ErrorState error={kardex.error} onRetry={() => void kardex.refetch()} /> : null}
+          {kardex.isError ? (
+            <ErrorState error={kardex.error} onRetry={() => void kardex.refetch()} />
+          ) : null}
           {kardex.data && kardex.data.movements.length === 0 ? (
             <p className="text-sm text-muted-foreground">Todavía sin movimientos: el stock es 0.</p>
           ) : null}
@@ -891,10 +1085,16 @@ function KardexSheet({
                       {MOVEMENT_NAMES[m.kind]}
                       {m.reference ? ` ${m.reference}` : ""}
                       {m.reason ? ` · «${m.reason}»` : ""}
-                      {m.unitCostCents !== null ? ` · ${money(m.unitCostCents, store.currency)} c/u` : ""}
-                      {m.actorName ? <span className="text-muted-foreground"> · {m.actorName}</span> : null}
+                      {m.unitCostCents !== null
+                        ? ` · ${money(m.unitCostCents, store.currency)} c/u`
+                        : ""}
+                      {m.actorName ? (
+                        <span className="text-muted-foreground"> · {m.actorName}</span>
+                      ) : null}
                     </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">{m.quantity > 0 ? `+${m.quantity}` : `−${-m.quantity}`}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">
+                      {m.quantity > 0 ? `+${m.quantity}` : `−${-m.quantity}`}
+                    </td>
                     <td className="py-1.5 text-right tabular-nums">{m.balance}</td>
                   </tr>
                 ))}
@@ -918,13 +1118,19 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
   const selectId = useId()
   const kindId = useId()
   const options = (catalog.data?.products ?? []).filter(
-    (p) => p.id !== product.id && !product.links.some((l) => l.productId === p.id && l.kind === kind),
+    (p) =>
+      p.id !== product.id && !product.links.some((l) => l.productId === p.id && l.kind === kind),
   )
   const links = (next: { productId: string; kind: Relation }[]) => save.mutate({ links: next })
   const current = product.links.map((l) => ({ productId: l.productId, kind: l.kind }))
   return (
-    <Card title="Sofi lo recomienda con" description="Lo parecido, si no hay su talla; lo que combina, para sumar al mismo despacho.">
-      {product.links.length === 0 ? <p className="text-sm text-muted-foreground">Sin productos relacionados.</p> : null}
+    <Card
+      title="Sofi lo recomienda con"
+      description="Lo parecido, si no hay su talla; lo que combina, para sumar al mismo despacho."
+    >
+      {product.links.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Sin productos relacionados.</p>
+      ) : null}
       {(Object.keys(RELATIONS) as Relation[]).map((k) => {
         const list = product.links.filter((l) => l.kind === k)
         if (list.length === 0) return null
@@ -933,8 +1139,15 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
             <span className="text-sm font-medium">{RELATIONS[k]}</span>
             <ul className="flex flex-wrap gap-2">
               {list.map((l) => (
-                <li key={l.productId} className="flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-3 text-sm">
-                  <Link to="/tiendas/$id/catalogo/$productId" params={{ id: store.id, productId: l.productId }} className="hover:underline">
+                <li
+                  key={l.productId}
+                  className="flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-3 text-sm"
+                >
+                  <Link
+                    to="/tiendas/$id/catalogo/$productId"
+                    params={{ id: store.id, productId: l.productId }}
+                    className="hover:underline"
+                  >
                     {l.name}
                   </Link>
                   {canEdit ? (
@@ -944,7 +1157,13 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
                       className="rounded-full"
                       aria-label={`Quitar ${l.name}`}
                       disabled={save.isPending}
-                      onClick={() => links(current.filter((c) => !(c.productId === l.productId && c.kind === l.kind)))}
+                      onClick={() =>
+                        links(
+                          current.filter(
+                            (c) => !(c.productId === l.productId && c.kind === l.kind),
+                          ),
+                        )
+                      }
                     >
                       <X aria-hidden />
                     </Button>
@@ -968,7 +1187,12 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
         >
           <Field className="w-36">
             <FieldLabel htmlFor={kindId}>Cómo</FieldLabel>
-            <select id={kindId} className={SELECT_CLASSES} value={kind} onChange={(e) => setKind(e.target.value as Relation)}>
+            <select
+              id={kindId}
+              className={SELECT_CLASSES}
+              value={kind}
+              onChange={(e) => setKind(e.target.value as Relation)}
+            >
               {(Object.keys(RELATIONS) as Relation[]).map((k) => (
                 <option key={k} value={k}>
                   {RELATIONS[k]}
@@ -978,7 +1202,12 @@ function RelatedCard({ product, canEdit }: { product: ProductDetail; canEdit: bo
           </Field>
           <Field className="min-w-40 flex-1">
             <FieldLabel htmlFor={selectId}>Producto</FieldLabel>
-            <select id={selectId} className={SELECT_CLASSES} value={other} onChange={(e) => setOther(e.target.value)}>
+            <select
+              id={selectId}
+              className={SELECT_CLASSES}
+              value={other}
+              onChange={(e) => setOther(e.target.value)}
+            >
               <option value="">Elige un producto</option>
               {options.map((p) => (
                 <option key={p.id} value={p.id}>

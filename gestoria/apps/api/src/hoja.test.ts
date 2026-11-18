@@ -81,9 +81,9 @@ describe("la hoja", () => {
   })
 
   it("dice qué falta en la cabecera y las opciones que no coinciden entre filas", () => {
-    expect(planSheet("Nombre;Precio\nx;1", "PEN", new Set(), new Set()).errors[0]?.message).toContain(
-      "«Producto»",
-    )
+    expect(
+      planSheet("Nombre;Precio\nx;1", "PEN", new Set(), new Set()).errors[0]?.message,
+    ).toContain("«Producto»")
     const plan = planSheet(
       "Producto;Opción 1;Valor 1;Precio;Stock\nPolo;Talla;S;30;1\nPolo;Color;rojo;30;1\nPolo;;;30;1",
       "PEN",
@@ -91,5 +91,17 @@ describe("la hoja", () => {
       new Set(),
     )
     expect(plan.errors.map((e) => e.row)).toEqual([3, 4])
+  })
+
+  it("2000 filas contra un catálogo de 2000 productos se revisan rápido (no traba el servidor)", () => {
+    const existing = new Set(
+      Array.from({ length: 2000 }, (_, i) => `Producto ya cargado número ${i}`),
+    )
+    const rows = Array.from({ length: 2000 }, (_, i) => `Producto nuevo número ${i};10;1`)
+    const started = performance.now()
+    const text = ["Producto;Precio;Stock", ...rows].join(String.fromCharCode(10))
+    const plan = planSheet(text, "PEN", existing, new Set())
+    expect(plan.products).toHaveLength(2000)
+    expect(performance.now() - started).toBeLessThan(1500)
   })
 })
