@@ -12,6 +12,7 @@ import {
   encounterPlanItem,
   serviceCatalog,
   treatmentPlanItem,
+  treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
   dentalTemplateRule,
@@ -213,6 +214,26 @@ export interface DentalEncounterDetailParts {
  * huesos) en la fila del plan.
  */
 const SURGICAL_KINDS: ReadonlySet<string | null> = new Set(["cirugia", "implantologia"])
+/**
+ * La cirugía que la biblioteca pone en otra especialidad (QA clínica del 18 nov, H1): la periapical
+ * (apicectomía, de endodoncia) y la periodontal que abre encía o hueso (colgajos, injertos,
+ * gingivectomía, alargamiento de corona, regeneración), de periodoncia. Por el comienzo de su clave
+ * en `seeds/biblioteca.csv`. AAOMS 2022 pone el riesgo de osteonecrosis en la cirugía dentoalveolar
+ * que expone hueso, también la periapical y la periodontal; SDCEP 2022 (anticoagulantes) las pone
+ * entre las de más riesgo de sangrado. Fuera: el raspado, el curetaje y la endodoncia convencional.
+ */
+const SURGICAL_KEY_PREFIXES: readonly string[] = [
+  "apicectomia-",
+  "alargamiento-de-corona-",
+  "aloinjerto-de-tejido-blando",
+  "cirugia-periodontal-",
+  "colgajo-",
+  "gingivectomia-",
+  "injerto-de-tejido-conectivo",
+  "injerto-gingival-libre",
+  "regeneracion-guiada-",
+  "regeneracion-osea",
+]
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
@@ -408,12 +429,20 @@ export const dentalHooks: ProductHooks = {
       )
     const out = new Set(rows.map((row) => row.serviceId))
     const services = await tx
-      .select({ id: serviceCatalog.id, templateId: serviceCatalog.templateId, specialtyId: serviceCatalog.specialtyId })
+      .select({
+        id: serviceCatalog.id,
+        templateId: serviceCatalog.templateId,
+        specialtyId: serviceCatalog.specialtyId,
+        libraryKey: treatmentTemplate.key,
+      })
       .from(serviceCatalog)
+      .leftJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
       .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, [...serviceIds])))
     for (const service of services) {
       if (out.has(service.id)) continue
-      if (SURGICAL_KINDS.has(await serviceKindOf(tx, orgId, service))) out.add(service.id)
+      const key = service.libraryKey
+      if (key && SURGICAL_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) out.add(service.id)
+      else if (SURGICAL_KINDS.has(await serviceKindOf(tx, orgId, service))) out.add(service.id)
     }
     return out
   },

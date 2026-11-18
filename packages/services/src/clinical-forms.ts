@@ -3098,8 +3098,8 @@ export async function createConsentDocument(
 /**
  * Los riesgos propios que se proponen al generar un consentimiento (reglas clínicas del 18 nov):
  * de su ficha (medicación, enfermedades con código y alergias) y del procedimiento. El procedimiento
- * lo dice la plantilla sugerida del producto con esa clave (`riskProfile`); una plantilla propia de
- * la clínica toma lo que dice su servicio (la exodoncia, el implante o la cirugía oral, por
+ * lo dice la plantilla sugerida del producto con esa clave (`riskProfile`), y su servicio si es una
+ * cirugía (la exodoncia, el implante, la cirugía oral, periapical o periodontal, por
  * `extractionServiceIds`). La regla es `consentPersonalRisks` de `@odentia/clinical`.
  */
 async function proposedPersonalRisks(
@@ -3112,9 +3112,14 @@ async function proposedPersonalRisks(
   const hooks = await productHooks(tx, orgId)
   const suggestion = hooks.consentSuggestions.find((row) => row.key === templateKey)
   let profile: ConsentRiskProfile = suggestion?.riskProfile ?? {}
-  // El servicio solo habla por una plantilla propia: la sugerida ya dice su procedimiento, y la de
-  // la anestesia de una exodoncia no consiente la extracción (no lleva el riesgo del hueso).
-  if (!suggestion && planItemId && hooks.extractionServiceIds) {
+  // El servicio habla por una plantilla propia y por una sugerida de un procedimiento (la que piden
+  // sus servicios): la apicectomía con la de endodoncia o el colgajo con la periodontal llevan el
+  // riesgo de la herida y del hueso, con la misma regla que la fila del plan (`extractionServiceIds`,
+  // QA clínica del 18 nov). La de la anestesia, que ningún servicio pide sola, no consiente la
+  // cirugía: no lleva el riesgo del hueso.
+  const consentsProcedure =
+    !suggestion || !!suggestion.servicePrefixes?.length || !!suggestion.serviceFamilies?.length
+  if (consentsProcedure && planItemId && hooks.extractionServiceIds) {
     const [item] = await tx
       .select({ serviceId: treatmentPlanItem.serviceId })
       .from(treatmentPlanItem)
