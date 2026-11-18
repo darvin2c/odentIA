@@ -2,8 +2,6 @@ import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduc
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import {
-  ACCOUNT_APP_INFO,
-  ACCOUNT_APPS,
   type AccountApp,
   appOfProduct,
   BASE_ACCOUNT_APP,
@@ -24,7 +22,7 @@ import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, notExists, or, sql } from "drizzle-orm"
 import { z } from "zod"
-import { recordAccountClosed } from "./account-events.js"
+import { recordAccountBlocked, recordAccountClosed, recordAccountReopened } from "./account-events.js"
 import { clientReadyForAccount, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -370,10 +368,11 @@ export interface LifecycleCandidate {
 
 const appOfSignup = (value: string | null): AccountApp => (isAccountApp(value) ? value : BASE_ACCOUNT_APP)
 
-/** Las apps de clínicas: el aviso «crea tu clínica» es solo de ellas. */
+/**
+ * Las apps de clínicas: los avisos de la cuenta («completa tu cuenta», «crea tu clínica») son
+ * solo de ellas; los de otra app los manda esa app (ADR 0201).
+ */
 const CLINIC_APPS: readonly AccountApp[] = CLINICAL_PRODUCTS.map(appOfProduct)
-/** Las apps con correos de su marca: el recordatorio de verificar sale solo con la suya. */
-const MAILED_APPS: readonly AccountApp[] = ACCOUNT_APPS.filter((app) => ACCOUNT_APP_INFO[app].mailBrand)
 
 // ---------------------------------------------------------------------------
 // Validación de borde (zod) y guards de rol interno
@@ -1262,6 +1261,8 @@ export async function setGlobalBlock(
         unblockedAt: null,
       },
     })
+  // Las apps que son otro sistema se enteran por aviso (ADR 0201).
+  await recordAccountBlocked(tx, args.userId, args.expiresAt ?? null)
   await writeAdminAudit(
     tx,
     staff,
@@ -1277,10 +1278,13 @@ export async function removeGlobalBlock(
   userId: string,
 ): Promise<void> {
   const staff = requireAdmin(actor)
-  await tx
+  const lifted = await tx
     .update(userGlobalBlock)
     .set({ active: false, unblockedBy: staff.userId, unblockedAt: new Date() })
-    .where(eq(userGlobalBlock.userId, userId))
+    .where(and(eq(userGlobalBlock.userId, userId), eq(userGlobalBlock.active, true)))
+    .returning({ userId: userGlobalBlock.userId })
+  // Solo si de verdad estaba bloqueada: quitar un bloqueo que no había no avisa nada.
+  if (lifted.length > 0) await recordAccountReopened(tx, userId)
   await writeAdminAudit(tx, staff, auditInput("user.global_unblock", null, userId, {}))
 }
 
@@ -1939,8 +1943,9 @@ export async function findLifecycleCandidates(
       and(
         eq(user.emailVerified, false),
         lt(user.createdAt, reminderCutoff),
-        // La de una app sin correos de su marca no ocupa el lugar de otra (ADR 0201).
-        or(isNull(user.signupApp), inArray(user.signupApp, [...MAILED_APPS])),
+        // La de una app que manda sus propios avisos no ocupa el lugar de otra (ADR 0201): solo
+        // entra cuando toca limpiarla, a los 30 días, como todas.
+        or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS]), lt(user.createdAt, cleanupCutoff)),
       ),
     )
     .orderBy(user.createdAt)

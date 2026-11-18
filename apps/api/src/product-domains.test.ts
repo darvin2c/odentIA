@@ -1,4 +1,5 @@
 import type { Auth } from "@odentia/auth"
+import { signAccountEvent } from "@odentia/auth/account-events"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import type { Storage } from "@odentia/services"
@@ -89,8 +90,9 @@ it("el enlace y la llave del portal van en el dominio del producto de la clínic
 })
 
 describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () => {
-  const appWith = (entry: Auth | null) =>
+  const appWith = (entry: Auth, more: Partial<Parameters<typeof createApp>[0]> = {}) =>
     createApp({
+      ...more,
       auth: sessionOf("odentIA"),
       externalApps: [
         { app: "gestoria", domain: "gestoria.test", auth: entry, trustedOrigins: ["https://app.gestoria.test"] },
@@ -109,13 +111,11 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       listenUrl: "postgres://localhost:5432/dentalagent",
     })
 
-  it("sin su entrada, nada responde en su dominio: ni la cuenta ni las clínicas", async () => {
-    const off = appWith(null)
-    expect((await off.request("https://api.gestoria.test/api/auth/get-session")).status).toBe(404)
-    expect((await off.request("https://api.gestoria.test/api/patients")).status).toBe(404)
-    expect((await off.request("https://gestoria.test/health")).status).toBe(404)
-    // Las clínicas siguen igual.
-    expect(await (await off.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
+  it("en su dominio no responde nada de las clínicas, y las clínicas siguen igual", async () => {
+    const app = appWith(sessionOf("gestorIA"))
+    expect((await app.request("https://api.gestoria.test/api/patients")).status).toBe(404)
+    expect((await app.request("https://gestoria.test/health")).status).toBe(404)
+    expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
   })
 
   it("con su entrada, solo responde la cuenta, sin las organizaciones de las clínicas", async () => {
@@ -139,5 +139,61 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       "https://app.gestoria.test",
     )
     expect((await preflight("https://app.odentia.test")).headers.get("access-control-allow-origin")).toBeNull()
+  })
+
+  describe("la revisión diaria de su copia de las cuentas", () => {
+    const SECRET = `whsec_${Buffer.alloc(32, 5).toString("base64")}`
+    const asked: string[][] = []
+    // Se arma dentro de cada prueba: `createApp` fija los dominios de todo el proceso, y la
+    // prueba del portal (arriba) lee los del primero.
+    const reviewing = () => appWith(sessionOf("gestorIA"), {
+      accountEventSenders: [{ app: "gestoria", url: "https://servidor.gestoria.test/avisos/cuenta", secret: SECRET }],
+      reviewAccounts: async (ids) => {
+        asked.push(ids)
+        return ids.map((userId) => ({
+          userId,
+          found: true,
+          blocked: false,
+          name: "Rosa",
+          email: "rosa@gestoria.test",
+          emailVerified: true,
+          image: null,
+        }))
+      },
+    })
+    const ask = (target: ReturnType<typeof createApp>, body: string, secret = SECRET, host = "api.gestoria.test") =>
+      target.request(`https://${host}/api/account-apps/review`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...signAccountEvent({ secret, id: "rev-1", body }) },
+        body,
+      })
+
+    it("responde lo vigente solo a quien firma con el secreto de sus avisos", async () => {
+      const withReview = reviewing()
+      const body = JSON.stringify({ userIds: ["u-1"] })
+      const response = await ask(withReview, body)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        accounts: [expect.objectContaining({ userId: "u-1", name: "Rosa", blocked: false })],
+      })
+      expect(asked).toEqual([["u-1"]])
+      // Otro secreto, o el cuerpo cambiado: no.
+      expect((await ask(withReview, body, `whsec_${Buffer.alloc(32, 6).toString("base64")}`)).status).toBe(401)
+      const tampered = await withReview.request("https://api.gestoria.test/api/account-apps/review", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...signAccountEvent({ secret: SECRET, id: "rev-2", body }) },
+        body: JSON.stringify({ userIds: ["u-2"] }),
+      })
+      expect(tampered.status).toBe(401)
+      expect(asked).toHaveLength(1)
+    })
+
+    it("no existe sin el secreto de la app, ni en el dominio de las clínicas", async () => {
+      const withReview = reviewing()
+      const body = JSON.stringify({ userIds: ["u-1"] })
+      expect((await ask(appWith(sessionOf("gestorIA")), body)).status).toBe(404)
+      expect((await ask(withReview, body, SECRET, "api.odentia.test")).status).not.toBe(200)
+      expect((await withReview.request("https://api.gestoria.test/api/account-apps/review")).status).toBe(404)
+    })
   })
 })

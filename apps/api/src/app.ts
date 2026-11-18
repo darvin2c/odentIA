@@ -77,6 +77,7 @@ import {
   supportSessionOf,
 } from "./lib/support-session.js"
 import { createAccountRoute } from "./routes/account.js"
+import { ACCOUNT_REVIEW_PATH, type AccountReviewDeps, answerAccountReview } from "./routes/account-review.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
 import { createAdminChatsRoute } from "./routes/admin-chats.js"
@@ -164,8 +165,8 @@ import { createWorkspaceRoute } from "./routes/workspace.js"
 export interface ExternalAppEntry {
   app: AccountApp
   domain: string
-  /** Su Better Auth; nulo mientras no se pueda encender (`accountAppNotReady`). */
-  auth: Auth | null
+  /** Su Better Auth, con la marca de sus correos. */
+  auth: Auth
   /** Sus pantallas: las únicas que pueden llamar a su entrada desde el navegador. */
   trustedOrigins: string[]
 }
@@ -203,6 +204,8 @@ export interface AppDeps {
   externalApps?: ExternalAppEntry[]
   /** Adónde y con qué secreto se avisa a cada una lo que pasa con la cuenta (ADR 0201). */
   accountEventSenders?: AccountEventSender[]
+  /** La revisión diaria de su copia de las cuentas; por omisión, la de esta base (pruebas sin base). */
+  reviewAccounts?: AccountReviewDeps["reviewAccounts"]
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -478,7 +481,7 @@ export function createApp(deps: AppDeps) {
   app.use("*", requestId())
   // El dominio de una app que es otro sistema (ADR 0201): ahí solo responde su entrada a la
   // cuenta, sin las rutas de organizaciones (que son clínicas). Nada de las clínicas existe
-  // en ese dominio, ni cae en el producto base. Sin su entrada todavía, todo responde 404.
+  // en ese dominio, ni cae en el producto base: lo demás responde 404.
   for (const entry of deps.externalApps ?? []) {
     const entryCors = cors({
       origin: (origin) => (entry.trustedOrigins.includes(origin) ? origin : ""),
@@ -487,11 +490,14 @@ export function createApp(deps: AppDeps) {
     })
     const entryAuth = entry.auth
     // El segundo factor del personal se cuida igual que en las clínicas (ADR 0089).
-    const factorBoundary = entryAuth ? createAdminFactorBoundary({ auth: entryAuth, ownerDb: deps.ownerDb }) : null
+    const factorBoundary = createAdminFactorBoundary({ auth: entryAuth, ownerDb: deps.ownerDb })
     app.use("*", async (c, next) => {
       if (!isOnDomain(c.req.url, entry.domain)) return next()
       const path = c.req.path
-      if (!entryAuth || !factorBoundary || !path.startsWith("/api/auth/") || path.startsWith("/api/auth/organization/"))
+      // La revisión diaria de su copia de las cuentas: de servidor a servidor, firmada con el
+      // secreto de sus avisos. Existe aunque gestorIA no esté configurada del todo.
+      if (path === ACCOUNT_REVIEW_PATH) return answerAccountReview(c, entry.app, deps)
+      if (!path.startsWith("/api/auth/") || path.startsWith("/api/auth/organization/"))
         return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
       return entryCors(c, async () => {
         const blocked = await factorBoundary(c, async () => {

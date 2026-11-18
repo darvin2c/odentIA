@@ -1,0 +1,58 @@
+name: gestoria-prod
+
+# gestorIA en producción (ADR 0203): su servidor y sus migraciones, en el mismo VPS que las
+# clínicas pero en su propio proyecto de OpenShip, con sus contenedores y sus límites. Las
+# clínicas no lo conocen: si se cae, ellas siguen. Su base (`gestoria`) vive en el mismo
+# PostgreSQL de las clínicas, con sus propios usuarios, que no pueden entrar a otra base
+# (`gestoria/infra/crear-base.sh`). Su app se publica en Cloudflare Workers desde el CI.
+#
+# Variables: el entorno del proyecto en OpenShip (`gestoria/infra/.env.example` dice cuáles).
+# Mientras el proyecto no exista en OpenShip, nada de esto corre.
+
+x-runtime-env-file: &runtime-env-file
+  - path: ./infra/prod/.env
+    required: false
+
+services:
+  gestoria-migrate:
+    build: &gestoria-build
+      context: ..
+      dockerfile: gestoria/Dockerfile
+    command: ["pnpm", "--filter", "@gestoria/db", "migrate"]
+    env_file: *runtime-env-file
+    restart: "no"
+    networks: [clinicas]
+
+  gestoria-api:
+    build: *gestoria-build
+    command: ["pnpm", "--filter", "@gestoria/api", "start"]
+    env_file: *runtime-env-file
+    restart: unless-stopped
+    depends_on:
+      gestoria-migrate:
+        condition: service_completed_successfully
+    # Límites propios: gestorIA no le quita memoria ni CPU a las clínicas.
+    mem_limit: 512m
+    cpus: 1.0
+    ports:
+      # Solo en loopback, como vuelta atrás; la entrada pública es el túnel de Cloudflare.
+      - "127.0.0.1:3201:3201"
+    networks: [clinicas]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.GESTORIA_PORT||3201)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+# La red de las clínicas, solo para llegar a su PostgreSQL y a su túnel de Cloudflare (que
+# entrega `servidor.<dominio de gestorIA>` a `gestoria-api:3201`). Su nombre lo da el proyecto
+# de las clínicas en OpenShip.
+networks:
+  clinicas:
+    external: true
+    name: ${GESTORIA_CLINICS_NETWORK:-odentia-prod_default}

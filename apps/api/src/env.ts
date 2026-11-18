@@ -27,8 +27,8 @@ const envSchema = z.object({
     .default(""),
   /**
    * El dominio de gestorIA (`gestoria24.com`, ADR 0201): ahí solo responde su entrada a la
-   * cuenta (`api.` + `/api/auth/*`), nada de las clínicas. Vacío: no existe. Con él, mientras
-   * sus correos no tengan su marca, ese dominio responde 404.
+   * cuenta (`api.` + `/api/auth/*`), nada de las clínicas, y sus correos llevan su marca y
+   * su web en el pie. Vacío: no existe.
    */
   GESTORIA_DOMAIN: z
     .string()
@@ -77,6 +77,8 @@ const envSchema = z.object({
   MEDICAL_SMTP_FROM: z.string().optional(),
   // El de vistIA, igual.
   OPTICAL_SMTP_FROM: z.string().optional(),
+  // El de gestorIA (su entrada a la cuenta, `GESTORIA_DOMAIN`), igual.
+  GESTORIA_SMTP_FROM: z.string().optional(),
   /**
    * Un segundo usuario del mismo servidor (ZeptoMail: otro canal de envío) para
    * las conversaciones de la administración: «Escribir» y las respuestas a un
