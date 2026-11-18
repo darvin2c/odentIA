@@ -67,6 +67,33 @@ export const TREATMENT_PHASE_LABELS: Record<TreatmentPhase, string> = {
 }
 
 /**
+ * La cirugía que la biblioteca pone en otra especialidad (QA clínica del 18 nov, H1): la periapical
+ * (apicectomía, de endodoncia) y la periodontal que abre encía o hueso (colgajos, injertos,
+ * gingivectomía, alargamiento de corona, regeneración), de periodoncia. Por el comienzo de su clave
+ * en `seeds/biblioteca.csv`. AAOMS 2022 pone el riesgo de osteonecrosis en la cirugía dentoalveolar
+ * que expone hueso, también la periapical y la periodontal; SDCEP 2022 (anticoagulantes) las pone
+ * entre las de más riesgo de sangrado. Fuera: el raspado, el curetaje y la endodoncia convencional.
+ * La misma regla avisa en la fila del plan y la pone en la fase quirúrgica (`phaseForTreatment`).
+ */
+export const SURGICAL_LIBRARY_KEY_PREFIXES: readonly string[] = [
+  "apicectomia-",
+  "alargamiento-de-corona-",
+  "aloinjerto-de-tejido-blando",
+  "cirugia-periodontal-",
+  "colgajo-",
+  "gingivectomia-",
+  "injerto-de-tejido-conectivo",
+  "injerto-gingival-libre",
+  "regeneracion-guiada-",
+  "regeneracion-osea",
+]
+
+/** ¿Es cirugía, aunque la biblioteca lo ponga en otra especialidad? Por su clave de la biblioteca. */
+export function isSurgicalLibraryKey(key: string | null | undefined): boolean {
+  return !!key && SURGICAL_LIBRARY_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+/**
  * Fase propuesta por el tipo de tratamiento del servicio; el clínico la
  * cambia. Sin tipo, la básica. El tipo nunca propone la urgencia: es un juicio
  * sobre el paciente, no sobre el acto (la propone su diagnóstico,
@@ -105,8 +132,10 @@ export interface PhaseDiagnosis {
 export function phaseForTreatment(
   kind: string | null | undefined,
   diagnoses: readonly PhaseDiagnosis[],
+  /** Su clave en la biblioteca: la apicectomía o un colgajo van en la quirúrgica, como cirugía. */
+  libraryKey?: string | null,
 ): TreatmentPhase {
-  const phase = phaseForKind(kind)
+  const phase = phaseForKind(isSurgicalLibraryKey(libraryKey) ? "cirugia" : kind)
   if (phase !== "basica" && phase !== "quirurgica") return phase
   return diagnoses.some((diagnosis) => isUrgentDiagnosis(diagnosis.system, diagnosis.code)) ? "urgencia" : phase
 }

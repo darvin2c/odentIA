@@ -745,7 +745,19 @@ async function proposedPhaseOf(
       )
     diagnoses.push(...rows)
   }
-  return hooks.phaseFor(input.service ? await serviceKindOf(tx, orgId, input.service) : null, diagnoses)
+  const templateId = input.service?.templateId
+  const [template] = templateId
+    ? await tx
+        .select({ key: treatmentTemplate.key })
+        .from(treatmentTemplate)
+        .where(eq(treatmentTemplate.id, templateId))
+        .limit(1)
+    : []
+  return hooks.phaseFor(
+    input.service ? await serviceKindOf(tx, orgId, input.service) : null,
+    diagnoses,
+    template?.key ?? null,
+  )
 }
 
 /** Alguien eligió su fase con «Planificar…»: lo que se recalcula al cambiarlo no se la pisa. */

@@ -54,3 +54,16 @@ describe("la fase «Urgencia» que propone el diagnóstico", () => {
     expect(phaseForTreatment("cirugia", [{ system: "ICD-10-PE", code: "K08.3" }])).toBe("quirurgica")
   })
 })
+
+// Verificación del 18 nov (8): la apicectomía es de endodoncia en la biblioteca, y quedaba en la
+// básica aunque los avisos ya la tratan como cirugía.
+it("la apicectomía y la cirugía periodontal van en la fase quirúrgica, como cirugía", () => {
+  expect(phaseForTreatment("endodoncia", [], "apicectomia-o-cirugia-periapical-posterior")).toBe("quirurgica")
+  expect(phaseForTreatment("periodoncia", [], "colgajo-de-reposicion-apical")).toBe("quirurgica")
+  // La endodoncia convencional y el raspado, no.
+  expect(phaseForTreatment("endodoncia", [], "endodoncia-posterior-vital")).toBe("basica")
+  // Con pulpitis o un absceso, la urgencia, como toda cirugía.
+  expect(
+    phaseForTreatment("endodoncia", [{ system: "ICD-10-PE", code: "K04.7" }], "apicectomia-o-cirugia-periapical-anterior"),
+  ).toBe("urgencia")
+})

@@ -597,7 +597,12 @@ export interface ProductHooks {
    * biblioteca y sus diagnósticos: el suyo y los vigentes de la atención en su mismo sitio
    * (odentIA: la pulpitis de la 36 propone «Urgencia» para su endodoncia).
    */
-  phaseFor(kind: string | null, diagnoses: ReadonlyArray<{ system: string | null; code: string | null }>): string
+  phaseFor(
+    kind: string | null,
+    diagnoses: ReadonlyArray<{ system: string | null; code: string | null }>,
+    /** Su clave en la biblioteca (odentIA: la apicectomía va en la quirúrgica, como cirugía). */
+    libraryKey?: string | null,
+  ): string
   /**
    * Las familias de cada tratamiento de la biblioteca (odentIA: lo que deja en la pieza,
    * «crown», y su familia anatómica, «pulpectomia-deciduo»), por id del tratamiento: con ella se une cada servicio a
