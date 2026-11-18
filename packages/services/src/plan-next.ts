@@ -202,6 +202,28 @@ export function unsentBudgetOf(
   items: ReadonlyArray<{ id: string; sourceEncounterId: string | null }> = [],
   openEncounters: ReadonlySet<string> = new Set(),
 ): BudgetWithTotals | null {
+  return draftBudgetOf(budgets, items, openEncounters, false)
+}
+
+/**
+ * El presupuesto sin enviar que todavía se arma en una atención en borrador (`unsentBudgetOf`): no se
+ * le pide a nadie enviarlo, pero se dice que falta (verificación del 18 nov, H7: recepción veía el
+ * N.º 618 «Por enviar» en el Plan y «Qué sigue» decía «Nada pendiente en el plan»).
+ */
+export function preparingBudgetOf(
+  budgets: BudgetWithTotals[],
+  items: ReadonlyArray<{ id: string; sourceEncounterId: string | null }> = [],
+  openEncounters: ReadonlySet<string> = new Set(),
+): BudgetWithTotals | null {
+  return draftBudgetOf(budgets, items, openEncounters, true)
+}
+
+function draftBudgetOf(
+  budgets: BudgetWithTotals[],
+  items: ReadonlyArray<{ id: string; sourceEncounterId: string | null }>,
+  openEncounters: ReadonlySet<string>,
+  inEncounter: boolean,
+): BudgetWithTotals | null {
   const source = new Map(items.map((item) => [item.id, item.sourceEncounterId]))
   const preparing = (budget: BudgetWithTotals) =>
     budget.items.some((line) => {
@@ -210,7 +232,11 @@ export function unsentBudgetOf(
     })
   return (
     budgets.find(
-      (budget) => budget.status === "borrador" && !budget.supersedesBudgetId && budget.items.length > 0 && !preparing(budget),
+      (budget) =>
+        budget.status === "borrador" &&
+        !budget.supersedesBudgetId &&
+        budget.items.length > 0 &&
+        preparing(budget) === inEncounter,
     ) ?? null
   )
 }
@@ -1066,6 +1092,13 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     detail: `${budgetLine(budget, locale)} · por enviar desde el ${day(budget.createdAt)}`,
     action: can("budgets.send") ? { label: "Enviar", budgetId: budget.id } : null,
   })
+  /** El que aún se arma en su atención: se dice que falta enviarlo, sin botón (lo envía quien la lleva). */
+  const preparingStep = (budget: BudgetWithTotals): PlanNextStep => ({
+    kind: "enviar",
+    text: `Falta enviar el presupuesto a ${name}`,
+    detail: `${budgetLine(budget, locale)} · se arma en su atención en curso: se envía al firmarla`,
+    action: null,
+  })
 
   /** «Limpieza y control vencido: tocaba el 2 oct», para la fila de lo aceptado. */
   const controlWords = (control: FollowUpRow) => {
@@ -1404,6 +1437,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
 
   return {
     unsent: unsentBudgetOf(budgets, facts.items, facts.openEncounters),
+    preparing: preparingBudgetOf(budgets, facts.items, facts.openEncounters),
     startedFirst,
     toStart,
     awaiting,
@@ -1420,6 +1454,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     bookedNext,
     bookedStep,
     sendStep,
+    preparingStep,
     scheduleStep,
     answerStep,
     controlStep,
@@ -1495,6 +1530,7 @@ function stepsOf(p: ReturnType<typeof planPieces>): PlanNextStep[] {
   if (p.pairedControl) steps.push(p.scheduleStep(p.pairedItems, [p.pairedControl]))
   if (p.treatmentControl && p.treatmentControl.id !== p.pairedControl?.id) steps.push(p.controlStep(p.treatmentControl))
   if (p.unsent) steps.push(p.sendStep(p.unsent))
+  else if (p.preparing) steps.push(p.preparingStep(p.preparing))
   const rest = p.toStart.filter((item) => !p.pairedItems.some((other) => other.id === item.id))
   const sessionFirst = rest.length > 0 ? p.startedFirst : undefined
   if (sessionFirst) steps.push(p.continueStep(sessionFirst))
