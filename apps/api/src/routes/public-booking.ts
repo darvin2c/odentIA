@@ -6,6 +6,7 @@ import {
   type AddressProvider,
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
+  checkRecordCopyDocument,
   confirmBookingLinkAppointment,
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
@@ -15,9 +16,11 @@ import {
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
+  getRecordCopyView,
   issueFields,
   listBookingLinkProfessionals,
   listBookingLinkSlots,
+  recordRecordCopyFailure,
   registerFromBookingLink,
   resendPersonalLink,
   reservePersonalLink,
@@ -25,6 +28,7 @@ import {
   type Storage,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
+  startRecordCopyDownload,
   submitPersonalLinkData,
   suggestAddresses,
 } from "@odentia/services"
@@ -34,6 +38,7 @@ import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { calendarResponse } from "../lib/calendar-response.js"
 import { errorBody } from "../lib/error.js"
+import { recordCopyZip } from "../lib/record-copy-zip.js"
 import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const WINDOW_MS = 10 * 60 * 1000
@@ -106,6 +111,8 @@ const dataBody = z.strictObject({
     })
     .nullish(),
 })
+// «Copia de tu historia»: su documento, para comprobar que es quien la pidió (como al firmar a distancia).
+const copyBody = z.strictObject({ token, docNumber: shortText(40) })
 // La hora de la cita que la persona tenía a la vista al pulsar: si «su cita» ya es otra, no se aplica.
 const seenStartsAt = z.iso.datetime({ offset: true }).optional()
 
@@ -434,6 +441,66 @@ export function createPublicBookingRoute(deps: {
       }
       throw error
     }
+  })
+
+  // «Copia de tu historia» (`/pendientes?abre=copia`, mesa del 18 nov): abrirla no descarga ni
+  // registra nada, porque la abren también la vista previa del chat y los lectores del correo.
+  app.get("/:slug/copy", async (c) => {
+    const query = z.strictObject({ token }).safeParse(c.req.query())
+    const storage = deps.storage
+    if (!query.success || !storage) return unavailable(c)
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyView(tx, orgId, query.data.token, { storage })))
+  })
+
+  // Un documento mal escrito se anota después del rollback, como el PIN del portal: con el tope, el
+  // enlace deja de servir para la copia.
+  const countingFailure = <T>(c: Context, linkToken: string, run: () => Promise<T>) =>
+    run().catch(async (error: unknown) => {
+      if (error instanceof ServiceError && error.code === "RECORD_COPY_DOCUMENT")
+        await inOrg(c, (tx, orgId) => recordRecordCopyFailure(tx, orgId, linkToken))
+      throw error
+    })
+
+  // «Descargar», antes de bajar: si el documento no es el suyo se dice en su campo, sin bajar nada.
+  app.post("/:slug/copy/check", async (c) => {
+    const body = copyBody.safeParse(await bodyOf(c))
+    if (!body.success) return unavailable(c)
+    return answer(c, 200, () =>
+      countingFailure(c, body.data.token, () =>
+        inOrg(c, (tx, orgId) => checkRecordCopyDocument(tx, orgId, body.data.token, body.data.docNumber)),
+      ),
+    )
+  })
+
+  // La copia completa, en streaming. Llega como formulario del navegador (así se guarda en el
+  // celular sin cargarla en memoria) o como JSON; el token va en el cuerpo, nunca en la dirección.
+  app.post("/:slug/copy/download", async (c) => {
+    const storage = deps.storage
+    const stream = storage?.streamAttachment
+    if (!storage || !stream) return unavailable(c)
+    const json = (c.req.header("content-type") ?? "").includes("application/json")
+    const body = copyBody.safeParse(json ? await bodyOf(c) : await c.req.parseBody().catch(() => null))
+    if (!body.success) return unavailable(c)
+    const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
+    let copy: Awaited<ReturnType<typeof startRecordCopyDownload>>
+    try {
+      copy = await countingFailure(c, body.data.token, () =>
+        inOrg(c, (tx, orgId) =>
+          startRecordCopyDownload(tx, orgId, body.data.token, { docNumber: body.data.docNumber }, evidence, { storage }),
+        ),
+      )
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        if (error.status === 404) return unavailable(c)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
+      }
+      throw error
+    }
+    // La misma copia de la clínica, con el mismo armado: el LÉEME último nombra lo que no se leyó.
+    return c.body(recordCopyZip(copy, stream), 200, {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(copy.fileName)}`,
+    })
   })
 
   // Terminal: nunca continuar hacia requireSession ni ampliar excepciones a otros /api/*.

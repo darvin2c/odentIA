@@ -1137,6 +1137,37 @@ it("pedidos sobre sus datos: Recepción los registra y envía; la historia compl
   expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
 })
 
+it("la copia de su historia: el odontólogo ve lo que trae y la descarga; recepción recibe 403 y envía sin abrirla (mesa del 18 nov)", async () => {
+  // Lo que trae, con sus cifras: es clínico como la descarga, aunque no se anote como bajarla.
+  expect((await buildApp("reception").request(`/patients/${patientId}/record/summary`)).status).toBe(403)
+  expect((await buildApp("cashier").request(`/patients/${patientId}/record/summary`)).status).toBe(403)
+  const summary = await buildApp("clinician").request(`/patients/${patientId}/record/summary`)
+  expect(summary.status).toBe(200)
+  expect(((await summary.json()) as { data: Record<string, unknown> }).data).toHaveProperty("approxBytes")
+  expect((await buildApp("clinician").request(`/patients/${patientId}/record`)).status).toBe(200)
+  expect((await buildApp("reception").request(`/patients/${patientId}/record`)).status).toBe(403)
+  // Recepción atiende el pedido de copia y la envía: ve por dónde, sin abrir lo clínico.
+  const detail = (await (await buildApp("reception").request(`/patients/${patientId}`)).json()) as {
+    data: { contacts: Array<{ contactId: string; relationship: string }> }
+  }
+  const self = detail.data.contacts.find((c) => c.relationship === "self")!.contactId
+  const created = await buildApp("reception").request(`/patients/${patientId}/data-requests`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "copia", requesterContactId: self, channel: "whatsapp" }),
+  })
+  const requestId = ((await created.json()) as { data: { id: string } }).data.id
+  expect((await buildApp("reception").request(`/patients/${patientId}/data-requests/${requestId}/send-options`)).status).toBe(200)
+  // El odontólogo no atiende pedidos: no envía.
+  const sendAs = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/data-requests/${requestId}/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ connectionId: crypto.randomUUID() }),
+    })
+  expect((await sendAs("clinician")).status).toBe(403)
+})
+
 it("borrar sus datos es de Administración y la historia bloqueada no existe para los demás (ADR 0080)", async () => {
   const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Elena Bloqueo" }))
   const json = { "content-type": "application/json" }

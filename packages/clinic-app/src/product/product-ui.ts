@@ -532,6 +532,11 @@ export interface RecordSectionProps {
 export interface ProductRecord {
   /** Van en Clínica después de Antecedentes, en este orden. */
   sections: readonly ProductRecordSection[]
+  /**
+   * Los estándares propios del producto que sigue la copia de su historia, después de los
+   * comunes (odentIA: la numeración FDI de las piezas). Solo los que de verdad se cumplen.
+   */
+  copyStandards?: ReadonlyArray<{ name: string; detail: string }>
 }
 
 /**

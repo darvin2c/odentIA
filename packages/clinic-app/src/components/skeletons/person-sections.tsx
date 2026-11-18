@@ -779,6 +779,23 @@ export function AccessLogSkeleton() {
   )
 }
 
+/** `RecordCopyBlock`: su título, «Descargar copia» y lo que trae. */
+export function RecordCopySkeleton() {
+  return (
+    <section className="elevated flex flex-col gap-4 rounded-xl border bg-card p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+          <h2 className="font-heading text-base font-medium">Copia de su historia</h2>
+          <Line className="w-full" />
+        </div>
+        <ButtonBar className="w-36" />
+      </div>
+      <h3 className="text-sm font-semibold">Qué trae</h3>
+      <RowsShape rows={3} action={false} />
+    </section>
+  )
+}
+
 /** `DataRequestsPanel`: su encabezado y los pedidos. */
 export function DataRequestsSkeleton() {
   return (
@@ -889,7 +906,14 @@ export function PersonSectionSkeleton({
     case "accesos":
       return <AccessLogSkeleton />
     case "pedidos":
-      return <DataRequestsSkeleton />
+      // Cada bloque con su permiso, como la sección (mesa del 18 nov).
+      return (
+        <div className="flex min-w-0 flex-col gap-6">
+          {can("clinical.read") ? <RecordCopySkeleton /> : null}
+          {canWritePatient ? <DataRequestsSkeleton /> : null}
+          {can("audit.read") ? <AccessLogSkeleton /> : null}
+        </div>
+      )
     default:
       return own ?? <GenericSectionSkeleton />
   }

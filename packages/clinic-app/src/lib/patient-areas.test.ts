@@ -47,7 +47,8 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     const datos = (role: string) => areaNav("datos", as(role)).map((entry) => entry.value)
     expect(datos("reception")).toContain("pedidos")
     expect(datos("owner")).toContain("pedidos")
-    expect(datos("clinician")).not.toContain("pedidos")
+    // El odontólogo la ve solo con la copia de su historia, para derivarla (mesa del 18 nov).
+    expect(datos("clinician")).toContain("pedidos")
     expect(datos("cashier")).not.toContain("pedidos")
     // Solo con ficha: quien aún no es paciente no tiene historia que pedir.
     expect(areaNav("datos", as("owner"), false).map((entry) => entry.value)).not.toContain("pedidos")
@@ -72,10 +73,12 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     const sections = visibleSections(as("clinician")).map((section) => section.id)
     for (const retired of ["coordinacion", "recorrido", "controles"])
       expect(sections).not.toContain(retired)
-    // Ni canales ni portal: son del CRM y de quien edita la filiación.
+    // Ni canales ni portal: son del CRM y de quien edita la filiación. «Privacidad y pedidos»,
+    // solo con la copia de su historia, para derivarla (mesa del 18 nov).
     expect(areaNav("datos", as("clinician")).map((entry) => entry.label)).toEqual([
       "Datos personales",
       "Familia y responsables",
+      "Privacidad y pedidos",
     ])
   })
 
@@ -134,7 +137,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("Clínica con lo del producto después de Antecedentes; el que atiende ve 10 y el propietario 13 (ADR 0035 y 0080; Datos en cuatro)", () => {
+  it("Clínica con lo del producto después de Antecedentes; el que atiende ve 11 y el propietario 13 (ADR 0035 y 0080; Datos en cuatro)", () => {
     expect(areaNav("clinica", as("clinician")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
       "Estudio",
@@ -149,7 +152,7 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(subsectionNav("estudio", as("clinician"))).toHaveLength(2)
     expect(subsectionNav("historia", as("clinician"))).toEqual([])
     expect(navSectionOf("detalle")).toBe("estudio")
-    expect(visibleSections(as("clinician"))).toHaveLength(10)
+    expect(visibleSections(as("clinician"))).toHaveLength(11)
     expect(visibleSections(as("owner"))).toHaveLength(13)
     // Recepción y caja no cambian.
     expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain(

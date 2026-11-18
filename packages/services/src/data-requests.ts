@@ -15,10 +15,10 @@
  */
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientDataRequest } from "@odentia/db/schema/clinical"
+import { patient, patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lte } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm"
 import { setMessageChoice } from "./automation.js"
 import { SWITCHABLE_PURPOSES } from "./automation-messages.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -45,6 +45,23 @@ export const DATA_REQUEST_DAYS = 10
 /** Desde cuántos días antes del plazo el pedido sale en «Te espera». */
 export const DATA_REQUEST_WARN_DAYS = 3
 
+/**
+ * La copia enviada (mesa del 18 nov): su PDF lleva en la primera página «Su
+ * enlace» con `abre=copia`, que sirve para bajar la copia completa estos días
+ * desde el último envío, hasta estas veces, y deja de servir con estos
+ * documentos mal escritos (como el PIN del portal).
+ */
+export const RECORD_COPY_DAYS = 7
+export const RECORD_COPY_DOWNLOADS = 5
+export const RECORD_COPY_ATTEMPTS = 10
+
+/** Lo que dice la fila de un pedido de copia enviado: hasta cuándo sirve su enlace y si ya la bajó. */
+export interface DataRequestCopy {
+  until: string
+  downloads: number
+  lastDownloadAt: string | null
+}
+
 /** Lo que dice la respuesta de «No recibir mensajes», que se cumple al registrarlo. */
 export const MESSAGES_OFF_RESOLUTION =
   "Se apagaron sus recordatorios, controles y novedades. Los avisos de sus citas y papeles siguen."
@@ -69,6 +86,8 @@ export interface DataRequestItem {
   resolvedAt: string | null
   resolvedByName: string | null
   createdAt: string
+  /** La copia que se le envió con su enlace; null si no se envió así. */
+  copy: DataRequestCopy | null
 }
 
 /** Un día ISO (AAAA-MM-DD) más `days` días corridos. */
@@ -307,6 +326,22 @@ export async function listDataRequests(
       ? (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, userIds))).map((u) => [u.id, u.name])
       : [],
   )
+  const sent = rows.filter((r) => r.copyUntil !== null).map((r) => r.id)
+  const downloads = new Map(
+    sent.length
+      ? (
+          await tx
+            .select({
+              requestId: patientRecordDownload.dataRequestId,
+              count: sql<number>`count(*)::int`,
+              last: sql<string>`max(${patientRecordDownload.createdAt})`,
+            })
+            .from(patientRecordDownload)
+            .where(and(eq(patientRecordDownload.organizationId, orgId), inArray(patientRecordDownload.dataRequestId, sent)))
+            .groupBy(patientRecordDownload.dataRequestId)
+        ).map((d) => [d.requestId, d])
+      : [],
+  )
   const items = rows.map(
     (row): DataRequestItem => ({
       id: row.id,
@@ -327,6 +362,7 @@ export async function listDataRequests(
       resolvedAt: row.resolvedAt?.toISOString() ?? null,
       resolvedByName: row.resolvedBy ? (users.get(row.resolvedBy) ?? null) : null,
       createdAt: row.createdAt.toISOString(),
+      copy: row.copyUntil ? copyOf(row.copyUntil, downloads.get(row.id)) : null,
     }),
   )
   // Pendientes primero (el plazo más cercano arriba), después los resueltos del más nuevo.
@@ -334,6 +370,15 @@ export async function listDataRequests(
     ...items.filter((i) => i.status === "pendiente"),
     ...items.filter((i) => i.status !== "pendiente").sort((a, b) => (b.resolvedAt ?? "").localeCompare(a.resolvedAt ?? "")),
   ]
+}
+
+function copyOf(until: Date, downloaded: { count: number; last: Date | string } | undefined): DataRequestCopy {
+  return {
+    until: until.toISOString(),
+    downloads: downloaded?.count ?? 0,
+    // `max()` llega como texto por el controlador: se pasa por Date.
+    lastDownloadAt: downloaded ? new Date(downloaded.last).toISOString() : null,
+  }
 }
 
 async function namesOf(tx: Db, orgId: string, rows: Array<{ requesterContactId: string }>): Promise<Map<string, string>> {

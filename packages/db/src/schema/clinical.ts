@@ -835,9 +835,18 @@ export const patientDataRequest = pgTable(
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedBy: text("resolved_by").references(() => user.id),
     createdBy: text("created_by").references(() => user.id),
+    /**
+     * Copia enviada (mesa del 18 nov): hasta cuándo la baja quien la pidió desde
+     * «Su enlace» (`abre=copia`), siete días desde el último envío. Manda el
+     * pedido, no el enlace, que se renueva con cada mensaje.
+     */
+    copyUntil: timestamp("copy_until", { withTimezone: true }),
+    /** Documentos mal escritos al bajarla: con el tope, el enlace deja de servir para la copia. */
+    copyFailedAttempts: smallint("copy_failed_attempts").notNull().default(0),
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("patient_data_request_org_id_uidx").on(table.organizationId, table.id),
     foreignKey({
       name: "patient_data_request_requester_fk",
       columns: [table.organizationId, table.patientId, table.requesterContactId],
@@ -872,6 +881,41 @@ export const patientDataRequest = pgTable(
       sql`(${table.status} = 'pendiente') = (${table.resolvedAt} IS NULL)`,
     ),
     check("patient_data_request_due_check", sql`${table.dueOn} >= ${table.requestedOn}`),
+  ],
+)
+
+/**
+ * Cada vez que quien pidió la copia la bajó desde su enlace (mesa del 18 nov):
+ * quién es lo dice el pedido (`requester_contact_id`), cuándo y desde dónde,
+ * esta fila. La aplicación solo agrega y lee: es la traza de quién se llevó la
+ * historia, como `clinical_access_log`, y por eso no la borra `erase_person_data`.
+ * Se ve en «Consultas a la historia clínica» y en la fila del pedido.
+ */
+export const patientRecordDownload = pgTable(
+  "patient_record_download",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    dataRequestId: uuid("data_request_id").notNull(),
+    /** Desde dónde la bajó, como la evidencia de una firma a distancia. */
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "patient_record_download_patient_fk",
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }),
+    foreignKey({
+      name: "patient_record_download_request_fk",
+      columns: [table.organizationId, table.dataRequestId],
+      foreignColumns: [patientDataRequest.organizationId, patientDataRequest.id],
+    }),
+    index("patient_record_download_org_request_idx").on(table.organizationId, table.dataRequestId),
+    index("patient_record_download_org_patient_idx").on(table.organizationId, table.patientId),
   ],
 )
 

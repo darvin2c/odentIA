@@ -155,6 +155,14 @@ export async function apiDownload(path: string, fallbackName: string): Promise<v
  * nombre que manda el servidor (`content-disposition`); un error de la API se
  * lanza como `ApiError`. Lo usan también las páginas públicas.
  */
+function safeDecode(value: string): string | null {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
 export async function saveDownload(response: Response, fallbackName: string): Promise<void> {
   if (!response.ok) {
     let shape: ApiErrorShape = {}
@@ -167,7 +175,9 @@ export async function saveDownload(response: Response, fallbackName: string): Pr
     throw new ApiError(response.status, shape)
   }
   const disposition = response.headers.get("content-disposition") ?? ""
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName
+  // `filename*=UTF-8''…` (RFC 6266) lleva tildes y espacios; `filename="…"`, el de siempre.
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const filename = (encoded ? safeDecode(encoded) : null) ?? /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName
   const url = URL.createObjectURL(await response.blob())
   try {
     const anchor = document.createElement("a")

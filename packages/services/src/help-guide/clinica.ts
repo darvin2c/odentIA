@@ -625,7 +625,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-copia-historia-trae-formularios",
         q: "¿La copia de la historia trae las fichas y lo que respondió el paciente?",
-        a: "Sí. En «Fichas de consulta» va cada ficha finalizada y en «Lo que respondió el paciente», cada cuestionario que envió: con su título y su versión, cada pregunta con su respuesta, sus adendas o correcciones con su motivo, quién lo llenó y quién lo finalizó o lo revisó. Lo que envió y nadie revisó también sale, marcado «sin revisar». Lo de una atención anulada sale marcado «es de una atención anulada», con su motivo. Trae además sus alergias y antecedentes con quién los revisó y cuándo, la medicina que ya no toma con hasta cuándo la tomó, la «Entrevista de salud» con el embarazo si se registró, y lo que declaró de su salud tal como llegó; lo que dijo y nadie revisó va marcado «sin revisar», con quién lo dijo y cuándo. Todo va en el PDF y en el archivo para otro sistema. Una ficha del equipo a medias no sale: ábrela en Documentos y «Finalizar…». La copia la baja Administración, en su página › Datos › Privacidad y pedidos, con «Descargar historia»; si atiendes o estás en recepción, pídesela a Administración. En la Historia, cada ficha finalizada va con lo respondido en una línea y «Ver», y la atención firmada la muestra con sus respuestas.",
+        a: "Sí. En «Fichas de consulta» va cada ficha finalizada y en «Lo que respondió el paciente», cada cuestionario que envió: con su título y su versión, cada pregunta con su respuesta, sus adendas o correcciones con su motivo, quién lo llenó y quién lo finalizó o lo revisó. Lo que envió y nadie revisó también sale, marcado «sin revisar». Lo de una atención anulada sale marcado «es de una atención anulada», con su motivo. Trae además sus alergias y antecedentes con quién los revisó y cuándo, la medicina que ya no toma con hasta cuándo la tomó, la «Entrevista de salud» con el embarazo si se registró, y lo que declaró de su salud tal como llegó; lo que dijo y nadie revisó va marcado «sin revisar», con quién lo dijo y cuándo. Todo va en el PDF y en el archivo para otro sistema. Una ficha del equipo a medias no sale: ábrela en Documentos y «Finalizar…». La copia la baja quien atiende o administra: en su página, «…» › «Copia de su historia» (el mismo bloque de Datos › Privacidad y pedidos), con «Descargar copia». Recepción no la abre: se la envía a la persona desde su pedido. En la Historia, cada ficha finalizada va con lo respondido en una línea y «Ver», y la atención firmada la muestra con sus respuestas.",
         forms: [
           "el formulario sale en la copia de la historia",
           "la historia que descargo incluye los formularios",
@@ -635,6 +635,34 @@ export const CLINICA: readonly HelpMore[] = [
           "la copia marca lo que no se reviso",
           "la copia trae lo de una atencion anulada",
           "como descargo yo la copia de la historia",
+        ],
+        area: "clinica",
+        needs: "clinical.read",
+      },
+      {
+        id: "pacientes-copia-historia-derivar",
+        q: "¿Puedo descargar la historia para derivar?",
+        a: "Sí, si atiendes o administras. En su página, «…» › «Copia de su historia» (es el bloque de arriba de Datos › Privacidad y pedidos) y «Descargar copia»: baja un ZIP con su historia en PDF para leer, cada papel emitido en su PDF (odontogramas firmados, recetas, órdenes, consentimientos), sus fotos, radiografías y tomografías, y el archivo para el sistema de otra clínica. El bloque dice qué trae con las cifras de esa persona. No trae presupuestos ni cobros, porque no son parte de la historia clínica. Cada descarga queda en «Consultas a la historia clínica». Si es la persona quien la pide para llevársela, mejor regístralo como su pedido: así le llega con su enlace.",
+        forms: [
+          "puedo descargar la historia para derivar",
+          "como descargo la historia del paciente para mandarla a otro especialista",
+          "quiero derivar al paciente con toda su historia",
+          "donde esta descargar copia de la historia",
+          "el odontologo puede bajar la historia completa",
+        ],
+        area: "clinica",
+        needs: "clinical.read",
+      },
+      {
+        id: "pacientes-copia-historia-estandares",
+        q: "¿Qué estándares sigue la copia?",
+        a: "Los que cumple de verdad, y el bloque «Copia de su historia» de cada persona los dice a la vista: HL7 FHIR R4, el formato internacional para pasar una historia clínica de un sistema a otro (el archivo «.fhir.json» del ZIP); CIE-10 y CIE-11, el código de cada diagnóstico; FDI (ISO 3950), la numeración de las piezas en el odontograma y en cada hallazgo; y DICOM, sus tomografías tal como salieron del equipo, solo si tiene alguna. Las fotos y radiografías van tal como se subieron. El ZIP trae un «LÉEME» que explica cómo se carga en otro sistema y qué no se pudo incluir.",
+        forms: [
+          "que estandares sigue la copia",
+          "la copia de la historia es fhir",
+          "en que formato sale la historia para otra clinica",
+          "la otra clinica puede cargar la historia en su sistema",
+          "la tomografia sale en dicom",
         ],
         area: "clinica",
         needs: "clinical.read",

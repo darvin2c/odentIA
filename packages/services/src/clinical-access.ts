@@ -6,7 +6,8 @@
  */
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { clinicalAccessLog } from "@odentia/db/schema/clinical"
+import { clinicalAccessLog, patientDataRequest, patientRecordDownload } from "@odentia/db/schema/clinical"
+import { contact } from "@odentia/db/schema/crm"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -71,8 +72,11 @@ export async function recordClinicalAccess(
 }
 
 export interface ClinicalAccessItem {
-  userId: string
+  /** Quien la consultó del equipo; null si es la persona que bajó su copia desde su enlace. */
+  userId: string | null
   userName: string | null
+  /** Quien pidió la copia y la bajó desde su enlace (`descarga_enlace`): no es del equipo. */
+  personName?: string | null
   /** Quien consultó no es del equipo de la clínica: soporte de odentIA con el permiso de la clínica. */
   outsideClinic: boolean
   resource: string
@@ -89,8 +93,9 @@ export async function listClinicalAccess(
 ): Promise<ClinicalAccessItem[]> {
   await requirePatient(tx, orgId, patientId)
   const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
-  return tx
+  const team = await tx
     .select({
+      bucket: clinicalAccessLog.bucket,
       userId: clinicalAccessLog.userId,
       userName: user.name,
       outsideClinic: sql<boolean>`exists (select 1 from support_access_grant g where g.staff_user_id = ${clinicalAccessLog.userId} and g.organization_id = ${clinicalAccessLog.organizationId} and g.created_at <= ${clinicalAccessLog.lastAt})`,
@@ -111,4 +116,40 @@ export async function listClinicalAccess(
     // misma hora, lo último consultado primero.
     .orderBy(desc(clinicalAccessLog.bucket), desc(clinicalAccessLog.lastAt))
     .limit(limit)
+  // Cada vez que quien pidió la copia la bajó desde su enlace, con su nombre (mesa del 18 nov).
+  const person = (
+    await tx
+      .select({ at: patientRecordDownload.createdAt, personName: contact.displayName })
+      .from(patientRecordDownload)
+      .innerJoin(
+        patientDataRequest,
+        and(
+          eq(patientDataRequest.organizationId, patientRecordDownload.organizationId),
+          eq(patientDataRequest.id, patientRecordDownload.dataRequestId),
+        ),
+      )
+      .leftJoin(
+        contact,
+        and(eq(contact.organizationId, patientDataRequest.organizationId), eq(contact.id, patientDataRequest.requesterContactId)),
+      )
+      .where(and(eq(patientRecordDownload.organizationId, orgId), eq(patientRecordDownload.patientId, patientId)))
+      .orderBy(desc(patientRecordDownload.createdAt))
+      .limit(limit)
+  ).map((row) => ({
+    // La misma franja que la bitácora del equipo, para ordenarlas juntas.
+    bucket: new Date(Math.floor(row.at.getTime() / 3_600_000) * 3_600_000),
+    userId: null,
+    userName: null,
+    personName: row.personName,
+    outsideClinic: false,
+    resource: "descarga_enlace",
+    firstAt: row.at,
+    lastAt: row.at,
+    hits: 1,
+  }))
+  // Como la bitácora: la franja más reciente primero y, dentro de la misma hora, lo último primero.
+  return [...team, ...person]
+    .sort((a, b) => b.bucket.getTime() - a.bucket.getTime() || b.lastAt.getTime() - a.lastAt.getTime())
+    .slice(0, limit)
+    .map(({ bucket: _bucket, ...item }): ClinicalAccessItem => item)
 }

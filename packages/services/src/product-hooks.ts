@@ -20,6 +20,7 @@ import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
 import type { FormSchemaDef } from "./clinical-forms.js"
 import type { DocumentCheckFacts } from "./document-check.js"
+import type { PaperStorage } from "./issued-papers.js"
 import { invalidField, validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
 import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
@@ -137,8 +138,12 @@ export interface ProductSite {
   chart?(
     rows: SiteColumns[],
   ): { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
-  /** El sitio como `bodySite` de FHIR para la exportación de la historia; null sin sitio. */
-  bodySite(row: SiteColumns): { text: string } | null
+  /**
+   * El sitio como `bodySite` de FHIR (un CodeableConcept) para la exportación de la historia; null
+   * sin sitio. `coding`, solo con un código de un sistema publicado (odentIA: la pieza permanente
+   * en `ex-tooth` de HL7, que es la numeración FDI de ISO 3950).
+   */
+  bodySite(row: SiteColumns): { text: string; coding?: Array<{ system: string; code: string }> } | null
   /** Lo que se le dice a quien manda un sitio suelto que no vale («Pieza FDI inválida: 19»). */
   invalid(value: unknown): string
   /**
@@ -201,6 +206,44 @@ export interface RecordSection {
   lines: string[]
   /** Lo que dice la sección sin líneas («Sin hallazgos registrados.»). */
   empty: string
+  /**
+   * Lo que va después de las líneas, cada uno con su título: un subtítulo con sus líneas o una
+   * tabla (odentIA: cada periodontograma, sitio por sitio). Sin esto, solo las líneas.
+   */
+  blocks?: RecordSectionBlock[]
+  /**
+   * Lo mismo para el paquete FHIR R4: recursos completos, con las referencias escritas como
+   * `Patient/<id>` o `Encounter/<id>`; la copia las resuelve dentro del paquete (`urn:uuid`).
+   */
+  fhir?: Array<Record<string, unknown> & { resourceType: string; id: string }>
+}
+
+/** Un bloque de una sección de la copia: un título con líneas y, si hace falta, una tabla. */
+export interface RecordSectionBlock {
+  title: string
+  /** Lo que va bajo el título: quién, cuándo, la clasificación, los índices. */
+  lines: string[]
+  table?: { columns: string[]; rows: string[][] }
+}
+
+/** Un papel propio del producto para la copia de la historia (odentIA: cada odontograma firmado y el de hoy, sin firmar). */
+export interface RecordPaper {
+  /** Clave estable para el nombre y el FHIR: «signed_odontogram», «odontogram_today». */
+  kind: string
+  /** El id de la fila (o un id estable para lo de hoy). */
+  id: string
+  /** «Odontograma firmado · Inicio del plan de tratamiento». */
+  label: string
+  at: Date
+  /** Nombre dentro del ZIP, sin carpeta: «Odontograma firmado - Inicio del plan (1a2b3c4d).pdf». */
+  fileName: string
+  bytes: Uint8Array
+  /** «sin firmar» para el de hoy; null si es un papel firmado vigente. */
+  mark: string | null
+  /** Quién lo firmó, con su título y colegiatura, para el PDF de lectura. */
+  signer: string | null
+  /** SHA-256 en hex del PDF guardado (el del papel emitido). */
+  sha256: string
 }
 
 /** Qué hechos de la historia se piden: tipos, si van fuera de su atención y la pieza o sitio. */
@@ -590,6 +633,15 @@ export interface ProductHooks {
   summaryParts(tx: Db, scope: { orgId: string; patientId: string }): Promise<ProductParts>
   /** Las secciones que el producto agrega a la copia de la historia (odentIA: el odontograma). */
   recordSections(tx: Db, scope: { orgId: string; patientId: string }): Promise<RecordSection[]>
+  /**
+   * Los papeles propios del producto para la copia de la historia, cada uno en su PDF (odentIA:
+   * cada odontograma firmado, guardado como papel emitido, y el de hoy marcado «sin firmar»).
+   */
+  recordPapers?(
+    tx: Db,
+    scope: { orgId: string; patientId: string },
+    storage: PaperStorage,
+  ): Promise<RecordPaper[]>
   /** Las fases del plan del producto, en su orden (odentIA: urgencia → mantenimiento). */
   planPhases: readonly string[]
   /** La fase que propone un tipo de tratamiento de la biblioteca. */

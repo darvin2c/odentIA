@@ -1,13 +1,29 @@
 /**
  * La historia completa de una persona, para entregársela (issue 45 mínimo,
  * ADR 0080): un PDF para leer y un paquete HL7 FHIR R4 para que otra clínica
- * la cargue. Las imágenes y documentos van aparte, en el ZIP de la API.
+ * la cargue. Las imágenes, los documentos y cada papel emitido van en el ZIP
+ * que arma `buildPatientRecordCopy` (`patient-record-copy.ts`).
  *
  * Lee todo lo clínico de la persona: solo la piden quienes leen la ficha
  * clínica (`clinical.read`). El envío a la propia persona lo hace el servidor
  * sin mostrarla a quien lo pide (Recepción).
+ *
+ * La copia dice lo mismo que la ficha (mesa del 18 nov): no tiene reglas
+ * propias de qué decir. El plan sale de `listPlanItems` con sus palabras
+ * (`planItemStateText`), los diagnósticos con las líneas de la Historia
+ * (`encounterDiagnosisLines`), los controles de `listFollowUps`, la salud de
+ * `getPatientHealth` y lo del producto de sus ganchos.
  */
 import { createHash } from "node:crypto"
+import {
+  allergiesSaidUnknownOf,
+  medicationAlertWords,
+  planItemStateText,
+  postalAddressText,
+  sessionWords,
+  showsSession,
+  type PregnancyToday,
+} from "@odentia/clinical"
 import {
   ALLERGY_CATEGORY_FHIR,
   ALLERGY_CRITICALITY_FHIR,
@@ -71,13 +87,14 @@ import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import {
+  appointmentPlanItem,
   clinicalNote,
-  diagnosisCatalog,
   encounter,
   encounterDiagnosis,
   encounterProcedure,
   imagingStudy,
   imagingStudyFile,
+  patient,
   patientAllergy,
   patientAnamnesis,
   patientCondition,
@@ -87,7 +104,7 @@ import {
   prescription,
   prescriptionItem,
 } from "@odentia/db/schema/clinical"
-import { consentDocument } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalOrder, consentDocument, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { AGENT_NAMES } from "./agent-names.js"
 import {
@@ -97,8 +114,10 @@ import {
   getPatientHealth,
   type HealthDeclaration,
 } from "./clinical.js"
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm"
+import { ORDER_KIND_WORDS } from "./clinical-papers.js"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
+import { diagnosisTitlesOf, namedDiagnosis } from "./diagnosis-codes.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import {
   chartNumber,
@@ -119,13 +138,19 @@ import {
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
+import { listFollowUps } from "./follow-ups.js"
+import { formDiagnosesOf, formDiagnosisKey } from "./form-diagnoses.js"
 import { civilDay, type FormRecord, type FormRecordItem, formRecordAt, loadFormRecords } from "./form-record.js"
 import { proposeHealthChannel } from "./health-documents.js"
 import { clinicToday } from "./inventory-stock.js"
+import { orgClinicalProfile } from "./locale.js"
+import { encounterDiagnosisLines } from "./patient-history.js"
 import { getPatient, requirePatient } from "./patients.js"
 import { listPlanItems } from "./plan.js"
-import type { ExamObservation, RecordSection, SiteColumns } from "./product-hooks.js"
+import { FILE_TYPE_WORDS } from "./portal-papers.js"
+import type { ExamObservation, ProductSite, RecordSection, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { issueRecordCopyLink, recordCopyCaption, recordCopyDayWords } from "./record-copy-link.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 
@@ -134,7 +159,62 @@ import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 type HealthTopic = "allergies" | "conditions" | "medications"
 
 /** El sitio dicho por el producto: en palabras para el PDF y como `bodySite` para FHIR. */
-type RecordSite = { siteWords: string | null; bodySite: { text: string } | null }
+type RecordSite = { siteWords: string | null; bodySite: ReturnType<ProductSite["bodySite"]> }
+
+/**
+ * Un papel emitido dentro de la copia: el mismo PDF que se envía y se imprime (con «ANULADA»
+ * encima si se anuló), en su carpeta del ZIP. `related` es lo que el papel documenta, para
+ * enlazarlo en FHIR (`DocumentReference.context.related`, `Consent.sourceAttachment`).
+ */
+export interface RecordPaperEntry {
+  /** «receta», «orden», «descanso», «hoja», «consentimiento» o el del producto («signed_odontogram»). */
+  kind: string
+  id: string
+  /** «Receta N.º 2», «Odontograma firmado · Inicio del plan de tratamiento». */
+  label: string
+  at: Date
+  /** «Anulada el … : motivo», «sin firmar»; null si vale. */
+  mark: string | null
+  /** Quién lo firmó, con su título y colegiatura; null si no se sabe. */
+  signer: string | null
+  /** Su ruta dentro del ZIP: «papeles/Receta N.º 2 (anulada).pdf». */
+  path: string
+  contentType: string
+  size: number
+  /** SHA-256 en hex: la huella del papel emitido. */
+  sha256: string
+  /** SHA-1 en base64: lo que pide `Attachment.hash` de FHIR R4. */
+  sha1: string
+  related: { resourceType: string; id: string } | null
+}
+
+/** Un tratamiento del plan como lo dice la ficha: su decisión, sus sesiones, su camino y su cita. */
+export interface RecordPlanItem {
+  id: string
+  title: string
+  status: string
+  decision: string
+  /** «Aceptado», «Lo piensa», «No aceptó», «Realizado»…: la etiqueta de la ficha (`planItemStateText`). */
+  stateWords: string
+  siteWords: string | null
+  bodySite: RecordSite["bodySite"]
+  phase: string
+  diagnosisName: string | null
+  diagnosisSystem: string | null
+  diagnosisCode: string | null
+  sessionsDone: number
+  plannedSessions: number
+  /** Su camino, si compite con otro del mismo presupuesto y la persona aún no elige. */
+  path: { budgetId: string; positions: number[]; name: string | null; pathCount: number; chosen: boolean } | null
+  /** El motivo de un suspendido o cancelado. */
+  statusReason: string | null
+  /** «va después de…»: el tratamiento de la misma pieza que va antes. */
+  waitsFor: string | null
+  /** Su próxima cita en pie, si la tiene. */
+  nextAppointmentAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}
 
 /**
  * De quién es algo de la entrevista y de cuándo. `declared`: lo dijo alguien (la
@@ -200,6 +280,8 @@ export interface PatientRecord {
     sex: string | null
     phone: string | null
     email: string | null
+    /** El domicilio como lo guarda la ficha (forma de FHIR Address) y en una línea; null sin domicilio. */
+    address: { line: string | null; city: string | null; district: string | null; region: string | null; postalCode: string | null; country: string | null; text: string } | null
   }
   contacts: Array<{
     contactId: string
@@ -207,7 +289,55 @@ export interface PatientRecord {
     relationship: string
     detail: string | null
     phone: string | null
+    isEmergency: boolean
   }>
+  /** La ASA, con quién la clasificó y cuándo, como la ficha; null sin clasificar. */
+  asa: { value: string; by: string | null; at: Date | null } | null
+  /** El embarazo de hoy, con la regla común (`pregnancyToday`); null si no hay. */
+  pregnancy: PregnancyToday | null
+  /** Su «No sé» a las alergias (se le preguntó y no sabe), con quién y cuándo; null si no. */
+  allergiesSaidUnknown: { by: HealthDeclarant; at: Date } | null
+  /** Las notas clínicas (no las adendas), con su autor; las de una atención también van en ella. */
+  clinicalNotes: Array<{ id: string; encounterId: string | null; note: string; authorName: string | null; createdAt: Date; siteWords: string | null }>
+  /** Los controles, como el Plan (`listFollowUps`): por venir, hechos y cancelados con su motivo. */
+  followUps: Array<{
+    id: string
+    title: string
+    kind: string
+    status: string
+    dueAt: Date
+    appointmentAt: Date | null
+    overdue: boolean
+    outcome: string | null
+    cancelledReason: string | null
+    completedAt: Date | null
+    cancelledAt: Date | null
+  }>
+  /** Las órdenes (imagen, laboratorio, derivación), con su resultado o «sin resultado». */
+  orders: Array<typeof clinicalOrder.$inferSelect & { kindWords: string; diagnosisName: string | null }>
+  /** Los descansos médicos. */
+  leaves: Array<typeof medicalLeave.$inferSelect & { diagnosisName: string | null }>
+  /**
+   * Lo retirado de sus archivos, nombrado con su tipo, fecha y motivo: sin el archivo ni su nombre
+   * (el nombre puede ser el de otra persona: el archivo era suyo, no de ella).
+   */
+  retiredDocuments: Array<{ id: string; typeWords: string; at: Date; retiredAt: Date; reason: string | null; retiredBy: string | null }>
+  /** Las tomografías completas, por documento, para `ImagingStudy`. */
+  imagingStudies: Array<{
+    documentId: string
+    studyInstanceUid: string
+    modality: string | null
+    fileCount: number
+    completedAt: Date | null
+    series: Array<{ uid: string; count: number }>
+  }>
+  /**
+   * Cada papel que va en la copia, con su archivo dentro del ZIP: lo llena quien arma la copia
+   * (`buildPatientRecordCopy`). Vacío si se pide solo el PDF.
+   */
+  papers: RecordPaperEntry[]
+  /** Lo que se nombra en la copia porque no se pudo incluir (un papel que no se leyó, una tomografía a medias). */
+  missing: string[]
   allergies: Array<typeof patientAllergy.$inferSelect>
   /**
    * Las alergias que se quitaron, con quién y por qué: quitar nunca borra, y lo que llegó como
@@ -263,20 +393,29 @@ export interface PatientRecord {
   encounters: Array<{
     row: typeof encounter.$inferSelect
     diagnoses: Array<typeof encounterDiagnosis.$inferSelect & RecordSite & { title: string | null }>
+    /**
+     * Los diagnósticos como los dice la Historia (`encounterDiagnosisLines`): nombre, código, el
+     * término de la ficha, la pieza y su tipo («presuntivo», «definitivo»).
+     */
+    diagnosisLines: string[]
+    /** Lo anulado de la atención, con su motivo: se corrigió, no se borró. */
+    voided: string[]
     procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
     /** El examen como lo cuenta el producto: en líneas para el PDF y como Observations para FHIR. */
     exam: { lines: string[]; observations: ExamObservation[] }
     /** Lo corregido después de firmar, con quién y cuándo: también es parte de la historia. */
     addenda: Array<{ note: string; authorName: string | null; createdAt: Date }>
   }>
-  /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente). */
+  /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente y el periodontograma). */
   productSections: RecordSection[]
-  planItems: Array<{ title: string; status: string; siteWords: string | null }>
+  /** Las fases del plan del producto, en su orden, con su nombre en el papel. */
+  planPhases: Array<{ key: string; words: string | null }>
+  planItems: RecordPlanItem[]
   prescriptions: Array<{
     row: typeof prescription.$inferSelect
     items: Array<typeof prescriptionItem.$inferSelect>
   }>
-  consents: Array<typeof consentDocument.$inferSelect>
+  consents: Array<typeof consentDocument.$inferSelect & { siteWords: string | null; bodySite: RecordSite["bodySite"] }>
   /**
    * Las fichas finalizadas y lo que respondió la persona, revisado o no, con cada
    * pregunta, su respuesta y sus adendas o correcciones.
@@ -515,53 +654,53 @@ export async function loadPatientRecord(
     .where(byPatient(encounter))
     .orderBy(asc(encounter.startedAt))
   const encounterIds = encounters.map((e) => e.id)
-  const diagnoses = encounterIds.length
+  // Lo anulado también es historia (se corrigió, no se borró): va aparte, con su motivo.
+  const allDiagnoses = encounterIds.length
     ? await tx
         .select()
         .from(encounterDiagnosis)
-        .where(and(byPatient(encounterDiagnosis), isNull(encounterDiagnosis.voidedAt)))
+        .where(byPatient(encounterDiagnosis))
         .orderBy(asc(encounterDiagnosis.createdAt))
     : []
-  const addenda = encounterIds.length
-    ? await tx
-        .select({ encounterId: clinicalNote.encounterId, note: clinicalNote.note, authorName: user.name, createdAt: clinicalNote.createdAt })
-        .from(clinicalNote)
-        .leftJoin(user, eq(user.id, clinicalNote.authorUserId))
-        .where(
-          and(
-            eq(clinicalNote.organizationId, orgId),
-            inArray(clinicalNote.encounterId, encounterIds),
-            eq(clinicalNote.kind, "adenda"),
-          ),
-        )
-        .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id))
-    : []
-  const procedures = encounterIds.length
+  const diagnoses = allDiagnoses.filter((d) => !d.voidedAt)
+  // Las notas: las adendas van con su atención («Correcciones después del cierre»); las demás son
+  // notas clínicas, de una atención o sueltas (mesa del 18 nov: solo salían las adendas).
+  const notes = await tx
+    .select({
+      id: clinicalNote.id,
+      encounterId: clinicalNote.encounterId,
+      kind: clinicalNote.kind,
+      note: clinicalNote.note,
+      authorName: user.name,
+      createdAt: clinicalNote.createdAt,
+      siteSystem: clinicalNote.siteSystem,
+      siteCode: clinicalNote.siteCode,
+      siteQualifiers: clinicalNote.siteQualifiers,
+    })
+    .from(clinicalNote)
+    .leftJoin(user, eq(user.id, clinicalNote.authorUserId))
+    .where(byPatient(clinicalNote))
+    .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id))
+  const addenda = notes.filter((n) => n.kind === "adenda" && n.encounterId)
+  const allProcedures = encounterIds.length
     ? await tx
         .select()
         .from(encounterProcedure)
-        .where(
-          and(
-            eq(encounterProcedure.organizationId, orgId),
-            inArray(encounterProcedure.encounterId, encounterIds),
-            isNull(encounterProcedure.voidedAt),
-          ),
-        )
+        .where(and(eq(encounterProcedure.organizationId, orgId), inArray(encounterProcedure.encounterId, encounterIds)))
         .orderBy(asc(encounterProcedure.createdAt))
     : []
-  const titles = new Map<string, string>()
-  const codes = [...new Set(diagnoses.map((d) => d.diagnosisCode))]
-  if (codes.length) {
-    const found = await tx
-      .select({
-        system: diagnosisCatalog.systemKey,
-        code: diagnosisCatalog.code,
-        title: diagnosisCatalog.title,
-      })
-      .from(diagnosisCatalog)
-      .where(inArray(diagnosisCatalog.code, codes))
-    for (const row of found) titles.set(`${row.system}|${row.code}`, row.title)
-  }
+  const procedures = allProcedures.filter((p) => !p.voidedAt)
+  const orders = await tx.select().from(clinicalOrder).where(byPatient(clinicalOrder)).orderBy(asc(clinicalOrder.createdAt))
+  const leaves = await tx.select().from(medicalLeave).where(byPatient(medicalLeave)).orderBy(asc(medicalLeave.issuedAt))
+  const planRows = await listPlanItems(tx, orgId, patientId, undefined, { withoutVoided: true })
+  const titles = await diagnosisTitlesOf(tx, [
+    ...allDiagnoses.map((d) => ({ system: d.diagnosisSystem, code: d.diagnosisCode })),
+    ...allProcedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
+    ...orders.map((o) => ({ system: o.diagnosisSystem, code: o.diagnosisCode })),
+    ...leaves.map((l) => ({ system: l.diagnosisSystem, code: l.diagnosisCode })),
+    ...planRows.map((i) => ({ system: i.diagnosisSystem, code: i.diagnosisCode })),
+  ])
+  const nameOfDiagnosis = (system: string | null, code: string | null) => (code ? namedDiagnosis(titles, system, code) : null)
   const prescriptions = await tx
     .select()
     .from(prescription)
@@ -579,12 +718,50 @@ export async function loadPatientRecord(
     .from(consentDocument)
     .where(byPatient(consentDocument))
     .orderBy(asc(consentDocument.createdAt))
+  // Lo oculto en su portal sí va: es su historia (mesa del 18 nov). Lo retirado se nombra aparte.
   const documents = await tx
     .select()
     .from(patientDocument)
     .where(and(byPatient(patientDocument), isNull(patientDocument.retiredAt)))
     // Por su fecha (la de toma, en una imagen), como en la Historia; sin ella, la de subida.
     .orderBy(asc(sql`coalesce(${patientDocument.capturedAt}, ${patientDocument.createdAt})`), asc(patientDocument.createdAt))
+  const retired = await tx
+    .select({
+      id: patientDocument.id,
+      category: patientDocument.category,
+      capturedAt: patientDocument.capturedAt,
+      createdAt: patientDocument.createdAt,
+      retiredAt: patientDocument.retiredAt,
+      reason: patientDocument.retireReason,
+      retiredBy: user.name,
+    })
+    .from(patientDocument)
+    .leftJoin(user, eq(user.id, patientDocument.retiredBy))
+    .where(and(byPatient(patientDocument), isNotNull(patientDocument.retiredAt)))
+    .orderBy(asc(patientDocument.retiredAt))
+  const studies = documents.length
+    ? await tx
+        .select({
+          documentId: imagingStudy.documentId,
+          studyInstanceUid: imagingStudy.studyInstanceUid,
+          modality: imagingStudy.modality,
+          fileCount: imagingStudy.fileCount,
+          completedAt: imagingStudy.completedAt,
+        })
+        .from(imagingStudy)
+        .where(and(eq(imagingStudy.organizationId, orgId), inArray(imagingStudy.documentId, documents.map((d) => d.id))))
+    : []
+  const seriesRows = studies.length
+    ? await tx
+        .select({
+          documentId: imagingStudyFile.documentId,
+          uid: imagingStudyFile.seriesInstanceUid,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(imagingStudyFile)
+        .where(and(eq(imagingStudyFile.organizationId, orgId), inArray(imagingStudyFile.documentId, studies.map((s) => s.documentId))))
+        .groupBy(imagingStudyFile.documentId, imagingStudyFile.seriesInstanceUid)
+    : []
   const appointments = await tx
     .select()
     .from(appointment)
@@ -621,13 +798,80 @@ export async function loadPatientRecord(
   // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: lo calcula la
   // ficha (`getPatientHealth`), y la copia usa el mismo día.
   const legacySaidOn = health.pregnancy?.saidOn ?? null
-  const planItems = await listPlanItems(tx, orgId, patientId)
   const site = hooks.site
   const recordSite = (row: SiteColumns): RecordSite => ({
     siteWords: site.words(row),
     bodySite: site.bodySite(row),
   })
   const timezone = establishmentRow?.timezone || "UTC"
+  // El término de la ficha junto a su código («irreversible sintomática» junto a K04.0), con la
+  // misma regla que la Historia (`formDiagnosesOf`): el diagnóstico no lo guarda.
+  const saidInForms =
+    hooks.forms.qualifiers && encounterIds.length
+      ? formDiagnosesOf(
+          await tx
+            .select({
+              id: clinicalFormResponse.id,
+              encounterId: clinicalFormResponse.encounterId,
+              templateSnapshot: clinicalFormResponse.templateSnapshot,
+              answers: clinicalFormResponse.answers,
+            })
+            .from(clinicalFormResponse)
+            .where(
+              and(
+                eq(clinicalFormResponse.organizationId, orgId),
+                inArray(clinicalFormResponse.encounterId, encounterIds),
+                notInArray(clinicalFormResponse.status, ["descartado"]),
+              ),
+            ),
+          hooks.forms,
+        )
+      : []
+  const qualifierOf = new Map(
+    saidInForms.flatMap((said) =>
+      said.encounterId && said.qualifier ? [[formDiagnosisKey(said.encounterId, said.code, said.toothNumber), said.qualifier] as const] : [],
+    ),
+  )
+  const looseValue = (row: SiteColumns): number | null => (row.siteSystem === site.system ? site.value(row.siteCode) : null)
+  // La próxima cita en pie de cada tratamiento (la que lo lleva), para «Lo que sigue».
+  const nextOfItem = new Map<string, Date>()
+  if (planRows.length)
+    for (const row of await tx
+      .select({ planItemId: appointmentPlanItem.planItemId, startsAt: appointment.startsAt })
+      .from(appointmentPlanItem)
+      .innerJoin(
+        appointment,
+        and(eq(appointment.organizationId, appointmentPlanItem.organizationId), eq(appointment.id, appointmentPlanItem.appointmentId)),
+      )
+      .where(
+        and(
+          eq(appointmentPlanItem.organizationId, orgId),
+          inArray(appointmentPlanItem.planItemId, planRows.map((item) => item.id)),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gt(appointment.startsAt, new Date()),
+        ),
+      )
+      .orderBy(asc(appointment.startsAt))) {
+      if (!nextOfItem.has(row.planItemId)) nextOfItem.set(row.planItemId, row.startsAt)
+    }
+  const [home] = await tx
+    .select({
+      line: patient.address,
+      city: patient.addressCity,
+      district: patient.addressDistrict,
+      region: patient.addressRegion,
+      postalCode: patient.addressPostalCode,
+      country: patient.addressCountry,
+      reference: patient.addressReference,
+    })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+  const homeText = home ? postalAddressText(await orgClinicalProfile(tx, orgId), home, { reference: home.reference }) : null
+  const asaBy = health.asaClassSetBy
+    ? ((await tx.select({ name: user.name }).from(user).where(eq(user.id, health.asaClassSetBy)))[0]?.name ?? null)
+    : null
+  const followUps = await listFollowUps(tx, orgId, patientId)
+  const planById = new Map(planRows.map((item) => [item.id, item]))
   // Lo de la entrevista que trajo una declaración, como lo cuenta el producto, con las claves con que entró ese día.
   const saidInterviewOf = (declaration: HealthDeclaration): InterviewEntry[] => {
     const day = clinicDay(declaration.at, timezone)
@@ -649,6 +893,7 @@ export async function loadPatientRecord(
       sex: identity.sex ?? null,
       phone: identity.phone ?? null,
       email: identity.email ?? null,
+      address: home && homeText ? { ...home, text: homeText } : null,
     },
     contacts: full.contacts
       .filter((c) => c.relationship !== "self")
@@ -658,7 +903,65 @@ export async function loadPatientRecord(
         relationship: c.relationship,
         detail: c.relationshipDetail,
         phone: c.phone,
+        isEmergency: !!c.isEmergency,
       })),
+    asa: health.asaClass ? { value: health.asaClass, by: asaBy, at: health.asaClassSetAt } : null,
+    pregnancy: health.pregnancy,
+    allergiesSaidUnknown: (() => {
+      const said = allergiesSaidUnknownOf({
+        reviewState: health.reviewStatus.allergies,
+        activeAllergies: allergies.length,
+        declarations: health.declarations,
+      })
+      return said ? { by: said.by, at: said.at } : null
+    })(),
+    clinicalNotes: notes
+      .filter((n) => n.kind !== "adenda")
+      .map((n) => ({
+        id: n.id,
+        encounterId: n.encounterId,
+        note: n.note,
+        authorName: n.authorName,
+        createdAt: n.createdAt,
+        siteWords: site.words(n),
+      })),
+    followUps: followUps.map((f) => ({
+      id: f.id,
+      title: f.title,
+      kind: f.kind,
+      status: f.status,
+      dueAt: f.dueAt,
+      appointmentAt: f.scheduledAt,
+      overdue: f.overdue,
+      outcome: f.outcome,
+      cancelledReason: f.cancelledReason,
+      completedAt: f.completedAt,
+      cancelledAt: f.cancelledAt,
+    })),
+    orders: orders.map((o) => ({
+      ...o,
+      kindWords: ORDER_KIND_WORDS[o.kind] ?? "Orden",
+      diagnosisName: nameOfDiagnosis(o.diagnosisSystem, o.diagnosisCode),
+    })),
+    leaves: leaves.map((l) => ({ ...l, diagnosisName: l.showDiagnosis ? nameOfDiagnosis(l.diagnosisSystem, l.diagnosisCode) : null })),
+    retiredDocuments: retired.map((d) => ({
+      id: d.id,
+      typeWords: FILE_TYPE_WORDS[d.category] ?? "Archivo",
+      at: d.capturedAt ?? d.createdAt,
+      retiredAt: d.retiredAt as Date,
+      reason: d.reason,
+      retiredBy: d.retiredBy,
+    })),
+    imagingStudies: studies
+      .filter((s) => s.completedAt)
+      .map((s) => ({
+        ...s,
+        series: seriesRows
+          .filter((row) => row.documentId === s.documentId && row.uid)
+          .map((row) => ({ uid: row.uid as string, count: row.count })),
+      })),
+    papers: [],
+    missing: [],
     allergies,
     removedAllergies,
     conditions,
@@ -706,6 +1009,39 @@ export async function loadPatientRecord(
           ...recordSite(d),
           title: titles.get(`${d.diagnosisSystem}|${d.diagnosisCode}`) ?? null,
         })),
+      diagnosisLines: encounterDiagnosisLines({
+        diagnoses: diagnoses
+          .filter((d) => d.encounterId === row.id)
+          .map((d) => ({
+            system: d.diagnosisSystem,
+            code: d.diagnosisCode,
+            type: d.diagnosisType,
+            status: d.status,
+            site: d,
+            qualifier: qualifierOf.get(formDiagnosisKey(row.id, d.diagnosisCode, looseValue(d))) ?? null,
+          })),
+        procedures: procedures
+          .filter((p) => p.encounterId === row.id)
+          .map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode, site: { ...p, siteQualifiers: [] } })),
+        titles,
+        site,
+      }).concat(
+        // La nota de un diagnóstico (lo que la ficha escribe debajo) va en su línea.
+        diagnoses
+          .filter((d) => d.encounterId === row.id && d.note?.trim())
+          .map((d) => `${nameOfDiagnosis(d.diagnosisSystem, d.diagnosisCode)}: ${d.note?.trim()}`),
+      ),
+      voided: [
+        ...allDiagnoses
+          .filter((d) => d.encounterId === row.id && d.voidedAt)
+          .map(
+            (d) =>
+              `Diagnóstico ${nameOfDiagnosis(d.diagnosisSystem, d.diagnosisCode)}${site.words(d, "short") ? ` · ${site.words(d, "short")}` : ""} · anulado${d.voidReason ? `: ${d.voidReason}` : ""}`,
+          ),
+        ...allProcedures
+          .filter((p) => p.encounterId === row.id && p.voidedAt)
+          .map((p) => `${p.description}${site.words(p, "short") ? ` · ${site.words(p, "short")}` : ""} · anulado${p.voidReason ? `: ${p.voidReason}` : ""}`),
+      ],
       procedures: procedures
         .filter((p) => p.encounterId === row.id)
         .map((p) => ({ ...p, ...recordSite(p) })),
@@ -718,22 +1054,54 @@ export async function loadPatientRecord(
         .map((a) => ({ note: a.note, authorName: a.authorName, createdAt: a.createdAt })),
     })),
     productSections,
-    planItems: planItems.map((item) => ({
+    planPhases: hooks.planPhases.map((key) => ({ key, words: hooks.phaseWords?.(key) ?? null })),
+    // El plan como la ficha (`listPlanItems` con `withoutVoided`): sin lo de una atención anulada,
+    // con la decisión de la persona, su camino y sus sesiones; nunca su precio.
+    planItems: planRows.map((item) => ({
+      id: item.id,
       title: item.title,
       status: item.status,
+      decision: item.decisionStatus,
+      stateWords: planItemStateText(item.status, item.decisionStatus),
       siteWords: site.words(item, "short"),
+      bodySite: site.bodySite(item),
+      phase: item.phase,
+      diagnosisName: item.diagnosisName,
+      diagnosisSystem: item.diagnosisSystem,
+      diagnosisCode: item.diagnosisCode,
+      sessionsDone: item.sessionsDone,
+      plannedSessions: item.plannedSessions,
+      path: item.path,
+      statusReason: item.statusReason,
+      waitsFor: item.waitsFor?.title ?? null,
+      nextAppointmentAt: nextOfItem.get(item.id) ?? null,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
     })),
     prescriptions: prescriptions.map((row) => ({
       row,
       items: items.filter((i) => i.prescriptionId === row.id),
     })),
-    consents,
+    // El consentimiento va con su tratamiento: su pieza es la del tratamiento.
+    consents: consents.map((c) => {
+      const item = c.planItemId ? planById.get(c.planItemId) : undefined
+      return { ...c, siteWords: item ? site.words(item, "short") : null, bodySite: item ? site.bodySite(item) : null }
+    }),
     forms,
     documents,
     appointments,
     visitAnswers: await patientVisitAnswers(tx, orgId, patientId),
   }
 }
+
+// La copia completa en su ZIP (mesa del 18 nov): vive en su módulo, con el mismo nombre de siempre.
+export {
+  buildPatientRecordCopy,
+  type PatientRecordCopy,
+  type PatientRecordSummary,
+  patientRecordSummary,
+  RECORD_README,
+} from "./patient-record-copy.js"
 
 /** Nombre del archivo, sin caracteres que un sistema de archivos rechace. */
 export function patientRecordFileName(record: PatientRecord, ext: string): string {
@@ -774,16 +1142,281 @@ const RELATION_WORDS: Record<string, string> = {
   other: "otra persona",
 }
 
-/** «en_curso» → «en curso»: el estado del tratamiento en palabras. */
-function planStatusWords(status: string): string {
-  return status.replaceAll("_", " ")
+/**
+ * La ASA en palabras, las mismas de la ficha (`asaLabel` de la pantalla): ASA Physical Status
+ * Classification System de la American Society of Anesthesiologists.
+ */
+const ASA_WORDS: Record<string, string> = {
+  I: "ASA I · sano",
+  II: "ASA II · enfermedad sistémica leve",
+  III: "ASA III · enfermedad sistémica grave",
+  IV: "ASA IV · amenaza constante para la vida",
+  V: "ASA V · moribundo",
+  VI: "ASA VI · muerte cerebral (donante)",
 }
 
-const CONSENT_WORDS: Record<string, string> = {
-  pendiente: "pendiente",
-  firmado: "firmado",
-  revocado: "revocado",
-  anulado: "anulado",
+/** «Ana Torres, Cirujano Dentista, COP 12345»: quién firmó, con lo que dice su perfil al firmar. */
+function signerWords(s: { name: string | null; title: string | null; registration: string | null }): string | null {
+  return [s.name, s.title, s.registration].filter((part) => !!part?.trim()).join(", ") || null
+}
+
+/** Quién firmó la atención y a qué hora; sin colegiatura, su motivo escrito (ADR 0200). */
+function encounterSignerWords(row: PatientRecord["encounters"][number]["row"], zone: Zone): string {
+  const who = signerWords({ name: row.signerName, title: row.signerTitle, registration: row.signerRegistration }) ?? "el equipo"
+  const when = row.endedAt ? ` el ${dayTimeWords(row.endedAt, zone)}` : ""
+  const skip = row.registrationSkipReason ? ` · sin colegiatura: ${row.registrationSkipReason}` : ""
+  return `${who}${when}${skip}`
+}
+
+/** «18 nov 2026, 10:32 · Ana Torres · pieza 46: Control post-obturación…». */
+function noteWords(n: PatientRecord["clinicalNotes"][number], zone: Zone): string {
+  return `${dayTimeWords(n.createdAt, zone)} · ${n.authorName ?? "el equipo"}${n.siteWords ? ` · ${n.siteWords}` : ""}: ${n.note}`
+}
+
+/** Un control con su estado, en palabras: por venir, con cita, hecho o cancelado con su motivo. */
+function followUpWords(f: PatientRecord["followUps"][number], zone: Zone): string {
+  if (f.status === "programado" && f.appointmentAt) return `${f.title} · con cita el ${dayTimeWords(f.appointmentAt, zone)}`
+  if (f.status === "realizado")
+    return `${f.title} · hecho${f.completedAt ? ` el ${dayWords(f.completedAt, zone)}` : ""}${f.outcome ? `: ${f.outcome}` : ""}`
+  if (f.status === "cancelado")
+    return `${f.title} · cancelado${f.cancelledAt ? ` el ${dayWords(f.cancelledAt, zone)}` : ""}${f.cancelledReason ? `: ${f.cancelledReason}` : ""}`
+  return `${f.title} · toca el ${dayWords(f.dueAt, zone)}${f.overdue ? " · vencido" : ""}`
+}
+
+/** Una orden con su resultado, o «sin resultado»; la anulada, con su motivo. */
+function orderWords(o: PatientRecord["orders"][number], zone: Zone, record: Pick<PatientRecord, "documents">): string {
+  const head = `${o.kindWords}: ${o.title}${o.recipient ? ` · a ${o.recipient}` : ""}${o.diagnosisName ? ` · por ${o.diagnosisName}` : ""} · pedida el ${dayWords(o.createdAt, zone)}`
+  if (o.status === "cancelado")
+    return `${head} · anulada${o.cancelledAt ? ` el ${dayWords(o.cancelledAt, zone)}` : ""}${o.cancelReason ? `: ${o.cancelReason}` : ""}`
+  if (o.status === "completado") {
+    const file = o.resultDocumentId ? record.documents.find((d) => d.id === o.resultDocumentId) : undefined
+    return `${head} · resultado${o.resultAt ? ` del ${dayWords(o.resultAt, zone)}` : ""}${o.resultText ? `: ${o.resultText}` : ""}${file ? ` · el informe es «${file.label}», en sus documentos` : ""}`
+  }
+  return `${head} · sin resultado`
+}
+
+function leaveWords(l: PatientRecord["leaves"][number], zone: Zone): string {
+  const head = `Descanso médico N.º ${l.leaveNumber} · ${l.days} ${l.days === 1 ? "día" : "días"}, del ${civilDay(l.startsOn)} al ${civilDay(l.endsOn)}${l.diagnosisName ? ` · por ${l.diagnosisName}` : ""}`
+  const by = signerWords({ name: l.signerName, title: l.signerTitle, registration: l.signerRegistration })
+  const voided = l.status === "anulado" ? ` · anulado${l.cancelledAt ? ` el ${dayWords(l.cancelledAt, zone)}` : ""}${l.cancelReason ? `: ${l.cancelReason}` : ""}` : ""
+  return `${head}${by ? ` · lo firmó ${by}` : ""}${voided}`
+}
+
+/**
+ * Un consentimiento en palabras, con su pieza: lo firmado desde su enlace y sin confirmar se dice
+ * así, no como «sin firmar» (es otro estado); lo revocado y lo anulado, con su motivo.
+ */
+function consentWords(c: PatientRecord["consents"][number], zone: Zone): string {
+  const head = `${c.titleSnapshot}${c.siteWords ? ` · ${c.siteWords}` : ""}`
+  const print = c.pdfSha256 ? ` · huella ${c.pdfSha256.slice(0, 16)}…` : ""
+  const informer = signerWords({ name: c.informerName, title: c.informerTitle, registration: c.informerRegistration })
+  if (c.status === "firmado")
+    return `${head} · firmado${c.signedAt ? ` el ${dayTimeWords(c.signedAt, zone)}` : ""}${c.signatureMethod === "enlace" ? " desde su enlace" : c.signatureMethod === "papel" ? " en papel" : ""}${c.signerName ? ` por ${c.signerName}` : ""}${informer ? ` · informó ${informer}` : ""}${print}`
+  if (c.status === "revocado")
+    return `${head} · revocado${c.revokedAt ? ` el ${dayTimeWords(c.revokedAt, zone)}` : ""}${c.revokeReason ? `: ${c.revokeReason}` : ""}${print}`
+  if (c.status === "anulado") return `${head} · anulado${c.cancelReason ? `: ${c.cancelReason}` : ""}`
+  if (c.personSignedAt)
+    return `${head} · lo firmó desde su enlace el ${dayTimeWords(c.personSignedAt, zone)} · falta que el profesional lo confirme con la persona delante`
+  return `${head} · le falta la firma`
+}
+
+/** «46 · lo piensa · 0 de 2 sesiones»: un tratamiento en una línea, sin precio. */
+function planItemWords(item: RecordPlanItem, zone: Zone, state = item.stateWords): string {
+  const sessions = showsSession(item.sessionsDone, item.plannedSessions)
+    ? ` · ${item.sessionsDone} de ${item.plannedSessions} sesiones`
+    : ""
+  const why = item.diagnosisName ? ` · por ${item.diagnosisName}` : ""
+  const reason =
+    item.statusReason && ["suspendido", "cancelado", "reemplazado"].includes(item.status) ? `: «${item.statusReason}»` : ""
+  const next = item.nextAppointmentAt ? ` · cita el ${dayTimeWords(item.nextAppointmentAt, zone)}` : ""
+  const after = item.waitsFor && item.status !== "realizado" ? ` · va después de ${lowerFirst(item.waitsFor)}` : ""
+  return `${item.title}${item.siteWords ? ` · ${item.siteWords}` : ""}${why} · ${lowerFirst(state)}${reason}${sessions}${next}${after}`
+}
+
+const OPEN_PLAN_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
+const LEFT_OUT = (item: RecordPlanItem) =>
+  item.decision === "rechazado" || item.decision === "no_elegida" || item.status === "cancelado" || item.status === "reemplazado"
+
+/**
+ * El plan como lo lee la ficha, sin repetir: lo que compite en un presupuesto y la persona aún no
+ * elige va junto, como caminos que no se suman («resina o corona»); el mismo tratamiento de la
+ * misma pieza que sigue abierto en dos presupuestos va una vez, con su última decisión, sin borrar
+ * el otro camino (voz clínica, 18 nov: la corona de la 46 de Rosa estaba dos veces).
+ */
+function planView(record: Pick<PatientRecord, "planItems">): {
+  paths: Array<{ budgetId: string; options: Array<{ position: number; name: string | null; items: Array<{ item: RecordPlanItem; state: string }> }> }>
+  items: RecordPlanItem[]
+} {
+  const keyOf = (item: RecordPlanItem) => `${item.title.toLocaleLowerCase("es")}|${item.siteWords ?? ""}`
+  const open = (item: RecordPlanItem) => OPEN_PLAN_STATUSES.includes(item.status) && !LEFT_OUT(item)
+  const competing = record.planItems.filter((item) => open(item) && item.path && !item.path.chosen && item.path.pathCount > 1)
+  const latest = new Map<string, RecordPlanItem>()
+  for (const item of record.planItems.filter(open)) {
+    const known = latest.get(keyOf(item))
+    if (!known || item.updatedAt.getTime() > known.updatedAt.getTime()) latest.set(keyOf(item), item)
+  }
+  const inPaths = new Set(competing.map(keyOf))
+  const paths = [...new Set(competing.map((item) => item.path!.budgetId))].map((budgetId) => {
+    const own = competing.filter((item) => item.path!.budgetId === budgetId)
+    const positions = [...new Set(own.flatMap((item) => item.path!.positions))].sort((a, b) => a - b)
+    return {
+      budgetId,
+      options: positions.map((position) => {
+        const items = own.filter((item) => item.path!.positions.includes(position))
+        return {
+          position,
+          name: items.map((item) => item.path?.name).find((name) => !!name) ?? null,
+          // Si el mismo tratamiento sigue abierto en otro presupuesto, vale su última decisión.
+          items: items.map((item) => ({ item, state: latest.get(keyOf(item))?.stateWords ?? item.stateWords })),
+        }
+      }),
+    }
+  })
+  const seen = new Set<string>()
+  const items = record.planItems.filter((item) => {
+    if (competing.includes(item)) return false
+    if (!open(item)) return true
+    const key = keyOf(item)
+    if (inPaths.has(key) || seen.has(key) || latest.get(key) !== item) return false
+    seen.add(key)
+    return true
+  })
+  return { paths, items }
+}
+
+/** «Caminos que no se suman (elige uno): Opción A · resina · 46 · por responder — o — Opción B …». */
+function pathWords(path: ReturnType<typeof planView>["paths"][number], zone: Zone): string {
+  return `Caminos que no se suman, falta que elija uno: ${path.options
+    .map(
+      (option) =>
+        `${String.fromCharCode(64 + option.position)}${option.name ? ` (${option.name})` : ""}: ${option.items.map(({ item, state }) => planItemWords(item, zone, state)).join(" + ")}`,
+    )
+    .join(" · o · ")}`
+}
+
+/** El plan por fases, en su orden, más «No se hará»; cada línea con la decisión de la persona. */
+function planLines(record: PatientRecord, zone: Zone): Array<{ title: string; lines: string[] }> {
+  const view = planView(record)
+  const groups: Array<{ title: string; lines: string[] }> = []
+  const phases = record.planPhases.length > 1 ? record.planPhases : [{ key: null as string | null, words: null }]
+  for (const [index, phase] of phases.entries()) {
+    const own = (item: RecordPlanItem) => phase.key === null || item.phase === phase.key || (index === 0 && !record.planPhases.some((p) => p.key === item.phase))
+    const lines = [
+      ...view.items.filter((item) => !LEFT_OUT(item) && own(item)).map((item) => planItemWords(item, zone)),
+      ...view.paths
+        .filter((path) => path.options.some((option) => option.items.some(({ item }) => own(item))))
+        .map((path) => pathWords(path, zone)),
+    ]
+    if (lines.length)
+      groups.push({ title: phase.key === null ? "Tratamientos" : `Fase ${index + 1}${phase.words ? ` · ${phase.words}` : ""}`, lines })
+  }
+  const out = view.items.filter(LEFT_OUT).map((item) => planItemWords(item, zone))
+  if (out.length) groups.push({ title: "No se hará", lines: out })
+  return groups
+}
+
+/** La línea de un grupo de antecedentes sin nada anotado: «niega», «no se le preguntó», «no sabe». */
+function groupStateLine(record: PatientRecord, topic: HealthTopic, label: string, zone: Zone): string | null {
+  const rows = { allergies: record.allergies.length, conditions: record.conditions.length, medications: record.medications.length }[topic]
+  if (rows > 0 || record.declared.some((group) => group.saidNo[topic])) return null
+  const group = record.groups[topic]
+  if (group.state === "none") return `${label}: niega`
+  if (group.state !== "unknown") return null
+  if (topic === "allergies" && record.allergiesSaidUnknown) {
+    const said = record.allergiesSaidUnknown
+    return `${label}: ${lowerFirst(saidNoWords(said.by, record.person.sex, "no sabe"))} el ${dayWords(said.at, zone)}`
+  }
+  // Con el «no» que dijo ella en su declaración: la clínica no lo preguntó, pero ella sí lo dijo.
+  if (group.saidNo)
+    return `${label}: no se le preguntó en la clínica; ${lowerFirst(saidNoWords(group.saidNo.by, record.person.sex))} el ${dayWords(group.saidNo.at, zone)}`
+  return `${label}: no se le preguntó`
+}
+
+/** La marca de lo que dijo y nadie revisó, o de lo que «dijo que cambió». */
+function rowMark(record: PatientRecord, topic: HealthTopic, id: string, zone: Zone): string | null {
+  const changed = changedRowWords(record, topic, id, record.person.sex, zone)
+  if (changed) return lowerFirst(changed)
+  const group = declaredGroupOf(record, topic, id)
+  return group ? unreviewedWords(group, record.person.sex, zone) : null
+}
+
+/**
+ * «Antes de atenderla»: alergias con su estado, enfermedades, lo que toma (anticoagulante,
+ * antiagregante y medicina para los huesos dichos como tales), ASA, embarazo y quién la representa.
+ * Lo mismo que la franja de la ficha, en la primera página (voz clínica, 18 nov).
+ */
+function beforeCareLines(record: PatientRecord, zone: Zone): string[] {
+  const sex = record.person.sex
+  const lines: string[] = []
+  const withMark = (text: string, mark: string | null) => (mark ? `${text} · ${mark}` : text)
+  for (const a of record.allergies) {
+    const severity = a.severity && a.severity !== "desconocida" ? ` ${a.severity}` : ""
+    lines.push(
+      withMark(
+        `${a.kind === "intolerancia" ? "Intolerancia" : "Alergia"}${severity}: ${a.substance}${a.reaction ? ` · ${a.reaction}` : ""}`,
+        rowMark(record, "allergies", a.id, zone),
+      ),
+    )
+  }
+  for (const [topic, label] of [
+    ["allergies", "Alergias"],
+    ["conditions", "Enfermedades"],
+    ["medications", "Medicación"],
+  ] as const) {
+    const state = groupStateLine(record, topic, label, zone)
+    if (state) lines.push(state)
+  }
+  for (const group of record.declared)
+    for (const [topic, label] of [
+      ["allergies", "Alergias"],
+      ["conditions", "Enfermedades"],
+      ["medications", "Medicación"],
+    ] as const)
+      if (group.saidNo[topic])
+        lines.push(`${label}: ${saidNoWords(group.by, sex)}${group.at ? ` el ${dayWords(group.at, zone)}` : ""}, sin revisar`)
+  for (const c of record.conditions.filter((row) => row.status === "activa"))
+    lines.push(withMark(`Enfermedad: ${c.name}`, rowMark(record, "conditions", c.id, zone)))
+  for (const m of record.medications.filter((row) => isCurrentMedication(row, record.today))) {
+    const alert = medicationAlertWords(m)
+    // Lo que «dijo que cambió» no se lee como de hoy: «Antes (anticoagulante): …», como en sus antecedentes.
+    const head = record.changed?.medications.includes(m.id)
+      ? `Antes${alert.group ? ` (${MEDICATION_CLASSES[alert.group].label.toLocaleLowerCase("es")})` : ""}: ${[m.name, m.dose].filter(Boolean).join(" ")}`
+      : alert.label
+    lines.push(withMark(`${head}${m.frequency ? ` · ${m.frequency}` : ""}`, rowMark(record, "medications", m.id, zone)))
+  }
+  for (const item of record.medicineClasses)
+    lines.push(`${MEDICATION_CLASSES[item.group].label}: ${MEDICINE_CLASS_WORDS[item.answer]}${item.said ? " · lo dijo la persona" : ""}`)
+  if (record.asa)
+    lines.push(
+      `Riesgo anestésico: ${ASA_WORDS[record.asa.value] ?? `ASA ${record.asa.value}`}${record.asa.by ? ` · la clasificó ${record.asa.by}` : ""}${record.asa.at ? ` el ${dayWords(record.asa.at, zone)}` : ""}`,
+    )
+  const pregnancy = record.pregnancy
+  if (pregnancy)
+    lines.push(
+      pregnancy.state === "vigente"
+        ? `Embarazo${pregnancy.weeksToday !== null ? `: ${pregnancy.weeksToday} semanas hoy` : ""}${pregnancy.saidOn ? ` · lo dijo el ${civilDay(pregnancy.saidOn)}` : ""}`
+        : `Embarazo por confirmar${pregnancy.saidOn ? ` · lo dijo el ${civilDay(pregnancy.saidOn)}` : ""}`,
+    )
+  for (const c of record.contacts.filter((row) => row.relationship === "guardian"))
+    lines.push(`La representa: ${c.displayName}${c.detail ? ` (${c.detail})` : ""}${c.phone ? ` · ${c.phone}` : ""}`)
+  return lines
+}
+
+/**
+ * «Lo que sigue»: lo aceptado por hacer (con sus sesiones y su cita), lo que espera respuesta, los
+ * controles por venir, las órdenes sin resultado y los consentimientos que faltan.
+ */
+function nextStepLines(record: PatientRecord, zone: Zone): string[] {
+  const view = planView(record)
+  const open = view.items.filter((item) => ["pendiente", "programado", "en_curso"].includes(item.status) && !LEFT_OUT(item))
+  return [
+    ...open.filter((item) => item.decision === "aceptado").map((item) => planItemWords(item, zone)),
+    ...open.filter((item) => item.decision !== "aceptado").map((item) => planItemWords(item, zone)),
+    ...view.paths.map((path) => pathWords(path, zone)),
+    ...record.followUps.filter((f) => f.status === "pendiente" || f.status === "programado").map((f) => followUpWords(f, zone)),
+    ...record.orders.filter((o) => o.status === "solicitado" || o.status === "en_proceso").map((o) => orderWords(o, zone, record)),
+    ...record.consents.filter((c) => c.status === "pendiente").map((c) => `Consentimiento: ${consentWords(c, zone)}`),
+  ]
 }
 
 /**
@@ -969,9 +1602,14 @@ function visitRows(told: PatientRecord["visitAnswers"][number]): Array<[string, 
   ).filter((row): row is [string, string] => !!row[1])
 }
 
+/**
+ * El PDF para leer. `copyLink`: el enlace para bajar la copia completa, con hasta cuándo sirve
+ * (`issueRecordCopyLink`); va en la primera página, en texto y en QR.
+ */
 export async function renderPatientRecordPdf(
   record: PatientRecord,
   clinic: DocumentClinic,
+  options: { copyLink?: { url: string; until: Date } } = {},
 ): Promise<Uint8Array> {
   const zone = clinic
   const p = record.person
@@ -1023,6 +1661,25 @@ export async function renderPatientRecordPdf(
     ],
     4,
   )
+  // Cuándo se armó, con su hora: dos copias del mismo día pueden decir cosas distintas.
+  kit.text(`Copia generada el ${dayTimeWords(record.generatedAt, zone)}.`, { size: SIZE.second, tone: "gray" })
+
+  // La primera página: lo que no se puede pasar por alto antes de tocar a la persona y lo que
+  // está a medias (mesa del 18 nov). La crónica de atenciones viene después.
+  if (options.copyLink) {
+    kit.gap(10)
+    kit.qrPanel({
+      url: options.copyLink.url,
+      title: "Su copia completa, con sus imágenes y cada papel",
+      body: `Se baja con este enlace hasta el ${dayWords(options.copyLink.until, zone)}: ${options.copyLink.url}`,
+    })
+  }
+  section("Antes de atenderla")
+  kit.bullets(beforeCareLines(record, zone))
+  section("Lo que sigue")
+  const next = nextStepLines(record, zone)
+  if (next.length) kit.bullets(next)
+  else kit.text("Nada pendiente: ningún tratamiento aceptado por hacer, control por venir ni orden sin resultado.")
 
   section("Datos de contacto")
   kit.text(
@@ -1034,11 +1691,12 @@ export async function renderPatientRecordPdf(
       .filter(Boolean)
       .join(" · ") || "Sin datos de contacto registrados.",
   )
+  if (p.address) kit.text(`Domicilio: ${p.address.text}`)
   if (record.contacts.length)
     kit.bullets(
       record.contacts.map(
         (c) =>
-          `${c.displayName} · ${c.detail ?? RELATION_WORDS[c.relationship] ?? c.relationship}${c.phone ? ` · ${c.phone}` : ""}`,
+          `${c.displayName} · ${c.detail ?? RELATION_WORDS[c.relationship] ?? c.relationship}${c.isEmergency ? " · contacto de emergencia" : ""}${c.phone ? ` · ${c.phone}` : ""}`,
       ),
     )
 
@@ -1072,24 +1730,16 @@ export async function renderPatientRecordPdf(
     (scope) => `${scope.label}${scope.review.by ? ` por ${scope.review.by}` : ""} el ${dayWords(scope.review.at, zone)}`,
   )
   if (reviewed.length) kit.text(reviewed.join(" · "), { size: SIZE.second, tone: "gray" })
-  // Un grupo sin nada anotado dice cómo quedó: «niega» si el equipo lo preguntó; tras una revisión,
-  // «no se le preguntó», con el «no» que ella dijo, que no se pierde (auditor, QA de la entrega 2).
+  // Un grupo sin nada anotado dice cómo quedó, con la regla de la franja de la ficha: «niega», «no
+  // sabe» o «no se le preguntó», con el «no» que ella dijo, que no se pierde. Antes, sin una revisión
+  // de antecedentes, decía «Sin registros.», que se lee «no tiene» (mesa del 18 nov, C2).
   const groupLines = (
     [
-      ["allergies", "Alergias", record.allergies.length],
-      ["conditions", "Enfermedades", record.conditions.length],
-      ["medications", "Medicación", record.medications.length],
+      ["allergies", "Alergias"],
+      ["conditions", "Enfermedades"],
+      ["medications", "Medicación"],
     ] as const
-  ).flatMap(([topic, label, rows]) => {
-    if (rows > 0 || record.declared.some((group) => group.saidNo[topic])) return []
-    const group = record.groups[topic]
-    if (group.state === "none") return [`${label}: niega`]
-    if (group.state !== "unknown" || !record.reviews.history) return []
-    const said = group.saidNo
-      ? `; ${lowerFirst(saidNoWords(group.saidNo.by, p.sex))} el ${dayWords(group.saidNo.at, zone)}`
-      : ""
-    return [`${label}: no se le preguntó en la clínica${said}`]
-  })
+  ).flatMap(([topic, label]) => groupStateLine(record, topic, label, zone) ?? [])
   if (
     !record.allergies.length &&
     !record.removedAllergies.length &&
@@ -1219,7 +1869,7 @@ export async function renderPatientRecordPdf(
 
   section(`Atenciones (${record.encounters.length})`)
   if (!record.encounters.length) kit.text("Sin atenciones registradas.")
-  for (const { row, diagnoses, procedures, exam, addenda } of record.encounters) {
+  for (const { row, diagnosisLines, voided, procedures, exam, addenda } of record.encounters) {
     const vitals = (row.vitals ?? {}) as Record<string, unknown>
     const vitalText = VITAL_SIGNS.filter((v) => typeof vitals[v.key] === "number")
       .map((v) => `${v.label} ${vitals[v.key]} ${v.suffix}`)
@@ -1228,14 +1878,13 @@ export async function renderPatientRecordPdf(
     kit.gap(5)
     kit.rule()
     kit.gap(7)
-    const signer = [row.signerName, row.signerRegistration].filter(Boolean).join(" · ")
     kit.spread(
       {
         text: `${dayTimeWords(row.startedAt, zone)}${row.status === "finalizada" ? "" : ` · ${ENCOUNTER_WORDS[row.status] ?? row.status}`}`,
         face: "sansBold",
         size: SIZE.read,
       },
-      { text: signer, size: SIZE.second, tone: "gray" },
+      { text: row.status === "finalizada" ? "" : (row.signerName ?? ""), size: SIZE.second, tone: "gray" },
       { size: SIZE.read, leading: 1.4 },
     )
     kit.gap(4)
@@ -1246,8 +1895,11 @@ export async function renderPatientRecordPdf(
       ["Relato de la enfermedad", row.presentIllness],
       ["Signos vitales", vitalText],
       ["Examen", exam.lines],
-      ["Diagnóstico", diagnoses.map((d) => `${diagnosisText(d)}${siteText(d)}`)],
+      // Con las líneas de la Historia: el término de la ficha, la pieza y su tipo (mesa del 18 nov).
+      ["Diagnóstico", diagnosisLines],
       ["Se hizo", procedures.map((pr) => `${pr.description}${siteText(pr)}`)],
+      ["Notas clínicas", record.clinicalNotes.filter((n) => n.encounterId === row.id).map((n) => noteWords(n, zone))],
+      ["Anulado en esta atención", voided],
       // Lo que se anotó en una ficha durante la atención, o lo que respondió para ella; sus
       // respuestas van en su apartado.
       [
@@ -1277,33 +1929,68 @@ export async function renderPatientRecordPdf(
         "Correcciones después del cierre",
         addenda.map((a) => `${a.note} (${[a.authorName, dayTimeWords(a.createdAt, zone)].filter(Boolean).join(", ")})`),
       ],
+      // Quién firmó, con su título, su colegiatura y la hora (NTS 139: firma y sello); la que sigue
+      // en curso dice que puede cambiar: quien la recibe no puede preguntarle a nadie.
+      ["Firmó", row.status === "finalizada" ? encounterSignerWords(row, zone) : null],
+      ["Sin firmar", row.status === "borrador" ? "Sigue en curso: lo que dice puede cambiar." : null],
     ])
+  }
+
+  // Las notas que no son de una atención.
+  const looseNotes = record.clinicalNotes.filter((n) => !n.encounterId)
+  if (looseNotes.length) {
+    section(`Notas clínicas (${looseNotes.length})`)
+    kit.bullets(looseNotes.map((n) => noteWords(n, zone)))
   }
 
   for (const product of record.productSections) {
     section(product.title)
-    if (!product.lines.length) kit.text(product.empty)
-    else kit.bullets(product.lines)
+    if (!product.lines.length && !product.blocks?.length) kit.text(product.empty)
+    else if (product.lines.length) kit.bullets(product.lines)
+    for (const block of product.blocks ?? []) {
+      kit.ensure(60)
+      kit.gap(6)
+      kit.text(block.title, { face: "sansBold", size: SIZE.table })
+      for (const line of block.lines) kit.text(line, { size: SIZE.second, tone: "gray" })
+      if (block.table && block.table.rows.length) {
+        kit.gap(3)
+        kit.table({
+          columns: block.table.columns.map((label, index) => ({ label, ...(index === 0 ? { width: 36 } : {}) })),
+          size: SIZE.second,
+          rows: block.table.rows.map((cells) => cells.map((cell) => [{ inlines: cell }])),
+        })
+      }
+    }
   }
 
   section("Plan de tratamiento")
-  if (!record.planItems.length) kit.text("Sin tratamientos en el plan.")
-  else
-    kit.bullets(
-      record.planItems.map(
-        (i) => `${i.title}${i.siteWords ? ` · ${i.siteWords}` : ""} · ${planStatusWords(i.status)}`,
-      ),
-    )
+  const plan = planLines(record, zone)
+  if (!plan.length) kit.text("Sin tratamientos en el plan.")
+  for (const group of plan) {
+    kit.subheading(group.title)
+    kit.bullets(group.lines)
+  }
+
+  section("Controles")
+  if (!record.followUps.length) kit.text("Sin controles.")
+  else kit.bullets(record.followUps.map((f) => followUpWords(f, zone)))
+
+  section("Órdenes")
+  if (!record.orders.length) kit.text("Sin órdenes.")
+  else kit.bullets(record.orders.map((o) => orderWords(o, zone, record)))
 
   section("Recetas")
   if (!record.prescriptions.length) kit.text("Sin recetas.")
   for (const { row, items } of record.prescriptions) {
+    // La anulada dice su motivo: la de Rosa se anuló por su alergia a la penicilina (C1).
     kit.text(
-      `Receta N.º ${row.prescriptionNumber} · ${dayTimeWords(row.issuedAt, zone)}${row.status === "anulada" ? " · anulada" : ""}`,
+      `Receta N.º ${row.prescriptionNumber} · ${dayTimeWords(row.issuedAt, zone)}${row.status === "anulada" ? ` · anulada${row.cancelledAt ? ` el ${dayWords(row.cancelledAt, zone)}` : ""}${row.cancelReason ? `: ${row.cancelReason}` : ""}` : ""}`,
       {
         face: "sansSemi",
       },
     )
+    const by = signerWords({ name: row.prescriberName, title: row.prescriberTitle, registration: row.prescriberRegistration })
+    if (by) kit.text(`La firmó ${by}`, { size: SIZE.second, tone: "gray" })
     kit.bullets(
       items.map(
         (i) =>
@@ -1312,21 +1999,31 @@ export async function renderPatientRecordPdf(
     )
   }
 
+  if (record.leaves.length) {
+    section("Descansos médicos")
+    kit.bullets(record.leaves.map((l) => leaveWords(l, zone)))
+  }
+
   section("Consentimientos")
   if (!record.consents.length) kit.text("Sin consentimientos.")
-  else
+  else kit.bullets(record.consents.map((c) => consentWords(c, zone)))
+
+  // Cada papel emitido va en su PDF, el mismo que se envía y se imprime (mesa del 18 nov).
+  if (record.papers.length) {
+    section(`Papeles emitidos (${record.papers.length})`)
+    kit.text(
+      options.copyLink
+        ? "Cada uno va en su PDF, en la copia completa que se baja con el enlace de la primera página."
+        : "Cada uno va en su PDF, en la carpeta «papeles» de esta copia.",
+      { size: SIZE.second, tone: "gray" },
+    )
     kit.bullets(
-      record.consents.map(
-        (c) =>
-          `${c.titleSnapshot} · ${CONSENT_WORDS[c.status] ?? c.status}${
-            c.status === "revocado" && c.revokedAt
-              ? ` el ${dayTimeWords(c.revokedAt, zone)}`
-              : c.signedAt
-                ? ` el ${dayTimeWords(c.signedAt, zone)}`
-                : ""
-          }${c.pdfSha256 ? ` · huella ${c.pdfSha256.slice(0, 16)}…` : ""}`,
+      record.papers.map(
+        (paper) =>
+          `${paper.label} · ${dayWords(paper.at, zone)}${paper.mark ? ` · ${paper.mark}` : ""}${paper.signer ? ` · ${paper.signer}` : ""}`,
       ),
     )
+  }
 
   // Las fichas del equipo y lo que respondió la persona, cada uno con su nombre, como en la Historia.
   for (const source of ["staff", "portal"] as const) {
@@ -1375,13 +2072,31 @@ export async function renderPatientRecordPdf(
   section("Imágenes y documentos")
   if (!record.documents.length) kit.text("Sin imágenes ni documentos.")
   else {
-    kit.text("Los archivos van aparte, en la carpeta «documentos» del ZIP.", {
-      size: SIZE.second,
-      tone: "gray",
-    })
+    // Lo que tiene en la mano quien lee: el PDF solo (con el enlace) o la copia completa.
+    kit.text(
+      options.copyLink
+        ? "Los archivos van en la copia completa, que se baja con el enlace de la primera página."
+        : "Los archivos van en la carpeta «documentos» de esta copia.",
+      { size: SIZE.second, tone: "gray" },
+    )
     kit.bullets(
       record.documents.map((d) => `${d.label} · ${documentDateWords(d, zone)}`),
     )
+  }
+  // Lo retirado se nombra con su tipo, su fecha y su motivo, sin el archivo ni su nombre: el
+  // nombre puede ser el de otra persona (auditor, 18 nov).
+  if (record.retiredDocuments.length) {
+    kit.subheading("Retirado de su ficha")
+    kit.bullets(
+      record.retiredDocuments.map(
+        (d) =>
+          `${d.typeWords} del ${dayWords(d.at, zone)} · retirado el ${dayWords(d.retiredAt, zone)}${d.retiredBy ? ` por ${d.retiredBy}` : ""}${d.reason ? `: ${d.reason}` : ""}`,
+      ),
+    )
+  }
+  if (record.missing.length) {
+    kit.subheading("No se pudo incluir")
+    kit.bullets(record.missing)
   }
 
   section("Citas")
@@ -1397,6 +2112,45 @@ export async function renderPatientRecordPdf(
 }
 
 type Resource = Record<string, unknown> & { resourceType: string; id: string }
+
+/** El espacio de los UUID v5 de lo que no es de un paciente (la clínica, quien firmó): siempre el mismo. */
+const FHIR_ID_NAMESPACE = "3f6b8c1e-2d4a-5b7c-9e0f-1a2b3c4d5e6f"
+const FHIR_LIST_EMPTY_REASON_SYSTEM = "http://terminology.hl7.org/CodeSystem/list-empty-reason"
+const FHIR_TOOTH_SYSTEM = "http://terminology.hl7.org/CodeSystem/ex-tooth"
+const FHIR_DICOM_MODALITY_SYSTEM = "http://dicom.nema.org/resources/ontology/DCM"
+
+/**
+ * La criticidad de una alergia (R4 `AllergyIntolerance.criticality`, 0..1): la que anotó la ficha.
+ * Sin ella no va: no se deduce de la severidad de la reacción (no se inventa un dato).
+ */
+function allergyCriticality(a: { criticality: string | null }): { criticality?: string } {
+  const code = fhirCode(ALLERGY_CRITICALITY_FHIR, a.criticality)
+  return code ? { criticality: code } : {}
+}
+
+/**
+ * Las referencias del paquete, resueltas dentro de él (R4, Bundle, «Resolving references in
+ * Bundles»): con `fullUrl` `urn:uuid:…`, una referencia relativa `Patient/<id>` no se resuelve; se
+ * escribe el `fullUrl` del recurso. La que no está en el paquete (lo que no viaja en la copia) queda
+ * solo con su `display`, sin `reference`: no apunta a nada que no exista. Las referencias a lo
+ * contenido (`#cuestionario`) quedan como están.
+ */
+function resolveBundleReferences(value: unknown, fullUrlOf: ReadonlyMap<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((item) => resolveBundleReferences(item, fullUrlOf))
+  if (!value || typeof value !== "object") return value
+  const out: Record<string, unknown> = {}
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "reference" && typeof inner === "string" && !inner.startsWith("#") && !inner.startsWith("urn:")) {
+      const resolved = fullUrlOf.get(inner)
+      if (resolved) out.reference = resolved
+      continue
+    }
+    out[key] = key === "contained" ? inner : resolveBundleReferences(inner, fullUrlOf)
+  }
+  // Una referencia que se cayó sin `display` queda vacía: se dice qué era.
+  if ("reference" in (value as Record<string, unknown>) && !("reference" in out) && !("display" in out)) out.display = "No va en esta copia"
+  return out
+}
 
 /** Una pregunta con lo respondido, para el `Questionnaire` contenido y su `QuestionnaireResponse`. */
 interface AskedItem {
@@ -1544,9 +2298,66 @@ function formAnswers(item: FormRecordItem, exported: ReadonlySet<string>): Array
  */
 export function patientRecordFhirBundle(record: PatientRecord): Record<string, unknown> {
   const p = record.person
+  // Las referencias se escriben `Tipo/id` mientras se arma y al final se resuelven dentro del
+  // paquete (`resolveBundleReferences`): R4, Bundle «Resolving references in Bundles».
   const patientRef = { reference: `Patient/${p.patientId}` }
   const resources: Resource[] = []
   const docCode = hl7DocumentTypeCode(p.docType, p.docCountry)
+  // La clínica y quienes firmaron, como recursos del paquete (R4 Organization y Practitioner): el
+  // sistema que lo carga sabe quién atendió y a quién llamar.
+  const organizationId = uuidV5(FHIR_ID_NAMESPACE, `Organization:${record.clinic.fiscalDocNumber ?? record.clinic.tradeName}`)
+  const organizationRef = { reference: `Organization/${organizationId}` }
+  resources.push({
+    resourceType: "Organization",
+    id: organizationId,
+    ...(record.clinic.fiscalDocNumber
+      ? {
+          identifier: [
+            {
+              // v2-0203 «TAX»: el número de contribuyente (en el Perú, el RUC). Sin una dirección
+              // inventada para la autoridad tributaria: el tipo, el valor y el texto.
+              type: { coding: [{ system: HL7_IDENTIFIER_TYPE_SYSTEM, code: "TAX" }], text: record.clinic.fiscalDocType ?? "Contribuyente" },
+              value: record.clinic.fiscalDocNumber,
+            },
+          ],
+        }
+      : {}),
+    active: true,
+    name: record.clinic.tradeName || record.clinic.legalName || "Clínica",
+    ...(record.clinic.legalName && record.clinic.legalName !== record.clinic.tradeName ? { alias: [record.clinic.legalName] } : {}),
+    ...(record.clinic.phone ? { telecom: [{ system: "phone", value: record.clinic.phone }] } : {}),
+    ...(record.clinic.address ? { address: [{ text: record.clinic.address }] } : {}),
+  })
+  const practitioners = new Map<string, string>()
+  /** El `Practitioner` de quien firmó, con su colegiatura (v2-0203 «LN») y su título; null sin nombre. */
+  const practitionerRef = (s: { name: string | null; title: string | null; registration: string | null }) => {
+    const name = s.name?.trim()
+    if (!name) return null
+    const key = `${name}|${s.registration ?? ""}`
+    let id = practitioners.get(key)
+    if (!id) {
+      id = uuidV5(FHIR_ID_NAMESPACE, `Practitioner:${key}`)
+      practitioners.set(key, id)
+      resources.push({
+        resourceType: "Practitioner",
+        id,
+        ...(s.registration?.trim()
+          ? {
+              identifier: [
+                {
+                  type: { coding: [{ system: HL7_IDENTIFIER_TYPE_SYSTEM, code: "LN" }], text: "Colegiatura" },
+                  value: s.registration.trim(),
+                },
+              ],
+            }
+          : {}),
+        name: [{ text: name }],
+        ...(s.title?.trim() ? { qualification: [{ code: { text: s.title.trim() } }] } : {}),
+      })
+    }
+    return { reference: `Practitioner/${id}`, display: name }
+  }
+  const address = p.address
   resources.push({
     resourceType: "Patient",
     id: p.patientId,
@@ -1580,10 +2391,32 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     ],
     ...(p.sex ? { gender: fhirCode(SEX_TO_FHIR_GENDER, p.sex) ?? "unknown" } : {}),
     ...(p.birthDate ? { birthDate: p.birthDate } : {}),
-    telecom: [
-      ...(p.phone ? [{ system: "phone", value: p.phone }] : []),
-      ...(p.email ? [{ system: "email", value: p.email }] : []),
-    ],
+    ...(p.phone || p.email
+      ? {
+          telecom: [
+            ...(p.phone ? [{ system: "phone", value: p.phone }] : []),
+            ...(p.email ? [{ system: "email", value: p.email }] : []),
+          ],
+        }
+      : {}),
+    // El domicilio: la ficha lo guarda ya en la forma de FHIR Address (ADR 0077).
+    ...(address
+      ? {
+          address: [
+            {
+              use: "home",
+              text: address.text,
+              ...(address.line ? { line: [address.line] } : {}),
+              ...(address.city ? { city: address.city } : {}),
+              ...(address.district ? { district: address.district } : {}),
+              ...(address.region ? { state: address.region } : {}),
+              ...(address.postalCode ? { postalCode: address.postalCode } : {}),
+              ...(address.country ? { country: address.country } : {}),
+            },
+          ],
+        }
+      : {}),
+    managingOrganization: organizationRef,
   })
   for (const c of record.contacts)
     resources.push({
@@ -1638,10 +2471,13 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       },
       type: fhirCode(ALLERGY_TYPE_FHIR, a.kind) ?? "allergy",
       ...(category ? { category: [category] } : {}),
-      ...(fhirCode(ALLERGY_CRITICALITY_FHIR, a.criticality)
-        ? { criticality: fhirCode(ALLERGY_CRITICALITY_FHIR, a.criticality) }
-        : {}),
-      code: { text: a.substance },
+      ...allergyCriticality(a),
+      // La sustancia con su código ATC si es de la lista (`ALLERGENS`); lo de la lista propia y lo
+      // escrito sin codificar va como texto: no se inventa un sistema.
+      code: {
+        ...(a.substanceSystem === "atc" && a.substanceCode ? { coding: [{ system: FHIR_ATC_SYSTEM, code: a.substanceCode }] } : {}),
+        text: a.substance,
+      },
       ...stated,
       ...(a.reaction || severity
         ? {
@@ -1653,6 +2489,32 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
             ],
           }
         : {}),
+    })
+  }
+  // Lo que nadie preguntó (o lo que niega) no es un recurso «sin alergias»: en R4 es una `List`
+  // vacía con su motivo (`emptyReason`, list-empty-reason: `notasked`, «no se le preguntó»;
+  // `nilknown`, «niega»), como lo dice la ficha. Así el sistema que la recibe no lee «no tiene».
+  for (const [topic, title, loinc] of [
+    ["allergies", "Alergias", { code: "48765-2", display: "Allergies and adverse reactions Document" }],
+    ["conditions", "Enfermedades", { code: "11348-0", display: "History of Past illness Narrative" }],
+    ["medications", "Medicación", { code: "10160-0", display: "History of Medication use Narrative" }],
+  ] as const) {
+    const line = groupStateLine(record, topic, title, record.clinic)
+    const state = record.groups[topic].state
+    if (!line || (state !== "unknown" && state !== "none")) continue
+    // «No sabe»: se le preguntó y no lo sabe (`unavailable`, la información no está disponible).
+    const reason = state === "none" ? "nilknown" : topic === "allergies" && record.allergiesSaidUnknown ? "unavailable" : "notasked"
+    resources.push({
+      resourceType: "List",
+      id: uuidV5(p.patientId, `List:${topic}`),
+      status: "current",
+      mode: "snapshot",
+      title,
+      code: { coding: [{ system: FHIR_LOINC_SYSTEM, ...loinc }], text: title },
+      subject: patientRef,
+      date: record.generatedAt.toISOString(),
+      note: [{ text: line }],
+      emptyReason: { coding: [{ system: FHIR_LIST_EMPTY_REASON_SYSTEM, code: reason }], text: line },
     })
   }
   for (const c of record.conditions)
@@ -1780,6 +2642,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     // anulado si se anuló (como sus procedimientos). Un borrador no viaja como «final».
     const observationStatus =
       row.status === "anulada" ? "entered-in-error" : row.status === "finalizada" ? "final" : "preliminary"
+    const signer = practitionerRef({ name: row.signerName, title: row.signerTitle, registration: row.signerRegistration })
     resources.push({
       resourceType: "Encounter",
       id: row.id,
@@ -1790,12 +2653,19 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         display: "ambulatory",
       },
       subject: patientRef,
+      // Quien la llevó y firmó (R4 `participant.individual`), y la clínica (`serviceProvider`).
+      ...(signer ? { participant: [{ individual: signer }] } : {}),
       period: {
         start: row.startedAt.toISOString(),
         ...(row.endedAt ? { end: row.endedAt.toISOString() } : {}),
       },
       ...(row.reason ? { reasonCode: [{ text: row.reason }] } : {}),
+      serviceProvider: organizationRef,
     })
+    // Las notas clínicas de la atención: en R4 no hay un recurso de nota suelta; va como
+    // Observation con el código LOINC de la nota de evolución (11506-3, «Progress note»).
+    for (const note of record.clinicalNotes.filter((n) => n.encounterId === row.id))
+      resources.push(clinicalNoteObservation(note, patientRef, encounterRef))
     for (const d of diagnoses)
       resources.push({
         resourceType: "Condition",
@@ -1845,6 +2715,9 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         code: { text: pr.description },
         ...(pr.bodySite ? { bodySite: [pr.bodySite] } : {}),
         performedDateTime: pr.createdAt.toISOString(),
+        ...(signer ? { performer: [{ actor: signer }] } : {}),
+        // El tratamiento del plan que cumple (R4 `basedOn` → su ServiceRequest).
+        ...(pr.planItemId ? { basedOn: [{ reference: `ServiceRequest/${pr.planItemId}` }] } : {}),
       })
     // La enfermedad actual de la anamnesis. El relato lleva su sección LOINC (10164-2, «History
     // of present illness Narrative»). El tiempo no tiene código propio: en LOINC la duración es
@@ -1940,16 +2813,20 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           : {}),
       })
   }
-  for (const { row, items } of record.prescriptions)
+  for (const { row, items } of record.prescriptions) {
+    const prescriber = practitionerRef({ name: row.prescriberName, title: row.prescriberTitle, registration: row.prescriberRegistration })
     for (const item of items)
       resources.push({
         resourceType: "MedicationRequest",
         id: item.id,
         status: fhirCode(PRESCRIPTION_STATUS_FHIR, row.status) ?? "unknown",
+        // La anulada, con su motivo (R4 `statusReason`): la de Rosa, por su alergia (C1).
+        ...(row.status === "anulada" && row.cancelReason ? { statusReason: { text: row.cancelReason } } : {}),
         intent: "order",
         subject: patientRef,
         ...(row.encounterId ? { encounter: { reference: `Encounter/${row.encounterId}` } } : {}),
         authoredOn: row.issuedAt.toISOString(),
+        ...(prescriber ? { requester: prescriber } : {}),
         medicationCodeableConcept: {
           ...(item.atcCode
             ? { coding: [{ system: FHIR_ATC_SYSTEM, code: item.atcCode }] }
@@ -1960,10 +2837,12 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           {
             text: [item.dose, item.route, item.frequency, item.duration, item.instructions]
               .filter(Boolean)
-              .join(" · "),
+              .join(" · ") || "Sin indicaciones escritas",
           },
         ],
       })
+  }
+  pushPlanAndOrders(record, resources, patientRef, practitionerRef)
   for (const a of record.appointments)
     resources.push({
       resourceType: "Appointment",
@@ -1974,17 +2853,31 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       end: a.endsAt.toISOString(),
       participant: [{ actor: patientRef, status: "accepted" }],
     })
-  for (const c of record.consents)
+  for (const c of record.consents) {
+    // Su PDF, el que va en la carpeta «papeles» (R4 `Consent.sourceAttachment`), y de qué
+    // tratamiento es (`provision.data`, `meaning: instance`, al ServiceRequest con su pieza).
+    const paper = record.papers.find((item) => item.kind === "consentimiento" && item.id === c.id)
     resources.push({
       resourceType: "Consent",
       id: c.id,
+      // Lo que firmó por su enlace y nadie confirmó sigue `proposed`: no es un consentimiento en pie.
+      text: {
+        status: "generated",
+        div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${xhtml(consentWords(c, record.clinic))}</p></div>`,
+      },
       status: fhirCode(CONSENT_STATUS_FHIR, c.status) ?? "proposed",
       scope: { coding: [FHIR_CONSENT_SCOPE] },
-      category: [{ coding: [FHIR_CONSENT_CATEGORY] }],
+      category: [{ coding: [FHIR_CONSENT_CATEGORY], text: c.titleSnapshot }],
       patient: patientRef,
       ...(c.signedAt ? { dateTime: c.signedAt.toISOString() } : {}),
+      organization: [organizationRef],
+      ...(paper ? { sourceAttachment: paperAttachment(paper) } : {}),
       policyRule: { text: c.titleSnapshot },
+      ...(c.planItemId && record.planItems.some((item) => item.id === c.planItemId)
+        ? { provision: { data: [{ meaning: "instance", reference: { reference: `ServiceRequest/${c.planItemId}` } }] } }
+        : {}),
     })
+  }
   // Las fichas finalizadas y lo que respondió la persona, revisado o no.
   const exportedDocuments = new Set(record.documents.map((d) => d.id))
   for (const form of record.forms) {
@@ -2220,7 +3113,15 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         },
       ],
     })
-  for (const d of record.documents)
+  // Cada archivo de la ficha, con su ruta dentro del ZIP (R4 `DocumentReference.content.attachment.url`).
+  // Una tomografía es su carpeta de cortes: va como ImagingStudy, no como un archivo.
+  const studyOf = new Map(record.imagingStudies.map((study) => [study.documentId, study]))
+  for (const d of record.documents) {
+    const study = studyOf.get(d.id)
+    if (study) {
+      resources.push(imagingStudyResource(d, study, patientRef, record.clinic.timezone))
+      continue
+    }
     resources.push({
       resourceType: "DocumentReference",
       id: d.id,
@@ -2229,12 +3130,14 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       category: [{ text: d.category }],
       subject: patientRef,
       date: d.createdAt.toISOString(),
+      custodian: organizationRef,
       content: [
         {
           attachment: {
             contentType: d.contentType,
             title: d.label,
-            url: `documentos/${documentFileName(d)}`,
+            url: zipUrl(`documentos/${documentFileName(d)}`),
+            ...(d.sizeBytes ? { size: d.sizeBytes } : {}),
             // FHIR R4 Attachment.creation: cuándo se hizo el papel (o se tomó la imagen);
             // `date` es cuándo entró a la ficha.
             // Solo el día (FHIR admite fecha sola): un día elegido no tiene hora.
@@ -2243,19 +3146,259 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         },
       ],
     })
+  }
+  // Lo retirado: un DocumentReference `entered-in-error` sin el archivo, con su tipo, su fecha y su
+  // motivo; ni su nombre ni su dirección (podía ser de otra persona).
+  for (const d of record.retiredDocuments)
+    resources.push({
+      resourceType: "DocumentReference",
+      id: d.id,
+      status: "entered-in-error",
+      type: { text: d.typeWords },
+      subject: patientRef,
+      date: d.retiredAt.toISOString(),
+      description: `${d.typeWords} retirado de su ficha${d.reason ? `: ${d.reason}` : ""}`,
+      content: [{ attachment: { title: `${d.typeWords} retirado: el archivo no va en la copia` } }],
+    })
+  // Cada papel emitido, en su PDF dentro del ZIP: lo que documenta va en `context.related`.
+  for (const paper of record.papers)
+    resources.push({
+      resourceType: "DocumentReference",
+      id: uuidV5(p.patientId, `paper:${paper.kind}:${paper.id}`),
+      // La huella del papel emitido: SHA-256 en hex. `Attachment.hash` de R4 es SHA-1 y va aparte.
+      identifier: [{ type: { text: "SHA-256" }, value: paper.sha256 }],
+      status: "current",
+      type: { text: paper.label },
+      category: [{ text: PAPER_KIND_WORDS[paper.kind] ?? "Papel" }],
+      subject: patientRef,
+      date: paper.at.toISOString(),
+      ...(paper.mark ? { description: paper.mark } : {}),
+      custodian: organizationRef,
+      content: [{ attachment: paperAttachment(paper) }],
+      ...(paper.related ? { context: { related: [{ reference: `${paper.related.resourceType}/${paper.related.id}` }] } } : {}),
+    })
+  // Las notas sueltas, como las de una atención.
+  for (const note of record.clinicalNotes.filter((n) => !n.encounterId))
+    resources.push(clinicalNoteObservation(note, patientRef, null))
+  // Lo del producto (odentIA: cada pieza del odontograma y cada periodontograma).
+  for (const product of record.productSections) resources.push(...((product.fhir ?? []) as Resource[]))
+  // R4 pide que `fullUrl` sea una dirección absoluta, y un `urn:uuid` lleva un UUID: el id que no lo
+  // es (`…-entrevista`, `…-examen-abdomen`) va con un UUID v5 suyo, que no tiene por qué ser su id
+  // cuando es un `urn:uuid` (Bundle.entry.fullUrl). Así no se arma un `urn:uuid` que no lo es
+  // (revisor, QA de la entrega 2) ni un `fullUrl` relativo.
+  const unique = new Map<string, Resource>()
+  for (const resource of resources) unique.set(`${resource.resourceType}/${resource.id}`, resource)
+  const fullUrlOf = new Map(
+    [...unique.keys()].map((key) => {
+      const resource = unique.get(key) as Resource
+      return [key, `urn:uuid:${UUID_RE.test(resource.id) ? resource.id : uuidV5(p.patientId, key)}`] as const
+    }),
+  )
   return {
     resourceType: "Bundle",
     type: "collection",
     meta: { tag: [{ system: "https://odentia32.com/fhir", code: `fhir-${FHIR_VERSION}` }] },
     timestamp: record.generatedAt.toISOString(),
-    // R4 pide que `fullUrl` sea una dirección absoluta, y un `urn:uuid` lleva un UUID: el id que no lo
-    // es (`…-entrevista`, `…-examen-abdomen`) va con un UUID v5 suyo, que no tiene por qué ser su id
-    // cuando es un `urn:uuid` (Bundle.entry.fullUrl). Así no se arma un `urn:uuid` que no lo es
-    // (revisor, QA de la entrega 2) ni un `fullUrl` relativo.
-    entry: resources.map((resource) => ({
-      fullUrl: `urn:uuid:${UUID_RE.test(resource.id) ? resource.id : uuidV5(p.patientId, `${resource.resourceType}/${resource.id}`)}`,
-      resource,
+    entry: [...unique.entries()].map(([key, resource]) => ({
+      fullUrl: fullUrlOf.get(key) as string,
+      resource: resolveBundleReferences(resource, fullUrlOf),
     })),
+  }
+}
+
+/**
+ * La ruta de un archivo dentro del ZIP como `url` de FHIR R4: una referencia relativa de RFC 3986,
+ * con cada tramo codificado (un `url` de R4 no admite espacios: «^\S*$»). «documentos/Periapical
+ * de la 46.jpg» va como «documentos/Periapical%20de%20la%2046.jpg».
+ */
+export function zipUrl(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/")
+}
+
+/** Qué es cada papel, como categoría de su DocumentReference. */
+const PAPER_KIND_WORDS: Record<string, string> = {
+  receta: "Receta",
+  orden: "Orden",
+  descanso: "Descanso médico",
+  hoja: "Hoja de atención",
+  consentimiento: "Consentimiento",
+  signed_odontogram: "Odontograma firmado",
+  odontogram_today: "Odontograma",
+}
+
+/** El PDF de un papel como Attachment de R4: su ruta en el ZIP, su tamaño y su SHA-1 en base64. */
+function paperAttachment(paper: RecordPaperEntry): Record<string, unknown> {
+  return {
+    contentType: paper.contentType,
+    url: zipUrl(paper.path),
+    size: paper.size,
+    hash: paper.sha1,
+    title: paper.label,
+    creation: paper.at.toISOString(),
+  }
+}
+
+/** Una nota clínica como Observation (LOINC 11506-3, nota de evolución), con quien la escribió. */
+function clinicalNoteObservation(
+  note: PatientRecord["clinicalNotes"][number],
+  patientRef: { reference: string },
+  encounterRef: { reference: string } | null,
+): Resource {
+  return {
+    resourceType: "Observation",
+    id: note.id,
+    status: "final",
+    code: { coding: [{ system: FHIR_LOINC_SYSTEM, code: "11506-3", display: "Progress note" }], text: "Nota clínica" },
+    subject: patientRef,
+    ...(encounterRef ? { encounter: encounterRef } : {}),
+    effectiveDateTime: note.createdAt.toISOString(),
+    ...(note.authorName ? { performer: [{ display: note.authorName }] } : {}),
+    valueString: note.siteWords ? `${note.siteWords}: ${note.note}` : note.note,
+  }
+}
+
+/**
+ * Una tomografía como ImagingStudy de R4: el estudio por su StudyInstanceUID (`urn:oid:`, como dice
+ * `imagingstudy.html`) y cada serie con su UID y su modalidad DICOM. Las instancias no se listan
+ * (`series.instance.sopClass` es 1..1 y no se guarda): va cuántas son. Dónde están los cortes, en
+ * la descripción: R4 no tiene un campo para una carpeta del ZIP.
+ */
+function imagingStudyResource(
+  d: PatientRecord["documents"][number],
+  study: PatientRecord["imagingStudies"][number],
+  patientRef: { reference: string },
+  timezone: string,
+): Resource {
+  const modality = study.modality?.trim() || "CT"
+  return {
+    resourceType: "ImagingStudy",
+    id: d.id,
+    identifier: [{ system: "urn:dicom:uid", value: `urn:oid:${study.studyInstanceUid}` }],
+    status: "available",
+    modality: [{ system: FHIR_DICOM_MODALITY_SYSTEM, code: modality }],
+    subject: patientRef,
+    ...(d.capturedAt ? { started: clinicDay(d.capturedAt, timezone) } : {}),
+    numberOfSeries: study.series.length || 1,
+    numberOfInstances: study.fileCount,
+    description: `${d.label}: sus cortes DICOM van en la carpeta «documentos/${documentFileName({ ...d, storageKey: "/" })}/DICOM» de esta copia.`,
+    ...(study.series.length
+      ? {
+          series: study.series.map((series) => ({
+            uid: series.uid,
+            modality: { system: FHIR_DICOM_MODALITY_SYSTEM, code: modality },
+            numberOfInstances: series.count,
+          })),
+        }
+      : {}),
+  }
+}
+
+/**
+ * El plan (R4 CarePlan) con cada tratamiento como ServiceRequest, los controles como
+ * ServiceRequest con su fecha y las órdenes como ServiceRequest con su DiagnosticReport si tienen
+ * resultado. La decisión de la persona: aceptado es `intent: plan`; lo que espera respuesta,
+ * `proposal`; un camino que compite con otro y aún no elige, `option` (R4 RequestIntent: una opción
+ * entre varias); lo que no aceptó o no eligió, `revoked`. Sin precios: el plan dice qué se hará.
+ */
+function pushPlanAndOrders(
+  record: PatientRecord,
+  resources: Resource[],
+  patientRef: { reference: string },
+  practitionerRef: (s: { name: string | null; title: string | null; registration: string | null }) => { reference: string; display: string } | null,
+): void {
+  const zone = record.clinic
+  const view = planView(record)
+  const competing = new Set(view.paths.flatMap((path) => path.options.flatMap((option) => option.items.map(({ item }) => item.id))))
+  const statusOf = (item: RecordPlanItem): string => {
+    if (item.status === "realizado") return "completed"
+    if (LEFT_OUT(item)) return "revoked"
+    if (item.status === "suspendido") return "on-hold"
+    return "active"
+  }
+  const intentOf = (item: RecordPlanItem): string => {
+    if (competing.has(item.id)) return "option"
+    return item.decision === "aceptado" || item.status === "realizado" || item.status === "en_curso" ? "plan" : "proposal"
+  }
+  const activities: Array<{ reference: string }> = []
+  for (const item of record.planItems) {
+    activities.push({ reference: `ServiceRequest/${item.id}` })
+    resources.push({
+      resourceType: "ServiceRequest",
+      id: item.id,
+      status: statusOf(item),
+      intent: intentOf(item),
+      category: [{ text: "Tratamiento del plan" }],
+      code: { text: item.title },
+      subject: patientRef,
+      ...(item.diagnosisCode ? { reasonCode: [diagnosisCodeable(item.diagnosisSystem, item.diagnosisCode, item.diagnosisName)] } : {}),
+      ...(item.bodySite ? { bodySite: [item.bodySite] } : {}),
+      authoredOn: item.createdAt.toISOString(),
+      ...(item.nextAppointmentAt ? { occurrenceDateTime: item.nextAppointmentAt.toISOString() } : {}),
+      // Lo que se dice en la ficha, con su decisión, sus sesiones y «va después de».
+      note: [{ text: planItemWords(item, zone) }],
+    })
+  }
+  for (const f of record.followUps) {
+    activities.push({ reference: `ServiceRequest/${f.id}` })
+    resources.push({
+      resourceType: "ServiceRequest",
+      id: f.id,
+      status: f.status === "realizado" ? "completed" : f.status === "cancelado" ? "revoked" : "active",
+      intent: "plan",
+      category: [{ text: "Control" }],
+      code: { text: f.title },
+      subject: patientRef,
+      occurrenceDateTime: (f.appointmentAt ?? f.dueAt).toISOString(),
+      note: [{ text: followUpWords(f, zone) }],
+    })
+  }
+  if (activities.length) {
+    const notes = view.paths.map((path) => ({ text: pathWords(path, zone) }))
+    resources.push({
+      resourceType: "CarePlan",
+      id: uuidV5(record.person.patientId, "CarePlan:plan"),
+      status: record.planItems.some((item) => OPEN_PLAN_STATUSES.includes(item.status) && !LEFT_OUT(item)) ? "active" : "completed",
+      intent: "plan",
+      title: "Plan de tratamiento",
+      subject: patientRef,
+      created: record.generatedAt.toISOString(),
+      activity: activities.map((reference) => ({ reference })),
+      ...(notes.length ? { note: notes } : {}),
+    })
+  }
+  for (const o of record.orders) {
+    const requester = practitionerRef({ name: o.signerName, title: o.signerTitle, registration: o.signerRegistration })
+    resources.push({
+      resourceType: "ServiceRequest",
+      id: o.id,
+      // Sin resultado sigue `active`; con él, `completed`; la anulada, `revoked` con su motivo en la nota.
+      status: o.status === "cancelado" ? "revoked" : o.status === "completado" ? "completed" : "active",
+      intent: "order",
+      category: [{ text: o.kindWords }],
+      code: { text: o.title },
+      subject: patientRef,
+      ...(o.encounterId ? { encounter: { reference: `Encounter/${o.encounterId}` } } : {}),
+      authoredOn: o.createdAt.toISOString(),
+      ...(requester ? { requester } : {}),
+      ...(o.recipient ? { performer: [{ display: o.recipient }] } : {}),
+      ...(o.diagnosisCode ? { reasonCode: [diagnosisCodeable(o.diagnosisSystem, o.diagnosisCode, o.diagnosisName)] } : {}),
+      note: [{ text: orderWords(o, zone, record) }],
+    })
+    if (o.status !== "completado") continue
+    const file = o.resultDocumentId ? record.documents.find((d) => d.id === o.resultDocumentId) : undefined
+    resources.push({
+      resourceType: "DiagnosticReport",
+      id: uuidV5(record.person.patientId, `DiagnosticReport:${o.id}`),
+      basedOn: [{ reference: `ServiceRequest/${o.id}` }],
+      status: "final",
+      code: { text: o.title },
+      subject: patientRef,
+      ...(o.resultAt ? { issued: o.resultAt.toISOString() } : {}),
+      ...(o.resultText ? { conclusion: o.resultText } : {}),
+      ...(file
+        ? { presentedForm: [{ contentType: file.contentType, url: zipUrl(`documentos/${documentFileName(file)}`), title: file.label }] }
+        : {}),
+    })
   }
 }
 
@@ -2320,7 +3463,9 @@ export async function recordSendOptions(
     (r) => r.contactId === request.requesterContactId,
   )
   if (!recipient) return { recipient: null, channels: [] }
-  const { channels: all } = await documentChannelsFor(tx, orgId, recipient)
+  // Pasadas las 24 horas de WhatsApp sale con «Documento listo», como los demás papeles (ADR 0156):
+  // el enlace a la copia completa va dentro del PDF, así que viaja igual.
+  const { channels: all } = await documentChannelsFor(tx, orgId, recipient, { documentTemplate: true })
   const channels = all.filter((o) => o.channel === "whatsapp" || o.channel === "email")
   const proposed = proposeHealthChannel(channels)
   if (proposed) proposed.isProposed = true
@@ -2342,7 +3487,10 @@ const CHANNEL_WORDS: Record<string, string> = { whatsapp: "WhatsApp", email: "co
 /**
  * Envía el PDF de la historia a quien lo pidió y responde el pedido. Lo puede
  * hacer Recepción: el servidor lo arma y lo envía sin mostrárselo. Exige haber
- * comprobado que es ella; un pedido ya respondido no se envía otra vez.
+ * comprobado que es ella. En la primera página del PDF va «Su enlace» para bajar
+ * la copia completa (`issueRecordCopyLink`), nunca en el texto del mensaje.
+ * «Enviar de nuevo» es esta misma operación sobre el pedido ya respondido con su
+ * copia enviada: le da otros días a su enlace y no vuelve a responder el pedido.
  */
 export async function sendPatientRecordCopy(
   tx: Db,
@@ -2354,7 +3502,8 @@ export async function sendPatientRecordCopy(
   deps: SendDeps,
 ): Promise<{ request: DataRequestItem; conversationId: string; channel: string }> {
   const request = await copyRequest(tx, orgId, patientId, requestId)
-  if (request.status !== "pendiente")
+  const again = request.status === "respondida" && request.copy !== null
+  if (request.status !== "pendiente" && !again)
     throw new ServiceError("DATA_REQUEST_CLOSED", 409, "Este pedido ya se respondió")
   if (!request.verifiedAt)
     throw new ServiceError(
@@ -2374,9 +3523,14 @@ export async function sendPatientRecordCopy(
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
     throw validation("La copia se envía por WhatsApp o por correo")
+  const link = await issueRecordCopyLink(
+    tx,
+    orgId,
+    { requestId, contactId: recipient.contactId, patientId, actorUserId },
+    deps,
+  )
   const record = await loadPatientRecord(tx, orgId, patientId)
-  const pdf = await renderPatientRecordPdf(record, record.clinic)
-  const clinic = record.clinic.tradeName
+  const pdf = await renderPatientRecordPdf(record, record.clinic, link ? { copyLink: link } : undefined)
   const { conversationId, messageId } = await deliverDocumentPdf(
     tx,
     orgId,
@@ -2386,8 +3540,14 @@ export async function sendPatientRecordCopy(
       conn,
       pdf,
       filename: patientRecordFileName(record, "pdf"),
-      // La primera línea es el asunto del correo en frío.
-      caption: `Copia de tu historia${clinic ? ` · ${clinic}` : ""}\n\nAquí tienes la copia de tu historia que pediste.`,
+      caption: recordCopyCaption({
+        clinicName: record.clinic.tradeName,
+        patientFirstName:
+          recipient.relation === "paciente" ? null : (record.person.givenNames ?? record.person.displayName).split(/\s+/)[0] ?? null,
+        until: link ? await recordCopyDayWords(tx, orgId, link.until) : null,
+      }),
+      // Pasadas las 24 horas, con «Documento listo» y el PDF en su encabezado (ADR 0156).
+      allowTemplate: true,
     },
     deps,
   )
@@ -2397,10 +3557,24 @@ export async function sendPatientRecordCopy(
     action: "patient_record.sent",
     entity: "message",
     entityId: messageId,
-    metadata: { patientId, requestId, conversationId, channel: conn.channel },
+    metadata: {
+      patientId,
+      requestId,
+      conversationId,
+      channel: conn.channel,
+      again,
+      copyUntil: link?.until.toISOString() ?? null,
+    },
   })
+  if (again) {
+    const [sent] = await listDataRequests(tx, orgId, patientId, { id: requestId })
+    return { request: sent!, conversationId, channel: conn.channel }
+  }
+  const via = CHANNEL_WORDS[conn.channel] ?? conn.channel
   const responded = await respondDataRequest(tx, orgId, actorUserId, patientId, requestId, {
-    resolution: `Se le envió por ${CHANNEL_WORDS[conn.channel] ?? conn.channel} el PDF de su historia.`,
+    resolution: link
+      ? `Se le envió por ${via} el PDF de su historia, con el enlace para bajar la copia completa.`
+      : `Se le envió por ${via} el PDF de su historia.`,
   })
   return { request: responded, conversationId, channel: conn.channel }
 }

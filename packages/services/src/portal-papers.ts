@@ -84,7 +84,7 @@ export interface PortalPaper {
 }
 
 /** Las palabras de cada archivo subido; nunca el código («foto_clinica»). */
-const FILE_TYPE_WORDS: Record<string, string> = {
+export const FILE_TYPE_WORDS: Record<string, string> = {
   radiografia: "Radiografía",
   foto_clinica: "Foto",
   informe: "Informe",

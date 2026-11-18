@@ -38,6 +38,27 @@ export function siteColumns(site: Partial<DentalSite> | null | undefined): SiteC
 }
 
 /** Columnas del sitio común → pieza, caras, cuadrante y arcada. */
+/**
+ * La pieza como código de HL7 FHIR R4 (`http://terminology.hl7.org/CodeSystem/ex-tooth`, el
+ * sistema de ejemplo de `valueset-tooth.html`, que es la numeración FDI de ISO 3950). Solo trae
+ * las 32 permanentes (11–48): una pieza temporal (51–85) va solo con su texto, sin inventar código.
+ */
+export function fhirToothCoding(toothNumber: number): { system: string; code: string } | null {
+  return /^[1-4][1-8]$/.test(String(toothNumber))
+    ? { system: "http://terminology.hl7.org/CodeSystem/ex-tooth", code: String(toothNumber) }
+    : null
+}
+
+/**
+ * La cara como código de FHIR R4 (`http://terminology.hl7.org/CodeSystem/FDI-surface`, de
+ * `valueset-surface.html`). Ese sistema no tiene «palatino»: la cara palatina es la lingual de
+ * la arcada superior y va como L; la facial de un anterior es la ventral (V).
+ */
+export function fhirSurfaceCoding(surface: string): { system: string; code: string } | null {
+  const code = ({ mesial: "M", distal: "D", buccal: "B", facial: "V", lingual: "L", palatal: "L", occlusal: "O", incisal: "I" } as Record<string, string>)[surface]
+  return code ? { system: "http://terminology.hl7.org/CodeSystem/FDI-surface", code } : null
+}
+
 /** Las caras en español, como en la pantalla: «distal, oclusal», no los códigos internos. */
 export function surfaceWords(surfaces: readonly string[]): string {
   return surfaces.map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")
@@ -238,7 +259,9 @@ export const dentalProductSite: ProductSite = {
   bodySite(row) {
     const site = dentalSiteOfRow(row)
     if (site.toothNumber === null) return null
+    const coding = fhirToothCoding(site.toothNumber)
     return {
+      ...(coding ? { coding: [coding] } : {}),
       text: `Pieza ${site.toothNumber} (FDI)${site.surfaces.length ? ` · ${surfaceWords(site.surfaces)}` : ""}`,
     }
   },

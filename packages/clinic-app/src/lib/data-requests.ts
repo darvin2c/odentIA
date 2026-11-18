@@ -1,4 +1,4 @@
-import { apiFetch } from "./api"
+import { apiFetch, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
@@ -30,6 +30,14 @@ export interface DataRequest {
   resolvedAt: string | null
   resolvedByName: string | null
   createdAt: string
+  /** La copia que se le envió con su enlace: hasta cuándo sirve y si ya la bajó. */
+  copy: DataRequestCopy | null
+}
+
+export interface DataRequestCopy {
+  until: string
+  downloads: number
+  lastDownloadAt: string | null
 }
 
 export const DATA_REQUEST_KIND_TEXT: Record<DataRequestKind, { title: string; detail: string }> = {
@@ -156,6 +164,10 @@ export interface RecordSendChannel {
   connectionName: string
   usable: boolean
   reason: string | null
+  /** Qué le llega por aquí («…le llega el PDF con el mensaje aprobado para documentos»). */
+  note?: string | null
+  /** Pasaron 24 horas: sale con el mensaje aprobado para documentos. */
+  viaTemplate?: boolean
   isProposed: boolean
 }
 
@@ -175,6 +187,49 @@ export async function sendRecordCopyApi(patientId: string, id: string, connectio
       body: JSON.stringify({ connectionId }),
     })
   ).data
+}
+
+/**
+ * Lo que trae la copia de esta persona, contado de la misma lista que arma el ZIP
+ * (`/record/summary`, solo para quien lee la historia). Lo que es 0 no se nombra.
+ */
+export interface PatientRecordSummary {
+  signedOdontograms: number
+  prescriptions: number
+  orders: number
+  medicalLeaves: number
+  consentsSigned: number
+  images: number
+  tomographies: number
+  otherFiles: number
+  approxBytes: number | null
+}
+
+export const recordSummaryKey = (patientId: string) => ["patient-record-summary", patientId] as const
+
+export async function fetchRecordSummary(patientId: string): Promise<PatientRecordSummary> {
+  return (await apiFetch<{ data: PatientRecordSummary }>(`/api/patients/${patientId}/record/summary`)).data
+}
+
+/** «Descargar copia»: baja el ZIP con la sesión; si el servidor lo rechaza, lanza su error. */
+export async function downloadPatientRecord(patientId: string): Promise<void> {
+  const response = await fetch(patientRecordDownloadUrl(patientId), { credentials: "include" })
+  await saveDownload(response, "Copia de su historia.zip")
+}
+
+/** «unos 90 MB», «unos 800 KB»: lo que pesa, redondeado, para decidir si bajarla con wifi. */
+export function sizeWords(bytes: number | null): string | null {
+  if (!bytes || bytes <= 0) return null
+  if (bytes < 1024 * 1024) return `unos ${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024 * 1024 * 1024) return `unos ${Math.round(bytes / (1024 * 1024))} MB`
+  return `unos ${(bytes / (1024 * 1024 * 1024)).toFixed(1).replace(".", ",")} GB`
+}
+
+/** «19 nov»: un instante en el día de la clínica, corto, para la fila de un pedido. */
+export function shortDayWords(at: string, locale: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", ...(timeZone ? { timeZone } : {}) })
+    .format(new Date(at))
+    .replaceAll(".", "")
 }
 
 /** Enlace del ZIP con la historia; `?org=` porque un enlace no envía la cabecera de la clínica. */
