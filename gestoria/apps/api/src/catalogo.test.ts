@@ -350,6 +350,13 @@ describe("el stock y su kardex (decisión 3)", () => {
 
 describe("el precio mínimo y el aviso del costo (tablero 14)", () => {
   it("avisa si queda cerca o bajo el último costo del kardex, y deja guardar igual", async () => {
+    // La negra entró después y más barata: el aviso usa la variante que más costó.
+    const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
+    await call("rosa", "POST", `${base}/variantes/${variantOf(detail, "negra", "38")}/movimientos`, {
+      kind: "entrada",
+      quantity: 1,
+      unitCostCents: 5500,
+    })
     const near = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, { minPriceCents: 7000 })
     expect(near.status).toBe(200)
     expect(near.json.product).toMatchObject({

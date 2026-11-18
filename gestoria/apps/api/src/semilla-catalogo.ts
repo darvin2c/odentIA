@@ -51,7 +51,8 @@ function solidPng(rgb: [number, number, number], size = 240): Buffer {
   ])
 }
 
-const day = (iso: string) => new Date(`${iso}T15:00:00Z`)
+/** Hace tantos días, para que el kardex de ejemplo quede siempre en el pasado. */
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000)
 const dateOnly = (offsetDays: number) =>
   new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10)
 const sizes = (from: number, to: number) =>
@@ -66,7 +67,7 @@ interface SeedProduct {
   options: ProductOption[]
   /** El precio propio de algunas variantes, por su primer valor. */
   priceBy?: Record<string, number>
-  /** Cuántas entran de cada variante el 12 de noviembre, y a qué costo. */
+  /** Cuántas entraron de cada variante hace seis días, y a qué costo. */
   stock: (values: string[]) => number
   costCents: (values: string[]) => number
   colors: [number, number, number][]
@@ -212,7 +213,7 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
         listPriceCents: seed.listPriceCents,
         minPriceCents: seed.minPriceCents ?? null,
         options: seed.options,
-        createdAt: day("2026-11-10"),
+        createdAt: daysAgo(8),
       })
       .returning({ id: product.id })
     const productId = row!.id
@@ -250,8 +251,8 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
       if (seed.name === "Mocasín azul") {
         // Agotado: entró uno de cada talla y se vendieron todos.
         moves.push(
-          { storeId, variantId, kind: "entrada", quantity: 1, unitCostCents: seed.costCents(values), actorUserId: ADMIN, createdAt: day("2026-11-05") },
-          { storeId, variantId, kind: "venta", quantity: -1, reference: `01${values[0]}`, actorUserId: OWNER, createdAt: day("2026-11-14") },
+          { storeId, variantId, kind: "entrada", quantity: 1, unitCostCents: seed.costCents(values), actorUserId: ADMIN, createdAt: daysAgo(13) },
+          { storeId, variantId, kind: "venta", quantity: -1, reference: `01${values[0]}`, actorUserId: OWNER, createdAt: daysAgo(4) },
         )
       } else if (entered > 0) {
         moves.push({
@@ -262,12 +263,12 @@ export async function seedDemoConfiguration(tx: Db, storeId: string): Promise<vo
           unitCostCents: seed.costCents(values),
           reason: "Compra al proveedor",
           actorUserId: ADMIN,
-          createdAt: day("2026-11-12"),
+          createdAt: daysAgo(6),
         })
         if (seed.name === "Zapatilla urbana" && values.join(" ") === "blanca 38")
           moves.push(
-            { storeId, variantId, kind: "ajuste", quantity: -1, reason: "par dañado", actorUserId: OWNER, createdAt: day("2026-11-16") },
-            { storeId, variantId, kind: "venta", quantity: -1, reference: "0142", actorUserId: OWNER, createdAt: day("2026-11-18") },
+            { storeId, variantId, kind: "ajuste", quantity: -1, reason: "par dañado", actorUserId: OWNER, createdAt: daysAgo(2) },
+            { storeId, variantId, kind: "venta", quantity: -1, reference: "0142", actorUserId: OWNER, createdAt: daysAgo(1) },
           )
       }
       // En orden: la base anota el saldo de cada uno.

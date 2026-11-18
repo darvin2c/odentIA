@@ -208,11 +208,18 @@ export async function cancelSale(tx: Db, storeId: string, actorUserId: string, r
   return back.length
 }
 
-/** El último costo de entrada de un producto (la última entrada con costo de sus variantes). */
+/**
+ * Lo que costó un producto según su kardex: la última entrada con costo de cada variante y, de
+ * esas, la más cara. Así el aviso del mínimo no se queda corto cuando una variante costó más
+ * (la blanca a 68 y la negra a 55: avisa con 68).
+ */
 export async function lastEntryCost(tx: Db, variantIds: string[]): Promise<number | null> {
   if (variantIds.length === 0) return null
-  const [row] = await tx
-    .select({ cost: stockMovement.unitCostCents })
+  const rows = await tx
+    .selectDistinctOn([stockMovement.variantId], {
+      variantId: stockMovement.variantId,
+      cost: stockMovement.unitCostCents,
+    })
     .from(stockMovement)
     .where(
       and(
@@ -221,8 +228,7 @@ export async function lastEntryCost(tx: Db, variantIds: string[]): Promise<numbe
         isNotNull(stockMovement.unitCostCents),
       ),
     )
-    .orderBy(desc(stockMovement.createdAt), desc(stockMovement.id))
-    .limit(1)
-  return row?.cost ?? null
+    .orderBy(stockMovement.variantId, desc(stockMovement.createdAt), desc(stockMovement.id))
+  const costs = rows.map((row) => row.cost).filter((cost): cost is number => cost !== null)
+  return costs.length > 0 ? Math.max(...costs) : null
 }
-
