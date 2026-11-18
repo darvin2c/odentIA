@@ -90,6 +90,8 @@ export function ConsentPersonalRisksField({
   // «Volver a proponer» trajo lo propuesto: se dice que falta guardar, y el foco va a esa frase.
   const [brought, setBrought] = useState(false)
   const focusField = () => rootRef.current?.querySelector("textarea")?.focus()
+  /** Guardado: el foco vuelve al campo cuando deja de estar desactivado. */
+  const [refocus, setRefocus] = useState(false)
   const form = useAppForm({
     defaultValues: { personalRisks: risksDraftOf(document.id)?.text ?? saved },
     validators: {
@@ -110,7 +112,9 @@ export function ConsentPersonalRisksField({
       toast.success(text ? "Riesgos propios guardados" : "Riesgos propios quitados de la hoja")
       await onSaved()
       // El botón queda desactivado al guardar: el foco vuelve al campo, no al inicio de la página.
-      focusField()
+      // Aquí el campo sigue desactivado mientras se envía y no lo recibe: se enfoca al habilitarse
+      // (verificación del 18 nov: caía a `body` y el lector de pantalla perdía el sitio).
+      setRefocus(true)
     },
   })
   const error = useFormSubmitError(form)
@@ -147,6 +151,12 @@ export function ConsentPersonalRisksField({
   useEffect(() => {
     if (brought) broughtRef.current?.focus()
   }, [brought])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cuando termina de guardar.
+  useEffect(() => {
+    if (!refocus || pending) return
+    setRefocus(false)
+    focusField()
+  }, [refocus, pending])
   // Lo que propone hoy el sistema, con su ficha de ahora: «Volver a proponer» lo trae al campo.
   const proposed = useQuery({
     queryKey: ["consent-proposed-risks", document.id],
