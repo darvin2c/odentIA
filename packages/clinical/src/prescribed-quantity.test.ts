@@ -59,7 +59,31 @@ describe("la cantidad total que propone el dictado", () => {
     expect(suggestedQuantity({ ...half, dose: "media tableta" })?.quantity).toBe(8)
   })
 
-  it("nada en un jarabe, un tópico, «si hay dolor», uso continuo, dosis por peso o «cada 5 h»", () => {
+  it("«si hay dolor» con frecuencia y duración propone el máximo; sin duración, nada", () => {
+    const ibuprofeno = {
+      dose: "1 tableta",
+      frequency: "cada 8 h si hay dolor",
+      duration: "3 días",
+      dosageForm: "tableta",
+      strength: "400 mg",
+    }
+    expect(suggestedQuantity(ibuprofeno)?.quantity).toBe(9)
+    expect(suggestedQuantity({ ...ibuprofeno, duration: "" })).toBeNull()
+    expect(suggestedQuantity({ ...ibuprofeno, frequency: "si hay dolor" })).toBeNull()
+  })
+
+  it("los sobres se cuentan por toma, como antes", () => {
+    const sobre = {
+      dose: "1 sobre",
+      frequency: "cada 12 horas",
+      duration: "5 días",
+      dosageForm: "polvo",
+    }
+    expect(suggestedQuantity(sobre)?.quantity).toBe(10)
+    expect(suggestedQuantity({ ...sobre, dosageForm: "sobre" })?.quantity).toBe(10)
+  })
+
+  it("nada en un jarabe, un tópico, uso continuo, dosis por peso o «cada 5 h»", () => {
     expect(
       suggestedQuantity({
         dose: "5 ml",
@@ -77,8 +101,6 @@ describe("la cantidad total que propone el dictado", () => {
         dosageForm: "gel",
       }),
     ).toBeNull()
-    expect(suggestedQuantity({ ...amoxicilina, frequency: "cada 8 horas si hay dolor" })).toBeNull()
-    expect(suggestedQuantity({ ...amoxicilina, dose: "1 cápsula condicional al dolor" })).toBeNull()
     expect(suggestedQuantity({ ...amoxicilina, duration: "uso continuo" })).toBeNull()
     expect(suggestedQuantity({ ...amoxicilina, dose: "15 mg/kg" })).toBeNull()
     expect(suggestedQuantity({ ...amoxicilina, frequency: "cada 5 horas" })).toBeNull()

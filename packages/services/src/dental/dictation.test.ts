@@ -184,7 +184,7 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     await enable(false)
   })
 
-  it("la cantidad sale también con «8 h», «c/8 h» o «3 veces al día», y no con «si hay dolor» ni en un jarabe", async () => {
+  it("la cantidad sale también con «8 h», «c/8 h» o «3 veces al día», y con «si hay dolor» solo si dice la duración; en un jarabe, no", async () => {
     await enable(true)
     const fx = await openSession("Obturación de frecuencias")
     const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
@@ -197,7 +197,10 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
       await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency } }] })
       expect(await current(recipe!.id)).toMatchObject({ payload: { frequency, quantity: 21, quantityCalculated: true } })
     }
+    // «Si hay dolor» con frecuencia y duración: el máximo; sin la duración, nada.
     await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency: "c/8 h si hay dolor" } }] })
+    expect(await current(recipe!.id)).toMatchObject({ payload: { quantity: 21, quantityCalculated: true } })
+    await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { duration: "hasta que pase el dolor" } }] })
     expect((await current(recipe!.id))?.payload).not.toHaveProperty("quantity")
     // Un jarabe se cuenta en frascos, que dependen del frasco: no se propone.
     const [syrup] = (await segment({
@@ -250,13 +253,11 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
       corrections: [{ suggestionId: ibuprofeno!.id, changes: { duration: "tres días" } }],
     })
     const completed = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === ibuprofeno!.id)
-    // «Si hay dolor» no propone la cantidad: la decide quien receta (la misma regla que la receta escrita).
-    expect(completed).toMatchObject({ status: "lista", voice: { before: "sin duración" } })
-    expect(completed?.payload).not.toHaveProperty("quantity")
+    expect(completed).toMatchObject({ status: "lista", payload: { quantity: 9 }, voice: { before: "sin duración" } })
 
     const { prescriptionId } = await fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))
     const items = await ownerDb.select().from(prescriptionItem).where(eq(prescriptionItem.prescriptionId, prescriptionId))
-    expect(items.map((item) => [item.genericName, item.route, item.quantity]).sort()).toEqual([["amoxicilina", "oral", 21], ["ibuprofeno", "oral", null]])
+    expect(items.map((item) => [item.genericName, item.route, item.quantity]).sort()).toEqual([["amoxicilina", "oral", 21], ["ibuprofeno", "oral", 9]])
     expect(await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).toEqual([])
 
     // Con alergia a las penicilinas, la amoxicilina queda con el aviso de siempre y no se emite sola.

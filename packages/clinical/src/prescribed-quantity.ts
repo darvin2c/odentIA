@@ -4,20 +4,25 @@
  * toma × tomas al día × días, hacia arriba. La usa el dictado (Clío): solo
  * propone, y lo que dice quien receta manda.
  *
+ * Lo que se toma «si hay dolor» con frecuencia y duración dichas («cada 8 h por 3 días») propone
+ * el máximo, como hacía el dictado; sin una de las dos, nada.
+ *
  * No propone nada si no se puede contar con certeza:
  * - una forma que no se cuenta por unidades (jarabe, suspensión, gotas, crema,
  *   colutorio): los frascos dependen del volumen del frasco, que no se conoce;
- * - «si hay dolor», «condicional», «SOS», «a demanda» (PRN): la cantidad la decide quien receta;
  * - sin días («uso continuo», «permanente») o con una frecuencia que no divide el día («cada 5 h»);
  * - la dosis por peso («15 mg/kg») o en mg que no es un múltiplo entero de la concentración.
  */
 
 /** Las formas que se cuentan por unidades (`DOSAGE_FORMS`, y como se dicen). */
 const COUNTED_FORMS =
-  /^(tabletas?( recubiertas?)?|capsulas?|comprimidos?( recubiertos?)?|grageas?)$/
+  /^(tabletas?( recubiertas?)?|capsulas?|comprimidos?( recubiertos?)?|grageas?|sobres?)$/
 
-/** Las unidades de una toma escritas con su número: «1 tableta», «2 cápsulas», «½ tableta». */
-const UNIT_WORD = "(?:tabletas?|tab|capsulas?|caps?|comprimidos?|grageas?)"
+/** Las unidades de una toma escritas con su número: «1 tableta», «2 cápsulas», «½ tableta», «1 sobre». */
+const UNIT_WORD = "(?:tabletas?|tab|capsulas?|caps?|comprimidos?|grageas?|sobres?)"
+
+/** «1 sobre» se cuenta aunque la forma diga otra cosa («polvo»), como hacía el dictado. */
+const SACHET_DOSE = /(?<![a-z\d])(\d+|[a-z]+)\s*sobres?\b/
 
 /** Números como se dictan o se escriben con letras: «ocho», «una», «media». */
 const WORD_NUMBERS: Record<string, number> = {
@@ -47,10 +52,6 @@ const WORD_NUMBERS: Record<string, number> = {
 
 /** Un número escrito: «8», «1,5», «1/2», «½», «ocho»; nunca el trozo de otra palabra. */
 const NUMBER = "(?<![a-z\\d])(\\d+\\/\\d+|\\d+(?:[.,]\\d+)?|½|[a-z]+)"
-
-/** Lo que se da solo si hace falta: la cantidad la decide quien receta. */
-const AS_NEEDED =
-  /\b(si (hay |tiene |presenta |le da |hubiera )?(dolor|fiebre|molestias?|malestar)|en caso de|condicional|sos|a demanda|segun (necesidad|necesite|requiera|dolor)|si (es necesario|lo necesita|necesita|requiere)|prn)\b/
 
 function fold(text: string): string {
   return text
@@ -155,11 +156,10 @@ export interface SuggestedQuantity {
 
 /** La cantidad total que se propone; null si no se puede contar con certeza. */
 export function suggestedQuantity(input: QuantityInput): SuggestedQuantity | null {
-  if (!COUNTED_FORMS.test(fold(input.dosageForm))) return null
   const dose = fold(input.dose)
+  if (!COUNTED_FORMS.test(fold(input.dosageForm)) && !SACHET_DOSE.test(dose)) return null
   const frequency = fold(input.frequency)
   const duration = fold(input.duration)
-  if ([dose, frequency, duration].some((text) => AS_NEEDED.test(text))) return null
   const perDose = unitsPerDose(dose, fold(input.strength ?? ""))
   const perDay = dosesPerDay(frequency)
   const days = daysOf(duration)
