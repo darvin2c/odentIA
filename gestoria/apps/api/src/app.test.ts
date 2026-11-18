@@ -262,6 +262,7 @@ describe("los permisos de cada rol (decisión 7)", () => {
     expect(lucia.json.store.permissions).toEqual([
       "tienda.ver",
       "equipo.ver",
+      "catalogo.ver",
       "ventas.atender",
       "pagos.confirmar",
       "entregas",

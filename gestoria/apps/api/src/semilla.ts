@@ -8,11 +8,13 @@ import {
   storeMember,
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
+import { seedDemoConfiguration } from "./semilla-catalogo.js"
 
 /**
  * La tienda de ejemplo de gestorIA, Calzados Rosa (lienzo B, tablero 2), para desarrollo y
  * demostraciones: nunca corre en producción ni en las pruebas. Cada entrega de gestorIA le suma
- * lo suyo (B2 sus conversaciones, B3 su catálogo, B4 sus pedidos).
+ * lo suyo (B2 sus conversaciones, B3 su configuración y su catálogo en `semilla-catalogo.ts`,
+ * B4 sus pedidos).
  *
  * Las personas del equipo son copias de cuentas de ejemplo: no existen en la cuenta, así que no
  * se puede entrar con ellas. Para entrar a la tienda, `GESTORIA_SEMILLA_CORREO` deja una
@@ -78,6 +80,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
         expiresAt: new Date(Date.now() + 7 * 86_400_000),
       })
     }
+    await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     const email = invite?.trim().toLowerCase()
     if (email) {
       const [pending] = await tx

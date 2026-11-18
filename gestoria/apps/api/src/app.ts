@@ -6,6 +6,34 @@ import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
 import {
+  addPhoto,
+  catalog,
+  createProduct,
+  deleteProduct,
+  photoContent,
+  productDetail,
+  productInput,
+  productPatch,
+  removePhoto,
+  removeVariant,
+  updateProduct,
+  updateVariant,
+  variantPatch,
+} from "./catalogo.js"
+import {
+  createDelivery,
+  createPayment,
+  deleteDelivery,
+  deletePayment,
+  deliveryInput,
+  deliveryPatch,
+  paymentInput,
+  paymentPatch,
+  paymentsAndDeliveries,
+  updateDelivery,
+  updatePayment,
+} from "./configuracion.js"
+import {
   type AccountConfig,
   AccountError,
   accountKeys,
@@ -14,6 +42,8 @@ import {
   receiveAccountEvent,
   syncAccountCopy,
 } from "./cuenta.js"
+import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
+import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
   changeRole,
@@ -44,6 +74,10 @@ type Env = { Variables: { person: Person } }
 
 /** Lo más que pesa un aviso de la cuenta o un pedido de la app. */
 const MAX_BODY_BYTES = 64 * 1024
+/** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
+const MAX_PHOTO_UPLOAD_BYTES = 1_500_000
+const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
+const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 
 function errorBody(c: Context, code: string, message: string, fields?: Record<string, string>) {
   return {
@@ -113,14 +147,20 @@ export function createApp(deps: AppDeps) {
     return c.json(errorBody(c, "INTERNAL", "Algo falló de nuestro lado. Inténtalo de nuevo."), 500)
   })
 
-  // Tope de tamaño leído mientras llega (también sin `content-length`).
-  app.use(
-    "*",
+  // Tope de tamaño leído mientras llega (también sin `content-length`), según la ruta.
+  const limit = (maxSize: number, message: string) =>
     bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: (c) => c.json(errorBody(c, "PAYLOAD_TOO_LARGE", "Pedido demasiado grande"), 413),
-    }),
-  )
+      maxSize,
+      onError: (c) => c.json(errorBody(c, "PAYLOAD_TOO_LARGE", message), 413),
+    })
+  const small = limit(MAX_BODY_BYTES, "Pedido demasiado grande")
+  const photo = limit(MAX_PHOTO_UPLOAD_BYTES, "La foto pesa demasiado. Prueba con otra más chica.")
+  const sheet = limit(MAX_SHEET_BYTES, "La hoja es muy grande: divídela en partes")
+  app.use("*", (c, next) => {
+    if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
+    if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
+    return small(c, next)
+  })
 
   app.get("/health", (c) => c.json({ ok: true }))
 
@@ -200,6 +240,124 @@ export function createApp(deps: AppDeps) {
   app.post("/api/invitaciones/:id/aceptar", async (c) =>
     c.json(await acceptInvitation(deps.appDb, c.get("person"), c.req.param("id"))),
   )
+
+  // La configuración (B3): medios de pago y formas de entrega.
+  app.get("/api/tiendas/:id/pagos-y-entregas", async (c) =>
+    c.json(await paymentsAndDeliveries(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/medios-de-pago", async (c) => {
+    const input = await bodyOf(c, paymentInput)
+    const method = await createPayment(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ method }, 201)
+  })
+  app.patch("/api/tiendas/:id/medios-de-pago/:methodId", async (c) => {
+    const patch = await bodyOf(c, paymentPatch)
+    const { id, methodId } = c.req.param()
+    return c.json({ method: await updatePayment(deps.appDb, c.get("person"), id, methodId, patch) })
+  })
+  app.delete("/api/tiendas/:id/medios-de-pago/:methodId", async (c) => {
+    const { id, methodId } = c.req.param()
+    await deletePayment(deps.appDb, c.get("person"), id, methodId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/formas-de-entrega", async (c) => {
+    const input = await bodyOf(c, deliveryInput)
+    const method = await createDelivery(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ method }, 201)
+  })
+  app.patch("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
+    const patch = await bodyOf(c, deliveryPatch)
+    const { id, methodId } = c.req.param()
+    return c.json({
+      method: await updateDelivery(deps.appDb, c.get("person"), id, methodId, patch),
+    })
+  })
+  app.delete("/api/tiendas/:id/formas-de-entrega/:methodId", async (c) => {
+    const { id, methodId } = c.req.param()
+    await deleteDelivery(deps.appDb, c.get("person"), id, methodId)
+    return c.body(null, 204)
+  })
+
+  // El catálogo (B3): productos, variantes, fotos, stock y la hoja.
+  app.get("/api/tiendas/:id/catalogo", async (c) =>
+    c.json(await catalog(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.get("/api/tiendas/:id/catalogo/hoja-de-ejemplo", async (c) => {
+    // Se pide desde la tienda, como todo lo de /api; la hoja no lleva datos de nadie.
+    await catalog(deps.appDb, c.get("person"), c.req.param("id"))
+    return c.body(exampleSheet(), 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": 'attachment; filename="catalogo-ejemplo.csv"',
+    })
+  })
+  app.post("/api/tiendas/:id/catalogo/hoja", async (c) => {
+    const text = await c.req.text()
+    const confirm = c.req.query("confirmar") === "1"
+    return c.json(await uploadSheet(deps.appDb, c.get("person"), c.req.param("id"), text, confirm))
+  })
+  app.post("/api/tiendas/:id/productos", async (c) => {
+    const input = await bodyOf(c, productInput)
+    const product = await createProduct(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ product }, 201)
+  })
+  app.get("/api/tiendas/:id/productos/:productId", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json({ product: await productDetail(deps.appDb, c.get("person"), id, productId) })
+  })
+  app.patch("/api/tiendas/:id/productos/:productId", async (c) => {
+    const patch = await bodyOf(c, productPatch)
+    const { id, productId } = c.req.param()
+    return c.json({
+      product: await updateProduct(deps.appDb, c.get("person"), id, productId, patch),
+    })
+  })
+  app.delete("/api/tiendas/:id/productos/:productId", async (c) => {
+    const { id, productId } = c.req.param()
+    await deleteProduct(deps.appDb, c.get("person"), id, productId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/productos/:productId/fotos", async (c) => {
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const { id, productId } = c.req.param()
+    return c.json({ photo: await addPhoto(deps.appDb, c.get("person"), id, productId, bytes) }, 201)
+  })
+  app.get("/api/tiendas/:id/fotos/:photoId", async (c) => {
+    const { id, photoId } = c.req.param()
+    const photo = await photoContent(deps.appDb, c.get("person"), id, photoId)
+    return c.body(new Uint8Array(photo.content), 200, {
+      "content-type": photo.contentType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      // La foto no cambia (otra foto es otro id); solo quien la pidió la guarda.
+      "cache-control": "private, max-age=86400, immutable",
+    })
+  })
+  app.delete("/api/tiendas/:id/fotos/:photoId", async (c) => {
+    const { id, photoId } = c.req.param()
+    await removePhoto(deps.appDb, c.get("person"), id, photoId)
+    return c.body(null, 204)
+  })
+  app.patch("/api/tiendas/:id/variantes/:variantId", async (c) => {
+    const patch = await bodyOf(c, variantPatch)
+    const { id, variantId } = c.req.param()
+    return c.json({
+      product: await updateVariant(deps.appDb, c.get("person"), id, variantId, patch),
+    })
+  })
+  app.delete("/api/tiendas/:id/variantes/:variantId", async (c) => {
+    const { id, variantId } = c.req.param()
+    return c.json({ product: await removeVariant(deps.appDb, c.get("person"), id, variantId) })
+  })
+  app.get("/api/tiendas/:id/variantes/:variantId/kardex", async (c) => {
+    const { id, variantId } = c.req.param()
+    return c.json(await kardex(deps.appDb, c.get("person"), id, variantId))
+  })
+  app.post("/api/tiendas/:id/variantes/:variantId/movimientos", async (c) => {
+    const input = await bodyOf(c, movementInput)
+    const { id, variantId } = c.req.param()
+    const movement = await addMovement(deps.appDb, c.get("person"), id, variantId, input)
+    return c.json({ movement }, 201)
+  })
 
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
   return app
