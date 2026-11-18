@@ -208,9 +208,15 @@ Turnos de Kairós: ${JSON.stringify(turns)}`)
       return (await kairosSaid())[count - 1]?.body ?? ""
     }
     const prices = await waitKairos(1)
-    expect(prices).toContain("Hola, soy Kairós, el asistente de Sallca.")
+    expect(prices).toContain("Hola, soy Kairós, del Grupo Sallca.")
     expect(prices).toContain(`Fundadores ${tag}`)
     expect(prices).toMatch(/— Kairós · odentIA$/)
+    // Nombró odentIA: la conversación lo sabe sin preguntar (A1, un solo número para todas).
+    const [known] = await fixtureDb
+      .select({ product: saasChat.product, source: saasChat.productSource })
+      .from(saasChat)
+      .where(eq(saasChat.id, chatId))
+    expect(known).toEqual({ product: "dental", source: "lo_dijo" })
 
     // --- Pide una presentación, dice su clínica, Kairós ofrece una hora y la confirma ------
     await postMeta(page, whatsappText(from, `wamid.demo-${tag}`, "Quiero una presentación"))

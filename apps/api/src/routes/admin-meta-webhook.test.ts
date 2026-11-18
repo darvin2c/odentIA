@@ -2,7 +2,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createHmac } from "node:crypto"
 import { createOwnerDb, type Db } from "@odentia/db"
-import { saasChat, saasInboundMessage, saasOutreach } from "@odentia/db/schema/admin-arm"
+import { saasAd, saasChat, saasInboundMessage, saasOutreach } from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -217,6 +217,53 @@ describe("WhatsApp", () => {
       clientId: null,
       displayName: "Luis Paredes",
     })
+  })
+
+  it("un mensaje desde un anuncio guarda el anuncio y lo liga a la conversación (A1)", async () => {
+    const body = whatsapp({
+      contacts: [{ profile: { name: "Marta Ruiz" }, wa_id: "51987650001" }],
+      messages: [
+        {
+          id: "wamid.anuncio",
+          from: "51987650001",
+          timestamp: String(Math.floor(Date.now() / 1000)),
+          type: "text",
+          text: { body: "Hola, quiero más información" },
+          referral: {
+            source_url: "https://fb.me/anuncio-ficticio",
+            source_id: "120000000000001",
+            source_type: "ad",
+            headline: "Tu óptica en orden",
+            body: "Pedidos de lentes y la medida de cada cliente",
+            media_type: "image",
+            ctwa_clid: "clid-ficticio",
+          },
+        },
+      ],
+    })
+    expect((await post(body)).status).toBe(200)
+    const [row] = await messagesOf("wamid.anuncio")
+    const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, row!.chatId))
+    const [ad] = await ownerDb.select().from(saasAd).where(eq(saasAd.sourceId, "120000000000001"))
+    expect(ad).toMatchObject({
+      sourceType: "ad",
+      headline: "Tu óptica en orden",
+      body: "Pedidos de lentes y la medida de cada cliente",
+      sourceUrl: "https://fb.me/anuncio-ficticio",
+      product: null,
+    })
+    // Nadie ató el anuncio todavía: la conversación no sabe su app y Kairós preguntará.
+    expect(chat).toMatchObject({ adId: ad?.id, product: null, productSource: null })
+  })
+
+  it("el mensaje ya escrito del botón de una web dice la app (A1)", async () => {
+    expect(
+      (await post(waText("wamid.enlace", "51987650002", "Hola, quiero información de latidIA")))
+        .status,
+    ).toBe(200)
+    const [row] = await messagesOf("wamid.enlace")
+    const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, row!.chatId))
+    expect(chat).toMatchObject({ product: "medical", productSource: "enlace", adId: null })
   })
 
   it("lo de otro número se ignora con 200", async () => {

@@ -7,6 +7,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
+import { chatAppSchema } from "../product"
 import { supportDay, supportDayTime, supportTime } from "../../lib/support-words"
 import { deleteOnWords } from "./client-files-tab"
 
@@ -129,6 +130,10 @@ export const chatDetailSchema = z.object({
     })
     .nullable(),
   contact: z.object({ id: z.string(), name: z.string(), phone: z.string().nullable() }).nullable(),
+  /** De qué app le hablan y cómo se supo; nulo si todavía no se sabe. */
+  app: chatAppSchema,
+  /** El anuncio de Meta que la abrió, si llegó por uno; `tied`: ya está atado a una app. */
+  ad: z.object({ id: z.string(), headline: z.string().nullable(), tied: z.boolean() }).nullable().default(null),
   notClinicAt: z.string().nullable(),
   /** «Lo atiendo yo» o Kairós la pasó al equipo: mientras tenga fecha, Kairós no responde solo. */
   kairosPausedAt: z.string().nullable().default(null),

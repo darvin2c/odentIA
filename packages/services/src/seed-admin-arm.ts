@@ -55,6 +55,7 @@ import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, like, ne, sql } from "drizzle-orm"
 import { strToU8, zipSync } from "fflate"
 import { PDFDocument, StandardFonts } from "pdf-lib"
+import { salesWhatsAppText } from "./admin-chat-app.js"
 import {
   clientFileKey,
   inboundAttachmentKey,
@@ -1897,6 +1898,48 @@ async function seedChats(
         displayName: "@dra.melissa.ortodoncia",
         externalId: instagram,
         body: "¿Sirve para ortodoncia? Tengo consultorio en Trujillo",
+        media: [],
+        receivedAt: clock.ago(0, 1),
+      },
+      clock.now,
+    )
+
+  // A1: un solo WhatsApp para todas las apps. Una persona que llegó por un anuncio que nadie ató
+  // todavía (Hoy lo muestra en «Anuncios por atar») y otra por el botón de la web de vistIA.
+  const fromAd = "wamid.seed-arm-anuncio-1"
+  if (!(await chatMessageSeeded(tx, fromAd)))
+    await ingestInboundChat(
+      tx,
+      {
+        channel: "whatsapp",
+        address: "+51900555101",
+        waId: "51900555101",
+        displayName: "Lucía (ficticia)",
+        externalId: fromAd,
+        body: "Hola, vi su anuncio. ¿Me dan más información? (ejemplo ficticio)",
+        media: [],
+        receivedAt: clock.ago(0, 1),
+        referral: {
+          sourceId: "seed-anuncio-consultorio-ordenado",
+          sourceType: "ad",
+          headline: "Tu consultorio en orden (anuncio de ejemplo)",
+          body: "Agenda, historia clínica y recetas en un solo lugar.",
+          sourceUrl: "https://fb.me/anuncio-de-ejemplo",
+        },
+      },
+      clock.now,
+    )
+  const fromLink = "wamid.seed-arm-enlace-vistia-1"
+  if (!(await chatMessageSeeded(tx, fromLink)))
+    await ingestInboundChat(
+      tx,
+      {
+        channel: "whatsapp",
+        address: "+51900555102",
+        waId: "51900555102",
+        displayName: "Óptica Ficticia",
+        externalId: fromLink,
+        body: salesWhatsAppText("optical"),
         media: [],
         receivedAt: clock.ago(0, 1),
       },

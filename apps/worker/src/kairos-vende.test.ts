@@ -161,7 +161,7 @@ describe("Kairós vende en los chats", () => {
     const chatId = await write(
       "whatsapp",
       "+51900000002",
-      "Hola, quiero una presentación. Mi clínica se llama Sonrisas del Norte",
+      "Hola, quiero una presentación para mi clínica dental. Mi clínica se llama Sonrisas del Norte",
       at,
     )
     // Mientras escribe (menos de 20 s), espera.
@@ -179,7 +179,7 @@ describe("Kairós vende en los chats", () => {
       status: "enviado",
       adminOnly: true,
     })
-    expect(out[0]?.body).toContain("Hola, soy Kairós, el asistente de Sallca.")
+    expect(out[0]?.body).toContain("Hola, soy Kairós, del Grupo Sallca.")
     // Son las 08:03 de Lima: con 2 h de aviso, la primera hora de Ana es a las 10:30.
     expect(out[0]?.body).toContain("lunes, 9 de noviembre a las 10:30")
     expect(out[0]?.body).toMatch(/— Kairós · odentIA$/)
@@ -318,7 +318,7 @@ describe("Kairós vende en los chats", () => {
     const chatId = await write(
       "whatsapp",
       "+51900000005",
-      "Hola. Mi clínica se llama Sonrisas del Norte",
+      "Hola, tengo una clínica dental. Mi clínica se llama Sonrisas del Norte",
       at,
     )
     await tick(new Date(at.getTime() + MIN))
@@ -628,7 +628,12 @@ describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como
       seller: "plantilla",
       async answer(_input, tools) {
         await tools.clinicData(
-          { clinicName: "Clínica Archivo (ficticia)", personName: null, product: null, city: null },
+          {
+            clinicName: "Clínica Archivo (ficticia)",
+            personName: null,
+            product: "dental",
+            city: null,
+          },
           live,
         )
         // Mientras el modelo piensa, alguien archiva al cliente.
@@ -800,7 +805,7 @@ describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como
     const chatId = await write(
       "whatsapp",
       "+51900000020",
-      "Hola, quiero una presentación. Mi clínica se llama Clínica Tope",
+      "Hola, quiero una presentación para mi clínica dental. Mi clínica se llama Clínica Tope",
       at,
     )
     const first = new Date(at.getTime() + MIN)
@@ -889,5 +894,28 @@ describe("Kairós le pregunta a Ariadna (la guía de la Ayuda)", () => {
     await expect(
       without.askGuide("¿tiene odontograma?", { signal: stopped.signal }),
     ).rejects.toThrow()
+  })
+})
+
+describe("Kairós vende sin saber de qué app le hablan (A1)", () => {
+  it("pregunta qué negocio tiene sin nombrar ninguna app, y con «tengo una óptica» sigue con vistIA", async () => {
+    await tx((db) => setKairosSells(db, ana, true, monday))
+    const at = new Date(monday.getTime() + 130 * MIN)
+    const address = "+51900000031"
+    const chatId = await write("whatsapp", address, "Hola, quiero información", at)
+    await tick(new Date(at.getTime() + MIN))
+    const [first] = await replies(chatId)
+    expect(first?.body).toContain("Hola, soy Kairós, del Grupo Sallca.")
+    expect(first?.body).toMatch(/negocio/)
+    expect(first?.body).not.toMatch(/odentIA|latidIA|vistIA/)
+    expect(first?.body).toMatch(/— Kairós · Grupo Sallca$/)
+    expect(await chatOf(chatId)).toMatchObject({ product: null })
+    const later = new Date(at.getTime() + 3 * MIN)
+    await write("whatsapp", address, "Tengo una óptica, ¿cuánto cuesta?", later)
+    await tick(new Date(later.getTime() + MIN))
+    expect(await chatOf(chatId)).toMatchObject({ product: "optical", productSource: "lo_dijo" })
+    const out = await replies(chatId)
+    expect(out).toHaveLength(2)
+    expect(out[1]?.body).toMatch(/— Kairós · vistIA$/)
   })
 })

@@ -228,6 +228,13 @@ export type SaasInboundMatch = (typeof SAAS_INBOUND_MATCHES)[number]
  */
 export const SAAS_CHAT_CHANNELS = ["whatsapp", "instagram", "messenger"] as const
 export type SaasChatChannel = (typeof SAAS_CHAT_CHANNELS)[number]
+/**
+ * Cómo se supo de qué app es una conversación (`saas_chat.product_source`): por el anuncio de Meta
+ * que la abrió (`anuncio`), por el mensaje ya escrito de un enlace (`enlace`), porque lo dijo la
+ * persona (`lo_dijo`) o porque lo eligió alguien del equipo (`persona`).
+ */
+export const SAAS_CHAT_PRODUCT_SOURCES = ["anuncio", "enlace", "lo_dijo", "persona"] as const
+export type SaasChatProductSource = (typeof SAAS_CHAT_PRODUCT_SOURCES)[number]
 export const KAIROS_AI_PURPOSES = [
   "borrador",
   "resumen",
@@ -1001,6 +1008,51 @@ export const saasInboundEmail = adminSchema.table(
 )
 
 /**
+ * Un anuncio de Meta que abrió una conversación de WhatsApp (el `referral` del mensaje, A1 del
+ * lienzo «Una sola administración»): uno por su id en Meta (`source_id`). Una persona lo ata una
+ * vez a su app (`product`) y desde ahí cada conversación que abra nace con esa app. Sin app, Hoy
+ * lo muestra con su título y su texto para que alguien diga de cuál es.
+ */
+export const saasAd = adminSchema.table(
+  "saas_ad",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    /** El id del anuncio o de la publicación en Meta (`referral.source_id`). */
+    sourceId: text("source_id").notNull(),
+    /** `ad` o `post`, como lo dice Meta. */
+    sourceType: text("source_type"),
+    headline: text("headline"),
+    body: text("body"),
+    sourceUrl: text("source_url"),
+    product: text("product"),
+    decidedBy: text("decided_by").references(() => user.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("saas_ad_source_uidx").on(table.sourceId),
+    check(
+      "saas_ad_product_check",
+      sql`${table.product} IS NULL OR ${oneOf(table.product, SAAS_CLIENT_PRODUCTS)}`,
+    ),
+    check(
+      "saas_ad_text_check",
+      sql`length(${table.sourceId}) BETWEEN 1 AND 128
+        AND (${table.sourceType} IS NULL OR length(${table.sourceType}) <= 40)
+        AND (${table.headline} IS NULL OR length(${table.headline}) <= 300)
+        AND (${table.body} IS NULL OR length(${table.body}) <= 2000)
+        AND (${table.sourceUrl} IS NULL OR length(${table.sourceUrl}) <= 2000)`,
+    ),
+    check(
+      "saas_ad_decided_check",
+      sql`(${table.product} IS NULL) = (${table.decidedAt} IS NULL)
+        AND (${table.decidedAt} IS NOT NULL OR ${table.decidedBy} IS NULL)`,
+    ),
+  ],
+)
+
+/**
  * Una conversación con Sallca por WhatsApp, Instagram o Messenger: una por
  * canal y remitente (`address`: en WhatsApp el número en E.164; en Instagram
  * el IGSID y en Messenger el PSID, ids de Meta sin formato de teléfono). Un
@@ -1033,11 +1085,26 @@ export const saasChat = adminSchema.table(
     /** «Lo atiendo yo»: mientras tenga fecha, Kairós no responde solo en esta conversación. */
     kairosPausedAt: timestamp("kairos_paused_at", { withTimezone: true }),
     kairosPausedBy: text("kairos_paused_by").references(() => user.id, { onDelete: "set null" }),
+    /**
+     * De qué app le hablan (`dental`, `medical` u `optical`) y cómo se supo (`product_source`).
+     * Nulo: todavía no se sabe y Kairós pregunta. Con cliente manda la app de su ficha.
+     */
+    product: text("product"),
+    productSource: text("product_source"),
+    /** El anuncio de Meta que la abrió, si llegó por uno. */
+    adId: uuid("ad_id").references(() => saasAd.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     uniqueIndex("saas_chat_address_uidx").on(table.channel, table.address),
+    index("saas_chat_ad_idx").on(table.adId),
+    check(
+      "saas_chat_product_check",
+      sql`(${table.product} IS NULL OR ${oneOf(table.product, SAAS_CLIENT_PRODUCTS)})
+        AND (${table.productSource} IS NULL OR ${oneOf(table.productSource, SAAS_CHAT_PRODUCT_SOURCES)})
+        AND ((${table.product} IS NULL) = (${table.productSource} IS NULL))`,
+    ),
     index("saas_chat_client_idx").on(table.clientId),
     check("saas_chat_channel_check", oneOf(table.channel, SAAS_CHAT_CHANNELS)),
     check(

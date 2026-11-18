@@ -22,6 +22,7 @@
  * yo» en un correo son lo único que se guarda (`saas_conversation_mark`); en un chat, quién lo
  * atiende lo dice la pausa de Kairós.
  */
+
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -38,6 +39,7 @@ import {
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, gt, inArray, isNotNull, type SQL, sql } from "drizzle-orm"
 import { type ChannelRules, channelRulesOf } from "./admin-channel-rules.js"
+import { type ChatApp, chatAppOf } from "./admin-chat-app.js"
 import { CLIENT_PHASES, type ClientPhase, clientPhaseSql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import {
@@ -154,6 +156,7 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
       m.received_at as last_inbound_at, m.created_at as since,
       greatest(m.received_at, coalesce(lo.sent_at, lo.created_at)) as last_activity_at,
       c.client_id, null::text as mailbox, null::text as to_address,
+      c.product as chat_product, c.product_source as chat_product_source,
       (case when c.kairos_paused_at is not null then c.kairos_paused_by end) as attended_by,
       mk.settled_at, (c.not_clinic_at is not null) as not_clinic,
       (c.kairos_paused_at is not null and c.kairos_paused_by is null) as handed_over,
@@ -328,6 +331,7 @@ function mailConversationsSql(
       l.received_at as last_inbound_at, l.received_at as since,
       greatest(l.received_at, coalesce(lo.sent_at, lo.created_at)) as last_activity_at,
       tc.client_id, l.mailbox, l.to_address,
+      null::text as chat_product, null::text as chat_product_source,
       mk.attended_by, mk.settled_at, false as not_clinic, false as handed_over,
       null::text as handover_why, false as kairos_busy, (td.thread_key is not null) as draft_ready,
       r.status as reply_status, r.by_kairos as reply_by_kairos, r.created_by as reply_created_by,
@@ -411,6 +415,8 @@ interface ConversationRow extends Record<string, unknown> {
   client_product: string | null
   client_has_app: boolean | null
   client_phase: string | null
+  chat_product: string | null
+  chat_product_source: string | null
   mailbox: string | null
   to_address: string | null
   attended_by: string | null
@@ -440,7 +446,7 @@ async function conversationRows(
       x.preview, x.attachments, ${iso(sql`x.last_inbound_at`)} as last_inbound_at,
       ${iso(sql`x.last_activity_at`)} as last_activity_at, x.client_id::text as client_id,
       x.client_name, x.client_product, x.client_has_app, x.client_phase, x.mailbox, x.to_address,
-      x.attended_by, au.name as attended_name,
+      x.chat_product, x.chat_product_source, x.attended_by, au.name as attended_name,
       (case when x.settled_at is null then null else ${iso(sql`x.settled_at`)} end) as settled_at,
       x.state, x.why_code, x.handover_why, x.reply_by_kairos, x.undelivered_by_kairos,
       x.draft_ready, x.last_out_status,
@@ -527,6 +533,8 @@ export interface InboxItem {
   /** Kairós dejó la respuesta lista (`responder_correo`): se envía o se cambia en el hilo. */
   draftReady: boolean
   client: InboxClient | null
+  /** Solo chats: de qué app le hablan y cómo se supo; nulo si no se sabe (o es un correo). */
+  app: ChatApp | null
   /** Solo correo: el buzón y la dirección a la que llegó. */
   mailbox: string | null
   to: string | null
@@ -573,6 +581,13 @@ function itemOf(row: ConversationRow): InboxItem {
           hasApp: Boolean(row.client_has_app),
         }
       : null,
+    app:
+      row.kind === "chat"
+        ? chatAppOf(
+            { product: row.chat_product, productSource: row.chat_product_source },
+            row.client_id && row.client_product ? { product: row.client_product } : null,
+          )
+        : null,
     mailbox: row.mailbox,
     to: row.to_address,
     attendedBy: row.attended_by ? { id: row.attended_by, name: row.attended_name ?? "" } : null,

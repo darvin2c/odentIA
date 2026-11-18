@@ -16,6 +16,7 @@ import {
   applyChatStatus,
   CHAT_MEDIA_MAX,
   type ChatMetaStatus,
+  type ChatReferral,
   inboundAttachmentKey,
   ingestInboundChat,
   ServiceError,
@@ -47,6 +48,11 @@ import { allowedInboundAttachment } from "./inbound-email.js"
  *
  * Estados (solo WhatsApp): por el `wamid` o por `biz_opaque_callback_data`, que
  * lleva el id del envío; resuelven un envío pendiente o incierto.
+ *
+ * Anuncios (A1): un mensaje que llega desde un anuncio de Facebook o Instagram que abre WhatsApp
+ * trae `referral` (el id del anuncio, su título y su texto); se lee del aviso crudo y entra con el
+ * mensaje, que guarda el anuncio y, si ya está atado a una app, la conversación nace con ella.
+ * Messenger e Instagram no lo leen todavía.
  *
  * Sin probar contra Meta: la app de la administración todavía no existe.
  */
@@ -116,6 +122,8 @@ interface PendingMessage {
   body: string | null
   receivedAt: Date
   media: { externalId: string; mimeType: string; filename: string | null } | null
+  /** Solo WhatsApp: el anuncio de Meta desde el que escribió (`referral`). */
+  referral?: ChatReferral | null
 }
 
 interface WaStatusRow {
@@ -148,15 +156,16 @@ function statusError(errors: unknown): string | null {
  */
 function readWhatsAppRaw(rawBody: string, phoneNumberId: string) {
   const filenames = new Map<string, string>()
+  const referrals = new Map<string, ChatReferral>()
   const statuses: WaStatusRow[] = []
   let body: unknown
   try {
     body = JSON.parse(rawBody)
   } catch {
-    return { filenames, statuses }
+    return { filenames, referrals, statuses }
   }
   const entries = (body as { entry?: unknown }).entry
-  if (!Array.isArray(entries)) return { filenames, statuses }
+  if (!Array.isArray(entries)) return { filenames, referrals, statuses }
   for (const entry of entries) {
     const changes = (entry as { changes?: unknown })?.changes
     if (!Array.isArray(changes)) continue
@@ -169,6 +178,18 @@ function readWhatsAppRaw(rawBody: string, phoneNumberId: string) {
         const id = text((message as { id?: unknown }).id)
         const filename = text((message as { document?: { filename?: unknown } }).document?.filename)
         if (id && filename) filenames.set(id, filename)
+        // Escribió desde un anuncio de Facebook o Instagram (Click to WhatsApp): de qué anuncio (A1).
+        const referral = (message as { referral?: Record<string, unknown> }).referral
+        const sourceId =
+          referral && typeof referral === "object" ? text(referral["source_id"]) : null
+        if (id && referral && sourceId)
+          referrals.set(id, {
+            sourceId,
+            sourceType: text(referral["source_type"]),
+            headline: text(referral["headline"]),
+            body: text(referral["body"]),
+            sourceUrl: text(referral["source_url"]),
+          })
       }
       for (const raw of Array.isArray(value["statuses"]) ? value["statuses"] : []) {
         const row = raw as {
@@ -189,7 +210,7 @@ function readWhatsAppRaw(rawBody: string, phoneNumberId: string) {
       }
     }
   }
-  return { filenames, statuses }
+  return { filenames, referrals, statuses }
 }
 
 /** Cuándo lo envió según Meta; si no se entiende, ahora. */
@@ -359,6 +380,7 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
             body: message.body,
             media: uploaded.slice(0, CHAT_MEDIA_MAX),
             receivedAt: message.receivedAt,
+            referral: message.referral ?? null,
           },
           now,
         ),
@@ -439,6 +461,7 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
                     }
                   : null,
                 receivedAt: sentAt(message, now),
+                referral: raw.referrals.get(message.externalMessageId) ?? null,
               },
             })
           }

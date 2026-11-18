@@ -9,6 +9,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { z } from "zod"
 import { api } from "../../lib/api"
+import { chatAppSchema } from "../product"
 
 const enc = encodeURIComponent
 
@@ -74,6 +75,8 @@ export const inboxItemSchema = z.object({
       hasApp: z.boolean(),
     })
     .nullable(),
+  /** Solo chats: de qué app le hablan y cómo se supo; nulo si no se sabe (o es un correo). */
+  app: chatAppSchema,
   /** Solo correo: el buzón y la dirección a la que llegó. */
   mailbox: z.string().nullable(),
   to: z.string().nullable(),

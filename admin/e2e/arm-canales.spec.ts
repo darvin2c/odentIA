@@ -214,6 +214,8 @@ test("Canales: un WhatsApp sin cliente llega a la Bandeja, se liga y se responde
   await expect(rosaRow).toContainText("Te toca")
   await expect(rosaRow).toContainText("WhatsApp")
   await expect(rosaRow).toContainText("Sin cliente: elegir")
+  // Nombró odentIA: la fila dice la app y cómo se supo (A1, un solo número para todas las apps).
+  await expect(rosaRow).toContainText(/odentIA\s*· lo dijo/)
   const igRow = list.getByRole("listitem").filter({ hasText: igText })
   await expect(igRow).toContainText("Instagram")
   await expect(igRow).toContainText("Sin cliente: elegir")

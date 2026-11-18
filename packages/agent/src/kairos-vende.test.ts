@@ -2,6 +2,7 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import { describe, expect, it } from "vitest"
 import type { KairosChatModel, KairosUse } from "./kairos.js"
 import {
+  appsNamedIn,
   checkSellReply,
   createKairosSeller,
   falseClaims,
@@ -13,6 +14,7 @@ import {
   type KairosSellTools,
   SELLER_SYSTEM,
   sellCancelledText,
+  sellContext,
   sellTimesNotIn,
   sellWhenWords,
 } from "./kairos-vende.js"
@@ -58,6 +60,16 @@ function input(overrides: Partial<KairosSellInput> = {}): KairosSellInput {
   }
 }
 
+/** Lo que Kairós sabe de vistIA cuando la persona dice que tiene una óptica. */
+const VISTIA = {
+  name: "vistIA",
+  audience: "ópticas",
+  facts: ["vistIA es el software del Grupo Sallca para ópticas."],
+  prices: ["Fundadores: Sofi cobra USD 0,07 por responder lo que preguntan (informa)."],
+  amounts: [{ value: 0.07, currency: "USD" }],
+  percents: [],
+}
+
 /** Herramientas de mentira que cuentan lo que se les pide. */
 function tools(overrides: Partial<KairosSellTools> = {}) {
   const calls: string[] = []
@@ -95,6 +107,10 @@ function tools(overrides: Partial<KairosSellTools> = {}) {
     clinicData: async () => {
       calls.push("clinicData")
       return { created: true, similar: [] }
+    },
+    chooseProduct: async (product) => {
+      calls.push(`chooseProduct:${product}`)
+      return VISTIA
     },
     askGuide: async (question) => {
       calls.push(`askGuide:${question}`)
@@ -289,7 +305,7 @@ describe("Kairós vende: la comprobación antes de enviar", () => {
     expect(uses[0]?.costMicros).not.toBeNull()
     // Lo fijo va primero y es el mismo en toda conversación.
     const system = seen[0]?.[0]?.content
-    expect(JSON.stringify(system)).toContain("Eres Kairós, el asistente de Sallca")
+    expect(JSON.stringify(system)).toContain("Eres Kairós, el asistente del Grupo Sallca")
     expect(SELLER_SYSTEM).toContain("Nunca prometas descuentos")
   })
 
@@ -597,7 +613,7 @@ describe("Kairós vende: en qué se basó", () => {
 describe("Kairós vende: lo mismo dicho dos veces sale una vez", () => {
   it("un párrafo repetido no se envía dos veces", async () => {
     const line =
-      "Hola, soy Kairós, el asistente de Sallca. Recibí un archivo que no puedo ver; ¿me lo escribes?"
+      "Hola, soy Kairós, del Grupo Sallca. Recibí un archivo que no puedo ver; ¿me lo escribes?"
     const { model } = scripted([{ text: `${line}\n${line}` }])
     const result = await seller(model).seller.answer(input({ firstReply: true }), tools().tools)
     expect(result).toMatchObject({ kind: "respondio", text: line })
@@ -679,10 +695,17 @@ describe("Kairós vende: le pregunta a Ariadna por una función", () => {
       { text: "Eso te lo muestro en la presentación. ¿Te agendo una?" },
     ])
     const t = tools({
-      askGuide: async () => ({ found: false, close: ["¿Dónde enciendo los recordatorios de cita?"] }),
+      askGuide: async () => ({
+        found: false,
+        close: ["¿Dónde enciendo los recordatorios de cita?"],
+      }),
     })
     await seller(model).seller.answer(input(), t.tools)
-    const lastSeen = seen.at(-1)?.map((m) => String(m.content)).join("\n") ?? ""
+    const lastSeen =
+      seen
+        .at(-1)
+        ?.map((m) => String(m.content))
+        .join("\n") ?? ""
     expect(lastSeen).toContain("- ¿Dónde enciendo los recordatorios de cita?")
     expect(lastSeen).toContain("tal cual")
   })
@@ -1032,5 +1055,125 @@ describe("Kairós vende: registra el nombre que dijo", () => {
       t.tools,
     )
     expect(t.calls).toContain("clinicData")
+  })
+})
+
+describe("Kairós vende: sin saber de qué app le hablan (A1)", () => {
+  const unknown = () =>
+    input({
+      product: null,
+      client: null,
+      firstReply: true,
+      history: [{ who: "persona", at: now, text: "Hola, ¿cuánto cuesta?" }],
+    })
+
+  it("el contexto dice que no se sabe y no trae hechos ni precios", () => {
+    const context = sellContext(unknown())
+    expect(context).toContain("App: todavía no sabemos qué negocio tiene")
+    expect(context).not.toContain("Precios vigentes")
+    expect(context).not.toContain("odentIA")
+  })
+
+  it("pregunta qué negocio tiene y se presenta como Grupo Sallca", async () => {
+    const { model } = scripted([
+      {
+        text: "Con gusto te cuento. ¿Tienes una clínica dental, un consultorio médico o una óptica?",
+      },
+    ])
+    const result = await seller(model).seller.answer(unknown(), tools().tools)
+    expect(result.kind).toBe("respondio")
+    expect(result.text.startsWith("Hola, soy Kairós, del Grupo Sallca.")).toBe(true)
+  })
+
+  it("no deja salir una app ni un precio mientras no se sabe", async () => {
+    const { model, seen } = scripted([{ text: "odentIA cuesta USD 0,05 por respuesta." }])
+    const result = await seller(model).seller.answer(unknown(), tools().tools)
+    expect(result).toMatchObject({ kind: "fallo", text: KAIROS_SELL_FALLBACK })
+    // La segunda vez el modelo supo por qué no salió.
+    const retry = JSON.stringify(seen[1]?.at(-1)?.content)
+    expect(retry).toContain("odentIA")
+    expect(retry).toContain("precio")
+  })
+
+  it("con «tengo una óptica» anota vistIA y responde con sus precios", async () => {
+    const { model, seen } = scripted([
+      { tool: "elegir_app", args: { producto: "optical" } },
+      { text: "vistIA te cobra USD 0,07 por cada respuesta de Sofi. ¿Agendamos una presentación?" },
+    ])
+    const { tools: t, calls } = tools()
+    const result = await seller(model).seller.answer(
+      input({
+        product: null,
+        client: null,
+        history: [{ who: "persona", at: now, text: "Tengo una óptica" }],
+      }),
+      t,
+    )
+    expect(calls).toEqual(["chooseProduct:optical"])
+    expect(result.kind).toBe("respondio")
+    expect(JSON.stringify(seen[1]?.at(-1)?.content)).toContain("Precios vigentes")
+  })
+
+  it("no registra la clínica sin saber qué negocio es", async () => {
+    const { model, seen } = scripted([
+      {
+        tool: "datos_de_la_clinica",
+        args: { clinica: "Visión Clara", persona: null, producto: null, ciudad: null },
+      },
+      { text: "¿Tu negocio es una clínica dental, un consultorio médico o una óptica?" },
+    ])
+    const { tools: t, calls } = tools()
+    await seller(model).seller.answer(
+      input({
+        product: null,
+        client: null,
+        history: [{ who: "persona", at: now, text: "Se llama Visión Clara" }],
+      }),
+      t,
+    )
+    expect(calls).toEqual([])
+    expect(JSON.stringify(seen[1]?.at(-1)?.content)).toContain("Todavía no sabes qué negocio tiene")
+  })
+
+  it("registrar la clínica con su producto también dice la app: sus precios pueden salir", async () => {
+    const { model } = scripted([
+      {
+        tool: "datos_de_la_clinica",
+        args: { clinica: "Lumen", persona: null, producto: "optical", ciudad: null },
+      },
+      { text: "Listo, registré tu óptica Lumen. vistIA te cobra USD 0,07 por respuesta." },
+    ])
+    const { tools: t, calls } = tools()
+    const result = await seller(model).seller.answer(
+      input({
+        product: null,
+        client: null,
+        history: [{ who: "persona", at: now, text: "Tengo la óptica Lumen, ¿cuánto cuesta?" }],
+      }),
+      t,
+    )
+    expect(calls).toEqual(["chooseProduct:optical", "clinicData"])
+    expect(result.kind).toBe("respondio")
+  })
+
+  it("sin saber la app puede nombrar las que nombró la persona, no otras", async () => {
+    const asked = input({
+      product: null,
+      client: null,
+      history: [{ who: "persona", at: now, text: "¿Qué diferencia hay entre odentIA y latidIA?" }],
+    })
+    const ok = scripted([
+      {
+        text: "odentIA es para clínicas dentales y latidIA para consultorios médicos. ¿Cuál es tu negocio?",
+      },
+    ])
+    expect((await seller(ok.model).seller.answer(asked, tools().tools)).kind).toBe("respondio")
+    const other = scripted([{ text: "También está vistIA, para ópticas. ¿Cuál es tu negocio?" }])
+    expect((await seller(other.model).seller.answer(asked, tools().tools)).kind).toBe("fallo")
+  })
+
+  it("appsNamedIn encuentra el nombre de cada app sin importar mayúsculas", () => {
+    expect(appsNamedIn("Te cuento de LATIDIA y de vistIA")).toEqual(["latidIA", "vistIA"])
+    expect(appsNamedIn("una clínica dental, un consultorio o una óptica")).toEqual([])
   })
 })

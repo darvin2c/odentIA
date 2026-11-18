@@ -20,6 +20,7 @@
  *   hora, un cambio hecho por una persona) salen una sola vez por su clave en
  *   la auditoría, escrita en la misma transacción que reserva el envío.
  */
+import { isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   type KairosTurnOutcome,
@@ -36,6 +37,7 @@ import {
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, type SQL, sql } from "drizzle-orm"
+import { type ChatApp, chatAppOf } from "./admin-chat-app.js"
 import { findClientDuplicates } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import {
@@ -438,7 +440,10 @@ export interface KairosChatContext {
     assigneeName: string
     meetingUrl: string | null
   } | null
-  sales: KairosSalesFacts
+  /** De qué app le hablan y cómo se supo; nulo si no se sabe: Kairós pregunta sin nombrar ninguna (A1). */
+  app: ChatApp | null
+  /** Lo que puede decir de esa app; nulo mientras no se sepa. */
+  sales: KairosSalesFacts | null
 }
 
 /** Un celular o un correo escritos en un mensaje: el celular en E.164 (9 cifras que empiezan con 9 son de Perú). */
@@ -573,6 +578,7 @@ export async function kairosChatContext(
   }
   const pending = await pendingKairosProposal(tx, chat.id, now)
   const task = await openPresentation(tx, chat.id, chat.clientId)
+  const app = chatAppOf(chat, client ?? null)
   const presenter = task ? await staffName(tx, task.assigneeUserId) : null
   return {
     chat: {
@@ -608,7 +614,8 @@ export async function kairosChatContext(
             meetingUrl: presenter.meetingUrl,
           }
         : null,
-    sales: await kairosSalesFacts(tx, client?.product ?? "dental"),
+    app,
+    sales: app ? await kairosSalesFacts(tx, app.product) : null,
   }
 }
 
@@ -977,8 +984,17 @@ export async function kairosClinicData(
     throw new ServiceError("NOT_CLINIC", 409, "Esta conversación está marcada «No es una clínica»")
   const name = input.clinicName.replace(/\s+/g, " ").trim().slice(0, 160)
   if (name.length < 2) throw invalidField("clinica", "Escribe el nombre de la clínica")
-  const product =
-    (["dental", "medical", "optical"] as const).find((p) => p === input.product) ?? "dental"
+  // La app que dijo, o la que ya se sabe de la conversación. Sin ninguna no se registra: Kairós
+  // pregunta primero qué negocio tiene (A1: nunca se asume una app).
+  const said = isClinicalProduct(input.product) ? input.product : null
+  const known = chat.product && isClinicalProduct(chat.product) ? chat.product : null
+  // Lo que eligió alguien del equipo no lo cambia Kairós (como `kairosChooseChatProduct`).
+  const product = chat.productSource === "persona" && known ? known : (said ?? known)
+  if (!product)
+    throw invalidField(
+      "producto",
+      "Todavía no sabemos qué negocio tiene: pregúntale si es una clínica dental, un consultorio médico o una óptica",
+    )
   const [client] = await tx
     .insert(saasClient)
     .values({

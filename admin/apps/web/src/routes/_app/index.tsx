@@ -31,6 +31,7 @@ import {
   type Said,
 } from "../../components/arm/hoy-rows"
 import { todaySearchOf } from "../../components/arm/hoy-search"
+import { AdsToTie } from "../../components/arm/chat-app"
 import { InboxToday } from "../../components/arm/inbox-today"
 import {
   KairosItemCard,
@@ -345,6 +346,7 @@ function AdminHome() {
       />
       {/* Lo que te toca responder en la Bandeja va primero: alguien espera. */}
       {isAdmin ? <InboxToday /> : null}
+      {isAdmin ? <AdsToTie /> : null}
       <KairosUnconfirmed product={product === "todos" ? undefined : product} />
       {today.isPending ? (
         <SkeletonRegion message="Consultando lo de hoy…">

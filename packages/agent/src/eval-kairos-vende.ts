@@ -39,6 +39,11 @@
  * Los avisos fijos por la comprobación o la falla («fallbacks») se cuentan
  * aparte: más de un 10 % de los turnos también es reprobar.
  *
+ * La app de la conversación (A1, un solo número para todas las apps): un caso
+ * sin cliente es de odentIA salvo que diga otra (`app`), como si la hubiera
+ * dicho el anuncio o el enlace; con `"app": null` no se sabe y Kairós tiene que
+ * preguntar. Nombrar una app o dar un importe sin saber cuál es también es GRAVE.
+ *
  * Con `LLM_MODEL=fake` corre el doble por reglas (`fakeSellerModel`) por el
  * mismo recorrido, sin juez y sin gasto: sirve para ver que la medición anda,
  * no cuenta como medición, y su resultado va a la carpeta temporal.
@@ -79,6 +84,7 @@ import {
   type KairosSellLine,
   type KairosSellResult,
   type KairosSellTools,
+  appsNamedIn,
   SELLER_SYSTEM,
   sellContext,
   sellTimesNotIn,
@@ -140,6 +146,8 @@ interface Expect {
   menciona?: string[]
   /** El aviso fijo no cuenta como no cumplido (sí en la tasa de avisos). */
   fallbackPermitido?: boolean
+  /** La app con la que debe terminar la conversación (la dijo la persona). */
+  app?: Product
 }
 
 interface CaseDef {
@@ -156,6 +164,11 @@ interface CaseDef {
     responsable?: string | null
   } | null
   contacto?: { nombre: string; whatsapp?: boolean; correo?: boolean } | null
+  /**
+   * La app de la conversación sin cliente, como la supo la entrada (anuncio o enlace): por omisión
+   * odentIA; `null`, no se sabe y Kairós pregunta (A1).
+   */
+  app?: Product | null
   pausado?: boolean
   noEsClinica?: boolean
   parecidos?: string[]
@@ -251,6 +264,8 @@ interface World {
     hasApp: boolean
   } | null
   contact: { name: string; phone: string | null; email: string | null } | null
+  /** La app de la conversación sin cliente; nula si no se sabe. */
+  app: "dental" | "medical" | "optical" | null
   paused: boolean
   notClinic: boolean
   presentation: { persona: string; start: number } | null
@@ -443,12 +458,23 @@ function toolsOf(w: World, calls: string[]): KairosSellTools {
     async askGuide(question) {
       calls.push("preguntar_a_ariadna")
       // La guía real del producto (`askGuideForSale`), con el mismo Jev que el worker.
-      const answer = await askGuideForSale(w.client?.product ?? "dental", question, guideDecider)
+      const answer = await askGuideForSale(
+        w.client?.product ?? w.app ?? "dental",
+        question,
+        guideDecider,
+      )
       w.guideAsked.push({ question, found: answer.found })
       guideStats.asked += 1
       if (answer.found) guideStats.found += 1
       if (answer.found) return { found: true, texts: answer.texts }
       return answer.close?.length ? { found: false, close: answer.close } : { found: false }
+    },
+    async chooseProduct(product) {
+      calls.push("elegir_app")
+      // Como `kairosChooseChatProduct`: con cliente manda su ficha.
+      if (!w.client) w.app = product
+      const key = w.client?.product ?? product
+      return kairosSalesFactsOf(key, bank.precios[productOfKey(key)])
     },
     async slots(range) {
       calls.push("ver_horarios")
@@ -592,7 +618,11 @@ function toolsOf(w: World, calls: string[]): KairosSellTools {
       const name = input.clinicName.replace(/\s+/g, " ").trim().slice(0, 160)
       if (name.length < 2)
         throw new ServiceError("VALIDATION", 400, "Escribe el nombre de la clínica")
-      w.client = { name, product: input.product ?? "dental", owner: null, hasApp: false }
+      // Como `kairosClinicData`: la app que dijo o la de la conversación; sin ninguna no se registra.
+      const product = input.product ?? w.app
+      if (!product)
+        throw new ServiceError("VALIDATION", 400, "Todavía no sabemos qué negocio tiene")
+      w.client = { name, product, owner: null, hasApp: false }
       w.createdClient = name
       // Por WhatsApp, el contacto nace con el número del chat.
       w.contact = {
@@ -795,6 +825,7 @@ function misses(c: CaseDef, w: World, sent: Sent[], gateClosed: boolean): string
   if (e.presentaCon && w.presentation?.persona !== e.presentaCon)
     push(excused(`no presenta ${e.presentaCon}`))
   if (e.preguntaGuia && w.guideAsked.length === 0) push(excused("no le preguntó a Ariadna"))
+  if (e.app && (w.client?.product ?? w.app) !== PRODUCT_KEY[e.app]) push(excused(`no quedó en ${e.app}`))
   if (e.responsable && w.client?.owner !== e.responsable)
     push(`el responsable pasó a ${w.client?.owner ?? "nadie"}`)
   for (const want of e.menciona ?? [])
@@ -929,6 +960,7 @@ function worldOf(c: CaseDef): World {
           hasApp: Boolean(c.cliente.conApp),
         }
       : null,
+    app: c.cliente ? null : c.app === null ? null : PRODUCT_KEY[c.app ?? "odentia"],
     contact: c.contacto
       ? {
           name: c.contacto.nombre,
@@ -998,6 +1030,7 @@ async function runCase(c: CaseDef, repetition: number): Promise<CaseResult> {
     texto: l.texto,
   }))
   const fallbackWhy: string[] = []
+  const unknownAppGraves: Grave[] = []
   const outcomes: string[] = []
   const promptChars: number[] = []
   let omitted = 0
@@ -1045,10 +1078,9 @@ async function runCase(c: CaseDef, repetition: number): Promise<CaseResult> {
         break
       }
     }
-    const sales = kairosSalesFactsOf(
-      w.client?.product ?? "dental",
-      bank.precios[productOfKey(w.client?.product ?? "dental")],
-    )
+    const known = w.client?.product ?? w.app
+    const appKnownBefore = known !== null
+    const sales = known ? kairosSalesFactsOf(known, bank.precios[productOfKey(known)]) : null
     const input: KairosSellInput = {
       channel: w.channel,
       now: new Date(w.now),
@@ -1091,6 +1123,14 @@ async function runCase(c: CaseDef, repetition: number): Promise<CaseResult> {
     for (const known of [w.proposal?.start, w.presentation?.start])
       if (known) knownTimes.add(limaMinutes(known))
     outcomes.push(`${result.kind}${calls.length ? ` (${calls.join(", ")})` : ""}`)
+    // Sin saber la app (antes y después del turno), no nombra ninguna ni da importes (A1).
+    if (!appKnownBefore && !(w.client?.product ?? w.app) && result.kind === "respondio") {
+      const named = appsNamedIn(result.text)
+      if (named.length)
+        unknownAppGraves.push({ rule: "nombró una app sin saber cuál es", text: result.text })
+      if ([...result.text.matchAll(MONEY)].length)
+        unknownAppGraves.push({ rule: "dio un importe sin saber la app", text: result.text })
+    }
     if (result.kind === "fallo") fallbackWhy.push(`t${index + 1}: ${result.why}`)
     sent.push({ turn: index, kind: result.kind, text: result.text })
     history.push({ who: "kairos", at: new Date(w.now.getTime() + 30_000), text: result.text })
@@ -1109,10 +1149,8 @@ async function runCase(c: CaseDef, repetition: number): Promise<CaseResult> {
       knownTimes.add(limaMinutes((result.booked as KairosSellBooked).startsAt.getTime()))
   }
   const personText = raw.map((r) => r.text).join("\n")
-  const sales = kairosSalesFactsOf(
-    w.client?.product ?? "dental",
-    bank.precios[productOfKey(w.client?.product ?? "dental")],
-  )
+  const finalApp = w.client?.product ?? w.app ?? "dental"
+  const sales = kairosSalesFactsOf(finalApp, bank.precios[productOfKey(finalApp)])
   // Los importes de los tres productos valen: el modelo puede comparar, pero nunca inventar.
   const amounts = (Object.keys(bank.precios) as Product[]).flatMap(
     (p) => kairosSalesFactsOf(PRODUCT_KEY[p], bank.precios[p]).amounts,
@@ -1126,6 +1164,7 @@ async function runCase(c: CaseDef, repetition: number): Promise<CaseResult> {
     [...knownTimes],
     closedGate && c.espera.sinRespuesta === true,
   )
+  graves.push(...unknownAppGraves)
   const missed = misses(c, w, sent, closedGate)
   const replied = sent.some((s) => s.kind === "respondio")
   const verdict = replied
