@@ -4348,21 +4348,27 @@ export async function consentDocumentPatientId(
   return doc.patientId
 }
 
+/**
+ * La historia del consentimiento, con quién hizo cada paso (`actorName`, su nombre en la cuenta):
+ * «Riesgos propios de su caso · los cambió Ana Torres» (QA del 18 nov).
+ */
 export async function listConsentEvents(
   tx: Db,
   orgId: string,
   documentId: string,
-): Promise<(typeof consentEvent.$inferSelect)[]> {
+): Promise<(typeof consentEvent.$inferSelect & { actorName: string | null })[]> {
   await consentDocumentPatientId(tx, orgId, documentId)
-  return tx
-    .select()
+  const rows = await tx
+    .select({ event: consentEvent, actorName: user.name })
     .from(consentEvent)
+    .leftJoin(user, eq(user.id, consentEvent.actorUserId))
     .where(and(eq(consentEvent.organizationId, orgId), eq(consentEvent.documentId, documentId)))
     // A igual hora, el orden del flujo: informar precede a firmar.
     .orderBy(
       asc(consentEvent.createdAt),
       sql`array_position(array['pendiente','riesgos_propios','enlace_enviado','enlace_firmado','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
     )
+  return rows.map((row) => ({ ...row.event, actorName: row.actorName ?? null }))
 }
 
 // ---------------------------------------------------------------------------

@@ -313,6 +313,8 @@ export interface ConsentEvent {
   fromStatus: string | null
   toStatus: string
   actorUserId: string | null
+  /** Quién hizo el paso, con su nombre en la cuenta (sin él, una API anterior). */
+  actorName?: string | null
   reason: string | null
   createdAt: string
 }

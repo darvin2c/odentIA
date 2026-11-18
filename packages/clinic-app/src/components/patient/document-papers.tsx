@@ -49,7 +49,7 @@ import { SendFinancialDocument } from "../finance-documents/SendFinancialDocumen
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentPersonalRisksField, personalRisksEditable } from "./consent-personal-risks"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
-import { CONSENT_EVENT_LABELS, RevokeForm } from "./consentimientos-tab"
+import { consentEventWords, RevokeForm } from "./consentimientos-tab"
 import { DocumentPaperPanel } from "./document-paper-panel"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { OrderCancelDrawer, OrderResultDrawer } from "./ordenes-tab"
@@ -518,8 +518,7 @@ function ConsentHistoryDrawer({
               dateStyle: "medium",
               timeStyle: "short",
             })}{" "}
-            · {CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus}
-            {event.reason && event.reason !== "Documento creado" ? ` · ${event.reason}` : ""}
+            · {consentEventWords(event)}
           </li>
         ))}
       </ol>

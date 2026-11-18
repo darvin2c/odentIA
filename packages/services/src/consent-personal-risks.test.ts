@@ -105,6 +105,8 @@ it("Teresa, con apixabán y alendronato escrito a mano: la exodoncia nace con su
     "riesgos_propios",
     "Cambiados",
   ])
+  // La Historia del documento dice quién los cambió (QA del 18 nov).
+  expect(events.find((event) => event.toStatus === "riesgos_propios")?.actorName).toBe("Clínico")
 
   // Vacío los quita: la hoja queda como siempre.
   await f.run((tx) => setConsentPersonalRisks(tx, "org_a", f.actor, doc.id, "  "))

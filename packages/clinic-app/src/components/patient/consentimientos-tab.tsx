@@ -21,6 +21,7 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   type ConsentDocument,
+  type ConsentEvent,
   type ConsentTreatmentChoice,
   cancelConsent,
   consentSignatureWords,
@@ -60,6 +61,25 @@ export const CONSENT_EVENT_LABELS: Record<string, string> = {
   revocado: "Revocado",
   anulado: "Anulado",
   riesgos_propios: "Riesgos propios de su caso",
+}
+
+/**
+ * Un paso de la Historia del documento, después de su fecha: qué pasó y quién lo hizo (QA del 18
+ * nov). «Riesgos propios de su caso · los cambió Ana Torres»; los demás, «Firmado · Ana Torres».
+ */
+export function consentEventWords(
+  event: Pick<ConsentEvent, "toStatus" | "reason" | "actorName">,
+): string {
+  const label = CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus
+  const who = event.actorName?.trim() || null
+  if (event.toStatus === "riesgos_propios") {
+    const removed = event.reason === "Quitados de la hoja"
+    if (who) return `${label} · ${removed ? "los quitó" : "los cambió"} ${who}`
+    return `${label} · ${removed ? "Quitados de la hoja" : "Cambiados"}`
+  }
+  return [label, event.reason && event.reason !== "Documento creado" ? event.reason : null, who]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 interface NewConsentValues {
