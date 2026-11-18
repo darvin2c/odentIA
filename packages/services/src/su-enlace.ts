@@ -539,8 +539,8 @@ async function pendingOf(
   patientId: string,
   /**
    * «Tus datos» pide datos: ahí el aviso va siempre, con su casilla, aunque la clínica no haya
-   * escrito uno (el sugerido; decisión 22, ADR 0141). En los demás pasos y para el agente
-   * (`chatBookingMissing`) solo cuenta el aviso que escribió la clínica, como antes.
+   * escrito uno (el sugerido; decisión 22, ADR 0141). En los demás pasos solo cuenta el aviso que
+   * escribió la clínica, como antes.
    */
   options: { asksData?: boolean } = {},
 ): Promise<{ privacy: boolean; promotions: boolean; promotionsOffer: boolean }> {
@@ -1784,27 +1784,6 @@ export async function reservePersonalLink(
     }
   }
   return reserveBookingLink(tx, orgId, token, choice, deps)
-}
-
-/**
- * Lo que a la clínica aún le falta de un paciente para reservarle con su sí en
- * el chat (ADR 0109): sus datos obligatorios (`getPatientMissingData`) y el
- * aviso de privacidad, si la clínica lo escribió y no lo aceptó. Con algo de
- * eso, el agente le da su enlace con la hora que eligió y ahí lo confirma al
- * reservar (`reservePersonalLink`). Vacío si no falta nada o si quien escribe
- * no decide por el paciente: a otro, su enlace solo le mostraría la cita.
- */
-export async function chatBookingMissing(
-  tx: Db,
-  orgId: string,
-  input: { contactId: string; patientId: string },
-): Promise<string[]> {
-  if (!(await contactDecides(tx, orgId, input.patientId, input.contactId))) return []
-  const missing = (await getPatientMissingData(tx, orgId, input.patientId)).map((item) =>
-    item.label.toLowerCase(),
-  )
-  const { privacy } = await pendingOf(tx, orgId, input.contactId, input.patientId)
-  return privacy ? [...missing, "aceptar el aviso de privacidad"] : missing
 }
 
 /**
