@@ -364,7 +364,10 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
           reason: parsed.data.reason,
           expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : undefined,
         }),
-      ).then(() => ({ ok: true })),
+      ).then(() => {
+        sendAccountEventsNow(deps)
+        return { ok: true }
+      }),
     )
   })
 
@@ -373,7 +376,10 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
     return runService(c, 200, () =>
-      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(() => ({ ok: true })),
+      owner((tx) => removeGlobalBlock(tx, actor, c.req.param("id"))).then(() => {
+        sendAccountEventsNow(deps)
+        return { ok: true }
+      }),
     )
   })
   app.post("/users/:id/close", async (c) => {

@@ -1030,6 +1030,13 @@
       "when": 1794990826092,
       "tag": "0146_la_conversacion_sabe_su_app",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1794992668888,
+      "tag": "0147_la_cuenta_avisa_bloqueo_y_reapertura",
+      "breakpoints": true
     }
   ]
 }
