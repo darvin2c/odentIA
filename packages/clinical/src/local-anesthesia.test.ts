@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
-  epinephrineCapOf,
+  type AnesthesiaCondition,
+  epinephrineCheckOf,
   isCardiacCondition,
+  isHypertension,
   LOCAL_ANESTHETICS,
   localAnesthesiaWords,
   localAnestheticOf,
@@ -16,7 +18,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         weightKg: 22,
         anesthetic: "lidocaina-2-epinefrina",
         ageYears: 7,
-        cardiac: null,
+        epinephrine: null,
       }),
     ).toEqual({
       dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos",
@@ -52,7 +54,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       weightKg: 80,
       anesthetic: "lidocaina-2-epinefrina",
       ageYears: 40,
-      cardiac: null,
+      epinephrine: null,
     })
     expect(words.dose).toBe(
       "Máximo para 80 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 300 mg (el tope), unos 8,3 cartuchos",
@@ -64,7 +66,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       weightKg: 15,
       anesthetic: "articaina-4-epinefrina",
       ageYears: 3,
-      cardiac: null,
+      epinephrine: null,
     })
     expect(words.warnings).toEqual(["La articaína no se recomienda en menores de 4 años."])
     expect(words.dose).toContain("105 mg")
@@ -76,7 +78,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         weightKg: null,
         anesthetic: "lidocaina-2-epinefrina",
         ageYears: 45,
-        cardiac: null,
+        epinephrine: null,
       }),
     ).toEqual({
       dose: null,
@@ -84,43 +86,90 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     })
   })
 
+  const check = (input: {
+    conditions?: AnesthesiaCondition[]
+    asaClass?: string | null
+    vitals?: { presionSistolica: number; presionDiastolica: number } | null
+    ageYears?: number | null
+  }) =>
+    epinephrineCheckOf({
+      conditions: input.conditions ?? [],
+      asaClass: input.asaClass ?? null,
+      vitals: input.vitals ?? null,
+      ageYears: input.ageYears ?? 60,
+    })
+  const warn = (epinephrine: ReturnType<typeof epinephrineCheckOf> | null, anesthetic = "lidocaina-2-epinefrina") =>
+    localAnesthesiaWords({ weightKg: 70, anesthetic, ageYears: 60, epinephrine }).warnings
+  const hta = { name: "Hipertensión esencial", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
+  const fa = { name: "Fibrilación auricular", diagnosisSystem: "ICD-10", diagnosisCode: "I48" }
+  const cap = (why: string) =>
+    `Por ${why}, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.`
+
   it("en un cardiópata avisa el tope de epinefrina, y sin vasoconstrictor no", () => {
-    const cardiac = epinephrineCapOf({ cardiacCondition: true, asaClass: "II" })
-    expect(
-      localAnesthesiaWords({
-        weightKg: 70,
-        anesthetic: "lidocaina-2-epinefrina",
-        ageYears: 60,
-        cardiac,
-      }).warnings,
-    ).toEqual([
-      "Por su enfermedad cardiovascular registrada, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
-    ])
-    expect(
-      localAnesthesiaWords({
-        weightKg: 70,
-        anesthetic: "mepivacaina-3",
-        ageYears: 60,
-        cardiac,
-      }).warnings,
-    ).toEqual([])
+    const epinephrine = check({ conditions: [fa], asaClass: "II" })
+    expect(warn(epinephrine)).toEqual([cap("su fibrilación auricular (I48)")])
+    expect(warn(epinephrine, "mepivacaina-3")).toEqual([])
   })
 
   // QA del 16 nov, Q10 (Gloria): ASA III puesta por el odontólogo y ninguna enfermedad registrada.
   // El aviso decía «Con su corazón…»: un motivo que la ficha no tiene.
-  it("el tope de epinefrina dice su motivo verdadero: la ASA, la enfermedad registrada o las dos", () => {
-    const warn = (cardiac: ReturnType<typeof epinephrineCapOf>) =>
-      localAnesthesiaWords({ weightKg: 62, anesthetic: "lidocaina-2-epinefrina", ageYears: 62, cardiac }).warnings
-    expect(warn(epinephrineCapOf({ cardiacCondition: false, asaClass: "III" }))).toEqual([
-      "Por su ASA III, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
-    ])
-    expect(warn(epinephrineCapOf({ cardiacCondition: true, asaClass: "IV" }))).toEqual([
-      "Por su enfermedad cardiovascular registrada y su ASA IV, la epinefrina hasta 0,04 mg por sesión: unos 2,2 cartuchos de este anestésico.",
-    ])
-    // Sin cardiopatía y con ASA I o II, o sin clasificar: no hay tope que avisar.
-    expect(epinephrineCapOf({ cardiacCondition: false, asaClass: "II" })).toBeNull()
-    expect(epinephrineCapOf({ cardiacCondition: false, asaClass: null })).toBeNull()
+  it("el tope de epinefrina dice su motivo verdadero: la ASA, la enfermedad, la presión o varias", () => {
+    expect(warn(check({ asaClass: "III" }))).toEqual([cap("su ASA III")])
+    expect(warn(check({ conditions: [fa], asaClass: "IV" }))).toEqual([cap("su ASA IV y su fibrilación auricular (I48)")])
+    expect(
+      warn(check({ conditions: [fa, hta], asaClass: "III", vitals: { presionSistolica: 165, presionDiastolica: 100 } })),
+    ).toEqual([cap("su ASA III, su fibrilación auricular (I48) y la presión de hoy (165/100)")])
+    // Sin nada de eso: no hay tope que avisar.
+    expect(check({ asaClass: "II" }).cap).toBeNull()
+    expect(check({}).cap).toBeNull()
     expect(warn(null)).toEqual([])
+  })
+
+  // Reglas clínicas del 18 nov, caso C2 (Rodrigo): la hipertensión controlada no limita la epinefrina.
+  it("la hipertensión con ASA II y la presión de hoy controlada no lleva tope", () => {
+    const today = check({ conditions: [hta], asaClass: "II", vitals: { presionSistolica: 130, presionDiastolica: 85 } })
+    expect(today).toEqual({ cap: null, takePressure: null })
+    expect(warn(today)).toEqual([])
+  })
+
+  it("la presión de hoy de 160/95 o más lleva el tope, y lo dice", () => {
+    expect(warn(check({ conditions: [hta], asaClass: "II", vitals: { presionSistolica: 165, presionDiastolica: 100 } }))).toEqual([
+      cap("la presión de hoy (165/100)"),
+    ])
+    // Basta la diastólica (150/95), y también sin hipertensión registrada.
+    expect(check({ vitals: { presionSistolica: 150, presionDiastolica: 95 } }).cap).toEqual({
+      conditions: [],
+      asaClass: null,
+      pressure: "150/95",
+    })
+    expect(check({ vitals: { presionSistolica: 159, presionDiastolica: 94 } }).cap).toBeNull()
+    // En un niño de 10 años la presión del adulto no vale.
+    expect(check({ vitals: { presionSistolica: 165, presionDiastolica: 100 }, ageYears: 10 }).cap).toBeNull()
+  })
+
+  it("la fibrilación auricular (I48) lleva el tope aun con ASA II; escrita sin código, no", () => {
+    expect(check({ conditions: [fa], asaClass: "II" }).cap).toEqual({
+      conditions: ["fibrilación auricular (I48)"],
+      asaClass: null,
+      pressure: null,
+    })
+    expect(check({ conditions: [{ name: "Fibrilación auricular" }], asaClass: "II" }).cap).toBeNull()
+  })
+
+  it("la hipertensión sin la presión de hoy pide tomarla antes de anestesiar, sin tope", () => {
+    const today = check({ conditions: [hta], asaClass: "II" })
+    expect(today).toEqual({ cap: null, takePressure: "hipertensión esencial (I10)" })
+    expect(warn(today)).toEqual(["Con su hipertensión esencial (I10), toma la presión antes de anestesiar."])
+    // Con cualquier anestésico: no es por la epinefrina sola.
+    expect(warn(today, "mepivacaina-3")).toEqual(["Con su hipertensión esencial (I10), toma la presión antes de anestesiar."])
+  })
+
+  // latidIA no pide la ASA: llega nula, y vale lo demás.
+  it("sin ASA (latidIA), la hipertensión sola no lleva tope y la cardiopatía sí", () => {
+    expect(check({ conditions: [hta], vitals: { presionSistolica: 128, presionDiastolica: 80 } }).cap).toBeNull()
+    expect(check({ conditions: [{ name: "Insuficiencia cardiaca", diagnosisSystem: "ICD-10", diagnosisCode: "I50.0" }] }).cap?.conditions).toEqual([
+      "insuficiencia cardiaca (I50.0)",
+    ])
   })
 
   it("cada anestésico tiene su tope y su dosis por kilo", () => {
@@ -128,6 +177,15 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       expect(anesthetic.mgPerKg).toBeGreaterThan(0)
       expect(anesthetic.maxMg).toBeGreaterThan(0)
     }
+  })
+
+  it("la hipertensión se reconoce por su código, aparte de la cardiopatía", () => {
+    expect(isHypertension("ICD-10", "I10")).toBe(true)
+    expect(isHypertension("ICD-10", "I15.0")).toBe(true)
+    expect(isHypertension("ICD-10", "I48")).toBe(false)
+    expect(isHypertension("ICD-11", "BA00")).toBe(true)
+    expect(isHypertension("ICD-11", "BC81")).toBe(false)
+    expect(isHypertension(null, null)).toBe(false)
   })
 
   it("la cardiopatía se reconoce por su código", () => {

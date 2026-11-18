@@ -604,6 +604,14 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Los riesgos propios del consentimiento: en una óptica no hay herida ni anestesia, queda el látex.
+  "pacientes-consentimiento-riesgos-propios": (faq) => [
+    {
+      ...faq,
+      a: "Al generar el consentimiento, el sistema propone los riesgos propios de su caso según sus antecedentes (por ejemplo, su alergia al látex). Ábrelo desde su fila en Documentos: mientras está pendiente, en «Riesgos propios de…» (opcional) los cambias, los agregas o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Firmado o ya enviado a su enlace, no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro).",
+      forms: ["riesgos propios del paciente en el consentimiento", "agregar un riesgo al consentimiento", "quitar los riesgos propios del consentimiento"],
+    },
+  ],
   // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
   "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).

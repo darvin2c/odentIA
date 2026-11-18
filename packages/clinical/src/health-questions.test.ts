@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { declaredMedicineAtc, HABITUAL_MEDICATIONS, MEDICATION_CLASSES, medicationClassOf } from "./allergens.js"
+import {
+  declaredMedicineAtc,
+  findHabitualMedication,
+  HABITUAL_MEDICATIONS,
+  MEDICATION_CLASSES,
+  matchHabitualMedication,
+  medicationClassOf,
+  searchHabitualMedications,
+} from "./allergens.js"
 import {
   ageInYears,
   anesthesiaAnswersOf,
@@ -333,13 +341,15 @@ describe("las marcas «Anticoagulante» y «Huesos» salen del grupo ATC, no del
     expect(medicationClassOf(null)).toBeNull()
   })
 
-  it("lo dicho al responder «Sí» lleva el código de su medicamento si es de la lista y de esa clase; si no, el del grupo", () => {
+  it("lo dicho al responder «Sí» lleva el código de su medicamento si lo nombra por un nombre de la lista y es de esa clase; si no, el del grupo", () => {
     expect(declaredMedicineAtc("anticoagulants", "Warfarina")).toBe("B01AA03")
-    expect(declaredMedicineAtc("anticoagulants", "warfarina 5 mg")).toBe("B01A")
-    expect(declaredMedicineAtc("anticoagulants", "Sintrom")).toBe("B01A")
+    // Reglas clínicas del 18 nov: con la dosis o por su marca, también es el suyo.
+    expect(declaredMedicineAtc("anticoagulants", "warfarina 5 mg")).toBe("B01AA03")
+    expect(declaredMedicineAtc("anticoagulants", "Sintrom")).toBe("B01AA07")
+    expect(declaredMedicineAtc("anticoagulants", "la pastilla para la sangre")).toBe("B01A")
     expect(declaredMedicineAtc("anticoagulants", "")).toBe("B01A")
     expect(declaredMedicineAtc("boneMedicines", "ácido alendrónico")).toBe("M05BA04")
-    expect(declaredMedicineAtc("boneMedicines", "alendronato 70 mg semanal")).toBe("M05B")
+    expect(declaredMedicineAtc("boneMedicines", "alendronato 70 mg semanal")).toBe("M05BA04")
     // Un medicamento de otra clase escrito en esta pregunta no cambia la respuesta: sigue siendo de la clase.
     expect(declaredMedicineAtc("boneMedicines", "warfarina")).toBe("M05B")
     // Los de la lista habitual quedan cada uno en su clase.
@@ -348,6 +358,62 @@ describe("las marcas «Anticoagulante» y «Huesos» salen del grupo ATC, no del
     expect(inClass("anticoagulants")).toEqual(
       expect.arrayContaining(["warfarina", "acenocumarol", "clopidogrel", "rivaroxabán", "apixabán"]),
     )
-    expect(inClass("boneMedicines")).toEqual(["ácido alendrónico", "ácido zoledrónico", "denosumab"])
+    expect(inClass("boneMedicines")).toEqual([
+      "ácido alendrónico",
+      "ácido risedrónico",
+      "ácido ibandrónico",
+      "ácido zoledrónico",
+      "ácido pamidrónico",
+      "denosumab",
+      "romosozumab",
+    ])
+  })
+})
+
+// Reglas clínicas del 18 nov (punto 1, casos C1 y C4): la lista habitual reconoce cada medicina por
+// sus nombres estándar (DCI, nombre local y marca registrada), con el código ATC de la DCI.
+describe("la medicina se reconoce por sus nombres estándar, nunca por un texto cualquiera", () => {
+  const atcOf = (written: string) => findHabitualMedication(written)?.atc ?? null
+
+  it("por su nombre local o su marca, sola o seguida de la dosis", () => {
+    expect(atcOf("alendronato 70 mg semanal")).toBe("M05BA04")
+    expect(atcOf("Fosamax")).toBe("M05BA04")
+    expect(atcOf("risedronato 35 mg")).toBe("M05BA07")
+    expect(atcOf("Ácido zoledrónico")).toBe("M05BA08")
+    expect(atcOf("zoledronato 5mg anual")).toBe("M05BA08")
+    expect(atcOf("Prolia 60 mg cada 6 meses")).toBe("M05BX04")
+    expect(atcOf("Evenity")).toBe("M05BX06")
+    expect(atcOf("Eliquis 5 mg")).toBe("B01AF02")
+    expect(atcOf("Xarelto")).toBe("B01AF01")
+    expect(atcOf("dabigatrán 150 mg")).toBe("B01AE07")
+    expect(atcOf("Plavix, 75 mg")).toBe("B01AC04")
+    // Gana el nombre más largo: la combinación no es la amoxicilina sola.
+    expect(findHabitualMedication("amoxicilina + ácido clavulánico 875 mg")?.dci).toBe("amoxicilina + ácido clavulánico")
+  })
+
+  it("un trozo de nombre, un nombre dentro de otro texto o lo que no es del grupo no se reconoce", () => {
+    expect(atcOf("ácido")).toBeNull()
+    expect(atcOf("ácido 5 mg")).toBeNull()
+    expect(atcOf("alendro")).toBeNull()
+    expect(atcOf("alendronatos")).toBeNull()
+    expect(atcOf("toma alendronato")).toBeNull()
+    expect(atcOf("la pastilla del hueso")).toBeNull()
+    // Raloxifeno, teriparatida y calcio no son del grupo M05B: no dan la marca de huesos.
+    for (const written of ["raloxifeno 60 mg", "teriparatida", "calcio con vitamina D"])
+      expect(medicationClassOf(atcOf(written))).toBeNull()
+  })
+
+  it("se elige de la lista también por la marca, y dice por cuál salió", () => {
+    expect(searchHabitualMedications("fosa")).toEqual([
+      expect.objectContaining({ dci: "ácido alendrónico", atc: "M05BA04", via: "Fosamax" }),
+    ])
+    expect(searchHabitualMedications("alendr")[0]).toEqual(
+      expect.objectContaining({ dci: "ácido alendrónico", via: "alendronato" }),
+    )
+    expect(searchHabitualMedications("apix")[0]).toEqual(expect.objectContaining({ dci: "apixabán", via: null }))
+    expect(matchHabitualMedication("Eliquis 5 mg")).toEqual({
+      entry: expect.objectContaining({ dci: "apixabán" }),
+      name: "Eliquis",
+    })
   })
 })

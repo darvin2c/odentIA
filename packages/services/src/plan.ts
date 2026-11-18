@@ -1102,8 +1102,9 @@ async function planItemSessionsOf(
 }
 
 /**
- * Las exodoncias por hacer (QA final de formularios, Y2): lo que dice el producto que es una
- * (`extractionServiceIds`), sin lo hecho, cancelado o reemplazado.
+ * Las exodoncias, implantes y cirugías por hacer (QA final de formularios, Y2; reglas clínicas del
+ * 18 nov): lo que dice el producto que es una (`extractionServiceIds`), sin lo hecho, cancelado o
+ * reemplazado.
  */
 async function extractionItemsOf(
   tx: Db,

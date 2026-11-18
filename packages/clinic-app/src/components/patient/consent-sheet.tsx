@@ -1,4 +1,4 @@
-import { CONSENT_SECTION_LABELS, type ConsentSections } from "@odentia/clinical"
+import { CONSENT_PERSONAL_RISKS_LABEL, CONSENT_SECTION_LABELS, type ConsentDocumentSections } from "@odentia/clinical"
 import { cn } from "@odentia/ui"
 import { type ReactNode, type Ref, useId } from "react"
 import type { ConsentLetterhead } from "../../lib/clinical-forms"
@@ -111,7 +111,8 @@ export interface ConsentSheetProps {
   facts: { label: string; value: string; strong?: boolean }[]
   /** «CIE-10 MINSA · K04.0 · Pulpitis». */
   diagnosis?: string | null
-  sections: Partial<ConsentSections> | null | undefined
+  /** Las secciones; un consentimiento generado trae además sus riesgos propios. */
+  sections: Partial<ConsentDocumentSections> | null | undefined
   /** El texto completo de un consentimiento sin secciones (los antiguos). */
   body?: string | null
   declaration: string
@@ -218,6 +219,8 @@ export function ConsentSheet({
             {section(CONSENT_SECTION_LABELS.diagnosis, diagnosis ? <p>{diagnosis}</p> : null)}
             {section(CONSENT_SECTION_LABELS.benefits, list(sections.benefits))}
             {section(CONSENT_SECTION_LABELS.risks, list(sections.risks))}
+            {/* Los de su caso, si los tiene: en el mismo lugar que el PDF. */}
+            {section(CONSENT_PERSONAL_RISKS_LABEL, list(sections.personalRisks ?? undefined))}
             {section(CONSENT_SECTION_LABELS.alternatives, list(sections.alternatives))}
             {section(
               CONSENT_SECTION_LABELS.consequences,

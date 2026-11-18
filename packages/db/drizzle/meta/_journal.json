@@ -1030,6 +1030,13 @@
       "when": 1794990826092,
       "tag": "0146_la_conversacion_sabe_su_app",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1795050000000,
+      "tag": "0147_medicinas_por_su_nombre",
+      "breakpoints": true
     }
   ]
 }

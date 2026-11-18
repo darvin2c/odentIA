@@ -1524,7 +1524,8 @@ it("«Tus datos y tu salud»: a quien el equipo ya le anotó un antecedente se l
   const health = await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))
   expect(health.allergies.map((row) => row.substance)).toEqual(["Látex"])
   expect(health.reviewStatus.allergies).toBe("recorded")
-  expect(health.medications).toEqual([expect.objectContaining({ name: "warfarina 5 mg", atcCode: "B01A" })])
+  // Escrita con su nombre estándar y la dosis, lleva el código de su DCI (reglas clínicas del 18 nov).
+  expect(health.medications).toEqual([expect.objectContaining({ name: "warfarina 5 mg", atcCode: "B01AA03" })])
   expect(health.medicineClasses).toEqual({
     anticoagulants: { answer: "yes", said: false },
     boneMedicines: { answer: "no", said: true },

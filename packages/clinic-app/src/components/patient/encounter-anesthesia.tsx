@@ -1,8 +1,7 @@
 import {
   type AnesthesiaAtSigning,
-  type EpinephrineCap,
-  epinephrineCapOf,
-  isCardiacCondition,
+  type EpinephrineCheck,
+  epinephrineCheckOf,
   isCurrentMedication,
   LOCAL_ANESTHETICS,
   type LocalAnestheticKey,
@@ -68,14 +67,21 @@ export function anesthesiaHealthWords(
   return parts.join(" ")
 }
 
-/** Cardiopatía registrada con su código, o ASA III o más: el tope de epinefrina, con su motivo. */
-export function cardiacOf(health: Pick<PatientHealth, "conditions" | "asaClass"> | null): EpinephrineCap | null {
+/**
+ * El tope de epinefrina y si falta tomar la presión, con la misma regla que guarda la firma
+ * (`epinephrineCheckOf`): sus enfermedades activas, la ASA donde el producto la pide, la presión de
+ * hoy y su edad.
+ */
+export function epinephrineOf(
+  health: Pick<PatientHealth, "conditions" | "asaClass"> | null,
+  input: { asksAsa: boolean; vitals: Vitals | null; ageYears: number | null },
+): EpinephrineCheck | null {
   if (!health) return null
-  return epinephrineCapOf({
-    cardiacCondition: health.conditions.some(
-      (row) => row.status === "activa" && isCardiacCondition(row.diagnosisSystem, row.diagnosisCode),
-    ),
-    asaClass: health.asaClass,
+  return epinephrineCheckOf({
+    conditions: health.conditions.filter((row) => row.status === "activa"),
+    asaClass: input.asksAsa ? health.asaClass : null,
+    vitals: input.vitals,
+    ageYears: input.ageYears,
   })
 }
 
@@ -163,7 +169,7 @@ export function EncounterAnesthesiaLine({
     weightKg: vitals?.peso ?? null,
     anesthetic,
     ageYears,
-    cardiac: cardiacOf(health),
+    epinephrine: epinephrineOf(health, { asksAsa, vitals, ageYears }),
   })
   const said = anesthesiaHealthWords(health, gaps, risks, today)
   const asaMissing = asksAsa && !asa

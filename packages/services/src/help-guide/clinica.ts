@@ -53,7 +53,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-anestesia-dosis-maxima",
         q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-        a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local (al marcarlo «Hoy» con «Hacer hoy» o al registrar algo fuera del plan) sale «Anestesia local» con sus alergias, su medicación y lo que dijo del corazón. La ASA se pone ahí con un toque (I a IV) y queda en su ficha con tu nombre y la fecha. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo, para no pasar el máximo). Con mepivacaína al 3 % el mismo niño son 1,7 cartuchos. Sin peso no calcula nada: pide anotarlo. Cuando la ASA ya está puesta y no hay nada que avisar (niega alergias, enfermedades y medicación), «Anestesia local» queda en dos líneas con la ASA y el máximo, y «Cambiar» abre todo otra vez; con una alergia, una enfermedad, un medicamento o un aviso, va siempre entera. Avisa si eliges articaína en un menor de 4 años y el tope de epinefrina (0,04 mg por sesión) si tiene registrada una enfermedad del corazón o de la presión, o ASA III o IV, y dice por cuál de las dos. Se repite al firmar, y la atención firmada guarda la ASA, el peso y el máximo, solo de lo que quedó registrado: si anulas el procedimiento porque no se hizo, «Anestesia local» se va y la atención firmada no la nombra. Avisa y no frena: la dosis la decides tú.",
+        a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local (al marcarlo «Hoy» con «Hacer hoy» o al registrar algo fuera del plan) sale «Anestesia local» con sus alergias, su medicación y lo que dijo del corazón. La ASA se pone ahí con un toque (I a IV) y queda en su ficha con tu nombre y la fecha. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo, para no pasar el máximo). Con mepivacaína al 3 % el mismo niño son 1,7 cartuchos. Sin peso no calcula nada: pide anotarlo. Cuando la ASA ya está puesta y no hay nada que avisar (niega alergias, enfermedades y medicación), «Anestesia local» queda en dos líneas con la ASA y el máximo, y «Cambiar» abre todo otra vez; con una alergia, una enfermedad, un medicamento o un aviso, va siempre entera. Avisa si eliges articaína en un menor de 4 años y el tope de epinefrina (0,04 mg por sesión) con ASA III o IV, con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, y dice por cuál. La hipertensión controlada no lo pide: si tiene hipertensión y no anotaste la presión de hoy, te dice «toma la presión antes de anestesiar». Se repite al firmar, y la atención firmada guarda la ASA, el peso y el máximo, solo de lo que quedó registrado: si anulas el procedimiento porque no se hizo, «Anestesia local» se va y la atención firmada no la nombra. Avisa y no frena: la dosis la decides tú.",
         forms: [
           "dosis maxima de anestesia",
           "maximo de lidocaina por kilo",
@@ -63,6 +63,8 @@ export const CLINICA: readonly HelpMore[] = [
           "cuanta anestesia le puedo poner a un niño de 22 kg",
           "cuanta anestesia le puedo poner si pesa 22 kg",
           "dosis de anestesia por peso",
+          "por que me limita la epinefrina",
+          "es hipertenso puedo usar lidocaina con epinefrina",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -303,8 +305,14 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-antecedentes-enfermedades-medicacion",
         q: "¿Dónde anoto sus enfermedades y los medicamentos que toma?",
-        a: "En su página › Clínica › Antecedentes, «Registrar antecedentes» (o «Editar antecedentes» si ya tiene): «Condiciones» para sus enfermedades, «Medicación vigente» para lo que toma (con «Fin (suspender)» dejas de contarlo) y «Entrevista de salud» para el «Embarazo» y los antecedentes familiares, con «Agregar antecedente familiar». Lo cambia quien escribe en la historia clínica.",
-        forms: ["donde anoto que es diabetica", "donde pongo que esta embarazada", "donde registro la medicacion que toma", "antecedentes familiares"],
+        a: "En su página › Clínica › Antecedentes, «Registrar antecedentes» (o «Editar antecedentes» si ya tiene): «Condiciones» para sus enfermedades, «Medicación vigente» para lo que toma (con «Fin (suspender)» dejas de contarlo) y «Entrevista de salud» para el «Embarazo» y los antecedentes familiares, con «Agregar antecedente familiar». Lo cambia quien escribe en la historia clínica. El medicamento se elige de la lista o se escribe: la lista lo reconoce por su nombre, su nombre común o su marca, también con la dosis, y lo guarda con su código («alendronato 70 mg semanal», «Fosamax» o «Eliquis» quedan como medicina para los huesos o anticoagulante, con su marca arriba de la ficha). Lo que no está en la lista queda escrito tal cual, sin código.",
+        forms: [
+          "donde anoto que es diabetica",
+          "donde pongo que esta embarazada",
+          "donde registro la medicacion que toma",
+          "antecedentes familiares",
+          "escribo la marca del medicamento",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -435,6 +443,20 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        // Reglas clínicas del 18 nov: los riesgos propios de su caso en el consentimiento.
+        id: "pacientes-consentimiento-riesgos-propios",
+        q: "¿Cómo pongo en el consentimiento el riesgo propio de este paciente?",
+        a: "Al generar el consentimiento, el sistema propone sus riesgos propios según sus antecedentes y el procedimiento: un anticoagulante o un antiagregante (puede sangrar más), una medicina para los huesos que toma o tomó (en una extracción, un implante o una cirugía, el riesgo poco frecuente de osteonecrosis), la diabetes registrada con su código (la herida cierra más lento), una alergia a un anestésico local o al látex. Ábrelo desde su fila en Documentos: mientras está pendiente, en «Riesgos propios de…» (opcional) los cambias o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Firmado o ya enviado a su enlace, no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro).",
+        forms: [
+          "riesgos propios del paciente en el consentimiento",
+          "agregar un riesgo al consentimiento",
+          "el consentimiento dice que toma anticoagulante",
+          "quitar los riesgos propios del consentimiento",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-consentimiento-revocar-anular",
         q: "¿Cómo revoco un consentimiento firmado o anulo uno pendiente?",
         a: "Abre el consentimiento en Documentos y usa su menú de acciones: «Anular pendiente…», con su motivo, si todavía no se firmó, o «Revocar…» si ya está firmado: eliges «Quién revoca», escribes el motivo y esa persona firma. El documento firmado se conserva marcado como revocado y el tratamiento vuelve a pedir consentimiento. «Historia del documento» muestra lo que pasó con él. Para firmarlo a mano, en la atención, «Otras formas de firmar» › «Imprimir para firmar en papel».",
@@ -551,9 +573,15 @@ export const CLINICA: readonly HelpMore[] = [
       {
         // Revisión final de formularios del 15 nov: el aviso de la exodoncia (Y2 de clínica, `extractionRisksOf`).
         id: "pacientes-exodoncia-aviso-medicinas",
-        q: "¿Por qué la exodoncia dice «pide su INR del día» o «riesgo de osteonecrosis»?",
-        a: "Porque toma algo que cambia una extracción: en la atención, en el plan, la fila de la exodoncia por hacer lo dice con quién lo contó y cuándo. Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
-        forms: ["por que la exodoncia me dice que pida su inr", "aviso de warfarina en la extraccion", "riesgo de osteonecrosis en la exodoncia"],
+        q: "¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?",
+        a: "Porque toma algo que cambia una cirugía: en la atención, en el plan, la fila de la exodoncia, el implante o la cirugía oral por hacer lo dice con quién lo contó y cuándo. Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo, o denosumab), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. La medicina cuenta escrita por su nombre, su nombre común o su marca, también con la dosis: «alendronato 70 mg semanal», «Fosamax» o «Eliquis 5 mg». Lo escrito de otra forma («la pastilla del hueso») no se reconoce: elígelo de la lista en Antecedentes. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
+        forms: [
+          "por que la exodoncia me dice que pida su inr",
+          "aviso de warfarina en la extraccion",
+          "riesgo de osteonecrosis en la exodoncia",
+          "riesgo de osteonecrosis en el implante",
+          "escribi alendronato y no me avisa",
+        ],
         area: "plan",
         needs: "clinical.read",
         own: true,
