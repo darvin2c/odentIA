@@ -21,7 +21,9 @@ import {
   CASE_SLOTS,
   type CaseSlot,
   type ContactAppointmentOption,
-  chatBookingMissing,
+  chatPrivacyNotice,
+  chatRegistrationSchema,
+  type ChatRegistrationPerson,
   chooseMessagesInConversation,
   chosenBeforeProposalOf,
   clinicAddressOf,
@@ -165,7 +167,7 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
-  reservar_paciente_nuevo: "Le dio a alguien nuevo su enlace con la hora que eligió, para que deje sus datos y reserve ahí.",
+  reservar_paciente_nuevo: "Propuso la cita de alguien nuevo, que con su sí queda registrado.",
   ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
   buscar_en_la_clinica: "Buscó en los servicios, promociones y profesionales de la clínica.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
@@ -173,7 +175,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   ver_contexto_paciente: "Verificó para quién es la atención.",
   ver_resumen_paciente: "Consultó las citas y el estado de cuenta del paciente.",
   ver_pedidos: "Consultó los pedidos del paciente.",
-  proponer_cita: "Propuso reservar una cita o, si a la clínica le faltaban datos del paciente, le dio su enlace con esa hora.",
+  proponer_cita: "Propuso reservar una cita.",
   reprogramar_cita: "Propuso mover una cita.",
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
@@ -1542,6 +1544,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (summary.moreBudgets > 0) {
         lines.push(`Y ${summary.moreBudgets} ${summary.moreBudgets === 1 ? "presupuesto anterior" : "presupuestos anteriores"} que no van aquí.`)
       }
+      // Lo que tiene por reservar: se le dice al pedir cita y se suma a la que se reserva.
+      const { controls, items } = summary.toBook
+      if (controls.length || items.length) {
+        lines.push("Por reservar (díselo cuando pida o reserve una cita y pregúntale si lo hace en esa misma; si quiere, van en proponer_cita con followUpIds o planItemIds):")
+        for (const c of controls) {
+          const due = new Date(c.dueAt).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric" })
+          lines.push(`- Control: ${c.title} (id ${c.followUpId}), ${c.overdue ? `vencido desde el ${due}` : `para el ${due}`}.`)
+        }
+        for (const item of items) lines.push(`- Tratamiento aceptado sin cita: ${item.title} (id ${item.planItemId}).`)
+      }
       if (summary.balance === null) {
         lines.push("Sin facultad para ver saldos: no los menciones ni los pidas.")
       } else if (!summary.balance.length || summary.balance.every((b) => b.outstandingCents <= 0)) {
@@ -1768,8 +1780,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     (await inOrg((tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "aqui" as const)) === "preguntar"
 
   /**
-   * «Su enlace» con la hora que eligió en el chat (ADR 0109): para quien aún no es paciente, o para
-   * el paciente al que la clínica le falta algo, la hora se reserva ahí, al confirmar sus datos. Es el
+   * «Su enlace» con la hora que eligió en el chat (ADR 0109): para quien aún no es paciente, la hora
+   * se reserva ahí, al dejar sus datos. Es el
    * mismo enlace que acompaña a los horarios (`issueAgendaLink`): nulo si el paciente ya tiene una
    * cita por venir, porque la página le mostraría esa cita en vez de la reserva. El mensaje guarda la
    * referencia del enlace y el worker pone el token al entregarlo (`personalLinkRef`).
@@ -1856,6 +1868,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return null
   }
 
+  /** Sin motivo no se reserva: se le pregunta por el chat (regla del 18 nov). */
+  const NO_MOTIVE =
+    "Falta el motivo de la cita: todavía no se reservó nada. Pregúntale en una frase a qué viene (por ejemplo «¿Me cuenta brevemente el motivo de su cita?»), sin pedirle nada más, y cuando lo diga vuelve a llamar con reason en sus palabras."
+
   const proposeBooking = tool(
     async (input: {
       patientId: string
@@ -1876,53 +1892,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
       if (await unknownService(input.serviceId)) return UNKNOWN_SERVICE
-      // Si a la clínica le falta algo del paciente (un dato obligatorio o el aviso de privacidad), esa
-      // hora se reserva en su enlace al confirmarlo, no con su sí en el chat (ADR 0109). Sin dirección
-      // pública, con una cita por venir (su enlace le mostraría esa cita) o si el enlace no se puede
-      // emitir, se propone aquí como siempre y la confirmación lleva el enlace para completar sus datos.
-      const viaLink = await (async () => {
-        const publicUrl = ctx.publicUrl
-        const branchId = input.branchId ?? offeredBranch(input)
-        if (!publicUrl || !branchId) return null
-        if (pickLinkGiven(input.startsAt)) {
-          return pickLinkAgain(inOrg((tx) => clinicLinkOrigin(tx, publicUrl)), {
-            patientId: input.patientId,
-            branchId,
-            ...(input.serviceId ? { serviceId: input.serviceId } : {}),
-            professionalUserId,
-            startsAt: input.startsAt,
-          })
-        }
-        try {
-          const found = await inOrg(async (tx) => {
-            const origin = await clinicLinkOrigin(tx, publicUrl)
-            const missing = origin ? await chatBookingMissing(tx, ctx.orgId, { contactId: ctx.contactId, patientId: input.patientId }) : []
-            return origin && missing.length ? { origin, missing } : null
-          })
-          if (!found) return null
-          const issued = await pickLink(found.origin, {
-            patientId: input.patientId,
-            branchId,
-            ...(input.serviceId ? { serviceId: input.serviceId } : {}),
-            professionalUserId,
-            startsAt: input.startsAt,
-          })
-          if (!issued) return null
-          await noteAction("enlace", "le dio su enlace con la hora que eligió")
-          const whose = issued.link.forName ?? "la persona"
-          return pickLinkReply(issued.url, `a la clínica le falta algo de ${whose} (${found.missing.join(", ")}) y no se reserva por aquí`, issued.link.forName)
-        } catch (error) {
-          if (error instanceof ServiceError) return null
-          throw error
-        }
-      })()
-      if (viaLink) return viaLink
+      const motive = input.reason?.trim()
+      if (!motive) return NO_MOTIVE
+      // La reserva va primero (18 nov, precisa la 0109): quien ya es paciente reserva aquí con su sí
+      // aunque le falte un dato o aceptar el aviso; los datos que faltan van en la confirmación
+      // (`bookedDataLink`) y el aviso lo acepta cuando complete sus datos o reserve en su enlace.
       // Sin servicio ni duración, la cita dura lo que el hueco ofrecido. Si no, se reserva lo que dura
       // una cita en la sede, y una hora ofrecida al final del turno ya no cabe al confirmarla.
       const slotMinutes = input.durationMin === undefined && !input.serviceId ? offeredSlotMinutes(ctx.evidence, input) : null
-      const { reason, ...payload } = { ...input, professionalUserId, ...(slotMinutes ? { durationMin: slotMinutes } : {}) }
+      // El motivo queda en la cita: antes iba solo a la nota interna y ninguna cita de Sofi lo tenía.
+      const payload = { ...input, professionalUserId, reason: motive, ...(slotMinutes ? { durationMin: slotMinutes } : {}) }
       let created: ProposalItem | undefined
-      const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
+      const proposed = await propose("reservar_cita", payload, "proponer_cita", motive, (p) => {
         created = p
       })
       if (created?.status === "propuesta") ctx.proposedNow = true
@@ -1948,21 +1929,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta). Si a la clínica le falta un dato del paciente o que acepte el aviso de privacidad, no la propone: te da su enlace con esa hora para que confirme sus datos y reserve ahí.`,
+        `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta). Lleva siempre el motivo (reason), en sus palabras: si no lo dijo, pregúntaselo antes. Si ver_resumen_paciente muestra algo «Por reservar» (un control, un tratamiento aceptado) y la persona quiere hacerlo en esta cita, súmalo con followUpIds o planItemIds. Si le falta un dato, se reserva igual: la confirmación te da su enlace para completarlo.`,
       schema: operationAgentSchema("cita.reservar", { room }),
     },
   )
 
   /**
-   * Quien aún no es paciente reserva en su enlace (ADR 0109, que precisa la 0101): con el hueco
-   * que eligió, su enlace ya trae esa hora y ahí deja sus datos (o los de su hijo, con «Para otra
-   * persona») y acepta el aviso; por el chat no se registra a nadie. Si quien escribe ya tiene
-   * pacientes (una madre con el suyo que pide cita para su hijo nuevo), el enlace es para alguien
-   * nuevo (`newPerson`): no es el de ellos. Sin registro en línea o sin dirección pública, lo
-   * registra recepción.
+   * Sin registro por el chat (la clínica no publicó su aviso o no tiene dirección pública): su
+   * enlace con la hora que eligió, para dejar sus datos y quedar reservada ahí; sin registro en
+   * línea, recepción. Si quien escribe ya tiene pacientes, el enlace es para alguien nuevo.
    */
-  const bookNewPatient = tool(
-    async (input: {
+  const newPatientLink = async (input: {
       professionalUserId: string
       roomId: string
       startsAt: string
@@ -2028,16 +2005,96 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           : "aún no es paciente y por aquí no se registra a nadie; si la cita es para otra persona (su hijo o hija, por ejemplo), en la página elige «Para otra persona» y deja sus datos",
         null,
       )
+    }
+
+  /**
+   * Quien aún no es paciente se registra y reserva aquí, con su sí (ADR 0101; la 0109 lo había
+   * mandado a su enlace y el 18 nov volvió: la reserva va primero, siempre con nombre y motivo).
+   * La pregunta del sí lleva el aviso de privacidad: con ese sí queda registrado y reservado. Sin
+   * aviso publicado o sin registro encendido, su enlace con esa hora (`newPatientLink`) o recepción.
+   */
+  const bookNewPatient = tool(
+    async (input: {
+      professionalUserId: string
+      roomId: string
+      startsAt: string
+      branchId?: string
+      serviceId?: string
+      durationMin?: number
+      reason?: string
+      givenNames: string
+      familyName: string
+      docType?: ChatRegistrationPerson["docType"]
+      docNumber?: string
+      forOther?: boolean
+      minor?: boolean
+      writerName?: string
+    }) => {
+      if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
+      const motive = input.reason?.trim()
+      if (!motive) return NO_MOTIVE
+      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría reservar y registrar a ${input.givenNames} ${input.familyName} el ${input.startsAt}.`
+      const forOther = input.forOther === true
+      const linked = await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))
+      if (!forOther && linked.some((item) => item.relationship === "self")) {
+        return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente). Si la cita es para otra persona que aún no es paciente (su hijo, por ejemplo), vuelve a llamar con forOther."
+      }
+      const { notice, origin } = await inOrg(async (tx) => ({
+        notice: await chatPrivacyNotice(tx, ctx.orgId),
+        origin: ctx.publicUrl ? await clinicLinkOrigin(tx, ctx.publicUrl) : null,
+      }))
+      if (!notice || !origin) return newPatientLink(input)
+      const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
+      if (!professionalUserId) return UNKNOWN_PROFESSIONAL
+      if (await unknownService(input.serviceId)) return UNKNOWN_SERVICE
+      const { givenNames, familyName, docType, docNumber, forOther: _forOther, minor, writerName, reason: _reason, ...slot } = input
+      const slotMinutes = input.durationMin === undefined && !input.serviceId ? offeredSlotMinutes(ctx.evidence, input) : null
+      const newPatient = {
+        givenNames,
+        familyName,
+        ...(docType && docNumber ? { docType, docNumber } : {}),
+        ...(forOther ? { forOther: true, minor: minor === true, ...(writerName ? { writerName } : {}) } : {}),
+      }
+      let created: ProposalItem | undefined
+      let proposed: string
+      try {
+        proposed = await propose(
+          "reservar_cita",
+          { ...slot, professionalUserId, reason: motive, ...(slotMinutes ? { durationMin: slotMinutes } : {}), newPatient },
+          "reservar_paciente_nuevo",
+          motive,
+          (p) => {
+            created = p
+          },
+        )
+      } catch (error) {
+        // Un documento mal escrito se le pide de nuevo antes de pedirle el sí.
+        if (error instanceof ServiceError && error.code === "VALIDATION") return `${error.message}. Pídele que lo revise; si no lo tiene a la mano, sigue sin documento.`
+        throw error
+      }
+      if (created?.status !== "propuesta") return proposed
+      ctx.proposedNow = true
+      const noticeUrl = new URL("/aviso", origin).toString()
+      // El registro va en la frase final, con el aviso y bajo «al confirmar»: dicho aparte sonaba
+      // hecho («te registro como paciente») o repetía «Al confirmar» (auditoría del ADR 0104).
+      const registers = !forOther
+        ? "te registro como paciente"
+        : minor
+          ? `registro a ${givenNames} ${familyName} como paciente, contigo como su madre, padre o tutor,`
+          : `registro a ${givenNames} ${familyName} como paciente`
+      const where = (await webchatNeedsContact())
+        ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
+        : ""
+      const accepts = `${registers} y aceptas nuestro aviso de privacidad: ${noticeUrl}.`
+      const writer = (forOther ? writerName : givenNames)?.trim().split(/\s+/)[0]
+      const byName = writer ? `empieza por su nombre («${writer}, …»), ` : ""
+      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, ${byName}di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere: termina en cambio con «Al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",
       description:
-        "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: te da su enlace con esa hora ya elegida, para que deje sus datos (o los de la persona para quien es la cita) y quede reservada ahí. Si quien escribe ya es paciente y la cita es para otra persona que aún no lo es (su hijo, por ejemplo), con forOther. Por aquí no se registra a nadie: no le pidas apellidos, documento ni nada de salud para esto.",
-      schema: operationAgentSchema("cita.reservar", { room })
-        .omit({ patientId: true })
-        .extend({
-          forOther: z.boolean().optional().describe("true si quien escribe ya es paciente y la cita es para otra persona que aún no lo es."),
-        }),
+        "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: con su sí lo registra como paciente y le reserva la cita aquí mismo, en un solo paso. Antes pídele por el chat sus nombres y apellidos y el motivo de la cita (y su documento solo si la clínica lo pide); nada de salud. Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor.",
+      schema: operationAgentSchema("cita.reservar", { room }).omit({ patientId: true, planItemIds: true, followUpIds: true }).extend(chatRegistrationSchema.shape),
     },
   )
 

@@ -763,19 +763,29 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .filter(Boolean)
           .join("\n")
       : null
-    // Quien aún no es paciente reserva en su enlace, que ya trae la hora que eligió:
-    // ahí deja sus datos (ADR 0109, que precisa la 0101); por aquí no se registra a
-    // nadie. Sin registro en línea, lo registra recepción. Se le dice desde el primer
-    // mensaje, para que no pida datos que no puede usar (auditoría del 27-oct).
-    async function newPersonLine(): Promise<string> {
+    // Quien aún no es paciente se registra y reserva aquí con su sí, si la clínica tiene su aviso
+    // publicado (ADR 0101; volvió el 18 nov: la reserva va primero, siempre con nombre y motivo);
+    // si no, por su enlace o por recepción. Lo que ya se sabe de su nombre no se le vuelve a pedir.
+    async function newPersonLine(known: "todo" | "nombre" | "nada", givenNames: string): Promise<string> {
       const config = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getPatientRegistrationConfig(tx, toolCtx.orgId)).catch(() => null)
+      if (available.has("reservar_paciente_nuevo") && config?.enabled && config.privacyNotice.trim() && toolCtx.publicUrl) {
+        const document =
+          config.fields.docNumber === "required" ? " y, porque la clínica lo pide, su documento (si no lo tiene a la mano, sigue sin él)" : ""
+        const ask =
+          known === "todo"
+            ? `ya tienes sus nombres y apellidos${document ? `; pídele también${document.replace(" y,", ",")}` : ""}`
+            : known === "nombre"
+              ? `pídele solo sus apellidos (ya sabes que se llama ${givenNames})${document}`
+              : `pídele sus nombres y apellidos${document}`
+        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, ${ask}, y el motivo de la cita si no lo dijo, y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Si la cita es para otra persona, pide los nombres y apellidos de esa persona${known === "nada" ? ", cómo se llama quien escribe" : ""} y, si no lo dijo, si es su hijo o hija menor de edad. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
+      }
       if (available.has("reservar_paciente_nuevo") && config?.enabled && toolCtx.publicUrl) {
-        return "Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, usa reservar_paciente_nuevo con ese hueco: te da su enlace con esa hora ya elegida, para que deje sus datos y quede reservada ahí, también si la cita es para otra persona (su hijo o hija, por ejemplo). Por aquí no lo registras: no le pidas apellidos, documento ni otros datos para eso, ni nada de salud. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita."
+        return "Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, pídele sus nombres y apellidos y el motivo si no los dijo, y usa reservar_paciente_nuevo con ese hueco: te da su enlace con esa hora ya elegida, para que deje sus datos y quede reservada ahí, también si la cita es para otra persona (su hijo o hija, por ejemplo). No le pidas documento ni nada de salud. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita."
       }
       const online = available.has("enviar_enlace_cita") && config?.enabled === true
       return online
         ? "Este interlocutor aún no es paciente de la clínica. Por aquí no le reservas ni lo registras, y no le pidas documento ni otros datos para eso: si quiere una cita, ofrécele los horarios y, cuando elija uno, envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos ahí; díselo así."
-        : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."
+        : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre, el motivo y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."
     }
     // Saber con quién habla (objetivo de Sofi, ADR 0097): el nombre del perfil de
     // WhatsApp o «Visitante del chat web» no es su nombre. Se conoce cuando la ficha
@@ -821,7 +831,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
           .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, di su nombre completo al proponerla y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
-      : await newPersonLine()
+      : await newPersonLine(nameKnown ? "todo" : onlyGivenNames ? "nombre" : "nada", person?.givenNames?.trim() ?? "")
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
     const memoryBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) =>

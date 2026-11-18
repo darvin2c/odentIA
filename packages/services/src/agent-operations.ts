@@ -368,6 +368,15 @@ export interface AgentPatientSummary {
   moreBudgets: number
   /** null = el interlocutor no tiene facultad económica. */
   balance: Array<{ currency: string; outstandingCents: number }> | null
+  /**
+   * Lo que tiene por reservar, solo con quien decide por el paciente (como sus presupuestos): los
+   * controles sin cita, el vencido primero, y lo aceptado del plan que aún no tiene cita. El agente
+   * se lo dice al pedir cita y lo suma a la que reserva (`followUpIds`, `planItemIds`).
+   */
+  toBook: {
+    controls: Array<{ followUpId: string; title: string; dueAt: string; overdue: boolean }>
+    items: Array<{ planItemId: string; title: string }>
+  }
 }
 
 /**
@@ -522,7 +531,19 @@ export async function getAgentPatientSummary(
     const account = await getAccountSummary(tx, orgId, patientId)
     balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.saldo }))
   }
+  // Lo que tiene por reservar: la misma lista de controles del Plan (`listFollowUps`) y lo aceptado sin cita.
+  const toBook: AgentPatientSummary["toBook"] = { controls: [], items: [] }
+  if (context.decides) {
+    const { listFollowUps } = await import("./follow-ups.js")
+    const controls = (await listFollowUps(tx, orgId, patientId, { status: "pendiente" })).filter((row) => !row.servedBy && !row.servedToday)
+    toBook.controls = controls
+      .map((row) => ({ followUpId: row.id, title: row.title, dueAt: new Date(row.dueAt).toISOString(), overdue: row.overdue }))
+      .sort((a, b) => Number(b.overdue) - Number(a.overdue))
+    const { schedulableItemsOf } = await import("./booking-links.js")
+    toBook.items = await schedulableItemsOf(tx, orgId, patientId)
+  }
   return {
+    toBook,
     context,
     upcomingAppointments: appointments.slice(0, AGENT_APPOINTMENTS_SHOWN).map((a) => ({
       appointmentId: a.appointmentId,
@@ -2090,6 +2111,11 @@ export function newPatientOf(payload: Record<string, unknown>): ChatRegistration
   }
 }
 
+/** Una lista de ids del payload; nula si no viene o viene vacía. */
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string") ? (value as string[]) : undefined
+}
+
 /** El aviso que se le mostró a quien se registra por el chat, congelado al proponer (ADR 0101). */
 function frozenNoticeOf(payload: Record<string, unknown>): ChatPrivacyNotice | null {
   const raw = payload.privacyNotice
@@ -3042,6 +3068,10 @@ export async function executeProposal(
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
         durationMin: typeof payload.durationMin === "number" ? (payload.durationMin as number) : undefined,
         reason: typeof payload.reason === "string" ? (payload.reason as string) : undefined,
+        // Lo que tenía por reservar y se suma a esta cita (su control, lo aceptado del plan): la misma
+        // operación que «Reservar lo aceptado y el control» de la Agenda.
+        ...(stringList(payload.planItemIds) ? { planItemIds: stringList(payload.planItemIds) } : {}),
+        ...(stringList(payload.followUpIds) ? { followUpIds: stringList(payload.followUpIds) } : {}),
         // La eligió la persona con su sí: queda confirmada, sin pedirle «Confirmar» después.
         status: "confirmada",
         source: "agent",
