@@ -1,5 +1,6 @@
 import { fakeModelStartProblem } from "@odentia/agent"
 import type { ProductDomains } from "@odentia/clinical"
+import type { AccountApp } from "@odentia/auth/apps"
 import { z } from "zod"
 
 const envSchema = z.object({
@@ -24,6 +25,23 @@ const envSchema = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
     .default(""),
+  /**
+   * El dominio de gestorIA (`gestoria24.com`, ADR 0201): ahí solo responde su entrada a la
+   * cuenta (`api.` + `/api/auth/*`), nada de las clínicas. Vacío: no existe. Con él, mientras
+   * sus correos no tengan su marca, ese dominio responde 404.
+   */
+  GESTORIA_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. gestoria24.com")
+    .default(""),
+  /**
+   * Los avisos de la cuenta a gestorIA (ADR 0201): adónde (https) y con qué secreto
+   * (`whsec_…`, Standard Webhooks). Los mismos en el worker. Vacíos: los avisos esperan.
+   */
+  GESTORIA_ACCOUNT_EVENTS_URL: z.string().trim().default(""),
+  GESTORIA_ACCOUNT_EVENTS_SECRET: z.string().trim().default(""),
   /** El dominio de vistIA (`vistia20.com`), como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()
@@ -229,6 +247,8 @@ function loadEnv() {
       medical: rest.MEDICAL_DOMAIN || undefined,
       optical: rest.OPTICAL_DOMAIN || undefined,
     } satisfies ProductDomains,
+    // El de cada app que es otro sistema (ADR 0201).
+    externalAppDomains: { gestoria: rest.GESTORIA_DOMAIN || undefined } as Partial<Record<AccountApp, string>>,
   }
 }
 

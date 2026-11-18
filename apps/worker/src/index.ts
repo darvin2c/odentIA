@@ -13,13 +13,20 @@ import {
   platformLlmFromEnv,
   resolveLlmSpec,
 } from "@odentia/agent"
-import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
+import {
+  ACCOUNT_APP_INFO,
+  type AccountApp,
+  appOfProduct,
+  emailVerificationUrl,
+  REMINDER_VERIFICATION_TTL_SECONDS,
+} from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
-import type { ProductDomains } from "@odentia/clinical"
+import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, type ProductDomains } from "@odentia/clinical"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
+  accountEventSendersFromEnv,
   adminChannelsFromEnv,
   askGuideForSale,
   clinicHostsFromEnv,
@@ -27,17 +34,19 @@ import {
   configureDocumentLogos,
   configurePublicLinks,
   createStorage,
+  deliverAccountEvents,
   ensureSuggestedConsentsEverywhere,
   ensureSuggestedFormsEverywhere,
   type HelpDecider,
   kairosAiUseRecorder,
   mailBrandDomains,
   metaSignupConfigured,
+  onDomain,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
-import { runAccountLifecycleTick } from "./account-lifecycle.js"
+import { type LifecycleApp, runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
 import { clinicHostsQueue } from "./clinic-hosts.js"
@@ -75,6 +84,35 @@ const publicLinks = {
   } satisfies ProductDomains,
 }
 configurePublicLinks(publicLinks)
+
+/**
+ * Los avisos de la cuenta de cada app de clínicas (ADR 0201): con su marca, su panel y su
+ * dominio, el de la app donde la persona se registró. gestorIA no está: su aviso lo manda ella.
+ */
+const lifecycleApps: Partial<Record<AccountApp, LifecycleApp>> = {}
+for (const product of CLINICAL_PRODUCTS) {
+  const app = appOfProduct(product)
+  const brand = ACCOUNT_APP_INFO[app].mailBrand
+  if (!brand) continue
+  const domain =
+    product === BASE_PRODUCT ? undefined : (publicLinks.productDomains as Partial<Record<ClinicalProduct, string>>)[product]
+  const on = (address: string) => (domain ? onDomain(address, env.COOKIE_DOMAIN, domain) : address)
+  const panel = on(env.WEB_URL).replace(/\/+$/, "")
+  const authUrl = on(env.BETTER_AUTH_URL)
+  lifecycleApps[app] = {
+    brand,
+    onboardingUrl: `${panel}/onboarding`,
+    // Lleva al panel ya adentro, como «Reenviar el enlace» de la pantalla de entrar.
+    verificationUrl: (email) =>
+      emailVerificationUrl({
+        secret: env.BETTER_AUTH_SECRET,
+        authUrl,
+        email,
+        callbackURL: `${panel}/`,
+        expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
+      }),
+  }
+}
 configureDocumentChecks(secretsKey)
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
@@ -407,16 +445,7 @@ queues.push(
       nextAccountPoll = Date.now() + 86_400_000
       const result = await runAccountLifecycleTick(ownerDb, {
         notify: { sendReminder: (email, mail) => mailer.send({ to: email, ...mail }) },
-        onboardingUrl: `${env.WEB_URL.replace(/\/+$/, "")}/onboarding`,
-        // Lleva al panel ya adentro, como «Reenviar el enlace» de la pantalla de entrar.
-        verificationUrl: (email) =>
-          emailVerificationUrl({
-            secret: env.BETTER_AUTH_SECRET,
-            authUrl: env.BETTER_AUTH_URL,
-            email,
-            callbackURL: `${env.WEB_URL.replace(/\/+$/, "")}/`,
-            expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
-          }),
+        apps: lifecycleApps,
         verificationDays: REMINDER_VERIFICATION_TTL_SECONDS / 86_400,
       })
       for (const error of result.errors) console.error(`worker: account_lifecycle ${error}`)
@@ -424,6 +453,16 @@ queues.push(
     },
   },
 )
+
+// Los avisos de la cuenta a las apps que son otro sistema (ADR 0201): los reintenta si la API
+// no pudo mandarlos en el momento. Sin la dirección y el secreto de una app, sus avisos esperan.
+const accountEvents = accountEventSendersFromEnv(env)
+for (const problem of accountEvents.problems) console.warn(`worker: ${problem}`)
+if (accountEvents.senders.length > 0)
+  queues.push({
+    name: "account_events",
+    poll: async () => (await deliverAccountEvents(ownerDb, accountEvents.senders)).delivered > 0,
+  })
 
 // La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y cada hora.
 if (clinicHosts) queues.push(clinicHostsQueue(ownerDb, clinicHosts))

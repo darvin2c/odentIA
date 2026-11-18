@@ -1,5 +1,5 @@
 import type { KairosWriter, PlatformDecisions, PlatformLlm } from "@odentia/agent"
-import type { Auth } from "@odentia/auth"
+import type { AccountApp, Auth } from "@odentia/auth"
 import { BASE_PRODUCT, type ClinicalProduct, configureZodMessages, type DomainProduct, type ProductDomains, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
@@ -30,8 +30,10 @@ import {
   initialOrgRegion,
   invalidField,
   type MailboxEnv,
+  isOnDomain,
   onDomain,
   productOfHost,
+  type AccountEventSender,
   RESERVED_ORG_SLUGS,
   regionPresetForCountry,
   type SearchEmbedder,
@@ -158,6 +160,16 @@ import { createWorkspaceRoute } from "./routes/workspace.js"
 import { createPushRoute } from "./routes/push.js"
 import { createLetterheadRoute } from "./routes/letterhead.js"
 
+/** La entrada a la cuenta de una app que es otro sistema, en su dominio (ADR 0201). */
+export interface ExternalAppEntry {
+  app: AccountApp
+  domain: string
+  /** Su Better Auth; nulo mientras no se pueda encender (`accountAppNotReady`). */
+  auth: Auth | null
+  /** Sus pantallas: las únicas que pueden llamar a su entrada desde el navegador. */
+  trustedOrigins: string[]
+}
+
 export interface AppDeps {
   auth: Auth
   db: Db
@@ -184,6 +196,13 @@ export interface AppDeps {
   productDomains?: ProductDomains
   /** La sesión de cada otro producto: la instancia de Better Auth de su dominio. */
   productAuth?: Partial<Record<DomainProduct, Auth>>
+  /**
+   * Las apps que son otro sistema (gestorIA, ADR 0201), con su dominio y su entrada a la
+   * cuenta. En su dominio solo responde esa entrada: nada de las clínicas existe ahí.
+   */
+  externalApps?: ExternalAppEntry[]
+  /** Adónde y con qué secreto se avisa a cada una lo que pasa con la cuenta (ADR 0201). */
+  accountEventSenders?: AccountEventSender[]
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -424,6 +443,31 @@ export function createApp(deps: AppDeps) {
   const app = new Hono()
 
   app.use("*", requestId())
+  // El dominio de una app que es otro sistema (ADR 0201): ahí solo responde su entrada a la
+  // cuenta, sin las rutas de organizaciones (que son clínicas). Nada de las clínicas existe
+  // en ese dominio, ni cae en el producto base. Sin su entrada todavía, todo responde 404.
+  for (const entry of deps.externalApps ?? []) {
+    const entryCors = cors({
+      origin: (origin) => (entry.trustedOrigins.includes(origin) ? origin : ""),
+      credentials: true,
+      maxAge: 7200,
+    })
+    const entryAuth = entry.auth
+    // El segundo factor del personal se cuida igual que en las clínicas (ADR 0089).
+    const factorBoundary = entryAuth ? createAdminFactorBoundary({ auth: entryAuth, ownerDb: deps.ownerDb }) : null
+    app.use("*", async (c, next) => {
+      if (!isOnDomain(c.req.url, entry.domain)) return next()
+      const path = c.req.path
+      if (!entryAuth || !factorBoundary || !path.startsWith("/api/auth/") || path.startsWith("/api/auth/organization/"))
+        return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+      return entryCors(c, async () => {
+        const blocked = await factorBoundary(c, async () => {
+          c.res = await entryAuth.handler(c.req.raw)
+        })
+        if (blocked) c.res = blocked
+      })
+    })
+  }
   // Lo buscado llega en una cabecera, no en la dirección (QA de la ficha del 10 nov, M4).
   app.use("*", searchFromHeader())
   app.use(

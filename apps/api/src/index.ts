@@ -1,13 +1,13 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
 import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, kairosModelNotice, platformLlmFromEnv } from "@odentia/agent"
-import { type Auth, createAuth } from "@odentia/auth"
+import { type Auth, accountAppNotReady, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
-import { createApp } from "./app.js"
+import { accountEventSendersFromEnv, adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { createApp, type ExternalAppEntry } from "./app.js"
 import { env } from "./env.js"
 import { instagramLoginFromEnv, metaPagesFromEnv } from "./routes/meta-pages.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -78,13 +78,44 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
   if (!domain) continue
   productAuth[product] = createAuth({
     ...authOptions,
-    product,
+    app: appOfProduct(product),
     baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
     webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
     cookieDomain: domain,
     trustedOrigins: trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin]),
   })
 }
+// Las apps que son otro sistema (gestorIA, ADR 0201): en su dominio solo su entrada a la cuenta,
+// con su marca y el token firmado con que su servidor reconoce a quien entró. Sin su dominio no
+// existe; con él pero sin la marca de sus correos, ese dominio responde 404 y las clínicas siguen.
+const externalApps: ExternalAppEntry[] = []
+for (const app of EXTERNAL_ACCOUNT_APPS) {
+  const domain = env.externalAppDomains[app]
+  if (!domain) continue
+  const notReady = accountAppNotReady(app)
+  if (notReady) console.error(`api: ${notReady}`)
+  const trustedOrigins = trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin])
+  externalApps.push({
+    app,
+    domain,
+    trustedOrigins,
+    auth: notReady
+      ? null
+      : createAuth({
+          ...authOptions,
+          app,
+          signedTokens: true,
+          baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
+          webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
+          cookieDomain: domain,
+          trustedOrigins,
+        }),
+  })
+}
+// Lo que pasa con la cuenta, a esas apps (ADR 0201): sale al momento y el trabajador lo reintenta.
+const accountEvents = accountEventSendersFromEnv(env)
+for (const problem of accountEvents.problems) console.warn(`api: ${problem}`)
+
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }
@@ -131,6 +162,8 @@ const app = createApp({
   cookieDomain: env.COOKIE_DOMAIN,
   productDomains: env.productDomains,
   productAuth,
+  externalApps,
+  accountEventSenders: accountEvents.senders,
   webURL: env.WEB_URL,
   adminURL: env.ADMIN_URL,
   mailer,

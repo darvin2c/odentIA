@@ -3,7 +3,7 @@ import { user } from "@odentia/db/schema/auth"
 import type { MailTemplate } from "@odentia/mail"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { type AccountLifecycleOptions, runAccountLifecycleTick } from "./account-lifecycle.js"
+import { type AccountLifecycleOptions, type LifecycleApp, runAccountLifecycleTick } from "./account-lifecycle.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -13,6 +13,21 @@ const API = "https://api.odentia.test"
 const PANEL = "https://app.odentia.test"
 const DAY = 86_400_000
 
+function appOn(brand: "odentia" | "latidia", api: string, panel: string): LifecycleApp {
+  return {
+    brand,
+    onboardingUrl: `${panel}/onboarding`,
+    verificationUrl: (email) =>
+      emailVerificationUrl({
+        secret: SECRET,
+        authUrl: api,
+        email,
+        callbackURL: `${panel}/`,
+        expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
+      }),
+  }
+}
+
 function options(sent: Array<{ to: string } & MailTemplate>, now: Date): AccountLifecycleOptions {
   return {
     notify: {
@@ -20,16 +35,11 @@ function options(sent: Array<{ to: string } & MailTemplate>, now: Date): Account
         sent.push({ to, ...mail })
       },
     },
-    onboardingUrl: `${PANEL}/onboarding`,
-    // Lo mismo que arma `index.ts` con las variables de la API.
-    verificationUrl: (email) =>
-      emailVerificationUrl({
-        secret: SECRET,
-        authUrl: API,
-        email,
-        callbackURL: `${PANEL}/`,
-        expiresInSeconds: REMINDER_VERIFICATION_TTL_SECONDS,
-      }),
+    // Lo mismo que arma `index.ts` con las variables de la API: cada app en su dominio.
+    apps: {
+      odentia: appOn("odentia", API, PANEL),
+      latidia: appOn("latidia", "https://api.latidia.test", "https://app.latidia.test"),
+    },
     verificationDays: REMINDER_VERIFICATION_TTL_SECONDS / 86_400,
     now,
   }
@@ -81,4 +91,33 @@ it("a los 3 días sin verificar llega «Completa tu cuenta» con el botón, y el
   const again = await runAccountLifecycleTick(ownerDb, options(sent, now))
   expect(again.reminders).toBe(0)
   expect(sent).toHaveLength(1)
+})
+
+it("cada aviso es de la app donde se registró, y a gestorIA no le llega «crea tu clínica»", async () => {
+  // Lienzo A, tablero 12: «a un vendedor de gestorIA le llegaría eso».
+  const now = new Date()
+  const old = new Date(now.getTime() - 4 * DAY)
+  await ownerDb.insert(user).values([
+    { id: "w-rosa", name: "Rosa Paz", email: "rosa@worker.test", emailVerified: false, createdAt: old, signupApp: "latidia" },
+    { id: "w-mario", name: "Mario Quispe", email: "mario@worker.test", emailVerified: true, createdAt: old, signupApp: "latidia" },
+    { id: "w-ana", name: "Ana Soto", email: "ana@worker.test", emailVerified: true, createdAt: old },
+    { id: "w-tienda", name: "Tienda Lima", email: "tienda@worker.test", emailVerified: true, createdAt: old, signupApp: "gestoria" },
+    { id: "w-tienda-nueva", name: "Tienda Sur", email: "tienda-sur@worker.test", emailVerified: false, createdAt: old, signupApp: "gestoria" },
+  ])
+  const sent: Array<{ to: string } & MailTemplate> = []
+
+  const result = await runAccountLifecycleTick(ownerDb, options(sent, now))
+  expect(result.errors).toEqual([])
+  const to = (email: string) => sent.find((mail) => mail.to === email)
+
+  // latidIA: con su marca y su dominio, en los dos avisos.
+  expect(to("rosa@worker.test")?.subject).toBe("Completa tu cuenta de latidIA")
+  expect(to("rosa@worker.test")?.text).toMatch(/https:\/\/api\.latidia\.test\/api\/auth\/verify-email\?token=/)
+  expect(to("mario@worker.test")?.subject).toBe("Tu cuenta de latidIA está verificada: crea o acepta tu clínica")
+  expect(to("mario@worker.test")?.text).toContain("https://app.latidia.test/onboarding")
+  // Quien se registró antes de que se guardara la app sigue con odentIA.
+  expect(to("ana@worker.test")?.subject).toBe("Tu cuenta de odentIA está verificada: crea o acepta tu clínica")
+  // gestorIA: ni «crea tu clínica» ni un recordatorio con la marca de otra app.
+  expect(to("tienda@worker.test")).toBeUndefined()
+  expect(to("tienda-sur@worker.test")).toBeUndefined()
 })

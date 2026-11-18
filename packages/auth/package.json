@@ -8,6 +8,8 @@
     "./permissions": "./src/permissions.ts",
     "./admin-permissions": "./src/admin-permissions.ts",
     "./legal": "./src/legal.ts",
+    "./apps": "./src/apps.ts",
+    "./account-events": "./src/account-events.ts",
     "./data-processors": "./src/data-processors.ts"
   },
   "scripts": {
