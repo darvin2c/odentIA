@@ -17,7 +17,12 @@ describe("la cantidad total que propone el dictado", () => {
 
   // Revisión de las reglas clínicas del 18 nov: el dictado lo calculaba con la palabra de la dosis.
   it("sin la forma farmacéutica dicha, la dosis con su unidad cuenta: «1 tableta» cada 8 horas por 7 días son 21", () => {
-    const said = { dose: "1 tableta", frequency: "cada 8 horas", duration: "7 días", dosageForm: "" }
+    const said = {
+      dose: "1 tableta",
+      frequency: "cada 8 horas",
+      duration: "7 días",
+      dosageForm: "",
+    }
     expect(suggestedQuantity(said)?.quantity).toBe(21)
     expect(suggestedQuantity({ ...said, dose: "dos cápsulas" })?.quantity).toBe(42)
     // Sin unidad que se cuente, nada; con una forma que no se cuenta, tampoco.

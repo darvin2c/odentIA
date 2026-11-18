@@ -13,12 +13,16 @@ export function personalRisksOf(document: Pick<ConsentDocument, "sectionsSnapsho
 }
 
 /** La hoja de este consentimiento salió a papel con los riesgos que tiene ahora. */
-export function rememberPrintedSheet(document: Pick<ConsentDocument, "id" | "sectionsSnapshot">): void {
+export function rememberPrintedSheet(
+  document: Pick<ConsentDocument, "id" | "sectionsSnapshot">,
+): void {
   printed.set(document.id, personalRisksOf(document))
 }
 
 /** Los riesgos propios de la hoja impresa; sin impresión desde aquí, los de la hoja a la vista. */
-export function personalRisksOnPaper(document: Pick<ConsentDocument, "id" | "sectionsSnapshot">): string[] {
+export function personalRisksOnPaper(
+  document: Pick<ConsentDocument, "id" | "sectionsSnapshot">,
+): string[] {
   return printed.get(document.id) ?? personalRisksOf(document)
 }
 

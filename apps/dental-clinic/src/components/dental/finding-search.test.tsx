@@ -31,7 +31,9 @@ describe("el buscador de hallazgos de la pieza", () => {
     expect(codes("funda")).toContain("crown")
     expect(codes("funda")).not.toContain("temporary_crown")
     // A medio escribir, las dos.
-    expect(codes("cura")).toEqual(expect.arrayContaining(["definitive_restoration", "temporary_restoration"]))
+    expect(codes("cura")).toEqual(
+      expect.arrayContaining(["definitive_restoration", "temporary_restoration"]),
+    )
   })
 
   it("«pulpitis» no es un hallazgo: se busca en diagnósticos y tratamientos", () => {

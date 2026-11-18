@@ -1,12 +1,25 @@
 import { expect, it } from "vitest"
 import type { ConsentDocument } from "./clinical-forms"
-import { personalRisksOf, personalRisksOnPaper, rememberPrintedSheet, shownRisksField } from "./consent-shown"
+import {
+  personalRisksOf,
+  personalRisksOnPaper,
+  rememberPrintedSheet,
+  shownRisksField,
+} from "./consent-shown"
 
 const sheet = (id: string, personalRisks?: string[]) =>
-  ({ id, sectionsSnapshot: { purpose: "", procedure: "", benefits: [], risks: [], alternatives: [], consequences: "", personalRisks } }) as unknown as Pick<
-    ConsentDocument,
-    "id" | "sectionsSnapshot"
-  >
+  ({
+    id,
+    sectionsSnapshot: {
+      purpose: "",
+      procedure: "",
+      benefits: [],
+      risks: [],
+      alternatives: [],
+      consequences: "",
+      personalRisks,
+    },
+  }) as unknown as Pick<ConsentDocument, "id" | "sectionsSnapshot">
 
 it("la firma en papel dice los riesgos de la hoja que salió impresa, no los que se cambiaron después", () => {
   const printedA = sheet("doc-1", ["Toma apixabán: puede sangrar más."])

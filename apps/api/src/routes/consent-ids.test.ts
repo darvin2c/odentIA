@@ -41,7 +41,11 @@ it("lo que cuelga de un consentimiento con un id que no es UUID responde 404, ta
   const app = buildApp()
   const json = { "content-type": "application/json" }
   const calls: [string, string, unknown?][] = [
-    ["PUT", "/clinical-forms/consents/no-es-un-id/personal-risks", { personalRisks: "Toma apixabán." }],
+    [
+      "PUT",
+      "/clinical-forms/consents/no-es-un-id/personal-risks",
+      { personalRisks: "Toma apixabán." },
+    ],
     ["POST", "/clinical-forms/consents/no-es-un-id/sign", {}],
     ["POST", "/clinical-forms/consents/no-es-un-id/send-link", {}],
     ["POST", "/clinical-forms/consents/no-es-un-id/show-link"],

@@ -5,7 +5,12 @@
  */
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { HABITUAL_MEDICATIONS, matchHabitualMedication, medicationClassOf, normalizeDrugText } from "@odentia/clinical"
+import {
+  HABITUAL_MEDICATIONS,
+  matchHabitualMedication,
+  medicationClassOf,
+  normalizeDrugText,
+} from "@odentia/clinical"
 import { patientMedication } from "@odentia/db/schema/clinical"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
