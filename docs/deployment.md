@@ -161,16 +161,56 @@ gestorIA es otro sistema que entra con la misma cuenta (ADR 0201). Todo lo suyo 
 mientras no se configure:
 
 - `GESTORIA_DOMAIN` (API): en ese dominio solo responde su entrada a la cuenta
-  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas. Mientras
-  sus correos no tengan su marca (cambio aparte en `shared/packages/mail`), ese dominio
-  responde 404 y la API lo dice en su registro al arrancar. Con la entrada encendida,
+  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas.
   `/api/auth/token` da a quien entró un JWT de 15 minutos firmado (EdDSA) y
-  `/api/auth/jwks` publica la llave para verificarlo.
+  `/api/auth/jwks` publica la llave para verificarlo. Los correos de esa entrada (verificar,
+  entrar sin contraseña, cambiar el correo o la contraseña) salen con la marca de gestorIA y,
+  en el pie, Términos, Privacidad y Ayuda de `https://<dominio>/terminos`, `/privacidad` y
+  `/contacto`: su web tiene que tenerlas.
+- `GESTORIA_SMTP_FROM` (API): el remitente de esos correos, cuando su dominio tenga SPF y
+  DKIM; vacío, el de `SMTP_FROM` con «gestorIA».
 - `GESTORIA_ACCOUNT_EVENTS_URL` y `GESTORIA_ACCOUNT_EVENTS_SECRET` (API y worker): adónde
   (https) y con qué secreto (`whsec_` y al menos 24 bytes en base64) se avisa a gestorIA que
   se cerró una cuenta, firmado con Standard Webhooks. La API lo manda al cerrar; si falla, el
   worker lo reintenta (30 s, 1 min, 2 min… hasta una hora). Vacíos, los avisos se guardan y
-  esperan: al configurarlos sale también lo anterior.
+  esperan: al configurarlos sale también lo anterior. Con el secreto puesto, en
+  `api.<dominio de gestorIA>/api/account-apps/review` gestorIA pregunta, firmando con ese mismo
+  secreto, por las personas que ya conoce (la revisión diaria de su copia); sin el secreto esa
+  ruta no existe.
+
+### gestorIA: su servidor, su base y su app (apagado)
+
+gestorIA (`gestoria/`, ADR 0203) se despliega aparte de las clínicas y nada de lo suyo corre
+mientras no se encienda. Para encenderlo, en este orden:
+
+1. **La base.** En el contenedor `postgres` de producción, `gestoria/infra/crear-base.sh` (con
+   `POSTGRES_URL` del superusuario, `GESTORIA_OWNER_PASSWORD`, `GESTORIA_APP_PASSWORD` y
+   `CLINICS_DB=dentalagent`): crea la base `gestoria`, su dueño `gestoria` y `gestoria_app`, con
+   tope de conexiones y de tiempo por consulta, y deja que ninguno de los dos entre a la base de
+   las clínicas (a cada usuario que hoy entra a ella se le da antes su permiso). Desde ahí, un
+   usuario nuevo con login en la base de las clínicas (monitoreo, réplica) necesita su
+   `GRANT CONNECT ON DATABASE dentalagent`.
+2. **El respaldo.** En el entorno del servicio `backup` de las clínicas,
+   `GESTORIA_BACKUP_DATABASE_URL` (el superusuario sobre la base `gestoria`): cada vuelta la
+   vuelca, la restaura para comprobarla y la sube a `gestoria/` del mismo bucket. Un fallo queda
+   en el registro del servicio (`[backup] …: gestorIA: FALLO en …`); todavía no sale en Soporte.
+3. **El servidor.** Un proyecto nuevo en OpenShip con `gestoria/compose.prod.yaml` y las
+   variables de `gestoria/infra/prod/.env.example`; en GitHub, `GESTORIA_OPENSHIP_PROJECT_ID`
+   (variable) y `GESTORIA_OPENSHIP_DEPLOY_TOKEN` (secreto). Desde ahí cada cambio de
+   `gestoria/` que llega a `main` se despliega solo en ese proyecto. Su contenedor se une a la red
+   de las clínicas (`GESTORIA_CLINICS_NETWORK`) solo para llegar a PostgreSQL y al túnel.
+4. **El dominio.** `gestoria24.com` en Cloudflare: en el túnel, `api.gestoria24.com` →
+   `http://api:3001` (la cuenta) y `servidor.gestoria24.com` → `http://gestoria-api:3201`.
+   En la API y el worker de las clínicas, `GESTORIA_DOMAIN=gestoria24.com`,
+   `GESTORIA_ACCOUNT_EVENTS_URL=https://servidor.gestoria24.com/avisos/cuenta` y el mismo
+   `GESTORIA_ACCOUNT_EVENTS_SECRET` que el servidor de gestorIA; y `https://app.odentia32.com` en
+   `TRUSTED_ORIGINS` (de ahí sale `https://app.gestoria24.com`).
+5. **La app.** En GitHub, `GESTORIA_ACCOUNT_URL=https://api.gestoria24.com` y
+   `GESTORIA_API_URL=https://servidor.gestoria24.com`: desde ahí el CI publica el Worker
+   `gestoria-web`; su ruta `app.gestoria24.com/*` se pone en el panel de Cloudflare.
+
+La entrada de gestorIA a la cuenta sigue respondiendo 404 hasta que sus correos tengan su marca
+(cambio aparte en `shared/packages/mail`).
 
 ### vistIA en su dominio
 

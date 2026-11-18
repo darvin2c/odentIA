@@ -1034,8 +1034,15 @@
     {
       "idx": 147,
       "version": "7",
+      "when": 1794993588243,
+      "tag": "0147_la_cuenta_avisa_bloqueo_y_reapertura",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
       "when": 1795050000000,
-      "tag": "0147_medicinas_por_su_nombre",
+      "tag": "0148_medicinas_por_su_nombre",
       "breakpoints": true
     }
   ]

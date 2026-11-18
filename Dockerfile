@@ -35,6 +35,10 @@ COPY shared/packages/ui/package.json shared/packages/ui/
 COPY shared/packages/ui-patterns/package.json shared/packages/ui-patterns/
 COPY e2e/package.json e2e/
 COPY admin/e2e/package.json admin/e2e/
+# gestorIA no entra en esta imagen (tiene la suya, gestoria/Dockerfile), pero el lockfile la nombra.
+COPY gestoria/apps/api/package.json gestoria/apps/api/
+COPY gestoria/apps/web/package.json gestoria/apps/web/
+COPY gestoria/packages/db/package.json gestoria/packages/db/
 # Instalación filtrada: solo lo que necesitan la API y el worker para ejecutar los paquetes
 # fuente TS (las migraciones viven en @odentia/db, que los dos usan).
 RUN pnpm install --frozen-lockfile \

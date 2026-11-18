@@ -441,7 +441,7 @@ function habitualKeys(entry: HabitualMedicationEntry): string[] {
  * parte («paracetamol + codeína 500/30», «enalapril 10 mg + hidroclorotiazida»), una «/» pegada
  * al nombre y seguida de otro («ibuprofeno/paracetamol»; «500/30» y «5 mg/día» no lo son) o «y»/«e»
  * seguida de otro nombre, justo después del nombre o de su dosis («losartán y amlodipino»,
- * «losartán 50 mg e hidroclorotiazida»). La migración 0147 usa la misma regla en SQL.
+ * «losartán 50 mg e hidroclorotiazida»). La migración 0148 usa la misma regla en SQL.
  */
 const COMPOUND_REST = /\+|^\s*\/\s*\p{L}|^\s*(?:[\d.,]+\s*(?:mg|g|mcg|ug|ml|ui|%)?\s*)?\b[ye]\b\s*\p{L}/u
 

@@ -15,7 +15,7 @@ import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organ
 import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
 import { accessLink } from "./access-link.js"
-import { ACCOUNT_APP_INFO, type AccountApp, accountAppNotReady, BASE_ACCOUNT_APP } from "./apps.js"
+import { ACCOUNT_APP_INFO, type AccountApp, BASE_ACCOUNT_APP } from "./apps.js"
 import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
@@ -45,7 +45,7 @@ export interface CreateAuthOptions {
    * La app en cuyo dominio va la sesión (decisión 9 del issue 229, ADR 0201): una
    * instancia por dominio, con la misma base y el mismo secreto. Da el nombre de la app
    * (segundo factor), la marca de sus correos y la app que recuerda quien se registra en
-   * ella. Una app sin la marca de sus correos no tiene entrada (`accountAppNotReady`).
+   * ella.
    */
   app?: AccountApp
   /**
@@ -102,9 +102,7 @@ export function createAuth({
   app = BASE_ACCOUNT_APP,
   signedTokens = false,
 }: CreateAuthOptions) {
-  const { name: appName, mailBrand } = ACCOUNT_APP_INFO[app]
-  if (!mailBrand) throw new Error(accountAppNotReady(app) ?? `Falta la marca de ${appName}`)
-  const brand = mailBrand
+  const { name: appName, mailBrand: brand } = ACCOUNT_APP_INFO[app]
   return betterAuth({
     appName,
     secret,

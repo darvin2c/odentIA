@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
 import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, kairosModelNotice, platformLlmFromEnv } from "@odentia/agent"
-import { type Auth, accountAppNotReady, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
+import { type Auth, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
@@ -16,24 +16,31 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 const metaSignup = metaSignupFromEnv(env)
 // Términos, Privacidad y Ayuda del pie de cada correo.
-// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, mailBrandDomains(env.productDomains))
+// El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229), y la
+// de gestorIA en el suyo.
+configureMailLinks(env.WEB_URL, {
+  ...mailBrandDomains(env.productDomains),
+  gestoria: env.externalAppDomains.gestoria,
+})
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 // Sin la clave de Jev el agente sigue, pero lo ajeno se cobra: que se vea en el registro (ADR 0047).
 const decisionKeyProblem = decisionKeyStartProblem(env)
 if (decisionKeyProblem) console.error(`api: ${decisionKeyProblem}`)
+// El remitente de cada otra marca; la que no tiene el suyo sale con SMTP_FROM y su nombre.
+const fromByBrand = {
+  ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+  ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+  ...(env.GESTORIA_SMTP_FROM ? { gestoria: env.GESTORIA_SMTP_FROM } : {}),
+}
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
   user: env.SMTP_USER || undefined,
   pass: env.SMTP_PASS || undefined,
   from: env.SMTP_FROM,
-  fromByBrand: {
-    ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
-    ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
-  },
+  fromByBrand,
 })
 // Las conversaciones de la administración («Escribir» y las respuestas) por su propio canal de
 // ZeptoMail, con el mismo servidor y remitentes; sin él, por el de siempre.
@@ -45,10 +52,7 @@ const conversationMailer =
         user: env.CONVERSATION_SMTP_USER,
         pass: env.CONVERSATION_SMTP_PASS,
         from: env.SMTP_FROM,
-        fromByBrand: {
-          ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
-          ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
-        },
+        fromByBrand,
       })
     : undefined
 if (Boolean(env.CONVERSATION_SMTP_USER) !== Boolean(env.CONVERSATION_SMTP_PASS)) {
@@ -87,7 +91,7 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
 }
 // Las apps que son otro sistema (gestorIA, ADR 0201): en su dominio solo su entrada a la cuenta,
 // con su marca y el token firmado con que su servidor reconoce a quien entró. Sin su dominio no
-// existe; con él pero sin la marca de sus correos, ese dominio responde 404 y las clínicas siguen.
+// existe.
 const externalApps: ExternalAppEntry[] = []
 for (const app of EXTERNAL_ACCOUNT_APPS) {
   const domain = env.externalAppDomains[app]
@@ -102,24 +106,20 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
     console.error(`api: el dominio de ${app} (${domain}) es o contiene uno de las clínicas: su entrada queda apagada.`)
     continue
   }
-  const notReady = accountAppNotReady(app)
-  if (notReady) console.error(`api: ${notReady}`)
   const trustedOrigins = trustedOriginsOn(env.trustedOrigins, env.COOKIE_DOMAIN, domain, [new URL(env.ADMIN_URL).origin])
   externalApps.push({
     app,
     domain,
     trustedOrigins,
-    auth: notReady
-      ? null
-      : createAuth({
-          ...authOptions,
-          app,
-          signedTokens: true,
-          baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
-          webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
-          cookieDomain: domain,
-          trustedOrigins,
-        }),
+    auth: createAuth({
+      ...authOptions,
+      app,
+      signedTokens: true,
+      baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
+      webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
+      cookieDomain: domain,
+      trustedOrigins,
+    }),
   })
 }
 // Lo que pasa con la cuenta, a esas apps (ADR 0201): sale al momento y el trabajador lo reintenta.
