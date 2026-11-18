@@ -45,3 +45,4 @@ export function ProductLogos({ className = "" }: { className?: string }) {
     </div>
   )
 }
+// Medición del CI (PR de prueba, se cierra sin unir).
