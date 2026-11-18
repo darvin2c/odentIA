@@ -49,6 +49,7 @@ import {
   SELECT_CLASSES,
   shrinkPhoto,
   TextField,
+  useDirty,
 } from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
 
@@ -174,7 +175,7 @@ function useSaveProduct(product: ProductDetail, done: string) {
       }),
     onSuccess: async (result) => {
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
-      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success(done)
     },
   })
@@ -204,7 +205,9 @@ function DataCard({ product, canEdit }: { product: ProductDetail; canEdit: boole
       next.options = "Cada opción necesita su nombre y al menos un valor"
     setLocal(next)
     if (Object.keys(next).length > 0) return
-    save.mutate({ name, category: category || null, description, options })
+    // Las opciones van solo si se tocaron: guardar el nombre no rehace las variantes.
+    const touched = JSON.stringify(drafts) !== JSON.stringify(draftsOf(product.options))
+    save.mutate({ name, category: category || null, description, ...(touched ? { options } : {}) })
   }
   const shown = { ...errors, ...local }
 
@@ -584,7 +587,7 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
     },
     onSuccess: async () => {
       await refresh()
-      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success("Foto agregada")
     },
     onError: async (error) => {
@@ -597,7 +600,7 @@ function PhotosCard({ product, canEdit }: { product: ProductDetail; canEdit: boo
       api(`/api/tiendas/${store.id}/fotos/${photoId}`, { method: "DELETE" }),
     onSuccess: async () => {
       await refresh()
-      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success("Foto borrada")
     },
     onError: (error) => toast.error(error.message),
@@ -683,7 +686,7 @@ function VariantsCard({ product, canEdit }: { product: ProductDetail; canEdit: b
       }),
     onSuccess: async (result) => {
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
-      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success("Variante quitada. Su kardex se conserva.")
       setRemoving(null)
     },
@@ -797,13 +800,14 @@ function VariantSheet({
       }),
     onSuccess: async (result) => {
       queryClient.setQueryData(PRODUCT_KEY(store.id, product.id), result)
-      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
+      await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" })
       toast.success("Variante guardada")
       onClose()
     },
   })
   const shown = { ...fieldErrors(save.error), ...local }
   const photoSelect = useId()
+  const dirty = useDirty({ sku, price, photoId })
   function submit() {
     const priceCents = price.trim() ? readMoney(price, store.currency) : null
     const next: Record<string, string> = {}
@@ -820,6 +824,7 @@ function VariantSheet({
       open
       title={variantName(variant)}
       description={product.name}
+      dirty={dirty}
       onClose={onClose}
       onSubmit={submit}
       footer={
@@ -911,7 +916,7 @@ function KardexSheet({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: key }),
         queryClient.invalidateQueries({ queryKey: PRODUCT_KEY(store.id, product.id) }),
-        queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) }),
+        queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id), refetchType: "none" }),
       ])
       toast.success(kind === "entrada" ? "Entrada anotada" : "Ajuste anotado")
       setQuantity("")
@@ -956,6 +961,7 @@ function KardexSheet({
     <FormSheet
       open
       title={`Kardex · ${variantName(variant)}`}
+      dirty={Boolean(quantity.trim() || cost.trim() || reason.trim())}
       description={`${product.name} · ${variant.sku} · quedan ${stock}`}
       onClose={onClose}
       onSubmit={canEdit ? submit : onClose}

@@ -168,23 +168,38 @@ export const MOVEMENT_NAMES: Record<Movement["kind"], string> = {
   ajuste: "Ajuste",
 }
 
+/** Los formatos de cada moneda se arman una vez: una lista larga los pide fila a fila. */
+const digitsOf = new Map<string, number>()
+const formats = new Map<string, Intl.NumberFormat>()
+
 /** Cuántos decimales tiene la moneda (ISO 4217): dos en PEN, cero en CLP. */
 export function fractionDigits(currency: string): number {
-  return (
-    new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
-      .maximumFractionDigits ?? 2
-  )
+  let digits = digitsOf.get(currency)
+  if (digits === undefined) {
+    digits =
+      new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
+        .maximumFractionDigits ?? 2
+    digitsOf.set(currency, digits)
+  }
+  return digits
 }
 
 /** «S/ 129» o «S/ 129.90»: sin decimales cuando no los tiene. */
 export function money(cents: number, currency: string): string {
   const digits = fractionDigits(currency)
-  return new Intl.NumberFormat("es-PE", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: cents % 10 ** digits === 0 ? 0 : digits,
-    maximumFractionDigits: digits,
-  }).format(cents / 10 ** digits)
+  const shown = cents % 10 ** digits === 0 ? 0 : digits
+  const key = `${currency}:${shown}`
+  let format = formats.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat("es-PE", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: shown,
+      maximumFractionDigits: shown,
+    })
+    formats.set(key, format)
+  }
+  return format.format(cents / 10 ** digits)
 }
 
 /** El precio como lo dirá Sofi: el exacto, o «desde» si las variantes cuestan distinto. */
@@ -219,7 +234,8 @@ export function currencySymbol(currency: string): string {
 
 /** «35 a 42» si son números seguidos; si no, separados por comas. */
 export function valuesSummary(values: string[]): string {
-  const numbers = values.map(Number)
+  // Solo números de hasta tres cifras y sin ceros delante, los que «35 a 42» vuelve a armar igual.
+  const numbers = values.map((v) => (/^(0|[1-9]\d{0,2})$/.test(v) ? Number(v) : Number.NaN))
   const consecutive =
     values.length > 2 &&
     numbers.every((n, i) => Number.isInteger(n) && (i === 0 || n === numbers[i - 1]! + 1))

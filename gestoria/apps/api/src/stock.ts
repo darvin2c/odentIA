@@ -2,7 +2,7 @@ import { accountCopy, type Db, productVariant, stockMovement } from "@gestoria/d
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
-import { inStore, StoreError } from "./tiendas.js"
+import { constraintError, inStore, StoreError } from "./tiendas.js"
 
 /**
  * El stock de cada variante y su kardex (decisión 3 del lienzo B). El saldo no se escribe: cada
@@ -32,32 +32,20 @@ export const movementInput = z.discriminatedUnion("kind", [
   }),
 ])
 
-function isStockError(error: unknown): boolean {
-  const e = error as {
-    code?: string
-    constraint_name?: string
-    cause?: { code?: string; constraint_name?: string }
-  }
-  const code = e.code ?? e.cause?.code
-  const constraint = e.constraint_name ?? e.cause?.constraint_name
-  return code === "23514" && constraint === "product_variant_stock_check"
-}
-
-/** Corre `fn` y convierte «no alcanza el stock» en un error que se entiende. */
+/** Corre `fn` y convierte lo que rechaza la base (no alcanza, variante quitada) en un error que se entiende. */
 async function stockGuard<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } catch (error) {
-    if (isStockError(error))
-      throw new StoreError(409, "NOT_ENOUGH_STOCK", "No alcanza el stock para ese movimiento")
-    throw error
+    throw constraintError(error) ?? error
   }
 }
 
-async function variantIn(tx: Db, storeId: string, variantId: string) {
+/** La variante de la tienda; con `lock`, tomada hasta terminar (para mover su stock). */
+async function variantIn(tx: Db, storeId: string, variantId: string, lock = false) {
   if (!z.uuid().safeParse(variantId).success)
     throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
-  const [row] = await tx
+  const query = tx
     .select({
       id: productVariant.id,
       stock: productVariant.stock,
@@ -65,7 +53,7 @@ async function variantIn(tx: Db, storeId: string, variantId: string) {
     })
     .from(productVariant)
     .where(and(eq(productVariant.id, variantId), eq(productVariant.storeId, storeId)))
-    .for("update")
+  const [row] = await (lock ? query.for("update") : query)
   if (!row) throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
   return row
 }
@@ -79,7 +67,7 @@ export async function addMovement(
   input: z.infer<typeof movementInput>,
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const variant = await variantIn(tx, storeId, variantId)
+    const variant = await variantIn(tx, storeId, variantId, true)
     if (variant.removedAt)
       throw new StoreError(409, "VARIANT_REMOVED", "Esa variante ya no se vende")
     const values =
@@ -221,17 +209,15 @@ export async function cancelSale(tx: Db, storeId: string, actorUserId: string, r
  * esas, la más cara. Así el aviso del mínimo no se queda corto cuando una variante costó más
  * (la blanca a 68 y la negra a 55: avisa con 68).
  */
-export async function lastEntryCost(tx: Db, variantIds: string[]): Promise<number | null> {
-  if (variantIds.length === 0) return null
+export async function lastEntryCost(tx: Db, productId: string): Promise<number | null> {
+  // También las variantes quitadas: su costo sigue siendo lo que costó el producto.
   const rows = await tx
-    .selectDistinctOn([stockMovement.variantId], {
-      variantId: stockMovement.variantId,
-      cost: stockMovement.unitCostCents,
-    })
+    .selectDistinctOn([stockMovement.variantId], { cost: stockMovement.unitCostCents })
     .from(stockMovement)
+    .innerJoin(productVariant, eq(productVariant.id, stockMovement.variantId))
     .where(
       and(
-        inArray(stockMovement.variantId, variantIds),
+        eq(productVariant.productId, productId),
         eq(stockMovement.kind, "entrada"),
         isNotNull(stockMovement.unitCostCents),
       ),

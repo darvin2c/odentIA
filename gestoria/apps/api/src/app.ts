@@ -1,4 +1,4 @@
-import type { Db } from "@gestoria/db"
+import { type Db, MAX_PHOTO_BYTES } from "@gestoria/db"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { cors } from "hono/cors"
@@ -47,7 +47,9 @@ import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
   changeRole,
+  constraintError,
   createStore,
+  inStore,
   invitationInput,
   inviteToStore,
   myStores,
@@ -75,7 +77,6 @@ type Env = { Variables: { person: Person } }
 /** Lo más que pesa un aviso de la cuenta o un pedido de la app. */
 const MAX_BODY_BYTES = 64 * 1024
 /** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
-const MAX_PHOTO_UPLOAD_BYTES = 1_500_000
 const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 
@@ -136,6 +137,8 @@ export function createApp(deps: AppDeps) {
         400,
       )
     }
+    const known = constraintError(error)
+    if (known) return c.json(errorBody(c, known.code, known.message, known.fields), known.status)
     // Dos pedidos iguales a la vez (invitar dos veces, aceptar dos veces): uno gana.
     const cause = (error as { cause?: { code?: string } }).cause
     if ((error as { code?: string }).code === "23505" || cause?.code === "23505")
@@ -154,7 +157,7 @@ export function createApp(deps: AppDeps) {
       onError: (c) => c.json(errorBody(c, "PAYLOAD_TOO_LARGE", message), 413),
     })
   const small = limit(MAX_BODY_BYTES, "Pedido demasiado grande")
-  const photo = limit(MAX_PHOTO_UPLOAD_BYTES, "La foto pesa demasiado. Prueba con otra más chica.")
+  const photo = limit(MAX_PHOTO_BYTES, "La foto pesa demasiado. Prueba con otra más chica.")
   const sheet = limit(MAX_SHEET_BYTES, "La hoja es muy grande: divídela en partes")
   app.use("*", (c, next) => {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
@@ -284,7 +287,7 @@ export function createApp(deps: AppDeps) {
   )
   app.get("/api/tiendas/:id/catalogo/hoja-de-ejemplo", async (c) => {
     // Se pide desde la tienda, como todo lo de /api; la hoja no lleva datos de nadie.
-    await catalog(deps.appDb, c.get("person"), c.req.param("id"))
+    await inStore(deps.appDb, c.get("person"), c.req.param("id"), "catalogo.ver", async () => {})
     return c.body(exampleSheet(), 200, {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": 'attachment; filename="catalogo-ejemplo.csv"',

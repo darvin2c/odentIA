@@ -13,9 +13,10 @@ import {
   SheetTitle,
 } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
+import { ConfirmDialog } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { ImageOff } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { ApiError, api } from "./lib/api"
 import { currencySymbol } from "./lib/tienda"
 
@@ -131,6 +132,7 @@ export function FormSheet({
   onClose,
   onSubmit,
   footer,
+  dirty = false,
   children,
 }: {
   open: boolean
@@ -140,29 +142,49 @@ export function FormSheet({
   onSubmit: () => void
   footer: ReactNode
   children: ReactNode
+  /** Hay algo escrito sin guardar: cerrar con × o Escape pregunta antes. */
+  dirty?: boolean
 }) {
+  const [asking, setAsking] = useState(false)
   return (
-    <Sheet open={open} onOpenChange={(next) => (next ? null : onClose())}>
-      <SheetContent className="w-full sm:max-w-md">
-        <form
-          noValidate
-          className="flex min-h-0 flex-1 flex-col"
-          onSubmit={(event: FormEvent) => {
-            event.preventDefault()
-            onSubmit()
-          }}
-        >
-          <SheetHeader className="pr-14">
-            <SheetTitle>{title}</SheetTitle>
-            {description ? <SheetDescription>{description}</SheetDescription> : null}
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">{children}</div>
-          <SheetFooter className="flex-row flex-wrap justify-end border-t py-4">
-            {footer}
-          </SheetFooter>
-        </form>
-      </SheetContent>
-    </Sheet>
+    <>
+      <ConfirmDialog
+        open={asking}
+        title="¿Salir sin guardar?"
+        description="Lo que escribiste en este formulario se pierde."
+        confirmLabel="Salir sin guardar"
+        cancelLabel="Seguir aquí"
+        onConfirm={() => {
+          setAsking(false)
+          onClose()
+        }}
+        onClose={() => setAsking(false)}
+      />
+      <Sheet
+        open={open}
+        onOpenChange={(next) => (next ? null : dirty ? setAsking(true) : onClose())}
+      >
+        <SheetContent className="w-full sm:max-w-md">
+          <form
+            noValidate
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault()
+              onSubmit()
+            }}
+          >
+            <SheetHeader className="pr-14">
+              <SheetTitle>{title}</SheetTitle>
+              {description ? <SheetDescription>{description}</SheetDescription> : null}
+            </SheetHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">{children}</div>
+            <SheetFooter className="flex-row flex-wrap justify-end border-t py-4">
+              {footer}
+            </SheetFooter>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }
 
@@ -178,10 +200,25 @@ export function Photo({
   alt: string
   className?: string
 }) {
+  // Se pide al acercarse a la vista: un catálogo largo no baja todas sus fotos de una vez.
+  const [seen, setSeen] = useState(false)
+  const holder = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const node = holder.current
+    if (!node || seen) return
+    const watch = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setSeen(true)
+      },
+      { rootMargin: "200px" },
+    )
+    watch.observe(node)
+    return () => watch.disconnect()
+  }, [seen])
   const blob = useQuery({
     queryKey: ["foto", storeId, photoId],
     queryFn: () => api<Blob>(`/api/tiendas/${storeId}/fotos/${photoId}`, { as: "blob" }),
-    enabled: Boolean(photoId),
+    enabled: Boolean(photoId) && seen,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 10 * 60_000,
   })
@@ -203,7 +240,7 @@ export function Photo({
   return url ? (
     <img src={url} alt={alt} className={cn(box, "object-cover")} />
   ) : (
-    <span className={box} />
+    <span ref={holder} className={box} />
   )
 }
 
@@ -256,4 +293,10 @@ export function SwitchField({
       <label htmlFor={id}>{label}</label>
     </div>
   )
+}
+
+/** Si lo del formulario cambió desde que se abrió (para preguntar antes de cerrarlo). */
+export function useDirty(values: unknown): boolean {
+  const [initial] = useState(() => JSON.stringify(values))
+  return JSON.stringify(values) !== initial
 }

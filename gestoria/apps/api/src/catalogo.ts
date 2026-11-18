@@ -45,7 +45,7 @@ const label = (what: string, max: number) =>
 const optionInput = z.object({
   name: label("el nombre de la opción (Talla, Color)", 30),
   values: z
-    .array(label("cada valor", 30))
+    .array(label("cada valor", 30).regex(/^[^,]*$/, "Un valor no lleva comas"))
     .min(1, "Escribe al menos un valor")
     .max(40, "Hasta 40 valores por opción"),
 })
@@ -222,30 +222,6 @@ async function takenSkus(tx: Db, storeId: string): Promise<Set<string>> {
   return new Set(rows.map((row) => row.sku.toLowerCase()))
 }
 
-function nameTaken(error: unknown): boolean {
-  const e = error as {
-    code?: string
-    constraint_name?: string
-    cause?: { code?: string; constraint_name?: string }
-  }
-  return (
-    (e.code ?? e.cause?.code) === "23505" &&
-    (e.constraint_name ?? e.cause?.constraint_name) === "product_store_name_uidx"
-  )
-}
-
-async function uniqueName<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (error) {
-    if (nameTaken(error))
-      throw new StoreError(409, "NAME_TAKEN", "Ya hay un producto con ese nombre", {
-        name: "Ya hay un producto con ese nombre",
-      })
-    throw error
-  }
-}
-
 /** La lista del catálogo: cada producto con su rango de precio, sus variantes y lo que queda. */
 export async function catalog(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "catalogo.ver", async (tx) => {
@@ -278,9 +254,13 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
       .from(productPhoto)
       .where(eq(productPhoto.storeId, storeId))
       .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
+    const byProduct = Map.groupBy(variants, (v) => v.productId)
+    const firstPhoto = new Map<string, string>()
+    for (const photo of photos)
+      if (!firstPhoto.has(photo.productId)) firstPhoto.set(photo.productId, photo.id)
     return {
       products: products.map((p) => {
-        const own = variants.filter((v) => v.productId === p.id)
+        const own = byProduct.get(p.id) ?? []
         const prices = own.map((v) => v.priceCents ?? p.listPriceCents)
         return {
           ...p,
@@ -288,7 +268,7 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
           stock: own.reduce((sum, v) => sum + v.stock, 0),
           fromCents: prices.length ? Math.min(...prices) : p.listPriceCents,
           toCents: prices.length ? Math.max(...prices) : p.listPriceCents,
-          photoId: photos.find((photo) => photo.productId === p.id)?.id ?? null,
+          photoId: firstPhoto.get(p.id) ?? null,
         }
       }),
     }
@@ -353,13 +333,7 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
         .from(product)
         .where(inArray(product.id, otherIds))
     : []
-  const allVariantIds = (
-    await tx
-      .select({ id: productVariant.id })
-      .from(productVariant)
-      .where(eq(productVariant.productId, productId))
-  ).map((v) => v.id)
-  const lastCostCents = await lastEntryCost(tx, allVariantIds)
+  const lastCostCents = await lastEntryCost(tx, productId)
   const prices = variants.map((v) => v.priceCents ?? row.listPriceCents)
   return {
     id: row.id,
@@ -443,7 +417,7 @@ export async function createProduct(
       .where(eq(product.storeId, storeId))) as [{ value: number }]
     if (value >= MAX_PRODUCTS)
       throw new StoreError(409, "TOO_MANY", `Hasta ${MAX_PRODUCTS} productos por tienda`)
-    const created = await uniqueName(() => createProductIn(tx, person, storeId, input))
+    const created = await createProductIn(tx, person, storeId, input)
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
@@ -478,6 +452,8 @@ async function applyOptions(
     })
     .from(productVariant)
     .where(and(eq(productVariant.productId, current.id), isNull(productVariant.removedAt)))
+    // Se toman las filas: una entrada a la vez no deja quitada una variante con stock.
+    .for("update")
   const wanted = combinations(next)
   const reshaped = current.options.length !== next.length
   const gone = active.filter(
@@ -508,7 +484,13 @@ async function applyOptions(
         ),
       )
   const kept = active.filter((v) => !gone.includes(v))
-  const fresh = wanted.filter((combo) => !kept.some((v) => sameCombo(combo, v.optionValues)))
+  // Solo se crean las combinaciones de un valor nuevo: lo que se quitó a mano no vuelve.
+  const isNew = (combo: string[]) =>
+    reshaped ||
+    combo.some((value, i) => !current.options[i]?.values.some((old) => sameText(old, value)))
+  const fresh = wanted.filter(
+    (combo) => isNew(combo) && !kept.some((v) => sameCombo(combo, v.optionValues)),
+  )
   if (fresh.length > 0) {
     const skus = await takenSkus(tx, storeId)
     await tx.insert(productVariant).values(
@@ -553,7 +535,7 @@ export async function updateProduct(
       minPriceCents,
       updatedAt: new Date(),
     }
-    await uniqueName(() => tx.update(product).set(changes).where(eq(product.id, productId)))
+    await tx.update(product).set(changes).where(eq(product.id, productId))
     if (patch.quantityPrices) {
       for (const tier of patch.quantityPrices)
         if (tier.unitPriceCents >= listPriceCents)
@@ -666,6 +648,7 @@ async function variantRow(tx: Db, storeId: string, variantId: string) {
         isNull(productVariant.removedAt),
       ),
     )
+    .for("update")
   if (!row) throw new StoreError(404, "NOT_FOUND", "Esa variante ya no está")
   return row
 }
@@ -689,13 +672,7 @@ export async function updateVariant(
         )
       if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está en el producto")
     }
-    if (patch.sku && patch.sku.toLowerCase() !== variant.sku.toLowerCase()) {
-      const taken = await takenSkus(tx, storeId)
-      if (taken.has(patch.sku.toLowerCase()))
-        throw new StoreError(409, "SKU_TAKEN", "Ese código ya es de otra variante", {
-          sku: "Ese código ya es de otra variante",
-        })
-    }
+    // Un código repetido lo rechaza el índice único de la base (`SKU_TAKEN`).
     await tx
       .update(productVariant)
       .set({ ...patch, updatedAt: new Date() })
@@ -725,6 +702,22 @@ export async function removeVariant(appDb: Db, person: Person, storeId: string, 
       .update(productVariant)
       .set({ removedAt: now, updatedAt: now })
       .where(eq(productVariant.id, variantId))
+    // Un valor que ya no usa ninguna variante sale de las opciones del producto.
+    const rest = await tx
+      .select({ optionValues: productVariant.optionValues })
+      .from(productVariant)
+      .where(and(eq(productVariant.productId, variant.productId), isNull(productVariant.removedAt)))
+    const current = await productRow(tx, storeId, variant.productId)
+    const options = current.options.map((option, i) => ({
+      name: option.name,
+      values: option.values.filter((value) =>
+        rest.some((v) => v.optionValues[i] !== undefined && sameText(v.optionValues[i]!, value)),
+      ),
+    }))
+    await tx
+      .update(product)
+      .set({ options, updatedAt: now })
+      .where(eq(product.id, variant.productId))
     return detailIn(tx, storeId, variant.productId)
   })
 }

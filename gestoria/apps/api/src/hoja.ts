@@ -8,7 +8,7 @@ import {
   storeEvent,
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
-import { MAX_PRODUCTS, makeSku } from "./catalogo.js"
+import { MAX_PRODUCTS, makeSku, productInput } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { parseMoney } from "./dinero.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -21,6 +21,9 @@ import { inStore, StoreError } from "./tiendas.js"
  * productos nuevos: lo que ya está en el catálogo se cambia en su página. Las fotos se agregan
  * después en cada producto. El stock de cada fila entra al kardex como una entrada.
  */
+
+/** El tope de un importe, el mismo que piden los formularios. */
+const MAX_AMOUNT = 100_000_000
 
 /** Lo más que se lee de una vez. */
 export const MAX_SHEET_BYTES = 1_000_000
@@ -202,6 +205,18 @@ export function planSheet(
   skus: Set<string>,
 ): SheetPlan {
   const errors: SheetError[] = []
+  // Excel guarda «CSV (delimitado por comas)» sin UTF-8: las tildes llegan rotas.
+  if (text.includes("\uFFFD"))
+    return {
+      products: [],
+      errors: [
+        {
+          row: 0,
+          message:
+            "La hoja no está en UTF-8 y se perderían las tildes. En Excel: Archivo › Guardar como › CSV UTF-8.",
+        },
+      ],
+    }
   const rows = parseCsv(text)
   if (rows.length < 2)
     return {
@@ -233,6 +248,8 @@ export function planSheet(
   // Los nombres del catálogo, una vez: compararlos fila por fila tardaba segundos con 2000.
   const taken = new Set([...existing].map(fold))
   const byName = new Map<string, PlannedProduct>()
+  // Las combinaciones ya leídas de cada producto, para ver una repetida sin recorrerlas.
+  const seen = new Map<string, Set<string>>()
   const sheetSkus = new Set<string>()
   // Cada fila, con su número en la hoja (la cabecera es la 1).
   const readRow = (r: string[], row: number): boolean => {
@@ -252,18 +269,21 @@ export function planSheet(
       const value = cell(r, `valor${n}`)
       if (!option && !value) continue
       if (!option || !value) return fail(`La opción ${n} necesita su nombre y su valor`)
+      if (value.includes(",")) return fail("Un valor de opción no lleva comas")
       if (option.length > 30 || value.length > 30)
         return fail("Una opción o un valor tiene más de 30 caracteres")
       options.push({ name: option, values: [value] })
       values.push(value)
     }
     const priceCents = parseMoney(cell(r, "precio"), currency)
-    if (!priceCents) return fail("Escribe el precio con números, como 129 o 129.90")
+    if (!priceCents || priceCents > MAX_AMOUNT)
+      return fail("Escribe el precio con números, como 129 o 129.90")
     const stockText = cell(r, "stock")
     if (!/^\d{1,6}$/.test(stockText)) return fail("Escribe el stock como un número entero, 0 o más")
     const costText = cell(r, "costo")
     const costCents = costText ? parseMoney(costText, currency) : null
-    if (costText && costCents === null) return fail("Escribe el costo con números, como 68 o 68.50")
+    if (costText && (costCents === null || costCents > MAX_AMOUNT))
+      return fail("Escribe el costo con números, como 68 o 68.50")
     const sku = cell(r, "codigo") || null
     if (sku) {
       if (!/^[A-Za-z0-9._/-]{1,40}$/.test(sku))
@@ -292,8 +312,10 @@ export function planSheet(
       return fail(
         `Las opciones no son las mismas que en las otras filas de «${planned.name}» (${planned.options.map((o) => o.name).join(", ") || "sin opciones"})`,
       )
-    if (planned.variants.some((v) => v.values.every((value, n) => sameText(value, values[n]!))))
-      return fail(`Esa combinación de «${planned.name}» ya está en otra fila`)
+    const combos = seen.get(key) ?? new Set<string>()
+    seen.set(key, combos)
+    const combo = JSON.stringify(values.map(fold))
+    if (combos.has(combo)) return fail(`Esa combinación de «${planned.name}» ya está en otra fila`)
     if (planned.options.length === 0 && planned.variants.length > 0)
       return fail(`«${planned.name}» no tiene opciones: va en una sola fila`)
     if (planned.variants.length >= 200) return fail(`«${planned.name}» tiene más de 200 variantes`)
@@ -301,10 +323,27 @@ export function planSheet(
       if (!o.values.some((v) => sameText(v, values[n]!))) o.values.push(values[n]!)
     })
     if (!planned.description) planned.description = cell(r, "descripcion").slice(0, 2000)
+    combos.add(combo)
     planned.variants.push({ row, values, sku, priceCents, stock: Number(stockText), costCents })
     return true
   }
   for (const [i, r] of rows.slice(1).entries()) readRow(r, i + 2)
+  // Cada producto cumple las mismas reglas que al crearlo a mano; el error va en su primera fila.
+  for (const planned of byName.values()) {
+    const checked = productInput.safeParse({
+      name: planned.name,
+      category: planned.category,
+      description: planned.description,
+      listPriceCents: planned.listPriceCents,
+      options: planned.options,
+    })
+    if (!checked.success)
+      errors.push({
+        row: planned.variants[0]?.row ?? 0,
+        message: `«${planned.name}»: ${checked.error.issues[0]?.message ?? "revisa sus datos"}`,
+      })
+  }
+  errors.sort((a, b) => a.row - b.row)
   if (existing.size + byName.size > MAX_PRODUCTS)
     errors.push({ row: 0, message: `Tu catálogo pasaría de ${MAX_PRODUCTS} productos` })
   return { products: [...byName.values()], errors }
@@ -337,8 +376,6 @@ export async function uploadSheet(
   text: string,
   confirm: boolean,
 ) {
-  if (text.length > MAX_SHEET_BYTES)
-    throw new StoreError(400, "SHEET_TOO_LARGE", "La hoja es muy grande: divídela en partes")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const [{ currency }] = (await tx
       .select({ currency: store.currency })
@@ -363,41 +400,53 @@ export async function uploadSheet(
     // Los códigos que trae la hoja quedan tomados antes de armar los que faltan.
     for (const p of plan.products)
       for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
-    for (const p of plan.products) {
-      const [row] = await tx
-        .insert(product)
-        .values({
+    // De a tantas filas por consulta: tres consultas por bloque, no tres por fila.
+    const created = await tx
+      .insert(product)
+      .values(
+        plan.products.map((p) => ({
           storeId,
           name: p.name,
           category: p.category,
           description: p.description,
           listPriceCents: p.listPriceCents,
           options: p.options,
-        })
-        .returning({ id: product.id })
-      for (const v of p.variants) {
-        const sku = v.sku ?? makeSku(p.name, v.values, skus)
-        const [variant] = await tx
-          .insert(productVariant)
-          .values({
-            storeId,
-            productId: row!.id,
-            optionValues: v.values,
-            sku,
-            priceCents: v.priceCents === p.listPriceCents ? null : v.priceCents,
-          })
-          .returning({ id: productVariant.id })
-        if (v.stock > 0)
-          await tx.insert(stockMovement).values({
-            storeId,
-            variantId: variant!.id,
-            kind: "entrada",
-            quantity: v.stock,
-            unitCostCents: v.costCents,
-            reason: "Hoja subida",
-            actorUserId: person.userId,
-          })
-      }
+        })),
+      )
+      .returning({ id: product.id, name: product.name })
+    const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
+    const rows = plan.products.flatMap((p) =>
+      p.variants.map((v) => ({
+        planned: v,
+        values: {
+          storeId,
+          productId: idOf.get(fold(p.name))!,
+          optionValues: v.values,
+          sku: v.sku ?? makeSku(p.name, v.values, skus),
+          priceCents: v.priceCents === p.listPriceCents ? null : v.priceCents,
+        },
+      })),
+    )
+    for (let at = 0; at < rows.length; at += 500) {
+      const chunk = rows.slice(at, at + 500)
+      const variants = await tx
+        .insert(productVariant)
+        .values(chunk.map((row) => row.values))
+        .returning({ id: productVariant.id, sku: productVariant.sku })
+      const variantOf = new Map(variants.map((v) => [v.sku.toLowerCase(), v.id]))
+      const entries = chunk
+        .filter((row) => row.planned.stock > 0)
+        .map((row) => ({
+          storeId,
+          variantId: variantOf.get(row.values.sku.toLowerCase())!,
+          kind: "entrada" as const,
+          quantity: row.planned.stock,
+          unitCostCents: row.planned.costCents,
+          reason: "Hoja subida",
+          actorUserId: person.userId,
+        }))
+      // El disparador pone el saldo fila por fila, en este orden.
+      if (entries.length > 0) await tx.insert(stockMovement).values(entries)
     }
     await tx.insert(storeEvent).values({
       storeId,

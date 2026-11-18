@@ -41,6 +41,7 @@ import {
   SELECT_CLASSES,
   SwitchField,
   TextField,
+  useDirty,
 } from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
 
@@ -419,6 +420,7 @@ function PaymentForm({
     },
     onError: (error) => setErrors(fieldErrors(error)),
   })
+  const dirty = useDirty({ name, typeCode, collection, details, isActive })
   const cash = typeCode === "10"
   const detailsId = useId()
 
@@ -432,6 +434,7 @@ function PaymentForm({
     <FormSheet
       open
       title={method ? method.name : "Nuevo medio de pago"}
+      dirty={dirty}
       description="Así se agrega cualquier medio, aunque no se parezca a los de la lista."
       onClose={onClose}
       onSubmit={submit}
@@ -578,6 +581,19 @@ function DeliveryForm({
   const [isActive, setIsActive] = useState(method?.isActive ?? true)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const negotiable = cost === "fijo" || cost === "por_zona"
+  const dirty = useDirty({
+    name,
+    type,
+    details,
+    cost,
+    price,
+    zones,
+    eta,
+    payOnDelivery,
+    maxDiscount,
+    freeFrom,
+    isActive,
+  })
   const payId = useId()
 
   const save = useMutation({
@@ -633,6 +649,7 @@ function DeliveryForm({
     <FormSheet
       open
       title={method ? method.name : "Nueva forma de entrega"}
+      dirty={dirty}
       description="Así se agrega cualquier forma, aunque no se parezca a las de la lista."
       onClose={onClose}
       onSubmit={submit}

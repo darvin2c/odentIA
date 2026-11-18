@@ -147,6 +147,21 @@ describe("medios de pago (tablero 6)", () => {
     ).toBe(403)
   })
 
+  it("un cambio con un dato inválido no se guarda a medias y dice qué campo", async () => {
+    const list = await call("rosa", "GET", `${base}/pagos-y-entregas`)
+    const yape = list.json.payments.find((m: { name: string }) => m.name === "Yape")
+    const bad = await call("rosa", "PATCH", `${base}/medios-de-pago/${yape.id}`, {
+      name: "",
+      typeCode: "68",
+      collection: "comprobante",
+      isActive: false,
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.json.error.fields).toHaveProperty("name")
+    const still = await call("rosa", "GET", `${base}/pagos-y-entregas`)
+    expect(still.json.payments.find((m: { id: string }) => m.id === yape.id).isActive).toBe(true)
+  })
+
   it("el efectivo se cobra al recibir; apagar un medio guarda solo eso", async () => {
     const cash = await call("rosa", "POST", `${base}/medios-de-pago`, {
       name: "Efectivo",
@@ -435,6 +450,32 @@ describe("el stock y su kardex (decisión 3)", () => {
     const negra40 = variantOf(changed.json.product, "negra", "40")
     const removed = await call("rosa", "DELETE", `${base}/variantes/${negra40}`)
     expect(removed.json.product.variants).toHaveLength(3)
+    // Guardar las mismas opciones no la trae de vuelta: solo un valor nuevo crea combinaciones.
+    const again = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
+      options: removed.json.product.options,
+    })
+    expect(again.json.product.variants).toHaveLength(3)
+    // Vender una variante quitada se rechaza con un error que se entiende.
+    await expect(
+      withPerson(
+        db.appDb,
+        { userId: "u-rosa", email: "rosa@calzados.test", storeId },
+        async (tx) => {
+          await enterStore(tx, storeId)
+          await recordSale(tx, storeId, "u-rosa", "0999", [{ variantId: negra40, quantity: 1 }])
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VARIANT_REMOVED" })
+  })
+
+  it("quitar la última variante de un valor lo saca de las opciones", async () => {
+    const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
+    const blanca40 = variantOf(detail, "blanca", "40")
+    const after = await call("rosa", "DELETE", `${base}/variantes/${blanca40}`)
+    expect(after.json.product.options).toEqual([
+      { name: "Color", values: ["blanca", "negra"] },
+      { name: "Talla", values: ["38"] },
+    ])
   })
 })
 
@@ -649,6 +690,13 @@ describe("subir una hoja (decisión 10)", () => {
     ])
     // La misma hoja otra vez no duplica: los productos ya están.
     expect((await sheet("mario", text, true)).json.saved).toBe(false)
+  })
+
+  it("una hoja sin UTF-8 o con un precio fuera de rango se rechaza antes de guardar", async () => {
+    const latin = await sheet("rosa", csv(["Zapatilla ni�o;;;;;;;89;1;"]), true)
+    expect(latin.json.errors[0].message).toContain("UTF-8")
+    const huge = await sheet("rosa", csv(["Carísimo;;;;;;;30000000;1;"]), true)
+    expect(huge.json).toMatchObject({ saved: false, errors: [{ row: 2 }] })
   })
 
   it("la hoja de ejemplo trae las columnas que se leen", async () => {

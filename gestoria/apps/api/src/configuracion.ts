@@ -29,6 +29,23 @@ const COLLECTION_RANK: Record<(typeof PAYMENT_COLLECTIONS)[number], number> = {
   al_recibir: 2,
 }
 
+/**
+ * Un cambio es encender o apagar (solo `isActive`) o el medio entero. Se elige por lo que trae,
+ * no probando uno y otro: así un dato inválido vuelve con su campo y nunca se guarda a medias.
+ */
+function patchOf<T>(full: z.ZodType<T>) {
+  const toggle = z.object({ isActive: z.boolean() }).strict()
+  return z.unknown().transform((raw, ctx): T | { isActive: boolean } => {
+    const onlyToggle =
+      typeof raw === "object" && raw !== null && Object.keys(raw).join() === "isActive"
+    const result = (onlyToggle ? toggle : full).safeParse(raw)
+    if (result.success) return result.data
+    for (const issue of result.error.issues)
+      ctx.addIssue({ code: "custom", message: issue.message, path: issue.path })
+    return z.NEVER
+  })
+}
+
 const cents = z.number().int("Escribe un monto válido").min(0).max(100_000_000)
 const positive = z
   .number()
@@ -49,7 +66,7 @@ export const paymentInput = z
     path: ["collection"],
   })
 
-export const paymentPatch = paymentInput.or(z.object({ isActive: z.boolean() }))
+export const paymentPatch = patchOf(paymentInput)
 
 const zone = z.object({
   name: z.string().trim().min(1, "Escribe el nombre de la zona").max(60),
@@ -91,7 +108,7 @@ export const deliveryInput = z
     freeFromCents: d.cost === "fijo" || d.cost === "por_zona" ? d.freeFromCents : null,
   }))
 
-export const deliveryPatch = deliveryInput.or(z.object({ isActive: z.boolean() }))
+export const deliveryPatch = patchOf(deliveryInput)
 
 const uuid = z.uuid()
 function idOf(id: string, what: string): string {

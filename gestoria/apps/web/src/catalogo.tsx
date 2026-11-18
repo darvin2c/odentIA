@@ -26,7 +26,16 @@ import {
   readMoney,
   valuesSummary,
 } from "./lib/tienda"
-import { download, FormAlert, FormSheet, fieldErrors, MoneyField, Photo, TextField } from "./piezas"
+import {
+  download,
+  FormAlert,
+  FormSheet,
+  fieldErrors,
+  MoneyField,
+  Photo,
+  TextField,
+  useDirty,
+} from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
 
 /**
@@ -286,6 +295,7 @@ function NewProduct({ onClose }: { onClose: () => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const categoriesId = useId()
   const descriptionId = useId()
+  const dirty = useDirty({ name, category, price, drafts, description })
   const categories = [
     ...new Set((catalog.data?.products ?? []).map((p) => p.category).filter(Boolean)),
   ]
@@ -325,6 +335,7 @@ function NewProduct({ onClose }: { onClose: () => void }) {
     <FormSheet
       open
       title="Nuevo producto"
+      dirty={dirty}
       description="Después le sumas sus fotos, su stock y lo que Sofi puede negociar."
       onClose={onClose}
       onSubmit={submit}
