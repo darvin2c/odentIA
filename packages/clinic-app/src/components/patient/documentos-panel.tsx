@@ -53,6 +53,7 @@ import {
   formatDate,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { useRisksDrafts } from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import {
   countWords,
@@ -264,6 +265,8 @@ export function DocumentosSection({
   const [uploadOpen, setUploadOpen] = useState(false)
   const [opened, setOpened] = useState<Row["open"] | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
+  // Riesgos propios escritos sin guardar: firmar los guarda antes de abrir la hoja (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   const [resultFor, setResultFor] = useState<ClinicalOrder | null>(null)
   // El control que abrió el visor recupera el foco al cerrarlo.
   const openerRef = useRef<HTMLElement | null>(null)
@@ -740,7 +743,7 @@ export function DocumentosSection({
             aria-label={`Firmar ${row.title}`}
             onClick={() => setSigning([action.consent])}
           >
-            Firmar
+            {risksDrafts.has(action.consent.id) ? "Guardar y firmar" : "Firmar"}
           </Button>
         )
       case "resultado":

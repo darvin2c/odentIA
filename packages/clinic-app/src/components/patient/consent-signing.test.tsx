@@ -392,7 +392,7 @@ it("si los riesgos propios cambiaron después de mostrarse, vuelve a la hoja nue
   // Vuelve a la hoja, ahora la nueva, con la casilla y la firma en blanco y el aviso que lo explica.
   expect(
     await screen.findByText(
-      "Cambiaron los riesgos propios: que lea la hoja nueva y firme otra vez.",
+      "La hoja se puso al día con sus riesgos propios de ahora. Pídele que la lea otra vez y firme.",
     ),
   ).toBeTruthy()
   expect(await screen.findByText("Toma Eliquis: lo suspende 1 día.")).toBeTruthy()
@@ -405,4 +405,80 @@ it("si los riesgos propios cambiaron después de mostrarse, vuelve a la hoja nue
   await waitFor(() => expect(onSigned).toHaveBeenCalled())
   expect(bodies).toHaveLength(2)
   expect(bodies[1]?.personalRisksShown).toEqual(["Toma Eliquis: lo suspende 1 día."])
+})
+
+// QA de diseño del 18 nov (H1): con un riesgo escrito y sin «Guardar», «Firmar ahora» hacía firmar
+// la hoja vieja. Ahora la firma guarda primero lo escrito y abre la hoja con ello.
+it("con riesgos propios escritos y sin guardar, los guarda antes de abrir la hoja y se firma con ellos", async () => {
+  profile = {
+    ...newProfile,
+    professionalTitle: "Cirujano dentista",
+    registrationBody: "COP",
+    registrationNumber: "12345",
+    complete: true,
+  }
+  const sections = (personalRisks: string[]) => ({
+    purpose: "",
+    procedure: "Tratamiento de conductos.",
+    benefits: [],
+    risks: [],
+    alternatives: [],
+    consequences: "",
+    personalRisks,
+  })
+  const saved = {
+    ...document,
+    patientId: "p-carmen",
+    planItemId: null,
+    sectionsSnapshot: sections(["Toma Eliquis: puede sangrar más."]),
+  }
+  const written = ["Toma Eliquis: puede sangrar más.", "Es hipertensa: se le toma la presión."]
+  const LINE = String.fromCharCode(10)
+  const { setRisksDraft, resetRisksDraftsForTest, risksDraftOf } = await import("../../lib/consent-risks-draft")
+  resetRisksDraftsForTest()
+  setRisksDraft("consent-1", {
+    documentId: "consent-1",
+    patientId: "p-carmen",
+    planItemId: null,
+    text: written.join(LINE),
+    seen: ["Toma Eliquis: puede sangrar más."],
+    latest: null,
+  })
+  const puts: Record<string, unknown>[] = []
+  const bodies: Record<string, unknown>[] = []
+  sign = async (body) => {
+    bodies.push(body)
+    return { data: { ...saved, sectionsSnapshot: sections(written), pdfDocumentId: "pdf-1" } }
+  }
+  const base = route.getMockImplementation()!
+  route.mockImplementation(async (url, init) => {
+    if (url === "/api/clinical-forms/consents/consent-1/personal-risks" && init?.method === "PUT") {
+      puts.push(JSON.parse(String(init.body)) as Record<string, unknown>)
+      return { data: { ...saved, sectionsSnapshot: sections(written) } }
+    }
+    return base(url, init)
+  })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const onSigned = vi.fn()
+  render(
+    <QueryClientProvider client={client}>
+      <ConsentSigningScreen
+        open
+        documents={[saved as unknown as ConsentDocument]}
+        patientId="p-carmen"
+        onClose={() => {}}
+        onSigned={onSigned}
+      />
+    </QueryClientProvider>,
+  )
+  // La hoja que ve es la de lo escrito, ya guardado.
+  expect(await screen.findByText("Es hipertensa: se le toma la presión.")).toBeTruthy()
+  expect(puts).toEqual([
+    { personalRisks: written.join(LINE), seen: ["Toma Eliquis: puede sangrar más."] },
+  ])
+  expect(risksDraftOf("consent-1")).toBeNull()
+  await carmenSigns()
+  fireEvent.click(screen.getByRole("button", { name: "Confirmar" }))
+  await waitFor(() => expect(onSigned).toHaveBeenCalled())
+  expect(bodies[0]?.personalRisksShown).toEqual(written)
 })

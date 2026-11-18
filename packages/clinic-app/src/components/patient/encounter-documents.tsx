@@ -34,6 +34,7 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { teethWords } from "../../lib/document-list"
 import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
@@ -49,6 +50,7 @@ import {
   consentLinkWords,
   SendToSignDialog,
 } from "./consent-link-actions"
+import { personalRisksEditable } from "./consent-personal-risks"
 import {
   CompleteSigningData,
   ConsentSigningScreen,
@@ -282,7 +284,7 @@ export function useEncounterDocuments(
 
 /** El papel que se abre al lado con «Ver»: su PDF, con «Enviar» e «Imprimir». */
 type ViewedPaper =
-  | { kind: "consent"; document: ConsentDocument }
+  | { kind: "consent"; document: ConsentDocument; focusRisks?: boolean }
   | { kind: "prescription"; prescription: Prescription }
   | { kind: "order"; order: ClinicalOrder }
   | { kind: "leave"; leave: MedicalLeave }
@@ -349,6 +351,8 @@ export function EncounterDocumentsBlock({
   const [sendingDoc, setSendingDoc] = useState<ConsentDocument | null>(null)
   const [phoneDoc, setPhoneDoc] = useState<ConsentDocument | null>(null)
   const [viewing, setViewing] = useState<ViewedPaper | null>(null)
+  // Lo escrito en «Riesgos propios» sin guardar: «Guardar y firmar» y la línea de la fila lo dicen.
+  const risksDrafts = useRisksDrafts()
   const [openForm, setOpenForm] = useState<string | null>(null)
   const [paperFor, setPaperFor] = useState<ConsentNeed | null>(null)
 
@@ -593,6 +597,33 @@ export function EncounterDocumentsBlock({
                   </span>
                 )
               })()}
+              {/* Los riesgos propios que lleva la hoja, en la fila (lienzo P5): se ven antes de firmar,
+                  y «Revisar» abre el papel con el foco en ellos (QA de diseño del 18 nov, H2). */}
+              {canWrite
+                ? docs.toSign.filter(personalRisksEditable).map((doc) => {
+                    const count = doc.sectionsSnapshot?.personalRisks?.length ?? 0
+                    const unsaved = risksDrafts.has(doc.id)
+                    if (count === 0 && !unsaved) return null
+                    return (
+                      <span key={`riesgos-${doc.id}`} className="text-xs text-muted-foreground">
+                        {pendingTitles.length === 1
+                          ? "Riesgos propios"
+                          : `Riesgos propios de ${doc.titleSnapshot}`}
+                        : {unsaved ? "cambios sin guardar" : count} ·{" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 text-xs"
+                          aria-label={`Revisar los riesgos propios de ${doc.titleSnapshot}`}
+                          onClick={() => setViewing({ kind: "consent", document: doc, focusRisks: true })}
+                        >
+                          Revisar
+                        </Button>
+                      </span>
+                    )
+                  })
+                : null}
             </div>
             <div className="flex items-center gap-1">
               {/* «Ver» abre el documento tal como lo firmará el paciente, sin firmar nada. Con
@@ -640,7 +671,9 @@ export function EncounterDocumentsBlock({
                 disabled={disabled}
                 onClick={() => setSigning(docs.toSign)}
               >
-                Firmar ahora
+                {hasRisksDraft(risksDrafts, { documentIds: docs.toSign.map((doc) => doc.id) })
+                  ? "Guardar y firmar"
+                  : "Firmar ahora"}
               </Button>
               <RowActions
                 label="Otras formas de firmar"
@@ -999,6 +1032,7 @@ export function EncounterDocumentsBlock({
           document={docs.consents.find((doc) => doc.id === viewing.document.id) ?? viewing.document}
           onClose={() => setViewing(null)}
           onChanged={refresh}
+          focusRisks={viewing.focusRisks}
         />
       ) : viewing?.kind === "prescription" ? (
         <PrescriptionPaper

@@ -44,6 +44,7 @@ import {
   totalsOf,
 } from "../../lib/budgets"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import {
   bringTreatmentApi,
@@ -321,6 +322,8 @@ export function EncounterPlanPanel({
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  // Riesgos propios escritos sin guardar: «Guardar y firmar» (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   const orgLocale = useOrgProfile().data?.locale
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
@@ -567,7 +570,11 @@ export function EncounterPlanPanel({
           >
             {/* Abre la firma del paciente (y la prepara si falta): dice lo que hace, no «Preparar»
                 (QA en pantalla del 17 nov, D3). Lo que firmó en su enlace se confirma. */}
-            {item.consent === "por_confirmar" ? "Confirmar" : "Firmar ahora"}
+            {item.consent === "por_confirmar"
+              ? "Confirmar"
+              : hasRisksDraft(risksDrafts, { planItemIds: [item.id] })
+                ? "Guardar y firmar"
+                : "Firmar ahora"}
           </Button>
         ) : null}
         {onRegister ? (

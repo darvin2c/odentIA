@@ -2,15 +2,16 @@ import { Button, FieldGroup, toast } from "@odentia/ui"
 import { submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
+import { type ConsentDocument, fetchProposedPersonalRisks } from "../../lib/clinical-forms"
 import {
-  type ConsentDocument,
-  fetchConsents,
-  fetchProposedPersonalRisks,
-  setConsentPersonalRisks,
-} from "../../lib/clinical-forms"
+  risksDraftOf,
+  saveRisksDraft,
+  setRisksDraft,
+  useRisksDrafts,
+} from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull } from "../../lib/patients"
 
@@ -41,17 +42,35 @@ export function personalRisksHelp(
 }
 
 /**
+ * «Volver a proponer» solo mientras se escribe algo distinto de lo propuesto, o con el campo vacío
+ * (QA de diseño del 18 nov, H9): guardado a propósito, lo escrito a mano no tiene un botón al lado
+ * para siempre.
+ */
+export function offersProposal(input: {
+  written: string
+  saved: string
+  proposed: string
+}): boolean {
+  if (!input.proposed || input.written === input.proposed) return false
+  return input.written !== input.saved || input.written === ""
+}
+
+/**
  * Los riesgos propios de su caso (reglas clínicas del 18 nov): el sistema los propone al generar el
  * consentimiento desde sus antecedentes y el procedimiento; aquí se cambian o se borran, una frase
  * por línea, mientras está pendiente y no se envió a su enlace. Vacío, la hoja queda como siempre.
- * No frena la firma.
+ * No frena la firma: lo escrito sin guardar queda como borrador (`consent-risks-draft`), y firmar
+ * lo guarda antes de abrir la hoja («Guardar y firmar»).
  */
 export function ConsentPersonalRisksField({
   document,
   onSaved,
+  autoFocus = false,
 }: {
   document: ConsentDocument
   onSaved: () => void | Promise<void>
+  /** Desde «Revisar» de la fila: el foco va al campo. */
+  autoFocus?: boolean
 }) {
   const canPatients = usePermission("patients.read")
   const patientQuery = useQuery({
@@ -63,12 +82,16 @@ export function ConsentPersonalRisksField({
   const first = (person?.givenNames ?? person?.displayName ?? "").trim().split(/\s+/)[0] ?? ""
   const savedRisks = document.sectionsSnapshot?.personalRisks ?? []
   const saved = savedRisks.join("\n")
-  // Lo que tenía a la vista quien edita: si otra pestaña los cambió, el servidor no los pisa (409).
-  const seen = useRef<string[]>(savedRisks)
-  // Tras ese 409, lo que dicen ahora: se ven, y lo escrito se conserva para guardarlo encima a sabiendas.
-  const [latest, setLatest] = useState<string[] | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const broughtRef = useRef<HTMLParagraphElement>(null)
+  // Lo escrito antes y sin guardar (se cerró el panel): vuelve al campo.
+  const draft = useRisksDrafts().get(document.id) ?? null
+  const latest = draft?.latest ?? null
+  // «Volver a proponer» trajo lo propuesto: se dice que falta guardar, y el foco va a esa frase.
+  const [brought, setBrought] = useState(false)
+  const focusField = () => rootRef.current?.querySelector("textarea")?.focus()
   const form = useAppForm({
-    defaultValues: { personalRisks: saved },
+    defaultValues: { personalRisks: risksDraftOf(document.id)?.text ?? saved },
     validators: {
       onSubmit: z.object({
         personalRisks: z.string().max(6000, "Escribe como mucho 6000 caracteres."),
@@ -76,31 +99,54 @@ export function ConsentPersonalRisksField({
     },
     onSubmit: async ({ value }) => {
       const text = value.personalRisks.trim()
+      remember(value.personalRisks)
       try {
-        const result = await setConsentPersonalRisks(document.id, text || null, seen.current)
-        seen.current = result.data.sectionsSnapshot?.personalRisks ?? []
+        await saveRisksDraft(document.id)
       } catch (error) {
-        if (error instanceof ApiError && error.shape.code === "CONSENT_RISKS_CHANGED") {
-          const fresh = await fetchConsents({ patientId: document.patientId })
-            .then((response) => response.data.find((row) => row.id === document.id) ?? null)
-            .catch(() => null)
-          if (fresh) {
-            seen.current = fresh.sectionsSnapshot?.personalRisks ?? []
-            setLatest(seen.current)
-          }
-          void onSaved()
-        }
+        void onSaved()
         throw error
       }
-      setLatest(null)
+      setBrought(false)
       toast.success(text ? "Riesgos propios guardados" : "Riesgos propios quitados de la hoja")
       await onSaved()
+      // El botón queda desactivado al guardar: el foco vuelve al campo, no al inicio de la página.
+      focusField()
     },
   })
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
-  const written = useStore(form.store, (state) => state.values.personalRisks.trim())
+  const raw = useStore(form.store, (state) => state.values.personalRisks)
+  const written = raw.trim()
   const changed = written !== saved
+  /** Lo escrito queda como borrador mientras sea distinto de lo guardado. */
+  const remember = (text: string) => {
+    const now = risksDraftOf(document.id)
+    if (text.trim() === saved && !now?.latest) {
+      setRisksDraft(document.id, null)
+      return
+    }
+    setRisksDraft(document.id, {
+      documentId: document.id,
+      patientId: document.patientId,
+      planItemId: document.planItemId,
+      text,
+      seen: now?.seen ?? savedRisks,
+      latest: now?.latest ?? null,
+    })
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambia lo escrito o lo guardado.
+  useEffect(() => {
+    if (!pending) remember(raw)
+  }, [raw, saved])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al aparecer.
+  useEffect(() => {
+    if (!autoFocus) return
+    rootRef.current?.scrollIntoView({ block: "center" })
+    focusField()
+  }, [])
+  useEffect(() => {
+    if (brought) broughtRef.current?.focus()
+  }, [brought])
   // Lo que propone hoy el sistema, con su ficha de ahora: «Volver a proponer» lo trae al campo.
   const proposed = useQuery({
     queryKey: ["consent-proposed-risks", document.id],
@@ -117,21 +163,23 @@ export function ConsentPersonalRisksField({
       }}
     >
       <FieldGroup className="gap-2">
-        <form.AppField name="personalRisks">
-          {(field) => (
-            <field.TextareaField
-              label={
-                first
-                  ? `Riesgos propios de ${first} (opcional)`
-                  : "Riesgos propios de su caso (opcional)"
-              }
-              description={personalRisksHelp(document)}
-              rows={3}
-              maxLength={6000}
-              disabled={pending}
-            />
-          )}
-        </form.AppField>
+        <div ref={rootRef}>
+          <form.AppField name="personalRisks">
+            {(field) => (
+              <field.TextareaField
+                label={
+                  first
+                    ? `Riesgos propios de ${first} (opcional)`
+                    : "Riesgos propios de su caso (opcional)"
+                }
+                description={personalRisksHelp(document)}
+                rows={3}
+                maxLength={6000}
+                disabled={pending}
+              />
+            )}
+          </form.AppField>
+        </div>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
@@ -152,18 +200,36 @@ export function ConsentPersonalRisksField({
             <p className="text-muted-foreground">Si guardas otra vez, quedan los que escribiste.</p>
           </div>
         ) : null}
+        {brought && changed ? (
+          <p
+            ref={broughtRef}
+            tabIndex={-1}
+            role="status"
+            className="text-sm text-muted-foreground outline-none"
+          >
+            Trajiste lo que propone el sistema. Falta «Guardar».
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" size="sm" variant="outline" disabled={pending || !changed}>
+          <Button
+            type="submit"
+            size="sm"
+            variant="outline"
+            disabled={pending || (!changed && !latest)}
+          >
             {pending ? "Guardando…" : "Guardar"}
           </Button>
           {/* Borrados o cambiados por error: lo que propone el sistema vuelve al campo, sin guardar. */}
-          {proposedText && written !== proposedText ? (
+          {offersProposal({ written, saved, proposed: proposedText }) ? (
             <Button
               type="button"
               size="sm"
               variant="ghost"
               disabled={pending}
-              onClick={() => form.setFieldValue("personalRisks", proposedText)}
+              onClick={() => {
+                form.setFieldValue("personalRisks", proposedText)
+                setBrought(true)
+              }}
             >
               Volver a proponer
             </Button>

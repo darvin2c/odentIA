@@ -40,6 +40,7 @@ import {
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { personalRisksOf } from "../../lib/consent-shown"
 import { CHANNEL_WORDS, fetchHealthDocumentSent } from "../../lib/encounter-documents"
 import { usePermission } from "../../lib/crm"
@@ -534,14 +535,21 @@ export function ConsentPaper({
   onChanged,
   confirmIn = null,
   signedSummary = null,
+  focusRisks = false,
 }: PaperSurface & {
   document: ConsentDocument
   /** Abierto desde la atención en curso: ahí se confirma lo firmado por enlace. */
   confirmIn?: string | null
   /** Quién firmó, con qué documento (abreviado en el servidor), cuándo y qué (`linkSignedSummary`). */
   signedSummary?: string | null
+  /** Desde «Revisar» de la fila de Documentos: el foco va a los riesgos propios. */
+  focusRisks?: boolean
 }) {
   const canWrite = usePermission("clinical.write")
+  // Con riesgos propios escritos y sin guardar, firmar los guarda antes de abrir la hoja (H1).
+  const signWord = hasRisksDraft(useRisksDrafts(), { documentIds: [document.id] })
+    ? "Guardar y firmar"
+    : "Firmar ahora"
   const refresh = useRefreshPapers(document.patientId, onChanged)
   const [sending, setSending] = useState(false)
   const [signing, setSigning] = useState(false)
@@ -575,7 +583,7 @@ export function ConsentPaper({
     // Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces.
     ...(canWrite && pending && !document.personSignedAt
       ? [
-          { key: "firmar", label: "Firmar ahora", onSelect: () => setSigning(true) },
+          { key: "firmar", label: signWord, onSelect: () => setSigning(true) },
           { key: "papel", label: "Firmado en papel", onSelect: () => setPaperOpen(true) },
         ]
       : []),
@@ -656,15 +664,19 @@ export function ConsentPaper({
                   `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. ${document.phoneSignBlock ? "Puedes enviárselo para que lo lea antes; lo firma en la cita." : "También puedes enviárselo para que lo firme desde su teléfono."}`}
               </p>
             )}
+            {/* Los riesgos propios van antes del botón que firma: se revisan y después se firma (QA de
+                diseño del 18 nov, H1). */}
+            {personalRisksEditable(document) ? (
+              <ConsentPersonalRisksField document={document} onSaved={refresh} autoFocus={focusRisks} />
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {document.personSignedAt ? null : (
                 <Button type="button" size="sm" onClick={() => setSigning(true)}>
-                  Firmar ahora
+                  {signWord}
                 </Button>
               )}
               <ConsentLinkActions document={document} onChanged={refresh} encounterId={confirmIn} />
             </div>
-            {personalRisksEditable(document) ? <ConsentPersonalRisksField document={document} onSaved={refresh} /> : null}
           </div>
         ) : signatureWords ? (
           <p className="text-muted-foreground">{signatureWords}</p>
