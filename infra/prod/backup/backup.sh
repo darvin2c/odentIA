@@ -71,6 +71,46 @@ stop_verify() {
   [ -f "$work/data/postmaster.pid" ] && gosu postgres pg_ctl -D "$work/data" -m fast -w stop >/dev/null 2>&1 || true
 }
 
+# La base de gestorIA (ADR 0203), en el mismo servidor: su propio volcado, verificado igual, en
+# `gestoria/` del mismo bucket y con la misma retención. Solo si `GESTORIA_BACKUP_DATABASE_URL`
+# está puesta; sin ella, nada cambia. Un fallo se anota en admin.platform_backup (Soporte lo ve,
+# con «gestorIA» en el detalle); uno verificado no se anota: el aviso de las clínicas sigue
+# contando solo los suyos.
+backup_gestoria() {
+  local work object log conn migrations expected size
+  work=$(mktemp -d /tmp/backup-gestoria.XXXXXX)
+  chown postgres "$work"
+  log="$work/log"
+  object="gestoria/gestoria-$ts.dump"
+  if ! pg_dump --format=custom --no-owner --file="$work/dump" "$GESTORIA_BACKUP_DATABASE_URL" 2>"$log"; then
+    record fallido volcado "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+  elif ! verify "$work/dump" "$work" "$log"; then
+    stop_verify "$work"
+    record fallido restauracion "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+  else
+    conn="host=$work port=5499 user=postgres dbname=verificar"
+    migrations=$(psql "$conn" -X -At -c "select count(*) from drizzle.__drizzle_migrations" 2>>"$log" || true)
+    expected=$(psql "$GESTORIA_BACKUP_DATABASE_URL" -X -At -c "select count(*) from drizzle.__drizzle_migrations" 2>>"$log" || true)
+    stop_verify "$work"
+    if [ -z "$migrations" ] || [ "$migrations" = 0 ] || [ "$migrations" != "$expected" ]; then
+      record fallido comprobacion "" "" "" "" "" "gestorIA: restaurado con $migrations migraciones (producción: $expected)"
+    elif ! rclone copyto "$work/dump" "r2:$BACKUP_BUCKET/$object" 2>"$log"; then
+      record fallido subida "" "" "" "" "" "gestorIA: $(tail -c 900 "$log")"
+    else
+      size=$(stat -c %s "$work/dump")
+      echo "[backup] $ts: gestorIA verificado y subido ($size bytes, $migrations migraciones)"
+      rclone lsf "r2:$BACKUP_BUCKET/gestoria" --files-only 2>/dev/null | grep -E '^gestoria-.*\.dump$' | sort -r \
+        | tail -n "+$((RETAIN + 1))" \
+        | while read -r f; do
+            echo "[backup] purgando gestoria/$f"
+            rclone deletefile "r2:$BACKUP_BUCKET/gestoria/$f" >/dev/null
+          done
+    fi
+  fi
+  stop_verify "$work"
+  rm -rf "$work"
+}
+
 while true; do
   ts=$(date -u +%Y%m%dT%H%M%SZ)
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -110,5 +150,6 @@ while true; do
   fi
   stop_verify "$work"
   rm -rf "$work"
+  if [ -n "${GESTORIA_BACKUP_DATABASE_URL:-}" ]; then backup_gestoria; fi
   sleep "$INTERVAL"
 done

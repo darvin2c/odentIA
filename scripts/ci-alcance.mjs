@@ -17,6 +17,10 @@
 //   de Playwright, `ALSO_ADMIN` en e2e/playwright.config.ts), en una parte; si no, todos,
 //   en tres. El cobro y el soporte viven todavía en packages/ y apps/api, así que siguen
 //   corriendo todo (lienzo A, paso 0).
+// - gestorIA (gestoria/, ADR 0203) es otro sistema: sus paquetes no los usa nadie más, así que un
+//   cambio solo suyo prueba lo suyo y no corre los recorridos E2E ni despliega las clínicas. Un
+//   archivo suelto de gestoria/ (su Dockerfile, su compose, su infra) cuenta como cambio de su
+//   servidor, no de todo.
 // Las pruebas que leen el repositorio entero no van aquí: van en el job `arquitectura`.
 import { execFileSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
@@ -26,10 +30,13 @@ const SHA = process.env.SHA || "HEAD"
 
 // Solo documentación y skills: no se compilan, no se prueban ni se despliegan.
 const SOLO_DOCS =
-  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|(apps|packages|admin\/apps|shared\/packages)\/[^/]+\/AGENTS\.md$)/
+  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
 // En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
-const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/)/
+const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
+// Lo suelto de gestorIA (Dockerfile, compose, infra): es de su servidor.
+const GESTORIA_SUELTO = /^gestoria\//
+const ES_GESTORIA = (nombre) => nombre.startsWith("@gestoria/")
 // La administración: si todo lo cambiado está aquí, solo sus recorridos E2E.
 const SOLO_ADMIN = /^admin\/(apps\/[^/]+|e2e)\//
 
@@ -58,6 +65,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/ui",
   "@odentia/ui-patterns",
   "@odentia/brand-scene",
+  "@gestoria/web",
 ]
 // Apps que se publican en Cloudflare Workers (deploy-web).
 const CLOUDFLARE = [
@@ -67,9 +75,12 @@ const CLOUDFLARE = [
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
   "@odentia/optical-clinic",
+  "@gestoria/web",
 ]
 // Apps del VPS: la imagen de producción sirve api y worker.
 const VPS = ["@odentia/api", "@odentia/worker"]
+// El servidor de gestorIA: su propia imagen y su propio proyecto en OpenShip.
+const VPS_GESTORIA = ["@gestoria/api", "@gestoria/db"]
 
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
@@ -116,8 +127,8 @@ function decidir() {
   if (codigo.length === 0) {
     return { motivo: "solo documentación o skills", soloDocs: true, afectados: [] }
   }
-  if (codigo.some((f) => !EN_PAQUETES.test(f))) {
-    const fuera = codigo.find((f) => !EN_PAQUETES.test(f))
+  if (codigo.some((f) => !EN_PAQUETES.test(f) && !GESTORIA_SUELTO.test(f))) {
+    const fuera = codigo.find((f) => !EN_PAQUETES.test(f) && !GESTORIA_SUELTO.test(f))
     return {
       motivo: `cambia ${fuera} fuera de los paquetes: se prueba todo`,
       soloDocs: false,
@@ -125,6 +136,8 @@ function decidir() {
     }
   }
   const afectados = turbo(["ls", `--filter=...[${BASE}]`])
+  if (codigo.some((f) => GESTORIA_SUELTO.test(f) && !EN_PAQUETES.test(f)))
+    for (const nombre of VPS_GESTORIA) if (!afectados.includes(nombre)) afectados.push(nombre)
   const soloAdmin = codigo.every((f) => SOLO_ADMIN.test(f))
   const motivo = `${afectados.length} paquete(s) afectado(s)${soloAdmin ? ", solo de la administración" : ""}`
   return { motivo, soloDocs: false, afectados, soloAdmin }
@@ -202,11 +215,12 @@ const salidas = {
         ? partes
         : [{ parte: "ninguna", tipos: "", pruebas: "", postgres: false, opciones: "" }],
   }),
-  // E2E prueba la app completa; el marketing (web) no la usa.
-  e2e: String(afectados.some((n) => n !== "@odentia/web")),
+  // E2E prueba la app completa de las clínicas; el marketing (web) y gestorIA no la usan.
+  e2e: String(afectados.some((n) => n !== "@odentia/web" && !ES_GESTORIA(n))),
   // Las partes de E2E: los de la administración solos, o todos en tres partes.
   e2e_partes: JSON.stringify(partesDeE2e(decision.soloAdmin === true)),
   vps: String(afectados.some((n) => VPS.includes(n))),
+  gestoria_vps: String(afectados.some((n) => VPS_GESTORIA.includes(n))),
   cloudflare: JSON.stringify(afectados.filter((n) => CLOUDFLARE.includes(n))),
   // Las pruebas que leen el repositorio entero corren en cada cambio de código.
   arquitectura: String(!decision.soloDocs),
