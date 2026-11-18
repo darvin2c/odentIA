@@ -592,8 +592,12 @@ export interface ProductHooks {
   recordSections(tx: Db, scope: { orgId: string; patientId: string }): Promise<RecordSection[]>
   /** Las fases del plan del producto, en su orden (odentIA: urgencia → mantenimiento). */
   planPhases: readonly string[]
-  /** La fase que propone un tipo de tratamiento de la biblioteca. */
-  phaseFor(kind: string | null): string
+  /**
+   * La fase que propone un tratamiento que se indica o se cambia, por el tipo de su servicio en la
+   * biblioteca y sus diagnósticos: el suyo y los vigentes de la atención en su mismo sitio
+   * (odentIA: la pulpitis de la 36 propone «Urgencia» para su endodoncia).
+   */
+  phaseFor(kind: string | null, diagnoses: ReadonlyArray<{ system: string | null; code: string | null }>): string
   /**
    * Las familias de cada tratamiento de la biblioteca (odentIA: lo que deja en la pieza,
    * «crown», y su familia anatómica, «pulpectomia-deciduo»), por id del tratamiento: con ella se une cada servicio a

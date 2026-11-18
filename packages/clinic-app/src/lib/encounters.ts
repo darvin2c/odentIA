@@ -29,8 +29,8 @@ export interface ClosingCheck {
   consents: ConsentNeed[]
   /**
    * En clínicas de Perú, el odontograma que firmará este cierre (su momento y
-   * lo que cambió en la atención); null si no cambió el gráfico o la clínica
-   * no firma odontogramas.
+   * los hallazgos observados hoy); null si la atención no llega a un momento de
+   * la norma (la sesión que solo trata) o la clínica no firma odontogramas.
    */
   odontogram: ClosingOdontogram | null
   /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */

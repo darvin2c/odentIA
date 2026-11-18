@@ -3533,7 +3533,7 @@ export async function finalizeEncounter(
     .returning()
   if (!row) throw notFound("Atención")
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
-  // firma el odontograma con el mismo perfil; NTS 188, 5.3 y 5.10).
+  // firma el odontograma con el mismo perfil si llega a un momento de la norma; NTS 188, 5.3 y 5.10).
   const product = await hooks.encounterFinalized(tx, {
     orgId,
     actorUserId,

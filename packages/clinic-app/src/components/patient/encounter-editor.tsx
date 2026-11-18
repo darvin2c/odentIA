@@ -1487,7 +1487,7 @@ export function EncounterEditor({
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
         void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
-      // En Perú, el cierre que cambió el gráfico firmó el odontograma.
+      // En Perú, el cierre que llegó a un momento de la norma firmó el odontograma.
       void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
       // Lo que salió de la sede cambia lo que hay en Inventario.
       if (result.data.materials) void queryClient.invalidateQueries({ queryKey: ["inventory"] })
@@ -1790,9 +1790,10 @@ export function EncounterEditor({
     sections,
   })
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
-  // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
-  // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
-  const signsOdontogram = Boolean(closingQuery.data?.data.odontogram)
+  // El odontograma tampoco cuando el cierre lo firma (decía a la vez «queda firmado» y «Sin registrar:
+  // odontograma», QA del 9 nov), ni en la sesión que solo trata (la 2 de la endodoncia): no firma copia,
+  // y lo tratado queda en el gráfico y en la atención firmada (reglas clínicas, 18 nov).
+  const odontogramCovered = Boolean(closingQuery.data?.data.odontogram) || activeProcedures > 0
   // Lo opcional del producto (el periodontograma) no se dice como algo sin registrar: no falta (P10).
   const optionalKeys = new Set(product.blocks.filter((item) => item.key !== "odontograma").map((item) => item.key))
   const unrecorded = closingSections
@@ -1801,7 +1802,7 @@ export function EncounterEditor({
         section.empty &&
         !optionalKeys.has(section.key) &&
         !(section.key === "plan" && closingControls) &&
-        !(section.key === "odontograma" && signsOdontogram),
+        !(section.key === "odontograma" && odontogramCovered),
     )
     .map((section) => section.title.toLowerCase())
   // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice

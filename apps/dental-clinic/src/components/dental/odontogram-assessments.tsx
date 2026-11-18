@@ -81,7 +81,8 @@ function rowLabel(item: OdontogramAssessment): string {
 
 /**
  * Odontogramas firmados (solo en clínicas de Perú, NTS 188; ADR 0036). Los
- * firma el cierre de la atención que cambió el gráfico, con su momento; el
+ * firma el cierre de la atención que llega a un momento de la norma (inicio,
+ * hallazgos observados o culminación; la que solo trata, no); el
  * botón «Firmar odontograma» queda para lo judicial, lo personal y el
  * reingreso. Una sola firma, la del perfil profesional, sin trazo. Cada uno se
  * ve con el gráfico de la norma y se imprime con «Firma y sello» en papel.
