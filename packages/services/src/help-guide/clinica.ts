@@ -442,6 +442,20 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        // Reglas clínicas del 18 nov: los riesgos propios de su caso en el consentimiento.
+        id: "pacientes-consentimiento-riesgos-propios",
+        q: "¿Cómo pongo en el consentimiento el riesgo propio de este paciente?",
+        a: "Al generar el consentimiento, el sistema propone sus riesgos propios según sus antecedentes y el procedimiento: un anticoagulante o un antiagregante (puede sangrar más), una medicina para los huesos que toma o tomó (en una extracción, un implante o una cirugía, el riesgo poco frecuente de osteonecrosis), la diabetes registrada con su código (la herida cierra más lento), una alergia a un anestésico local o al látex. Ábrelo desde su fila en Documentos: mientras está pendiente, en «Riesgos propios de…» (opcional) los cambias o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Firmado o ya enviado a su enlace, no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro).",
+        forms: [
+          "riesgos propios del paciente en el consentimiento",
+          "agregar un riesgo al consentimiento",
+          "el consentimiento dice que toma anticoagulante",
+          "quitar los riesgos propios del consentimiento",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-consentimiento-revocar-anular",
         q: "¿Cómo revoco un consentimiento firmado o anulo uno pendiente?",
         a: "Abre el consentimiento en Documentos y usa su menú de acciones: «Anular pendiente…», con su motivo, si todavía no se firmó, o «Revocar…» si ya está firmado: eliges «Quién revoca», escribes el motivo y esa persona firma. El documento firmado se conserva marcado como revocado y el tratamiento vuelve a pedir consentimiento. «Historia del documento» muestra lo que pasó con él. Para firmarlo a mano, en la atención, «Otras formas de firmar» › «Imprimir para firmar en papel».",

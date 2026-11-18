@@ -462,6 +462,17 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       ),
     },
   ],
+  // En el consultorio no hay cirugía de los maxilares: el riesgo de la medicina para los huesos no va.
+  "pacientes-consentimiento-riesgos-propios": (faq) => [
+    {
+      ...faq,
+      a: swap(
+        faq.a,
+        "una medicina para los huesos que toma o tomó (en una extracción, un implante o una cirugía, el riesgo poco frecuente de osteonecrosis), ",
+        "",
+      ),
+    },
+  ],
   // El embarazo no va en «Personales» (`asksPregnancy: false`): tiene su sección, con la lactancia.
   "pacientes-antecedentes-enfermedades-medicacion": (faq) => [
     withoutForms(

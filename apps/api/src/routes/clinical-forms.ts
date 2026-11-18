@@ -60,6 +60,7 @@ import {
   ServiceError,
   saveConsentTemplate,
   sendConsentToSign,
+  setConsentPersonalRisks,
   setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
@@ -377,6 +378,9 @@ const consentRevoke = z
 const consentCancel = z
   .object({ reason: z.string().trim().min(1, "Escribe el motivo").max(2000) })
   .strict()
+
+// Los riesgos propios de su caso: una frase por línea; vacío los quita. El servicio valida el tope.
+const consentPersonalRisks = z.object({ personalRisks: z.string().max(6000).nullable() }).strict()
 
 const orderCreate = z
   .object({
@@ -1262,6 +1266,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (response.status === 200 && patientId)
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
     return response
+  })
+
+  // Mientras está pendiente y no se envió a su enlace: con el mismo permiso que generarlo.
+  app.put("/consents/:id/personal-risks", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para cambiar consentimientos")
+    }
+    const parsed = consentPersonalRisks.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setConsentPersonalRisks(tx, orgId, userId, c.req.param("id"), parsed.data.personalRisks),
+      ),
+    )
   })
 
   app.post("/consents/:id/cancel", async (c) => {

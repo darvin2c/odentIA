@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
+  CONSENT_PERSONAL_RISKS_LABEL,
+  type ConsentDocumentSections,
   type ConsentSections,
   clinicalProfileFor,
   signatureKindWords,
@@ -72,7 +74,7 @@ function consentBody(kit: DocumentKit, data: ConsentPrint, signaturesHeight = 0)
     ],
     3,
   )
-  const sections = doc.sectionsSnapshot as ConsentSections | null
+  const sections = doc.sectionsSnapshot as ConsentDocumentSections | null
   if (sections) {
     kit.subheading(CONSENT_SECTION_LABELS.procedure, sectionStyle)
     kit.text(sections.procedure, { size: SIZE.read })
@@ -87,6 +89,11 @@ function consentBody(kit: DocumentKit, data: ConsentPrint, signaturesHeight = 0)
     kit.bullets(sections.benefits, { size: SIZE.read })
     kit.subheading(CONSENT_SECTION_LABELS.risks, sectionStyle)
     kit.bullets(sections.risks, { size: SIZE.read })
+    // Los riesgos propios de su caso, si los tiene: igual que en la tablet y en su enlace.
+    if (sections.personalRisks && sections.personalRisks.length > 0) {
+      kit.subheading(CONSENT_PERSONAL_RISKS_LABEL, sectionStyle)
+      kit.bullets(sections.personalRisks, { size: SIZE.read })
+    }
     kit.subheading(CONSENT_SECTION_LABELS.alternatives, sectionStyle)
     kit.bullets(sections.alternatives, { size: SIZE.read })
     kit.subheading(CONSENT_SECTION_LABELS.consequences, sectionStyle)

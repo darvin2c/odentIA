@@ -475,6 +475,8 @@ export interface ConsentSection {
   alternatives?: string[]
   consequences?: string
   notes?: string | null
+  /** Los riesgos propios de su caso, una frase por elemento (`ConsentDocumentSections`). */
+  personalRisks?: string[] | null
 }
 
 /** Lo que lee antes de firmar: la misma hoja que el PDF (sin el número de su documento). */

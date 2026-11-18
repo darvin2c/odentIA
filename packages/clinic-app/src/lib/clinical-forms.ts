@@ -1,4 +1,4 @@
-import type { ConsentSections, HealthDeclarant } from "@odentia/clinical"
+import type { ConsentDocumentSections, ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, apiFetch, apiFetchBytes } from "./api"
 
@@ -268,7 +268,8 @@ export interface ConsentDocument {
   signedAt: string | null
   revokedAt: string | null
   revokeReason: string | null
-  sectionsSnapshot: ConsentSections | null
+  /** Las secciones de su plantilla y, si los tiene, los riesgos propios de su caso. */
+  sectionsSnapshot: ConsentDocumentSections | null
   diagnosisCode: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
@@ -784,6 +785,11 @@ export function revokeConsent(
 
 export function cancelConsent(id: string, reason: string) {
   return post<ConsentDocument>(`${BASE}/consents/${id}/cancel`, { reason })
+}
+
+/** Los riesgos propios de su caso, una frase por línea; vacío los quita (solo pendiente y sin enviar). */
+export function setConsentPersonalRisks(id: string, personalRisks: string | null) {
+  return put<ConsentDocument>(`${BASE}/consents/${id}/personal-risks`, { personalRisks })
 }
 
 export function generateConsentPdf(id: string) {

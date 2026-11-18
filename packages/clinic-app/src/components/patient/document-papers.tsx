@@ -45,6 +45,7 @@ import { cancelMedicalLeaveApi, type MedicalLeave } from "../../lib/medical-leav
 import { appWords } from "../../lib/product-words"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { ConsentPersonalRisksField, personalRisksEditable } from "./consent-personal-risks"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
 import { CONSENT_EVENT_LABELS, RevokeForm } from "./consentimientos-tab"
 import { DocumentPaperPanel } from "./document-paper-panel"
@@ -627,7 +628,7 @@ export function ConsentPaper({
                 }
       }
       menu={menu}
-      revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}`}
+      revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}-${document.updatedAt}`}
       page={page}
       onClose={onClose}
       notice={
@@ -654,6 +655,7 @@ export function ConsentPaper({
               )}
               <ConsentLinkActions document={document} onChanged={refresh} encounterId={confirmIn} />
             </div>
+            {personalRisksEditable(document) ? <ConsentPersonalRisksField document={document} onSaved={refresh} /> : null}
           </div>
         ) : signatureWords ? (
           <p className="text-muted-foreground">{signatureWords}</p>

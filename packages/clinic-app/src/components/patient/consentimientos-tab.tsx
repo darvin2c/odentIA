@@ -59,6 +59,7 @@ export const CONSENT_EVENT_LABELS: Record<string, string> = {
   firmado: "Firmado",
   revocado: "Revocado",
   anulado: "Anulado",
+  riesgos_propios: "Riesgos propios de su caso",
 }
 
 interface NewConsentValues {

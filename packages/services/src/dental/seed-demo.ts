@@ -5259,6 +5259,27 @@ for (const seed of [
     conditions: [],
     medications: [{ name: "alendronato 70 mg semanal" }],
   })
+  // Su consentimiento de la exodoncia, preparado y sin enviar: nace con «Riesgos propios de su caso»
+  // (la osteonecrosis por el alendronato), que se cambia o se borra en su fila de Documentos.
+  const [gloriaExodoncia] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "exodoncia"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (gloriaExodoncia)
+    await db.transaction((tx) =>
+      createConsentDocument(tx, ORG_A, SALAS_ID, {
+        templateId: gloriaExodoncia.id,
+        patientId: gloria.id,
+        procedureRef: "Exodoncia de la pieza 48",
+      }),
+    )
 
   const mateo = await createPatient(db, ORG_A, ANA_ID, {
     displayName: "Mateo Flores Guzmán",

@@ -14,6 +14,8 @@
  * pero la pantalla dice cuáles faltan.
  */
 
+import type { ConsentRiskProfile } from "./consent-risks.js"
+
 export interface ConsentSections {
   /** Procedimiento propuesto, en lenguaje comprensible. */
   procedure: string
@@ -35,6 +37,15 @@ export const CONSENT_SECTION_LABELS = {
   consequences: "Consecuencias de no tratarse",
   notes: "Información adicional",
 } as const
+
+/**
+ * Lo que guarda un consentimiento generado (`consent_document.sections_snapshot`): las secciones
+ * de su plantilla y, si tiene, los riesgos propios de su caso (`consentPersonalRisks`), una frase
+ * por elemento. No es parte de la plantilla: el editor de plantillas no lo ofrece.
+ */
+export interface ConsentDocumentSections extends ConsentSections {
+  personalRisks?: string[] | null
+}
 
 /** Declaración que la persona firmante confirma al firmar. */
 export const CONSENT_DECLARATION =
@@ -149,12 +160,15 @@ export interface SuggestedConsentTemplate {
   serviceFamilies?: readonly string[]
   /** Claves que no lo piden aunque su familia sí (la corona de acero de un temporal). */
   exceptPrefixes?: readonly string[]
+  /** Lo que cambia sus riesgos propios (`consentPersonalRisks`): herida, hueso, implante, anestesia. */
+  riskProfile?: ConsentRiskProfile
 }
 
 /** Plantillas sugeridas por procedimiento: cada clínica nace con ellas activas. */
 export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "anestesia-local",
+    riskProfile: { localAnesthesia: true, words: "la anestesia" },
     title: "Anestesia local odontológica",
     sections: {
       procedure:
@@ -177,6 +191,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "exodoncia",
+    riskProfile: { wound: true, jawBone: true, localAnesthesia: true, words: "la extracción" },
     title: "Exodoncia simple o quirúrgica",
     serviceFamilies: ["missing_tooth"],
     servicePrefixes: ["exodoncia-"],
@@ -201,6 +216,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "endodoncia",
+    riskProfile: { localAnesthesia: true, words: "la endodoncia" },
     title: "Tratamiento de conductos (endodoncia)",
     // La de la pieza permanente; la pulpectomía de un temporal tiene el suyo y la pulpotomía va
     // con la odontopediatría (QA del 10 nov, A1 y M3).
@@ -227,6 +243,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "periodoncia",
+    riskProfile: { wound: true, localAnesthesia: true, words: "el tratamiento de las encías" },
     title: "Tratamiento periodontal",
     servicePrefixes: ["raspado-y-alisado-radicular-", "curetaje-subgingival", "cirugia-periodontal-", "colgajo-con-alisado-radicular-"],
     sections: {
@@ -247,6 +264,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "implante",
+    riskProfile: { wound: true, jawBone: true, implant: true, localAnesthesia: true, words: "la cirugía del implante" },
     title: "Implante dental",
     serviceFamilies: ["implant"],
     servicePrefixes: ["colocacion-de-implante-"],
@@ -373,6 +391,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "pulpectomia",
+    riskProfile: { localAnesthesia: true, words: "el tratamiento" },
     title: "Pulpectomía en piezas temporales",
     // La terapia pulpar total de un temporal tiene sus propios riesgos (la raíz que se reabsorbe,
     // la permanente que se forma debajo): el de odontopediatría no los decía (QA del 10 nov, M3).
