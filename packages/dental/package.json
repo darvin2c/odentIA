@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./odontogram-arch": "./src/odontogram-arch.ts",
+    "./odontogram-sheet": "./src/odontogram-sheet.ts",
     "./tooth-shapes": "./src/tooth-shapes.ts"
   },
   "scripts": {

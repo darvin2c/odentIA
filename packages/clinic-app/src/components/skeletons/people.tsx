@@ -154,7 +154,7 @@ export function LockedRecordPageSkeleton() {
           <div>
             <h2 className="text-base font-semibold">Abrirla con motivo</h2>
             <p className="text-muted-foreground">
-              Solo Administración. Queda en «Consultas a la historia» y en la Actividad del equipo, con quién y cuándo.
+              Solo Administración. Queda en «Consultas a la historia clínica» y en la Actividad del equipo, con quién y cuándo.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

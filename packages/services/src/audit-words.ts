@@ -309,7 +309,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "data_request.verify": say("Comprobó la identidad de quien pidió algo sobre sus datos"),
   "data_request.respond": say("Respondió un pedido sobre sus datos"),
   "data_request.deny": say("Denegó un pedido sobre sus datos"),
-  "patient_record.downloaded": say("Descargó la historia completa de una persona"),
+  "patient_record.downloaded": say("Descargó la copia de la historia de una persona"),
   "patient_record.sent": say("Envió a la persona la copia de su historia"),
   "patient.record_locked": say("Borró los datos de una persona a su pedido y bloqueó su historia"),
   "patient.record_opened": say("Abrió con motivo una historia bloqueada, para leerla"),

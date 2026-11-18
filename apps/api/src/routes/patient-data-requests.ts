@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  buildPatientRecordCopy,
   createDataRequest,
   DATA_REQUEST_CHANNELS,
   DATA_REQUEST_KINDS,
@@ -9,12 +10,9 @@ import {
   eraseForDataRequest,
   erasurePreview,
   getDataRequestsView,
-  loadPatientRecord,
-  patientRecordFhirBundle,
-  patientRecordFileName,
-  patientRecordFiles,
+  type PatientRecordCopy,
+  patientRecordSummary,
   recordSendOptions,
-  renderPatientRecordPdf,
   respondDataRequest,
   sendPatientRecordCopy,
   verifyDataRequest,
@@ -23,7 +21,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { zipStream } from "../lib/zip-stream.js"
+import { recordCopyZip } from "../lib/record-copy-zip.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
@@ -64,7 +62,8 @@ const denyInput = z
       .max(1000, "El motivo admite hasta 1000 caracteres"),
   })
   .strict()
-const sendInput = z.object({ connectionId: z.uuid() }).strict()
+// `again`: «Enviar de nuevo», explícito (una pestaña vieja no reenvía por el estado guardado).
+const sendInput = z.object({ connectionId: z.uuid(), again: z.boolean().optional() }).strict()
 
 export function createPatientDataRequestsRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -196,76 +195,54 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
           c.req.param("id"),
           c.req.param("requestId"),
           parsed.data,
-          {
-            storage: deps.storage,
-          },
+          // Con la clave, el PDF lleva en su primera página «Su enlace» para bajar la copia completa.
+          { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
       ),
     )
   })
 
-  // La historia completa en un ZIP: el PDF para leer, el paquete FHIR y los
-  // archivos (imágenes y documentos). Solo para quien lee la ficha clínica.
+  // La copia completa de su historia en un ZIP: el PDF para leer, el paquete HL7 FHIR R4, cada
+  // papel emitido en su PDF, los archivos y el LÉEME (`buildPatientRecordCopy`, la misma lista del
+  // enlace de la persona). Solo para quien lee la ficha clínica.
   app.get("/:id/record", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const stream = deps.storage.streamAttachment
     if (!stream) return c.json(errorBody(c, "UNAVAILABLE", "La descarga no está disponible"), 503)
     const patientId = c.req.param("id")
-    let pdf: Uint8Array
-    let fhir: string
-    let fileName: string
-    let files: Array<{ name: string; storageKey: string }>
-    let generatedAt: Date
+    let copy: PatientRecordCopy
     try {
-      ;({ pdf, fhir, fileName, files, generatedAt } = await withOrgContext(
-        deps.db,
-        orgId,
-        async (tx) => {
-          const record = await loadPatientRecord(tx, orgId, patientId)
-          // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora).
-          await tx.insert(auditEvent).values({
-            organizationId: orgId,
-            actorUserId: userId,
-            action: "patient_record.downloaded",
-            entity: "patient",
-            entityId: patientId,
-            metadata: { patientId, documents: record.documents.length },
-          })
-          return {
-            pdf: await renderPatientRecordPdf(record, record.clinic),
-            fhir: JSON.stringify(patientRecordFhirBundle(record), null, 2),
-            fileName: patientRecordFileName(record, "zip"),
-            files: await patientRecordFiles(tx, orgId, record),
-            generatedAt: record.generatedAt,
-          }
-        },
-      ))
+      copy = await withOrgContext(deps.db, orgId, async (tx) => {
+        const built = await buildPatientRecordCopy(tx, orgId, patientId, { storage: deps.storage }, { downloadedBy: { userId } })
+        // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora), con lo que trae.
+        await tx.insert(auditEvent).values({
+          organizationId: orgId,
+          actorUserId: userId,
+          action: "patient_record.downloaded",
+          entity: "patient",
+          entityId: patientId,
+          metadata: { patientId, files: built.entries.length, summary: built.summary },
+        })
+        return built
+      })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
-    const bytes = (data: Uint8Array) => async () =>
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(data)
-          controller.close()
-        },
-      })
-    const base = fileName.replace(/\.zip$/, "")
-    const body = ReadableStream.from(
-      zipStream(
-        [
-          { name: `${base}.pdf`, open: bytes(pdf) },
-          { name: `${base}.fhir.json`, open: bytes(new TextEncoder().encode(fhir)) },
-          ...files.map((f) => ({ name: f.name, open: () => stream(f.storageKey) })),
-        ],
-        generatedAt,
-      ),
-    )
-    return c.body(body, 200, {
+    // La transacción ya se cerró: el ZIP se arma mientras se envía.
+    return c.body(recordCopyZip(copy, (key) => stream(key)), 200, {
       "content-type": "application/zip",
-      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(copy.fileName)}`,
       "cache-control": "private, no-store",
     })
+  })
+
+  // Lo que trae la copia, contado de la misma lista que arma el ZIP: lo muestra la pantalla antes
+  // de bajarla. El mismo permiso que la copia (`clinical.read`, el guarda de `patients.ts`).
+  app.get("/:id/record/summary", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => patientRecordSummary(tx, orgId, c.req.param("id"), { storage: deps.storage })),
+    )
   })
 
   return app

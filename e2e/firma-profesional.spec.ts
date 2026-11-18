@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto"
+import { readFile } from "node:fs/promises"
 import { drawSignature } from "./draw-signature"
 import { API, tenant } from "./env"
 import { api, call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { downloadPaper, scanAndCompare } from "./issued-paper-journey"
 import { readPdfLikeACamera } from "./read-pdf"
 
 const PROFILE = "/api/clinical-forms/professionals/me/profile"
@@ -140,7 +142,7 @@ test("la firma del profesional: se dibuja al cerrar, sale en el papel y lo emiti
 })
 
 test("la hoja del odontograma firmado lleva la firma que regía, o la línea para firmar a mano", async ({ owner, browser }, info) => {
-  const { page, org, user } = owner
+  const { page, org } = owner
   const { patientId } = await readyEncounter(owner)
   const sign = () =>
     call<{ id: string }>(page, "POST", `/api/patients/${patientId}/odontogram/assessments`, org.slug, {
@@ -149,6 +151,9 @@ test("la hoja del odontograma firmado lleva la firma que regía, o la línea par
       observations: "Sin observaciones.",
     }, 201)
   const sheet = (id: string) => tenant(org.slug, `/patients/${patientId}/odontogram/${id}/print`)
+  // El papel emitido: el PDF que se guardó al firmarlo, el mismo que va en la copia de la historia.
+  const paper = (id: string) =>
+    downloadPaper(page, { api: API, slug: org.slug, patientId, path: `/odontogram/assessments/${id}/pdf` })
 
   const without = await sign()
   await call(page, "PUT", PROFILE, org.slug, {
@@ -157,51 +162,42 @@ test("la hoja del odontograma firmado lleva la firma que regía, o la línea par
   })
   const withIt = await sign()
 
+  // La hoja es el PDF, con «Descargar PDF» e «Imprimir», y lo que se descarga es ese papel.
   await gotoHydrated(page, sheet(withIt.id))
-  const trace = page.getByRole("img", { name: `Firma de ${user.name}` })
-  await expect(trace).toBeVisible()
-  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Odontograma firmado · A pedido de la persona" })).toBeVisible()
+  await expect(page.locator("iframe[title='Odontograma firmado · A pedido de la persona']")).toBeVisible()
   await page.screenshot({ path: info.outputPath("odontograma-con-firma.png"), fullPage: true })
-  // Impresa cabe en una hoja, y su QR se lee en esa hoja y abre la comprobación.
-  await expect(page.getByRole("img", { name: "Código para comprobar este documento" })).toBeVisible()
-  const printed = await readPdfLikeACamera(browser, await page.pdf({ preferCSSPageSize: true }), {
-    picturePath: info.outputPath("odontograma-impreso.png"),
+  const signedPdf = await paper(withIt.id)
+  const download = page.waitForEvent("download")
+  await page.getByRole("link", { name: "Descargar PDF" }).click()
+  const saved = await (await download).path()
+  expect(saved && (await readFile(saved)).equals(signedPdf)).toBe(true)
+
+  // Con su firma, un dibujo más que sin ella; cada uno cabe en una hoja con su QR.
+  const signedRead = await readPdfLikeACamera(browser, signedPdf, {
+    picturePath: info.outputPath("odontograma-con-firma.pdf.png"),
   })
-  expect(printed.pages).toBe(1)
-  const scanned = printed.qr
-  expect(scanned).toContain(`${tenant(org.slug, "")}/comprobar/`)
-  const stranger = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } })
-  const check = await stranger.newPage()
-  await gotoHydrated(check, scanned as string)
-  await expect(check.getByRole("heading", { name: "Documento vigente", exact: true })).toBeVisible()
-  // Se imprime desde el navegador: no hay archivo con el que comparar.
-  await expect(check.getByRole("button", { name: "Elegir el PDF", exact: true })).toHaveCount(0)
-  await stranger.close()
+  const unsignedRead = await readPdfLikeACamera(browser, await paper(without.id), {
+    picturePath: info.outputPath("odontograma-sin-firma.pdf.png"),
+  })
+  expect(signedRead.pages).toBe(1)
+  expect(unsignedRead.pages).toBe(1)
+  expect(signedRead.drawings).toBeGreaterThan(unsignedRead.drawings)
+  expect(unsignedRead.qr).toContain(`${tenant(org.slug, "")}/comprobar/`)
 
-  await gotoHydrated(page, sheet(without.id))
-  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
-  await expect(trace).toHaveCount(0)
-  await page.screenshot({ path: info.outputPath("odontograma-sin-firma.png"), fullPage: true })
+  // Su QR abre la comprobación y, como es un papel guardado, se puede comparar el archivo.
+  await scanAndCompare(browser, signedPdf, {
+    origin: tenant(org.slug, ""),
+    state: "Documento vigente",
+    initials: "R. M.",
+    picturePath: info.outputPath("odontograma-qr.png"),
+    pagePicturePath: info.outputPath("odontograma-comprobado.png"),
+  })
 
-  // Lo firmado conserva el documento que la persona tenía, aunque después lo corrijan.
+  // Lo firmado no cambia: ni al corregir su documento ni al elegir el color de la marca.
   await call(page, "PATCH", `/api/patients/${patientId}`, org.slug, { docType: "DNI", docNumber: "99887766" })
-  await gotoHydrated(page, sheet(withIt.id))
-  await expect(page.getByText("DNI: 41223344", { exact: true })).toBeVisible()
-  await expect(page.getByText("99887766")).toHaveCount(0)
-
-  // El color de la marca va en la línea del membrete, y se congela al firmar: la hoja firmada
-  // antes de elegirlo sigue en gris; la firmada después lo lleva (ADR 0162).
-  const line = () => page.locator(".odontogram-sheet header").first().evaluate((el) => getComputedStyle(el).borderBottomColor)
-  const gray = await line()
   await call(page, "PUT", "/api/org-profile/brand-color", org.slug, { color: "#ea580c" })
-  await gotoHydrated(page, sheet(withIt.id))
-  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
-  expect(await line()).toBe(gray)
-  const colored = await sign()
-  await gotoHydrated(page, sheet(colored.id))
-  await expect(page.getByText(/^Firmado electrónicamente/)).toBeVisible()
-  expect(await line()).not.toBe(gray)
-  expect(await line()).not.toBe("rgb(234, 88, 12)")
+  expect((await paper(withIt.id)).equals(signedPdf)).toBe(true)
 })
 
 test("el servidor rechaza una firma mal formada y no entrega las firmas en la lista del equipo", async ({ owner }) => {

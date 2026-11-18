@@ -1,3 +1,5 @@
+import { withOrgContext } from "@odentia/db"
+import { keepSignedOdontogramPaper } from "@odentia/services/dental"
 import { Hono } from "hono"
 import { createPatientOdontogramRoute } from "./dental/patient-odontogram.js"
 import { createPatientPeriodontalRoute } from "./dental/patient-periodontal.js"
@@ -18,4 +20,24 @@ export function patientProductRoutes(deps: CrmDeps) {
   app.route("/", createPatientPeriodontalRoute(deps))
   app.route("/", createPatientLensPrescriptionsRoute(deps))
   return app
+}
+
+/**
+ * Lo que el producto deja guardado al firmar una atención, ya confirmada la firma (odentIA:
+ * el PDF del odontograma que firmó el cierre, como la hoja de atención). Si falla, se guarda
+ * la primera vez que se abra.
+ */
+export async function keepFinalizedProductPapers(
+  deps: CrmDeps,
+  input: { orgId: string; patientId: string; finalized: Record<string, unknown> },
+): Promise<void> {
+  const odontogram = input.finalized.odontogram as { id?: unknown } | null | undefined
+  if (typeof odontogram?.id !== "string") return
+  await keepSignedOdontogramPaper({
+    run: (fn) => withOrgContext(deps.db, input.orgId, fn),
+    storage: deps.storage,
+    orgId: input.orgId,
+    patientId: input.patientId,
+    assessmentId: odontogram.id,
+  })
 }

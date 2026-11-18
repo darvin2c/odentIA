@@ -293,6 +293,7 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] «Se ve en su portal» lo decide el servidor, con la misma regla que arma su lista.
 - [ ] Ningún papel cambia un carácter por «?»; un emoji se quita (la copia de la historia imprimió «??» en lugar de los emojis del cuestionario, QA de la entrega 2, 14 nov). La letra de los PDF no tiene «−», «≥», «≤», «≈», «→», «←», «∆» ni «✓»: `printable` (`S/document-kit.ts`, `STAND_INS`) escribe su equivalente, salvo en «✓». Un carácter nuevo en el texto de un papel se prueba ahí.
 - [ ] Un signo y su importe no se separan al final de una línea: el signo va pegado («‒S/ 410.00»).
+- [ ] Un papel que solo dibuja el navegador (el odontograma firmado) no es un papel: se dibuja en el servidor, se guarda con su huella y la hoja de imprimir muestra ese PDF.
 
 **Ya falló:** el signo menos salía «?» en la receta de lentes («?2,00»), en el descuento del presupuesto y en el saldo a favor del ticket, y en la primera versión del arreglo el «–» del descuento podía quedar solo al final de la línea; un documento se mandó como enlace en vez del PDF; enviar la orden dijo «no tiene WhatsApp ni correo» a quien tenía los dos; el resultado de una orden desapareció del portal y la ficha decía que se veía; «se ve en su portal» se calculaba en la pantalla con otra regla; el cajón prometió que el mensaje escrito «queda en la conversación» y con la plantilla se perdía.
 
@@ -308,8 +309,10 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Dos pestañas o un doble clic dejan una sola cita, y la segunda pestaña dice lo que pasó.
 - [ ] Lo que promete («te escribiremos por WhatsApp») se dice solo si de verdad sale.
 - [ ] «Tus datos» se envía una vez y pide solo lo que falta.
+- [ ] Un enlace que va dentro de un PDF se puede tocar (anotación `/URI`, `S/document-kit.ts`), no solo leer o escanear, y no se parte en dos líneas.
+- [ ] El estado de un enlace (bloqueado por intentos, agotado, vencido, reemplazado) lo calcula el servidor y la fila lo dice; nunca «vence el…» sobre un enlace muerto.
 
-**Ya falló:** el enlace de firma y el de presupuesto abrieron el más antiguo; hubo tres definiciones de «pendiente»; se pudo reservar otra cita con un enlace que nunca ofreció reservar; en la segunda pestaña decía «Este enlace ya no sirve» con la cita ya reservada; prometió «por WhatsApp» a quien no recibe recordatorios.
+**Ya falló:** el enlace de firma y el de presupuesto abrieron el más antiguo; hubo tres definiciones de «pendiente»; se pudo reservar otra cita con un enlace que nunca ofreció reservar; en la segunda pestaña decía «Este enlace ya no sirve» con la cita ya reservada; prometió «por WhatsApp» a quien no recibe recordatorios; el enlace de la copia dentro del PDF era texto partido en dos líneas y sin vínculo (QA del 18 nov, corregido).
 
 ## O-ENV-03 Mensajes automáticos y la baja
 
@@ -324,6 +327,22 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Un texto con un marcador sin resolver nunca llega a la pantalla ni a la persona.
 
 **Ya falló:** escribió «BAJA» y al día siguiente le llegó «Cuando quieras retomar…»; la pantalla dijo «el agente le avisa» a quien había pedido ningún mensaje; reservó, preguntó algo más y la conversación se cerró a la hora; la Bandeja mostró el marcador del enlace sin resolver; respondieron el mismo tema desde dos pestañas y le llegaron dos precios.
+
+## O-COP-01 La copia de la historia (descargarla y enviarla)
+
+**Dónde:** `S/patient-record-copy.ts` (`buildPatientRecordCopy`, `patientRecordSummary`), `S/patient-record.ts` (lo que trae, el PDF y el FHIR), `API/patient-data-requests.ts` (`/record`, `/record/summary`, `/send`), `API/lib/record-copy-zip.ts`, `S/portal-papers.ts`, `S/issued-papers.ts`, `S/data-requests.ts`, `S/record-copy-link.ts` y `S/record-copy-public.ts` (el enlace de la persona).
+
+- [ ] La copia compone lo que ya calcula la ficha (plan con su decisión, alergias, papeles del portal, odontograma del producto); no tiene consultas propias que digan otra cosa.
+- [ ] Lo que dice la pantalla (cuántos papeles, imágenes, tamaño) sale de la misma lista que arma el ZIP.
+- [ ] Un archivo o un papel que no se puede leer no corta la copia ni queda vacío en silencio: se nombra en «No se pudo incluir» y en el LÉEME.
+- [ ] Más de 4 GiB o más de 65.535 archivos: se avisa antes, o el ZIP lleva ZIP64 (`API/lib/zip-stream.ts` no lo menciona: probarlo).
+- [ ] Los papeles emitidos van con sus bytes guardados (su huella); no se rehacen para la copia.
+- [ ] En FHIR, cada referencia resuelve dentro del paquete (`urn:uuid`) y cada recurso pasa el esquema JSON de R4 (`dental/patient-record-copy.test.ts`). La pantalla nombra un estándar solo si la prueba lo verifica (FHIR con el esquema, PDF/A con veraPDF, DICOMDIR con un verificador).
+- [ ] Enviarla dice «se le envió» solo cuando salió; fuera de las 24 horas de WhatsApp sale con una plantilla aprobada o la pantalla dice por dónde sí.
+- [ ] «Enviar de nuevo» es una intención que manda la pantalla (`again`); el servidor no la deduce del estado. Reenviar deja un enlace que funciona aunque el anterior se haya agotado.
+- [ ] El enlace: abrirlo no descarga ni registra; descargar es una acción (`startRecordCopyDownload`). Vencido e inválido responden lo mismo, sin datos de la persona. Cada descarga queda registrada una vez (`patient_record.downloaded` la del equipo).
+
+**Ya falló:** la copia decía «Sin registros» en alergias a quien nunca le preguntaron; no traía el odontograma firmado ni el PDF de recetas y órdenes; el plan perdía la decisión; las referencias FHIR eran `Patient/<id>` con `fullUrl` `urn:uuid` (mesa del 18 nov); una pestaña vieja mandó la copia otra vez y dejó muerto el enlace del primer PDF (QA de la entrega, 18 nov, corregido con `again`).
 
 ## O-COM-01 Pagar comisiones
 
@@ -471,6 +490,8 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 | CO25 | De otro día: una radiografía de 2023 y una historia en papel de 2018–2024 se suben hoy con su fecha, y después se retira una. | DOC-01 | La misma fecha en todos los lugares; el retirado queda plegado en la Historia; ninguna hora inventada en el visor ni en la copia. |
 | CO26 | Se equivoca y corrige: un informe sube con 2013 en vez de 2023, y dos personas corrigen la fecha a la vez. | DOC-01 | Se corrige con su motivo sin duplicar el archivo; la segunda recibe que el documento cambió. |
 | CO27 | Otro rol, a la vez: Ana corrige la fecha de un archivo mientras Luis tiene «Corregir la fecha» abierto con la fecha vieja. | DOC-01 | Luis guarda y la pantalla le dice que el archivo cambió; su fecha y su motivo siguen ahí. |
+| CO30 | De otro día: pidió la copia por WhatsApp hace 3 días y no volvió a escribir; la tomografía pesa 1 GiB y un papel tiene la huella alterada. | COP-01 | Sale por la plantilla o la pantalla dice por dónde; el papel alterado se nombra en «No se pudo incluir»; el pedido no dice «se le envió» si no salió. |
+| CO31 | Otro rol y repetido: el correo pasa el enlace por un escáner; la persona lo abre dos veces y se corta la descarga. | COP-01 | El escáner no registra nada; cada descarga real queda una vez; pasados los días de vigencia dice que venció, sin su nombre. |
 
 ## Soporte
 

@@ -6,25 +6,31 @@ import {
   type AddressProvider,
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
+  checkRecordCopyDocument,
   confirmBookingLinkAppointment,
   decidePersonalLinkBudget,
   decideSaasPublicAccess,
+  finishRecordCopyDownload,
   getBookingLinkCalendar,
   getBookingLinkRegistrationForm,
   getBranchDirections,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
+  getRecordCopyClinic,
+  getRecordCopyView,
   issueFields,
   listBookingLinkProfessionals,
   listBookingLinkSlots,
   registerFromBookingLink,
   resendPersonalLink,
   reservePersonalLink,
+  reserveRecordCopyAttempt,
   ServiceError,
   type Storage,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
+  startRecordCopyDownload,
   submitPersonalLinkData,
   suggestAddresses,
 } from "@odentia/services"
@@ -34,6 +40,7 @@ import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { calendarResponse } from "../lib/calendar-response.js"
 import { errorBody } from "../lib/error.js"
+import { recordCopyZip } from "../lib/record-copy-zip.js"
 import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const WINDOW_MS = 10 * 60 * 1000
@@ -106,6 +113,8 @@ const dataBody = z.strictObject({
     })
     .nullish(),
 })
+// «Copia de tu historia»: su documento, para comprobar que es quien la pidió (como al firmar a distancia).
+const copyBody = z.strictObject({ token, docNumber: shortText(40) })
 // La hora de la cita que la persona tenía a la vista al pulsar: si «su cita» ya es otra, no se aplica.
 const seenStartsAt = z.iso.datetime({ offset: true }).optional()
 
@@ -434,6 +443,84 @@ export function createPublicBookingRoute(deps: {
       }
       throw error
     }
+  })
+
+  // «Copia de tu historia» (`/pendientes?abre=copia`, mesa del 18 nov): abrirla no descarga ni
+  // registra nada, porque la abren también la vista previa del chat y los lectores del correo.
+  app.get("/:slug/copy", async (c) => {
+    const query = z.strictObject({ token }).safeParse(c.req.query())
+    const storage = deps.storage
+    if (!query.success || !storage) return unavailable(c)
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyView(tx, orgId, query.data.token, { storage })))
+  })
+
+  // La clínica del enlace que ya no sirve: su nombre y un teléfono para pedirla de nuevo. Sin token:
+  // es lo público de la clínica, igual para un enlace vencido, reemplazado o inválido.
+  app.get("/:slug/copy/clinic", (c) => answer(c, 200, () => inOrg(c, (tx, orgId) => getRecordCopyClinic(tx, orgId))))
+
+  // Cada intento con su documento se cuenta antes de comparar, en su propia transacción ya
+  // confirmada (como el PIN del portal): muchas peticiones a la vez no prueban más que el tope.
+  // Si el documento coincide, la operación lo devuelve.
+  const withAttempt = async <T>(c: Context, linkToken: string, run: () => Promise<T>) => {
+    await inOrg(c, (tx, orgId) => reserveRecordCopyAttempt(tx, orgId, linkToken))
+    return run()
+  }
+
+  // «Descargar», antes de bajar: si el documento no es el suyo o ya no le quedan descargas, se
+  // dice en la página (el formulario del navegador no mostraría bien un rechazo), sin bajar nada.
+  app.post("/:slug/copy/check", async (c) => {
+    const body = copyBody.safeParse(await bodyOf(c))
+    if (!body.success) return unavailable(c)
+    return answer(c, 200, () =>
+      withAttempt(c, body.data.token, () =>
+        inOrg(c, (tx, orgId) => checkRecordCopyDocument(tx, orgId, body.data.token, body.data.docNumber)),
+      ),
+    )
+  })
+
+  // La copia completa, en streaming. Llega como formulario del navegador (así se guarda en el
+  // celular sin cargarla en memoria) o como JSON; el token va en el cuerpo, nunca en la dirección.
+  app.post("/:slug/copy/download", async (c) => {
+    const storage = deps.storage
+    const stream = storage?.streamAttachment
+    if (!storage || !stream) return unavailable(c)
+    const json = (c.req.header("content-type") ?? "").includes("application/json")
+    const body = copyBody.safeParse(json ? await bodyOf(c) : await c.req.parseBody().catch(() => null))
+    if (!body.success) return unavailable(c)
+    const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
+    let started: Awaited<ReturnType<typeof startRecordCopyDownload>>
+    try {
+      started = await withAttempt(c, body.data.token, () =>
+        inOrg(c, (tx, orgId) =>
+          startRecordCopyDownload(tx, orgId, body.data.token, { docNumber: body.data.docNumber }, evidence, { storage }),
+        ),
+      )
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        if (error.status === 404) return unavailable(c)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
+      }
+      throw error
+    }
+    // La misma copia de la clínica, con el mismo armado: el LÉEME último nombra lo que no se leyó.
+    // «Se bajó» se anota cuando el ZIP terminó de enviarse; si se corta, queda solo el inicio.
+    const { copy, downloadId } = started
+    const zip = recordCopyZip(copy, stream).getReader()
+    const response = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await zip.read()
+        if (!done) return controller.enqueue(value)
+        await inOrg(c, (tx, orgId) => finishRecordCopyDownload(tx, orgId, downloadId)).catch(() => {
+          console.error("public-booking: no se pudo anotar que la copia terminó de bajarse")
+        })
+        controller.close()
+      },
+      cancel: (reason) => zip.cancel(reason),
+    })
+    return c.body(response, 200, {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(copy.fileName)}`,
+    })
   })
 
   // Terminal: nunca continuar hacia requireSession ni ampliar excepciones a otros /api/*.

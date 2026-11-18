@@ -22,8 +22,10 @@ describe("odentIA en la página de la persona (ADR 0035 y 0079)", () => {
       "Periodontograma",
     ])
     expect(navSectionOf("periodontograma")).toBe("odontograma")
-    // Datos en cuatro y sin la pestaña Conversaciones (QA de la ficha del 8 nov).
-    expect(visibleSections(as("clinician"))).toHaveLength(10)
+    // Datos en cuatro y sin la pestaña Conversaciones (QA de la ficha del 8 nov); el
+    // odontólogo ve además «Privacidad y pedidos», solo con la copia de la historia.
+    expect(visibleSections(as("clinician"))).toHaveLength(11)
+    expect(visibleSections(as("clinician")).map((section) => section.id)).toContain("pedidos")
     expect(visibleSections(as("owner"))).toHaveLength(13)
     // Recepción no lee la clínica: no ve el odontograma.
     expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain(

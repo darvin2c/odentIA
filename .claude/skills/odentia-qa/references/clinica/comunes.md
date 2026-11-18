@@ -100,13 +100,14 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 
 ## P-COM-06 Datos personales, historia bloqueada y copia de la historia
 
-**Dónde:** Protección de datos (`R/_org/settings.data-protection.tsx`), `R/_org/people.locked.tsx` y las tablas `patient_data_consent`, `patient_data_request` y `patient_record_opening`.
+**Dónde:** Protección de datos (`R/_org/settings.data-protection.tsx`), `R/_org/people.locked.tsx` y las tablas `patient_data_consent`, `patient_data_request` y `patient_record_opening`; la copia: el bloque «Copia de su historia» (`CA/patient/record-copy-block.tsx`), la página del enlace (`CA/public/record-copy-page.tsx`) y el armado (`S/patient-record-copy.ts`, `S/patient-record.ts`).
 
 - [ ] Al registrar se pide el consentimiento para el tratamiento de los datos personales, con sus finalidades, y se puede revocar.
 - [ ] Un pedido de la persona (copia, corrección o borrado) se atiende y deja rastro.
 - [ ] La historia bloqueada no se abre. Administración la abre con motivo, para leer durante una hora y sin cambiar nada, y queda en la auditoría.
 - [ ] «Vuelve a atenderse» desbloquea la ficha entera y queda registrado.
-- [ ] La copia lleva la filiación que pide la NTS 139 (domicilio incluido, si está guardado), la hora de emisión y quién la entregó.
+- [ ] La copia lleva la filiación que pide la NTS 139 (domicilio incluido, si está guardado), el contacto de emergencia con su parentesco, la hora de emisión y quién la entregó.
+- [ ] El pie dice cómo salió: la que baja el equipo dice quién la generó y cuándo, no «a pedido de la persona»; la que sale de un pedido o de su enlace lo dice como tal.
 
 **Ya falló:** lo de permisos y datos no se escribe aquí, porque el repositorio es público: está en los informes privados de `~/odentia-qa/`.
 **Fuentes:** Ley 29733 (protección de datos personales) y su reglamento; NTS 139-MINSA; ADR 0080.
@@ -319,9 +320,9 @@ No tiene camino en el código.
 - [ ] Con varios archivos, «Para todos» no pisa lo que ya se cambió en una fila (fecha, categoría o tipo).
 - [ ] Un papel con fecha propia adjunto a una atención dice su fecha dentro de la tarjeta de esa atención.
 - [ ] La misma fecha se escribe igual en todos lados (dd/mm/aaaa), también en las miniaturas de la pieza.
-- [ ] Lo retirado sale en la copia y en el FHIR marcado como retirado, con su motivo (hoy la copia lo omite).
+- [ ] Lo retirado sale en la copia y en el FHIR marcado como retirado, con su motivo y sin su archivo ni su nombre.
 
-**Ya falló:** la Historia ponía una radiografía de 2019 en el día de subida mientras Documentos la ponía en su toma; un informe no tenía dónde poner su fecha; la copia imprimía «12:00» para un día elegido; lo retirado seguía en la Historia como vigente (mesa del 12 nov, corregidos en la entrega de la fecha del documento).
+**Ya falló:** la Historia ponía una radiografía de 2019 en el día de subida mientras Documentos la ponía en su toma; un informe no tenía dónde poner su fecha; la copia imprimía «12:00» para un día elegido; lo retirado seguía en la Historia como vigente (mesa del 12 nov, corregidos en la entrega de la fecha del documento); la copia omitía lo retirado (mesa de la copia, 18 nov, corregido: se nombra con su tipo, fecha y motivo).
 **Huecos conocidos:** una historia de varios años lleva una sola fecha (la de su última anotación), no su periodo (FHIR `DocumentReference.context.period`); nada avisa al atender que el paciente trajo historia anterior.
 **Fuentes:** HL7 FHIR R4 (`DocumentReference.date` y `Attachment.creation`); ADR 0080.
 
@@ -354,6 +355,7 @@ No tiene camino en el código.
 | CC21 | La dueña arma un cuestionario de salud propio (anticoagulantes, medicinas para los huesos, enfermedades para marcar, alergias, tabaco y una declaración firmada), lo publica habiendo ya otro, y una paciente de 66 años con warfarina y alendronato lo responde desde su celular antes de una exodoncia. | 02, 04, 17 y P-ODO-02 | El diálogo avisa que reemplaza al anterior; lo marcado llega a Antecedentes como declarado y se ve en la franja; lo que ella envió no cambia aunque el equipo corrija; la Historia y la copia lo traen. |
 | CC22 | Una mamá registra a su hijo de 6 años en el enlace público y responde el cuestionario antes de la cita; el odontólogo llena la ficha de odontopediatría en la primera visita y el niño vuelve a su control. | 04, 17 y P-ODO-01, P-ODO-21 | Las preguntas son las de un niño y están dichas para la mamá; en el control se ve la ficha de la primera visita. |
 | CC23 | Una paciente que respondió hace 3 meses vuelve con el anticoagulante cambiado y dolor 8 de 10 la víspera. | 04, 09 y P-ODO-02 | Se le pregunta si cambió algo; lo que cambió y el dolor se ven al abrir la atención; el dato anterior no se pierde. |
+| CC24 | El odontólogo baja la copia de una paciente para derivarla a un cirujano. | P-COM-06, P-ODO-17 | El pie dice su nombre y la hora, no «a pedido de la persona»; el plan sale igual que en la ficha. |
 
 ## P-COM-25 Soporte de la plataforma mira la clínica
 
@@ -373,3 +375,15 @@ No tiene camino en el código.
 - [ ] Pendiente legal: lo sensible (VIH, salud mental, violencia), los menores y quien no tiene consentimiento de datos vigente; si el profesional que atiende debe ver después qué miró soporte de su paciente; qué dice Protección de datos.
 
 **Fuentes:** ADR 0184 y 0080; contrato de encargo (`apps/web/src/lib/legal/encargo.ts`, «Confidencialidad»); Ley 29733 y su reglamento (encargado, datos sensibles, menores; verificar artículos); Ley 26842 art. 25 (reserva del acto médico; verificar); HL7 FHIR `AuditEvent`; HL7 v3 `ActInformationSensitivityPolicy`.
+
+## P-COM-26 La copia que recibe otra clínica
+
+**Dónde:** el ZIP de `GET /api/patients/:id/record` (`API/patient-data-requests.ts`), `S/patient-record-copy.ts` y `S/patient-record.ts`. Cargarla en otra odentIA no existe: se sube como PDF.
+
+- [ ] Con solo la copia, un odontólogo de otra clínica sabe antes de tocar a la persona: alergias y su estado, ASA, medicación de riesgo, embarazo y quién decide si es menor.
+- [ ] Sabe qué está a medias, qué se indicó y no se hizo, y qué control o examen tocaba.
+- [ ] Ve las radiografías con su fecha y su pieza, y lo que se le hizo a cada pieza.
+- [ ] Sabe a quién llamar (clínica, profesional y colegiatura).
+
+**Caso:** una paciente pide su copia porque se cambia de clínica, con la endodoncia de la 46 aceptada y la sesión 1 pendiente; otra odontóloga la recibe y debe poder empezar la endodoncia con seguridad.
+**Fuentes:** NTS 139-MINSA/2018/DGAIN; NTS 188-MINSA/DGIESP-2022; HL7 FHIR R4; HL7 IPS (ISO 27269:2021; verificar qué secciones son obligatorias).

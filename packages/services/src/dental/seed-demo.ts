@@ -45,6 +45,7 @@ import {
   patientCharge,
   patientCondition,
   patientContact,
+  patientDataRequest,
   patientDocument,
   patientDocumentContext,
   patientHealthDeclaration,
@@ -52,6 +53,7 @@ import {
   patientPayment,
   patientPaymentApplication,
   patientPaymentRefund,
+  patientRecordDownload,
   patientRegistration,
   patientRegistrationLink,
   patientResponsibility,
@@ -213,6 +215,10 @@ import { grantResponsibility } from "../responsibilities.js"
 import { decideActionReview, requestActionReview } from "../saas-action-review.js"
 import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import { secretsKeyFromEnv } from "../secrets.js"
+import { configureDocumentChecks } from "../document-check.js"
+import { configureDocumentLogos } from "../document-clinic.js"
+import { configurePublicLinks } from "../public-links.js"
+import { issueRecordCopyLink } from "../record-copy-link.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
 import { seedAdminArm } from "../seed-admin-arm.js"
 import { seedAdminOrganizations } from "../seed-admin-organizations.js"
@@ -269,8 +275,10 @@ import type { DentalFinalizeParts } from "./hooks.js"
 import {
   addOdontogramEntries,
   createOdontogramAssessment,
+  listOdontogramAssessments,
   voidOdontogramEntry,
 } from "./odontogram.js"
+import { signedOdontogramPaper } from "./odontogram-pdf.js"
 import { seedPeriodontalCase } from "./seed-periodontal.js"
 import { seedTwoCurrencies } from "./seed-two-currencies.js"
 import { registerToothFinding } from "./tooth-panel.js"
@@ -441,6 +449,8 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     "address_lookup_day",
     // La bitácora de consultas referencia paciente, usuario y organización sin cascada.
     "clinical_access_log",
+    // Las descargas de la copia por su enlace referencian el pedido: van antes que él.
+    "patient_record_download",
     // Los pedidos sobre sus datos referencian a la persona vinculada (ADR 0080).
     "patient_data_request",
     // Las aperturas de una historia bloqueada referencian al paciente (ADR 0080).
@@ -2105,12 +2115,16 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
 await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   expectedRevision: 1,
   reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+  // Con su tipo, su criticidad y su verificación: sin ellos, la segunda revisión los borraba.
   allergies: rosaHealthV1.allergies.map((a) => ({
     id: a.id,
     substance: a.substance,
     category: a.category,
     reaction: a.reaction,
     severity: a.severity,
+    kind: a.kind,
+    criticality: a.criticality,
+    verification: a.verification,
   })),
   conditions: rosaHealthV1.conditions.map((c) => ({
     id: c.id,
@@ -2783,7 +2797,7 @@ await voidOdontogramEntry(
   ANA_ID,
   wearId,
   rosaPatientId,
-  "Registro de prueba anulado en seed",
+  "Anotado en la pieza equivocada: el desgaste es de la 27",
 )
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
@@ -3134,6 +3148,20 @@ await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
   purpose: "personal",
   observations: "Copia firmada que pidió la paciente para su seguro.",
 })
+// Sus dos odontogramas firmados quedan guardados como papel emitido, como al firmarlos en
+// la clínica: el PDF que se ve, se imprime y va en la copia de su historia, con su QR. La
+// dirección del QR y su clave son las de la API; sin ellas no se guarda (quedaría sin QR
+// para siempre) y se guarda la primera vez que se abra.
+if (process.env.WEB_URL && process.env.COOKIE_DOMAIN) {
+  configurePublicLinks({ webURL: process.env.WEB_URL, cookieDomain: process.env.COOKIE_DOMAIN })
+  configureDocumentChecks(secretsKey)
+  configureDocumentLogos(storage)
+  for (const signed of await listOdontogramAssessments(db, ORG_A, rosaPatientId))
+    await signedOdontogramPaper(db, ORG_A, rosaPatientId, signed.id, storage)
+  configurePublicLinks(null)
+  configureDocumentChecks(null)
+  configureDocumentLogos(null)
+}
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Control post-obturación: sin dolor, oclusión estable. Pendiente endodoncia pieza 46.",
 })
@@ -3957,6 +3985,68 @@ await db.transaction(async (tx) => {
   await respondDataRequest(tx, ORG_A, ANA_ID, rosaPatientId, fix.id, {
     resolution: "Se cambió su dirección a Jr. Las Begonias 120, dpto. 302",
   })
+})
+// La copia ya enviada (mesa del 18 nov): Carlos Paredes la pidió en la clínica antes de
+// mudarse, recepción se la envió ayer por WhatsApp con el enlace en el PDF (vence al final del
+// día de ayer + 7) y se bajó entera anoche, después del envío. Su fila dice «Se bajó el…» y
+// ofrece «Enviar de nuevo»; la descarga sale en «Consultas a la historia clínica». El enlace se
+// abre con su DNI, 45678903.
+await withOrgContext(db, ORG_A, async (tx) => {
+  const today = await clinicToday(tx, ORG_A)
+  const carlosPatientId = patientIdByName.get("Carlos Paredes")!
+  const carlosContactId = contactIdByName.get("Carlos Paredes")!
+  const copy = await createDataRequest(tx, ORG_A, ANA_ID, carlosPatientId, {
+    kind: "copia",
+    requesterContactId: carlosContactId,
+    channel: "clinica",
+    requestedOn: addCalendarDays(today, -2),
+    said: "Me voy a vivir a Arequipa y quiero llevar todo, con mis radiografías",
+  })
+  await verifyDataRequest(tx, ORG_A, ANA_ID, carlosPatientId, copy.id, { how: "documento" })
+  await respondDataRequest(tx, ORG_A, ANA_ID, carlosPatientId, copy.id, {
+    resolution: "Se le envió por WhatsApp el PDF de su historia, con el enlace para bajar la copia completa.",
+  })
+  // Se envió ayer: el pedido se respondió entonces y el envío queda en la auditoría, de donde el tope de
+  // descargas toma desde cuándo contar.
+  const sentAt = new Date(Date.now() - 24 * 3_600_000)
+  await tx
+    .update(patientDataRequest)
+    .set({ resolvedAt: sentAt })
+    .where(and(eq(patientDataRequest.organizationId, ORG_A), eq(patientDataRequest.id, copy.id)))
+  await tx.insert(auditEvent).values({
+    organizationId: ORG_A,
+    actorUserId: RECEPCION_ID,
+    action: "patient_record.sent",
+    entity: "patient",
+    entityId: carlosPatientId,
+    metadata: { patientId: carlosPatientId, requestId: copy.id, channel: "whatsapp", again: false },
+    createdAt: sentAt,
+  })
+  // Su enlace propio, el que viajó dentro del PDF (no «Su enlace»), vigente hasta el final del día del envío + 7.
+  // Necesita la dirección pública de la clínica, como el QR de los papeles.
+  if (process.env.WEB_URL && process.env.COOKIE_DOMAIN)
+    configurePublicLinks({ webURL: process.env.WEB_URL, cookieDomain: process.env.COOKIE_DOMAIN })
+  const link = await issueRecordCopyLink(tx, ORG_A, { requestId: copy.id })
+  configurePublicLinks(null)
+  if (link) {
+    // Se envió ayer: vence un día antes que si se enviara hoy.
+    await tx
+      .update(patientDataRequest)
+      .set({ copyUntil: new Date(link.until.getTime() - 24 * 3_600_000) })
+      .where(and(eq(patientDataRequest.organizationId, ORG_A), eq(patientDataRequest.id, copy.id)))
+    console.log(`copia de Carlos Paredes (demo, DNI 45678903): ${link.url}`)
+    // Se bajó entera anoche, con el enlace de ese envío.
+    const startedAt = new Date(Date.now() - 14 * 3_600_000)
+    await tx.insert(patientRecordDownload).values({
+      organizationId: ORG_A,
+      patientId: carlosPatientId,
+      dataRequestId: copy.id,
+      ip: "192.0.2.10",
+      userAgent: "Mozilla/5.0 (Linux; Android 14) demostración",
+      createdAt: startedAt,
+      completedAt: new Date(startedAt.getTime() + 90_000),
+    })
+  }
 })
 // Historia bloqueada (ADR 0080, fase 2): Elena Huamán pidió en la clínica
 // borrar sus datos. Lo no clínico se borró y su historia quedó bloqueada:

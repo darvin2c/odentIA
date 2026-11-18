@@ -673,10 +673,11 @@ it("odontograma firmado: solo en clínicas de Perú, con el perfil, sin trazo ni
     expect(listed.status).toBe(200)
     expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(1)
     const sheet = await app.request(
-      `/patients/${patientId}/odontogram/assessments/${sealedBody.data.id}/print`,
+      `/patients/${patientId}/odontogram/assessments/${sealedBody.data.id}/pdf`,
     )
     expect(sheet.status).toBe(200)
-    expect(await sheet.json()).toMatchObject({ data: { assessment: { id: sealedBody.data.id } } })
+    expect(sheet.headers.get("content-type")).toBe("application/pdf")
+    expect(new TextDecoder().decode((await sheet.arrayBuffer()).slice(0, 5))).toBe("%PDF-")
   } finally {
     await ownerDb.execute(sql`update "org_profile" set "country_code" = 'PE' where "organization_id" = 'org_a'`)
   }
@@ -1135,6 +1136,37 @@ it("pedidos sobre sus datos: Recepción los registra y envía; la historia compl
   expect(zip.headers.get("content-type")).toBe("application/zip")
   const bytes = new Uint8Array(await zip.arrayBuffer())
   expect(new TextDecoder().decode(bytes.slice(0, 2))).toBe("PK")
+})
+
+it("la copia de su historia: el odontólogo ve lo que trae y la descarga; recepción recibe 403 y envía sin abrirla (mesa del 18 nov)", async () => {
+  // Lo que trae, con sus cifras: es clínico como la descarga, aunque no se anote como bajarla.
+  expect((await buildApp("reception").request(`/patients/${patientId}/record/summary`)).status).toBe(403)
+  expect((await buildApp("cashier").request(`/patients/${patientId}/record/summary`)).status).toBe(403)
+  const summary = await buildApp("clinician").request(`/patients/${patientId}/record/summary`)
+  expect(summary.status).toBe(200)
+  expect(((await summary.json()) as { data: Record<string, unknown> }).data).toHaveProperty("approxBytes")
+  expect((await buildApp("clinician").request(`/patients/${patientId}/record`)).status).toBe(200)
+  expect((await buildApp("reception").request(`/patients/${patientId}/record`)).status).toBe(403)
+  // Recepción atiende el pedido de copia y la envía: ve por dónde, sin abrir lo clínico.
+  const detail = (await (await buildApp("reception").request(`/patients/${patientId}`)).json()) as {
+    data: { contacts: Array<{ contactId: string; relationship: string }> }
+  }
+  const self = detail.data.contacts.find((c) => c.relationship === "self")!.contactId
+  const created = await buildApp("reception").request(`/patients/${patientId}/data-requests`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "copia", requesterContactId: self, channel: "whatsapp" }),
+  })
+  const requestId = ((await created.json()) as { data: { id: string } }).data.id
+  expect((await buildApp("reception").request(`/patients/${patientId}/data-requests/${requestId}/send-options`)).status).toBe(200)
+  // El odontólogo no atiende pedidos: no envía.
+  const sendAs = (role: string) =>
+    buildApp(role).request(`/patients/${patientId}/data-requests/${requestId}/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ connectionId: crypto.randomUUID() }),
+    })
+  expect((await sendAs("clinician")).status).toBe(403)
 })
 
 it("borrar sus datos es de Administración y la historia bloqueada no existe para los demás (ADR 0080)", async () => {
