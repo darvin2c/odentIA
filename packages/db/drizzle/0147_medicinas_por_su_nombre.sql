@@ -7,7 +7,9 @@
 -- faltaba, nunca se cambia uno puesto. Los nombres son los de `HABITUAL_MEDICATIONS`
 -- (`@odentia/clinical`), ya sin tildes ni mayúsculas, como los compara `normalizeDrugText`; una
 -- prueba comprueba que esta lista y la del código digan lo mismo. Se reconoce el nombre entero al
--- principio, seguido de lo que no es una letra: «ácido» o «alendro» solos no.
+-- principio, seguido de lo que no es una letra: «ácido» o «alendro» solos no. Una combinación no es
+-- su primera medicina («alendronato + colecalciferol», «Eliquis/aspirina», «Prolia y calcio»): lo que
+-- sigue al nombre se mira con la misma regla que `COMPOUND_REST` del código.
 -- `patient_health_declaration` no se toca: guarda lo que la persona dijo, tal como llegó.
 WITH standard_name(atc, name) AS (
   VALUES
@@ -59,6 +61,7 @@ found AS (
   JOIN standard_name s
     ON left(w.text, length(s.name)) = s.name
    AND substr(w.text, length(s.name) + 1, 1) !~ '[[:alpha:]]'
+   AND substr(w.text, length(s.name) + 1) !~ '\+|^\s*/\s*[[:alpha:]]|^\s*([0-9.,]+\s*(mg|g|mcg|ug|ml|ui|%)?\s*)?\m[ye]\M\s*[[:alpha:]]'
   ORDER BY w.id, length(s.name) DESC
 )
 UPDATE public.patient_medication pm

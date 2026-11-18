@@ -403,6 +403,30 @@ describe("la medicina se reconoce por sus nombres estándar, nunca por un texto 
       expect(medicationClassOf(atcOf(written))).toBeNull()
   })
 
+  // Revisión de las reglas clínicas del 18 nov: una combinación no es la primera de sus medicinas.
+  it("una combinación no se reconoce como una sola medicina; la dosis y la frecuencia, sí", () => {
+    for (const written of [
+      "paracetamol + codeína 500/30",
+      "ibuprofeno/paracetamol",
+      "ibuprofeno / paracetamol 400 mg",
+      "enalapril + hidroclorotiazida",
+      "enalapril 10 mg + hidroclorotiazida 25 mg",
+      "losartán y amlodipino",
+      "losartán 50 mg e hidroclorotiazida",
+      "alendronato + colecalciferol 70 mg/2800 UI",
+      "Eliquis y aspirina",
+    ])
+      expect([written, matchHabitualMedication(written)]).toEqual([written, null])
+    for (const [written, dci] of [
+      ["paracetamol 500/30", "paracetamol"],
+      ["Eliquis 5 mg c/12 h", "apixabán"],
+      ["alendronato 70 mg/semana", "ácido alendrónico"],
+      ["losartán 50 mg mañana y noche", "losartán"],
+      ["amoxicilina + ácido clavulánico 875 mg", "amoxicilina + ácido clavulánico"],
+    ] as const)
+      expect([written, matchHabitualMedication(written)?.entry.dci]).toEqual([written, dci])
+  })
+
   it("se elige de la lista también por la marca, y dice por cuál salió", () => {
     expect(searchHabitualMedications("fosa")).toEqual([
       expect.objectContaining({ dci: "ácido alendrónico", atc: "M05BA04", via: "Fosamax" }),

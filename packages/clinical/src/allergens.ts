@@ -437,11 +437,21 @@ function habitualKeys(entry: HabitualMedicationEntry): string[] {
 }
 
 /**
+ * Lo que sigue al nombre dice que es una combinación, no esa medicina sola: un «+» en cualquier
+ * parte («paracetamol + codeína 500/30», «enalapril 10 mg + hidroclorotiazida»), una «/» pegada
+ * al nombre y seguida de otro («ibuprofeno/paracetamol»; «500/30» y «5 mg/día» no lo son) o «y»/«e»
+ * seguida de otro nombre, justo después del nombre o de su dosis («losartán y amlodipino»,
+ * «losartán 50 mg e hidroclorotiazida»). La migración 0147 usa la misma regla en SQL.
+ */
+const COMPOUND_REST = /\+|^\s*\/\s*\p{L}|^\s*(?:[\d.,]+\s*(?:mg|g|mcg|ug|ml|ui|%)?\s*)?\b[ye]\b\s*\p{L}/u
+
+/**
  * La medicina de la lista que nombra lo escrito y el nombre por el que se reconoció. Se reconoce
  * si lo escrito es uno de sus nombres estándar o empieza por él y sigue lo que no es una letra:
  * la dosis o la frecuencia («alendronato 70 mg semanal», «Eliquis 5mg»). Gana el nombre más largo
  * («amoxicilina + ácido clavulánico 875 mg» no es «amoxicilina»). Nunca un trozo de nombre
- * («alendro», «ácido») ni un nombre dentro de otro texto: no adivina.
+ * («alendro», «ácido»), un nombre dentro de otro texto ni una combinación que la lista no tiene
+ * entera (`COMPOUND_REST`): no adivina.
  */
 export function matchHabitualMedication(
   written: string,
@@ -457,6 +467,7 @@ export function matchHabitualMedication(
     for (let index = 0; index < keys.length; index++) {
       const key = keys[index] ?? ""
       if (!key || !text.startsWith(key) || /\p{L}/u.test(text.charAt(key.length))) continue
+      if (COMPOUND_REST.test(text.slice(key.length))) continue
       if (key.length > bestLength) {
         best = { entry, name: names[index] ?? entry.dci }
         bestLength = key.length

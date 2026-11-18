@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { HABITUAL_MEDICATIONS, medicationClassOf, normalizeDrugText } from "@odentia/clinical"
+import { HABITUAL_MEDICATIONS, matchHabitualMedication, medicationClassOf, normalizeDrugText } from "@odentia/clinical"
 import { patientMedication } from "@odentia/db/schema/clinical"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -46,6 +46,14 @@ it("lo escrito a mano antes recibe el código de su DCI y conserva su texto; lo 
         { name: "raloxifeno 60 mg" },
         { name: "Losartán 50 mg" },
         { name: "Fosamax", atcCode: "M05B" },
+        // Una combinación no es su primera medicina (la misma regla que `matchHabitualMedication`).
+        { name: "Alendronato + colecalciferol 70 mg/2800 UI" },
+        { name: "Eliquis/aspirina" },
+        { name: "Prolia y calcio" },
+        { name: "Warfarina 5 mg e ibuprofeno" },
+        // La dosis y la frecuencia, sí.
+        { name: "alendronato 70 mg/semana" },
+        { name: "Xarelto 20 mg mañana y noche" },
       ].map((row) => ({ organizationId: "org_a", patientId: f.patient.id, ...row })),
     )
     .returning({ id: patientMedication.id })
@@ -73,5 +81,16 @@ it("lo escrito a mano antes recibe el código de su DCI y conserva su texto; lo 
     { name: "raloxifeno 60 mg", genericName: null, atc: null },
     { name: "Losartán 50 mg", genericName: null, atc: null },
     { name: "Fosamax", genericName: null, atc: "M05B" },
+    { name: "Alendronato + colecalciferol 70 mg/2800 UI", genericName: null, atc: null },
+    { name: "Eliquis/aspirina", genericName: null, atc: null },
+    { name: "Prolia y calcio", genericName: null, atc: null },
+    { name: "Warfarina 5 mg e ibuprofeno", genericName: null, atc: null },
+    { name: "alendronato 70 mg/semana", genericName: null, atc: "M05BA04" },
+    { name: "Xarelto 20 mg mañana y noche", genericName: null, atc: "B01AF01" },
   ])
+  // Lo mismo que dice el código para cada texto del grupo (el que ya tenía código no se toca).
+  for (const row of after.filter((row) => row!.name !== "Fosamax")) {
+    const atc = matchHabitualMedication(row!.genericName ?? row!.name)?.entry.atc ?? null
+    expect([row!.name, medicationClassOf(atc) ? atc : null]).toEqual([row!.name, row!.atc])
+  }
 })
