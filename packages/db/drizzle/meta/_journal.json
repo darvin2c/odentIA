@@ -1009,6 +1009,13 @@
       "when": 1794936155072,
       "tag": "0143_firmar_sin_colegiatura_con_motivo",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1794973604661,
+      "tag": "0144_la_conversacion_sabe_su_app",
+      "breakpoints": true
     }
   ]
 }

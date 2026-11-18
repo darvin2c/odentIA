@@ -1985,7 +1985,8 @@ describe("responder un chat con archivos", () => {
       NOW,
     )
     // Messenger no tiene formato: sale sin marcas.
-    expect(ok.body).toBe("Hola Lucía, listo\n\n— Ada · odentIA")
+    // Sin cliente ni app sabida firma el grupo, que vende todas por el mismo número (A1).
+    expect(ok.body).toBe("Hola Lucía, listo\n\n— Ada · Grupo Sallca")
     const instagram = await wrote({
       channel: "instagram",
       address: `igsid-${crypto.randomUUID().slice(0, 8)}`,

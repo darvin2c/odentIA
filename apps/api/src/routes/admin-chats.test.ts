@@ -168,7 +168,8 @@ describe("responder", () => {
       to: "51911000001",
       type: "text",
       biz_opaque_callback_data: data.outreachId,
-      text: { body: "Claro, le cuento\n\n— Ana · odentIA" },
+      // Sin cliente ni app sabida firma el Grupo Sallca, que vende todas por el mismo número (A1).
+      text: { body: "Claro, le cuento\n\n— Ana · Grupo Sallca" },
     })
     expect(await outreach(data.outreachId)).toMatchObject({
       status: "enviado",
@@ -261,6 +262,29 @@ describe("quién ve qué", () => {
     await expectStatus(await call("DELETE", `/${chatId}/not-clinic`, ADMIN), 200)
     const [undone] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
     expect(undone?.notClinicAt).toBeNull()
+  })
+
+  it("la app de una conversación y los anuncios por atar: solo Administración (A1)", async () => {
+    const chatId = await chatWith("whatsapp", "+51911000077")
+    await expectStatus(await call("POST", `/${chatId}/app`, SUPPORT, { product: "optical" }), 403)
+    await expectStatus(await call("POST", `/${chatId}/app`, ADMIN, { product: "otra" }), 400)
+    const response = await call("POST", `/${chatId}/app`, ADMIN, { product: "optical" })
+    await expectStatus(response, 200)
+    expect((await json(response)).data.app).toEqual({ product: "optical", source: "persona" })
+    await expectStatus(await call("GET", "/ads/to-tie", SUPPORT), 403)
+    await expectStatus(await call("GET", "/ads/to-tie", ADMIN), 200)
+    await expectStatus(
+      await call("POST", "/ads/00000000-0000-4000-8000-000000000009/app", SUPPORT, {
+        product: "dental",
+      }),
+      403,
+    )
+    await expectStatus(
+      await call("POST", "/ads/00000000-0000-4000-8000-000000000009/app", ADMIN, {
+        product: "dental",
+      }),
+      404,
+    )
   })
 
   it("la configuración dice qué canales están (solo a Administración)", async () => {

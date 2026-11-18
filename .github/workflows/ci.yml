@@ -360,11 +360,14 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic...
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
       # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
+      # `SALES_WHATSAPP` (variable del repositorio, E.164) es el WhatsApp de ventas del Grupo Sallca:
+      # sin ella la web no muestra el botón; con ella cada web lo abre con su mensaje ya escrito.
       - name: Armar la web de odentIA
         if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
         working-directory: apps/web
         env:
           VITE_BASE_DOMAIN: odentia32.com
+          VITE_SALES_WHATSAPP: ${{ vars.SALES_WHATSAPP }}
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la web de odentIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
@@ -379,6 +382,7 @@ jobs:
         env:
           VITE_BASE_DOMAIN: latidia72.com
           VITE_PRODUCT: medical
+          VITE_SALES_WHATSAPP: ${{ vars.SALES_WHATSAPP }}
           CLOUDFLARE_ENV: latidia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la web de latidIA
@@ -395,6 +399,7 @@ jobs:
         env:
           VITE_BASE_DOMAIN: vistia20.com
           VITE_PRODUCT: optical
+          VITE_SALES_WHATSAPP: ${{ vars.SALES_WHATSAPP }}
           CLOUDFLARE_ENV: vistia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la web de vistIA

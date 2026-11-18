@@ -11,6 +11,7 @@ import {
   chatReplyOutbound,
   getChat,
   issueFields,
+  listAdsToTie,
   markChatNotClinic,
   openChatForContact,
   pauseChatKairos,
@@ -18,6 +19,8 @@ import {
   resumeChatKairos,
   ServiceError,
   type Storage,
+  setAdProduct,
+  setChatProduct,
   skipChatOutreach,
   undoChatNotClinic,
 } from "@odentia/services"
@@ -107,6 +110,11 @@ function parse<T extends z.ZodType>(schema: T, raw: unknown): z.output<T> {
   return parsed.data
 }
 
+/** La app que se elige: el servicio dice si es una de las de hoy. */
+const appBody = z.strictObject({
+  product: z.string().trim().min(1, "Elige una de las apps").max(40),
+})
+
 const bodyOf = (c: Context) => c.req.json().catch(() => null)
 
 /** Una parte de lo que salió, para la respuesta: el texto o un archivo, con su estado. */
@@ -149,9 +157,34 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
     })
   })
 
+  /** Los anuncios de Meta que nadie ató todavía a su app (Hoy, «Anuncios por atar»). */
+  app.get("/ads/to-tie", (c) => adminRun(c, 200, (actor) => owner((tx) => listAdsToTie(tx, actor))))
+
+  /** Ata un anuncio a su app: sus conversaciones sin app la toman. */
+  app.post("/ads/:adId/app", async (c) => {
+    const raw = await bodyOf(c)
+    return adminRun(c, 200, (actor) => {
+      const body = parse(appBody, raw)
+      return owner((tx) => setAdProduct(tx, actor, c.req.param("adId"), body.product, clock()))
+    })
+  })
+
   app.get("/:id", (c) =>
     adminRun(c, 200, (actor) => owner((tx) => getChat(tx, actor, c.req.param("id"), clock()))),
   )
+
+  /** «Cambiar la app» de una conversación sin cliente: devuelve la conversación como queda. */
+  app.post("/:id/app", async (c) => {
+    const raw = await bodyOf(c)
+    return adminRun(c, 200, (actor) => {
+      const body = parse(appBody, raw)
+      const now = clock()
+      return owner(async (tx) => {
+        await setChatProduct(tx, actor, c.req.param("id"), body.product, now)
+        return getChat(tx, actor, c.req.param("id"), now)
+      })
+    })
+  })
 
   app.post("/:id/assign", async (c) => {
     const raw = await bodyOf(c)

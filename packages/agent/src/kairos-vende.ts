@@ -6,7 +6,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages"
 import { tool } from "@langchain/core/tools"
-import { KAIROS_FALLBACK_TEXT } from "@odentia/services"
+import { KAIROS_FALLBACK_TEXT, SALES_APP_NAMES } from "@odentia/services"
 import { z } from "zod"
 import { reportReplyUse, withAiMeter } from "./ai-usage.js"
 import type { KairosChatModel, KairosUse } from "./kairos.js"
@@ -46,11 +46,14 @@ export const KAIROS_SELL_FALLBACK = KAIROS_FALLBACK_TEXT
 /** Lo que se le dice al pasarlo al equipo (descuento, precio especial, algo que no sabe). */
 export const KAIROS_SELL_HANDOFF =
   "Gracias por escribir. Eso lo ve alguien del equipo de Sallca, que te escribirá pronto por aquí."
-/** Lo que se le dice a un paciente: Sallca hace el software, no atiende. */
+/** Lo que se le dice a un paciente: el Grupo Sallca hace el software, no atiende. */
 export const KAIROS_SELL_PATIENT =
-  "Sallca hace el software que usan las clínicas: no atendemos pacientes ni damos citas. Para atenderte, escríbele directamente a tu clínica. Gracias por escribir."
-/** Cómo se presenta la primera vez. */
-export const KAIROS_SELL_INTRO = "Hola, soy Kairós, el asistente de Sallca."
+  "El Grupo Sallca hace el software que usan las clínicas y las ópticas: no atendemos pacientes ni damos citas. Para atenderte, escríbele directamente a tu clínica. Gracias por escribir."
+/**
+ * Cómo se presenta la primera vez: como Grupo Sallca, que vende todas sus apps por el mismo
+ * número (A1 del lienzo «Una sola administración»).
+ */
+export const KAIROS_SELL_INTRO = "Hola, soy Kairós, del Grupo Sallca."
 
 /** Cuántas veces llama al modelo en un turno como mucho. */
 export const KAIROS_SELL_MAX_STEPS = 6
@@ -60,6 +63,19 @@ export const KAIROS_SELL_TIMEOUT_MS = 45_000
 const REPLY_MAX = 900
 
 export type KairosSellChannel = "whatsapp" | "instagram" | "messenger"
+
+/** La app de la que le hablan (`dental`, `medical` u `optical`), como la guarda la conversación. */
+export type KairosSellApp = "dental" | "medical" | "optical"
+
+/** Lo que Kairós puede decir de una app: los hechos de la web y sus precios vigentes. */
+export interface KairosSellProduct {
+  name: string
+  audience: string
+  facts: string[]
+  prices: string[]
+  amounts: Array<{ value: number; currency: string }>
+  percents: number[]
+}
 
 /** Una línea de la conversación, ya filtrada (sin datos de pacientes). */
 export interface KairosSellLine {
@@ -73,14 +89,11 @@ export interface KairosSellInput {
   now: Date
   /** Kairós todavía no le escribió en esta conversación: se presenta. */
   firstReply: boolean
-  product: {
-    name: string
-    audience: string
-    facts: string[]
-    prices: string[]
-    amounts: Array<{ value: number; currency: string }>
-    percents: number[]
-  }
+  /**
+   * La app de la que le hablan, con lo que puede decir de ella. Nulo mientras no se sepa: saluda
+   * como Grupo Sallca, pregunta qué negocio tiene y no nombra ninguna app ni da precios (A1).
+   */
+  product: KairosSellProduct | null
   client: { name: string } | null
   contact: { name: string; hasPhone: boolean; hasEmail: boolean } | null
   /** El nombre de su perfil, tal como lo dio Meta. */
@@ -144,6 +157,11 @@ export interface KairosSellTools {
     ctx: KairosToolContext,
   ): Promise<{ created: boolean; similar: string[] }>
   /**
+   * Anota la app que dijo la persona («tengo una óptica», `elegir_app`) y devuelve lo que puede
+   * decir de ella. Con cliente, o elegida por alguien del equipo, sigue la que ya tenía.
+   */
+  chooseProduct(product: KairosSellApp, ctx: KairosToolContext): Promise<KairosSellProduct>
+  /**
    * Le pregunta a Ariadna, la guía de la Ayuda del producto (`askGuideForSale`), si el sistema
    * hace algo y cómo. Solo lee, sin datos de ninguna clínica.
    */
@@ -193,11 +211,12 @@ export interface KairosSellerDeps {
 /* ---------- Las instrucciones ---------- */
 
 /** Las instrucciones de Kairós cuando vende en los chats (la parte fija, marcada para la caché). */
-export const SELLER_SYSTEM = `Eres Kairós, el asistente de Sallca. Sallca hace odentIA (para clínicas dentales), latidIA (para consultorios médicos) y vistIA (para ópticas). Respondes los mensajes que le llegan a Sallca por WhatsApp, Instagram y Messenger de quienes todavía no usan su app: les cuentas qué es, les das los precios vigentes y les agendas una presentación de 45 minutos por videollamada con alguien del equipo.
+export const SELLER_SYSTEM = `Eres Kairós, el asistente del Grupo Sallca. El Grupo Sallca hace odentIA (para clínicas dentales), latidIA (para consultorios médicos) y vistIA (para ópticas). Respondes los mensajes que le llegan al Grupo Sallca por WhatsApp, Instagram y Messenger de quienes todavía no usan su app: les cuentas qué es, les das los precios vigentes y les agendas una presentación de 45 minutos por videollamada con alguien del equipo.
 
 Siempre:
 - Español de Perú, trato de tú, cálido, claro y profesional. De 1 a 4 frases cortas. Sin emojis, sin listas ni formato.
-- La primera vez que respondes en una conversación, preséntate: «Hola, soy Kairós, el asistente de Sallca.»
+- La primera vez que respondes en una conversación, preséntate: «Hola, soy Kairós, del Grupo Sallca.»
+- Si «App» dice que todavía no sabemos qué negocio tiene: no nombres ninguna app ni des precios. Pregúntale qué negocio tiene (clínica dental, consultorio médico u óptica). Cuando lo diga, usa elegir_app y sigue con lo que te devuelva.
 - Usa solo los hechos del producto, los precios que se te dan y lo que te responda preguntar_a_ariadna. No inventes funciones, plazos, resultados ni promesas.
 - Si pregunta si el sistema hace algo o cómo funciona algo que no está en «Lo que sabes del producto», usa preguntar_a_ariadna antes de responder, con la pregunta de cómo se hace eso en el sistema («¿Cómo firma el paciente el consentimiento en la tablet?»). Con lo que te diga, responde en tono de venta: qué gana su clínica con eso, en 1 o 2 frases, sin los pasos de la pantalla ni nombres de botones. Si Ariadna no lo encuentra, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo.
 - Termina con el paso siguiente claro: qué puede hacer o qué pasa ahora.
@@ -272,7 +291,9 @@ export function sellContext(input: KairosSellInput): string {
     `Canal: ${CHANNEL_WORDS[input.channel]}`,
     `Hoy: ${todayWords(input.now)} (hora de Lima)`,
     `Primera vez que le respondes en esta conversación: ${input.firstReply ? "sí" : "no"}`,
-    `Producto: ${input.product.name} (para ${input.product.audience})`,
+    input.product
+      ? `App: ${input.product.name} (para ${input.product.audience})`
+      : "App: todavía no sabemos qué negocio tiene (clínica dental, consultorio médico u óptica)",
     input.client
       ? `Clínica: ${input.client.name}`
       : "Clínica: todavía no sabemos de qué clínica es (si es un consultorio médico o una óptica, díselo a datos_de_la_clinica con su producto)",
@@ -288,8 +309,7 @@ export function sellContext(input: KairosSellInput): string {
     input.presentation
       ? `Su presentación agendada: ${sellWhenWords(input.presentation.startsAt)} con ${input.presentation.assigneeName}`
       : null,
-    `Lo que sabes del producto:\n${input.product.facts.map((fact) => `- ${fact}`).join("\n")}`,
-    `Precios vigentes:\n${input.product.prices.length ? input.product.prices.map((line) => `- ${line}`).join("\n") : "- (no hay un plan publicado: no des precios)"}`,
+    ...(input.product ? productLines(input.product) : []),
     `Conversación (lo último al final):\n${input.history.map((line) => `[${line.who}] ${line.text}`).join("\n") || "(sin mensajes)"}`,
     input.omitted > 0
       ? `Se quitaron ${input.omitted} frase(s) de sus mensajes que podían tener datos de pacientes: no preguntes por ellas.`
@@ -297,6 +317,14 @@ export function sellContext(input: KairosSellInput): string {
   ]
     .filter((part): part is string => part !== null)
     .join("\n")
+}
+
+/** Lo que sabe de la app y sus precios, como lo lee el modelo (en el contexto o al elegir la app). */
+function productLines(product: KairosSellProduct): string[] {
+  return [
+    `Lo que sabes del producto:\n${product.facts.map((fact) => `- ${fact}`).join("\n")}`,
+    `Precios vigentes:\n${product.prices.length ? product.prices.map((line) => `- ${line}`).join("\n") : "- (no hay un plan publicado: no des precios)"}`,
+  ]
 }
 
 /* ---------- Las herramientas ---------- */
@@ -339,6 +367,11 @@ const TOOL_SCHEMAS = {
       ),
   }),
   es_paciente: z.object({}),
+  elegir_app: z.object({
+    producto: z
+      .enum(["dental", "medical", "optical"])
+      .describe("dental: clínica dental; medical: consultorio médico; optical: óptica"),
+  }),
 }
 
 type ToolName = keyof typeof TOOL_SCHEMAS
@@ -361,6 +394,8 @@ const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Le preguntas a Ariadna, la Ayuda del sistema, si el producto hace algo y cómo. Responde con su guía o dice que no lo encuentra. Solo lee.",
   es_paciente:
     "Quien escribe es un paciente: le explica que Sallca hace el software y no atiende, y lo deja al equipo.",
+  elegir_app:
+    "Anota qué negocio tiene, cuando lo dijo (clínica dental, consultorio médico u óptica). Devuelve lo que sabes de esa app y sus precios.",
 }
 
 interface TurnState {
@@ -376,6 +411,8 @@ interface TurnState {
   signal: AbortSignal
   /** Lo que consultó en el turno, en el orden en que lo hizo (`KAIROS_BASIS`). */
   basis: string[]
+  /** La app con la que sigue el turno: la de la conversación o la que eligió con `elegir_app`. */
+  product: KairosSellProduct | null
 }
 
 /* ---------- En qué se basó (ADR 0196) ---------- */
@@ -559,6 +596,8 @@ async function runTool(
       case "datos_de_la_clinica": {
         // Registra el nombre que dijo, no «consultorio dental» de «quiero info para mi consultorio
         // dental»: un registro así ocupaba la conversación y el nombre de verdad ya no entraba.
+        if (!value.producto && !state.product)
+          return "Todavía no sabes qué negocio tiene: pregúntaselo (clínica dental, consultorio médico u óptica) y registra la clínica con su producto."
         if (!clinicNameSaid(String(value.clinica), input.history))
           return "Ese no es el nombre de su clínica: todavía no lo dijo. Pregúntale cómo se llama su clínica y regístrala cuando lo diga."
         const result = await tools.clinicData(
@@ -580,6 +619,8 @@ async function runTool(
         }
         return "Pasado al equipo."
       case "preguntar_a_ariadna": {
+        if (!state.product)
+          return "Todavía no sabes qué negocio tiene: pregúntaselo antes de hablar de funciones."
         const reply = await tools.askGuide(String(value.pregunta), ctx)
         addBasis(
           state,
@@ -592,6 +633,11 @@ async function runTool(
         if (!reply.found)
           return "Ariadna no lo encuentra en la guía: no digas que el sistema lo hace ni que no lo hace. Ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo."
         return `Ariadna (la guía de la Ayuda):\n${reply.texts.map((text) => `- ${text}`).join("\n")}\nCuéntaselo en tono de venta, en 1 o 2 frases, sin pasos de pantalla ni nombres de botones, y sin agregar nada que no diga.`
+      }
+      case "elegir_app": {
+        const product = await tools.chooseProduct(value.producto as KairosSellApp, ctx)
+        state.product = product
+        return `App: ${product.name} (para ${product.audience}).\n${productLines(product).join("\n")}`
       }
       case "es_paciente":
         state.ended = {
@@ -840,10 +886,12 @@ export function falseClaims(
 
 /** Lo que se le dio en el turno, como fuentes de la comprobación. */
 function evidenceOf(input: KairosSellInput, state: TurnState): Evidence[] {
-  const out: Evidence[] = [
-    { source: "Hechos del producto", text: input.product.facts.join("\n") },
-    { source: "Precios vigentes", text: input.product.prices.join("\n") },
-  ]
+  const out: Evidence[] = state.product
+    ? [
+        { source: "Hechos del producto", text: state.product.facts.join("\n") },
+        { source: "Precios vigentes", text: state.product.prices.join("\n") },
+      ]
+    : []
   const offered = [...state.offered.values()].map((slot) => sellWhenWords(slot.startsAt))
   if (offered.length) out.push({ source: "Horas ofrecidas", text: offered.join("\n") })
   if (input.proposal)
@@ -857,6 +905,14 @@ function evidenceOf(input: KairosSellInput, state: TurnState): Evidence[] {
     })
   if (state.booked) out.push({ source: "Agendada", text: state.booked.confirmation })
   return out
+}
+
+/** Las apps que nombra un texto, por su nombre («latidIA»), sin importar mayúsculas. */
+export function appsNamedIn(text: string): string[] {
+  const low = text.toLowerCase()
+  return Object.values(SALES_APP_NAMES).filter((name) =>
+    new RegExp(`(?<![\\p{L}])${name.toLowerCase()}(?![\\p{L}])`, "u").test(low),
+  )
 }
 
 /** Lo mismo dicho dos veces seguidas (un párrafo o una línea repetidos) sale una vez. */
@@ -973,10 +1029,15 @@ async function runTurn(
       const check = checkSellReply(
         out,
         evidenceOf(input, state),
-        input.product,
+        state.product ?? { amounts: [], percents: [] },
         input.now,
         askedThisTurn(input.history),
       )
+      // Sin saber la app, no nombra ninguna: pregunta qué negocio tiene.
+      if (!state.product)
+        for (const name of appsNamedIn(out))
+          check.unsupported.push(`app: ${name} (todavía no sabes qué negocio tiene)`)
+      if (check.unsupported.length) check.ok = false
       const untrue = check.ok
         ? falseClaims(text, { ...state, presentation: input.presentation })
         : []
@@ -1050,6 +1111,7 @@ export function createKairosSeller(deps: KairosSellerDeps): KairosSeller {
         retried: false,
         signal: controller.signal,
         basis: [],
+        product: input.product,
       }
       // Lo que ya hizo en la base se le confirma aunque el modelo falle o tarde después.
       const failed = (why: string): KairosSellResult => failedTurn(input, state, why)
@@ -1113,6 +1175,12 @@ const CANCEL = /\b(cancelar|cancela|ya no puedo|anular)\b/
 const FEATURE =
   /\b(se puede|puedo|pueden|tiene|tienen|hace|permite|sirve para|funciona|manda|guarda|emite)\b/
 const YES = /^(si|sí|ok|dale|perfecto|confirmo|confirmado|de acuerdo|esa|la primera|me sirve|va)\b/
+/** Qué negocio dice tener, para `elegir_app` del doble. */
+const KIND_WORDS: Array<[RegExp, KairosSellApp]> = [
+  [/\b(optica|opticas|optometr\w*|lentes)\b/, "optical"],
+  [/\b(consultorio medico|medico|medica|policlinico|medicina)\b/, "medical"],
+  [/\b(dental|dentales|dentista|odontolog\w*)\b/, "dental"],
+]
 const CLINIC =
   /(?:^|\s)(?:mi|la|nuestra)\s+(?:cl[ií]nica|consultorio|[oó]ptica)\s+(?:es|se llama)\s+([^.,;!?\n]+)/i
 
@@ -1159,7 +1227,12 @@ export function fakeSellerModel(): KairosChatModel {
     const left = /Dejó este contacto en sus mensajes: (.+)/.exec(context)?.[1] ?? ""
     const waiting = /Hora que espera su sí: /.test(context)
     const booked = /Su presentación agendada: /.test(context)
-    const pricesBlock = /Precios vigentes:\n((?:- .*\n?)+)/.exec(context)?.[1] ?? ""
+    const chosen = done("elegir_app")
+    const pricesBlock =
+      /Precios vigentes:\n((?:- .*\n?)+)/.exec(
+        `${context}\n${String(chosen?.content ?? "")}`,
+      )?.[1] ?? ""
+    const appUnknown = /App: todavía no sabemos/.test(context) && !chosen
     const priceLines = pricesBlock
       .split("\n")
       .map((line) => line.replace(/^- /, "").trim())
@@ -1169,6 +1242,15 @@ export function fakeSellerModel(): KairosChatModel {
       if (DISCOUNT.test(last))
         return call("pasar_al_equipo", { motivo: "Pide un descuento o un precio especial" })
       if (PATIENT.test(last)) return call("es_paciente", {})
+    }
+    if (appUnknown) {
+      const kind = KIND_WORDS.find(([re]) => re.test(all))?.[1]
+      if (kind) return call("elegir_app", { producto: kind })
+      return say(
+        "Te cuento con gusto. Hacemos software para clínicas dentales, consultorios médicos y ópticas. ¿Qué negocio tienes?",
+      )
+    }
+    if (results.length === 0 || results.at(-1)?.name === "elegir_app") {
       if (CANCEL.test(last) && booked) return call("cancelar", { motivo: null })
       if (YES.test(last.trim()) && waiting) return call(booked ? "mover" : "agendar", {})
       if (FEATURE.test(last) && !PRICES.test(last) && !PRESENTATION.test(last))

@@ -1253,6 +1253,131 @@
         "agenda": "no",
         "preguntaGuia": true
       }
+    },
+    {
+      "id": "a1-anuncio-latidia",
+      "lienzo": "A1",
+      "canal": "whatsapp",
+      "cliente": null,
+      "app": "latidia",
+      "nota": "Llegó por un anuncio de latidIA (la conversación ya sabe su app): habla de latidIA desde el primer mensaje, sin preguntar qué negocio tiene.",
+      "turnos": [
+        {
+          "texto": "Hola, quiero más información"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "menciona": ["latidia"]
+      }
+    },
+    {
+      "id": "a1-enlace-vistia",
+      "lienzo": "A1",
+      "canal": "whatsapp",
+      "cliente": null,
+      "app": "vistia",
+      "nota": "Escribió con el mensaje ya escrito del botón de vistIA: habla de vistIA y de sus precios.",
+      "turnos": [
+        {
+          "texto": "Hola, quiero información de vistIA. ¿Cuánto cuesta?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "menciona": ["vistia"]
+      }
+    },
+    {
+      "id": "a1-directo",
+      "lienzo": "A1",
+      "canal": "whatsapp",
+      "cliente": null,
+      "app": null,
+      "nota": "Escribe directo, sin anuncio ni enlace: saluda como Grupo Sallca y pregunta qué negocio tiene, sin nombrar ninguna app ni dar precios.",
+      "turnos": [
+        {
+          "texto": "Hola, buenas tardes. Vi que hacen sistemas"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "menciona": ["grupo sallca", "negocio|clinica dental|optica|consultorio"]
+      }
+    },
+    {
+      "id": "a1-precio-sin-app",
+      "lienzo": "A1",
+      "canal": "instagram",
+      "cliente": null,
+      "app": null,
+      "nota": "Borró el mensaje ya escrito y pregunta el precio: no da precios hasta saber qué negocio tiene; lo pregunta.",
+      "turnos": [
+        {
+          "texto": "cuanto cuesta el sistema?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "menciona": ["clinica dental|optica|consultorio|negocio"]
+      }
+    },
+    {
+      "id": "a1-tengo-una-optica",
+      "lienzo": "A1",
+      "canal": "whatsapp",
+      "cliente": null,
+      "app": null,
+      "previo": [
+        {
+          "quien": "persona",
+          "texto": "Hola, info por favor",
+          "haceMin": 5
+        },
+        {
+          "quien": "kairos",
+          "texto": "Hola, soy Kairós, del Grupo Sallca. Con gusto te cuento. ¿Qué negocio tienes: una clínica dental, un consultorio médico o una óptica?",
+          "haceMin": 4
+        }
+      ],
+      "nota": "Responde que tiene una óptica y pregunta el precio: anota vistIA y responde con los precios de vistIA.",
+      "turnos": [
+        {
+          "texto": "Tengo una óptica en Arequipa, ¿cuánto cuesta?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "app": "vistia",
+        "menciona": ["usd"]
+      }
+    },
+    {
+      "id": "a1-consultorio-agenda",
+      "lienzo": "A1",
+      "canal": "whatsapp",
+      "cliente": null,
+      "app": null,
+      "nota": "Sin app: quiere una presentación y dice que es un consultorio médico con su nombre; anota latidIA, registra el consultorio y agenda.",
+      "turnos": [
+        {
+          "texto": "Hola, quiero agendar una demo"
+        },
+        {
+          "texto": "Es un consultorio médico, se llama Cardio Vida"
+        },
+        {
+          "texto": "Sí, la primera hora que tengas"
+        },
+        {
+          "texto": "Sí, confirmo"
+        }
+      ],
+      "espera": {
+        "app": "latidia",
+        "clienteCreado": "Cardio Vida",
+        "fallbackPermitido": true
+      }
     }
   ]
 }

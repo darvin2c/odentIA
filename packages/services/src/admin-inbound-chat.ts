@@ -42,6 +42,7 @@ import {
   type SaasInboundMedia,
   type SaasOutreachPurpose,
   type SaasOutreachStatus,
+  saasAd,
   saasChat,
   saasClient,
   saasClientContact,
@@ -64,6 +65,7 @@ import {
   channelTextProblem,
   textForChannel,
 } from "./admin-channel-rules.js"
+import { type ChatApp, chatAppOf, learnChatProduct, SALES_GROUP_NAME } from "./admin-chat-app.js"
 import {
   cargaDeleteAfter,
   cleanFilename,
@@ -121,6 +123,16 @@ const inboundSchema = z
     body: z.string().nullish(),
     media: z.array(mediaSchema).max(CHAT_MEDIA_MAX, "Demasiados archivos").default([]),
     receivedAt: z.date("Fecha de llegada no válida"),
+    /** Solo WhatsApp: el anuncio de Meta desde el que escribió (`referral`); se recorta al guardar. */
+    referral: z
+      .strictObject({
+        sourceId: z.string(),
+        sourceType: z.string().nullish(),
+        headline: z.string().nullish(),
+        body: z.string().nullish(),
+        sourceUrl: z.string().nullish(),
+      })
+      .nullish(),
   })
   .refine((value) => value.channel !== "whatsapp" || E164.test(value.address), {
     message: "El número de quien escribe no es E.164",
@@ -428,6 +440,13 @@ export async function ingestInboundChat(
     }
   }
   const arrived = notAfter(input.receivedAt, now)
+  // De qué app le hablan: el anuncio que la abrió o lo que dice el texto (A1; nunca pisa una que ya tiene).
+  await learnChatProduct(
+    tx,
+    chat,
+    { body, referral: input.channel === "whatsapp" ? (input.referral ?? null) : null },
+    now,
+  )
   await tx
     .update(saasChat)
     .set({
@@ -1029,6 +1048,10 @@ export interface ChatDetail {
     phase: ClientPhase
   } | null
   contact: { id: string; name: string; phone: string | null } | null
+  /** De qué app le hablan y cómo se supo; nulo si todavía no se sabe (Kairós pregunta). */
+  app: ChatApp | null
+  /** El anuncio de Meta que la abrió, si llegó por uno. */
+  ad: { id: string; headline: string | null; tied: boolean } | null
   notClinicAt: Date | null
   /** «Lo atiendo yo» (o Kairós la pasó al equipo): mientras tenga fecha, Kairós no responde solo. */
   kairosPausedAt: Date | null
@@ -1084,11 +1107,14 @@ function firstName(name: string | null | undefined): string {
   return (name ?? "").trim().split(/\s+/)[0] || "El equipo"
 }
 
-/** «odentIA», «latidIA» o «vistIA» por el producto del cliente; sin cliente, la marca base. */
-function chatBrand(client: { product: string } | null): string {
-  return client && isClinicalProduct(client.product)
-    ? mailBrandName(productWords(client.product).brand)
-    : mailBrandName()
+/**
+ * «odentIA», «latidIA» o «vistIA» por la app de la conversación (la de su cliente o la que se
+ * supo); sin saberla, el Grupo Sallca, que vende todas por el mismo número (A1).
+ */
+function chatBrand(app: { product: string } | null): string {
+  return app && isClinicalProduct(app.product)
+    ? mailBrandName(productWords(app.product).brand)
+    : SALES_GROUP_NAME
 }
 
 /** «— Ana · odentIA»: la firma de una respuesta en una conversación. */
@@ -1099,6 +1125,16 @@ export function chatSignature(name: string | null | undefined, client: { product
 /** «— Kairós · odentIA»: lo que escribe Kairós solo lleva su nombre, no el de una persona. */
 export function kairosChatSignature(client: { product: string } | null) {
   return `— Kairós · ${chatBrand(client)}`
+}
+
+async function chatAdOf(tx: Db, adId: string | null): Promise<ChatDetail["ad"]> {
+  if (!adId) return null
+  const [ad] = await tx
+    .select({ id: saasAd.id, headline: saasAd.headline, product: saasAd.product })
+    .from(saasAd)
+    .where(eq(saasAd.id, adId))
+    .limit(1)
+  return ad ? { id: ad.id, headline: ad.headline, tied: ad.product !== null } : null
 }
 
 async function userName(tx: Db, userId: string): Promise<string | null> {
@@ -1299,6 +1335,8 @@ export async function getChat(
         }
       : null,
     contact: contact ?? null,
+    app: chatAppOf(chat, client),
+    ad: await chatAdOf(tx, chat.adId),
     notClinicAt: chat.notClinicAt,
     kairosPausedAt: chat.kairosPausedAt,
     handledByKairos: kairosAvailable && !chat.kairosPausedAt,
@@ -1307,7 +1345,7 @@ export async function getChat(
     kairosHandover,
     lastInboundAt: chat.lastInboundAt,
     ...chatFreeWindow(chat.lastInboundAt, now),
-    replySignature: chatSignature(await userName(tx, actor.userId), client),
+    replySignature: chatSignature(await userName(tx, actor.userId), chatAppOf(chat, client)),
     suggestion:
       !client && chat.channel === "whatsapp" ? await chatSuggestion(tx, chat.address) : null,
     entries,
@@ -1494,7 +1532,7 @@ export async function prepareChatReply(
     template = input.template as ChatTemplate
   }
   const name = await userName(tx, actor.userId)
-  const signature = chatSignature(name, client)
+  const signature = chatSignature(name, chatAppOf(chat, client))
   let body: string | null = null
   let templateParams: string[] = []
   if (template) {
@@ -1672,7 +1710,7 @@ export async function prepareKairosChatReply(
   const template = input.template ?? null
   if (template && channel !== "whatsapp")
     throw invalidField("template", "Solo WhatsApp retoma una conversación con una plantilla")
-  const signature = kairosChatSignature(client)
+  const signature = kairosChatSignature(chatAppOf(chat, client))
   let body: string
   if (template) {
     body = trimTo(input.body, OUTREACH_BODY_MAX) ?? `Plantilla «${template}»`

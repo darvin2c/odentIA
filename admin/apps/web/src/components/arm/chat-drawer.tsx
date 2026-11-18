@@ -40,6 +40,7 @@ import { Paperclip } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
+import { ChatAppChange } from "./chat-app"
 import { supportTime } from "../../lib/support-words"
 import {
   assignChatTo,
@@ -445,6 +446,7 @@ function Conversation({
             · {CLIENT_PHASE_WORDS[chat.client.phase as ClientPhase]}
           </span>
         ) : null}
+        <ChatAppChange chatId={chat.id} app={chat.app} hasClient={Boolean(chat.client)} canChange={isAdmin} />
         {chat.attendedBy && !kairos ? (
           <span className="text-muted-foreground">
             {attendedByMe

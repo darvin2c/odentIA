@@ -13,6 +13,19 @@ export const contactEmail = `hola@${domain}`
 export const privacyEmail = `privacidad@${domain}`
 /** Donde la clínica envía sus datos para la carga inicial (carta de bienvenida, `clinic-import-letter.ts`). */
 export const supportEmail = `soporte@${domain}`
+/**
+ * El WhatsApp de ventas del Grupo Sallca, uno para todas las apps (`VITE_SALES_WHATSAPP`, E.164).
+ * Sin él, la web no muestra el botón. Abre el chat con el mensaje ya escrito de esta web: por ese
+ * texto la administración sabe de qué app le hablan. Es el mismo de `salesWhatsAppText` de los
+ * servicios («Hola, quiero información de latidIA»): si cambia uno, cambia el otro (lo vigila
+ * `admin-chat-app.test.ts` de los servicios).
+ */
+export function salesWhatsAppHref(phone: string | undefined, name: string): string | null {
+  const digits = (phone ?? "").trim()
+  if (!/^\+[1-9][0-9]{6,14}$/.test(digits)) return null
+  return `https://wa.me/${digits.slice(1)}?text=${encodeURIComponent(`Hola, quiero información de ${name}`)}`
+}
+export const salesWhatsApp = salesWhatsAppHref(import.meta.env.VITE_SALES_WHATSAPP, WORDS.name)
 /** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
 export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
 

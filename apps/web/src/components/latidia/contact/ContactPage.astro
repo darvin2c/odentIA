@@ -14,7 +14,7 @@ import { TITULAR } from "../../../lib/legal/types"
 import { PAGES } from "../../../lib/pages-data"
 import { businessDays, giftOf, shownPlan } from "../../../lib/pricing"
 import { ofProduct, WORDS } from "../../../lib/product"
-import { contactEmail, ctaOf } from "../../../lib/site"
+import { contactEmail, ctaOf, salesWhatsApp } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
 
@@ -147,6 +147,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
             <p class="cp-path-t">Escríbenos y te contamos si te sirve.</p>
             <p class="cp-path-x">Cuéntanos cuántos {WORDS.clinicians} y sedes tienen, y por dónde te escriben tus {WORDS.patients}.</p>
             <a class="btn btn-g" href={mailto}>{contactEmail}</a>
+            {salesWhatsApp ? (
+              <a class="btn btn-g" href={salesWhatsApp} target="_blank" rel="noopener">Escribir por WhatsApp</a>
+            ) : null}
           </div>
         </div>
         <div class="cp-next rise d3">

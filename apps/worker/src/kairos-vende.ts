@@ -24,10 +24,12 @@ import {
   kairosChatBlocked,
   kairosChatContext,
   kairosChatsToAnswer,
+  kairosChooseChatProduct,
   kairosClinicData,
   kairosMove,
   kairosPresentationNotices,
   kairosPropose,
+  kairosSalesFacts,
   kairosSaveContact,
   kairosSlots,
   kairosTurnCap,
@@ -124,8 +126,10 @@ export function toolsFor(
   deps: KairosSellsDeps,
   chatId: string,
   now: Date,
-  product: ClinicalProduct = "dental",
+  initial: ClinicalProduct | null = null,
 ): KairosSellTools {
+  // La app con la que sigue el turno: la de la conversación o la que anotó con `elegir_app` (A1).
+  let product = initial
   const read = <T>(fn: (tx: Db) => Promise<T>, ctx: KairosToolContext) => {
     if (ctx.signal.aborted) throw stopped()
     return deps.ownerDb.transaction((tx) => fn(tx as Db))
@@ -153,10 +157,22 @@ export function toolsFor(
       bookedOrThrow(await write((tx) => kairosMove(tx, chatId, proposalId, now), ctx)),
     cancel: (reason, ctx) => write((tx) => kairosCancel(tx, chatId, reason, now), ctx),
     saveContact: (input, ctx) => write((tx) => kairosSaveContact(tx, chatId, input, now), ctx),
-    clinicData: (input, ctx) => write((tx) => kairosClinicData(tx, chatId, input, now), ctx),
+    clinicData: (input, ctx) =>
+      write(
+        (tx) => kairosClinicData(tx, chatId, { ...input, product: input.product ?? product }, now),
+        ctx,
+      ),
+    chooseProduct: async (chosen, ctx) => {
+      const facts = await write(async (tx) => {
+        const app = await kairosChooseChatProduct(tx, chatId, chosen, now)
+        return kairosSalesFacts(tx, app.product)
+      }, ctx)
+      product = facts.product
+      return facts
+    },
     askGuide: async (question, ctx) => {
       if (ctx.signal.aborted) throw stopped()
-      if (!deps.guide) return { found: false }
+      if (!deps.guide || !product) return { found: false }
       const answer = await deps.guide.ask(product, question)
       if (answer.found) return { found: true, texts: answer.texts }
       return answer.close?.length ? { found: false, close: answer.close } : { found: false }
@@ -214,7 +230,7 @@ async function answerOne(
             : null,
           presentation: context.presentation,
         },
-        toolsFor(deps, target.chatId, now, context.sales.product),
+        toolsFor(deps, target.chatId, now, context.sales?.product ?? null),
       )
     } catch (error) {
       result = {

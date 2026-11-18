@@ -122,3 +122,45 @@ export function ProductFilter({
     </ToggleGroup>
   )
 }
+
+/** Cómo se supo de qué app es una conversación (lo dice el servidor, `saas_chat.product_source`). */
+export const CHAT_APP_SOURCES = ["anuncio", "enlace", "lo_dijo", "persona", "cliente"] as const
+export type ChatAppSource = (typeof CHAT_APP_SOURCES)[number]
+
+const CHAT_APP_SOURCE_WORDS: Record<ChatAppSource, string> = {
+  anuncio: "por el anuncio",
+  enlace: "por el enlace",
+  lo_dijo: "lo dijo",
+  persona: "la eligió el equipo",
+  cliente: "de su ficha",
+}
+
+/** La app de una conversación como la manda la API: nula si todavía no se sabe. */
+export const chatAppSchema = z
+  .object({
+    product: z.string(),
+    source: z
+      .string()
+      .transform((value): ChatAppSource =>
+        (CHAT_APP_SOURCES as readonly string[]).includes(value) ? (value as ChatAppSource) : "persona",
+      ),
+  })
+  .nullable()
+  .default(null)
+export type ChatApp = z.infer<typeof chatAppSchema>
+
+/**
+ * «● latidIA · por el anuncio», o «App por saber» mientras no se sepa: el Grupo Sallca vende todas
+ * sus apps por el mismo número y la conversación dice de cuál le hablan. Con cliente no repite
+ * «de su ficha».
+ */
+export function ChatAppMark({ app, className }: { app: ChatApp; className?: string }) {
+  if (!app || !isClinicalProduct(app.product))
+    return <span className={cn("text-xs font-semibold text-muted-foreground", className)}>App por saber</span>
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-xs", className)}>
+      <ProductMark product={app.product} />
+      {app.source === "cliente" ? null : <span className="text-muted-foreground">· {CHAT_APP_SOURCE_WORDS[app.source]}</span>}
+    </span>
+  )
+}
