@@ -169,6 +169,24 @@ export function dayWithRoomFrom(
   return { kind: "stay" }
 }
 
+/**
+ * El paso desde el día pedido sin hueco: solo se busca otro día si ese está lleno o tiene una
+ * ausencia (quien se mira atiende ese día); si no atiende ese día, se queda en él y se dice que no
+ * atiende (e2e de la sesión 2: sin horario en la sede, saltaba ocho semanas y dejaba esas semanas
+ * leídas sin su horario). Desde ahí, como `dayWithRoomFrom`.
+ */
+export function requestedDayStep(input: {
+  date: string
+  requested: string | undefined
+  week: readonly string[]
+  hasRoom: (day: string) => boolean
+  worksOn: (day: string) => boolean
+  skipped: number
+}): { kind: "day" | "nextWeek"; day: string } | { kind: "stay" } {
+  if (input.date === input.requested && !input.worksOn(input.date)) return { kind: "stay" }
+  return dayWithRoomFrom(input.date, input.week, input.hasRoom, input.skipped)
+}
+
 export function useWhen(input: WhenInput): WhenState {
   const { branchId, timeZone, today, toneOf, duration, moving } = input
   const [professionalFilter, setProfessionalFilter] = React.useState<string | null>(
@@ -345,7 +363,16 @@ export function useWhen(input: WhenInput): WhenState {
       // Un día pedido («Reservar la sesión 2» desde mañana) que cae en vacaciones o está lleno: se
       // abre en el primer día con hueco desde él, en esta semana o en las siguientes (verificación
       // del 18 nov, 11). Hasta ocho semanas; después, el día pedido.
-      const step = dayWithRoomFrom(date, week, (day) => !!firstFit(day, lanes, duration), skippedWeeks.current)
+      const ids = new Set(lanes.map((item) => item.id))
+      const step = requestedDayStep({
+        date,
+        requested,
+        week,
+        hasRoom: (day) => !!firstFit(day, lanes, duration),
+        worksOn: (day) =>
+          open.some((item) => ids.has(item.columnId) && dayRangeOf(item.start, item.end, day, timeZone) !== null),
+        skipped: skippedWeeks.current,
+      })
       if (step.kind !== "stay") {
         if (step.kind === "nextWeek") skippedWeeks.current += 1
         setDate(step.day)
@@ -359,7 +386,7 @@ export function useWhen(input: WhenInput): WhenState {
     }
     autoDate.current = false
     setValue(fit)
-  }, [availability, placeholder, free, date, week, lanes, duration, firstFit, timeZone, today, requested])
+  }, [availability, placeholder, free, open, date, week, lanes, duration, firstFit, timeZone, today, requested])
 
   const choose = (next: ScheduleRangeValue) => {
     touched.current = true
@@ -439,6 +466,8 @@ export function useWhen(input: WhenInput): WhenState {
     choose,
     goToDate: (next) => {
       touched.current = false
+      // Lo elige la persona: ya no se busca solo otro día con hueco.
+      autoDate.current = false
       setDate(next)
     },
     pickProfessional: (next) => {
