@@ -48,6 +48,11 @@ export interface ConsentRiskProfile {
   words?: string
 }
 
+/** «después de» y lo que se nombra, con su contracción: «del tratamiento», «de la extracción». */
+export function afterWords(words: string): string {
+  return /^el /i.test(words) ? `del ${words.slice(3)}` : `de ${words}`
+}
+
 /** El título de la sección en la hoja: igual en la tablet, el enlace y el PDF. */
 export const CONSENT_PERSONAL_RISKS_LABEL = "Riesgos propios de su caso"
 /** Como mucho, estas frases y de este largo cada una. */
@@ -148,7 +153,8 @@ export function consentPersonalRisks(input: {
   const { profile, health, today } = input
   const habitual = input.habitual ?? HABITUAL_MEDICATIONS
   const allergens = input.allergens ?? ALLERGENS
-  const after = profile.words ?? "el procedimiento"
+  // «después del tratamiento de las encías», no «después de el…» (verificación del 18 nov): llega al PDF firmado.
+  const after = afterWords(profile.words ?? "el procedimiento")
   const lines: string[] = []
   const anticoagulants: Array<string | null> = []
   const antiplatelets: Array<string | null> = []
@@ -170,11 +176,11 @@ export function consentPersonalRisks(input: {
   const known = (names: Array<string | null>) => names.filter((name): name is string => !!name)
   if (profile.wound && anticoagulants.length > 0)
     lines.push(
-      `Toma un anticoagulante${named(known(anticoagulants))}: puede sangrar más tiempo después de ${after}.${vitaminK ? " Se revisará su INR del día." : ""}`,
+      `Toma un anticoagulante${named(known(anticoagulants))}: puede sangrar más tiempo después ${after}.${vitaminK ? " Se revisará su INR del día." : ""}`,
     )
   if (profile.wound && antiplatelets.length > 0)
     lines.push(
-      `Toma un antiagregante${named(known(antiplatelets))}: puede sangrar un poco más después de ${after}; no debe dejarlo sin indicación de su médico.`,
+      `Toma un antiagregante${named(known(antiplatelets))}: puede sangrar un poco más después ${after}; no debe dejarlo sin indicación de su médico.`,
     )
   if (profile.jawBone && bones.now.length + bones.before.length > 0) {
     const verb = bones.now.length > 0 ? "Toma" : "Tomó"

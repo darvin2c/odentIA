@@ -117,3 +117,15 @@ describe("lo escrito en el campo, una frase por línea", () => {
     expect(() => parsePersonalRisks("x".repeat(501))).toThrow("500 caracteres")
   })
 })
+
+// Verificación del 18 nov (7): «después de el tratamiento de las encías» llegaba al PDF firmado.
+it("«después del tratamiento», con su contracción; «de la extracción», sin ella", () => {
+  const anticoagulated = { medications: [{ name: "Warfarina", atcCode: "B01AA03" }] }
+  expect(risks("periodoncia", anticoagulated)[0]).toContain("después del tratamiento de las encías.")
+  expect(risks("exodoncia", anticoagulated)[0]).toContain("después de la extracción.")
+  // Sin nombre propio en la plantilla, «después del procedimiento».
+  expect(
+    consentPersonalRisks({ profile: { wound: true }, health: { ...none, ...anticoagulated }, today })[0],
+  ).toContain("después del procedimiento.")
+  expect(risks("periodoncia", anticoagulated).join(" ")).not.toMatch(/\bde el\b|\ba el\b/)
+})

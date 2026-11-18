@@ -33,6 +33,11 @@ function usesWords(uses: readonly string[]): string {
   return [listWords(procedures), listWords(anesthetics)].filter(Boolean).join(" · ")
 }
 
+/** Un nombre en medio de una frase: la primera letra en minúscula si no es una sigla. */
+function midSentence(name: string): string {
+  return /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
+}
+
 const GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
   allergies: "sus alergias",
   conditions: "sus enfermedades",
@@ -51,13 +56,15 @@ export function anesthesiaHealthWords(
 ): string {
   const parts: string[] = []
   if (health) {
-    const allergies = health.allergies.filter((row) => row.isActive).map((row) => row.substance)
+    const allergies = health.allergies.filter((row) => row.isActive).map((row) => midSentence(row.substance))
+    // En medio de la frase, en minúscula: «Tiene hipertensión arterial», no «Tiene Hipertensión…»
+    // (verificación del 18 nov). Una sigla («HTA», «VIH») queda como está.
     const conditions = health.conditions
       .filter((row) => row.status === "activa")
-      .map((row) => row.name)
+      .map((row) => midSentence(row.name))
     const medications = health.medications
       .filter((row) => isCurrentMedication(row, today))
-      .map((row) => [row.genericName ?? row.name, row.dose].filter(Boolean).join(" "))
+      .map((row) => midSentence([row.genericName ?? row.name, row.dose].filter(Boolean).join(" ")))
     const denied = [
       allergies.length === 0 && health.reviewStatus.allergies === "none" ? "alergias" : "",
       conditions.length === 0 && health.reviewStatus.conditions === "none" ? "enfermedades" : "",

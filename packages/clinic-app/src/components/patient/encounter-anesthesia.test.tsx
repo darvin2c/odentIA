@@ -221,7 +221,8 @@ it("dice lo que tiene, lo que toma y lo que dijo del corazón", () => {
     "2026-11-16",
   )
   expect(words).toBe(
-    "Alergia a Penicilina. Tiene Hipertensión. Toma Enalapril 10 mg. Dijo que tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis.",
+    // En medio de la frase, en minúscula (verificación del 18 nov: «Tiene Hipertensión…»).
+    "Alergia a penicilina. Tiene hipertensión. Toma enalapril 10 mg. Dijo que tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis.",
   )
 })
 
