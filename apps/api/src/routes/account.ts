@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import {
   closeMyAccount,
+  deliverAccountEvents,
   forgetTrustedBrowsers,
   getMyTwoFactor,
   leaveOrganization,
@@ -14,7 +15,18 @@ import type { AppDeps } from "../app.js"
 import { errorBody } from "../lib/error.js"
 import { runService, validationError } from "./helpers.js"
 
-export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb"> {}
+export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {}
+
+/**
+ * Tras cerrar una cuenta, el aviso a las apps que son otro sistema sale en el momento
+ * (ADR 0201), sin esperar la respuesta: si falla, lo reintenta el trabajador.
+ */
+export function sendAccountEventsNow(deps: Pick<AppDeps, "ownerDb" | "accountEventSenders">): void {
+  if (!deps.accountEventSenders?.length) return
+  void deliverAccountEvents(deps.ownerDb, deps.accountEventSenders).catch((error: unknown) =>
+    console.error("api: aviso de la cuenta a las apps", error),
+  )
+}
 
 const closeInput = z.object({
   confirm: z.literal(true, { message: "Confirma el cierre de tu cuenta" }),
@@ -87,7 +99,10 @@ export function createAccountRoute(deps: AccountDeps) {
     const parsed = closeInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      owner((tx) => closeMyAccount(tx, who.userId)).then(() => ({ ok: true })),
+      owner((tx) => closeMyAccount(tx, who.userId)).then(() => {
+        sendAccountEventsNow(deps)
+        return { ok: true }
+      }),
     )
   })
 

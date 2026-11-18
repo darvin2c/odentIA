@@ -1,5 +1,6 @@
+import type { AccountApp } from "@odentia/auth/apps"
 import type { Db } from "@odentia/db"
-import { accountReminderTemplate, type MailTemplate } from "@odentia/mail"
+import { accountReminderTemplate, type MailBrand, type MailTemplate } from "@odentia/mail"
 import {
   claimLifecycleReminder,
   cleanupUnverifiedAccount,
@@ -14,12 +15,23 @@ export interface AccountLifecycleMailer {
   sendReminder(email: string, mail: MailTemplate): Promise<void>
 }
 
+/** Lo de una app para los avisos de la cuenta a quien se registró en ella (ADR 0201). */
+export interface LifecycleApp {
+  /** La marca de sus correos. */
+  brand: MailBrand
+  /** Dónde se crea la clínica, en su panel: el botón del aviso a una cuenta verificada sin clínica. */
+  onboardingUrl: string
+  /** Enlace nuevo de verificación de Better Auth, en su dominio: el botón del recordatorio a una cuenta sin verificar. */
+  verificationUrl: (email: string) => Promise<string>
+}
+
 export interface AccountLifecycleOptions {
   notify: AccountLifecycleMailer
-  /** Dónde se crea la clínica: el botón del aviso a una cuenta verificada sin clínica. */
-  onboardingUrl: string
-  /** Enlace nuevo de verificación de Better Auth: el botón del recordatorio a una cuenta sin verificar. */
-  verificationUrl: (email: string) => Promise<string>
+  /**
+   * Cada app con sus avisos. La que no está aquí (gestorIA, mientras no tenga la marca de
+   * sus correos) no recibe ninguno de la cuenta; la limpieza a los 30 días sigue igual.
+   */
+  apps: Partial<Record<AccountApp, LifecycleApp>>
   /** Días que sirve ese enlace; el correo lo dice. */
   verificationDays: number
   now?: Date
@@ -45,6 +57,8 @@ export interface AccountLifecycleResult {
  * - Verificadas sin clínica: aviso distinto de onboarding (cómo crear o
  *   aceptar su clínica); jamás se borran ni reciben ventas: sin llamadas
  *   comerciales ni marketing supuesto.
+ * - Cada aviso sale con la marca, el panel y el dominio de la app donde la
+ *   persona se registró (ADR 0201); el de crear clínica, solo a las de clínicas.
  */
 export async function runAccountLifecycleTick(
   ownerDb: Db,
@@ -65,9 +79,11 @@ export async function runAccountLifecycleTick(
     return result
   }
   for (const candidate of candidates.reminders) {
+    const app = opts.apps[candidate.app]
+    if (!app) continue
     try {
       // Antes de reclamar: si el enlace no se puede armar, el recordatorio queda para la próxima vuelta.
-      const url = await opts.verificationUrl(candidate.email)
+      const url = await app.verificationUrl(candidate.email)
       const claimed = await ownerDb.transaction((tx) =>
         claimLifecycleReminder(tx, candidate.userId),
       )
@@ -75,7 +91,7 @@ export async function runAccountLifecycleTick(
       try {
         await opts.notify.sendReminder(
           candidate.email,
-          accountReminderTemplate({ kind: "sin_verificar", url, days: opts.verificationDays }),
+          accountReminderTemplate({ kind: "sin_verificar", url, days: opts.verificationDays, brand: app.brand }),
         )
       } catch (error) {
         await ownerDb.transaction((tx) => markLifecycleReminderUncertain(tx, candidate.userId))
@@ -89,6 +105,8 @@ export async function runAccountLifecycleTick(
     }
   }
   for (const candidate of candidates.nudges) {
+    const app = opts.apps[candidate.app]
+    if (!app) continue
     try {
       const claimed = await ownerDb.transaction((tx) =>
         claimLifecycleReminder(tx, candidate.userId, "onboarding_sin_clinica"),
@@ -97,7 +115,7 @@ export async function runAccountLifecycleTick(
       try {
         await opts.notify.sendReminder(
           candidate.email,
-          accountReminderTemplate({ kind: "sin_clinica", url: opts.onboardingUrl }),
+          accountReminderTemplate({ kind: "sin_clinica", url: app.onboardingUrl, brand: app.brand }),
         )
       } catch (error) {
         await ownerDb.transaction((tx) => markLifecycleReminderUncertain(tx, candidate.userId))

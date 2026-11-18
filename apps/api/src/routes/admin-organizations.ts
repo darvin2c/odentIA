@@ -40,12 +40,13 @@ import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import type { AppDeps } from "../app.js"
+import { sendAccountEventsNow } from "./account.js"
 import { adminContextOf, forbidUnlessManager } from "../lib/admin-context.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 export interface AdminOrganizationsDeps
-  extends Pick<AppDeps, "auth" | "ownerDb" | "mailer" | "webURL"> {
+  extends Pick<AppDeps, "auth" | "ownerDb" | "mailer" | "webURL" | "accountEventSenders"> {
   /** El panel de cada producto: la invitación se acepta en el dominio de la clínica. */
   panelUrlOf?: (product: ClinicalProduct) => string
   getBillingSummary?: OrganizationBillingLoaders["getBillingSummary"]
@@ -384,7 +385,10 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     return runService(c, 200, () =>
       owner((tx) =>
         closeAccountByAdmin(tx, actor, { userId: c.req.param("id"), reason: parsed.data.reason }),
-      ).then(() => ({ ok: true })),
+      ).then(() => {
+        sendAccountEventsNow(deps)
+        return { ok: true }
+      }),
     )
   })
 

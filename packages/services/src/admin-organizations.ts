@@ -1,6 +1,14 @@
 import { BASE_PRODUCT, CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { randomUUID } from "node:crypto"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
+import {
+  ACCOUNT_APP_INFO,
+  ACCOUNT_APPS,
+  type AccountApp,
+  appOfProduct,
+  BASE_ACCOUNT_APP,
+  isAccountApp,
+} from "@odentia/auth/apps"
 import type { Db } from "@odentia/db"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import {
@@ -14,8 +22,9 @@ import { channelConnection, contact, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, notExists, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { recordAccountClosed } from "./account-events.js"
 import { clientReadyForAccount, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -355,7 +364,16 @@ export interface LifecycleCandidate {
   userId: string
   email: string
   createdAt: Date
+  /** La app donde se registró (ADR 0201): sus avisos son de esa app. Sin anotar, la base. */
+  app: AccountApp
 }
+
+const appOfSignup = (value: string | null): AccountApp => (isAccountApp(value) ? value : BASE_ACCOUNT_APP)
+
+/** Las apps de clínicas: el aviso «crea tu clínica» es solo de ellas. */
+const CLINIC_APPS: readonly AccountApp[] = CLINICAL_PRODUCTS.map(appOfProduct)
+/** Las apps con correos de su marca: el recordatorio de verificar sale solo con la suya. */
+const MAILED_APPS: readonly AccountApp[] = ACCOUNT_APPS.filter((app) => ACCOUNT_APP_INFO[app].mailBrand)
 
 // ---------------------------------------------------------------------------
 // Validación de borde (zod) y guards de rol interno
@@ -1350,6 +1368,8 @@ export async function closeAccountByAdmin(
         unblockedAt: null,
       },
     })
+  // Las apps que son otro sistema se enteran por aviso (ADR 0201).
+  await recordAccountClosed(tx, args.userId)
   await writeAdminAudit(
     tx,
     staff,
@@ -1592,6 +1612,7 @@ export async function closeMyAccount(tx: Db, userId: string): Promise<void> {
       metadata: { role: m.role },
     })
   }
+  await recordAccountClosed(tx, userId)
   await writeAdminAudit(
     tx,
     null,
@@ -1912,9 +1933,16 @@ export async function findLifecycleCandidates(
   const cleanupCutoff = new Date(now.getTime() - cleanupDays * 24 * 60 * 60 * 1000)
 
   const stale = await tx
-    .select({ id: user.id, email: user.email, createdAt: user.createdAt })
+    .select({ id: user.id, email: user.email, createdAt: user.createdAt, signupApp: user.signupApp })
     .from(user)
-    .where(and(eq(user.emailVerified, false), lt(user.createdAt, reminderCutoff)))
+    .where(
+      and(
+        eq(user.emailVerified, false),
+        lt(user.createdAt, reminderCutoff),
+        // La de una app sin correos de su marca no ocupa el lugar de otra (ADR 0201).
+        or(isNull(user.signupApp), inArray(user.signupApp, [...MAILED_APPS])),
+      ),
+    )
     .orderBy(user.createdAt)
     .limit(limit * 2)
   const reminders: LifecycleCandidate[] = []
@@ -1932,6 +1960,7 @@ export async function findLifecycleCandidates(
           userId: candidate.id,
           email: candidate.email,
           createdAt: candidate.createdAt,
+          app: appOfSignup(candidate.signupApp),
         })
       }
     } else {
@@ -1939,40 +1968,56 @@ export async function findLifecycleCandidates(
         userId: candidate.id,
         email: candidate.email,
         createdAt: candidate.createdAt,
+        app: appOfSignup(candidate.signupApp),
       })
     }
     if (reminders.length + cleanups.length >= limit) break
   }
-  const nudges: LifecycleCandidate[] = []
+  // Verificadas sin clínica, sin invitación pendiente y sin aviso previo, registradas en una
+  // app de clínicas: el aviso de otra app lo manda esa app (ADR 0201). Todo en la consulta,
+  // para que quien ya tiene clínica no ocupe el lugar de quien espera el aviso. Solo quien
+  // se registró hace menos de 30 días: es un aviso de bienvenida, y quien lleva más tiempo
+  // sin clínica pudo haberla dejado (un ex empleado). Nunca a una cuenta bloqueada o
+  // cerrada, ni al personal de la administración.
   const settled = await tx
-    .select({ id: user.id, email: user.email, createdAt: user.createdAt })
+    .select({ id: user.id, email: user.email, createdAt: user.createdAt, signupApp: user.signupApp })
     .from(user)
-    .where(and(eq(user.emailVerified, true), lt(user.createdAt, reminderCutoff)))
+    .where(
+      and(
+        eq(user.emailVerified, true),
+        lt(user.createdAt, reminderCutoff),
+        gte(user.createdAt, cleanupCutoff),
+        or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS])),
+        notExists(
+          tx
+            .select({ one: sql`1` })
+            .from(userGlobalBlock)
+            .where(and(eq(userGlobalBlock.userId, user.id), eq(userGlobalBlock.active, true))),
+        ),
+        notExists(tx.select({ one: sql`1` }).from(adminStaff).where(eq(adminStaff.userId, user.id))),
+        notExists(tx.select({ one: sql`1` }).from(member).where(eq(member.userId, user.id))),
+        notExists(
+          tx
+            .select({ one: sql`1` })
+            .from(invitation)
+            .where(and(eq(invitation.email, user.email), eq(invitation.status, "pending"))),
+        ),
+        notExists(
+          tx
+            .select({ one: sql`1` })
+            .from(accountLifecycleNotice)
+            .where(eq(accountLifecycleNotice.userId, user.id)),
+        ),
+      ),
+    )
     .orderBy(user.createdAt)
     .limit(limit)
-  for (const candidate of settled) {
-    if (nudges.length >= limit) break
-    const [membership] = await tx
-      .select({ userId: member.userId })
-      .from(member)
-      .where(eq(member.userId, candidate.id))
-      .limit(1)
-    if (membership) continue
-    // Con invitación pendiente ya tiene camino: el aviso sobra.
-    const [invited] = await tx
-      .select({ id: invitation.id })
-      .from(invitation)
-      .where(and(eq(invitation.email, candidate.email), eq(invitation.status, "pending")))
-      .limit(1)
-    if (invited) continue
-    const [notice] = await tx
-      .select({ userId: accountLifecycleNotice.userId })
-      .from(accountLifecycleNotice)
-      .where(eq(accountLifecycleNotice.userId, candidate.id))
-      .limit(1)
-    if (notice) continue
-    nudges.push({ userId: candidate.id, email: candidate.email, createdAt: candidate.createdAt })
-  }
+  const nudges: LifecycleCandidate[] = settled.map((candidate) => ({
+    userId: candidate.id,
+    email: candidate.email,
+    createdAt: candidate.createdAt,
+    app: appOfSignup(candidate.signupApp),
+  }))
   return { reminders, cleanups, nudges }
 }
 

@@ -20,6 +20,12 @@ const envSchema = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. latidia72.com")
     .default(""),
+  /**
+   * Los avisos de la cuenta a gestorIA (ADR 0201): adónde (https) y con qué secreto
+   * (`whsec_…`, Standard Webhooks). Los mismos de la API. Vacíos: los avisos esperan.
+   */
+  GESTORIA_ACCOUNT_EVENTS_URL: z.string().trim().default(""),
+  GESTORIA_ACCOUNT_EVENTS_SECRET: z.string().trim().default(""),
   /** El dominio de vistIA, como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()
