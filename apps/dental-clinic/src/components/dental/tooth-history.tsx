@@ -1,11 +1,13 @@
+import { categoryLabel } from "@odentia/clinic-app/components/patient/document-labels"
+import { EncounterReadDrawer } from "@odentia/clinic-app/components/patient/encounter-read-drawer"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import { DIAGNOSIS_STATUS_LABELS } from "@odentia/clinic-app/lib/encounters"
+import { activeOrgLocale } from "@odentia/clinic-app/lib/locale"
 import { conditionLabel, surfaceLabel } from "@odentia/dental"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
-import { apiFetch } from "@odentia/clinic-app/lib/api"
-import { DIAGNOSIS_STATUS_LABELS } from "@odentia/clinic-app/lib/encounters"
-import { categoryLabel } from "@odentia/clinic-app/components/patient/document-labels"
-import { activeOrgLocale } from "@odentia/clinic-app/lib/locale"
+import { Link, useLocation } from "@tanstack/react-router"
+import { useState } from "react"
 
 export interface ToothEvent {
   kind: "hallazgo" | "diagnostico" | "procedimiento" | "control" | "documento"
@@ -102,6 +104,12 @@ export function ToothHistory({
   toothNumber: number
 }): React.JSX.Element {
   const query = useToothHistory(patientId, toothNumber)
+  // «Ver atención» se lee al lado, sin cambiar de página: con una atención abierta, la dirección
+  // sigue siendo la suya. La que está en curso solo se abre (para seguirla) desde fuera de una atención.
+  const inEncounter = useLocation({
+    select: (location) => /\/encounters\//.test(location.pathname),
+  })
+  const [reading, setReading] = useState<ToothEvent | null>(null)
   const events = query.data?.data ?? []
   const count = (kind: ToothEvent["kind"], status?: string) =>
     events.filter(
@@ -177,13 +185,25 @@ export function ToothHistory({
                     {event.encounterId ? (
                       <>
                         {" · "}
-                        <Link
-                          to="/patients/$patientId/encounters/$encounterId"
-                          params={{ patientId, encounterId: event.encounterId }}
-                          className="underline underline-offset-2"
-                        >
-                          {event.encounterOpen ? "Atención en curso" : "Ver atención"}
-                        </Link>
+                        {event.encounterOpen && inEncounter ? (
+                          "Atención en curso"
+                        ) : event.encounterOpen ? (
+                          <Link
+                            to="/patients/$patientId/encounters/$encounterId"
+                            params={{ patientId, encounterId: event.encounterId }}
+                            className="underline underline-offset-2"
+                          >
+                            Atención en curso
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={() => setReading(event)}
+                          >
+                            Ver atención
+                          </button>
+                        )}
                       </>
                     ) : null}
                   </p>
@@ -193,6 +213,14 @@ export function ToothHistory({
           </ol>
         </>
       )}
+      {reading?.encounterId ? (
+        <EncounterReadDrawer
+          patientId={patientId}
+          encounterId={reading.encounterId}
+          title={`${day(reading.at)} · ${title(reading)}`}
+          onClose={() => setReading(null)}
+        />
+      ) : null}
     </section>
   )
 }

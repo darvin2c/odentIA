@@ -566,6 +566,18 @@ it("el resumen muestra la atención en curso con lo que le falta para cerrarse",
   expect(after.openEncounter).toMatchObject({ diagnosisCount: 1, missing: [] })
 })
 
+it("el resumen dice si la atención abierta es de hoy: desde la ficha, «Hacer hoy» no marca nada en una de otro día (QA en pantalla del 17 nov)", async () => {
+  const f = await clinicalFixture()
+  const summary = () => f.run((tx) => getPatientSummary(tx, "org_a", f.patient.id))
+  expect((await summary()).openEncounter?.today).toBe(true)
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000)
+  await ownerDb
+    .update(encounter)
+    .set({ startedAt: twoDaysAgo, createdAt: twoDaysAgo })
+    .where(eq(encounter.id, f.encounter.id))
+  expect((await summary()).openEncounter?.today).toBe(false)
+})
+
 it("la nota normativa valida signos vitales y el cargo multiplica la cantidad", async () => {
   const f = await clinicalFixture()
   await expect(

@@ -1,17 +1,15 @@
 import type { KairosWriter, PlatformDecisions, PlatformLlm } from "@odentia/agent"
-import type { Auth } from "@odentia/auth"
+import type { AccountApp, Auth } from "@odentia/auth"
 import { BASE_PRODUCT, type ClinicalProduct, configureZodMessages, type DomainProduct, type ProductDomains, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import {
-  type InstagramLoginConfig,
-  type MetaPagesApp,
+  type AdminChannels,
   brandMailbox,
   CLINIC_LOGO_MAX_BYTES,
   CLINIC_LOGO_MIME_EXT,
-  type AdminChannels,
   type ClinicHosts,
   CONVERSATION_STATE_ACTIONS,
   clinicLogoColors,
@@ -22,34 +20,38 @@ import {
   createBranch,
   ensureClinicConsents,
   ensureClinicSpecialties,
+  exchangeRateAuthor,
   getAgentConfig,
   getBackofficeOverview,
   getBackofficeToday,
   getClinicLogo,
+  getCurrencyUsage,
   getOrganizationBillingSummary,
+  type InstagramLoginConfig,
   initialOrgRegion,
   invalidField,
   type MailboxEnv,
+  isOnDomain,
+  type MetaPagesApp,
   onDomain,
   productOfHost,
+  type AccountEventSender,
   RESERVED_ORG_SLUGS,
+  refreshSuggestedNotice,
   regionPresetForCountry,
   type SearchEmbedder,
   ServiceError,
   type Storage,
-  exchangeRateAuthor,
-  getCurrencyUsage,
+  saveOrgProfile,
   setBranchActive,
   setClinicBrandColor,
   setClinicLogo,
   setOrgDiagnosisSystem,
   setOrgExchangeRate,
-  startSaasTrial,
-  trustedOriginsOn,
-  refreshSuggestedNotice,
-  saveOrgProfile,
   setUpNewClinic,
+  startSaasTrial,
   syncClinicHosts,
+  trustedOriginsOn,
   updateBranch,
   updateOrgRegion,
 } from "@odentia/services"
@@ -62,28 +64,9 @@ import { z } from "zod"
 import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
-import { searchFromHeader } from "./lib/search-header.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { lockedRecordGuard } from "./lib/record-lock.js"
-import { createAccountRoute } from "./routes/account.js"
-import { createAccountSupportRoute } from "./routes/account-support.js"
-import { type AddressProviders, createAddressRoute } from "./routes/address.js"
-import { createAdminChatsRoute } from "./routes/admin-chats.js"
-import { createAdminClientsRoute } from "./routes/admin-clients.js"
-import { createAdminInboxRoute } from "./routes/admin-inbox.js"
-import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
-import {
-  createAccountAdminAccessRoute,
-  createAdminCoreRoute,
-  createAdminFactorBoundary,
-} from "./routes/admin-core.js"
-import { createAdminDemosRoute } from "./routes/admin-demos.js"
-import { createAdminFoundersRoute } from "./routes/admin-founders.js"
-import { createAdminImportsRoute } from "./routes/admin-imports.js"
-import { createAdminKairosRoute } from "./routes/admin-kairos.js"
-import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
-import { createAdminReportsRoute } from "./routes/admin-reports.js"
-import { createAdminSupportRoute } from "./routes/admin-support.js"
+import { searchFromHeader } from "./lib/search-header.js"
 import {
   auditDenied,
   createSupportSessionRoute,
@@ -93,6 +76,26 @@ import {
   supportSessionGate,
   supportSessionOf,
 } from "./lib/support-session.js"
+import { createAccountRoute } from "./routes/account.js"
+import { createAccountSupportRoute } from "./routes/account-support.js"
+import { type AddressProviders, createAddressRoute } from "./routes/address.js"
+import { createAdminChatsRoute } from "./routes/admin-chats.js"
+import { createAdminClientsRoute } from "./routes/admin-clients.js"
+import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
+import {
+  createAccountAdminAccessRoute,
+  createAdminCoreRoute,
+  createAdminFactorBoundary,
+} from "./routes/admin-core.js"
+import { createAdminDemosRoute } from "./routes/admin-demos.js"
+import { createAdminFoundersRoute } from "./routes/admin-founders.js"
+import { createAdminImportsRoute } from "./routes/admin-imports.js"
+import { createAdminInboxRoute } from "./routes/admin-inbox.js"
+import { createAdminKairosRoute } from "./routes/admin-kairos.js"
+import { createAdminMetaWebhookRoute } from "./routes/admin-meta-webhook.js"
+import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
+import { createAdminReportsRoute } from "./routes/admin-reports.js"
+import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
@@ -112,15 +115,15 @@ import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
-import { createAdminMetaWebhookRoute } from "./routes/admin-meta-webhook.js"
-import { createInboundEmailRoute } from "./routes/inbound-email.js"
 import { runService, validationError } from "./routes/helpers.js"
+import { createInboundEmailRoute } from "./routes/inbound-email.js"
 import { createInventoryRoute } from "./routes/inventory.js"
-import { createOrdersRoute } from "./routes/orders.js"
 import { createLegalRoute } from "./routes/legal.js"
+import { createLetterheadRoute } from "./routes/letterhead.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createMetaPagesRoute } from "./routes/meta-pages.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
+import { createOrdersRoute } from "./routes/orders.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
@@ -139,6 +142,7 @@ import {
 } from "./routes/public-patient-registration.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createPublicSignUpRoute } from "./routes/public-sign-up.js"
+import { createPushRoute } from "./routes/push.js"
 import { createPublicReportDigestRoute } from "./routes/report-digest-public.js"
 import { createReportsRoute } from "./routes/reports.js"
 import {
@@ -155,8 +159,16 @@ import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webc
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
-import { createPushRoute } from "./routes/push.js"
-import { createLetterheadRoute } from "./routes/letterhead.js"
+
+/** La entrada a la cuenta de una app que es otro sistema, en su dominio (ADR 0201). */
+export interface ExternalAppEntry {
+  app: AccountApp
+  domain: string
+  /** Su Better Auth; nulo mientras no se pueda encender (`accountAppNotReady`). */
+  auth: Auth | null
+  /** Sus pantallas: las únicas que pueden llamar a su entrada desde el navegador. */
+  trustedOrigins: string[]
+}
 
 export interface AppDeps {
   auth: Auth
@@ -184,6 +196,13 @@ export interface AppDeps {
   productDomains?: ProductDomains
   /** La sesión de cada otro producto: la instancia de Better Auth de su dominio. */
   productAuth?: Partial<Record<DomainProduct, Auth>>
+  /**
+   * Las apps que son otro sistema (gestorIA, ADR 0201), con su dominio y su entrada a la
+   * cuenta. En su dominio solo responde esa entrada: nada de las clínicas existe ahí.
+   */
+  externalApps?: ExternalAppEntry[]
+  /** Adónde y con qué secreto se avisa a cada una lo que pasa con la cuenta (ADR 0201). */
+  accountEventSenders?: AccountEventSender[]
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -361,6 +380,39 @@ async function toReplayPayload(
   return null
 }
 
+/**
+ * Los tramos de la dirección, decodificados uno a uno. Un `%` mal escrito (`%E0%A4%A`) queda como
+ * llegó, igual que el parámetro de la ruta: así no lanza dentro del manejador de errores, que
+ * respondería un 500 sin cuerpo.
+ */
+function pathSegments(path: string): string[] {
+  return path.split("/").map((segment) => {
+    try {
+      return decodeURIComponent(segment)
+    } catch {
+      return segment
+    }
+  })
+}
+
+/** Error 22P02 de uuid cuyo valor inválido viene de la dirección pedida (no del cuerpo). */
+export function idMalformadoEnLaDireccion(err: unknown, path: string): boolean {
+  let actual: unknown = err
+  for (let i = 0; i < 4 && actual && typeof actual === "object"; i++) {
+    const { code, message, cause } = actual as {
+      code?: unknown
+      message?: unknown
+      cause?: unknown
+    }
+    if (code === "22P02" && typeof message === "string") {
+      const valor = /type uuid: "(.*)"/s.exec(message)?.[1]
+      if (valor && /^[^/]+$/.test(valor)) return pathSegments(path).includes(valor)
+    }
+    actual = cause
+  }
+  return false
+}
+
 export function createApp(deps: AppDeps) {
   const { auth, db } = deps
   // Una sola escucha de eventos para todos los streams de este proceso.
@@ -424,6 +476,31 @@ export function createApp(deps: AppDeps) {
   const app = new Hono()
 
   app.use("*", requestId())
+  // El dominio de una app que es otro sistema (ADR 0201): ahí solo responde su entrada a la
+  // cuenta, sin las rutas de organizaciones (que son clínicas). Nada de las clínicas existe
+  // en ese dominio, ni cae en el producto base. Sin su entrada todavía, todo responde 404.
+  for (const entry of deps.externalApps ?? []) {
+    const entryCors = cors({
+      origin: (origin) => (entry.trustedOrigins.includes(origin) ? origin : ""),
+      credentials: true,
+      maxAge: 7200,
+    })
+    const entryAuth = entry.auth
+    // El segundo factor del personal se cuida igual que en las clínicas (ADR 0089).
+    const factorBoundary = entryAuth ? createAdminFactorBoundary({ auth: entryAuth, ownerDb: deps.ownerDb }) : null
+    app.use("*", async (c, next) => {
+      if (!isOnDomain(c.req.url, entry.domain)) return next()
+      const path = c.req.path
+      if (!entryAuth || !factorBoundary || !path.startsWith("/api/auth/") || path.startsWith("/api/auth/organization/"))
+        return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+      return entryCors(c, async () => {
+        const blocked = await factorBoundary(c, async () => {
+          c.res = await entryAuth.handler(c.req.raw)
+        })
+        if (blocked) c.res = blocked
+      })
+    })
+  }
   // Lo buscado llega en una cabecera, no en la dirección (QA de la ficha del 10 nov, M4).
   app.use("*", searchFromHeader())
   app.use(
@@ -482,6 +559,10 @@ export function createApp(deps: AppDeps) {
   app.onError((err, c) => {
     if (err instanceof ServiceError)
       return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+    // Un id con forma de otra cosa en la dirección (`/patients/HTTP`) no existe: lo dice
+    // Postgres al comparar con una columna uuid. Se responde 404 para toda ruta, no una a una.
+    if (idMalformadoEnLaDireccion(err, c.req.path))
+      return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
     console.error(err)
     return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
   })

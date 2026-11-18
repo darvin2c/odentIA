@@ -29,6 +29,12 @@ export interface PickedPerson {
   sex?: string | null
 }
 
+/**
+ * Lo que se dice a quien busca a alguien nuevo y no puede registrarlo (el odontólogo, caja):
+ * quién lo hace. Lo decide el permiso de registrar, no el nombre del rol; los permisos no cambian.
+ */
+export const ASK_RECEPTION_TO_REGISTER = "Para registrar a alguien nuevo, pídeselo a recepción."
+
 /** Lo que el buscador devuelve, como persona elegida. */
 export function pickedOf(row: PersonListItem): PickedPerson {
   return {
@@ -70,6 +76,7 @@ export function PersonPicker({
   excludeId,
   onCreate,
   createLabel = (typed) => `Crear a ${typed}`,
+  emptyHint,
 }: {
   id?: string
   /** El nombre de lo que se busca, para la lista y su botón (la etiqueta visible es de la pantalla). */
@@ -92,6 +99,11 @@ export function PersonPicker({
   onCreate?: (query: string) => void
   /** Texto del botón de crear: «Registrar a …». */
   createLabel?: (query: string) => string
+  /**
+   * Sin `onCreate`, lo que se dice cuando nadie coincide: a quien no puede registrar
+   * a la persona, quién lo hace («pídeselo a recepción»).
+   */
+  emptyHint?: string
 }) {
   const fallbackId = useId()
   const id = idProp ?? fallbackId
@@ -253,6 +265,15 @@ export function PersonPicker({
                   >
                     {createLabel(query.trim())}
                   </Button>
+                </span>
+              ) : emptyHint ? (
+                <span className="grid w-full gap-1 px-2">
+                  <span>
+                    {patientsOnly
+                      ? "Ningún paciente con ese nombre, teléfono o documento."
+                      : "Nadie con ese nombre, teléfono o documento."}
+                  </span>
+                  <span className="text-muted-foreground">{emptyHint}</span>
                 </span>
               ) : patientsOnly ? (
                 "Ningún paciente con ese nombre, teléfono o documento."

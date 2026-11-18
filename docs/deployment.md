@@ -155,6 +155,23 @@ solo inicio, precios, pedir invitación y las páginas legales
 (`apps/web/src/lib/product-pages.json`); lo demás responde 404. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
 
+### gestorIA y la cuenta (apagado)
+
+gestorIA es otro sistema que entra con la misma cuenta (ADR 0201). Todo lo suyo está apagado
+mientras no se configure:
+
+- `GESTORIA_DOMAIN` (API): en ese dominio solo responde su entrada a la cuenta
+  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas. Mientras
+  sus correos no tengan su marca (cambio aparte en `shared/packages/mail`), ese dominio
+  responde 404 y la API lo dice en su registro al arrancar. Con la entrada encendida,
+  `/api/auth/token` da a quien entró un JWT de 15 minutos firmado (EdDSA) y
+  `/api/auth/jwks` publica la llave para verificarlo.
+- `GESTORIA_ACCOUNT_EVENTS_URL` y `GESTORIA_ACCOUNT_EVENTS_SECRET` (API y worker): adónde
+  (https) y con qué secreto (`whsec_` y al menos 24 bytes en base64) se avisa a gestorIA que
+  se cerró una cuenta, firmado con Standard Webhooks. La API lo manda al cerrar; si falla, el
+  worker lo reintenta (30 s, 1 min, 2 min… hasta una hora). Vacíos, los avisos se guardan y
+  esperan: al configurarlos sale también lo anterior.
+
 ### vistIA en su dominio
 
 vistIA, el producto de las ópticas (ADR 0169), va en `vistia20.com` igual que latidIA en el

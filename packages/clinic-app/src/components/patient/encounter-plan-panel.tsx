@@ -1,19 +1,19 @@
 /**
- * «Plan y controles» dentro de la atención (tablero 3, ADR 0034): un solo
- * bloque en lugar de «Plan de tratamiento», «Tratamientos de esta atención» y
- * «Controles». De arriba abajo: el plan en corto con lo indicado hoy marcado e
- * «Indicar un tratamiento», «Hecho hoy» con «Completar», «Próximo control» con
- * «Reservar» y, si hay un presupuesto por enviar y la persona sigue en el
- * unidad dental, «Enviar presupuesto».
+ * El Plan de la atención (la atención agrupada, 17 nov): el único lugar de cada tratamiento. De
+ * arriba abajo, por fases como la ficha: cada fila con su estado, lo de hoy en ella («Hoy», su
+ * sesión, «Registrar», lo registrado con «Anular…», la espera y el consentimiento) y sus sesiones
+ * anteriores; los caminos de una pieza en su recuadro; los controles que puede cumplir esta
+ * visita; la línea del presupuesto; «Añadir un tratamiento al plan» y «Próximo control».
  *
- * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
- * persona, que se crea solo con la primera indicación.
+ * Añadir no ejecuta ni cobra, y no se elige plan: va al plan abierto de la persona, que se crea
+ * solo con la primera indicación.
  */
 import { budgetAnswerLine, budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
   Checkbox,
+  cn,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -30,24 +30,38 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { Fragment, useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import {
+  ASSEMBLED_QUERY_KEYS,
   budgetNumberLabel,
   commonPlanItemIds,
   fetchBudgetDetail,
   fetchTreatmentPlans,
-  ASSEMBLED_QUERY_KEYS,
   INDICATED_QUERY_KEYS,
   PLAN_QUERY_KEYS,
   planDecisionLabel,
   totalsOf,
 } from "../../lib/budgets"
-import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
-import { bringTreatmentApi, removeIndicatedApi, restoreIndicatedApi } from "../../lib/encounters"
+import { usePermission } from "../../lib/crm"
+import {
+  bringTreatmentApi,
+  chooseVisitControlApi,
+  leaveTreatmentApi,
+  removeIndicatedApi,
+  restoreIndicatedApi,
+} from "../../lib/encounters"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
-import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
+import {
+  type EncounterVisit,
+  type PlanItem,
+  type ProcedureItem,
+  planStatusLabel,
+  quotedPriceOf,
+  treatmentConsentWords,
+} from "../../lib/patients"
 import {
   fetchService,
   fetchServices,
@@ -60,10 +74,11 @@ import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
+import { visitWaitWords } from "./encounter-visit"
 import { treatmentSiteLabel, useBudgetFormat } from "./plan/budget-parts"
+import { RecommendedLine } from "./plan/budget-recommended"
 import { AnsweredBy } from "./plan/budget-response"
 import { BudgetShowActions } from "./plan/budget-show"
-import { RecommendedLine } from "./plan/budget-recommended"
 import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
@@ -77,6 +92,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
+import { PlanItemSessions } from "./plan-fases"
 import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
@@ -93,6 +109,83 @@ const QUADRANT_LABELS: Record<string, string> = {
 
 /** Lo cerrado ya no es «lo que sigue» en el plan en corto. */
 const CLOSED = new Set(["realizado", "cancelado", "reemplazado"])
+
+/**
+ * Lo que el Plan de la atención muestra: lo abierto de los planes vigentes, sin lo que la persona
+ * dejó fuera, y lo registrado en esta atención aunque ya quedó realizado (el servicio de una
+ * sesión, lo aceptado al hacerlo, «Completar»): ahí se ve y se anula (revisión del 17 nov). Lo
+ * demás que se registró hoy va en «Hecho hoy fuera del plan» (`EncounterProcedures`).
+ */
+export function shownInEncounterPlan(
+  item: Pick<PlanItem, "id" | "planId" | "status" | "decisionStatus">,
+  currentPlanIds: ReadonlySet<string>,
+  liveHere: ReadonlySet<string>,
+): boolean {
+  if (liveHere.has(item.id)) return true
+  return currentPlanIds.has(item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus)
+}
+
+/** Los planes vigentes: el abierto y los que aún tienen algo por hacer (QA del 6 nov, M12 y M13). */
+export function currentPlanIdsOf(
+  rows: ReadonlyArray<{ plan: { id: string }; isOpen: boolean; active?: boolean }>,
+): Set<string> {
+  return new Set(rows.filter((row) => row.isOpen || row.active).map((row) => row.plan.id))
+}
+
+/** Los tratamientos con un procedimiento vigente en esta atención. */
+export function liveProcedureItems(procedures: readonly ProcedureItem[]): Set<string> {
+  return new Set(
+    procedures.flatMap((proc) => (proc.planItemId && !proc.voidedAt ? [proc.planItemId] : [])),
+  )
+}
+
+/**
+ * Aún no empezó: sin sesiones, ni en otra atención ni en esta. Solo eso dice su precio en la fila:
+ * lo empezado ya se cargó (cobro único) o se carga por sesión, y quien no ve la caja no puede
+ * saberlo (QA en pantalla del 17 nov).
+ */
+export function notStartedYet(
+  item: Pick<PlanItem, "id" | "status" | "sessionsDone" | "sessions">,
+  liveHere: ReadonlySet<string>,
+): boolean {
+  return (
+    item.status !== "en_curso" &&
+    !CLOSED.has(item.status) &&
+    !item.sessionsDone &&
+    (item.sessions?.length ?? 0) === 0 &&
+    !liveHere.has(item.id)
+  )
+}
+
+/**
+ * Después de «Hacer hoy», «Hoy no» o «Registrar», el botón pulsado se desmonta y el foco caía a la
+ * página (QA en pantalla del 17 nov, D13): vuelve a la fila, a su botón principal («Registrar»,
+ * «Anular…» o «Hacer hoy»), o a la fila misma. Espera a que la fila cambie y a que se cierre el
+ * registro, y no le quita el foco a nada que la persona haya tocado mientras tanto.
+ */
+export function keepFocusInPlanRow(rowId: string): void {
+  if (typeof document === "undefined") return
+  const lastTry = 40
+  let tries = 0
+  const attempt = () => {
+    tries += 1
+    const active = document.activeElement
+    const row = document.querySelector<HTMLElement>(`[data-plan-row="${rowId}"]`)
+    if ((!active || active === document.body) && row) {
+      // Su botón principal; si aún está apagado (la fila se está guardando), se lo espera, y solo
+      // al final el foco se queda en la fila.
+      const primary = row.querySelector<HTMLElement>("[data-row-primary]")
+      const target =
+        primary && !primary.matches(":disabled") ? primary : !primary || tries >= lastTry ? row : null
+      if (target) {
+        target.focus({ preventScroll: true })
+        if (document.activeElement === target) return
+      }
+    }
+    if (tries < lastTry) window.setTimeout(attempt, 50)
+  }
+  window.setTimeout(attempt, 0)
+}
 
 const QUADRANT_OPTIONS = Object.entries(QUADRANT_LABELS).map(([value, label]) => ({ value, label }))
 const ARCH_OPTIONS = [
@@ -156,26 +249,6 @@ function editableSessions(item: PlanItem): boolean {
 /** El servidor nombra el dato como en el cuerpo de la petición. */
 const INDICATION_FIELD_MAP = { serviceId: "service", toothNumber: "teeth", plannedSessions: "sessions" }
 
-function BlockPart({
-  title,
-  action,
-  children,
-}: {
-  title: string
-  action?: React.ReactNode
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section aria-label={title} className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  )
-}
-
 export function EncounterPlanPanel({
   patientId,
   encounterId,
@@ -191,12 +264,40 @@ export function EncounterPlanPanel({
   broughtIds = new Set<string>(),
   indicationDefaults,
   showControls = true,
+  visit = null,
+  procedures = [],
+  past = false,
+  onRegister,
+  onVoid,
+  onConsentFirst,
+  onOpenJourney,
+  onOpenEncounter,
 }: {
+  /**
+   * Lo que se puede hacer hoy de cada tratamiento, como lo calcula el servidor (la atención
+   * agrupada, 17 nov): su sesión, si lo trae la cita, si ya se registró, su espera y su
+   * consentimiento. El Plan de la atención es el único lugar de cada tratamiento.
+   */
+  visit?: EncounterVisit | null
+  /** Lo registrado en esta atención: lo de cada tratamiento se ve en su fila, con «Anular…». */
+  procedures?: ProcedureItem[]
+  /** La atención es de otro día (una cita pasada que se registra después): «Ese día», no «Hoy». */
+  past?: boolean
+  /** «Registrar»: abre el registro con ese tratamiento puesto. */
+  onRegister?: (itemId: string) => void
+  /** «Anular…» de lo registrado en la fila. */
+  onVoid?: (procedureId: string) => void
+  /** «Preparar» o «Firmar ahora» el consentimiento antes del acto. */
+  onConsentFirst?: (planItemId: string, awaiting: boolean) => void
+  /** «Ver»: el recorrido del tratamiento, al lado, sin salir de la atención. */
+  onOpenJourney?: (itemId: string) => void
+  /** «Abrir» una sesión anterior: se lee al lado. */
+  onOpenEncounter?: (encounterId: string, title: string) => void
   patientId: string
   encounterId: string
   /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
   removableIds: ReadonlySet<string>
-  /** Lo que ya se trajo a esta atención («Hacerla hoy» o su cita): su fila no lo ofrece otra vez. */
+  /** Lo que ya se trajo a esta atención («Hacer hoy» o su cita): su fila no lo ofrece otra vez. */
   broughtIds?: ReadonlySet<string>
   /** Al indicar, la pieza y el diagnóstico del último hallazgo de hoy. */
   indicationDefaults?: Partial<IndicationValues>
@@ -207,12 +308,12 @@ export function EncounterPlanPanel({
   showControls?: boolean
   /** Para «Mostrar a Rosa» el presupuesto en borrador. */
   patientName: string
-  /** Indicados en esta atención: se marcan «Hoy» en el plan en corto. */
+  /** Indicados en esta atención: se marcan «Indicado hoy» en el plan. */
   indicatedItems: PlanItem[]
   /** Unos y otros, para ligar un control a su tratamiento. */
   attentionItems: PlanItem[]
   disabled?: boolean
-  /** Recién agregado el bloque: abre «Indicar un tratamiento» sin un clic de más. */
+  /** Recién agregado el bloque: abre «Añadir un tratamiento al plan» sin un clic de más. */
   autoOpen?: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -232,12 +333,13 @@ export function EncounterPlanPanel({
     enabled: canRead,
   })
   // Los planes con algo por hacer, no solo el que recibe lo nuevo (QA del 6 nov, M12 y M13).
-  const current = (plansQuery.data?.data ?? []).filter((row) => row.isOpen || row.active)
+  const currentPlanIds = currentPlanIdsOf(plansQuery.data?.data ?? [])
   const today = new Set(indicatedItems.map((item) => item.id))
-  // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero.
+  const liveHere = liveProcedureItems(procedures)
+  // El plan en corto: lo abierto de los planes vigentes, con lo de hoy primero. La opción que no
+  // eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
   const brief = (itemsQuery.data?.data ?? [])
-    // La opción que no eligió no es algo por hacer: sigue en su presupuesto y en la Historia (QA del 9 nov).
-    .filter((item) => current.some((row) => row.plan.id === item.planId) && !CLOSED.has(item.status) && !isLeftOut(item.decisionStatus))
+    .filter((item) => shownInEncounterPlan(item, currentPlanIds, liveHere))
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   // Lo que va después de otro de la misma pieza (la corona tras la endodoncia en curso) baja a
   // continuación de él, aunque se indicara hoy: la regla de «Qué sigue» (QA del 9 nov, repaso 3).
@@ -249,6 +351,18 @@ export function EncounterPlanPanel({
       brief.splice(blocker, 0, item)
     }
   }
+  // Por fases, en el orden del producto y con su fase por defecto, como el plan de la ficha
+  // (`plan-fases.tsx`); dentro de cada una, el orden de arriba. Sin esto, lo indicado hoy abría
+  // una fase que volvía a salir más abajo (revisión del 17 nov).
+  const { phases, defaultPhase } = productUi().plan
+  const phaseIndexOf = (item: PlanItem) => {
+    const at = phases.findIndex((phase) => phase.key === (item.phase ?? defaultPhase))
+    return at === -1 ? phases.length : at
+  }
+  brief.sort((a, b) => phaseIndexOf(a) - phaseIndexOf(b))
+  /** «Hoy», o «Ese día» en una atención de otro día. */
+  const dayWord = past ? "Ese día" : "Hoy"
+  const indicatedWord = past ? "Indicado ese día" : "Indicado hoy"
   const [indicating, setIndicating] = useState(autoOpen)
   /** El renglón que se está cambiando: su formulario se abre en el mismo renglón. */
   const [changing, setChanging] = useState<string | null>(null)
@@ -311,9 +425,9 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
-  // «Hacerla hoy» de lo indicado y aceptado hoy (P11, D6): está en su fila, no en «Hoy viene a…», y
-  // trae el tratamiento a la atención con la misma operación, para que su consentimiento se pida
-  // antes del acto. Nunca en lo que «va después» de otro (la corona tras la endodoncia): no toca hoy.
+  // «Hacer hoy» en su fila: trae el tratamiento a la atención con la misma operación que su cita,
+  // para que su consentimiento se pida antes del acto. Nunca en lo que «va después» de otro (la
+  // corona tras la endodoncia): no toca hoy.
   const [bringing, setBringing] = useState<string | null>(null)
   const bringToday = async (item: PlanItem) => {
     if (bringing) return
@@ -329,32 +443,243 @@ export function EncounterPlanPanel({
     } finally {
       setBringing(null)
       onPendingChange(false)
+      keepFocusInPlanRow(item.id)
     }
   }
+  // «Hacer hoy» en cada fila de lo que se puede hacer hoy (la atención agrupada, 17 nov): lo dice el
+  // servidor (`visit.treatments`, sin tope), también lo de visitas anteriores. Marca la fila «Hoy»
+  // en su mismo lugar. Lo que «va después» de otro no se ofrece primero: lo dice su fila.
+  const doable = new Map((visit?.treatments ?? []).map((row) => [row.planItemId, row]))
+  const bringWord = past ? "Se hizo ese día" : "Hacer hoy"
+  const leaveWord = past ? "Ese día no" : "Hoy no"
   const bringAction = (item: PlanItem) =>
     canWrite &&
     !disabled &&
-    today.has(item.id) &&
+    doable.has(item.id) &&
+    !doable.get(item.id)?.linked &&
     !broughtIds.has(item.id) &&
-    !item.waitsFor &&
-    item.decisionStatus === "aceptado" &&
-    ["pendiente", "programado", "en_curso"].includes(item.status) ? (
+    !item.waitsFor ? (
       <Button
         type="button"
         size="sm"
         variant="outline"
-        aria-label={`Hacerla hoy: ${item.title}`}
+        data-row-primary
+        aria-label={`${bringWord}: ${item.title}`}
         disabled={bringing !== null || removing !== null}
         onClick={() => void bringToday(item)}
       >
-        {bringing === item.id ? "Preparando…" : "Hacerla hoy"}
+        {bringing === item.id ? "Preparando…" : bringWord}
       </Button>
     ) : null
+  const [choosingControl, setChoosingControl] = useState<string | null>(null)
+  /**
+   * El control al que viene hoy: uno por atención, y se cumple al firmar (la misma operación de
+   * siempre). Elegir otro reemplaza al anterior.
+   */
+  const chooseControl = async (controlId: string | null, rowId?: string) => {
+    if (choosingControl) return
+    setChoosingControl(controlId ?? "ninguno")
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await chooseVisitControlApi(patientId, encounterId, controlId)
+      await onChanged()
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    } finally {
+      setChoosingControl(null)
+      onPendingChange(false)
+      if (rowId) keepFocusInPlanRow(rowId)
+    }
+  }
+  const [leaving, setLeaving] = useState<string | null>(null)
+  /** «Hoy no»: lo desmarca; sigue en el plan para otro día. Lo que trae la cita no se desmarca. */
+  const leaveToday = async (itemId: string) => {
+    if (leaving) return
+    setLeaving(itemId)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await leaveTreatmentApi(patientId, encounterId, itemId)
+      await refreshPlan()
+    } catch (err) {
+      setRowError({ itemId, message: submitErrorMessage(err) })
+    } finally {
+      setLeaving(null)
+      onPendingChange(false)
+      keepFocusInPlanRow(itemId)
+    }
+  }
+  /**
+   * Lo de hoy de un tratamiento (la atención agrupada, 17 nov): si es «Hoy», su sesión, lo
+   * registrado y lo anulado, la espera y el consentimiento antes del acto. «Hoy» sale de lo que el
+   * servidor dice unido a la atención o de lo registrado vigente: lo anulado queda como rastro,
+   * no como marca, y «Hoy no» la desmarca aunque algo se haya anulado (QA en pantalla del 17 nov).
+   */
+  const todayOf = (item: PlanItem) => {
+    const visitRow = doable.get(item.id)
+    const mine = procedures.filter((proc) => proc.planItemId === item.id)
+    const done = mine.filter((proc) => !proc.voidedAt)
+    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked) || done.length > 0
+    const pending = isToday && done.length === 0
+    const consentWords = pending ? treatmentConsentWords(item.consent, item.consentMissing) : null
+    return {
+      visitRow,
+      done,
+      voided: mine.filter((proc) => proc.voidedAt),
+      isToday,
+      pending,
+      wait: pending && visitRow ? visitWaitWords(visitRow) : null,
+      consentWords,
+      consentPending: consentWords != null && item.consent !== "firmado",
+      earlier: (item.sessions ?? []).filter((session) => session.encounterId !== encounterId),
+    }
+  }
+  type TodayOf = ReturnType<typeof todayOf>
+  /** Bajo el nombre de la fila «Hoy»: «Sesión 2 de 2 · por hacer» o «hecha hoy», y si la trajo su cita. */
+  const todayState = (today: TodayOf) => (
+    <>
+      {today.visitRow && today.visitRow.m > 1
+        ? `Sesión ${today.visitRow.n} de ${today.visitRow.m} · `
+        : ""}
+      {today.done.length > 0 ? (
+        <span className="font-medium text-success">{past ? "hecha ese día" : "hecha hoy"}</span>
+      ) : (
+        <span className="font-medium text-warning">por hacer</span>
+      )}
+      {today.visitRow?.broughtByAppointment ? " · la trajo su cita" : ""}
+    </>
+  )
+  /**
+   * A la derecha de la fila «Hoy», en la misma fila (el lienzo, tablero 1): la firma que falta,
+   * «Registrar» y «Hoy no». Hecha, lo registrado lleva su «Anular…» debajo.
+   */
+  const todayActions = (item: PlanItem, today: TodayOf) =>
+    canWrite && !disabled && today.pending ? (
+      <>
+        {today.consentPending && onConsentFirst ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onConsentFirst(item.id, false)}
+          >
+            {/* Abre la firma del paciente (y la prepara si falta): dice lo que hace, no «Preparar»
+                (QA en pantalla del 17 nov, D3). Lo que firmó en su enlace se confirma. */}
+            {item.consent === "por_confirmar" ? "Confirmar" : "Firmar ahora"}
+          </Button>
+        ) : null}
+        {onRegister ? (
+          <Button type="button" size="sm" data-row-primary onClick={() => onRegister(item.id)}>
+            Registrar
+          </Button>
+        ) : null}
+        {today.visitRow?.broughtByAppointment ? null : (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-label={`${leaveWord}: ${item.title}`}
+            disabled={leaving !== null}
+            onClick={() => void leaveToday(item.id)}
+          >
+            {leaveWord}
+          </Button>
+        )}
+      </>
+    ) : null
+  /**
+   * Debajo, dentro de la misma fila: lo registrado con «Anular…», lo anulado tachado y con su
+   * motivo (también sin «Hoy»: es rastro), la espera entre sesiones, el consentimiento una sola
+   * vez y sus sesiones anteriores, con el día, quién y lo anotado.
+   */
+  const todayDetails = (item: PlanItem, today: TodayOf) => {
+    if (
+      today.done.length === 0 &&
+      today.voided.length === 0 &&
+      !today.wait &&
+      !today.consentWords &&
+      today.earlier.length === 0
+    )
+      return null
+    return (
+      <div className="flex basis-full flex-col gap-1">
+        {today.done.map((proc) => (
+          <span
+            key={proc.id}
+            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+          >
+            Registrado: {proc.description}
+            {canWrite && !disabled && onVoid ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-row-primary
+                onClick={() => onVoid(proc.id)}
+              >
+                Anular…
+              </Button>
+            ) : null}
+          </span>
+        ))}
+        {/* Lo anulado no desaparece: se lee qué fue y por qué, tachado y con su motivo. */}
+        {today.voided.map((proc) => (
+          <span key={proc.id} className="text-xs text-muted-foreground">
+            <span className="line-through">Registrado: {proc.description}</span>
+            {` · Anulado: ${proc.voidReason ?? ""}. No cuenta como sesión ni genera cargo.`}
+          </span>
+        ))}
+        {today.wait ? <span className="text-xs text-warning">{today.wait}</span> : null}
+        {today.consentWords ? (
+          <span
+            className={
+              today.consentPending ? "text-xs text-warning" : "text-xs text-muted-foreground"
+            }
+          >
+            {today.consentWords}
+          </span>
+        ) : null}
+        {today.earlier.length > 0 ? (
+          // Las sesiones se ven igual en la atención, el recorrido y la ficha (mesa del 17 nov).
+          <PlanItemSessions
+            sessions={today.earlier}
+            itemLabel={item.title}
+            current={encounterId}
+            className="text-xs text-muted-foreground"
+            onOpen={onOpenEncounter ? (id) => onOpenEncounter(id, item.title) : undefined}
+          />
+        ) : null}
+      </div>
+    )
+  }
+  /** «Ver»: el recorrido del tratamiento, al lado. */
+  const seeAction = (item: PlanItem) =>
+    onOpenJourney ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`Ver ${item.title}`}
+        onClick={() => onOpenJourney(item.id)}
+      >
+        Ver
+      </Button>
+    ) : null
+
   /** Lo que se hace con un renglón: traerlo a hoy y corregirlo. */
   const actionsOf = (item: PlanItem) => (
     <>
       {bringAction(item)}
       {rowActions(item)}
+      {seeAction(item)}
+    </>
+  )
+  const noticeOf = (item: PlanItem) => (
+    <>
+      {todayDetails(item, todayOf(item))}
+      {fitNotice(item)}
     </>
   )
   /**
@@ -535,7 +860,10 @@ export function EncounterPlanPanel({
   const canPlace = canWrite && canBudget && !disabled
   const pathGroups = groupPlanPaths(brief)
   const rows = brief.filter((item) => !isOpenPath(item))
-  // «Va también» o «En los dos»: solo deja de preguntar aquí; no cambia nada.
+  // «Va también» y «En las dos» se guardan en el servidor (`pathAnsweredAt`): al recargar no se
+  // vuelve a preguntar (mesa del 17 nov). «Va también» cierra la pregunta aquí mismo, como antes:
+  // si el servidor no puede guardarlo (`PATH_NO_BUDGET`), la pregunta no vuelve y el error se dice
+  // en su fila (revisión del 17 nov).
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set())
   const [placeError, setPlaceError] = useState<{ itemId: string; message: string } | null>(null)
   const place = usePlacePath({ patientId, encounterId, beforeWrite, onChanged })
@@ -551,7 +879,6 @@ export function EncounterPlanPanel({
       },
     )
   }
-  const dismiss = (itemId: string) => setDismissed((prev) => new Set(prev).add(itemId))
   const chooser = (patientName.trim().split(/\s+/)[0] ?? "") || "la persona"
 
   return (
@@ -571,92 +898,148 @@ export function EncounterPlanPanel({
           }}
         />
       ) : null}
-      <BlockPart title="Lo que sigue por hacer">
+      <div className="flex flex-col gap-3">
         {itemsQuery.isPending || plansQuery.isPending ? (
           <LoadingState message="Cargando el plan…" />
         ) : brief.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Todavía no hay tratamientos por hacer. El primero que indiques abre el plan.
+            {/* Quien ya tiene plan no lo abre con lo primero que se indique (QA en pantalla del 17 nov, H9). */}
+            {(plansQuery.data?.data ?? []).length > 0
+              ? "No tiene tratamientos por hacer en su plan."
+              : "Todavía no hay tratamientos por hacer. El primero que indiques abre el plan."}
           </p>
         ) : (
           <>
             {rows.length > 0 ? (
               <ul className="flex flex-col divide-y">
-                {rows.map((item) => {
+                {rows.map((item, index) => {
                   // Sin responder «¿otro camino o va también?» no se sabe si va después de lo otro de
                   // la pieza: la exodoncia que es otro camino no «va después de la endodoncia» (QA del
                   // 10 nov, B2). Se calla hasta responder, también para quien no puede responderlo.
-                  const unanswered = !dismissed.has(item.id)
-                    ? pathQuestion(item, brief, today, pathGroups)
-                    : null
+                  const unanswered = dismissed.has(item.id)
+                    ? null
+                    : pathQuestion(item, brief, today, pathGroups)
                   const question = canPlace ? unanswered : null
                   const error = placeError?.itemId === item.id ? placeError.message : null
+                  // Por fases, como el plan de la ficha: un encabezado por fase (las filas ya van
+                  // ordenadas por ella).
+                  const previous = rows[index - 1]
+                  const phaseLabel =
+                    phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
+                      ? (phases[phaseIndexOf(item)]?.label ?? null)
+                      : null
+                  // El precio, solo de lo que aún no empezó: lo empezado ya se cobró o se cobra por
+                  // sesión, y la fila no lo sabe sin la caja (QA en pantalla del 17 nov).
+                  const price = notStartedYet(item, liveHere) ? quotedPriceOf(item) : null
+                  // «Hecha hoy» ya lo dice: «Realizado» antes de firmar diría que está terminado.
+                  const doneHere = CLOSED.has(item.status) && liveHere.has(item.id)
+                  const now = todayOf(item)
+                  const subtitle = [
+                    treatmentSiteLabel(item),
+                    now.isToday ? todayState(now) : null,
+                    item.waitsFor && !unanswered ? `va después de ${item.waitsFor.title}` : null,
+                    // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
+                    price?.priceCents != null && orgLocale
+                      ? `${formatMoney(price.priceCents, price.currency, orgLocale)}${price.offered ? " en su presupuesto" : ""}`
+                      : null,
+                    // El consentimiento va con el tratamiento; en la fila «Hoy» se dice una sola vez,
+                    // debajo, con su botón (QA en pantalla del 17 nov, D2).
+                    now.isToday ? null : treatmentConsentWords(item.consent, item.consentMissing),
+                  ].filter((part) => part != null && part !== "")
                   return (
-                    <li
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-                    >
-                      <span className="flex min-w-0 flex-col">
-                        <span className="font-medium">
-                          {item.title}
-                          {today.has(item.id) ? (
-                            <Badge variant="default" className="ml-2 align-middle">
-                              Indicado hoy
-                            </Badge>
-                          ) : null}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {[
-                            treatmentSiteLabel(item),
-                            item.waitsFor && !unanswered
-                              ? `va después de ${item.waitsFor.title}`
-                              : "",
-                            // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
-                            quotedPriceOf(item).priceCents != null && orgLocale
-                              ? `${formatMoney(quotedPriceOf(item).priceCents ?? 0, quotedPriceOf(item).currency, orgLocale)}${quotedPriceOf(item).offered ? " en su presupuesto" : ""}`
-                              : "",
-                            // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
-                            treatmentConsentWords(item.consent, item.consentMissing) ?? "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-1">
-                        <Badge
-                          variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
-                        >
-                          {planDecisionLabel(item.decisionStatus)}
-                        </Badge>
-                        {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
-                        {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
-                          <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                    <Fragment key={item.id}>
+                      {phaseLabel ? (
+                        <li className="pt-3 text-xs font-semibold text-muted-foreground">
+                          Fase {phaseLabel.toLowerCase()}
+                        </li>
+                      ) : null}
+                      {/* Una sola fila por tratamiento (el lienzo, tablero 1): con «Hoy», la fila entera
+                          lleva la marca, su estado bajo el nombre, sus botones a la derecha y lo de hoy
+                          y sus sesiones debajo, sin una banda aparte (QA en pantalla del 17 nov, D1). */}
+                      <li
+                        data-plan-row={item.id}
+                        tabIndex={-1}
+                        className={cn(
+                          "flex flex-wrap items-center justify-between gap-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          now.isToday && "my-1 rounded-md border-l-2 border-l-primary bg-primary/5 px-3",
                         )}
-                        {actionsOf(item)}
-                      </span>
-                      <ExtractionRisks lines={item.extractionRisks} />
-                      {fitNotice(item)}
-                      {changeForm(item)}
-                      {rowError?.itemId === item.id ? (
-                        <p role="alert" className="basis-full text-sm text-destructive">
-                          {rowError.message}
-                        </p>
-                      ) : null}
-                      {question ? (
-                        <PathQuestionRow
-                          item={item}
-                          question={question}
-                          pending={place.isPending}
-                          onPlace={(path) => placeIn(item.id, path)}
-                          onDismiss={() => dismiss(item.id)}
-                        />
-                      ) : null}
-                      {error ? (
-                        <p role="alert" className="basis-full text-sm text-destructive">
-                          {error}
-                        </p>
-                      ) : null}
-                    </li>
+                      >
+                        <span className="flex min-w-0 flex-col">
+                          <span className="font-medium">
+                            {now.isToday ? (
+                              <Badge variant="default" className="mr-2 align-middle">
+                                {dayWord}
+                              </Badge>
+                            ) : null}
+                            {item.title}
+                            {today.has(item.id) ? (
+                              <Badge variant="default" className="ml-2 align-middle">
+                                {indicatedWord}
+                              </Badge>
+                            ) : null}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {subtitle.map((part, at) => (
+                              // biome-ignore lint/suspicious/noArrayIndexKey: partes fijas de una línea, en su orden.
+                              <Fragment key={at}>
+                                {at > 0 ? " · " : ""}
+                                {part}
+                              </Fragment>
+                            ))}
+                          </span>
+                        </span>
+                        <span className="flex flex-wrap items-center gap-1">
+                          {/* Con «Hoy», su estado ya está bajo el nombre: «Aceptado» y «En curso» sobran. */}
+                          {now.isToday ? null : (
+                            <>
+                              <Badge
+                                variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
+                              >
+                                {planDecisionLabel(item.decisionStatus)}
+                              </Badge>
+                              {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
+                              {isLeftOut(item.decisionStatus) || item.status === "pendiente" || doneHere ? null : (
+                                <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                              )}
+                            </>
+                          )}
+                          {now.isToday ? (
+                            <>
+                              {todayActions(item, now)}
+                              {seeAction(item)}
+                            </>
+                          ) : (
+                            actionsOf(item)
+                          )}
+                        </span>
+                        <ExtractionRisks lines={item.extractionRisks} />
+                        {todayDetails(item, now)}
+                        {fitNotice(item)}
+                        {changeForm(item)}
+                        {rowError?.itemId === item.id ? (
+                          <p role="alert" className="basis-full text-sm text-destructive">
+                            {rowError.message}
+                          </p>
+                        ) : null}
+                        {question ? (
+                          <PathQuestionRow
+                            item={item}
+                            question={question}
+                            pending={place.isPending}
+                            onPlace={(path) => placeIn(item.id, path)}
+                            onDismiss={() => {
+                              setDismissed((prev) => new Set(prev).add(item.id))
+                              placeIn(item.id, "todos")
+                            }}
+                          />
+                        ) : null}
+                        {error ? (
+                          <p role="alert" className="basis-full text-sm text-destructive">
+                            {error}
+                          </p>
+                        ) : null}
+                      </li>
+                    </Fragment>
                   )
                 })}
               </ul>
@@ -668,6 +1051,7 @@ export function EncounterPlanPanel({
                 group={group}
                 chooser={chooser}
                 today={today}
+                indicatedWord={indicatedWord}
                 locale={orgLocale}
                 editable={canPlace}
                 pending={place.isPending}
@@ -681,11 +1065,84 @@ export function EncounterPlanPanel({
                 onPlace={placeIn}
                 rowActions={actionsOf}
                 changeForm={changeForm}
-                fitNotice={fitNotice}
+                fitNotice={noticeOf}
               />
             ))}
           </>
         )}
+        {(visit?.controls ?? []).length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold text-muted-foreground">Controles</p>
+            <ul className="flex flex-col divide-y text-sm">
+              {(visit?.controls ?? []).map((control) => {
+                const day = new Date(control.dueAt).toLocaleDateString(activeOrgLocale(), {
+                  day: "numeric",
+                  month: "short",
+                  timeZone: activeOrgTimeZone(),
+                })
+                const chosen = control.chosen || control.byAppointment
+                return (
+                  <li
+                    key={control.id}
+                    data-plan-row={control.id}
+                    tabIndex={-1}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      chosen && "my-1 rounded-md border-l-2 border-l-primary bg-primary/5 px-3",
+                    )}
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-medium">
+                        {chosen ? (
+                          <Badge variant="default" className="mr-2 align-middle">
+                            {dayWord}
+                          </Badge>
+                        ) : null}
+                        {control.title}
+                      </span>
+                      <span
+                        className={
+                          control.overdue ? "text-xs text-warning" : "text-xs text-muted-foreground"
+                        }
+                      >
+                        {[
+                          control.overdue ? `vencido el ${day}` : `toca el ${day}`,
+                          control.byName ? `lo indicó ${control.byName}` : null,
+                          control.byAppointment
+                            ? "lo trae su cita: se cumple al firmar"
+                            : control.chosen
+                              ? "se cumple al firmar"
+                              : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    {canWrite && !disabled && !control.byAppointment ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={control.chosen ? "ghost" : "outline"}
+                        data-row-primary
+                        aria-label={`${control.chosen ? leaveWord : bringWord}: ${control.title}`}
+                        disabled={choosingControl !== null}
+                        onClick={() =>
+                          void chooseControl(control.chosen ? null : control.id, control.id)
+                        }
+                      >
+                        {choosingControl === control.id
+                          ? "Anotando…"
+                          : control.chosen
+                            ? leaveWord
+                            : bringWord}
+                      </Button>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
         {/* La línea del presupuesto, antes del formulario: abierto, la empujaba fuera de la vista (QA del 9 nov). */}
         <EncounterBudgetSend
           patientId={patientId}
@@ -720,7 +1177,7 @@ export function EncounterPlanPanel({
                   className="group self-start"
                   disabled={disabled}
                 >
-                  Indicar un tratamiento
+                  Añadir un tratamiento al plan
                   <ChevronDown
                     aria-hidden
                     className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
@@ -741,7 +1198,7 @@ export function EncounterPlanPanel({
             </CollapsibleContent>
           </Collapsible>
         ) : null}
-      </BlockPart>
+      </div>
 
       {showControls ? (
         <ControlesPanel
@@ -774,7 +1231,13 @@ function pathQuestion(
   today: ReadonlySet<string>,
   groups: PlanPathGroup[],
 ): PathQuestion | null {
-  if (!today.has(item.id) || item.decisionStatus !== "pendiente" || item.path) return null
+  if (
+    !today.has(item.id) ||
+    item.decisionStatus !== "pendiente" ||
+    item.path ||
+    item.pathAnsweredAt
+  )
+    return null
   if (item.toothNumber == null || item.priceCents == null) return null
   const tooth = item.toothNumber
   const siblings = brief.filter(
@@ -883,6 +1346,7 @@ function PathsBox({
   group,
   chooser,
   today,
+  indicatedWord,
   locale,
   editable,
   pending,
@@ -897,6 +1361,8 @@ function PathsBox({
   /** «Ana» o «la persona». */
   chooser: string
   today: ReadonlySet<string>
+  /** «Indicado hoy», o «Indicado ese día» en una atención de otro día. */
+  indicatedWord: string
   locale: string | undefined
   editable: boolean
   pending: boolean
@@ -1006,7 +1472,7 @@ function PathsBox({
                             {item.title}
                             {today.has(item.id) ? (
                               <Badge variant="default" className="ml-2 align-middle">
-                                Indicado hoy
+                                {indicatedWord}
                               </Badge>
                             ) : null}
                           </span>

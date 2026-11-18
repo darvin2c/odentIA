@@ -1,28 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "../../lib/locale"
 import { visitToldHeading } from "../../lib/visit-answer-words"
-import { visitBookedWords, visitTreatmentsShown, visitWaitWords } from "./encounter-visit"
-
-// QA del 16 nov, Q17: tras «Hacerla hoy» de lo indicado en esta atención, la tarjeta «Hoy viene a…»
-// volvía con ese tratamiento, que ya está en «Realizado hoy» y en el Plan.
-describe("«Hoy viene a…» solo lleva lo de antes", () => {
-  const treatments = [
-    { planItemId: "endodoncia-hoy", linked: true },
-    { planItemId: "corona-de-antes", linked: false },
-    { planItemId: "limpieza-de-antes", linked: true },
-  ]
-
-  it("lo indicado en esta atención no se repite, tampoco después de «Hacerla hoy»", () => {
-    expect(visitTreatmentsShown(treatments, new Set(["endodoncia-hoy"])).map((item) => item.planItemId)).toEqual([
-      "corona-de-antes",
-      "limpieza-de-antes",
-    ])
-  })
-
-  it("si todo lo suyo es de esta atención, no queda nada que mostrar", () => {
-    expect(visitTreatmentsShown([treatments[0]!], new Set(["endodoncia-hoy"]))).toEqual([])
-  })
-})
+import { bookedReasonNote, visitAppointmentWords, visitBookedWords, visitWaitWords } from "./encounter-visit"
 
 describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", () => {
   it("la sesión 1 de hoy avisa con los días que pide su servicio, sin trabar", () => {
@@ -86,5 +65,34 @@ describe("lo que contó para otra cita", () => {
   it("lo de la cita de hoy se dice como siempre", () => {
     expect(visitToldHeading(told, "Rosa")).toBe("Lo que contó Rosa antes de venir (14 nov, desde su enlace)")
     expect(visitToldHeading({ ...told, otherAppointment: false }, null)).toBe("Lo que contó antes de venir (14 nov, desde su enlace)")
+  })
+})
+
+// Acta, criterio 3 y B6: la sesión 2 adelantada en la cita de otra doctora decía solo su motivo.
+describe("«Su cita» con su hora y su profesional", () => {
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const at = "2026-11-14T15:30:00.000Z"
+
+  it("dice la hora y con quién", () => {
+    expect(
+      plain(visitAppointmentWords({ startsAt: at, professionalName: "Dra. Vela" }, "es-PE", "America/Lima")),
+    ).toBe("10:30 a. m. · Dra. Vela")
+  })
+
+  it("de otro día, también el día; sin profesional, solo la hora", () => {
+    expect(
+      plain(visitAppointmentWords({ startsAt: at, professionalName: "Dra. Vela" }, "es-PE", "America/Lima", true)),
+    ).toBe("sáb 14 nov, 10:30 a. m. · Dra. Vela")
+    expect(plain(visitAppointmentWords({ startsAt: at, professionalName: null }, "es-PE", "America/Lima"))).toBe(
+      "10:30 a. m.",
+    )
+  })
+})
+
+// QA en pantalla del 17 nov (D4): con el motivo «Control de mantenimiento», la cita de las resinas decía «Ya es el motivo de hoy».
+describe("«Ya es el motivo de hoy», bajo lo que traía su cita", () => {
+  it("solo si el motivo escrito es el de la cita", () => {
+    expect(bookedReasonNote("Continúa: Resina de la 16", " Continúa: Resina de la 16 ")).toBe("Ya es el motivo de hoy")
+    expect(bookedReasonNote("Continúa: Resina de la 16", "Control de mantenimiento")).toBeNull()
   })
 })

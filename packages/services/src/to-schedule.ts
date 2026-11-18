@@ -50,16 +50,22 @@ export function isToSchedule(
   )
 }
 
-/** Una cita por venir (programada o confirmada, desde `now`) lleva el tratamiento. */
+/**
+ * Una cita por venir (programada o confirmada, desde `now`) lleva el tratamiento. `except`: una
+ * cita que no cuenta, la que se está atendiendo (sigue confirmada hasta firmar y puede empezar
+ * más tarde de la hora en que se atiende).
+ */
 export function carriedByUpcomingSql(
   item: { id: SQLWrapper; organizationId: SQLWrapper },
   now: SQLWrapper = sql`now()`,
+  except: string | null = null,
 ): SQL {
   return sql`exists (select 1 from appointment_plan_item carrier
     join appointment carrier_appointment on carrier_appointment.organization_id = carrier.organization_id
       and carrier_appointment.id = carrier.appointment_id
     where carrier.organization_id = ${item.organizationId} and carrier.plan_item_id = ${item.id}
-      and carrier_appointment.status in (${list(LIVE_APPOINTMENT_STATUSES)}) and carrier_appointment.starts_at > ${now})`
+      and carrier_appointment.status in (${list(LIVE_APPOINTMENT_STATUSES)}) and carrier_appointment.starts_at > ${now}
+      ${except ? sql`and carrier_appointment.id <> ${except}` : sql``})`
 }
 
 /**

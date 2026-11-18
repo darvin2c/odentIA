@@ -1,4 +1,4 @@
-import { BASE_PRODUCT, brandEmailColors, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
+import { BASE_PRODUCT, brandEmailColors, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   changeEmailConfirmationTemplate,
@@ -10,11 +10,12 @@ import {
 import { betterAuth } from "better-auth"
 import { APIError } from "better-auth/api"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
-import { organization } from "better-auth/plugins"
+import { jwt, organization } from "better-auth/plugins"
 import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
 import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
 import { accessLink } from "./access-link.js"
+import { ACCOUNT_APP_INFO, type AccountApp, accountAppNotReady, BASE_ACCOUNT_APP } from "./apps.js"
 import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
@@ -41,11 +42,18 @@ export interface CreateAuthOptions {
   /** Cabecera con la IP de quien pide; vacía, ninguna (ver `clientIpAddress`). */
   clientIpHeader?: string
   /**
-   * El producto en cuyo dominio va la sesión (odentIA o latidIA; decisión 9 del
-   * issue 229): una instancia por dominio, con la misma base y el mismo secreto.
-   * Da el nombre de la app (segundo factor, passkeys) y la marca de sus correos.
+   * La app en cuyo dominio va la sesión (decisión 9 del issue 229, ADR 0201): una
+   * instancia por dominio, con la misma base y el mismo secreto. Da el nombre de la app
+   * (segundo factor), la marca de sus correos y la app que recuerda quien se registra en
+   * ella. Una app sin la marca de sus correos no tiene entrada (`accountAppNotReady`).
    */
-  product?: ClinicalProduct
+  app?: AccountApp
+  /**
+   * El token firmado (ADR 0201): `/api/auth/token` da a quien entró un JWT de 15 minutos
+   * y `/api/auth/jwks` publica la llave para verificarlo, así otra app reconoce a la
+   * persona sin leer esta base. Apagado, esas rutas no existen y la sesión no firma nada.
+   */
+  signedTokens?: boolean
 }
 
 /**
@@ -91,13 +99,18 @@ export function createAuth({
   ownerDb,
   passwordBreachCheck: breachCheck = true,
   clientIpHeader,
-  product = "dental",
+  app = BASE_ACCOUNT_APP,
+  signedTokens = false,
 }: CreateAuthOptions) {
-  const { name: appName, brand } = productWords(product)
+  const { name: appName, mailBrand } = ACCOUNT_APP_INFO[app]
+  if (!mailBrand) throw new Error(accountAppNotReady(app) ?? `Falta la marca de ${appName}`)
+  const brand = mailBrand
   return betterAuth({
     appName,
     secret,
     baseURL,
+    // Sin token firmado, sus rutas no existen (Better Auth responde 404).
+    ...(signedTokens ? {} : { disabledPaths: ["/token", "/jwks"] }),
     database: drizzleAdapter(db, { provider: "pg" }),
     socialProviders: {
       ...(googleClientId && googleClientSecret
@@ -131,6 +144,8 @@ export function createAuth({
         // Contrato de encargo: solo quien abre una clínica; la clínica lo copia al crearse.
         processingAgreementVersion: { type: "string", required: false },
         processingAgreementAcceptedAt: { type: "date", required: false, input: false },
+        // La app de la entrada donde se registró: la pone el servidor (`user.create.before`).
+        signupApp: { type: "string", required: false, input: false },
       },
       changeEmail: {
         enabled: true,
@@ -155,6 +170,7 @@ export function createAuth({
             return {
               data: {
                 ...data,
+                signupApp: app,
                 ...(typeof data.termsVersion === "string" && data.termsVersion ? { termsAcceptedAt: now } : {}),
                 ...(typeof data.processingAgreementVersion === "string" && data.processingAgreementVersion
                   ? { processingAgreementAcceptedAt: now }
@@ -189,6 +205,22 @@ export function createAuth({
       // solo-OAuth (Google) enrolan con sesión fresca verificada en
       // /api/admin/access (regla propia); con credencial siempre exige contraseña.
       twoFactor({ allowPasswordless: true }),
+      // Token firmado para otra app (ADR 0201): `sub` es la cuenta y `aud` la app de esta
+      // entrada; lleva lo justo para la copia de la cuenta de esa app. Apagado, inerte.
+      jwt({
+        disableSettingJwtHeader: !signedTokens,
+        jwt: {
+          issuer: baseURL,
+          audience: app,
+          expirationTime: "15m",
+          definePayload: ({ user: who }) => ({
+            email: who.email,
+            emailVerified: who.emailVerified,
+            name: who.name,
+            image: who.image ?? null,
+          }),
+        },
+      }),
       keepTwoFactorWhileRequired(ownerDb),
       accessLink({ mailer, webURL, brand }),
       passwordBreachCheck({ enabled: breachCheck }),
@@ -321,5 +353,7 @@ export { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "./email
 export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
 export { termsState } from "./terms.js"
 export * from "./permissions.js"
+export * from "./apps.js"
+export * from "./account-events.js"
 export { ADMIN_DEVICE_COOKIE } from "./admin-device.js"
 export { SESSION_TWO_FACTOR_PREFIX } from "./team-two-factor.js"

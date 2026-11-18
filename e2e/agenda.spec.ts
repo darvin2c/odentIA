@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { tenant, tenantPattern } from "./env"
 import type { Page } from "@playwright/test"
-import { api, call, expect, test, type OwnerFixture } from "./fixtures"
+import { tenant, tenantPattern } from "./env"
+import { api, call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
@@ -150,8 +150,8 @@ test("agenda: «Llegó» con un clic, «Deshacer» y «Atender» sin formulario"
   const attending = await call<{ visit: string; arrivedAt: string | null }>(page, "GET", `/api/appointments/${appointment.id}`, owner.org.slug)
   expect(attending.visit).toBe("en_atencion")
   expect(attending.arrivedAt).not.toBeNull()
-  // El motivo de la reserva se ofrece arriba, en «Hoy viene a…», y no cuenta hasta usarlo: la atención nace sin él.
-  const visita = page.getByRole("region", { name: "Hoy viene a…", exact: true })
+  // El motivo de la reserva se ofrece en «Consulta», y no cuenta hasta usarlo: la atención nace sin él.
+  const visita = page.getByRole("region", { name: "Por qué viene", exact: true })
   const reason = page.getByLabel("Motivo de consulta", { exact: true })
   await expect(visita.getByText("«Control de ortodoncia»")).toBeVisible()
   await expect(reason).toHaveValue("")

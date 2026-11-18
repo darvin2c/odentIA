@@ -1,4 +1,10 @@
-import { CHILDHOOD_DENTAL_SENTENCE, HELP_TOPICS, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import {
+  CHILDHOOD_DENTAL_SENTENCE,
+  HELP_TOPICS,
+  type HelpFaq,
+  type HelpTopic,
+  SHARED_HELP_TOPICS,
+} from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en latidIA (issue 229, entrega 11) ----------
@@ -32,6 +38,18 @@ const say = (text: string) =>
   WORDS.reduce((out, [word, replacement]) => out.replace(word, replacement), text)
 
 type Faq = HelpFaq
+
+/**
+ * Lo que un odontólogo nuevo preguntó con sus palabras en la QA en pantalla del 17 nov (la
+ * endodoncia, la resina, la caries, la pieza): en un consultorio nadie lo pregunta así.
+ */
+const DENTAL_ASKED = [
+  "viene a su segunda sesion de endodoncia como lo atiendo",
+  "el paciente acepto una resina y vino sin cita como la hago hoy y la registro",
+  "encontre una caries en la primera consulta como la agrego al plan y la hago hoy",
+  "registre algo en la pieza equivocada como lo corrijo",
+  "registre en la pieza equivocada",
+]
 
 /**
  * Cambia un trozo de una respuesta heredada. Si la base ya no lo dice, falla al
@@ -83,7 +101,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. Si vuelve sin cita, arriba de la atención «Hoy viene a…» lo dice con su sesión (por ejemplo, la sesión 2 de 10) y «Continuar hoy» lo trae, con el motivo y el diagnóstico que sigue si faltan; nada se da por hecho hasta registrar su procedimiento. En «Realizado hoy» dice en qué sesión va y «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo indicado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Realizado hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo. Si la sesión de una cita por venir se hizo antes, la cita lo sigue diciendo en «Qué sigue», en la cabecera, en la cita y en Inicio hasta que la uses para otra cosa o la liberes; liberarla no le avisa, salvo que marques «Avisarle».",
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. Si vuelve con su cita para la siguiente sesión, el motivo ya dice qué continúa («Continúa:» con el tratamiento) y, en el Plan de la atención, el tratamiento llega marcado «Hoy» y «por hacer», con la sesión anterior a la vista debajo (el día, quién y lo anotado, con «Abrir»). Si vuelve sin cita, «Hacer hoy» en su fila lo marca «Hoy» en su lugar y trae el motivo y el diagnóstico que sigue si faltan; «Hoy no» lo desmarca. Nada se da por hecho hasta registrar su procedimiento: su fila dice en qué sesión va (sesión 2 de 10), «por hacer» y «Registrar», y después, «hecha hoy». Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento, su servicio y quien atendió ya elegido, sin salir de la atención; si no tiene horario en la sede o no está en la especialidad del servicio, lo dice ahí y se le reserva igual o eliges a otra persona. Al reservar dice cuándo vuelve y con quién. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo indicado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, al firmar «¿Terminaste?» también se pregunta en lo que aún no llega a sus sesiones previstas, con «Sigue en curso» elegido: «Sí, terminar» lo deja realizado. Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo. Si la sesión de una cita por venir se hizo antes, la cita lo sigue diciendo en «Qué sigue», en la cabecera, en la cita y en Inicio hasta que la uses para otra cosa o la liberes; liberarla no le avisa, salvo que marques «Avisarle».",
             ...(faq.forms
               ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") }
               : {}),
@@ -271,6 +289,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * Reportes no tiene sus pasos (`funnelStepsOf`); el plan tiene una sola fase.
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
+  "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).
   "indique-despues-presupuesto-incluida": () => [],
   // «De pequeño» es de odentIA (pediatría dental); en un consultorio, solo lo común de quien cuida a un niño.
@@ -425,8 +445,22 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       "pasar un tratamiento a otra fase",
     ),
   ],
-  "pacientes-procedimiento-registrar-anular": (faq) => [
-    { ...faq, a: swap(faq.a, "eliges un tratamiento aceptado de su plan", "eliges un tratamiento indicado de su plan") },
+  // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.
+  "atencion-donde-hacerla-hoy": (faq) => [
+    {
+      ...withoutForms(faq, ...DENTAL_ASKED),
+      a: swaps(
+        faq.a,
+        [
+          "En el bloque «Plan de tratamiento» de la atención, que es el único lugar de cada tratamiento, por fases:",
+          "En el bloque «Plan» de la atención, que es el único lugar de cada tratamiento:",
+        ],
+        [
+          ", y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy.",
+          ".",
+        ],
+      ),
+    },
   ],
   // El embarazo no va en «Personales» (`asksPregnancy: false`): tiene su sección, con la lactancia.
   "pacientes-antecedentes-enfermedades-medicacion": (faq) => [
@@ -567,7 +601,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-anestesia-dosis-maxima",
       q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-      a: "En la atención, en «Realizado hoy», en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
       forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo"],
       area: "clinica",
       needs: "clinical.write",

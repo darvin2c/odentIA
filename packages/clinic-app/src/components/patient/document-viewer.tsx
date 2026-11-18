@@ -1,4 +1,3 @@
-import { productUi } from "../../product/product-ui"
 import {
   Badge,
   Button,
@@ -31,7 +30,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useLocation } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -44,6 +43,8 @@ import type {
   PatientDocumentContext,
   PlanItem,
 } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
+import { PlacesField } from "../../product/site-fields"
 import {
   capturedDay,
   capturedInstant,
@@ -57,13 +58,14 @@ import {
   takenAt,
 } from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
+import { EncounterReadDrawer } from "./encounter-read-drawer"
 import { ImageCompare } from "./image-viewer"
 import { DicomFacts, ImageViewer2D } from "./image-viewer-2d"
 import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
 import { isTyping, usePatientName, ViewerShell } from "./viewer-shell"
-import { PlacesField } from "../../product/site-fields"
+import { useOpenWide } from "./wide-section"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -555,6 +557,13 @@ function DocumentViewer({
   const urlQuery = useSignedUrl(patientId, doc.id, "original", !doc.imaging)
   const url = urlQuery.data?.data.url ?? null
   const [compareId, setCompareId] = useState<string>("")
+  // Con una atención abierta, lo que enlaza el documento se lee al lado y no cambia de página: la
+  // dirección sigue siendo la de la atención. En la ficha son enlaces, como siempre.
+  const inEncounter = useLocation({
+    select: (location) => /\/encounters\//.test(location.pathname),
+  })
+  const openWide = useOpenWide()
+  const [readingEncounter, setReadingEncounter] = useState(false)
   const [retireOpen, setRetireOpen] = useState(false)
   const [actionPending, setActionPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -911,15 +920,35 @@ function DocumentViewer({
             <div>
               <dt className="text-xs text-muted-foreground">Atención</dt>
               <dd>
-                <Link
-                  to="/patients/$patientId/encounters/$encounterId"
-                  params={{ patientId, encounterId: doc.encounterId }}
-                  className={linkButton}
-                >
-                  {encounter
-                    ? `Abrir la atención del ${formatDate(encounter.createdAt)}`
-                    : "Abrir la atención"}
-                </Link>
+                {inEncounter ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => setReadingEncounter(true)}>
+                      {encounter
+                        ? `Ver la atención del ${formatDate(encounter.createdAt)}`
+                        : "Ver la atención"}
+                    </Button>
+                    {readingEncounter ? (
+                      <EncounterReadDrawer
+                        patientId={patientId}
+                        encounterId={doc.encounterId}
+                        title={
+                          encounter ? `Atención del ${formatDate(encounter.createdAt)}` : "Atención"
+                        }
+                        onClose={() => setReadingEncounter(false)}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <Link
+                    to="/patients/$patientId/encounters/$encounterId"
+                    params={{ patientId, encounterId: doc.encounterId }}
+                    className={linkButton}
+                  >
+                    {encounter
+                      ? `Abrir la atención del ${formatDate(encounter.createdAt)}`
+                      : "Abrir la atención"}
+                  </Link>
+                )}
               </dd>
             </div>
           )}
@@ -927,14 +956,30 @@ function DocumentViewer({
             <div>
               <dt className="text-xs text-muted-foreground">Tratamiento</dt>
               <dd>
-                <Link
-                  to="/patients/$patientId"
-                  params={{ patientId }}
-                  search={planSearch}
-                  className={linkButton}
-                >
-                  {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
-                </Link>
+                {inEncounter && openWide ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      openWide({
+                        id: "plan",
+                        itemId: doc.planItemId ?? undefined,
+                        budgetId: planItem?.budgetId ?? undefined,
+                      })
+                    }
+                  >
+                    {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
+                  </Button>
+                ) : (
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={planSearch}
+                    className={linkButton}
+                  >
+                    {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
+                  </Link>
+                )}
               </dd>
             </div>
           )}
@@ -942,14 +987,24 @@ function DocumentViewer({
             <div>
               <dt className="text-xs text-muted-foreground">Presupuesto</dt>
               <dd>
-                <Link
-                  to="/patients/$patientId"
-                  params={{ patientId }}
-                  search={{ tab: "plan", budgetId: doc.budgetId }}
-                  className={linkButton}
-                >
-                  Ver la propuesta
-                </Link>
+                {inEncounter && openWide ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openWide({ id: "plan", budgetId: doc.budgetId ?? undefined })}
+                  >
+                    Ver la propuesta
+                  </Button>
+                ) : (
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={{ tab: "plan", budgetId: doc.budgetId }}
+                    className={linkButton}
+                  >
+                    Ver la propuesta
+                  </Link>
+                )}
               </dd>
             </div>
           )}

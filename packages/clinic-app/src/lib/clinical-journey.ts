@@ -556,7 +556,7 @@ export const NEXT_ACTION_LABELS: Record<TreatmentNextAction, string> = {
   definir: "Definir el tratamiento",
   presupuestar: "Preparar la propuesta",
   decidir: "Registrar la decisión",
-  iniciar: "Iniciar la primera sesión",
+  iniciar: "Por empezar",
   reanudar: "Reanudar el tratamiento",
   // En curso y sin una atención abierta que lo trabaje: va por su próxima sesión. No dice si ya
   // tiene cita (eso lo cruza «Qué sigue»), así que no promete «falta».

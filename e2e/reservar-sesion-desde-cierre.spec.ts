@@ -52,9 +52,16 @@ test("al firmar la sesión 1, la sesión 2 se reserva desde «Atención finaliza
   // Al firmar: «¿Cuándo vuelve?» dice la sesión 2 y no pide un control aparte.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
-  await expect(signing.getByText("Sigue en curso: Endodoncia unirradicular · 36 · sesión 1 de 2", { exact: false })).toBeVisible()
+  // Lo que aún no llega a sus previstas también pregunta «¿Terminaste?», con «Sigue en curso» elegido.
   await expect(
-    signing.getByText("Vuelve para Endodoncia unirradicular · 36 · sesión 2 de 2: al firmar puedes reservar su cita aquí mismo."),
+    signing.getByText("Endodoncia unirradicular · 36 · sesión 1 de 2", { exact: true }),
+  ).toBeVisible()
+  await expect(signing.getByRole("button", { name: "Sigue en curso", pressed: true })).toBeVisible()
+  await expect(signing.getByText("Sigue en curso: le queda la sesión 2.")).toBeVisible()
+  await expect(
+    signing.getByText(
+      "Vuelve para Endodoncia unirradicular · 36 · sesión 2 de 2: al firmar puedes reservar su cita aquí mismo.",
+    ),
   ).toBeVisible()
   await expect(signing.getByRole("button", { name: "En 1 semana" })).toHaveCount(0)
   // Si hace falta un control igual (algo terminado hoy), está a un toque.

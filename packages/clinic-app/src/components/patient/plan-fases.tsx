@@ -17,17 +17,30 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@odentia/ui"
-import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import {
+  FormDrawer,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  zonedDateOf,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, ArrowUp, ChevronDown } from "lucide-react"
+import { useNavigate } from "@tanstack/react-router"
+import { ArrowDown, ArrowUp, Check, ChevronDown } from "lucide-react"
 import { useId, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
-import { formatDateTime, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
+import { formatDate, formatDateTime, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
-import { type PlanItem, planStatusLabel, treatmentConsentWords, type TreatmentJourneySummary } from "../../lib/patients"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import {
+  type PlanItem,
+  type PlanItemSession,
+  planStatusLabel,
+  type TreatmentJourneySummary,
+  treatmentConsentWords,
+} from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { useBudgetFormat } from "./plan/budget-parts"
 import {
@@ -72,12 +85,15 @@ export function PlanPhases({
   journeys,
   selectedId,
   onSelect,
+  onOpenEncounter,
 }: {
   patientId: string
   items: PlanItem[]
   journeys: TreatmentJourneySummary[]
   selectedId: string
   onSelect: (itemId: string) => void
+  /** «Abrir la atención» de una sesión; sin él, va a esa atención. */
+  onOpenEncounter?: (encounterId: string) => void
 }): React.JSX.Element {
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
@@ -108,6 +124,7 @@ export function PlanPhases({
             journeys={journeys}
             selectedId={selectedId}
             onSelect={onSelect}
+            onOpenEncounter={onOpenEncounter}
           />
         )
       })}
@@ -126,6 +143,7 @@ function PlanPhasesGroup({
   journeys,
   selectedId,
   onSelect,
+  onOpenEncounter,
 }: {
   patientId: string
   title: string
@@ -133,8 +151,17 @@ function PlanPhasesGroup({
   journeys: TreatmentJourneySummary[]
   selectedId: string
   onSelect: (itemId: string) => void
+  onOpenEncounter?: (encounterId: string) => void
 }): React.JSX.Element {
   const headingId = useId()
+  const navigate = useNavigate()
+  const openEncounter =
+    onOpenEncounter ??
+    ((encounterId: string) =>
+      void navigate({
+        to: "/patients/$patientId/encounters/$encounterId",
+        params: { patientId, encounterId },
+      }))
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const [planning, setPlanning] = useState<PlanItem | null>(null)
@@ -232,6 +259,12 @@ function PlanPhasesGroup({
                   const selected = item.id === selectedId
                   const planned = item.plannedSessions ?? 1
                   const sessions = item.sessionsDone ?? 0
+                  const done = item.sessions ?? []
+                  // La que sigue, con su cita: con sesiones a la vista va debajo de ellas.
+                  const nextBooked =
+                    !closed && bookedAt && (next === "iniciar" || next === "continuar")
+                      ? bookedAt
+                      : null
                   return (
                     <li
                       key={item.id}
@@ -271,23 +304,38 @@ function PlanPhasesGroup({
                               : planned > 1 || sessions > planned
                                 ? `${sessions} de ${plural(planned, "sesión", "sesiones")}`
                                 : null,
-                            !closed && bookedAt && (next === "iniciar" || next === "continuar")
-                              ? `${planned > 1 ? `Sesión ${sessions + 1}` : "Su cita"}: ${formatDateTime(bookedAt)}`
-                              : // Lo que espera a otro de la misma pieza no se empieza todavía: dice
-                                // tras qué va (repaso final de la atención, B14), como «Qué sigue».
-                                !closed && next === "iniciar" && item.waitsFor
-                                ? `Va después de ${lowerFirst(item.waitsFor.title)}`
-                                : !closed && next
-                                  ? NEXT_ACTION_LABELS[next]
-                                  : null,
+                            nextBooked && done.length > 0
+                              ? null
+                              : nextBooked
+                                ? `${planned > 1 ? `Sesión ${sessions + 1}` : "Su cita"}: ${formatDateTime(nextBooked)}`
+                                : // Lo que espera a otro de la misma pieza no se empieza todavía: dice
+                                  // tras qué va (repaso final de la atención, B14), como «Qué sigue».
+                                  !closed && next === "iniciar" && item.waitsFor
+                                  ? `Va después de ${lowerFirst(item.waitsFor.title)}`
+                                  : // Con su sesión de hoy sin firmar, «Sesión 2 · en curso hoy» ya lo dice:
+                                    // terminarlo se decide al firmar esa atención, no aquí (QA en pantalla del 17 nov).
+                                    !closed && next === "completar" && done.some((session) => !session.signed)
+                                    ? null
+                                    : !closed && next
+                                      ? NEXT_ACTION_LABELS[next]
+                                      : null,
                             // El consentimiento va con el tratamiento: lo que falta firmar se ve aquí también.
                             !closed ? treatmentConsentWords(item.consent, item.consentMissing) : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                         </span>
+                        {done.length > 0 ? (
+                          <PlanItemSessions
+                            sessions={done}
+                            itemLabel={`${item.title}${site(item)}`}
+                            onOpen={openEncounter}
+                            nextAt={nextBooked}
+                            className="mt-1"
+                          />
+                        ) : null}
                       </div>
-                      {/* «Pendiente» junto a «Aceptado · Iniciar la primera sesión» o a «Lo está
+                      {/* «Pendiente» junto a «Aceptado · Por empezar» o a «Lo está
                           pensando · Registrar la decisión» eran dos etiquetas para lo mismo: lo que
                           no empezó lo dice su renglón (repaso final de la ficha, B12). */}
                       {item.status === "pendiente" ? null : (
@@ -378,6 +426,96 @@ function PlanPhasesGroup({
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Si dos instantes caen el mismo día en la zona de la clínica (no la del navegador), para saber si
+ * una sesión es de hoy: comparar el día, no el texto de una fecha formateada.
+ */
+export function sameClinicDay(a: string, b: string): boolean {
+  const timeZone = activeOrgTimeZone()
+  return zonedDateOf(a, timeZone) === zonedDateOf(b, timeZone)
+}
+
+/**
+ * Las sesiones de un tratamiento, de la primera a la última (mesa del 17 nov). La de una
+ * atención firmada lleva ✓, el día, quién y el comienzo de su evolución; la de un borrador
+ * dice «en curso», sin ✓ ni nota: lo de un borrador puede cambiar. Las mismas en la ficha y en
+ * el recorrido. `current` es la atención desde donde se mira: esa no se ofrece abrir.
+ */
+export function PlanItemSessions({
+  sessions,
+  itemLabel,
+  onOpen,
+  current,
+  nextAt = null,
+  className = "",
+}: {
+  sessions: PlanItemSession[]
+  /** La cita ya reservada de la sesión que sigue, si la tiene. */
+  nextAt?: string | null
+  /** «Endodoncia · Pieza 46», para el nombre accesible de «Abrir la atención». */
+  itemLabel: string
+  onOpen?: (encounterId: string) => void
+  current?: string
+  className?: string
+}): React.JSX.Element {
+  const today = new Date().toISOString()
+  return (
+    <ol aria-label={`Sesiones de ${itemLabel}`} className={`flex flex-col gap-1 ${className}`}>
+      {sessions.map((session, index) => {
+        const n = index + 1
+        const words = session.signed
+          ? [
+              `Sesión ${n}`,
+              formatDate(session.at),
+              session.byName,
+              session.note ? `«${session.note}»` : null,
+            ]
+          : [
+              `Sesión ${n}`,
+              sameClinicDay(session.at, today)
+                ? "en curso hoy"
+                : `en curso, abierta el ${formatDate(session.at)}`,
+            ]
+        return (
+          <li
+            key={session.encounterId}
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+          >
+            <span
+              className={`flex min-w-0 items-start gap-1 ${session.signed ? "" : "text-muted-foreground"}`}
+            >
+              {session.signed ? (
+                <>
+                  <Check aria-hidden className="mt-px size-3.5 shrink-0 text-success" />
+                  <span className="sr-only">Firmada:</span>
+                </>
+              ) : null}
+              <span className="min-w-0">{words.filter(Boolean).join(" · ")}</span>
+            </span>
+            {onOpen && session.encounterId !== current ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="link"
+                className="px-0"
+                aria-label={`Abrir la atención de la sesión ${n} de ${itemLabel}`}
+                onClick={() => onOpen(session.encounterId)}
+              >
+                Abrir la atención
+              </Button>
+            ) : null}
+          </li>
+        )
+      })}
+      {nextAt ? (
+        <li className="text-xs text-muted-foreground">
+          Sesión {sessions.length + 1} · su cita del {formatDateTime(nextAt)}
+        </li>
+      ) : null}
+    </ol>
   )
 }
 
@@ -582,7 +720,7 @@ function PlanningDrawer({
           {(field) => (
             <field.TextField
               label="Sesiones previstas"
-              description={sessionsRule}
+              description={`Cuántas visitas calculas. Lo que hagas en cada una se registra ese día, en su atención. ${sessionsRule}`}
               type="number"
               inputMode="numeric"
               min={least}

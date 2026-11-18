@@ -3,7 +3,7 @@
  * así que solo se ofrece con la atención vacía de verdad. Lo guardado lo dice el servidor
  * (`empty` de la atención abierta); lo de la página, esta regla: nada escrito, aunque aún no se
  * guarde (el motivo recién escrito), nada indicado y ningún bloque con algo. Lo traído por su
- * cita («Hoy viene a…») no la llena: el servidor la descarta igual. Antes seguía a la vista
+ * cita (lo marcado «Hoy» en el plan) no la llena: el servidor la descarta igual. Antes seguía a la vista
  * después de indicar y daba un error sin salida, y borraba un motivo recién escrito.
  */
 export function discardableHere(page: {

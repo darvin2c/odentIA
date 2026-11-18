@@ -1,4 +1,4 @@
-# 0201 · Un solo WhatsApp para todas las apps: la conversación sabe su app
+# 0202 · Un solo WhatsApp para todas las apps: la conversación sabe su app
 
 Fecha: 2026-11-17 · Estado: aceptada · Paso A1 del lienzo «Una sola administración para todas las apps» · Revisa ADR 0189 (Kairós vende en los chats) y 0196 (la Bandeja)
 

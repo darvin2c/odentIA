@@ -6,6 +6,8 @@
  * grupo de caminos (hasta tres opciones): con dos piezas dudosas saldrían
  * combinaciones que nadie arma.
  */
+
+import { BUDGET_OPTIONS_MAX } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { and, eq } from "drizzle-orm"
@@ -24,9 +26,11 @@ import {
 import { notFound, ServiceError } from "./errors.js"
 import { lockDraftEncounter } from "./plan.js"
 import { productHooks } from "./products.js"
-import { BUDGET_OPTIONS_MAX } from "@odentia/clinical"
 
-/** «nuevo»: otro camino con este tratamiento; un número: solo en ese camino; «todos»: va en todos. */
+/**
+ * «nuevo»: otro camino con este tratamiento; un número: solo en ese camino; «todos»: va en todos,
+ * que es también «Va también» cuando aún no hay caminos (no compite con lo demás de su pieza).
+ */
 export type BudgetPathTarget = "nuevo" | "todos" | 1 | 2 | 3
 
 function conflict(code: string, message: string, field = "path"): ServiceError {
@@ -155,6 +159,12 @@ export async function placeBudgetPath(
     for (const option of options) if (option.id !== target.id && has(option.id, item.id)) await remove(option.id, [item.id])
   }
   budget = await dropPathsWithoutOwn(tx, orgId, actorUserId, patientId, budget, opts)
+  // La respuesta queda dicha: «Va también» («todos») no cambia el presupuesto de una sola opción,
+  // y sin esto la pregunta volvía al recargar (mesa del 17 nov, hallazgo 2 del novato).
+  await tx
+    .update(treatmentPlanItem)
+    .set({ pathAnsweredAt: new Date() })
+    .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, item.id)))
   return getBudgetDetail(tx, orgId, patientId, budget.id)
 }
 

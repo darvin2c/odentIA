@@ -196,9 +196,10 @@ function BookingHost({
   dock?: boolean
 }) {
   const client = useQueryClient()
-  // La sede que se está mirando, la misma de la Agenda.
+  // La sede que pide quien la abre (la sesión siguiente, en la sede de la atención anterior: mesa
+  // del 17 nov); si no pide ninguna, la que se está mirando en la Agenda.
   const sede = useActiveBranch()
-  const resources = useResources(sede.branchId, true)
+  const resources = useResources(seed.branchId ?? sede.branchId, true)
   const toneOf = useToneOf(resources.data?.data)
   const now = useScheduleNow()
   if (resources.isError) return <Waiting title="Nueva cita" error="No se pudo abrir la agenda. Ciérrala y vuelve a intentarlo." onClose={onClose} />

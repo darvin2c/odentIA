@@ -35,7 +35,6 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import * as React from "react"
 import { z } from "zod"
 import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
-import { warnUnsentNotice } from "./notice-warning"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
@@ -44,8 +43,9 @@ import { useOrgProfile } from "../../lib/org"
 import type { PhoneWhatsApp } from "../../lib/people"
 import { appWords } from "../../lib/product-words"
 import { fetchService } from "../../lib/services"
-import { PersonPicker } from "../person-picker"
+import { ASK_RECEPTION_TO_REGISTER, PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
+import { warnUnsentNotice } from "./notice-warning"
 import { dayShort, whenSaid } from "./shared"
 import {
   type AgendaException,
@@ -77,6 +77,11 @@ export interface BookingSeed {
    * ofrezca, y se dice por qué (QA del 8 nov).
    */
   keepProfessional?: boolean
+  /**
+   * La sede donde se reserva; sin ella, la que se mira en la Agenda. La sesión siguiente va en la
+   * sede de la atención anterior, donde atiende quien la hizo (mesa del 17 nov).
+   */
+  branchId?: string
   /** Instante del hueco ya elegido. */
   startsAt?: string
   /** Día en que se abre el selector. */
@@ -102,6 +107,19 @@ export interface BookingSeed {
   note?: string
   /** Antes de este día (`YYYY-MM-DD`) se avisa, sin frenar: la persona decide. */
   notBefore?: string
+}
+
+/**
+ * Lo marcado en «Para esta cita» al cambiar el servicio a mano: otro servicio marca lo suyo; quitarlo
+ * no desmarca nada (mesa del 17 nov: se quitaba para ver a quien empezó el tratamiento y la cita se
+ * guardaba sin su sesión 2).
+ */
+export function markedForService(
+  marked: string[],
+  serviceId: string | null,
+  itemsOfService: (serviceId: string) => string[],
+): string[] {
+  return serviceId ? itemsOfService(serviceId) : marked
 }
 
 /**
@@ -877,6 +895,7 @@ export function BookingDrawer({
                         }}
                         onCreate={canRegister ? (typed) => startRegistering(typed) : undefined}
                         createLabel={(typed) => `Registrar a ${typed}`}
+                        emptyHint={canRegister ? undefined : ASK_RECEPTION_TO_REGISTER}
                       />
                     )}
                   </field.Control>
@@ -967,8 +986,15 @@ export function BookingDrawer({
                       field.handleChange(next?.id ?? "")
                       autoService.current = null
                       serviceByHand.current = Boolean(next)
-                      // Otro servicio marca lo suyo; lo demás sigue a la vista.
-                      if (coordinationQuery.data) setMarked({ patientId: values.patientId, ids: itemsOfService(next?.id ?? "") })
+                      // Otro servicio marca lo suyo; lo demás sigue a la vista. Quitarlo no desmarca
+                      // nada: la sesión 2 sigue ligada a la cita.
+                      if (coordinationQuery.data)
+                        setMarked({
+                          patientId: values.patientId,
+                          ids: markedForService(markedIds, next?.id ?? null, (id) =>
+                            itemsOfService(id),
+                          ),
+                        })
                       // Con servicio, el bloque toma lo que dura el servicio.
                       when.resize(next?.durationMin ?? defaultMinutes)
                     }}

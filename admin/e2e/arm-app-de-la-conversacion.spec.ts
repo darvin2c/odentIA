@@ -1,5 +1,5 @@
 /**
- * De qué app le hablan (A1 del lienzo «Una sola administración», ADR 0201), en
+ * De qué app le hablan (A1 del lienzo «Una sola administración», ADR 0202), en
  * pantalla: el Grupo Sallca vende todas sus apps por un solo WhatsApp. Un
  * mensaje que llega desde un anuncio que nadie ató aparece en Hoy, «Anuncios
  * por atar», con su título; se ata a latidIA con el teclado y su conversación
