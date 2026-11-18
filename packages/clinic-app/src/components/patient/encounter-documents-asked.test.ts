@@ -6,7 +6,7 @@
  * salía «Ya no se pide: no lo aceptó o eligió otra opción».
  */
 import { describe, expect, it } from "vitest"
-import { consentsStillAsked } from "./encounter-documents"
+import { consentsStillAsked, inLinkWords } from "./encounter-documents"
 
 const prepared = {
   id: "doc-1",
@@ -47,6 +47,16 @@ describe("consentsStillAsked", () => {
     ])
     expect(asked.notAsked).toEqual([])
     expect(asked.toSign).toEqual([prepared])
+  })
+
+  // QA del 18 nov (desarrollo): dos pendientes agrupados decían «lo tiene en su enlace» con uno solo enviado.
+  it("lo que tiene en su enlace dice cuántos, si no son todos", () => {
+    const sent = { linkSentAt: "2026-11-18T13:00:00.000Z" }
+    const kept = { linkSentAt: null }
+    expect(inLinkWords([kept, kept])).toBe("")
+    expect(inLinkWords([sent, kept])).toBe(" · 1 de 2 en su enlace")
+    expect(inLinkWords([sent])).toBe(" · lo tiene en su enlace")
+    expect(inLinkWords([sent, sent])).toBe(" · los tiene en su enlace")
   })
 
   it("el de lo que no aceptó, no eligió o se anuló ya no se pide", () => {

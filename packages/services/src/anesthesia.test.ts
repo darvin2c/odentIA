@@ -179,6 +179,55 @@ it("B5d: una endodoncia en un adulto sin peso: la firma guarda la ASA y ningún 
   expect(signed?.anesthesiaAtSigning).toMatchObject({ asaClass: null, weightKg: null, dose: null })
 })
 
+// QA del 18 nov (novato 10): en la segunda atención del mismo día volvía a pedir el peso.
+it("sin peso en esta atención, la firma usa el anotado hoy en otra atención no anulada", async () => {
+  const f = await clinicalFixture()
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+  // La de la mañana, firmada, con su peso; otra anulada después, con otro peso que ya no cuenta.
+  const morningAt = new Date(Date.now() - 30 * 60_000)
+  await ownerDb.insert(encounter).values([
+    {
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      reason: "Dolor",
+      vitals: { peso: 80 },
+      status: "finalizada",
+      startedAt: morningAt,
+      endedAt: morningAt,
+      finalizedAt: morningAt,
+      finalizedBy: f.actor,
+    },
+    {
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      reason: "Abierta por error",
+      vitals: { peso: 95 },
+      status: "anulada",
+      startedAt: new Date(Date.now() - 10 * 60_000),
+      voidedAt: new Date(),
+      voidedBy: f.actor,
+      voidReason: "Abierta por error",
+    },
+  ])
+  const signing = () =>
+    f.run((tx) =>
+      anesthesiaAtSigningOf(tx, "org_a", {
+        patientId: f.patient.id,
+        encounterId: f.encounter.id,
+        uses: ["Endodoncia"],
+        vitals: null,
+        birthDate: "1984-05-02",
+        today,
+        anesthetic: "lidocaina-2-epinefrina",
+        asksAsa: false,
+        timeZone: "America/Lima",
+      }),
+    )
+  expect(await signing()).toMatchObject({ weightKg: 80, dose: expect.stringContaining("80 kg") })
+})
+
 // QA del 16 nov, Q7 (Gloria): la exodoncia se registró, se anuló («se difiere por presión») y la
 // atención se firmó. La firmada decía «Anestesia local · Para Exodoncia…» sobre «Anulado: se difiere».
 it("Q7: el acto anulado deja de pedir la línea de anestesia y la firmada no la afirma", async () => {

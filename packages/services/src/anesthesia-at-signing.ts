@@ -7,6 +7,7 @@
 import {
   type AnesthesiaAtSigning,
   ageInYears,
+  anesthesiaWeightKg,
   epinephrineCheckOf,
   localAnesthesiaWords,
   localAnestheticOf,
@@ -14,7 +15,7 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientCondition } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientCondition } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { localAnesthesiaSql } from "./service-catalog.js"
@@ -74,9 +75,33 @@ export async function anesthesiaAtSigningOf(
     today: string
     anesthetic: string | null | undefined
     asksAsa: boolean
+    /** La zona de la clínica: sin peso en esta atención, el anotado ese día en otra (`anesthesiaWeightKg`). */
+    timeZone?: string
   },
 ): Promise<AnesthesiaAtSigning | null> {
   if (input.uses.length === 0) return null
+  const sameDay =
+    input.timeZone && !(typeof input.vitals?.peso === "number" && input.vitals.peso > 0)
+      ? await tx
+          .select({ status: encounter.status, vitals: encounter.vitals, startedAt: encounter.startedAt })
+          .from(encounter)
+          .where(
+            and(
+              eq(encounter.organizationId, orgId),
+              eq(encounter.patientId, input.patientId),
+              sql`${encounter.id} <> ${input.encounterId}`,
+              sql`(${encounter.startedAt} at time zone ${input.timeZone})::date = ${input.today}::date`,
+            ),
+          )
+      : []
+  const weight = anesthesiaWeightKg(
+    input.vitals?.peso,
+    sameDay.map((row) => ({
+      status: row.status,
+      weightKg: (row.vitals as Vitals | null)?.peso,
+      startedAt: row.startedAt,
+    })),
+  ).kg
   const [header] = await tx
     .select({ asaClass: patient.asaClass, setAt: patient.asaClassSetAt, setBy: user.name })
     .from(patient)
@@ -124,7 +149,7 @@ export async function anesthesiaAtSigningOf(
     ageYears,
   })
   const anesthetic = localAnestheticOf(input.anesthetic)
-  const weightKg = input.vitals?.peso ?? null
+  const weightKg = weight
   const words = anesthetic
     ? localAnesthesiaWords({
         weightKg,

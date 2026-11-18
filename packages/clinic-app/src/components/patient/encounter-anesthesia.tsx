@@ -1,5 +1,6 @@
 import {
   type AnesthesiaAtSigning,
+  anesthesiaUsesParts,
   type EpinephrineCheck,
   epinephrineCheckOf,
   isCurrentMedication,
@@ -24,6 +25,12 @@ import { RadioChips } from "../ui/radio-chips"
 function listWords(words: readonly string[]): string {
   if (words.length <= 1) return words[0] ?? ""
   return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
+}
+
+/** «Exodoncia simple · Lidocaína 2 % con epinefrina»: los procedimientos y, aparte, el anestésico. */
+function usesWords(uses: readonly string[]): string {
+  const { procedures, anesthetics } = anesthesiaUsesParts(uses)
+  return [listWords(procedures), listWords(anesthetics)].filter(Boolean).join(" · ")
 }
 
 const GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
@@ -136,6 +143,8 @@ export function EncounterAnesthesiaLine({
   disabled = false,
   atSign = false,
   onComplete,
+  weightFromOther = false,
+  onAddWeight,
 }: {
   patientId: string
   encounterId: string
@@ -155,6 +164,10 @@ export function EncounterAnesthesiaLine({
   atSign?: boolean
   /** «Completar en Antecedentes». */
   onComplete?: () => void
+  /** El peso viene de otra atención de hoy: se dice, para que se sepa de dónde salió el máximo. */
+  weightFromOther?: boolean
+  /** «Anotar su peso»: lleva a los signos vitales del examen clínico. */
+  onAddWeight?: () => void
 }): React.JSX.Element | null {
   const ids = useId()
   const queryClient = useQueryClient()
@@ -198,13 +211,13 @@ export function EncounterAnesthesiaLine({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {listWords([...uses])}
+            Anestesia local · {usesWords(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {[
               asksAsa && asa ? `ASA ${asa}` : null,
               said.replace(/\.$/, "") || null,
-              words.dose ?? "Sin peso anotado: sin dosis máxima",
+              words.dose ? `${words.dose}${weightFromOther ? " (peso anotado hoy en otra atención)" : ""}` : "Sin peso anotado: sin dosis máxima",
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -233,7 +246,7 @@ export function EncounterAnesthesiaLine({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {listWords([...uses])}
+            Anestesia local · {usesWords(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {said}
@@ -301,8 +314,17 @@ export function EncounterAnesthesiaLine({
         </ChoiceSelect>
         <p id={`${ids}-dose`} className="text-sm font-medium">
           {words.dose
-            ? `${words.dose}.`
+            ? `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
             : "Anota su peso en los signos vitales para ver la dosis máxima."}
+          {/* Lleva a los signos vitales del examen clínico (QA del 18 nov: había que adivinarlo). */}
+          {!words.dose && onAddWeight && canWrite ? (
+            <>
+              {" "}
+              <Button type="button" size="sm" variant="link" className="h-auto p-0" disabled={disabled} onClick={onAddWeight}>
+                Anotar su peso
+              </Button>
+            </>
+          ) : null}
         </p>
         {words.warnings.map((warning) => (
           <p key={warning} className="text-sm">
@@ -320,6 +342,7 @@ export function AnesthesiaAtSigningView({
 }: {
   value: AnesthesiaAtSigning
 }): React.JSX.Element {
+  const parts = anesthesiaUsesParts(value.uses)
   const asa = value.asaClass ? asaLabel(value.asaClass) : null
   const before =
     value.asaBefore !== undefined && value.asaBefore !== value.asaClass
@@ -331,7 +354,9 @@ export function AnesthesiaAtSigningView({
       : ""
   return (
     <ul className="flex flex-col gap-0.5 text-sm">
-      <li>Para {listWords(value.uses)}</li>
+      {/* Los procedimientos y, aparte, el anestésico de sus materiales (auditor, 18 nov, H7). */}
+      {parts.procedures.length > 0 ? <li>Para {listWords(parts.procedures)}</li> : null}
+      {parts.anesthetics.length > 0 ? <li>Anestésico: {listWords(parts.anesthetics)}</li> : null}
       {asa ? (
         <li>
           {asa}

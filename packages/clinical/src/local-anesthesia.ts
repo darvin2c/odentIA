@@ -16,6 +16,7 @@
  * prudente.
  * A quién le corresponde el tope de epinefrina (reglas clínicas del 18 nov): `epinephrineCheckOf`.
  */
+import { isLocalAnestheticName } from "./medications.js"
 import { ADULT_BLOOD_PRESSURE_FROM_AGE, type Vitals } from "./vitals.js"
 
 /** El cartucho dental: 1,8 mL. */
@@ -321,6 +322,34 @@ export type OfficeAsaClass = (typeof OFFICE_ASA_CLASSES)[number]
 /** ASA III o IV: el paciente con enfermedad sistémica grave, para el tope de epinefrina. */
 export function isSevereAsa(asaClass: string | null | undefined): boolean {
   return asaClass === "III" || asaClass === "IV" || asaClass === "V" || asaClass === "VI"
+}
+
+/**
+ * Lo de hoy que usa anestesia, separado: los procedimientos y los anestésicos de sus materiales
+ * (`isLocalAnestheticName`). La línea decía «Para Exodoncia simple y Lidocaína 2 % con
+ * epinefrina» y mezclaba un material con los procedimientos (auditor, 18 nov, H7). Lo firmado
+ * antes guarda las dos cosas en `uses`: se separan al leerlo.
+ */
+export function anesthesiaUsesParts(uses: readonly string[]): { procedures: string[]; anesthetics: string[] } {
+  const anesthetics = uses.filter((use) => isLocalAnestheticName(use))
+  return { procedures: uses.filter((use) => !anesthetics.includes(use)), anesthetics }
+}
+
+/**
+ * El peso para el máximo de anestesia: el de esta atención o, si no se anotó, el último anotado
+ * hoy en otra atención no anulada de la persona (QA del 18 nov: la segunda atención del mismo día
+ * volvía a pedirlo media hora después). El peso no cambia en el día. La presión sí, y la que
+ * limita la epinefrina es la de esta atención: no se trae de otra.
+ */
+export function anesthesiaWeightKg(
+  own: number | null | undefined,
+  sameDay: ReadonlyArray<{ status: string; weightKg: unknown; startedAt: string | Date }>,
+): { kg: number | null; fromOther: boolean } {
+  if (typeof own === "number" && own > 0) return { kg: own, fromOther: false }
+  const other = sameDay
+    .filter((row) => row.status !== "anulada" && typeof row.weightKg === "number" && row.weightKg > 0)
+    .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0]
+  return other ? { kg: other.weightKg as number, fromOther: true } : { kg: null, fromOther: false }
 }
 
 /**

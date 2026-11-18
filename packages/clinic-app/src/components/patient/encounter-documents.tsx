@@ -172,6 +172,17 @@ export function consentsStillAsked<
   }
 }
 
+/**
+ * Lo que de los pendientes agrupados ya tiene en su enlace: todos, o cuántos de ellos. Decía «lo
+ * tiene en su enlace» de todos aunque solo uno se le mostró (QA del 18 nov, desarrollo).
+ */
+export function inLinkWords(docs: ReadonlyArray<{ linkSentAt?: string | null }>): string {
+  const sent = docs.filter((doc) => doc.linkSentAt).length
+  if (sent === 0) return ""
+  if (sent < docs.length) return ` · ${sent} de ${docs.length} en su enlace`
+  return docs.length === 1 ? " · lo tiene en su enlace" : " · los tiene en su enlace"
+}
+
 export function useEncounterDocuments(
   patientId: string,
   encounterId: string,
@@ -561,7 +572,7 @@ export function EncounterDocumentsBlock({
                 {pendingTitles.length === 1
                   ? `Falta la firma de ${who}`
                   : `Faltan las firmas de ${who}`}
-                {docs.toSign.some((doc) => doc.linkSentAt) ? " · lo tiene en su enlace" : ""}
+                {inLinkWords(docs.toSign)}
               </span>
               {(() => {
                 const block = docs.toSign.find((doc) => doc.phoneSignBlock)?.phoneSignBlock

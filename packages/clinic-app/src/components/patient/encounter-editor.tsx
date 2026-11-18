@@ -1,5 +1,6 @@
 import {
   ageInYears,
+  anesthesiaWeightKg,
   appendDictated,
   type ClinicalProduct,
   DEFAULT_LOCAL_ANESTHETIC,
@@ -2510,6 +2511,23 @@ export function EncounterEditor({
       }}
     />
   ) : null
+  // Sin peso en esta atención, el anotado hoy en otra (la misma regla que guarda la firma).
+  const clinicDayOf = (iso: string) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(iso))
+  const anesthesiaWeight = anesthesiaWeightKg(
+    parsedVitals?.peso,
+    (encountersQuery.data?.data ?? [])
+      .filter(
+        (row) =>
+          row.id !== encounterId &&
+          row.startedAt &&
+          encounter.startedAt &&
+          clinicDayOf(row.startedAt) === clinicDayOf(encounter.startedAt),
+      )
+      .map((row) => ({ status: row.status, weightKg: row.vitals?.peso, startedAt: row.startedAt! })),
+  )
+  const anesthesiaVitals: Vitals | null =
+    anesthesiaWeight.fromOther && anesthesiaWeight.kg !== null ? { ...(parsedVitals ?? {}), peso: anesthesiaWeight.kg } : parsedVitals
   /** La línea de anestesia de hoy: arriba del plan antes de anestesiar, y al firmar. */
   const anesthesiaLine = (atSign: boolean) => (
     <EncounterAnesthesiaLine
@@ -2520,7 +2538,17 @@ export function EncounterEditor({
       gaps={healthGaps}
       risks={closingQuery.data?.data.health?.risks ?? []}
       health={stripHealth.data?.data ?? null}
-      vitals={parsedVitals}
+      vitals={anesthesiaVitals}
+      weightFromOther={anesthesiaWeight.fromOther}
+      onAddWeight={() => {
+        setConfirmOpen(false)
+        setContextOpen(false)
+        openExtra("examen")
+        requestAnimationFrame(() => {
+          goTo(`${uid}-examen`)
+          document.getElementById(`${uid}-vital-peso`)?.focus({ preventScroll: true })
+        })
+      }}
       ageYears={patientAge}
       anesthetic={anesthetic}
       onAnestheticChange={setAnesthetic}
