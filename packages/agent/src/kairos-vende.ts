@@ -296,7 +296,7 @@ export function sellContext(input: KairosSellInput): string {
       : "App: todavía no sabemos qué negocio tiene (clínica dental, consultorio médico u óptica)",
     input.client
       ? `Clínica: ${input.client.name}`
-      : "Clínica: todavía no sabemos de qué clínica es (si es un consultorio médico o una óptica, díselo a datos_de_la_clinica con su producto)",
+      : "Clínica: todavía no sabemos de qué clínica es (al registrarla con datos_de_la_clinica, di su producto)",
     contact
       ? `Persona: ${contact.name} (WhatsApp guardado: ${contact.hasPhone ? "sí" : "no"}; correo guardado: ${contact.hasEmail ? "sí" : "no"})`
       : `Persona: ${input.displayName?.trim() || "sin nombre"} (sin WhatsApp ni correo guardados)`,
@@ -598,6 +598,9 @@ async function runTool(
         // dental»: un registro así ocupaba la conversación y el nombre de verdad ya no entraba.
         if (!value.producto && !state.product)
           return "Todavía no sabes qué negocio tiene: pregúntaselo (clínica dental, consultorio médico u óptica) y registra la clínica con su producto."
+        // Registrarla con su producto también dice la app: el turno sigue con sus hechos y precios.
+        if (!state.product && value.producto)
+          state.product = await tools.chooseProduct(value.producto as KairosSellApp, ctx)
         if (!clinicNameSaid(String(value.clinica), input.history))
           return "Ese no es el nombre de su clínica: todavía no lo dijo. Pregúntale cómo se llama su clínica y regístrala cuando lo diga."
         const result = await tools.clinicData(
@@ -1034,9 +1037,20 @@ async function runTurn(
         askedThisTurn(input.history),
       )
       // Sin saber la app, no nombra ninguna: pregunta qué negocio tiene.
-      if (!state.product)
+      // Las que nombró la persona sí se pueden nombrar («¿qué diferencia hay entre…?»).
+      if (!state.product) {
+        const said = new Set(
+          appsNamedIn(
+            input.history
+              .filter((line) => line.who === "persona")
+              .map((line) => line.text)
+              .join("\n"),
+          ),
+        )
         for (const name of appsNamedIn(out))
-          check.unsupported.push(`app: ${name} (todavía no sabes qué negocio tiene)`)
+          if (!said.has(name))
+            check.unsupported.push(`app: ${name} (todavía no sabes qué negocio tiene)`)
+      }
       if (check.unsupported.length) check.ok = false
       const untrue = check.ok
         ? falseClaims(text, { ...state, presentation: input.presentation })

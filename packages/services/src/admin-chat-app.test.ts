@@ -274,6 +274,30 @@ describe("elegir la app a mano y cuando lo dice la persona", () => {
     })
   })
 
+  it("lo que eligió el equipo gana a lo que diga el modelo al registrar la clínica", async () => {
+    const { chatId } = await ingest(message({ body: "Mi consultorio se llama Visión Sur" }))
+    await ownerDb.transaction((tx) => setChatProduct(tx, admin, chatId, "optical", NOW))
+    const created = await ownerDb.transaction((tx) =>
+      kairosClinicData(tx, chatId, { clinicName: "Visión Sur", product: "medical" }, NOW),
+    )
+    const [clientRow] = await ownerDb
+      .select()
+      .from(saasClient)
+      .where(eq(saasClient.id, created.clientId))
+    expect(clientRow?.product).toBe("optical")
+  })
+
+  it("si ya tenía esa app, Kairós no cambia cómo se supo", async () => {
+    const { chatId } = await ingest(message({ body: salesWhatsAppText("medical") }))
+    expect(
+      await ownerDb.transaction((tx) => kairosChooseChatProduct(tx, chatId, "medical", NOW)),
+    ).toEqual({
+      product: "medical",
+      source: "enlace",
+    })
+    expect(await chatRow(chatId)).toMatchObject({ product: "medical", productSource: "enlace" })
+  })
+
   it("Kairós anota lo que dijo y registra la clínica con esa app; sin app no la registra", async () => {
     const { chatId } = await ingest(message({ body: "Hola, se llama Visión Clara" }))
     await expect(

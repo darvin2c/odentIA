@@ -988,7 +988,8 @@ export async function kairosClinicData(
   // pregunta primero qué negocio tiene (A1: nunca se asume una app).
   const said = isClinicalProduct(input.product) ? input.product : null
   const known = chat.product && isClinicalProduct(chat.product) ? chat.product : null
-  const product = said ?? known
+  // Lo que eligió alguien del equipo no lo cambia Kairós (como `kairosChooseChatProduct`).
+  const product = chat.productSource === "persona" && known ? known : (said ?? known)
   if (!product)
     throw invalidField(
       "producto",

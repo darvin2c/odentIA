@@ -146,8 +146,21 @@ const adsSchema = z.array(
   }),
 )
 
-/** Solo un enlace web normal se abre: lo que manda Meta no se sigue a ciegas. */
-const safeHref = (value: string | null) => (value && /^https:\/\//i.test(value) ? value : null)
+/** Los dominios de Meta, los únicos a los que lleva «Ver el anuncio». */
+const META_HOSTS = ["fb.me", "facebook.com", "fb.com", "instagram.com", "whatsapp.com"]
+
+/** Solo un enlace https a Meta se abre: lo que llega en el aviso no se sigue a ciegas. */
+function safeHref(value: string | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    const host = url.hostname.toLowerCase()
+    const meta = META_HOSTS.some((own) => host === own || host.endsWith(`.${own}`))
+    return url.protocol === "https:" && meta ? url.toString() : null
+  } catch {
+    return null
+  }
+}
 
 /** «Anuncios por atar» en Hoy: sin ninguno, no ocupa lugar. Solo Administración. */
 export function AdsToTie() {

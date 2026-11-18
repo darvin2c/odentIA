@@ -32,7 +32,7 @@ import {
   saasChat,
   saasClient,
 } from "@odentia/db/schema/admin-arm"
-import { and, asc, eq, isNull, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, isNull, ne, or, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 
@@ -275,17 +275,17 @@ export async function kairosChooseChatProduct(
     : []
   const kept = chatAppOf(chat, client ?? null)
   if (kept && (kept.source === "cliente" || kept.source === "persona")) return kept
-  if (kept?.product !== product) {
-    await tx
-      .update(saasChat)
-      .set({ product, productSource: "lo_dijo", updatedAt: now })
-      .where(eq(saasChat.id, chat.id))
-    await writeAdminAudit(tx, null, {
-      action: "kairos.chat_product",
-      entityId: chat.id,
-      metadata: { chatId: chat.id, product, before: chat.product },
-    })
-  }
+  // La misma app que ya tenía: queda como se supo.
+  if (kept?.product === product) return kept
+  await tx
+    .update(saasChat)
+    .set({ product, productSource: "lo_dijo", updatedAt: now })
+    .where(eq(saasChat.id, chat.id))
+  await writeAdminAudit(tx, null, {
+    action: "kairos.chat_product",
+    entityId: chat.id,
+    metadata: { chatId: chat.id, product, before: chat.product },
+  })
   return { product, source: "lo_dijo" }
 }
 
@@ -301,7 +301,10 @@ export interface AdToTie {
   waiting: number
 }
 
-/** Los anuncios sin app, el más viejo primero (Hoy, «Anuncios por atar»). Solo Administración. */
+/**
+ * Los anuncios sin app (Hoy, «Anuncios por atar»): primero los que tienen más conversaciones
+ * esperando, después el más viejo. Solo Administración.
+ */
 export async function listAdsToTie(tx: Db, actor: AdminActor): Promise<AdToTie[]> {
   requireAdmin(actor)
   const rows = await tx
@@ -317,15 +320,20 @@ export async function listAdsToTie(tx: Db, actor: AdminActor): Promise<AdToTie[]
     })
     .from(saasAd)
     .where(isNull(saasAd.product))
-    .orderBy(asc(saasAd.createdAt), asc(saasAd.id))
+    .orderBy(
+      desc(sql`(select count(*) from admin.saas_chat c
+        where c.ad_id = "admin"."saas_ad"."id" and c.product is null and c.client_id is null)`),
+      asc(saasAd.createdAt),
+      asc(saasAd.id),
+    )
     .limit(50)
   return rows.map((row) => ({ ...row, waiting: Number(row.waiting ?? 0) }))
 }
 
 /**
- * Ata un anuncio a su app, una vez: desde ahí cada conversación que abra nace con esa app, y las
- * que ya abrió y siguen sin app ni cliente la toman (`anuncio`). Solo Administración. Atar otra vez
- * a otra app cambia el anuncio y las suyas que tomaron la app del anuncio.
+ * Ata un anuncio a su app: desde ahí cada conversación que abra nace con esa app, y las que ya
+ * abrió y siguen sin app ni cliente la toman (`anuncio`). Solo Administración. Se puede volver a
+ * atar a otra app: cambia el anuncio y las suyas sin cliente que tomaron la app del anuncio.
  */
 export async function setAdProduct(
   tx: Db,

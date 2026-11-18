@@ -139,10 +139,11 @@ const CHAT_APP_SOURCE_WORDS: Record<ChatAppSource, string> = {
 export const chatAppSchema = z
   .object({
     product: z.string(),
+    // Un origen que esta pantalla no conoce no se dice: mejor nada que algo falso.
     source: z
       .string()
-      .transform((value): ChatAppSource =>
-        (CHAT_APP_SOURCES as readonly string[]).includes(value) ? (value as ChatAppSource) : "persona",
+      .transform((value): ChatAppSource | null =>
+        (CHAT_APP_SOURCES as readonly string[]).includes(value) ? (value as ChatAppSource) : null,
       ),
   })
   .nullable()
@@ -160,7 +161,7 @@ export function ChatAppMark({ app, className }: { app: ChatApp; className?: stri
   return (
     <span className={cn("inline-flex items-center gap-1 text-xs", className)}>
       <ProductMark product={app.product} />
-      {app.source === "cliente" ? null : <span className="text-muted-foreground">· {CHAT_APP_SOURCE_WORDS[app.source]}</span>}
+      {app.source === null || app.source === "cliente" ? null : <span className="text-muted-foreground">· {CHAT_APP_SOURCE_WORDS[app.source]}</span>}
     </span>
   )
 }

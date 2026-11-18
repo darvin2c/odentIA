@@ -1135,6 +1135,43 @@ describe("Kairós vende: sin saber de qué app le hablan (A1)", () => {
     expect(JSON.stringify(seen[1]?.at(-1)?.content)).toContain("Todavía no sabes qué negocio tiene")
   })
 
+  it("registrar la clínica con su producto también dice la app: sus precios pueden salir", async () => {
+    const { model } = scripted([
+      {
+        tool: "datos_de_la_clinica",
+        args: { clinica: "Lumen", persona: null, producto: "optical", ciudad: null },
+      },
+      { text: "Listo, registré tu óptica Lumen. vistIA te cobra USD 0,07 por respuesta." },
+    ])
+    const { tools: t, calls } = tools()
+    const result = await seller(model).seller.answer(
+      input({
+        product: null,
+        client: null,
+        history: [{ who: "persona", at: now, text: "Tengo la óptica Lumen, ¿cuánto cuesta?" }],
+      }),
+      t,
+    )
+    expect(calls).toEqual(["chooseProduct:optical", "clinicData"])
+    expect(result.kind).toBe("respondio")
+  })
+
+  it("sin saber la app puede nombrar las que nombró la persona, no otras", async () => {
+    const asked = input({
+      product: null,
+      client: null,
+      history: [{ who: "persona", at: now, text: "¿Qué diferencia hay entre odentIA y latidIA?" }],
+    })
+    const ok = scripted([
+      {
+        text: "odentIA es para clínicas dentales y latidIA para consultorios médicos. ¿Cuál es tu negocio?",
+      },
+    ])
+    expect((await seller(ok.model).seller.answer(asked, tools().tools)).kind).toBe("respondio")
+    const other = scripted([{ text: "También está vistIA, para ópticas. ¿Cuál es tu negocio?" }])
+    expect((await seller(other.model).seller.answer(asked, tools().tools)).kind).toBe("fallo")
+  })
+
   it("appsNamedIn encuentra el nombre de cada app sin importar mayúsculas", () => {
     expect(appsNamedIn("Te cuento de LATIDIA y de vistIA")).toEqual(["latidIA", "vistIA"])
     expect(appsNamedIn("una clínica dental, un consultorio o una óptica")).toEqual([])
