@@ -9,9 +9,9 @@
 import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
-  duplicateWarnings,
   DOSAGE_FORMS,
   dispensedUnit,
+  duplicateWarnings,
   FOLLOW_UP_REPEAT_MONTHS,
   followUpRepeatWords,
   prescribingAlerts,
@@ -26,11 +26,11 @@ import {
   FormDrawer,
   FormField,
   regionToday,
+  SkeletonRegion,
   submitErrorMessage,
   useAppForm,
   useFieldContext,
   useFormSurface,
-  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -38,17 +38,16 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchMyProfessionalProfile } from "../../lib/encounters"
 import {
   cancelFollowUpApi,
   changeFollowUpDueApi,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
+  encounterControls,
   FOLLOW_UP_KIND_LABELS,
   FOLLOW_UP_STATUS_LABELS,
   type FollowUp,
-  encounterControls,
   fetchFollowUps,
   fetchPrescriptionDetail,
   fetchPrescriptions,
@@ -61,17 +60,18 @@ import {
   stopFollowUpRepeatApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { fetchMyProfessionalProfile } from "../../lib/encounters"
+import { clinicToday } from "../../lib/inventory"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
+import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
+import { ControlRowsSkeleton } from "../skeletons/person-sections"
 import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { PrescriptionPaper } from "./document-papers"
 import { FollowUpScheduler } from "./follow-up-scheduler"
-import { clinicToday } from "../../lib/inventory"
 import { PrescriptionAlertsSeen } from "./prescription-alerts"
-import { ControlRowsSkeleton } from "../skeletons/person-sections"
-import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -378,8 +378,8 @@ export function ControlesPanel({
         <div className="flex flex-col gap-1.5">
           <h3 className="font-heading text-base font-medium">{heading}</h3>
           <p className="text-sm text-muted-foreground">
-            Un control programado no equivale a un control realizado: se completa contra una
-            atención finalizada y deja su resultado en la historia.
+            El control se hace cuando el paciente vuelve: en su atención aparece cuando falta poco
+            para su fecha y queda hecho al firmar.
           </p>
         </div>
         {canWrite && allowCreate ? (
@@ -1174,8 +1174,10 @@ export function RecetasPanel({
   )
   const dciId = (key: string | undefined) => `${uid}-med-${key}`
 
+  // `@container`: los campos van en dos columnas según el ancho del formulario y no el de la ventana;
+  // en la columna lateral o en un cajón angosto quedan uno debajo del otro.
   const createBody = (
-    <div className="flex flex-col gap-4">
+    <div className="@container flex min-w-0 flex-col gap-4">
       {needsRegistration ? (
         <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
           <span className="min-w-0 flex-1">Para firmar la receta falta tu colegiatura. Lo escrito se queda aquí.</span>
@@ -1252,7 +1254,7 @@ export function RecetasPanel({
             {itemsField.state.value.map((medication, index) => (
               <FieldSet
                 key={medication.key}
-                className="grid gap-3 rounded-md border p-3 sm:grid-cols-2"
+                className="grid gap-3 rounded-md border p-3 @xl:grid-cols-2"
               >
                 <FieldLegend variant="label" className="mb-0 px-1">
                   Medicamento {index + 1}
@@ -1332,7 +1334,7 @@ export function RecetasPanel({
                       label="Cantidad total"
                       description={(() => {
                         const unit = dispensedUnit(medications[index]?.dosageForm ?? "", null)
-                        return `${unit ? `En ${unit}. ` : ""}Los seguros reembolsan solo la cantidad escrita.`
+                        return unit ? `En ${unit}.` : undefined
                       })()}
                       inputMode="numeric"
                       maxLength={4}
@@ -1531,9 +1533,11 @@ export function RecetasPanel({
       {...surface}
       open={createOpen}
       title="Emitir receta"
-      description="La receta queda inmutable: para corregirla se anula con motivo."
+      description="Una vez emitida no se edita: si hay un error, se anula y se emite otra."
       submitLabel="Emitir receta"
-      className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
+      // Con el prefijo del eje, como las demás superficies anchas: sin él, el ancho de 24 rem del cajón
+      // le gana a este y sale de 384 px. Hasta 42 rem para que pueda ir en la columna lateral.
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
       onClose={() => {
         if (!surface.isSubmitting) setCreateOpen(false)
       }}

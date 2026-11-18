@@ -52,6 +52,7 @@ import {
   valueOptionOf,
 } from "./budgets.js"
 import { notFound } from "./errors.js"
+import { type LastSession, lastSessionOf } from "./last-session.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
@@ -122,6 +123,13 @@ export interface PlanNextAction {
   appointmentStartsAt?: string
   /** «Usarla para la exodoncia»: lo aceptado que falta reservar y podría ir en esa cita. */
   reuse?: { planItemId: string; title: string }
+  /**
+   * La sesión siguiente: quien hizo la anterior va primero en la reserva, aunque el servicio
+   * lo atienda otra especialidad, y en la sede de esa atención (mesa del 17 nov). Se puede cambiar.
+   */
+  professionalUserId?: string
+  professionalName?: string | null
+  branchId?: string
 }
 
 export interface PlanNextStep {
@@ -524,7 +532,16 @@ async function planFactsOf(
       sessions,
       controls,
       carriedAt: await carriedAtOf(tx, orgId, [patientId]),
-      sessionFrom: await nextSessionFromOf(tx, orgId, items.filter((item) => item.status === "en_curso").map((item) => item.id)),
+      sessionFrom: await nextSessionFromOf(
+        tx,
+        orgId,
+        items.filter((item) => item.status === "en_curso").map((item) => item.id),
+      ),
+      lastSession: await lastSessionOf(
+        tx,
+        orgId,
+        items.filter((item) => item.status === "en_curso").map((item) => item.id),
+      ),
       callbacks: new Map(
         callbacks.map((row) => [
           row.key.slice(BUDGET_CALLBACK_KEY.length),
@@ -677,11 +694,12 @@ async function planFactsMany(
   const todayOf = await todayLiveAppointments(tx, orgId, ids, context.timezone)
   const openEncounters = await openEncountersOf(tx, orgId, ids)
   const carriedAt = await carriedAtOf(tx, orgId, ids)
-  const sessionFrom = await nextSessionFromOf(
-    tx,
-    orgId,
-    [...itemsOf.values()].flat().filter((item) => item.status === "en_curso").map((item) => item.id),
-  )
+  const started = [...itemsOf.values()]
+    .flat()
+    .filter((item) => item.status === "en_curso")
+    .map((item) => item.id)
+  const sessionFrom = await nextSessionFromOf(tx, orgId, started)
+  const lastSession = await lastSessionOf(tx, orgId, started)
   // «No contesta · volver a llamar» de cada uno: la fila de Pacientes dice lo mismo que la ficha.
   const callbackRows = await tx.execute<{ patientId: string; key: string; dueAt: Date | null; reason: string | null }>(sql`
     select patient_id as "patientId", idempotency_key as key, due_at as "dueAt", reason from task
@@ -706,6 +724,7 @@ async function planFactsMany(
       sessions,
       carriedAt,
       sessionFrom,
+      lastSession,
       callbacks: callbacksOf.get(person.id),
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
@@ -802,6 +821,8 @@ interface PlanFacts {
   carriedAt?: ReadonlyMap<string, Date>
   /** Desde qué día conviene la próxima sesión de lo empezado (`nextSessionFromOf`): la endodoncia, una semana. */
   sessionFrom?: ReadonlyMap<string, string>
+  /** Quién hizo la última sesión de lo empezado y en qué sede (`lastSessionOf`): la siguiente, con esa persona. */
+  lastSession?: ReadonlyMap<string, LastSession>
   /** «No contesta»: el presupuesto y cuándo volver a llamar (su tarea abierta). Solo de una persona. */
   callbacks?: ReadonlyMap<string, { said: string | null; dueAt: Date | null }>
   /**
@@ -811,6 +832,18 @@ interface PlanFacts {
   returnDay?: string | null
   /** Sus citas por venir que solo llevaban lo ya terminado (`freedAppointmentsOf`). Solo de una persona. */
   freed?: Array<{ id: string; version: number; startsAt: Date; professionalName: string | null; wasFor: string }>
+}
+
+/** Lo que la reserva de la sesión siguiente toma de la anterior: quién y dónde. */
+function lastSessionAction(
+  last: LastSession | undefined,
+): Pick<PlanNextAction, "professionalUserId" | "professionalName" | "branchId"> {
+  if (!last) return {}
+  return {
+    professionalUserId: last.professionalUserId,
+    professionalName: last.professionalName,
+    ...(last.branchId ? { branchId: last.branchId } : {}),
+  }
 }
 
 /** Sin nada que hacer en el plan. */
@@ -990,6 +1023,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
             ...(facts.sessionFrom?.get(item.id)
               ? { date: facts.sessionFrom.get(item.id)!, note: SESSION_GAP_NOTE }
               : {}),
+            // Con quien hizo la anterior y en su sede, primero (mesa del 17 nov): se puede cambiar.
+            ...lastSessionAction(facts.lastSession?.get(item.id)),
           }
         : null,
     }

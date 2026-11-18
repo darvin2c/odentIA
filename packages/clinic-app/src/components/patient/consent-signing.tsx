@@ -17,6 +17,7 @@ import {
 import {
   applySubmitError,
   ConfirmDialog,
+  DetailDrawer,
   FormChoiceField,
   FormDrawer,
   focusFirstInvalid,
@@ -52,9 +53,12 @@ import {
 } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { hcLabel, type PatientFull } from "../../lib/patients"
+import { usePerson } from "../../lib/people"
 import { productUi } from "../../product/product-ui"
 import { ConsentSheet } from "./consent-sheet"
+import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { FirmaPad } from "./firma-pad"
+import { ResponsablesTab } from "./responsables-tab"
 import { REGISTRATION_FIELDS, SignatureRegistrationFields } from "./signature-registration-fields"
 
 export interface SignerChoice {
@@ -134,6 +138,133 @@ export function useConsentSignerWord(patientId: string, patientFirstName: string
 /** Primer nombre de quien firma, como lo dice la pantalla: «Firma de Lucía». */
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name
+}
+
+/** Lo que falta para que alguien pueda firmar, y se completa al lado. */
+export type SigningGap = "sin-fecha" | "sin-documento" | "sin-representante"
+
+/**
+ * «Completar»: lo que falta para firmar (la fecha de nacimiento del paciente, el documento de quien
+ * firma o el representante legal de un menor) se completa en un cajón al lado, sin salir de la
+ * atención ni de la firma. Solo lo ofrece quien puede guardar los datos de una persona
+ * (`patients.write`); a los demás les dice a quién pedírselo: el permiso no cambia, solo el aviso.
+ * `onDone` avisa que el cajón se cerró, para que quien lo usa vuelva a leer lo que dependía de ello.
+ */
+export function CompleteSigningData({
+  patientId,
+  gap,
+  onDone,
+}: {
+  patientId: string
+  gap: SigningGap
+  onDone?: () => void
+}): React.JSX.Element {
+  const canWrite = usePermission("patients.write")
+  const { choices, isMinor, patient } = useSignerChoices(patientId)
+  /** Qué se abre: el paciente, un representante (por su persona) o los responsables. */
+  const [open, setOpen] = useState<
+    { kind: "patient" } | { kind: "person"; contactId: string } | { kind: "responsables" } | null
+  >(null)
+  const closed = () => {
+    setOpen(null)
+    onDone?.()
+  }
+
+  // El documento que falta es el de quien firma. Un menor firma por su representante. Un adulto
+  // firma él mismo si es quien recibe lo suyo y su ficha no tiene documento; si no, firma por él su
+  // representante legal y el que falta es el de este (revisión del 17 nov: abría el del paciente,
+  // que ya lo tenía, y guardarlo no destrababa la firma).
+  const withoutDoc = choices.filter((choice) => choice.kind === "representante" && !choice.doc)
+  const patientSigns =
+    !isMinor && choices[0]?.kind === "paciente" && !patient?.docNumber?.trim()
+  const targets: Array<{ key: string; label: string; target: NonNullable<typeof open> }> =
+    gap === "sin-representante"
+      ? [{ key: "responsables", label: "Completar", target: { kind: "responsables" } }]
+      : gap === "sin-fecha" || patientSigns
+        ? [{ key: "patient", label: "Completar", target: { kind: "patient" } }]
+        : withoutDoc.map((choice) => ({
+            key: choice.contactId,
+            // De un adulto, el texto nombra al paciente: el botón dice de quién es el que falta.
+            label:
+              withoutDoc.length > 1 || !isMinor
+                ? `Completar el de ${firstName(choice.name)}`
+                : "Completar",
+            target: { kind: "person" as const, contactId: choice.contactId },
+          }))
+
+  if (!canWrite || !patient || targets.length === 0) return <span>Pídeselo a recepción.</span>
+
+  return (
+    <>
+      <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+        {targets.map((item) => (
+          <Button
+            key={item.key}
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setOpen(item.target)}
+          >
+            {item.label}
+          </Button>
+        ))}
+      </span>
+      {open?.kind === "patient" ? (
+        <FiliacionSectionDrawer
+          patient={patient}
+          section="completar"
+          missing={
+            gap === "sin-fecha"
+              ? [{ key: "birthDate", label: "Fecha de nacimiento" }]
+              : [
+                  { key: "docType", label: "Tipo de documento" },
+                  { key: "docNumber", label: "Número de documento" },
+                ]
+          }
+          open
+          onClose={closed}
+        />
+      ) : null}
+      {open?.kind === "person" ? (
+        <RepresentativeDataDrawer contactId={open.contactId} onClose={closed} />
+      ) : null}
+      {open?.kind === "responsables" ? (
+        <DetailDrawer
+          open
+          size="xl"
+          title="Familia y responsables"
+          description="Registra a su representante legal para que pueda firmar por él."
+          onClose={closed}
+        >
+          <ResponsablesTab patientId={patientId} startGranting />
+        </DetailDrawer>
+      ) : null}
+    </>
+  )
+}
+
+/** Los datos del representante legal (su documento), de su propia persona. */
+function RepresentativeDataDrawer({
+  contactId,
+  onClose,
+}: {
+  contactId: string
+  onClose: () => void
+}): React.JSX.Element | null {
+  const person = usePerson(contactId)
+  if (!person.data) return null
+  return (
+    <FiliacionSectionDrawer
+      person={person.data.data}
+      section="completar"
+      missing={[
+        { key: "docType", label: "Tipo de documento" },
+        { key: "docNumber", label: "Número de documento" },
+      ]}
+      open
+      onClose={onClose}
+    />
+  )
 }
 
 /**
@@ -545,9 +676,15 @@ function SigningFlow({
               <LoadingState message="Preparando la hoja…" />
             ) : !signer ? (
               <p role="alert" className="rounded-md bg-warning-soft p-4 text-base">
-                {isMinor
-                  ? "Es menor de edad y no tiene representante legal vigente. Regístralo en Datos para que pueda firmar por él, o fírmalo en papel."
-                  : "No hay una persona habilitada para firmar. Revisa sus vínculos en Datos."}
+                {isMinor ? (
+                  <>
+                    Es menor de edad y no tiene representante legal vigente. Regístralo para que
+                    pueda firmar por él, o fírmalo en papel.{" "}
+                    <CompleteSigningData patientId={patientId} gap="sin-representante" />
+                  </>
+                ) : (
+                  "No hay una persona habilitada para firmar. Revisa sus vínculos en Datos."
+                )}
               </p>
             ) : choosing ? (
               <form.AppField name="signerContactId">
@@ -1016,9 +1153,14 @@ export function PaperSignDrawer({
         <LoadingState message="Buscando quién puede firmar…" />
       ) : !signer ? (
         <p role="alert" className="rounded-md bg-warning-soft p-3 text-sm">
-          {isMinor
-            ? "Es menor de edad y no tiene representante legal vigente: regístralo en Datos."
-            : "No hay una persona habilitada para firmar: revisa sus vínculos en Datos."}
+          {isMinor ? (
+            <>
+              Es menor de edad y no tiene representante legal vigente.{" "}
+              <CompleteSigningData patientId={patientId} gap="sin-representante" />
+            </>
+          ) : (
+            "No hay una persona habilitada para firmar: revisa sus vínculos en Datos."
+          )}
         </p>
       ) : (
         <div className="flex flex-col gap-4">

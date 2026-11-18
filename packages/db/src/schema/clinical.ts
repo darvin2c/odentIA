@@ -1742,6 +1742,12 @@ export const treatmentPlanItem = pgTable(
      */
     consentResetAt: timestamp("consent_reset_at", { withTimezone: true }),
     /**
+     * Cuándo quien lo indicó respondió «¿Es otro camino o va también?», en la atención donde lo
+     * indicó (`placeBudgetPath`): la pregunta no vuelve al recargar (mesa del 17 nov). «Va también»
+     * no cambia el presupuesto, por eso la respuesta se guarda aquí; nula, sin responder.
+     */
+    pathAnsweredAt: timestamp("path_answered_at", { withTimezone: true }),
+    /**
      * Decisión vigente. `no_elegida`: el tratamiento solo estaba en una opción
      * del presupuesto que la persona no eligió (decisión 13); no es un «no».
      */

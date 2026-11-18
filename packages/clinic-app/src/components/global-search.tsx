@@ -52,15 +52,23 @@ import {
   useRef,
   useState,
 } from "react"
-import { apiFetch } from "../lib/api"
 import { ADMIN_NAME, HELP_NAME } from "../lib/agent-names"
-import { ARGOS_ALLOWANCE_KEY, type ArgosRoute, getArgosAllowance, openArgos, routeArgos, useArgosLastQuestion } from "../lib/argos"
+import { apiFetch } from "../lib/api"
+import {
+  ARGOS_ALLOWANCE_KEY,
+  type ArgosRoute,
+  getArgosAllowance,
+  openArgos,
+  routeArgos,
+  useArgosLastQuestion,
+} from "../lib/argos"
 import { timeAgo, useMyRole, useMyUserId } from "../lib/crm"
 import {
   askHelp,
   canOpenHref,
   formatSearchMoney,
   formatSearchWhen,
+  looksLikeQuestion,
   readHiddenTypes,
   readRecents,
   rememberRecent,
@@ -76,10 +84,10 @@ import {
   searchStatusText,
   targetHref,
   targetVerb,
-  looksLikeQuestion,
 } from "../lib/global-search"
 import { activeOrgTimeZone, useOrgLocale } from "../lib/locale"
 import { appWords } from "../lib/product-words"
+import { ASK_RECEPTION_TO_REGISTER } from "./person-picker"
 
 /**
  * Buscador rápido (Ctrl+K; lienzo «Buscador rápido odentIA», aprobado el
@@ -832,6 +840,9 @@ function GlobalSearchDialog({
               <p className="text-xs text-muted-foreground">
                 Revisa cómo se escribe o busca por teléfono o documento.
               </p>
+              {canRegister ? null : (
+                <p className="text-xs text-muted-foreground">{ASK_RECEPTION_TO_REGISTER}</p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {canRegister && !/\d{4,}/.test(text) ? (
                   <Button

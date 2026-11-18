@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { encodeDemoCtSlice } from "@odentia/clinical"
 import { LEGAL } from "@odentia/auth/legal"
+import { encodeDemoCtSlice } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { agentKnowledgeGap } from "@odentia/db/schema/agent"
 import { account, organization, user as users } from "@odentia/db/schema/auth"
@@ -12,15 +12,15 @@ import { branch, orgProfile } from "@odentia/db/schema/org"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
-import { hostUrl, latidiaUrl, tenant } from "./env"
-import { asClinicFromBefore, chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { consentLinkJourney } from "./consent-link-journey"
 import { drawSignature } from "./draw-signature"
+import { hostUrl, latidiaUrl, tenant } from "./env"
+import { asClinicFromBefore, chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { downloadPaper, scanAndCompare } from "./issued-paper-journey"
+import { latestLinkFor } from "./mailpit"
 import { putAndRemovePhoto } from "./patient-photo"
 import { readPdfLikeACamera } from "./read-pdf"
-import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
 
 /**
@@ -682,8 +682,10 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   // La Dra. Vela indica 3 nebulizaciones: sin «ámbito» dental ni presupuesto que esperar (decisión 15).
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
   const block = page.getByRole("region", { name: "Plan", exact: true })
-  await block.getByRole("button", { name: "Indicar un tratamiento" }).click()
-  await expect(block.getByText("Lo indicado queda aceptado: se puede agendar enseguida, sin presupuesto.")).toBeVisible()
+  await block.getByRole("button", { name: "Añadir un tratamiento al plan" }).click()
+  await expect(
+    block.getByText("Lo indicado queda aceptado: se puede agendar enseguida, sin presupuesto."),
+  ).toBeVisible()
   await expect(block.getByLabel("Ámbito", { exact: true })).toHaveCount(0)
   await block.getByLabel("Tratamiento", { exact: true }).fill("Nebuli")
   await page.getByRole("option", { name: /Nebulización/ }).click()

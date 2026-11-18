@@ -16,38 +16,45 @@ import { ApiError } from "../../lib/api"
 import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
-  consentSignatureWords,
   canFillFormInAttention,
+  consentSignatureWords,
   FORM_RESPONSE_STATUS_LABELS,
-  formStateWords,
-  unfinishedAfterSigning,
   fetchConsents,
   fetchFormResponses,
-  teamFormsOfEncounter,
   fetchFormTemplates,
   fetchOrders,
+  formStateWords,
   phoneSignBlockWords,
+  teamFormsOfEncounter,
+  unfinishedAfterSigning,
 } from "../../lib/clinical-forms"
 import {
   fetchPrescriptionDetail,
   fetchPrescriptions,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { useMyUserId, usePermission } from "../../lib/crm"
+import { teethWords } from "../../lib/document-list"
 import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
 import type { MedicalLeave } from "../../lib/medical-leaves"
 import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
-import { teethWords } from "../../lib/document-list"
 import { productUi } from "../../product/product-ui"
 import { RecetasPanel } from "./clinical-panels"
+import { ClioFormNotice, useClioFormProposals } from "./clio-form-proposals"
 import {
   ConsentLinkActions,
   ConsentPhoneDrawer,
   consentLinkWords,
   SendToSignDialog,
 } from "./consent-link-actions"
-import { ConsentSigningScreen, PaperSignDrawer, useConsentSignerWord } from "./consent-signing"
+import {
+  CompleteSigningData,
+  ConsentSigningScreen,
+  PaperSignDrawer,
+  useConsentSignerWord,
+} from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { categoryLabel, formatTakenAt, imageTypeLabel } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -59,9 +66,7 @@ import {
   PrescriptionPaper,
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
-import { ClioFormNotice, useClioFormProposals } from "./clio-form-proposals"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
-import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 import { useOpenWide } from "./wide-section"
@@ -105,22 +110,48 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
  * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
  * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
- * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide».
+ * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide», ni
+ * el recién preparado para un tratamiento que lo pide y que lo pedido todavía no
+ * nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
  */
-export function consentsStillAsked<T extends { id: string; linkSentAt?: string | null; personSignedAt?: string | null }>(
+export function consentsStillAsked<
+  T extends {
+    id: string
+    linkSentAt?: string | null
+    personSignedAt?: string | null
+    templateId?: string | null
+    planItemId?: string | null
+  },
+>(
   pending: readonly T[],
-  needs: { data?: { data: ReadonlyArray<{ documentId: string | null }> }; isFetching: boolean },
+  needs: {
+    data?: {
+      data: ReadonlyArray<{ documentId: string | null; templateId?: string | null; planItemId?: string | null }>
+    }
+    isFetching: boolean
+  },
 ): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
-  const asked = needs.data && !needs.isFetching ? new Set(needs.data.data.map((need) => need.documentId)) : null
-  const notAsked = asked
-    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
+  const list = needs.data && !needs.isFetching ? needs.data.data : null
+  const isAsked = (doc: T) =>
+    list != null &&
+    list.some(
+      (need) =>
+        need.documentId === doc.id ||
+        // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
+        (need.documentId == null &&
+          need.planItemId != null &&
+          need.planItemId === doc.planItemId &&
+          (need.templateId == null || need.templateId === doc.templateId)),
+    )
+  const notAsked = list
+    ? pending.filter((doc) => !isAsked(doc) && !doc.linkSentAt && !doc.personSignedAt)
     : []
   const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
   return {
     pendingSignatures,
     notAsked,
     // Lo firmado en su enlace solo falta confirmarlo; lo enviado de algo que ya no se pide, no se ofrece aquí.
-    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!asked || asked.has(doc.id))),
+    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!list || isAsked(doc))),
   }
 }
 
@@ -516,12 +547,64 @@ export function EncounterDocumentsBlock({
               </span>
               {(() => {
                 const block = docs.toSign.find((doc) => doc.phoneSignBlock)?.phoneSignBlock
-                return block ? (
-                  <span className="text-xs text-muted-foreground">{phoneSignBlockWords(block, who, firstName(patient))}</span>
-                ) : null
+                if (!block) return null
+                // Lo que falta (la fecha o el documento) se completa al lado: «Completar», o a quién
+                // pedírselo si esta persona no puede guardar datos.
+                const gap = block === "sin-fecha" || block === "sin-documento" ? block : null
+                return (
+                  <span className="text-xs text-muted-foreground">
+                    {gap
+                      ? gap === "sin-fecha"
+                        ? `Para firmar desde su teléfono falta la fecha de nacimiento de ${firstName(patient)}. `
+                        : `Para firmar desde su teléfono falta el documento de ${who}. `
+                      : phoneSignBlockWords(block, who, firstName(patient))}
+                    {gap ? (
+                      <CompleteSigningData patientId={patientId} gap={gap} onDone={refresh} />
+                    ) : null}
+                  </span>
+                )
               })()}
             </div>
             <div className="flex items-center gap-1">
+              {/* «Ver» abre el documento tal como lo firmará el paciente, sin firmar nada. Con
+                  varios por firmar, elige cuál. */}
+              {docs.toSign.length === 1 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Ver ${docs.toSign[0]!.titleSnapshot}`}
+                  onClick={() => setViewing({ kind: "consent", document: docs.toSign[0]! })}
+                >
+                  Ver
+                </Button>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        aria-label="Ver los consentimientos por firmar"
+                      >
+                        Ver
+                        <ChevronDown aria-hidden />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end">
+                    {docs.toSign.map((doc) => (
+                      <DropdownMenuItem
+                        key={doc.id}
+                        onClick={() => setViewing({ kind: "consent", document: doc })}
+                      >
+                        {doc.titleSnapshot}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -789,6 +872,7 @@ export function EncounterDocumentsBlock({
           patientId={patientId}
           encounterId={encounterId}
           defaultProcedureRef={procedureRef}
+          todayPlanItemIds={activeProcedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : []))}
           defaultDiagnosisCode={firstDiagnosis}
           defaultDiagnosisSystem={firstDiagnosisSystem}
           onClose={() => setCreating(null)}

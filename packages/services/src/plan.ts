@@ -17,6 +17,8 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
 import { readBillingModes } from "./budgets.js"
+import { extractionRisksOf } from "./clinical.js"
+import { treatmentConsentStates } from "./consent-state.js"
 import {
   diagnosisTitlesOf,
   namedDiagnosis,
@@ -24,8 +26,6 @@ import {
 } from "./diagnosis-codes.js"
 import { assertAttending } from "./encounter-attending.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { extractionRisksOf } from "./clinical.js"
-import { treatmentConsentStates } from "./consent-state.js"
 import { createFinishControls } from "./finish-controls.js"
 import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -971,8 +971,16 @@ export async function listPlanItems(
    * `extractionRisks`: a la exodoncia por hacer, lo que toma y la cambia (`extractionRisksOf`). Solo
    * lo pide quien lee lo clínico (la ruta del plan): la coordinación y el dictado no lo reciben.
    */
-  opts: { withoutVoided?: boolean; extractionRisks?: boolean } = {},
-): Promise<Array<PlanItemWithProgress & { waitsFor: { id: string; title: string } | null; extractionRisks?: string[] }>> {
+  opts: { withoutVoided?: boolean; extractionRisks?: boolean; sessions?: boolean } = {},
+): Promise<
+  Array<
+    PlanItemWithProgress & {
+      waitsFor: { id: string; title: string } | null
+      extractionRisks?: string[]
+      sessions?: PlanItemSession[]
+    }
+  >
+> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
     eq(treatmentPlanItem.patientId, patientId),
@@ -1007,6 +1015,13 @@ export async function listPlanItems(
   const consents = await treatmentConsentStates(tx, orgId, withProgress.map((item) => item.id))
   const risky = opts.extractionRisks ? await extractionItemsOf(tx, orgId, hooks, withProgress) : new Set<string>()
   const risks = risky.size > 0 ? await extractionRisksOf(tx, orgId, patientId) : []
+  const sessions = opts.sessions
+    ? await planItemSessionsOf(
+        tx,
+        orgId,
+        withProgress.map((item) => item.id),
+      )
+    : null
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
     return {
@@ -1015,8 +1030,75 @@ export async function listPlanItems(
       consent: consents.get(item.id)?.state ?? null,
       consentMissing: consents.get(item.id)?.missing ?? [],
       ...(risky.has(item.id) && risks.length > 0 ? { extractionRisks: risks } : {}),
+      ...(sessions ? { sessions: sessions.get(item.id) ?? [] } : {}),
     }
   })
+}
+
+/**
+ * Una sesión hecha de un tratamiento: una atención no anulada con un procedimiento vigente suyo
+ * (la regla de `sessionsDone`). La nota es el comienzo de su evolución y solo va con la atención
+ * firmada: lo de un borrador puede cambiar, y por eso tampoco se dice «hecha» (mesa del 17 nov).
+ */
+export interface PlanItemSession {
+  encounterId: string
+  /**
+   * El día de la sesión: el de la atención (su inicio), como la fechan la Historia y la propia
+   * atención. No el de la firma: una cita registrada después o un borrador de otro día se firman
+   * otro día (revisión del 17 nov).
+   */
+  at: Date
+  signed: boolean
+  byName: string | null
+  note: string | null
+}
+
+/** Las sesiones de cada tratamiento, de la primera a la última. Solo para quien lee lo clínico. */
+async function planItemSessionsOf(
+  tx: Db,
+  orgId: string,
+  ids: readonly string[],
+): Promise<Map<string, PlanItemSession[]>> {
+  const out = new Map<string, PlanItemSession[]>()
+  if (ids.length === 0) return out
+  const rows = await tx.execute<{
+    item_id: string
+    encounter_id: string
+    status: string
+    at: Date
+    by_name: string | null
+    evolution: string | null
+  }>(sql`
+    select distinct on (p.plan_item_id, e.id) p.plan_item_id as item_id, e.id as encounter_id, e.status,
+      e.started_at as at, u.name as by_name, e.evolution
+    from encounter_procedure p
+    join encounter e on e.organization_id = p.organization_id and e.id = p.encounter_id
+    left join "user" u on u.id = e.professional_user_id
+    where p.organization_id = ${orgId} and p.plan_item_id in (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )}) and p.voided_at is null and e.status <> 'anulada'
+    order by p.plan_item_id, e.id`)
+  for (const row of [...rows].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())) {
+    const signed = row.status === "finalizada"
+    const evolution = row.evolution?.trim() ?? ""
+    const note =
+      signed && evolution
+        ? evolution.length > 140
+          ? `${evolution.slice(0, 139).trimEnd()}…`
+          : evolution
+        : null
+    const list = out.get(row.item_id) ?? []
+    list.push({
+      encounterId: row.encounter_id,
+      at: new Date(row.at),
+      signed,
+      byName: row.by_name,
+      note,
+    })
+    out.set(row.item_id, list)
+  }
+  return out
 }
 
 /**

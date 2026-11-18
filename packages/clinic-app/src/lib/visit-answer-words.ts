@@ -4,7 +4,7 @@ import type { VisitAnswerView } from "./patients"
 
 /**
  * Cómo se dice lo que la persona contó antes de su cita (mesa del 13 nov, entrega 8), igual en
- * «Hoy viene a…», la atención firmada y la Historia: quién lo contó, cuándo y por dónde, y quién lo
+ * la Consulta de la atención, la atención firmada y la Historia: quién lo contó, cuándo y por dónde, y quién lo
  * vio al atender. Lo que contó, con `visitAnswerLine` de `@odentia/clinical`.
  */
 

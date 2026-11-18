@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { canAccess, ORG_ROLES, type Permission } from "@odentia/auth/permissions"
-import { describe, expect, it } from "vitest"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
+import { describe, expect, it } from "vitest"
+import { describeHelpScreen, exactHelpOption } from "./help.js"
 import {
   HELP_TOPICS,
   helpGuideForRole,
@@ -14,9 +15,8 @@ import {
   matchHelpTopics,
   PRODUCT_ONLY_SCREENS,
 } from "./help-guide.js"
-import { helpTopicsFor } from "./products.js"
 import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-suite.js"
-import { describeHelpScreen, exactHelpOption } from "./help.js"
+import { helpTopicsFor } from "./products.js"
 
 /**
  * La guía de Ariadna contra el código y contra lo que pregunta la gente. Sin
@@ -315,9 +315,22 @@ describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atenció
   })
 
   it.each([
-    ["¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?", "pacientes-reservar-lo-aceptado"],
-    ["¿Para qué sirve «Completar» en «Realizado hoy»?", "pacientes-realizado-hoy-completar"],
-    ["Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?", "pacientes-ficha-endodoncia-propone-diagnostico"],
+    [
+      "¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?",
+      "pacientes-reservar-lo-aceptado",
+    ],
+    [
+      "¿Cómo doy por terminado un tratamiento antes de las sesiones previstas?",
+      "pacientes-realizado-hoy-completar",
+    ],
+    // La atención agrupada (17 nov): el plan es el único lugar de cada tratamiento.
+    ["¿Cómo hago hoy algo del plan?", "atencion-donde-hacerla-hoy"],
+    ["¿Dónde anulo algo que registré mal?", "pacientes-anular-lo-registrado"],
+    ["¿Dónde veo cómo le fue en la sesión anterior?", "pacientes-sesion-anterior-como-le-fue"],
+    [
+      "Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?",
+      "pacientes-ficha-endodoncia-propone-diagnostico",
+    ],
   ])("«%s» tiene su respuesta propia", (question, id) => {
     expect(faqOf(question, "owner")).toBe(id)
   })
@@ -351,7 +364,7 @@ describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atenció
     ["¿Cuánta anestesia le puedo poner a un niño de 22 kg?", "pacientes-anestesia-dosis-maxima"],
     ["¿Puedo usar articaína en un niño de 3 años?", "pacientes-anestesia-articaina-ninos"],
     // «Hacerla hoy» y «Por decidir» se responden con lo que ya las explicaba: no otra respuesta suelta.
-    ["¿Qué es Hacerla hoy?", "atencion-donde-hacerla-hoy"],
+    ["¿Qué es Hacer hoy?", "atencion-donde-hacerla-hoy"],
     ["¿Qué significa Por decidir?", "palabras-lo-piensa"],
     ["¿Qué pasa si quito un tratamiento y le doy Deshacer?", "palabras-deshacer-quitar"],
     ["¿Qué significa inmutable?", "palabras-inmutable"],
@@ -368,19 +381,47 @@ describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atenció
     expect(faqOf(next, "owner")).toBe("termine-ya-reservaron-siguiente")
     for (const role of ["reception", "cashier"]) {
       expect(faqOf(next, role), role).toBe("termine-ya-reservaron-siguiente-sin-atencion")
-      // El «Completar» que tienen es el de los datos que faltan; el de «Realizado hoy» no está en su guía.
-      const ids = helpGuideForRole(HELP_TOPICS, role).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
+      // El «Completar» que tienen es el de los datos que faltan; el de terminar un tratamiento no está en su guía.
+      const ids = helpGuideForRole(HELP_TOPICS, role).flatMap((topic) =>
+        (topic.faqs ?? []).map((faq) => faq.id),
+      )
       expect(ids, role).toContain("pacientes-completar-datos")
       expect(ids, role).not.toContain("pacientes-realizado-hoy-completar")
-      expect(faqOf("¿Para qué sirve «Completar» junto a «Faltan datos»?", role), role).toBe("pacientes-completar-datos")
-      expect(faqOf("¿Para qué sirve «Completar» en «Realizado hoy»?", role), role).toBeNull()
+      expect(faqOf("¿Para qué sirve «Completar» junto a «Faltan datos»?", role), role).toBe(
+        "pacientes-completar-datos",
+      )
+      expect(
+        faqOf("¿Cómo doy por terminado un tratamiento antes de las sesiones previstas?", role),
+        role,
+      ).toBeNull()
     }
     expect(faqOf("para que sirve completar", "clinician")).toBe("pacientes-realizado-hoy-completar")
     const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
     const reception = faqs.find((faq) => faq.id === "termine-ya-reservaron-siguiente-sin-atencion")
     expect(reception?.a).toMatch(/^En su página, en «Qué sigue»/)
-    // La pantalla dice «Realizado hoy»: la guía y los avisos ya no dicen «Hecho hoy».
+    // La pantalla dice «Hecho hoy fuera del plan» y «hecha hoy», no «Hecho hoy» a secas.
     expect(faqs.filter((faq) => faq.a.includes("«Hecho hoy»")).map((faq) => faq.id)).toEqual([])
+  })
+
+  // La atención agrupada (17 nov): lo que desapareció de la pantalla no puede seguir en la Ayuda.
+  it("la guía no nombra lo que la atención ya no tiene", () => {
+    const old =
+      /«Hoy viene a…»|«Realizado hoy»|«Registrar lo de hoy»|«Indicar un tratamiento»|«Hacerla hoy»|«Registrar la sesión»|«Continuar hoy»|«Iniciar sesión»|«Iniciar la primera sesión»|«Viene a su control»|«Continuar en la atención abierta»/
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    expect(faqs.filter((faq) => old.test(faq.a) || old.test(faq.q)).map((faq) => faq.id)).toEqual(
+      [],
+    )
+  })
+
+  it("al odontólogo que busca a alguien nuevo le dice a quién pedírselo", () => {
+    expect(faqOf("¿Por qué no puedo registrar a un paciente nuevo?", "clinician")).toBe(
+      "registro-paciente-nuevo-no-puedo",
+    )
+    expect(faqOf("¿Por qué no puedo registrar a un paciente nuevo?", "reception")).toBeNull()
+    const asked = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find(
+      (faq) => faq.id === "registro-paciente-nuevo-no-puedo",
+    )
+    expect(asked?.a).toContain("Para registrar a alguien nuevo, pídeselo a recepción")
   })
 
   it.each([

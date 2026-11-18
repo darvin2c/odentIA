@@ -4,19 +4,25 @@
  * en una sola transacción; nunca el diagnóstico de otro hallazgo.
  */
 import { randomUUID } from "node:crypto"
-import { encounterDiagnosis, encounterSite, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import {
+  encounterDiagnosis,
+  encounterProcedure,
+  encounterSite,
+  serviceCatalog,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createConsentTemplate } from "../clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
-import { registerToothFinding } from "./tooth-panel.js"
 import { getCorrectionPreview, voidWithCorrection } from "../encounter-correction.js"
 import { restoreRemovedInEncounter } from "../encounter-plan-remove.js"
 import { getEncounterClosing } from "../encounters.js"
 import { REMOVED_IN_ENCOUNTER } from "../plan.js"
 import { ownerDb, setupTestDb } from "../test-setup.js"
+import { registerToothFinding } from "./tooth-panel.js"
 
 setupTestDb()
 
@@ -259,4 +265,29 @@ it("B3c: con el consentimiento de la 47 ya firmado, el aviso lo nombra y el cons
     .from(consentDocument)
     .where(and(eq(consentDocument.id, signed!.id), eq(consentDocument.status, "firmado")))
   expect(still).toBeTruthy()
+})
+
+it("B4: lo ya registrado hoy no se deshace con la corrección, y el aviso manda a anularlo en su fila del plan", async () => {
+  const { f, endo, register, preview } = await setup()
+  const wrong = await register({
+    toothNumbers: [47],
+    condition: "caries",
+    surfaces: ["occlusal"],
+    details: { variant: "pulpal_involvement" },
+    diagnosis: { diagnosisCode: "K04.0", diagnosisType: "confirmed" },
+    treatment: { serviceId: endo.id },
+  })
+  await ownerDb.insert(encounterProcedure).values({
+    organizationId: "org_a",
+    encounterId: f.encounter.id,
+    serviceId: endo.id,
+    planItemId: wrong.planItems[0]!.id,
+    description: "Endodoncia",
+    createdBy: f.actor,
+  })
+  const shown = await preview({ findingIds: wrong.entries.map((entry) => entry.id) })
+  // «Realizado hoy» ya no existe: lo hecho hoy se ve y se anula en su fila del plan.
+  expect(shown.notices).toEqual([
+    "«Endodoncia» ya se registró como hecho hoy y no se deshace: si no se hizo, anúlalo en su fila del plan.",
+  ])
 })

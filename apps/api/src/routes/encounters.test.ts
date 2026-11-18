@@ -492,8 +492,12 @@ it("encounters: un tratamiento indicado con la pieza por definir la pide al hace
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Pieza Por Definir")
   const ctx = await setupPlan(app, patientId)
-  // Indicar no es hacer: la corona entra al plan aunque aún no se diga la pieza.
-  const item = await addPlanItem(app, patientId, ctx, { serviceId: "c1111111-1111-4111-8111-111111111111" })
+  // Indicar no es hacer: la corona entra al plan aunque aún no se diga la pieza. En dos sesiones:
+  // la siguiente, en otra atención, conserva la pieza.
+  const item = await addPlanItem(app, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    plannedSessions: 2,
+  })
   expect(item.toothNumber).toBeNull()
   const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
   await deliverBudget(app, patientId, budgetId)
@@ -508,8 +512,28 @@ it("encounters: un tratamiento indicado con la pieza por definir la pide al hace
   expect((await post({ planItemId: item.id, toothNumber: 26 })).status).toBe(201)
   const plan = (await (await app.request(`/patients/${patientId}/plan`)).json()) as { data: PlanItemRow[] }
   expect(plan.data.find((row) => row.id === item.id)?.toothNumber).toBe(26)
-  // Ya definida, la siguiente sesión conserva la pieza.
-  expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(400)
+  // En la misma atención no se registra otra vez (mesa del 17 nov): se anula antes lo de hoy.
+  expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(409)
+
+  // Ya definida, la sesión siguiente, en otra atención, conserva la pieza.
+  await prepareClosing(app, patientId, ctx.encounterId)
+  const signed = await app.request(`/patients/${patientId}/encounters/${ctx.encounterId}/finalize`, {
+    method: "POST",
+  })
+  expect(signed.status).toBe(200)
+  const next = await postEncounter(app, patientId, { reason: "Sesión 2" })
+  expect(next.status).toBe(201)
+  const nextId = ((await next.json()) as { data: { id: string } }).data.id
+  const nextPost = (body: Record<string, unknown>) =>
+    app.request(`/patients/${patientId}/encounters/${nextId}/procedures`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  const moved = await nextPost({ planItemId: item.id, toothNumber: 27 })
+  expect(moved.status).toBe(400)
+  expect(((await moved.json()) as ErrorBody).error.message).toContain("conserva")
+  expect((await nextPost({ planItemId: item.id, toothNumber: 26 })).status).toBe(201)
 })
 
 it("encounters: las sesiones mantienen en curso hasta completar explícitamente", async () => {
@@ -548,7 +572,9 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
       body: JSON.stringify({ planItemId: itemId }),
     },
   )
-  expect(duplicate.status).toBe(201)
+  // Dos veces lo mismo en una atención se rechaza: con el cobro por sesión cargaba dos (mesa del 17 nov).
+  expect(duplicate.status).toBe(409)
+  expect(((await duplicate.json()) as ErrorBody).error.code).toBe("SESSION_REGISTERED")
   const during = await app.request(`/patients/${patientId}/plan`)
   expect(
     ((await during.json()) as { data: PlanItemRow[] }).data.find((row) => row.id === itemId)
@@ -579,7 +605,7 @@ it("encounters: las sesiones mantienen en curso hasta completar explícitamente"
 
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
   const detailBody = (await detail.json()) as EncounterDetailBody
-  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(2)
+  expect(detailBody.data.procedures.filter((p) => p.planItemId === itemId)).toHaveLength(1)
   expect(detailBody.data.indicatedItems.map((row) => row.id)).toContain(itemId)
 })
 it("encounters: referencias de otro paciente del mismo org responden 404 sin efectos", async () => {

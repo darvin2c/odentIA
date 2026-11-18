@@ -4,10 +4,14 @@ import { setOrgLocale } from "../../lib/locale"
 import {
   type ClosingValues,
   closingControlsBody,
+  closingDraftKeyOf,
   continuingAfterSign,
   controlBesideAccepted,
-  needsNextControlDay,
   finishingAtSign,
+  needsNextControlDay,
+  noNewChargesWords,
+  resolvingOnSign,
+  sessionAnswersBody,
   signFormsOf,
   signFormWords,
 } from "./encounter-closing"
@@ -132,5 +136,65 @@ describe("la ficha se cierra con la firma (revisión final del 15 nov, propuesta
     expect(finishingAtSign(signForms, [])).toEqual(["endo"])
     // Desmarcarla la deja a medias; marcar la vacía la finaliza; la que no tiene su obligatoria, nunca.
     expect(finishingAtSign(signForms, ["endo", "vacia", "sin-pieza"])).toEqual(["vacia"])
+  })
+})
+
+describe("«¿Terminaste?» también en lo que aún no llega a sus previstas (mesa del 17 nov)", () => {
+  it("sin respuesta sigue en curso; «Sí, terminar» lo deja realizado al firmar y lo pide la firma", () => {
+    const sessions = { finishing: [resin], continuing: [endo] }
+    expect(sessionAnswersBody({}, sessions)).toEqual({})
+    expect(sessionAnswersBody({ endo: "terminar", resina: "otra" }, sessions)).toEqual({
+      addSessionPlanItemIds: ["resina"],
+      completePlanItemIds: ["endo"],
+    })
+    // «Sigue en curso» no se manda: es lo que pasa sin decir nada. «Sí, terminar» en lo que
+    // llega a sus previstas tampoco: el servidor lo termina solo.
+    expect(sessionAnswersBody({ endo: "otra", resina: "terminar" }, sessions)).toEqual({})
+    // Lo que el cierre no preguntó no se manda.
+    expect(sessionAnswersBody({ otro: "terminar" }, sessions)).toEqual({})
+  })
+
+  it("terminada antes, la endodoncia ya no vuelve y lo que resuelve pasa a resuelto", () => {
+    const sessions = { finishing: [], continuing: [endo] }
+    expect(continuingAfterSign(sessions, { endo: "terminar" })).toEqual([])
+    const pulpitis = {
+      diagnosisIds: ["dx"],
+      planItemIds: ["endo"],
+      label: "Pulpitis",
+      site: "pieza 46",
+    }
+    expect(resolvingOnSign([pulpitis], sessions, {})).toEqual([])
+    expect(resolvingOnSign([pulpitis], sessions, { endo: "terminar" })).toEqual([pulpitis])
+  })
+})
+
+// Revisión del 17 nov: en la PC compartida, la colegiatura que la Dra. A escribió y no firmó
+// aparecía en el cierre del Dr. B y quedaba en su perfil al firmar.
+describe("lo escrito en el cierre se guarda por persona", () => {
+  it("la misma atención, con otra persona, no lee lo de la primera", () => {
+    expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-1", "dr-b"))
+    expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-2", "dra-a"))
+    expect(closingDraftKeyOf("enc-1", "dra-a")).toBe(closingDraftKeyOf("enc-1", "dra-a"))
+  })
+})
+
+// QA en pantalla del 17 nov (auditor H3): en la sesión 2 de una endodoncia ya cargada, el cierre prometía
+// «lo marcado «Hoy» se carga al registrarlo», y al registrarla no se cargaba nada.
+describe("«Sin cargos nuevos» del cierre de la página", () => {
+  const words = (chargedIds: string[], registeredIds: string[] = []) =>
+    noNewChargesWords({
+      plannedIds: ["endo"],
+      registeredIds: new Set(registeredIds),
+      chargedIds: new Set(chargedIds),
+      dayWord: "Hoy",
+    })
+  it("lo marcado «Hoy» que aún no tiene su cargo se carga al registrarlo", () => {
+    expect(words([])).toBe(
+      "Sin cargos nuevos por ahora: lo marcado «Hoy» se carga al registrarlo, según su presupuesto.",
+    )
+  })
+  it("lo marcado que ya tiene su cargo (cobro único) no promete otro", () => {
+    expect(words(["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
+    expect(words([], ["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
   })
 })

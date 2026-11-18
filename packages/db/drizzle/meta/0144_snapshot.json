@@ -1,5 +1,5 @@
 {
-  "id": "bfadc819-a751-47dd-a082-58a6f61ccfc3",
+  "id": "c05a28d8-6796-46b7-8146-194304e7a80c",
   "prevId": "1516ee22-3e31-4cda-80ca-abf28b108f4c",
   "version": "7",
   "dialect": "postgresql",
@@ -11471,109 +11471,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "auth.account_event": {
-      "name": "account_event",
-      "schema": "auth",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "app": {
-          "name": "app",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "account_event_pending_idx": {
-          "name": "account_event_pending_idx",
-          "columns": [
-            {
-              "expression": "app",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "delivered_at IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "account_event_app_check": {
-          "name": "account_event_app_check",
-          "value": "app IN ('odentia','latidia','vistia','gestoria')"
-        },
-        "account_event_type_check": {
-          "name": "account_event_type_check",
-          "value": "type IN ('cuenta.cerrada')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.invitation": {
       "name": "invitation",
       "schema": "",
@@ -11690,61 +11587,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "auth.jwks": {
-      "name": "jwks",
-      "schema": "auth",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "public_key": {
-          "name": "public_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "private_key": {
-          "name": "private_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "alg": {
-          "name": "alg",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "crv": {
-          "name": "crv",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -12114,12 +11956,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "signup_app": {
-          "name": "signup_app",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -12148,12 +11984,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "user_signup_app_check": {
-          "name": "user_signup_app_check",
-          "value": "signup_app IS NULL OR signup_app IN ('odentia','latidia','vistia','gestoria')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "auth.verification": {
@@ -28435,6 +28266,12 @@
         },
         "consent_reset_at": {
           "name": "consent_reset_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "path_answered_at": {
+          "name": "path_answered_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

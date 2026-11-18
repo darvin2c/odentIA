@@ -1,4 +1,9 @@
-import { CHILDHOOD_DENTAL_SENTENCE, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import {
+  CHILDHOOD_DENTAL_SENTENCE,
+  type HelpFaq,
+  type HelpTopic,
+  SHARED_HELP_TOPICS,
+} from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -39,6 +44,18 @@ type Faq = HelpFaq
 
 const withoutForms = (faq: Faq, ...drop: string[]): Faq =>
   faq.forms ? { ...faq, forms: faq.forms.filter((form) => !drop.includes(form)) } : faq
+
+/**
+ * Lo que un odontólogo nuevo preguntó con sus palabras en la QA en pantalla del 17 nov (la
+ * endodoncia, la resina, la caries, la pieza): en una óptica nadie lo pregunta así.
+ */
+const DENTAL_ASKED = [
+  "viene a su segunda sesion de endodoncia como lo atiendo",
+  "el paciente acepto una resina y vino sin cita como la hago hoy y la registro",
+  "encontre una caries en la primera consulta como la agrego al plan y la hago hoy",
+  "registre algo en la pieza equivocada como lo corrijo",
+  "registre en la pieza equivocada",
+]
 
 /**
  * Cambia un trozo de una respuesta heredada. Si la base ya no lo dice, falla al
@@ -129,7 +146,11 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: faq.a
           .replace("por ejemplo una corona en dos", "por ejemplo una terapia visual de diez")
-          .replace("(por ejemplo, la endodoncia de la 46 en su sesión 2 de 2)", "(por ejemplo, la terapia visual en su sesión 2 de 10)")
+          .replace(
+            "(«Continúa:» con el tratamiento y la pieza)",
+            "(«Continúa:» con el tratamiento)",
+          )
+          .replace("(sesión 2 de 2)", "(sesión 2 de 10)")
           .replace(
             " Si lo indicas desde la pieza del odontograma, el panel también pide «Sesiones previstas» con las habituales del servicio, y «Cambiar» un tratamiento indicado hoy por otro también las pide, con las habituales del nuevo, y lo pasa a la fase que le toca (una exodoncia cambiada por una endodoncia deja la cirugía).",
             " «Cambiar» un tratamiento indicado hoy por otro también pide sus sesiones, con las habituales del nuevo.",
@@ -259,7 +280,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
             "la diabetes, la presión alta, un medicamento o un embarazo cambian lo que se revisa en el ojo y lo que se indica",
           )
           .replace(
-            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar.",
+            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», arriba del Plan y al firmar.",
             "",
           )
           .replace(
@@ -583,6 +604,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
+  "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).
   "indique-despues-presupuesto-incluida": () => [],
   // «De pequeño» es de odentIA (pediatría dental); en una óptica, solo lo común de quien cuida a un niño.
@@ -646,8 +669,22 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       "pasar un tratamiento a otra fase",
     ),
   ],
-  "pacientes-procedimiento-registrar-anular": (faq) => [
-    { ...faq, a: swap(faq.a, "eliges un tratamiento aceptado de su plan", "eliges un tratamiento indicado de su plan") },
+  // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.
+  "atencion-donde-hacerla-hoy": (faq) => [
+    {
+      ...withoutForms(faq, ...DENTAL_ASKED),
+      a: swaps(
+        faq.a,
+        [
+          "En el bloque «Plan de tratamiento» de la atención, que es el único lugar de cada tratamiento, por fases:",
+          "En el bloque «Plan» de la atención, que es el único lugar de cada tratamiento:",
+        ],
+        [
+          ", y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy.",
+          ".",
+        ],
+      ),
+    },
   ],
   // Cada cuánto puede repetirse un control, como el control anual de la vista (`FOLLOW_UP_REPEAT_MONTHS`).
   // Aquí un control se puede repetir (`repeatingControls`); en odentIA, no.

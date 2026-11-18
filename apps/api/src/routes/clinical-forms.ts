@@ -11,9 +11,8 @@ import {
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
-  sendConsentToSign,
-  showPersonalLink,
   consentPhoneSignBlock,
+  consentTreatmentChoices,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -34,13 +33,13 @@ import {
   getProfessionalProfile,
   keepIssuedPaper,
   listClinicalOrders,
+  listClinicFormTemplates,
   listConsentDocuments,
-  listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
-  listClinicFormTemplates,
   listConsentTemplates,
   listFormAddenda,
+  listLinkSignedToConfirm,
   listPatientFormResponses,
   listProfessionalProfiles,
   listProfessionalSpecialties,
@@ -60,11 +59,13 @@ import {
   revokeConsentDocument,
   ServiceError,
   saveConsentTemplate,
+  sendConsentToSign,
   setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
   setSpecialtyProfessionals,
+  showPersonalLink,
   signConsentDocument,
   updateConsentTemplate,
   updateFormResponseDraft,
@@ -312,6 +313,8 @@ const consentCreate = z
     procedureRef: z.string().trim().max(500).nullish(),
     diagnosisCode: z.string().trim().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
+    // «Otro, fuera del plan»: no se une al tratamiento que pide esta plantilla.
+    outsidePlan: z.boolean().optional(),
   })
   .strict()
 
@@ -1111,6 +1114,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
           : null
         return rows.map((row) => ({ ...row, phoneSignBlock }))
       }),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
+  })
+
+  // «Nuevo › Consentimiento»: los tratamientos del plan que piden esa plantilla y aún no la tienen.
+  app.get("/consents/treatments", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    const parsed = z.object({ patientId: uuid, templateId: uuid }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId, templateId } = parsed.data
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        consentTreatmentChoices(tx, orgId, patientId, templateId),
+      ),
     )
     if (response.status === 200)
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })

@@ -35,4 +35,4 @@ Una sola cuenta por persona sirve para la administración y para todas las apps 
 
 ## Referencias
 
-`packages/auth/src/apps.ts`, `packages/auth/src/account-events.ts`, `packages/services/src/account-events.ts`, `apps/api/src/app.ts` (`externalApps`), `apps/worker/src/account-lifecycle.ts`; migración `0144_la_cuenta_conoce_las_apps.sql`. Standard Webhooks: https://www.standardwebhooks.com.
+`packages/auth/src/apps.ts`, `packages/auth/src/account-events.ts`, `packages/services/src/account-events.ts`, `apps/api/src/app.ts` (`externalApps`), `apps/worker/src/account-lifecycle.ts`; migración `0145_la_cuenta_conoce_las_apps.sql`. Standard Webhooks: https://www.standardwebhooks.com.
