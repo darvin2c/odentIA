@@ -19,6 +19,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
+import { can } from "./permisos.js"
 import { lastEntryCost } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -361,7 +362,11 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
 }
 
 export async function productDetail(appDb: Db, person: Person, storeId: string, productId: string) {
-  return inStore(appDb, person, storeId, "catalogo.ver", (tx) => detailIn(tx, storeId, productId))
+  return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) => {
+    const detail = await detailIn(tx, storeId, productId)
+    // Lo que costó es del dueño: quien no puede ver costos no lo recibe, ni el aviso que lo nombra.
+    return can(role, "costos.ver") ? detail : { ...detail, lastCostCents: null, costWarning: null }
+  })
 }
 
 /** Crea el producto con todas las combinaciones de sus opciones, cada una con stock 0. */

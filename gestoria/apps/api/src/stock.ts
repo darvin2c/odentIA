@@ -2,6 +2,7 @@ import { accountCopy, type Db, productVariant, stockMovement } from "@gestoria/d
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { can } from "./permisos.js"
 import { constraintError, inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -93,7 +94,7 @@ export async function addMovement(
 
 /** El kardex de una variante, del más nuevo al más viejo, con el nombre de quien lo hizo. */
 export async function kardex(appDb: Db, person: Person, storeId: string, variantId: string) {
-  return inStore(appDb, person, storeId, "catalogo.ver", async (tx) => {
+  return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) => {
     const variant = await variantIn(tx, storeId, variantId)
     const movements = await tx
       .select({
@@ -112,7 +113,12 @@ export async function kardex(appDb: Db, person: Person, storeId: string, variant
       .where(eq(stockMovement.variantId, variantId))
       .orderBy(desc(stockMovement.createdAt), desc(stockMovement.id))
       .limit(200)
-    return { stock: variant.stock, movements }
+    // El costo de cada entrada solo lo ve quien puede ver costos (Ventas no).
+    const costs = can(role, "costos.ver")
+    return {
+      stock: variant.stock,
+      movements: costs ? movements : movements.map((m) => ({ ...m, unitCostCents: null })),
+    }
   })
 }
 

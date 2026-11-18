@@ -348,7 +348,9 @@ describe("el stock y su kardex (decisión 3)", () => {
         })
       ).status,
     ).toBe(409)
-    // Ventas ve el kardex, pero no mueve el stock a mano.
+    // Ventas ve el kardex sin lo que costó, y no mueve el stock a mano.
+    const own = await call("rosa", "GET", `${base}/variantes/${blanca38}/kardex`)
+    expect(own.json.movements[1]).toMatchObject({ kind: "entrada", unitCostCents: 6800 })
     const seen = await call("lucia", "GET", `${base}/variantes/${blanca38}/kardex`)
     expect(seen.json.stock).toBe(3)
     expect(seen.json.movements).toEqual([
@@ -363,7 +365,7 @@ describe("el stock y su kardex (decisión 3)", () => {
         kind: "entrada",
         quantity: 4,
         balance: 4,
-        unitCostCents: 6800,
+        unitCostCents: null,
         actorName: "Mario Huamán",
       }),
     ])
@@ -502,6 +504,14 @@ describe("el precio mínimo y el aviso del costo (tablero 14)", () => {
       lastCostCents: 6800,
       costWarning: { kind: "cerca", marginCents: 200 },
     })
+    // Ventas ve el producto con su precio y su mínimo, pero no lo que costó ni el aviso.
+    const forSales = await call("lucia", "GET", `${base}/productos/${zapatilla}`)
+    expect(forSales.json.product).toMatchObject({
+      minPriceCents: 7000,
+      lastCostCents: null,
+      costWarning: null,
+    })
+    expect(JSON.stringify(forSales.json)).not.toContain("6800")
     const loss = await call("rosa", "PATCH", `${base}/productos/${zapatilla}`, {
       minPriceCents: 6000,
     })

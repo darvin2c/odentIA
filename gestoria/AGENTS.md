@@ -45,7 +45,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   al día (ADR 0204). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
   agregar un movimiento. Las ventas de B4 usan `recordSale` y `cancelSale` (`apps/api/src/stock.ts`).
 - Ventas ve el catálogo, el stock y la configuración (`catalogo.ver`, `tienda.ver`), sin cambiarlos
-  (`configuracion`).
+  (`configuracion`). Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
+  `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
 
 ## Trabajo

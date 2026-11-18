@@ -11,7 +11,8 @@ import type { StoreRole } from "@gestoria/db"
  * Los permisos de atender, confirmar pagos y entregar ya están aquí aunque sus pantallas lleguen
  * en B2 y B4: así la matriz se decide una vez. «configuracion» es cambiar los medios de pago, las
  * formas de entrega, el catálogo, sus precios y el stock (entradas y ajustes); «catalogo.ver» es
- * verlos, sin cambiarlos (B3).
+ * verlos, sin cambiarlos (B3); «costos.ver» es ver lo que costó cada producto (el costo de las
+ * entradas del kardex y el aviso del mínimo), que Ventas no ve.
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
@@ -19,6 +20,7 @@ export const STORE_PERMISSIONS = [
   "equipo.gestionar",
   "configuracion",
   "catalogo.ver",
+  "costos.ver",
   "plan",
   "ventas.atender",
   "pagos.confirmar",
