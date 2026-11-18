@@ -25,5 +25,10 @@ export default defineConfig({
     // worker (la app instalable, ADR 0177), que Chrome no registra con un certificado propio.
     launchOptions: { args: ["--force-prefers-reduced-motion", "--ignore-certificate-errors"] },
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  // Cada sistema con sus recorridos (lienzo A, paso 0): las clínicas aquí y la
+  // administración en `admin/e2e`. Comparten este arnés y el mismo entorno.
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" } },
+    { name: "admin", testDir: "../admin/e2e", use: { browserName: "chromium" } },
+  ],
 })

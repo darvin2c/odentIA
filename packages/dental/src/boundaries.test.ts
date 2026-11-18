@@ -50,10 +50,10 @@ const COMMON = [
   "packages/db/src",
   "packages/agent/src",
   "packages/auth/src",
-  "packages/channels/src",
-  "packages/mail/src",
-  "packages/ui/src",
-  "packages/ui-patterns/src",
+  "shared/packages/channels/src",
+  "shared/packages/mail/src",
+  "shared/packages/ui/src",
+  "shared/packages/ui-patterns/src",
   "packages/clinic-app/src",
   "apps/medical-clinic/src",
   "apps/optical-clinic/src",
@@ -61,7 +61,7 @@ const COMMON = [
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",
-  "apps/admin/src",
+  "admin/apps/web/src",
 ]
 /**
  * Dentro de lo común, lo que ya es del producto dental, y `products.ts`: el

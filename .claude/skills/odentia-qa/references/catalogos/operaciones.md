@@ -29,7 +29,7 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 ## O-GEN-02 Lo que la pantalla recuerda en el navegador
 
-**Dónde:** `packages/ui-patterns/src/side-dock.tsx` (`useSideColumnWidth`, `SideColumn`), `docked-surface.tsx`, `master-detail.tsx`; lo mismo vale para filtros y vistas guardadas.
+**Dónde:** `shared/packages/ui-patterns/src/side-dock.tsx` (`useSideColumnWidth`, `SideColumn`), `docked-surface.tsx`, `master-detail.tsx`; lo mismo vale para filtros y vistas guardadas.
 
 - [ ] Lo guardado de otro día (más grande de lo que cabe hoy, vacío, inválido, de una clave vieja) no rompe el primer cuadro ni deja un tramo muerto al arrastrar.
 - [ ] Lo que se pinta, el tope, las flechas y lo que anuncia el lector usan la misma medida, que se lee al cambiar la ventana (también al aparecer la barra de desplazamiento) y no en cada movimiento.

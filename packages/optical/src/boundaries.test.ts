@@ -22,17 +22,17 @@ const OUTSIDE = [
   "packages/db/src",
   "packages/agent/src",
   "packages/auth/src",
-  "packages/channels/src",
-  "packages/mail/src",
-  "packages/ui/src",
-  "packages/ui-patterns/src",
+  "shared/packages/channels/src",
+  "shared/packages/mail/src",
+  "shared/packages/ui/src",
+  "shared/packages/ui-patterns/src",
   "packages/clinic-app/src",
   "apps/dental-clinic/src",
   "apps/medical-clinic/src",
   "apps/api/src",
   "apps/worker/src",
   "apps/panel/src",
-  "apps/admin/src",
+  "admin/apps/web/src",
 ]
 /**
  * Lo óptico de los servicios y de la base, y los `products.ts`: los únicos

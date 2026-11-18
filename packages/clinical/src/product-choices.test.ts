@@ -55,8 +55,11 @@ const NOT_RUNTIME = /\.(test|spec|stories)\.tsx?$|\.eval\.ts$|\/routeTree\.gen\.
 const MEASUREMENTS =
   /^packages\/agent\/src\/(.*\/)?(auditoria-[^/]+|eval(-[^/]+)?|help-measure)\.ts$|^packages\/services\/src\/help-guide-suite\.ts$/
 
+/** Dónde hay paquetes y apps: las clínicas en la raíz, y cada otro sistema en su carpeta. */
+const GROUPS = ["packages", "apps", "admin/apps", "admin/packages", "shared/packages"]
+
 function commonDirs(): string[] {
-  return ["packages", "apps"].flatMap((group) =>
+  return GROUPS.filter((group) => existsSync(join(ROOT, group))).flatMap((group) =>
     readdirSync(join(ROOT, group), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => `${group}/${entry.name}`)

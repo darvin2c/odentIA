@@ -132,7 +132,7 @@ function piece(s) {
 }
 
 /* ===== Piezas de la marca ===== */
-// El diente de la portada (packages/brand-scene): supercuádrica con cúspides y raíz más angosta.
+// El diente de la portada (shared/packages/brand-scene): supercuádrica con cúspides y raíz más angosta.
 function toothGeo(kind) {
   const LAT = 30,
     LON = 36,
