@@ -1396,6 +1396,28 @@ export class DocumentKit {
     this.y = top - height
   }
 
+  /**
+   * Un texto suelto dentro de un dibujo (el gráfico del odontograma): centrado en `x`, sobre
+   * la línea base `baseline`, con su color. No avanza ni salta de página: lo ubica el dibujo.
+   */
+  centeredText(
+    value: string,
+    x: number,
+    baseline: number,
+    style: { size: number; face?: Face; color: RGB },
+  ): void {
+    const face = style.face ?? "sans"
+    const text = printable(value, face)
+    const width = this.fonts[face].widthOfTextAtSize(text, style.size)
+    this.page.drawText(text, {
+      x: x - width / 2,
+      y: baseline,
+      size: style.size,
+      font: this.fonts[face],
+      color: style.color,
+    })
+  }
+
   // --- QR ----------------------------------------------------------------------
 
   /** QR vectorial: nada de imágenes, se imprime nítido a cualquier tamaño. */

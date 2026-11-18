@@ -7,15 +7,17 @@ import {
   getOdontogramPrint,
   getSignedOdontogramPrint,
   getToothHistory,
+  keepSignedOdontogramPaper,
   listOdontogramAssessments,
   registerToothFinding,
   reviewLegacyEntry,
+  signedOdontogramPaper,
   voidOdontogramEntry,
 } from "@odentia/services/dental"
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../../lib/context.js"
-import { type CrmDeps, runService, validationError } from "../helpers.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "../helpers.js"
 
 /**
  * Odontograma (ADR 0079: lo dental de la ficha). Va bajo
@@ -212,15 +214,49 @@ export function createPatientOdontogramRoute(deps: CrmDeps) {
       ),
     )
   })
+  // El odontograma firmado en PDF: el papel emitido, guardado una vez con su huella (el
+  // mismo que va en la copia de la historia). Firmado antes, se guarda la primera vez que se
+  // abre; si no se puede guardar, se ve igual, dibujado al vuelo.
+  app.get("/:id/odontogram/assessments/:assessmentId/pdf", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const assessmentId = z.uuid().safeParse(c.req.param("assessmentId"))
+    if (!assessmentId.success) return validationError(c, assessmentId.error.issues)
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        signedOdontogramPaper(tx, orgId, c.req.param("id"), assessmentId.data, deps.storage, {
+          viewing: true,
+        }),
+      )
+      return new Response(Buffer.from(pdf.bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.filename)}"`,
+          "Cache-Control": "private, no-store",
+        },
+      })
+    } catch (error) {
+      return serviceErrorResponse(c, error) ?? Promise.reject(error)
+    }
+  })
   app.post("/:id/odontogram/assessments", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = assessmentInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 201, async () => {
+      const row = await withOrgContext(deps.db, orgId, (tx) =>
         createOdontogramAssessment(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
-    )
+      )
+      // Su PDF queda guardado desde que se firma, como la receta.
+      await keepSignedOdontogramPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: c.req.param("id"),
+        assessmentId: row.id,
+      })
+      return row
+    })
   })
 
   return app

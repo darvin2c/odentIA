@@ -69,10 +69,13 @@ export type PaperSend =
   | { kind: "node"; node: ReactNode }
   | { kind: "blocked"; reason: string }
 
-export interface DocumentPaperPanelProps {
+/** El papel por su tipo y su id, o por la dirección de su PDF (un papel del producto: el odontograma firmado). */
+type PaperSource =
+  | { type: PaperType; documentId: string; pdfPath?: never }
+  | { pdfPath: string; type?: never; documentId?: never }
+
+export type DocumentPaperPanelProps = PaperSource & {
   patientId: string
-  type: PaperType
-  documentId: string
   title: string
   /** La línea bajo el título: «Emitida · 30 oct 2026». */
   status: string
@@ -101,6 +104,7 @@ export function DocumentPaperPanel({
   patientId,
   type,
   documentId,
+  pdfPath,
   title,
   status,
   send,
@@ -112,7 +116,10 @@ export function DocumentPaperPanel({
   onClose,
 }: DocumentPaperPanelProps) {
   const mobile = useIsMobile() === true
-  const pdf = usePaperPdf(paperPdfPath(patientId, type, documentId), revision)
+  const pdf = usePaperPdf(
+    pdfPath ?? paperPdfPath(patientId, type as PaperType, documentId as string),
+    revision,
+  )
   const frame = useRef<HTMLIFrameElement | null>(null)
   const filename = `${title.replace(/[\\/:*?"<>|]+/g, " ").trim()}.pdf`
 
