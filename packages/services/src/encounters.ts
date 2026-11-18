@@ -1,6 +1,6 @@
 import { canAttend } from "@odentia/auth/permissions"
 import {
-  budgetStateText,
+  budgetChoiceText,
   doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
@@ -1412,7 +1412,7 @@ async function encounterBudgetsOf(
     // Anulado en el mismo paso que la atención (`settleEncounterVoidBudgets`, en su transacción).
     voidedWith:
       budget.status === "cancelado" && voidedAt !== null && Math.abs(updatedAt.getTime() - voidedAt.getTime()) < 60_000,
-    stateText: budgetStateText({
+    stateText: budgetChoiceText({
       status: budget.status,
       items: lines.filter((line) => line.budgetId === budget.id),
       options: options.filter((option) => option.budgetId === budget.id),
