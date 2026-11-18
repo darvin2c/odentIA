@@ -27,6 +27,7 @@ import { recordEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   assertLinkablePlans,
   assertOpenDraft,
+  bookedReasonOf,
   dueControlsOf,
   type EncounterRow,
   lockEncounter,
@@ -378,7 +379,15 @@ function siteInput(site: Record<string, unknown>): {
 
 /** «Continúa: Endodoncia anterior vital de la 46», como lo dice la cita que lo trae. */
 function continuesWords(title: string, tooth: number | null): string {
-  return tooth != null ? `Continúa: ${title.trim()} de la ${tooth}` : `Continúa: ${title.trim()}`
+  return `Continúa: ${startWords(title, tooth)}`
+}
+
+/**
+ * Lo que aún no empezó se nombra tal cual: «Resina fotocurable de la 16», no «Continúa: …», que
+ * diría que hubo una sesión antes (QA en pantalla del 17 nov, D9).
+ */
+function startWords(title: string, tooth: number | null): string {
+  return tooth != null ? `${title.trim()} de la ${tooth}` : title.trim()
 }
 
 /**
@@ -512,7 +521,8 @@ async function continuingDiagnosis(
 
 /**
  * «Hacer hoy»: el tratamiento aceptado pasa a esta atención,
- * como si lo trajera su cita. Si el motivo está vacío, queda «Continúa: …»; el
+ * como si lo trajera su cita. Si el motivo está vacío, queda «Continúa: …» (o su
+ * nombre, si aún no empezó); el
  * diagnóstico que sigue se registra con su tipo (nunca lo sube a definitivo) y
  * lo ya escrito no se toca. No cuenta la sesión ni cambia el tratamiento: eso
  * es registrar su procedimiento. El consentimiento que pide ya se ve.
@@ -547,20 +557,7 @@ export async function bringTreatmentToEncounter(
         .values({ organizationId: orgId, encounterId, siteSystem: site.system, siteCode: code })
         .onConflictDoNothing()
   }
-  let reasonSet = false
-  if (!row.reason?.trim()) {
-    await tx
-      .update(encounter)
-      .set({
-        reason: continuesWords(item.title, linkable.toothNumber).slice(0, 2000),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
-    reasonSet = true
-  }
-  // El diagnóstico sigue solo con lo que ya empezó (la sesión 2 de la endodoncia): la corona que
-  // se empieza semanas después no hereda la pulpitis (segunda mesa del 9 nov); su diagnóstico
-  // propio, si lo tiene, se propone con «Usar».
+  // Ya empezó: tiene una sesión hecha en otra atención (la sesión 2 de la endodoncia).
   const started =
     item.status === "en_curso" ||
     (
@@ -570,6 +567,20 @@ export async function bringTreatmentToEncounter(
         where done.organization_id = ${orgId} and done.plan_item_id = ${planItemId} and done.voided_at is null
           and done_encounter.status <> 'anulada' and done_encounter.id <> ${encounterId} limit 1`)
     ).length > 0
+  let reasonSet = false
+  if (!row.reason?.trim()) {
+    await tx
+      .update(encounter)
+      .set({
+        reason: (started ? continuesWords : startWords)(item.title, linkable.toothNumber).slice(0, 2000),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId)))
+    reasonSet = true
+  }
+  // El diagnóstico sigue solo con lo que ya empezó (la sesión 2 de la endodoncia): la corona que
+  // se empieza semanas después no hereda la pulpitis (segunda mesa del 9 nov); su diagnóstico
+  // propio, si lo tiene, se propone con «Usar».
   const diagnosisAdded = started && await continuingDiagnosis(
     tx,
     orgId,
@@ -628,7 +639,7 @@ export async function leaveTreatmentFromEncounter(
         eq(encounterPlanItem.planItemId, planItemId),
       ),
     )
-  // El motivo que puso «Continuar hoy», si nadie lo cambió, se va con él; lo escrito se queda.
+  // El motivo que puso «Hacer hoy», si nadie lo cambió, se va con él; lo escrito se queda.
   const [item] = await tx
     .select({ title: treatmentPlanItem.title, siteSystem: treatmentPlanItem.siteSystem, siteCode: treatmentPlanItem.siteCode })
     .from(treatmentPlanItem)
@@ -637,7 +648,8 @@ export async function leaveTreatmentFromEncounter(
   if (item && row.reason) {
     const { site } = await productHooks(tx, orgId)
     const tooth = item.siteSystem === site.system ? site.value(item.siteCode) : null
-    if (row.reason === continuesWords(item.title, tooth).slice(0, 2000))
+    const put = [continuesWords(item.title, tooth), startWords(item.title, tooth)].map((words) => words.slice(0, 2000))
+    if (put.includes(row.reason))
       await tx
         .update(encounter)
         .set({ reason: null, updatedAt: new Date() })
@@ -651,8 +663,10 @@ export async function leaveTreatmentFromEncounter(
 
 /**
  * «Viene a su control»: el control por cumplir que es el de hoy (o ninguno con
- * `null`). Con el motivo vacío, queda el nombre del control. Se cumple recién
- * al firmar, como lo demás del cierre (ADR 0152).
+ * `null`). Con el motivo vacío, queda el nombre del control, salvo que la cita de
+ * esta atención ofrezca el suyo: ese sigue ofreciéndose con «Usar como motivo»
+ * (QA en pantalla del 17 nov, D4). Se cumple recién al firmar, como lo demás del
+ * cierre (ADR 0152).
  */
 export async function chooseVisitControl(
   tx: Db,
@@ -675,7 +689,8 @@ export async function chooseVisitControl(
       )
     title = control.title
   }
-  const reasonSet = Boolean(title && !row.reason?.trim())
+  const offered = title && !row.reason?.trim() ? await bookedReasonOf(tx, orgId, row.appointmentId) : null
+  const reasonSet = Boolean(title && !row.reason?.trim() && !offered?.trim())
   await tx
     .update(encounter)
     .set({

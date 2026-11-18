@@ -17,7 +17,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@odentia/ui"
-import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import {
+  FormDrawer,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  zonedDateOf,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp, Check, ChevronDown } from "lucide-react"
@@ -27,7 +33,7 @@ import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { formatDate, formatDateTime, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
   type PlanItem,
   type PlanItemSession,
@@ -306,9 +312,13 @@ function PlanPhasesGroup({
                                   // tras qué va (repaso final de la atención, B14), como «Qué sigue».
                                   !closed && next === "iniciar" && item.waitsFor
                                   ? `Va después de ${lowerFirst(item.waitsFor.title)}`
-                                  : !closed && next
-                                    ? NEXT_ACTION_LABELS[next]
-                                    : null,
+                                  : // Con su sesión de hoy sin firmar, «Sesión 2 · en curso hoy» ya lo dice:
+                                    // terminarlo se decide al firmar esa atención, no aquí (QA en pantalla del 17 nov).
+                                    !closed && next === "completar" && done.some((session) => !session.signed)
+                                    ? null
+                                    : !closed && next
+                                      ? NEXT_ACTION_LABELS[next]
+                                      : null,
                             // El consentimiento va con el tratamiento: lo que falta firmar se ve aquí también.
                             !closed ? treatmentConsentWords(item.consent, item.consentMissing) : null,
                           ]
@@ -419,9 +429,13 @@ function PlanPhasesGroup({
   )
 }
 
-/** El día de la clínica de un instante, para saber si una sesión es de hoy. */
-function sameClinicDay(a: string, b: string): boolean {
-  return formatDate(a) === formatDate(b)
+/**
+ * Si dos instantes caen el mismo día en la zona de la clínica (no la del navegador), para saber si
+ * una sesión es de hoy: comparar el día, no el texto de una fecha formateada.
+ */
+export function sameClinicDay(a: string, b: string): boolean {
+  const timeZone = activeOrgTimeZone()
+  return zonedDateOf(a, timeZone) === zonedDateOf(b, timeZone)
 }
 
 /**

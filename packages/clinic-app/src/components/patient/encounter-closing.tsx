@@ -286,6 +286,26 @@ export function sessionLine(label: string, n: number, m: number): string {
   return showsSession(n, m) ? `${label} · ${sessionWords(n, m)}` : label
 }
 
+/**
+ * Lo que dice el cierre de la página, a quien ve la caja, cuando aún no hay cargos que estimar. Que
+ * lo marcado «Hoy» se carga al registrarlo, solo si algo marcado y sin registrar todavía no tiene su
+ * cargo: la sesión 2 de un cobro único ya cargado no carga nada (QA en pantalla del 17 nov, auditor
+ * H3). `chargedIds` es lo de cobro único que ya tiene su cargo (`conCargo` de la cuenta).
+ */
+export function noNewChargesWords(input: {
+  plannedIds: readonly string[]
+  registeredIds: ReadonlySet<string>
+  chargedIds: ReadonlySet<string>
+  dayWord: string
+}): string {
+  const charges = input.plannedIds.some(
+    (id) => !input.registeredIds.has(id) && !input.chargedIds.has(id),
+  )
+  return charges
+    ? `Sin cargos nuevos por ahora: lo marcado «${input.dayWord}» se carga al registrarlo, según su presupuesto.`
+    : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
+}
+
 /** Falta el día de «Otra fecha»: lo dice su campo. Si sigue en curso, no se pregunta. */
 export function needsNextControlDay(
   value: ClosingValues,

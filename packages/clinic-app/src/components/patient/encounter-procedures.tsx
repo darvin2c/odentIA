@@ -20,7 +20,7 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { voidProcedureApi } from "../../lib/encounters"
@@ -37,7 +37,12 @@ import type { ServiceCatalogItem } from "../../lib/services"
 import { type PlaceWithParts, productUi } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
 import { DiagnosisSearch } from "./diagnosis-search"
-import { currentPlanIdsOf, liveProcedureItems, shownInEncounterPlan } from "./encounter-plan-panel"
+import {
+  currentPlanIdsOf,
+  keepFocusInPlanRow,
+  liveProcedureItems,
+  shownInEncounterPlan,
+} from "./encounter-plan-panel"
 import { ServicePicker } from "./service-picker"
 
 const NO_PLAN = "__sin-plan__"
@@ -215,7 +220,20 @@ export function sessionChoices(
     .map(({ item }) => item)
 }
 
-function planOptionLabel(item: PlanItem, locale: string | undefined): string {
+/**
+ * Lo marcado «Hoy» en la atención no está «Pendiente»: dice su sesión, como su fila del Plan
+ * («Sesión 2 de 2»), o «Hoy» si es de una sola (QA en pantalla del 17 nov, C3). Lo demás, su estado.
+ */
+export function planOptionStatus(
+  item: Pick<PlanItem, "id" | "status">,
+  today: { brought: ReadonlySet<string>; sessions: ReadonlyMap<string, { n: number; m: number }>; dayWord: string },
+): string {
+  if (!today.brought.has(item.id)) return planStatusLabel(item.status)
+  const session = today.sessions.get(item.id)
+  return session && session.m > 1 ? `Sesión ${session.n} de ${session.m}` : today.dayWord
+}
+
+function planOptionLabel(item: PlanItem, locale: string | undefined, status: string): string {
   // Lo que se cobra al hacerlo: el acordado si lo aceptó.
   const agreed = agreedPriceOf(item)
   const price =
@@ -232,7 +250,7 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
         : "general"
   const accepts = item.decision === "pendiente" ? " · se acepta al hacerlo" : ""
   const after = item.waitsFor ? ` · va después de ${item.waitsFor.title}` : ""
-  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}${accepts}${after}`
+  return `${item.title} · ${tooth} · ${status} · ${price}${accepts}${after}`
 }
 
 /**
@@ -257,7 +275,10 @@ export function EncounterProcedures({
   onConsentFirst,
   voidRequestId = null,
   onVoidRequestUsed,
+  past = false,
 }: {
+  /** La atención es de otro día: lo marcado dice «Ese día», no «Hoy». */
+  past?: boolean
   /**
    * «Anular…» desde la fila del plan (la atención agrupada, 17 nov): lo registrado de un
    * tratamiento se ve en su fila; su anulación es la misma de aquí, con su motivo.
@@ -395,11 +416,22 @@ export function EncounterProcedures({
         await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
         await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
         await onChanged()
+      } catch (err) {
+        // Otra pestaña ya lo registró: esta vuelve a leer la atención y su plan, y la fila dice
+        // «hecha hoy» sin recargar; el error se dice igual en el formulario (QA en pantalla del 17 nov).
+        if (err instanceof ApiError && err.shape.code === "SESSION_REGISTERED")
+          await Promise.allSettled([
+            queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
+            onChanged(),
+          ])
+        throw err
       } finally {
         onPendingChange(false)
       }
       formApi.reset()
       setOpen(false)
+      // «Registrar» se desmonta al quedar «hecha hoy»: el foco vuelve a su fila («Anular…»).
+      if (plan) keepFocusInPlanRow(plan.id)
     },
   })
   const surface = useFormSurface(form, {
@@ -433,7 +465,9 @@ export function EncounterProcedures({
       } finally {
         onPendingChange(false)
       }
+      const fromRow = voidingProc.planItemId
       setVoidingProc(null)
+      if (fromRow) keepFocusInPlanRow(fromRow)
     },
   })
   const voidSubmitting = useStore(voidForm.store, (state) => state.isSubmitting)
@@ -445,10 +479,13 @@ export function EncounterProcedures({
   const tooth = values.site.toothNumber
   // Al elegir pieza solo caben sus ítems más los generales (sin pieza); el
   // servidor no exige coincidencia, así que los generales siempre aplican.
-  const ordered = sessionChoices(openItems, {
-    encounterId: encounter.id,
-    brought: new Set(detail.plannedItems.map((planned) => planned.id)),
-  })
+  const brought = new Set(detail.plannedItems.map((planned) => planned.id))
+  const ordered = sessionChoices(openItems, { encounterId: encounter.id, brought })
+  const todayStatus = {
+    brought,
+    sessions: new Map((detail.visit?.treatments ?? []).map((row) => [row.planItemId, row])),
+    dayWord: past ? "Ese día" : "Hoy",
+  }
   const visiblePlans =
     tooth == null
       ? ordered
@@ -460,7 +497,8 @@ export function EncounterProcedures({
       : visiblePlans
 
   const planItems: Record<string, string> = {}
-  for (const item of options) planItems[item.id] = planOptionLabel(item, orgLocale)
+  for (const item of options)
+    planItems[item.id] = planOptionLabel(item, orgLocale, planOptionStatus(item, todayStatus))
   planItems[NO_PLAN] = OTHER_SERVICE
   // Con tratamientos por elegir, el catálogo aparece al elegir «Otro servicio del catálogo»: no
   // antes, para no registrar un acto suelto sin querer (R10).
@@ -720,7 +758,7 @@ export function EncounterProcedures({
                               <SelectContent>
                                 {options.map((item) => (
                                   <SelectItem key={item.id} value={item.id}>
-                                    {planOptionLabel(item, orgLocale)}
+                                    {planItems[item.id]}
                                   </SelectItem>
                                 ))}
                                 <SelectItem value={NO_PLAN}>{OTHER_SERVICE}</SelectItem>

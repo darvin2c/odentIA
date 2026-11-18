@@ -16,6 +16,10 @@ const calls = vi.hoisted(() => [] as string[])
 const navigate = vi.hoisted(() => vi.fn())
 const state = vi.hoisted(() => ({
   professional: "u-1",
+  nextAction: "iniciar",
+  waitsFor: null as { id: string; title: string } | null,
+  openToday: true,
+  openedAt: "2026-11-15T15:00:00.000Z",
   planned: [] as string[],
   sessions: [] as Array<{
     encounterId: string
@@ -83,13 +87,19 @@ vi.mock("../../lib/api", async (original) => ({
   ...(await original<typeof import("../../lib/api")>()),
   apiFetch: async (url: string, init?: { method?: string }) => {
     calls.push(`${init?.method ?? "GET"} ${url}`)
-    if (url.endsWith("/plan")) return { data: [{ ...item, sessions: state.sessions }] }
+    if (url.endsWith("/plan"))
+      return { data: [{ ...item, sessions: state.sessions, waitsFor: state.waitsFor }] }
     if (url.endsWith("/summary"))
       return {
         data: {
           openEncounterId: "enc-1",
-          openEncounter: { id: "enc-1", professionalUserId: state.professional },
-          treatmentJourneys: [{ item, nextAction: "iniciar" }],
+          openEncounter: {
+            id: "enc-1",
+            professionalUserId: state.professional,
+            today: state.openToday,
+            startedAt: state.openedAt,
+          },
+          treatmentJourneys: [{ item, nextAction: state.nextAction }],
         },
       }
     if (url.endsWith("/journey"))
@@ -107,7 +117,7 @@ vi.mock("../../lib/api", async (original) => ({
           prescriptions: [],
           documents: [],
           finance: null,
-          nextAction: "iniciar",
+          nextAction: state.nextAction,
         },
       }
     if (url.endsWith("/encounters/enc-1"))
@@ -137,6 +147,9 @@ beforeEach(() => {
   calls.length = 0
   navigate.mockReset()
   state.professional = "u-1"
+  state.nextAction = "iniciar"
+  state.waitsFor = null
+  state.openToday = true
   state.planned = []
   state.sessions = []
 })
@@ -271,4 +284,38 @@ it("«4. Sesiones»: la firmada con ✓, el día, quién y su nota; la de un bor
   expect(list.textContent).toMatch(/Sesión 2 · en curso hoy/)
   expect(list.textContent).not.toMatch(/Firmada:Sesión 2/)
   expect(screen.getAllByRole("button", { name: /Abrir la atención de la sesión/ })).toHaveLength(2)
+})
+
+// QA en pantalla del 17 nov (clínica H1): al lado de la atención ofrecía «Hacer hoy» en la corona con la
+// endodoncia de la misma pieza en la sesión 1 de 2, y el servidor la traía.
+it("lo que va después de otro tratamiento de la pieza no ofrece «Hacer hoy»: dice tras qué va, como su fila", async () => {
+  state.waitsFor = { id: "it-endo", title: "Endodoncia posterior vital" }
+  show({ encounterId: "enc-1", onRegister: vi.fn(), onOdontogram: vi.fn() })
+  expect(await screen.findByText("Va después de endodoncia posterior vital")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Hacer hoy" })).toBeNull()
+  expect(calls.filter((call) => call.startsWith("POST"))).toEqual([])
+})
+
+// QA en pantalla del 17 nov (clínica H2): con la sesión 1 de 2 registrada, «Completar tratamiento» lo daba
+// por terminado con un clic, sin «¿Terminaste?».
+it("dentro de la atención, lo registrado hoy no se completa aquí: lo decide «¿Terminaste?» al firmar", async () => {
+  state.nextAction = "completar"
+  show({ encounterId: "enc-1", onRegister: vi.fn(), onOdontogram: vi.fn() })
+  expect(await screen.findByText(/lo dices al firmar, en «¿Terminaste\?»/)).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Completar tratamiento" })).toBeNull()
+})
+
+// QA en pantalla del 17 nov (desarrollo 2): «Hacer hoy» desde la ficha marcaba el tratamiento en un
+// borrador de otro día, y la sesión quedaba con ese día.
+it("con su atención abierta de otro día, desde la ficha no hay «Hacer hoy»: dice de qué día es y la abre", async () => {
+  state.openToday = false
+  show()
+  expect(await screen.findByText(/^Tiene una atención abierta del .*15.*: ciérrala o anúlala/)).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Hacer hoy" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Abrir esa atención" }))
+  expect(navigate).toHaveBeenCalledWith({
+    to: "/patients/$patientId/encounters/$encounterId",
+    params: { patientId: "p-1", encounterId: "enc-1" },
+  })
+  expect(calls.filter((call) => call.startsWith("POST"))).toEqual([])
 })

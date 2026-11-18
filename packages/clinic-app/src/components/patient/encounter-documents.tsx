@@ -110,22 +110,48 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
  * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
  * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
- * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide».
+ * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide», ni
+ * el recién preparado para un tratamiento que lo pide y que lo pedido todavía no
+ * nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
  */
-export function consentsStillAsked<T extends { id: string; linkSentAt?: string | null; personSignedAt?: string | null }>(
+export function consentsStillAsked<
+  T extends {
+    id: string
+    linkSentAt?: string | null
+    personSignedAt?: string | null
+    templateId?: string | null
+    planItemId?: string | null
+  },
+>(
   pending: readonly T[],
-  needs: { data?: { data: ReadonlyArray<{ documentId: string | null }> }; isFetching: boolean },
+  needs: {
+    data?: {
+      data: ReadonlyArray<{ documentId: string | null; templateId?: string | null; planItemId?: string | null }>
+    }
+    isFetching: boolean
+  },
 ): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
-  const asked = needs.data && !needs.isFetching ? new Set(needs.data.data.map((need) => need.documentId)) : null
-  const notAsked = asked
-    ? pending.filter((doc) => !asked.has(doc.id) && !doc.linkSentAt && !doc.personSignedAt)
+  const list = needs.data && !needs.isFetching ? needs.data.data : null
+  const isAsked = (doc: T) =>
+    list != null &&
+    list.some(
+      (need) =>
+        need.documentId === doc.id ||
+        // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
+        (need.documentId == null &&
+          need.planItemId != null &&
+          need.planItemId === doc.planItemId &&
+          (need.templateId == null || need.templateId === doc.templateId)),
+    )
+  const notAsked = list
+    ? pending.filter((doc) => !isAsked(doc) && !doc.linkSentAt && !doc.personSignedAt)
     : []
   const pendingSignatures = pending.filter((doc) => !notAsked.includes(doc))
   return {
     pendingSignatures,
     notAsked,
     // Lo firmado en su enlace solo falta confirmarlo; lo enviado de algo que ya no se pide, no se ofrece aquí.
-    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!asked || asked.has(doc.id))),
+    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!list || isAsked(doc))),
   }
 }
 

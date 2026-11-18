@@ -1070,6 +1070,8 @@ export interface OpenEncounterBrief {
   id: string
   reason: string | null
   startedAt: string
+  /** Es de hoy, en el día de la clínica: si no, «Hacer hoy» desde la ficha no la usa. */
+  today?: boolean
   professionalUserId: string
   appointmentId: string | null
   diagnosisCount: number

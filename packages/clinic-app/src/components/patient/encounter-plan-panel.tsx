@@ -13,6 +13,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  cn,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -138,6 +139,54 @@ export function liveProcedureItems(procedures: readonly ProcedureItem[]): Set<st
   )
 }
 
+/**
+ * Aún no empezó: sin sesiones, ni en otra atención ni en esta. Solo eso dice su precio en la fila:
+ * lo empezado ya se cargó (cobro único) o se carga por sesión, y quien no ve la caja no puede
+ * saberlo (QA en pantalla del 17 nov).
+ */
+export function notStartedYet(
+  item: Pick<PlanItem, "id" | "status" | "sessionsDone" | "sessions">,
+  liveHere: ReadonlySet<string>,
+): boolean {
+  return (
+    item.status !== "en_curso" &&
+    !CLOSED.has(item.status) &&
+    !item.sessionsDone &&
+    (item.sessions?.length ?? 0) === 0 &&
+    !liveHere.has(item.id)
+  )
+}
+
+/**
+ * Después de «Hacer hoy», «Hoy no» o «Registrar», el botón pulsado se desmonta y el foco caía a la
+ * página (QA en pantalla del 17 nov, D13): vuelve a la fila, a su botón principal («Registrar»,
+ * «Anular…» o «Hacer hoy»), o a la fila misma. Espera a que la fila cambie y a que se cierre el
+ * registro, y no le quita el foco a nada que la persona haya tocado mientras tanto.
+ */
+export function keepFocusInPlanRow(rowId: string): void {
+  if (typeof document === "undefined") return
+  const lastTry = 40
+  let tries = 0
+  const attempt = () => {
+    tries += 1
+    const active = document.activeElement
+    const row = document.querySelector<HTMLElement>(`[data-plan-row="${rowId}"]`)
+    if ((!active || active === document.body) && row) {
+      // Su botón principal; si aún está apagado (la fila se está guardando), se lo espera, y solo
+      // al final el foco se queda en la fila.
+      const primary = row.querySelector<HTMLElement>("[data-row-primary]")
+      const target =
+        primary && !primary.matches(":disabled") ? primary : !primary || tries >= lastTry ? row : null
+      if (target) {
+        target.focus({ preventScroll: true })
+        if (document.activeElement === target) return
+      }
+    }
+    if (tries < lastTry) window.setTimeout(attempt, 50)
+  }
+  window.setTimeout(attempt, 0)
+}
+
 const QUADRANT_OPTIONS = Object.entries(QUADRANT_LABELS).map(([value, label]) => ({ value, label }))
 const ARCH_OPTIONS = [
   { value: "upper", label: "Superior" },
@@ -218,7 +267,6 @@ export function EncounterPlanPanel({
   visit = null,
   procedures = [],
   past = false,
-  chargedIds = new Set<string>(),
   onRegister,
   onVoid,
   onConsentFirst,
@@ -235,11 +283,6 @@ export function EncounterPlanPanel({
   procedures?: ProcedureItem[]
   /** La atención es de otro día (una cita pasada que se registra después): «Ese día», no «Hoy». */
   past?: boolean
-  /**
-   * Los tratamientos de cobro único que ya tienen su cargo (`conCargo` de la cuenta): hacerlos hoy
-   * no cobra nada, así que su fila no dice un precio. Sin la cuenta a la vista, vacío.
-   */
-  chargedIds?: ReadonlySet<string>
   /** «Registrar»: abre el registro con ese tratamiento puesto. */
   onRegister?: (itemId: string) => void
   /** «Anular…» de lo registrado en la fila. */
@@ -400,6 +443,7 @@ export function EncounterPlanPanel({
     } finally {
       setBringing(null)
       onPendingChange(false)
+      keepFocusInPlanRow(item.id)
     }
   }
   // «Hacer hoy» en cada fila de lo que se puede hacer hoy (la atención agrupada, 17 nov): lo dice el
@@ -419,6 +463,7 @@ export function EncounterPlanPanel({
         type="button"
         size="sm"
         variant="outline"
+        data-row-primary
         aria-label={`${bringWord}: ${item.title}`}
         disabled={bringing !== null || removing !== null}
         onClick={() => void bringToday(item)}
@@ -431,7 +476,7 @@ export function EncounterPlanPanel({
    * El control al que viene hoy: uno por atención, y se cumple al firmar (la misma operación de
    * siempre). Elegir otro reemplaza al anterior.
    */
-  const chooseControl = async (controlId: string | null) => {
+  const chooseControl = async (controlId: string | null, rowId?: string) => {
     if (choosingControl) return
     setChoosingControl(controlId ?? "ninguno")
     onPendingChange(true)
@@ -444,6 +489,7 @@ export function EncounterPlanPanel({
     } finally {
       setChoosingControl(null)
       onPendingChange(false)
+      if (rowId) keepFocusInPlanRow(rowId)
     }
   }
   const [leaving, setLeaving] = useState<string | null>(null)
@@ -462,119 +508,143 @@ export function EncounterPlanPanel({
     } finally {
       setLeaving(null)
       onPendingChange(false)
+      keepFocusInPlanRow(itemId)
     }
   }
   /**
-   * Lo de hoy en la fila (la atención agrupada, 17 nov): «Hoy», su sesión, «por hacer» o «hecha hoy»,
-   * lo registrado con «Anular…» (y lo anulado, tachado y con su motivo), la espera entre sesiones y
-   * el consentimiento antes del acto. Y sus sesiones anteriores, con el día, quién y lo anotado.
+   * Lo de hoy de un tratamiento (la atención agrupada, 17 nov): si es «Hoy», su sesión, lo
+   * registrado y lo anulado, la espera y el consentimiento antes del acto. «Hoy» sale de lo que el
+   * servidor dice unido a la atención o de lo registrado vigente: lo anulado queda como rastro,
+   * no como marca, y «Hoy no» la desmarca aunque algo se haya anulado (QA en pantalla del 17 nov).
    */
-  const todayPart = (item: PlanItem) => {
+  const todayOf = (item: PlanItem) => {
     const visitRow = doable.get(item.id)
     const mine = procedures.filter((proc) => proc.planItemId === item.id)
     const done = mine.filter((proc) => !proc.voidedAt)
-    const voided = mine.filter((proc) => proc.voidedAt)
-    // Lo registrado aquí es de hoy aunque ya no esté unido (lo anulado sigue a la vista).
-    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked) || mine.length > 0
-    const earlier = (item.sessions ?? []).filter((session) => session.encounterId !== encounterId)
-    const wait = isToday && done.length === 0 && visitRow ? visitWaitWords(visitRow) : null
-    const consentWords =
-      isToday && done.length === 0 ? treatmentConsentWords(item.consent, item.consentMissing) : null
-    const consentPending = consentWords != null && item.consent !== "firmado"
-    if (!isToday && earlier.length === 0) return null
-    const sessionLine = visitRow && visitRow.m > 1 ? `Sesión ${visitRow.n} de ${visitRow.m} · ` : ""
-    return (
-      <div className="flex basis-full flex-col gap-1.5">
-        {isToday ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border-l-2 border-primary bg-primary/5 px-3 py-2">
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-xs">
-                <Badge variant="default" className="mr-2 align-middle">
-                  {dayWord}
-                </Badge>
-                {sessionLine}
-                {done.length > 0 ? (
-                  <span className="font-medium text-success">
-                    {past ? "hecha ese día" : "hecha hoy"}
-                  </span>
-                ) : (
-                  <span className="font-medium text-warning">por hacer</span>
-                )}
-                {visitRow?.broughtByAppointment ? " · la trajo su cita" : ""}
-              </span>
-              {done.map((proc) => (
-                <span
-                  key={proc.id}
-                  className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-                >
-                  Registrado: {proc.description}
-                  {canWrite && !disabled && onVoid ? (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => onVoid(proc.id)}>
-                      Anular…
-                    </Button>
-                  ) : null}
-                </span>
-              ))}
-              {/* Lo anulado no desaparece: se lee qué fue y por qué, tachado y con su motivo. */}
-              {voided.map((proc) => (
-                <span key={proc.id} className="text-xs text-muted-foreground">
-                  <span className="line-through">Registrado: {proc.description}</span>
-                  {` · Anulado: ${proc.voidReason ?? ""}. No cuenta como sesión ni genera cargo.`}
-                </span>
-              ))}
-              {wait ? <span className="text-xs text-warning">{wait}</span> : null}
-              {consentWords ? (
-                <span
-                  className={
-                    consentPending ? "text-xs text-warning" : "text-xs text-muted-foreground"
-                  }
-                >
-                  {consentWords}
-                </span>
-              ) : null}
-            </span>
-            {canWrite && !disabled && done.length === 0 ? (
-              <span className="flex flex-wrap items-center gap-1">
-                {consentPending && onConsentFirst ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onConsentFirst(item.id, false)}
-                  >
-                    {/* Lo que firmó en su enlace se confirma; no se prepara otra vez. */}
-                    {item.consent === "sin_firmar"
-                      ? "Firmar ahora"
-                      : item.consent === "por_confirmar"
-                        ? "Confirmar"
-                        : "Preparar"}
-                  </Button>
-                ) : null}
-                {onRegister ? (
-                  <Button type="button" size="sm" onClick={() => onRegister(item.id)}>
-                    Registrar
-                  </Button>
-                ) : null}
-                {visitRow?.broughtByAppointment ? null : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`${leaveWord}: ${item.title}`}
-                    disabled={leaving !== null}
-                    onClick={() => void leaveToday(item.id)}
-                  >
-                    {leaveWord}
-                  </Button>
-                )}
-              </span>
-            ) : null}
-          </div>
+    const isToday = broughtIds.has(item.id) || Boolean(visitRow?.linked) || done.length > 0
+    const pending = isToday && done.length === 0
+    const consentWords = pending ? treatmentConsentWords(item.consent, item.consentMissing) : null
+    return {
+      visitRow,
+      done,
+      voided: mine.filter((proc) => proc.voidedAt),
+      isToday,
+      pending,
+      wait: pending && visitRow ? visitWaitWords(visitRow) : null,
+      consentWords,
+      consentPending: consentWords != null && item.consent !== "firmado",
+      earlier: (item.sessions ?? []).filter((session) => session.encounterId !== encounterId),
+    }
+  }
+  type TodayOf = ReturnType<typeof todayOf>
+  /** Bajo el nombre de la fila «Hoy»: «Sesión 2 de 2 · por hacer» o «hecha hoy», y si la trajo su cita. */
+  const todayState = (today: TodayOf) => (
+    <>
+      {today.visitRow && today.visitRow.m > 1
+        ? `Sesión ${today.visitRow.n} de ${today.visitRow.m} · `
+        : ""}
+      {today.done.length > 0 ? (
+        <span className="font-medium text-success">{past ? "hecha ese día" : "hecha hoy"}</span>
+      ) : (
+        <span className="font-medium text-warning">por hacer</span>
+      )}
+      {today.visitRow?.broughtByAppointment ? " · la trajo su cita" : ""}
+    </>
+  )
+  /**
+   * A la derecha de la fila «Hoy», en la misma fila (el lienzo, tablero 1): la firma que falta,
+   * «Registrar» y «Hoy no». Hecha, lo registrado lleva su «Anular…» debajo.
+   */
+  const todayActions = (item: PlanItem, today: TodayOf) =>
+    canWrite && !disabled && today.pending ? (
+      <>
+        {today.consentPending && onConsentFirst ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onConsentFirst(item.id, false)}
+          >
+            {/* Abre la firma del paciente (y la prepara si falta): dice lo que hace, no «Preparar»
+                (QA en pantalla del 17 nov, D3). Lo que firmó en su enlace se confirma. */}
+            {item.consent === "por_confirmar" ? "Confirmar" : "Firmar ahora"}
+          </Button>
         ) : null}
-        {earlier.length > 0 ? (
+        {onRegister ? (
+          <Button type="button" size="sm" data-row-primary onClick={() => onRegister(item.id)}>
+            Registrar
+          </Button>
+        ) : null}
+        {today.visitRow?.broughtByAppointment ? null : (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-label={`${leaveWord}: ${item.title}`}
+            disabled={leaving !== null}
+            onClick={() => void leaveToday(item.id)}
+          >
+            {leaveWord}
+          </Button>
+        )}
+      </>
+    ) : null
+  /**
+   * Debajo, dentro de la misma fila: lo registrado con «Anular…», lo anulado tachado y con su
+   * motivo (también sin «Hoy»: es rastro), la espera entre sesiones, el consentimiento una sola
+   * vez y sus sesiones anteriores, con el día, quién y lo anotado.
+   */
+  const todayDetails = (item: PlanItem, today: TodayOf) => {
+    if (
+      today.done.length === 0 &&
+      today.voided.length === 0 &&
+      !today.wait &&
+      !today.consentWords &&
+      today.earlier.length === 0
+    )
+      return null
+    return (
+      <div className="flex basis-full flex-col gap-1">
+        {today.done.map((proc) => (
+          <span
+            key={proc.id}
+            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+          >
+            Registrado: {proc.description}
+            {canWrite && !disabled && onVoid ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-row-primary
+                onClick={() => onVoid(proc.id)}
+              >
+                Anular…
+              </Button>
+            ) : null}
+          </span>
+        ))}
+        {/* Lo anulado no desaparece: se lee qué fue y por qué, tachado y con su motivo. */}
+        {today.voided.map((proc) => (
+          <span key={proc.id} className="text-xs text-muted-foreground">
+            <span className="line-through">Registrado: {proc.description}</span>
+            {` · Anulado: ${proc.voidReason ?? ""}. No cuenta como sesión ni genera cargo.`}
+          </span>
+        ))}
+        {today.wait ? <span className="text-xs text-warning">{today.wait}</span> : null}
+        {today.consentWords ? (
+          <span
+            className={
+              today.consentPending ? "text-xs text-warning" : "text-xs text-muted-foreground"
+            }
+          >
+            {today.consentWords}
+          </span>
+        ) : null}
+        {today.earlier.length > 0 ? (
           // Las sesiones se ven igual en la atención, el recorrido y la ficha (mesa del 17 nov).
           <PlanItemSessions
-            sessions={earlier}
+            sessions={today.earlier}
             itemLabel={item.title}
             current={encounterId}
             className="text-xs text-muted-foreground"
@@ -584,28 +654,31 @@ export function EncounterPlanPanel({
       </div>
     )
   }
+  /** «Ver»: el recorrido del tratamiento, al lado. */
+  const seeAction = (item: PlanItem) =>
+    onOpenJourney ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`Ver ${item.title}`}
+        onClick={() => onOpenJourney(item.id)}
+      >
+        Ver
+      </Button>
+    ) : null
 
   /** Lo que se hace con un renglón: traerlo a hoy y corregirlo. */
   const actionsOf = (item: PlanItem) => (
     <>
       {bringAction(item)}
       {rowActions(item)}
-      {onOpenJourney ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          aria-label={`Ver ${item.title}`}
-          onClick={() => onOpenJourney(item.id)}
-        >
-          Ver
-        </Button>
-      ) : null}
+      {seeAction(item)}
     </>
   )
   const noticeOf = (item: PlanItem) => (
     <>
-      {todayPart(item)}
+      {todayDetails(item, todayOf(item))}
       {fitNotice(item)}
     </>
   )
@@ -830,7 +903,10 @@ export function EncounterPlanPanel({
           <LoadingState message="Cargando el plan…" />
         ) : brief.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Todavía no hay tratamientos por hacer. El primero que indiques abre el plan.
+            {/* Quien ya tiene plan no lo abre con lo primero que se indique (QA en pantalla del 17 nov, H9). */}
+            {(plansQuery.data?.data ?? []).length > 0
+              ? "No tiene tratamientos por hacer en su plan."
+              : "Todavía no hay tratamientos por hacer. El primero que indiques abre el plan."}
           </p>
         ) : (
           <>
@@ -852,11 +928,24 @@ export function EncounterPlanPanel({
                     phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
                       ? (phases[phaseIndexOf(item)]?.label ?? null)
                       : null
-                  // El precio, solo si hacerlo hoy cobra algo: lo de cobro único ya cargado no se
-                  // cobra otra vez (acta, criterio 13).
-                  const price = chargedIds.has(item.id) ? null : quotedPriceOf(item)
+                  // El precio, solo de lo que aún no empezó: lo empezado ya se cobró o se cobra por
+                  // sesión, y la fila no lo sabe sin la caja (QA en pantalla del 17 nov).
+                  const price = notStartedYet(item, liveHere) ? quotedPriceOf(item) : null
                   // «Hecha hoy» ya lo dice: «Realizado» antes de firmar diría que está terminado.
                   const doneHere = CLOSED.has(item.status) && liveHere.has(item.id)
+                  const now = todayOf(item)
+                  const subtitle = [
+                    treatmentSiteLabel(item),
+                    now.isToday ? todayState(now) : null,
+                    item.waitsFor && !unanswered ? `va después de ${item.waitsFor.title}` : null,
+                    // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
+                    price?.priceCents != null && orgLocale
+                      ? `${formatMoney(price.priceCents, price.currency, orgLocale)}${price.offered ? " en su presupuesto" : ""}`
+                      : null,
+                    // El consentimiento va con el tratamiento; en la fila «Hoy» se dice una sola vez,
+                    // debajo, con su botón (QA en pantalla del 17 nov, D2).
+                    now.isToday ? null : treatmentConsentWords(item.consent, item.consentMissing),
+                  ].filter((part) => part != null && part !== "")
                   return (
                     <Fragment key={item.id}>
                       {phaseLabel ? (
@@ -864,9 +953,24 @@ export function EncounterPlanPanel({
                           Fase {phaseLabel.toLowerCase()}
                         </li>
                       ) : null}
-                      <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                      {/* Una sola fila por tratamiento (el lienzo, tablero 1): con «Hoy», la fila entera
+                          lleva la marca, su estado bajo el nombre, sus botones a la derecha y lo de hoy
+                          y sus sesiones debajo, sin una banda aparte (QA en pantalla del 17 nov, D1). */}
+                      <li
+                        data-plan-row={item.id}
+                        tabIndex={-1}
+                        className={cn(
+                          "flex flex-wrap items-center justify-between gap-2 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          now.isToday && "my-1 rounded-md border-l-2 border-l-primary bg-primary/5 px-3",
+                        )}
+                      >
                         <span className="flex min-w-0 flex-col">
                           <span className="font-medium">
+                            {now.isToday ? (
+                              <Badge variant="default" className="mr-2 align-middle">
+                                {dayWord}
+                              </Badge>
+                            ) : null}
                             {item.title}
                             {today.has(item.id) ? (
                               <Badge variant="default" className="ml-2 align-middle">
@@ -875,36 +979,42 @@ export function EncounterPlanPanel({
                             ) : null}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {[
-                              treatmentSiteLabel(item),
-                              item.waitsFor && !unanswered
-                                ? `va después de ${item.waitsFor.title}`
-                                : "",
-                              // El acordado; sin aceptar, el de su presupuesto dicho así (QA de la ficha del 8 nov).
-                              price?.priceCents != null && orgLocale
-                                ? `${formatMoney(price.priceCents, price.currency, orgLocale)}${price.offered ? " en su presupuesto" : ""}`
-                                : "",
-                              // El consentimiento va con el tratamiento: se dice aquí también (10 nov).
-                              treatmentConsentWords(item.consent, item.consentMissing) ?? "",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
+                            {subtitle.map((part, at) => (
+                              // biome-ignore lint/suspicious/noArrayIndexKey: partes fijas de una línea, en su orden.
+                              <Fragment key={at}>
+                                {at > 0 ? " · " : ""}
+                                {part}
+                              </Fragment>
+                            ))}
                           </span>
                         </span>
                         <span className="flex flex-wrap items-center gap-1">
-                          <Badge
-                            variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
-                          >
-                            {planDecisionLabel(item.decisionStatus)}
-                          </Badge>
-                          {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
-                          {isLeftOut(item.decisionStatus) || item.status === "pendiente" || doneHere ? null : (
-                            <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                          {/* Con «Hoy», su estado ya está bajo el nombre: «Aceptado» y «En curso» sobran. */}
+                          {now.isToday ? null : (
+                            <>
+                              <Badge
+                                variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}
+                              >
+                                {planDecisionLabel(item.decisionStatus)}
+                              </Badge>
+                              {/* «Pendiente» al lado de «Aceptado» o «No elegida» confundía (QA del 8 nov): solo se dice el avance si empezó. */}
+                              {isLeftOut(item.decisionStatus) || item.status === "pendiente" || doneHere ? null : (
+                                <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                              )}
+                            </>
                           )}
-                          {actionsOf(item)}
+                          {now.isToday ? (
+                            <>
+                              {todayActions(item, now)}
+                              {seeAction(item)}
+                            </>
+                          ) : (
+                            actionsOf(item)
+                          )}
                         </span>
                         <ExtractionRisks lines={item.extractionRisks} />
-                        {noticeOf(item)}
+                        {todayDetails(item, now)}
+                        {fitNotice(item)}
                         {changeForm(item)}
                         {rowError?.itemId === item.id ? (
                           <p role="alert" className="basis-full text-sm text-destructive">
@@ -974,7 +1084,12 @@ export function EncounterPlanPanel({
                 return (
                   <li
                     key={control.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-2"
+                    data-plan-row={control.id}
+                    tabIndex={-1}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      chosen && "my-1 rounded-md border-l-2 border-l-primary bg-primary/5 px-3",
+                    )}
                   >
                     <span className="flex min-w-0 flex-col">
                       <span className="font-medium">
@@ -1008,9 +1123,12 @@ export function EncounterPlanPanel({
                         type="button"
                         size="sm"
                         variant={control.chosen ? "ghost" : "outline"}
+                        data-row-primary
                         aria-label={`${control.chosen ? leaveWord : bringWord}: ${control.title}`}
                         disabled={choosingControl !== null}
-                        onClick={() => void chooseControl(control.chosen ? null : control.id)}
+                        onClick={() =>
+                          void chooseControl(control.chosen ? null : control.id, control.id)
+                        }
                       >
                         {choosingControl === control.id
                           ? "Anotando…"

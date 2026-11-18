@@ -40,6 +40,18 @@ const say = (text: string) =>
 type Faq = HelpFaq
 
 /**
+ * Lo que un odontólogo nuevo preguntó con sus palabras en la QA en pantalla del 17 nov (la
+ * endodoncia, la resina, la caries, la pieza): en un consultorio nadie lo pregunta así.
+ */
+const DENTAL_ASKED = [
+  "viene a su segunda sesion de endodoncia como lo atiendo",
+  "el paciente acepto una resina y vino sin cita como la hago hoy y la registro",
+  "encontre una caries en la primera consulta como la agrego al plan y la hago hoy",
+  "registre algo en la pieza equivocada como lo corrijo",
+  "registre en la pieza equivocada",
+]
+
+/**
  * Cambia un trozo de una respuesta heredada. Si la base ya no lo dice, falla al
  * cargar: el texto de odentIA no vuelve a la guía de latidIA sin que nadie lo vea.
  */
@@ -277,6 +289,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * Reportes no tiene sus pasos (`funnelStepsOf`); el plan tiene una sola fase.
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
+  "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).
   "indique-despues-presupuesto-incluida": () => [],
   // «De pequeño» es de odentIA (pediatría dental); en un consultorio, solo lo común de quien cuida a un niño.
@@ -434,7 +448,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.
   "atencion-donde-hacerla-hoy": (faq) => [
     {
-      ...faq,
+      ...withoutForms(faq, ...DENTAL_ASKED),
       a: swaps(
         faq.a,
         [

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "../../lib/locale"
 import { visitToldHeading } from "../../lib/visit-answer-words"
-import { visitAppointmentWords, visitBookedWords, visitWaitWords } from "./encounter-visit"
+import { bookedReasonNote, visitAppointmentWords, visitBookedWords, visitWaitWords } from "./encounter-visit"
 
 describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", () => {
   it("la sesión 1 de hoy avisa con los días que pide su servicio, sin trabar", () => {
@@ -86,5 +86,13 @@ describe("«Su cita» con su hora y su profesional", () => {
     expect(plain(visitAppointmentWords({ startsAt: at, professionalName: null }, "es-PE", "America/Lima"))).toBe(
       "10:30 a. m.",
     )
+  })
+})
+
+// QA en pantalla del 17 nov (D4): con el motivo «Control de mantenimiento», la cita de las resinas decía «Ya es el motivo de hoy».
+describe("«Ya es el motivo de hoy», bajo lo que traía su cita", () => {
+  it("solo si el motivo escrito es el de la cita", () => {
+    expect(bookedReasonNote("Continúa: Resina de la 16", " Continúa: Resina de la 16 ")).toBe("Ya es el motivo de hoy")
+    expect(bookedReasonNote("Continúa: Resina de la 16", "Control de mantenimiento")).toBeNull()
   })
 })

@@ -9,6 +9,7 @@ import {
   controlBesideAccepted,
   finishingAtSign,
   needsNextControlDay,
+  noNewChargesWords,
   resolvingOnSign,
   sessionAnswersBody,
   signFormsOf,
@@ -174,5 +175,26 @@ describe("lo escrito en el cierre se guarda por persona", () => {
     expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-1", "dr-b"))
     expect(closingDraftKeyOf("enc-1", "dra-a")).not.toBe(closingDraftKeyOf("enc-2", "dra-a"))
     expect(closingDraftKeyOf("enc-1", "dra-a")).toBe(closingDraftKeyOf("enc-1", "dra-a"))
+  })
+})
+
+// QA en pantalla del 17 nov (auditor H3): en la sesión 2 de una endodoncia ya cargada, el cierre prometía
+// «lo marcado «Hoy» se carga al registrarlo», y al registrarla no se cargaba nada.
+describe("«Sin cargos nuevos» del cierre de la página", () => {
+  const words = (chargedIds: string[], registeredIds: string[] = []) =>
+    noNewChargesWords({
+      plannedIds: ["endo"],
+      registeredIds: new Set(registeredIds),
+      chargedIds: new Set(chargedIds),
+      dayWord: "Hoy",
+    })
+  it("lo marcado «Hoy» que aún no tiene su cargo se carga al registrarlo", () => {
+    expect(words([])).toBe(
+      "Sin cargos nuevos por ahora: lo marcado «Hoy» se carga al registrarlo, según su presupuesto.",
+    )
+  })
+  it("lo marcado que ya tiene su cargo (cobro único) no promete otro", () => {
+    expect(words(["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
+    expect(words([], ["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
   })
 })

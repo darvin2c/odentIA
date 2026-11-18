@@ -443,10 +443,62 @@ it("«Hacerla hoy» de lo que aún no empezó no arrastra el diagnóstico de otr
   const brought = await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, today, item.id))
   // Sin empezar: el diagnóstico de la atención donde se indicó no se copia (la corona no hereda la pulpitis).
   expect(brought).toEqual({ reasonSet: true, diagnosisAdded: false })
+  // Y el motivo es su nombre: «Continúa: …» diría que hubo una sesión antes (QA en pantalla del 17 nov, D9).
+  const marked = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect(marked.encounter.reason).toBe(item.title.trim())
   await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, today, item.id))
   const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
   expect(detail.encounter.reason).toBeNull()
   expect(detail.diagnoses).toEqual([])
+})
+
+it("«Hacer hoy» de un control no pone su nombre de motivo si la cita ofrece el suyo (QA en pantalla del 17 nov, D4)", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID()}` })
+    .returning()
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad 1" })
+    .returning()
+  const startsAt = new Date()
+  const [visitAt] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      reason: "Resinas de la 16 y la 26",
+    })
+    .returning()
+  // Un control vencido que no trae la cita: se puede cumplir hoy.
+  const [control] = await ownerDb
+    .insert(clinicalFollowUp)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      kind: "mantenimiento",
+      title: "Control de mantenimiento",
+      dueAt: new Date(Date.now() - 30 * 86_400_000),
+      createdAt: new Date(Date.now() - 200 * 86_400_000),
+    })
+    .returning()
+  const today = await secondVisit(f)
+  await ownerDb.update(encounter).set({ appointmentId: visitAt!.id }).where(eq(encounter.id, today))
+  const chose = await f.run((tx) => chooseVisitControl(tx, ...f.args, today, control!.id))
+  // Antes llenaba el motivo con «Control de mantenimiento» y la cita decía «Ya es el motivo de hoy».
+  expect(chose.reasonSet).toBe(false)
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, today))
+  expect(detail.encounter.reason ?? null).toBeNull()
+  expect(detail.bookedReason).toBe("Resinas de la 16 y la 26")
+  expect(detail.visit?.controls).toEqual([expect.objectContaining({ id: control!.id, chosen: true })])
 })
 
 it("el control reservado en la cita de hoy sigue a la vista y el cierre dice cuál se cumple (QA del 9 nov, repaso 3)", async () => {

@@ -698,6 +698,9 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "no sale nuevo paciente",
           "para registrar a alguien nuevo",
           "por que no aparece nuevo paciente",
+          // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+          "llego una persona nueva que no esta registrada que hago",
+          "llego alguien nuevo que no esta registrado",
         ],
         notFor: { has: "patients.write" },
         general: true,
@@ -852,6 +855,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "receta-consentimiento-orden-atencion",
         q: "¿Dónde hago la receta, el consentimiento o la orden de la atención?",
         a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, ficha o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
+        // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+        forms: [
+          "como emito una receta",
+          "emitir una receta",
+        ],
         area: "clinica",
       },
       {
@@ -890,13 +898,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "firma-persona-consentimiento",
         q: "¿Cómo firma la persona su consentimiento?",
-        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, no se firma desde el teléfono: en la atención no se ofrece enviarlo ni el código, y la fila dice qué falta («falta el documento de…»); desde su página, «Enviar para que lo lea» le llega para leerlo antes y lo firma en la cita. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: su fila del Plan dice si falta, si falta firmarlo o si ya está, y en la fila «Hoy» tiene «Preparar» o «Firmar ahora», en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Al pie de la hoja dice cómo se firma («Firma en la clínica», «Firma en papel» o «Firma por enlace») y que queda en la historia clínica con la fecha y la hora, sin advertencias; el PDF firmado dice el nivel real en letra chica: firma electrónica simple (en el Perú, Ley 27269), no firma digital. Si es menor, «Falta la firma de…» nombra a su representante; «Firmar en su teléfono» no se ofrece si su enlace no lo dejaría firmar (menor, sin fecha de nacimiento o sin su documento en la ficha).",
+        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Para leerlo antes de pasarle la tablet, sin firmar nada, «Ver» en su fila de Documentos lo abre al lado. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente; si no sabe firmar, la hoja en papel trae el recuadro para su huella. Con «Enviar para firmar» le llega «Firma tu consentimiento»: lee la misma hoja y la firma desde su teléfono antes de llegar, escribiendo su documento. Si está en la clínica, «Firmar en su teléfono» muestra un código para que lo escanee (o «Copiar enlace» para pegarlo en su chat), sin enviarle ningún mensaje. Si su ficha no tiene su documento, si no tiene fecha de nacimiento o si es menor, no se firma desde el teléfono: en la atención no se ofrece enviarlo ni el código, y la fila dice qué falta («falta el documento de…»); desde su página, «Enviar para que lo lea» le llega para leerlo antes y lo firma en la cita. Lo firmado queda pendiente hasta que lo confirmes dentro de su atención: al abrirla, arriba sale «Firmó un consentimiento en su enlace»; «Revisar y confirmar» abre la hoja con quién firmó, su documento abreviado y cuándo, y «Confirmar consentimiento» lo deja firmado y anotado en esa atención, aunque la atención sea de otro día: queda el día real y a quién informaste. Confírmalo con quien firmó delante; si vino otra persona, o si firmó hace meses, «Firmar de nuevo aquí» lo firma en la tablet y lo del enlace queda en su historia. El consentimiento va con su tratamiento: su fila del Plan dice si falta, si falta firmarlo o si ya está, y en la fila «Hoy» tiene «Firmar ahora», que lo prepara si hace falta, en cualquier atención donde se haga. Si cambias dónde se hace, el servicio o el diagnóstico, lo firmado deja de contar y se prepara con el texto nuevo. Al pie de la hoja dice cómo se firma («Firma en la clínica», «Firma en papel» o «Firma por enlace») y que queda en la historia clínica con la fecha y la hora, sin advertencias; el PDF firmado dice el nivel real en letra chica: firma electrónica simple (en el Perú, Ley 27269), no firma digital. Si es menor, «Falta la firma de…» nombra a su representante; «Firmar en su teléfono» no se ofrece si su enlace no lo dejaría firmar (menor, sin fecha de nacimiento o sin su documento en la ficha).",
+        // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+        forms: [
+          "quiero leer el consentimiento antes de pasarle la tablet",
+          "como leo el consentimiento sin firmarlo",
+          "ver el consentimiento antes de que lo firme",
+        ],
         area: "clinica",
       },
       {
         id: "atencion-donde-hacerla-hoy",
         q: "¿Cómo hago hoy algo del plan?",
-        a: "En el bloque «Plan de tratamiento» de la atención, que es el único lugar de cada tratamiento, por fases: lo aceptado trae «Hacer hoy», que lo marca «Hoy» en su mismo lugar, sin moverlo. En la fila «Hoy» están «Registrar», que la deja «hecha hoy» con lo registrado, y «Hoy no», que la desmarca y la deja en el plan para otro día (lo que trajo su cita llega ya marcado «Hoy» y no trae «Hoy no»: el cierre avisa si no se hizo). Ahí mismo, antes de registrar, dice si falta su consentimiento, con «Preparar» o «Firmar ahora», y si su servicio pide esperar entre sesiones. Lo que aún está por decidir conserva «Anotar su respuesta», y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy. Un control se hace igual, en «Controles», con «Hacer hoy», y queda hecho al firmar. Un tratamiento nuevo se agrega con «Añadir un tratamiento al plan», y algo que no está en el plan se registra con «Registrar algo fuera del plan». Si registras algo cuyo consentimiento falta firmar, antes de registrarlo te dice cuál pide, con «Preparar y firmar»; puedes registrarlo igual.",
+        a: "En el bloque «Plan de tratamiento» de la atención, que es el único lugar de cada tratamiento, por fases: lo aceptado trae «Hacer hoy», que lo marca «Hoy» en su mismo lugar, sin moverlo. En la fila «Hoy» están «Registrar», que la deja «hecha hoy» con lo registrado, y «Hoy no», que la desmarca y la deja en el plan para otro día (lo que trajo su cita llega ya marcado «Hoy» y no trae «Hoy no»: el cierre avisa si no se hizo). La sesión que sigue de un tratamiento se hace igual: su fila dice en qué sesión va, con la anterior debajo. En la misma fila, antes de registrar, dice si falta su consentimiento, con «Firmar ahora», que lo prepara si hace falta y abre su firma, y si su servicio pide esperar entre sesiones. Lo que aún está por decidir se acepta en la línea del presupuesto, debajo del plan («Armarlo ahora» si aún no lo tiene y después «Anotar su respuesta»), y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy. Un control se hace igual, en «Controles», con «Hacer hoy», y queda hecho al firmar. Un tratamiento nuevo se agrega con «Añadir un tratamiento al plan», y algo que no está en el plan se registra con «Registrar algo fuera del plan». Si registras algo cuyo consentimiento falta firmar, antes de registrarlo te dice cuál pide, con «Preparar y firmar»; puedes registrarlo igual.",
         forms: [
           "como hago hoy algo del plan",
           "como hago hoy lo que acabo de indicar",
@@ -906,6 +920,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "para que sirve hacer hoy",
           "que es hoy no",
           "como marco lo que hago hoy",
+          // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+          "viene a su segunda sesion de endodoncia como lo atiendo",
+          "como atiendo la segunda sesion de un tratamiento",
+          "el paciente acepto una resina y vino sin cita como la hago hoy y la registro",
+          "vino sin cita como hago hoy lo que acepto",
+          "encontre una caries en la primera consulta como la agrego al plan y la hago hoy",
+          "como agrego un tratamiento al plan y lo hago hoy",
         ],
         area: "clinica",
       },
@@ -957,6 +978,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "queda-hecho-control-vino-otra-cosa",
         q: "¿Cuándo queda hecho un control si vino por otra cosa?",
         a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: en el Plan de la atención, «Controles» lo muestra con «Hacer hoy»: tócalo y el cierre lo trae marcado, aunque lo haya indicado otro doctor; «Hoy no» lo deja como estaba. Al firmar, el cierre muestra su control como casilla, marcada si lo indicaste tú o si dijiste que viene a él. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
+        // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+        forms: [
+          "al paciente le toca un control como lo atiendo",
+          "como atiendo un control",
+        ],
         area: "plan",
       },
       {

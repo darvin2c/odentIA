@@ -152,6 +152,7 @@ import {
   healthGapWords,
   type SessionAnswers,
   needsNextControlDay,
+  noNewChargesWords,
   endTimeBounds,
   resolvingOnSign,
   SignatureRegistrationFields,
@@ -1957,7 +1958,7 @@ export function EncounterEditor({
       const brought = detail.plannedItems.some((item) => item.id === planItemId)
       if (!brought && awaiting) {
         const prepared = await prepareConsents(patientId, encounterId, undefined, planItemId)
-        await handleChildChanged()
+        await refreshConsents()
         const need = prepared.data.needs.find(
           (item) => item.planItemId === planItemId && item.status !== "firmado" && item.status !== "sin_publicar",
         )
@@ -1978,6 +1979,18 @@ export function EncounterEditor({
     } catch (err) {
       toast.error(submitErrorMessage(err))
     }
+  }
+  /**
+   * Después de preparar o firmar un consentimiento (o de cerrar su firma sin terminar), la fila del
+   * Plan, Documentos y el cierre vuelven a leer lo suyo: si no, decían «Falta preparar» y «Ya no se
+   * pide» de uno recién preparado hasta recargar (QA en pantalla del 17 nov, D3).
+   */
+  const refreshConsents = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+      queryClient.invalidateQueries({ queryKey: ["consents-to-confirm", patientId] }),
+      handleChildChanged(),
+    ])
   }
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
@@ -2003,6 +2016,7 @@ export function EncounterEditor({
       if (need.status === "sin_preparar") {
         await flush()
         await prepareConsents(patientId, encounterId, [need.templateKey])
+        await refreshConsents()
       }
       const list = await queryClient.fetchQuery({
         queryKey: ["consents", patientId],
@@ -2862,8 +2876,6 @@ export function EncounterEditor({
                 visit={detail.visit}
                 procedures={detail.procedures}
                 past={pastVisit}
-                // Lo de cobro único ya cargado: hacerlo hoy no cobra, su fila no dice un precio.
-                chargedIds={new Set(accountQuery.data?.data.conCargo ?? [])}
                 onRegister={(itemId) => setSessionPrefill(itemId)}
                 onVoid={(procedureId) => setVoidRequest(procedureId)}
                 onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
@@ -2881,6 +2893,7 @@ export function EncounterEditor({
                 onPrefillUsed={() => setSessionPrefill(null)}
                 voidRequestId={voidRequest}
                 onVoidRequestUsed={() => setVoidRequest(null)}
+                past={pastVisit}
                 onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
               />
               {suggestionsOf("procedimientos")}
@@ -2967,10 +2980,14 @@ export function EncounterEditor({
                 {accountQuery.isSuccess
                   ? chargeableText
                     ? `Cargos nuevos al cerrar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
-                    : // Con algo marcado «Hoy» sin registrar, no se da una razón que no es (mesa del 17 nov).
-                      detail.plannedItems.some((item) => !sessionItemIds.has(item.id))
-                      ? `Sin cargos nuevos por ahora: lo marcado «${pastVisit ? "Ese día" : "Hoy"}» se carga al registrarlo, según su presupuesto.`
-                      : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
+                    : // Con algo marcado «Hoy» sin registrar, no se da una razón que no es (mesa del 17 nov),
+                      // ni se promete un cargo de lo que ya tiene el suyo (QA en pantalla del 17 nov).
+                      noNewChargesWords({
+                        plannedIds: detail.plannedItems.map((item) => item.id),
+                        registeredIds: sessionItemIds,
+                        chargedIds: new Set(accountQuery.data?.data.conCargo ?? []),
+                        dayWord: pastVisit ? "Ese día" : "Hoy",
+                      })
                   : accountQuery.isError
                     ? "No se pudo consultar la cuenta para estimar los cargos."
                     : "Consultando cargos existentes…"}
@@ -3223,11 +3240,11 @@ export function EncounterEditor({
         open={signingDocs !== null}
         documents={signingDocs ?? []}
         patientId={patientId}
-        onClose={() => setSigningDocs(null)}
-        onSigned={async () => {
-          await refreshClosing()
-          await onChanged()
+        onClose={() => {
+          setSigningDocs(null)
+          void refreshConsents()
         }}
+        onSigned={refreshConsents}
       />
 
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}

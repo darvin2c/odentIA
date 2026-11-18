@@ -57,6 +57,8 @@ import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { CollectButton } from "./collect-flow"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { DocumentOpenButton } from "./document-open-button"
+import { lowerFirst } from "./plan/plan-paths"
+import { encounterDayWords } from "./stale-encounter"
 import { PlanItemSessions, PlanPhases } from "./plan-fases"
 import { ServicePicker } from "./service-picker"
 
@@ -285,8 +287,14 @@ export function RecorridoClinicoTab({
     (!summary?.openEncounter || summary.openEncounter.professionalUserId === myUserId)
       ? openEncounterId
       : null
-  // La atención de hoy donde «Hacer hoy» lo marca: la que está abierta al lado o la propia.
-  const todayEncounterId = inAttention?.encounterId ?? ownEncounterId
+  // La propia de otro día no es la de hoy: «Hacer hoy» no escribe en ella, dice de qué día es y
+  // ofrece abrirla (QA en pantalla del 17 nov). Lo sabe el servidor, en el día de la clínica.
+  const staleEncounter =
+    !inAttention && ownEncounterId && summary?.openEncounter?.today === false
+      ? summary.openEncounter
+      : null
+  // La atención de hoy donde «Hacer hoy» lo marca: la que está abierta al lado o la propia de hoy.
+  const todayEncounterId = inAttention?.encounterId ?? (staleEncounter ? null : ownEncounterId)
   // La abierta de otro profesional: se dice, sin un botón que el servidor rechazaría.
   const othersEncounter =
     !inAttention && openEncounterId && !ownEncounterId ? (summary?.openEncounter ?? null) : null
@@ -357,19 +365,28 @@ export function RecorridoClinicoTab({
     }
   }
 
+  // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia en curso)
+  // no se hace hoy: lo dice, como su fila del Plan, sin «Hacer hoy» (QA en pantalla del 17 nov, H1).
+  const waitsFor =
+    (nextAction === "iniciar" || nextAction === "continuar") && item?.waitsFor ? item.waitsFor : null
   // «Hacer hoy» (mesa del 17 nov): lo aceptado por empezar y lo que sigue en curso se hacen en la
   // atención de hoy. Ya traído a ella, el botón es «Registrar»; registrado hoy, no queda nada aquí.
-  const doesToday = nextAction === "iniciar" || nextAction === "continuar"
+  const doesToday = (nextAction === "iniciar" || nextAction === "continuar") && !waitsFor
+  // Dentro de la atención, terminarlo lo decide «¿Terminaste?» al firmar, no un botón aquí (QA en
+  // pantalla del 17 nov, H2): con la sesión 1 de 2 registrada, «Completar» lo daba por terminado.
+  const finishesAtSign = inAttention != null && nextAction === "completar"
   const broughtToday =
     todayQuery.data?.data.plannedItems.some((planned) => planned.id === selectedId) ?? false
   const registeredToday =
     todayEncounterId != null &&
     (item?.sessions ?? []).some((session) => session.encounterId === todayEncounterId)
-  const todayStep: "hacer" | "registrar" | "registrado" | "de_otro" | null = !doesToday
+  const todayStep: "hacer" | "registrar" | "registrado" | "de_otro" | "otro_dia" | null = !doesToday
     ? null
     : othersEncounter
       ? "de_otro"
-      : registeredToday
+      : staleEncounter
+        ? "otro_dia"
+        : registeredToday
         ? "registrado"
         : broughtToday
           ? "registrar"
@@ -463,6 +480,7 @@ export function RecorridoClinicoTab({
     registrar: "Registrar",
     registrado: "Abrir la atención",
     de_otro: "",
+    otro_dia: "",
   } as const
   const primaryLabel: Record<TreatmentNextAction, string> = {
     definir: "Ir a la atención abierta",
@@ -481,6 +499,9 @@ export function RecorridoClinicoTab({
     nextAction !== null &&
     !(nextAction === "definir" && (!openEncounterId || inAttention)) &&
     todayStep !== "de_otro" &&
+    todayStep !== "otro_dia" &&
+    !waitsFor &&
+    !finishesAtSign &&
     !(todayStep === "registrado" && inAttention)
   /** «Hoy» en la línea de arriba: en qué va hoy lo que se hace en la atención. */
   const todayWords =
@@ -490,7 +511,19 @@ export function RecorridoClinicoTab({
         ? "Marcado para hoy: falta registrarlo."
         : todayStep === "de_otro" && othersEncounter
           ? `La atención abierta es de ${memberName(othersEncounter.professionalUserId)}: lo de hoy se registra en ella, y quien la lleva lo marca.`
-          : null
+          : todayStep === "otro_dia" && staleEncounter
+            ? `Tiene una atención abierta del ${encounterDayWords(staleEncounter.startedAt)}: ciérrala o anúlala antes de hacer esto hoy.`
+            : finishesAtSign
+              ? "Registrado hoy en esta atención. Si con esta sesión terminó, lo dices al firmar, en «¿Terminaste?»."
+              : null
+  /** Lo que dice arriba: lo que sigue, o tras qué va lo que aún no toca. */
+  const headline = waitsFor
+    ? `Va después de ${lowerFirst(waitsFor.title)}`
+    : finishesAtSign
+      ? "Sesión de hoy registrada"
+      : nextAction
+        ? NEXT_ACTION_LABELS[nextAction]
+        : "Sin acción pendiente"
 
   return (
     <div className="flex flex-col gap-6">
@@ -515,9 +548,7 @@ export function RecorridoClinicoTab({
           <div className="flex flex-col gap-3 rounded-md border border-primary/40 bg-primary/5 p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium">
-                  {nextAction ? NEXT_ACTION_LABELS[nextAction] : "Sin acción pendiente"}
-                </span>
+                <span className="text-sm font-medium">{headline}</span>
                 <span className="text-xs text-muted-foreground">
                   Decisión: {planDecisionLabel(journey.item.decisionStatus)} · Ejecución:{" "}
                   {planStatusLabel(journey.item.status)}
@@ -543,6 +574,17 @@ export function RecorridoClinicoTab({
                     onClick={() => goToEncounter(othersEncounter.id)}
                   >
                     Abrir su atención
+                  </Button>
+                ) : null}
+                {todayStep === "otro_dia" && staleEncounter ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="link"
+                    className="self-start px-0"
+                    onClick={() => goToEncounter(staleEncounter.id)}
+                  >
+                    Abrir esa atención
                   </Button>
                 ) : null}
               </div>

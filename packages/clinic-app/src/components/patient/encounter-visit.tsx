@@ -61,6 +61,15 @@ export function visitWaitWords(item: Pick<VisitTreatment, "wait">): string | nul
   return `La sesión anterior fue ${when}: la medicación suele dejarse ${gapWords(wait.days)}.`
 }
 
+/**
+ * Bajo lo que traía su cita, ya escrito el motivo: «Ya es el motivo de hoy» solo si el motivo es ese.
+ * Con otro (el de un control, lo que escribió), la cita sigue a la vista sin esa nota (QA en pantalla
+ * del 17 nov, D4: decía «Ya es el motivo de hoy» con el motivo «Control de mantenimiento»).
+ */
+export function bookedReasonNote(bookedReason: string, currentReason: string): string | null {
+  return currentReason.trim() === bookedReason.trim() ? "Ya es el motivo de hoy" : null
+}
+
 const row = "flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2"
 
 export function EncounterVisitStrip({
@@ -115,8 +124,9 @@ export function EncounterVisitStrip({
   const [error, setError] = useState<string | null>(null)
   // Su cita: lo que continúa (la sesión 2) también trae su diagnóstico al usarla como motivo.
   const allTreatments = visit?.treatments ?? []
-  // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
+  // Con el motivo ya escrito, «Su cita» sigue a la vista, sin botón: lo escrito no se pisa.
   const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
+  const usedNote = usedReason ? bookedReasonNote(usedReason, currentReason) : null
   // Sus palabras se ofrecen como motivo mientras no haya otro; usadas o con otro escrito, siguen a la vista.
   const toldReason = visitAnswer ? visitReasonForEncounter(visitAnswer) : null
   const nothing = !offeredReason && !usedReason && !visitAnswer
@@ -161,7 +171,9 @@ export function EncounterVisitStrip({
             <li className={row}>
               <span className="min-w-0">
                 <span className="text-muted-foreground">{citaLabel}</span>«{usedReason}»
-                <span className="block text-xs text-muted-foreground">Ya es el motivo de hoy</span>
+                {usedNote ? (
+                  <span className="block text-xs text-muted-foreground">{usedNote}</span>
+                ) : null}
               </span>
             </li>
           ) : null}

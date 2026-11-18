@@ -121,6 +121,9 @@ export const CLINICA: readonly HelpMore[] = [
           "me equivoque al registrar",
           "como deshago lo que registre",
           "anular un procedimiento",
+          // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+          "registre algo en la pieza equivocada como lo corrijo",
+          "registre en la pieza equivocada",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -135,6 +138,9 @@ export const CLINICA: readonly HelpMore[] = [
           "que se hizo en la sesion 1",
           "donde veo lo que se hizo la vez pasada",
           "sesiones hechas de un tratamiento",
+          // La QA en pantalla del 17 nov preguntó así, como un odontólogo nuevo, y la Ayuda no supo responder.
+          "donde veo como le fue en su sesion anterior sin perder lo que estoy haciendo",
+          "como le fue en su sesion anterior",
         ],
         area: "clinica",
         needs: "clinical.read",

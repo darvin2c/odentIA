@@ -648,17 +648,28 @@ export async function getOpenEncounterRef(
     .limit(1)
   if (!row) return null
   const { timezone } = await findOrgLocale(tx, orgId)
-  const day = (at: Date) =>
-    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
   return {
     id: row.id,
     professionalUserId: row.professionalUserId,
     startedAt: row.startedAt,
-    // De hoy, o abierta hoy para una cita pasada (lleva la fecha de la cita, pero no quedó
-    // abierta de otro día: se está registrando ahora).
-    today: day(row.startedAt) === day(new Date()) || (row.appointmentId !== null && day(row.createdAt) === day(new Date())),
+    today: encounterOpenedToday(row, timezone),
     empty: !(await encounterHasRecords(tx, orgId, row)),
   }
+}
+
+/**
+ * Si un borrador es de hoy, en el día de la clínica: empezó hoy, o se abrió hoy para una cita
+ * pasada (lleva la fecha de la cita, pero no quedó abierto de otro día: se está registrando
+ * ahora). Lo usan «Atender» y el resumen de la ficha, para no marcar hoy nada en uno de otro día.
+ */
+export function encounterOpenedToday(
+  row: { startedAt: Date; createdAt: Date; appointmentId: string | null },
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  return day(row.startedAt) === day(now) || (row.appointmentId !== null && day(row.createdAt) === day(now))
 }
 
 /**
@@ -1415,7 +1426,7 @@ async function encounterBudgetsOf(
  * si no hay, los controles que se reservaron con ella; si tampoco, los tratamientos
  * que se agendaron con ella («Continúa: Endodoncia posterior vital de la 46»).
  */
-async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
+export async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
   if (!appointmentId) return null
   const [booked] = await tx
     .select({ reason: appointment.reason, serviceName: appointment.serviceName })
