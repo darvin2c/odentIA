@@ -1938,8 +1938,9 @@ export async function findLifecycleCandidates(
       and(
         eq(user.emailVerified, false),
         lt(user.createdAt, reminderCutoff),
-        // La de una app que manda sus propios avisos no ocupa el lugar de otra (ADR 0201).
-        or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS])),
+        // La de una app que manda sus propios avisos no ocupa el lugar de otra (ADR 0201): solo
+        // entra cuando toca limpiarla, a los 30 días, como todas.
+        or(isNull(user.signupApp), inArray(user.signupApp, [...CLINIC_APPS]), lt(user.createdAt, cleanupCutoff)),
       ),
     )
     .orderBy(user.createdAt)

@@ -105,6 +105,15 @@ it("cada aviso es de la app donde se registró, y a gestorIA no le llega «crea 
     { id: "w-ana", name: "Ana Soto", email: "ana@worker.test", emailVerified: true, createdAt: old },
     { id: "w-tienda", name: "Tienda Lima", email: "tienda@worker.test", emailVerified: true, createdAt: old, signupApp: "gestoria" },
     { id: "w-tienda-nueva", name: "Tienda Sur", email: "tienda-sur@worker.test", emailVerified: false, createdAt: old, signupApp: "gestoria" },
+    // Sin verificar a los 31 días: se limpia como cualquier otra, sin correo.
+    {
+      id: "w-tienda-vieja",
+      name: "Tienda Norte",
+      email: "tienda-norte@worker.test",
+      emailVerified: false,
+      createdAt: new Date(now.getTime() - 31 * DAY),
+      signupApp: "gestoria",
+    },
   ])
   const sent: Array<{ to: string } & MailTemplate> = []
 
@@ -122,6 +131,9 @@ it("cada aviso es de la app donde se registró, y a gestorIA no le llega «crea 
   // gestorIA: ni «crea tu clínica» ni un recordatorio con la marca de otra app.
   expect(to("tienda@worker.test")).toBeUndefined()
   expect(to("tienda-sur@worker.test")).toBeUndefined()
+  expect(to("tienda-norte@worker.test")).toBeUndefined()
+  expect(result.cleaned).toBe(1)
+  expect(await ownerDb.select({ id: user.id }).from(user).where(eq(user.id, "w-tienda-vieja"))).toEqual([])
 })
 
 it("«crea tu clínica» es de bienvenida: no a una cuenta cerrada, al personal ni a quien lleva más de 30 días", async () => {
