@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AgendaAvailability } from "../../lib/agenda"
-import { blockedOn, emptyDaySaid, offDutyOn, seedNoteOf } from "./when"
+import { blockedOn, dayWithRoomFrom, emptyDaySaid, offDutyOn, seedNoteOf } from "./when"
 
 /**
  * «Reservar la sesión 2» con quien atendió (QA del 8 nov): si la agenda no lo
@@ -109,4 +109,15 @@ describe("lo que se dice de un día sin nada libre", () => {
       "Ese día no queda un hueco donde quepa la cita. Prueba otro día.",
     )
   })
+})
+
+// Verificación del 18 nov (11): «Reservar la sesión 2» abría en un día de vacaciones.
+it("sin hueco el día pedido, se abre en el primer día que tiene, en esta semana o en las siguientes", () => {
+  const week = ["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-21", "2026-11-22"]
+  const room = new Set(["2026-11-20"])
+  expect(dayWithRoomFrom("2026-11-18", week, (day) => room.has(day), 0)).toEqual({ kind: "day", day: "2026-11-20" })
+  // Toda la semana de vacaciones: el lunes siguiente.
+  expect(dayWithRoomFrom("2026-11-18", week, () => false, 0)).toEqual({ kind: "nextWeek", day: "2026-11-23" })
+  // Después de ocho semanas, se queda.
+  expect(dayWithRoomFrom("2026-11-18", week, () => false, 8)).toEqual({ kind: "stay" })
 })

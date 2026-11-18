@@ -150,6 +150,25 @@ export interface WhenState {
  * El «cuándo» de una cita, igual al reservar y al reprogramar: a quién se
  * mira, qué día y el bloque sobre las horas libres que devuelve el servicio.
  */
+/** Hasta cuántas semanas se busca el primer día con hueco desde el día pedido. */
+const MAX_SKIPPED_WEEKS = 8
+
+/**
+ * Sin hueco el día pedido: el siguiente día de la semana que tiene, o el lunes de la siguiente
+ * (hasta `MAX_SKIPPED_WEEKS`); después, se queda.
+ */
+export function dayWithRoomFrom(
+  date: string,
+  week: readonly string[],
+  hasRoom: (day: string) => boolean,
+  skipped: number,
+): { kind: "day" | "nextWeek"; day: string } | { kind: "stay" } {
+  const later = week.find((day) => day > date && hasRoom(day))
+  if (later) return { kind: "day", day: later }
+  if (skipped < MAX_SKIPPED_WEEKS) return { kind: "nextWeek", day: addDays(week[6] ?? date, 1) }
+  return { kind: "stay" }
+}
+
 export function useWhen(input: WhenInput): WhenState {
   const { branchId, timeZone, today, toneOf, duration, moving } = input
   const [professionalFilter, setProfessionalFilter] = React.useState<string | null>(
@@ -284,8 +303,14 @@ export function useWhen(input: WhenInput): WhenState {
   const touched = React.useRef(Boolean(input.startsAt && input.professionalUserId))
   const seedPending = React.useRef(touched.current)
   const autoDate = React.useRef(!touched.current && !moving)
+  // Cuántas semanas se saltó buscando el primer día con hueco desde el día pedido.
+  const skippedWeeks = React.useRef(0)
+  const requested = input.date
+  const placeholder = availabilityQuery.isPlaceholderData
   React.useEffect(() => {
     if (!availability) return
+    // Al cambiar de semana se ve la anterior mientras llega la nueva: no se decide con ella.
+    if (placeholder) return
     if (seedPending.current) {
       // El hueco tocado en la rejilla puede ser más corto que una cita regular: el bloque toma el hueco.
       seedPending.current = false
@@ -316,9 +341,25 @@ export function useWhen(input: WhenInput): WhenState {
         return
       }
     }
+    if (!fit && autoDate.current && date > today) {
+      // Un día pedido («Reservar la sesión 2» desde mañana) que cae en vacaciones o está lleno: se
+      // abre en el primer día con hueco desde él, en esta semana o en las siguientes (verificación
+      // del 18 nov, 11). Hasta ocho semanas; después, el día pedido.
+      const step = dayWithRoomFrom(date, week, (day) => !!firstFit(day, lanes, duration), skippedWeeks.current)
+      if (step.kind !== "stay") {
+        if (step.kind === "nextWeek") skippedWeeks.current += 1
+        setDate(step.day)
+        return
+      }
+      if (requested && date !== requested) {
+        autoDate.current = false
+        setDate(requested)
+        return
+      }
+    }
     autoDate.current = false
     setValue(fit)
-  }, [availability, free, date, lanes, duration, firstFit, timeZone, today])
+  }, [availability, placeholder, free, date, week, lanes, duration, firstFit, timeZone, today, requested])
 
   const choose = (next: ScheduleRangeValue) => {
     touched.current = true
