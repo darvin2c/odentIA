@@ -7,7 +7,7 @@
 -- agregarlo, `stock_movement_apply` (con el dueño de la base) pone al día el stock y anota el
 -- saldo; un saldo negativo se rechaza. El kardex solo se agrega, a nombre de quien pide y con
 -- la hora de la base. El disparador corre antes de insertar: nunca se agrega un movimiento con
--- `ON CONFLICT DO NOTHING`, que movería el stock aunque la fila se descarte (ADR 0205).
+-- `ON CONFLICT DO NOTHING`, que movería el stock aunque la fila se descarte (ADR 0206).
 
 CREATE FUNCTION stock_movement_apply() RETURNS trigger
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$

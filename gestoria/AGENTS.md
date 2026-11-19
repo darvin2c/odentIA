@@ -42,7 +42,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
   mínimo, el producto no se negocia; el aviso del mínimo frente al costo solo avisa.
 - El stock no lo escribe la aplicación: solo cambia con un movimiento del kardex, que la base pone
-  al día (ADR 0205). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
+  al día (ADR 0206). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
   agregar un movimiento. Las ventas de B4 usan `recordSale` y `cancelSale` (`apps/api/src/stock.ts`).
 - Ventas ve el catálogo, el stock y la configuración (`catalogo.ver`, `tienda.ver`), sin cambiarlos
   (`configuracion`). Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
