@@ -97,6 +97,36 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
       if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
         return []
+      // «Sin enfermedad» de un consultorio: el examen del adulto o del niño, sin odontograma.
+      if (faq.q === "¿Qué diagnóstico pongo si el paciente está sano o no tiene nada?")
+        return [
+          {
+            ...faq,
+            a: "En el bloque «Diagnóstico», «Sin enfermedad», con un toque: «Examen médico general» (Z00.0) para el chequeo de un adulto sano, «Control de salud del niño» (Z00.1) en un menor de 18 años, o «Sin hallazgos» (Z71.1) si vino por una molestia y no se encontró nada. Si ya tuvo un tratamiento, sale también «Control después de un tratamiento» (Z09.8). Se registra como definitivo y no queda en su lista de problemas. No sale si la persona tiene un diagnóstico activo: entonces se propone ese («Sigue activo»). Otros motivos, como «Consulta para repetición de receta», se buscan en «Registrar diagnóstico».",
+          },
+        ]
+      // Sin odontograma ni piezas: lo demás es igual.
+      if (faq.q === "¿Qué hago si firmé un tratamiento que no hice?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace(" el odontograma deja de dibujarlo,", "")
+              .replace("Si lo hiciste en otra pieza, regístralo en una atención nueva.", "Si hiciste otra cosa, regístrala en una atención nueva."),
+            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "puse la pieza equivocada y ya firme") } : {}),
+          },
+        ]
+      // En el consultorio el control también se cobra: viene su consulta de control.
+      if (faq.q === "¿Por qué al firmar viene marcada la consulta?")
+        return [
+          {
+            ...faq,
+            a: faq.a.replace(
+              "No viene en el control de un tratamiento, ni si la consulta de esa visita ya se cobró.",
+              "Si la visita es un control, viene la «Consulta de control». No viene si la consulta de esa visita ya se cobró.",
+            ),
+          },
+        ]
       // Las sesiones de un consultorio son de una terapia, sin pieza.
       if (faq.q === "¿Cómo llevo un tratamiento de varias sesiones?")
         return [
@@ -260,7 +290,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         ? {
             id: faq.id,
             q: faq.q,
-            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes». Si está sana, «Sin enfermedad» ofrece con un toque «Examen médico general» (en un menor, «Control de salud del niño») o «Sin hallazgos».",
           }
         : faq,
     ),

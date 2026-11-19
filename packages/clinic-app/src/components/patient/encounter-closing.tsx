@@ -1,4 +1,4 @@
-import { sessionWords, showsSession } from "@odentia/clinical"
+import { formatMoney, sessionWords, showsSession } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -117,6 +117,22 @@ export interface ClosingValues extends SignatureRegistration {
    * `key`: otro día o quitarlo. Vale solo para esta persona.
    */
   finishChanges?: Record<string, { dueDay?: string; remove?: boolean }>
+  /**
+   * La consulta del cierre: vacío es la que viene marcada (`closing.consultation.proposed`),
+   * «none» es desmarcada, o el servicio elegido con «Cambiar».
+   */
+  consultation?: string
+}
+
+/** Lo que se manda a `/finalize` de la consulta: la elegida, `null` si se desmarcó, nada si no hubo. */
+export function consultationBody(
+  value: Pick<ClosingValues, "consultation">,
+  consultation: ClosingCheck["consultation"],
+): { consultationServiceId?: string | null } {
+  if (!consultation) return {}
+  const choice = value.consultation ?? ""
+  if (choice === "none") return { consultationServiceId: null }
+  return { consultationServiceId: choice || consultation.proposed.serviceId }
 }
 
 /** Los datos de `/finalize` que la pantalla llama de otro modo. */
@@ -133,6 +149,7 @@ const EMPTY_CLOSING: ClosingValues = {
   nextControlDate: "",
   fulfill: {},
   finishChanges: {},
+  consultation: "",
 }
 
 /** Un control de Clío marcado para entrar con la firma: ya dice cuándo vuelve. */
@@ -1468,6 +1485,9 @@ export function EncounterClosingDialog({
   const bounds = endTimeBounds(startedAt)
   const needsReason = consents.length > 0
   const onSubmit = useFormSubmit(form, { fieldMap: CLOSING_FIELD_MAP })
+  // La consulta marcada también se carga: «No se carga nada» ya no sería cierto.
+  const consultationChoice = useStore(form.store, (state) => state.values.consultation ?? "")
+  const charges = mayCharge || (Boolean(closing?.consultation) && consultationChoice !== "none")
   const formError = useFormSubmitError(form)
   const submitting = useStore(form.store, (state) => state.isSubmitting)
   const busy = pending || submitting
@@ -1595,6 +1615,19 @@ export function EncounterClosingDialog({
                   part="decide"
                 />
               ) : null}
+              {closing ? (
+                <form.AppField name="consultation">
+                  {(field) => (
+                    <ClosingBilling
+                      id={`${ids}-cobro`}
+                      closing={closing}
+                      choice={(field.state.value as string | undefined) ?? ""}
+                      onChoice={(next) => field.handleChange(next)}
+                      disabled={busy}
+                    />
+                  )}
+                </form.AppField>
+              ) : null}
               {nextVisit}
               {endTime}
               {/* Desde aquí, lo que solo se lee: lo que sigue en curso y lo que firma el producto (NTS 188). */}
@@ -1640,9 +1673,9 @@ export function EncounterClosingDialog({
                   {blockedReason}
                 </p>
               ) : null}
-              {mayCharge || seesFinance ? (
+              {charges || seesFinance ? (
                 <p className="text-xs text-muted-foreground">
-                  {!mayCharge
+                  {!charges
                     ? // Hoy no se carga nada: solo lo que ya debía (QA de la ficha del 10 nov, B6).
                       "No se carga nada. Después: si debe algo de antes, para avisar a caja."
                     : seesFinance
@@ -1677,3 +1710,124 @@ export function EncounterClosingDialog({
 
 /** El bloque de la colegiatura vive aparte: también lo usa el consentimiento en la tablet. */
 export { SignatureRegistrationFields } from "./signature-registration-fields"
+
+const CONSULTATION_REASON: Record<string, string> = {
+  cita: "Era el servicio de su cita.",
+  "mas-cobrada": "La consulta que más cobra la clínica.",
+  biblioteca: "La consulta de la lista de servicios.",
+}
+
+/**
+ * Lo que se firma como hecho hoy, con su pieza y lo que se cargará, y la consulta ya marcada si
+ * hoy no se hizo nada (mesa del cierre de la atención, 19 nov 2026). Antes decía «2
+ * procedimientos» sin nombrarlos ni el total, y una consulta sin nada hecho no se cobraba.
+ */
+function ClosingBilling({
+  id,
+  closing,
+  choice,
+  onChoice,
+  disabled,
+}: {
+  id: string
+  closing: ClosingCheck
+  /** Vacío: la marcada; «none»: desmarcada; si no, el servicio elegido con «Cambiar». */
+  choice: string
+  onChoice: (next: string) => void
+  disabled: boolean
+}): React.JSX.Element | null {
+  const [changing, setChanging] = useState(false)
+  const locale = activeOrgLocale() ?? "es-PE"
+  const lines = closing.billing?.lines ?? []
+  const consultation = closing.consultation ?? null
+  if (lines.length === 0 && !consultation) return null
+  const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
+  const chosen = consultation
+    ? choice === "none"
+      ? null
+      : (consultation.options.find((option) => option.serviceId === choice) ?? consultation.proposed)
+    : null
+  // El total: lo de hoy más la consulta marcada, por moneda.
+  const totals = new Map<string, number>()
+  for (const total of closing.billing?.totals ?? []) totals.set(total.currency, total.totalCents)
+  if (chosen) totals.set(chosen.currency, (totals.get(chosen.currency) ?? 0) + chosen.priceCents)
+  const totalWords = [...totals.entries()].map(([currency, cents]) => money(cents, currency)).join(" y ")
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      {lines.length > 0 ? (
+        <>
+          <p className="font-medium">Lo que firmas como hecho hoy</p>
+          <ul className="flex flex-col gap-1" aria-label="Lo que firmas como hecho hoy">
+            {lines.map((line) => (
+              <li key={line.procedureId} className="flex items-baseline justify-between gap-3">
+                <span>{[line.description, line.site].filter(Boolean).join(" · ")}</span>
+                <span className={line.amountCents != null ? "font-medium" : "text-xs text-muted-foreground"}>
+                  {line.amountCents != null && line.currency
+                    ? money(line.amountCents, line.currency)
+                    : line.reason === "covered"
+                      ? "ya cargado"
+                      : "sin cargo"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">Si algo no lo hiciste, vuelve y quítalo en su fila antes de firmar.</p>
+        </>
+      ) : null}
+      {consultation ? (
+        <div className="flex flex-col gap-2">
+          <p className="font-medium">Lo que se cobra hoy</p>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id={`${id}-consulta`}
+              checked={chosen !== null}
+              disabled={disabled}
+              onCheckedChange={(checked) => onChoice(checked === true ? "" : "none")}
+            />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <label htmlFor={`${id}-consulta`} className="font-medium">
+                {(chosen ?? consultation.proposed).name} · {money((chosen ?? consultation.proposed).priceCents, (chosen ?? consultation.proposed).currency)}
+              </label>
+              <span className="text-xs text-muted-foreground">
+                {chosen && chosen.serviceId !== consultation.proposed.serviceId
+                  ? "La elegiste con «Cambiar»."
+                  : CONSULTATION_REASON[consultation.proposed.reason]}{" "}
+                Desmárcala si hoy no se cobra.
+              </span>
+            </div>
+            {consultation.options.length > 1 ? (
+              <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => setChanging((open) => !open)}>
+                Cambiar
+              </Button>
+            ) : null}
+          </div>
+          {changing ? (
+            <ToggleGroup
+              aria-label="Consultas de la clínica"
+              value={chosen ? [chosen.serviceId] : []}
+              onValueChange={(next: unknown[]) => {
+                const picked = next[0]
+                if (typeof picked !== "string") return
+                onChoice(picked)
+                setChanging(false)
+              }}
+              disabled={disabled}
+              spacing={2}
+              className="flex-wrap"
+            >
+              {consultation.options.map((option) => (
+                <ToggleGroupItem key={option.serviceId} value={option.serviceId} className={CHIP}>
+                  {chosen?.serviceId === option.serviceId ? <Check aria-hidden className="size-4" /> : null}
+                  {option.name} · {money(option.priceCents, option.currency)}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="text-sm">
+        {totals.size > 0 ? `Se cargará ${totalWords} a su cuenta, para avisar a caja.` : "No se carga nada de hoy."}
+      </p>
+    </div>
+  )
+}

@@ -147,6 +147,7 @@ import {
   closingControlsBody,
   continuingAfterSign,
   type DictatedControl,
+  consultationBody,
   EncounterClosingDialog,
   finishesByDefault,
   finishingAtSign,
@@ -1464,6 +1465,8 @@ export function EncounterEditor({
           ),
           // Con anestesia hoy, la atención firmada guarda el máximo con el anestésico elegido.
           ...(anesthesiaUses.length > 0 ? { anesthetic } : {}),
+          // La consulta que el cierre trajo marcada, otra elegida o desmarcada (mesa del 19 nov).
+          ...consultationBody(value, closingQuery.data?.data.consultation),
         }),
       })
       onSigned?.()

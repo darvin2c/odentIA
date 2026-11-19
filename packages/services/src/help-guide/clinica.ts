@@ -90,7 +90,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "atencion-cerrar-finalizar",
         q: "¿Cómo cierro la atención cuando termino de atender?",
-        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo; una firma del paciente que espera va debajo como aviso, porque no frena. Al pulsarlo se abre el cierre: confirmas el consentimiento si falta (o escribes por qué sigues sin él), respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura (sin ella, escribes por qué). Después ya no se edita: lo que falte se agrega con una adenda.",
+        a: "Con «Finalizar y firmar», en el pie fijo de abajo de la atención. El pie dice lo que falta para cerrar (por ejemplo, «Falta 1: diagnóstico») y te lleva a registrarlo; una firma del paciente que espera va debajo como aviso, porque no frena. Al pulsarlo se abre el cierre: dice lo que firmas como hecho hoy, cada cosa con su precio, y cuánto se cargará a su cuenta; si hoy no hiciste nada, trae la consulta ya marcada, que se desmarca si no se cobra. Confirmas el consentimiento si falta (o escribes por qué sigues sin él), respondes «¿Terminaste?» si hoy acaba un tratamiento y «¿Cuándo vuelve?», y «Finalizar y firmar» la firma con tu nombre y tu colegiatura (sin ella, escribes por qué). Después ya no se edita: lo que falte se agrega con una adenda, y lo que firmaste y no hiciste se marca «No se hizo…».",
         forms: [
           "como cierro la atencion",
           "quiero cerrar la atencion",
@@ -103,8 +103,22 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-diagnostico-registrar-anular",
         q: "¿Cómo agrego o quito un diagnóstico de la atención?",
-        a: "En la atención, en el bloque «Diagnóstico», «Registrar diagnóstico»: lo eliges de la lista de la clínica con su tipo y, si quieres, los hallazgos que lo sustentan. Los que el sistema ya propone se usan con un toque. Para quitar uno, «Anular…» en su fila, con el motivo: queda en la historia como anulado. Hace falta al menos uno para cerrar.",
+        a: "En la atención, en el bloque «Diagnóstico», «Registrar diagnóstico»: lo eliges de la lista de la clínica con su tipo y, si quieres, los hallazgos que lo sustentan. Los que el sistema ya propone se usan con un toque; lo que la persona sigue teniendo de otra atención sale como «Sigue activo», con «Usar». Si no tiene ninguna enfermedad, «Sin enfermedad» ofrece «Chequeo» o «Sin hallazgos» con un toque. Para quitar uno, «Anular…» en su fila, con el motivo: queda en la historia como anulado. Hace falta al menos uno para cerrar.",
         forms: ["como registro un diagnostico", "como anulo un diagnostico que puse mal", "agregar diagnostico a la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "atencion-sin-enfermedad",
+        q: "¿Qué diagnóstico pongo si el paciente está sano o no tiene nada?",
+        a: "En el bloque «Diagnóstico», «Sin enfermedad», con un toque: «Chequeo» (Examen odontológico, Z01.2) para un chequeo de alguien sano, o «Sin hallazgos» (Z71.1) si vino por una molestia y no se encontró nada. Si ya tuvo un tratamiento, sale también «Control después de un tratamiento» (Z09.8), y con prótesis u ortodoncia, «Ajuste de prótesis» o «Control de ortodoncia». Se registra como definitivo y no queda como enfermedad activa. No sale si hoy registraste algo en el odontograma o si la persona tiene un diagnóstico activo: entonces se propone ese («Sigue activo»). Otros motivos, como «Consulta para repetición de receta», se buscan en «Registrar diagnóstico».",
+        forms: [
+          "el paciente esta sano que diagnostico pongo",
+          "consulta sin diagnostico",
+          "me obliga a poner un diagnostico y no tiene nada",
+          "como registro un chequeo",
+          "diagnostico para un control",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -125,7 +139,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-anular-lo-registrado",
         q: "¿Dónde anulo algo que registré mal?",
-        a: "Donde quedó: lo de un tratamiento del plan, en su fila «Hoy», bajo «hecha hoy», con «Anular…» junto a lo registrado; lo que se hizo sin tratamiento, en «Hecho hoy fuera del plan», abajo del Plan, también con «Anular…». Escribes el motivo y listo: no cuenta como sesión ni se carga al firmar, y la fila del tratamiento vuelve a «por hacer». Nada se borra: queda anulado, con su motivo. Si registraste lo que no era, anúlalo y regístralo otra vez bien. Una atención ya firmada no se cambia: se corrige con una adenda.",
+        a: "Donde quedó: lo de un tratamiento del plan, en su fila «Hoy», bajo «hecha hoy», con «Anular…» junto a lo registrado; lo que se hizo sin tratamiento, en «Hecho hoy fuera del plan», abajo del Plan, también con «Anular…». Escribes el motivo y listo: no cuenta como sesión ni se carga al firmar, y la fila del tratamiento vuelve a «por hacer». Nada se borra: queda anulado, con su motivo. Si registraste lo que no era, anúlalo y regístralo otra vez bien. Si ya firmaste, en la atención firmada «No se hizo…» en su fila.",
         forms: [
           "donde anulo lo que registre mal",
           "me equivoque al registrar",
@@ -177,8 +191,35 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-atencion-firmada-corregir",
         q: "¿Cómo corrijo una atención que ya firmé?",
-        a: "Una atención firmada no se edita: se le agrega una corrección. Ábrela desde la Historia y, abajo, «Agregar corrección»: lo que escribes queda en «Correcciones después del cierre», con tu nombre y la fecha. Las correcciones tampoco se editan ni se borran. Lo hace quien escribe en la historia clínica.",
+        a: "Una atención firmada no se edita: se le agrega una corrección. Ábrela desde la Historia y, abajo, «Agregar corrección»: lo que escribes queda en «Correcciones después del cierre», con tu nombre y la fecha. Las correcciones tampoco se editan ni se borran. Lo hace quien escribe en la historia clínica. Si firmaste un tratamiento que no hiciste, no basta la corrección: usa «No se hizo…» en su fila.",
         forms: ["me equivoque en la nota y ya firme", "editar una atencion firmada", "agregar una adenda a la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "atencion-firmada-no-se-hizo",
+        q: "¿Qué hago si firmé un tratamiento que no hice?",
+        a: "Abre la atención firmada desde la Historia y, en «Lo que se hizo», toca «No se hizo…» en su fila. Escribe por qué y, antes de confirmar, el cajón dice lo que pasará: el tratamiento vuelve a pendiente en el plan, su diagnóstico vuelve a activo, el odontograma deja de dibujarlo, el material vuelve al almacén y su cobro sin pagar se anula. Si ya lo pagó, el cobro no se toca: caja recibe una tarea para devolverlo o dejarlo a favor. Nada se borra: queda tachado, con tu motivo, quién y cuándo, y como corrección de la atención. Si lo hiciste en otra pieza, regístralo en una atención nueva. Lo marca quien firmó la atención, o el dueño o quien administra la clínica.",
+        forms: [
+          "firme un tratamiento que no hice",
+          "registre dos tratamientos por error y ya firme",
+          "como quito un procedimiento de una atencion firmada",
+          "puse la pieza equivocada y ya firme",
+          "anular un tratamiento ya firmado",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "atencion-consulta-marcada",
+        q: "¿Por qué al firmar viene marcada la consulta?",
+        a: "Porque hoy no registraste nada hecho y casi todas las clínicas cobran la consulta: el cierre trae la de su cita, o la que más cobra la clínica, con su precio. Al firmar queda en «Lo que se hizo» y se carga a su cuenta. «Cambiar» elige otra consulta de la clínica, y desmarcarla no carga nada (queda anotado quién la desmarcó). No viene en el control de un tratamiento, ni si la consulta de esa visita ya se cobró.",
+        forms: [
+          "por que se cobra la consulta al firmar",
+          "no quiero cobrar la consulta",
+          "como cobro la consulta",
+          "la consulta no se cobro",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },

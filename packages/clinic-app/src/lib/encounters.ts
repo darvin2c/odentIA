@@ -14,8 +14,31 @@ export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signatu
 /** Lo que falta saber de su salud: alergias, enfermedades o medicación nunca preguntadas, o la ASA. */
 export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
 
+/** Un acto de hoy en el cierre: qué es, dónde y lo que se cargará (o por qué no). */
+export interface ClosingBillingLine {
+  procedureId: string
+  description: string
+  site: string | null
+  amountCents: number | null
+  currency: string | null
+  reason: string | null
+}
+
+/** Una consulta que el cierre puede cargar si hoy no se hizo nada. */
+export interface ConsultationOption {
+  serviceId: string
+  name: string
+  priceCents: number
+  currency: string
+  reason: "cita" | "mas-cobrada" | "biblioteca"
+}
+
 export interface ClosingCheck {
   ready: boolean
+  /** Lo que se firma como hecho hoy, con lo que se cargará (la misma regla de la firma). */
+  billing?: { lines: ClosingBillingLine[]; totals: Array<{ currency: string; totalCents: number }> }
+  /** La consulta que viene marcada si hoy no se hizo nada; null si no corresponde. */
+  consultation?: { proposed: ConsultationOption; options: ConsultationOption[] } | null
   missing: ClosingRequirement[]
   /**
    * Quien firma no tiene su colegiatura en el perfil. No bloquea (17 nov): la escribe en el

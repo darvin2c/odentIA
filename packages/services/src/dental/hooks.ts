@@ -250,6 +250,18 @@ export const dentalHooks: ProductHooks = {
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
   withoutDisease: DENTAL_WITHOUT_DISEASE,
+  // El control de un tratamiento suele ir incluido: no se propone cobrarlo.
+  consultation: {
+    templateKeys: [
+      "consulta-odontologica-general",
+      "evaluacion-oral-completa",
+      "consulta-odontologica-especializada",
+      "evaluacion-periodica-de-paciente-continuador",
+      "reevaluacion-oral-limitada",
+      "reevaluacion-postoperatoria",
+    ],
+    controlTemplateKeys: null,
+  },
 
   async closingParts(tx, { orgId, patientId, encounterId, finishingPlanItemIds }) {
     const parts: DentalClosingParts = {

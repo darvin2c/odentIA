@@ -488,6 +488,8 @@ const finalizeInput = z
     followUpIds: z.array(z.uuid()).max(50).nullish(),
     // El anestésico de la línea de anestesia, solo para el máximo que guarda la atención firmada.
     anesthetic: z.string().max(60).nullish(),
+    // La consulta que el cierre trajo marcada; null si quien firma la desmarcó.
+    consultationServiceId: z.uuid().nullish(),
   })
   .strict()
 /** Lo que se va a registrar como servicio directo, para avisar si ya se hizo (`findEarlierTreatment`). */
