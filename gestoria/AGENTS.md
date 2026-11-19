@@ -66,6 +66,27 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
   hasta B2. Ninguna pantalla dice que se enviaron.
 
+## Sofi y Argos (B5)
+
+- Sofi usa las operaciones de `pedidos.ts` (`quoteOrderIn`, `createOrderIn`, `addReceiptIn`,
+  `createPaymentLinkWith`, `cancelOrderIn`); sus herramientas (`apps/api/src/sofi/herramientas.ts`)
+  no repiten reglas de precio, stock ni estados. Solo ve y toca los pedidos de su conversación.
+- Sofi y Argos entran con el rol de la aplicación y su remitente (`withAgent`, `agente:sofi`,
+  `agente:argos`), nunca con el dueño de la base. La base les niega revisar pagos, mover stock,
+  dar un pedido por pagado y tocar la configuración (`0007_reglas_sofi.sql`): toda tabla nueva
+  que el agente no deba escribir suma su regla restrictiva. Solo el agente escribe como Sofi.
+- Lo que escribe el cliente va siempre como mensaje del cliente, nunca en el mensaje de sistema.
+  Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
+  sale el aviso fijo y la conversación pasa a una persona.
+- Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
+  cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
+- Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
+  fijos, uno por motivo y pedido. Solo Dueño y Administrador ven Reportes (`reportes.ver`).
+- Un cambio en lo que Sofi lee o puede hacer (prompt, herramientas, modelo) se mide con
+  `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
+  las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
+
 ## Trabajo
 
 - Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.

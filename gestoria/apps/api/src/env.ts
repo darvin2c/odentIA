@@ -38,6 +38,14 @@ const schema = z.object({
       (value) => value === "" || Buffer.from(value, "base64").length === 32,
       "Son 32 bytes en base64 (openssl rand -base64 32)",
     ),
+  /**
+   * El modelo de Sofi (B5): por omisión el de las clínicas (`gpt-6-luna`); «fake» responde por
+   * reglas sin red (solo en desarrollo). Sin la clave de OpenAI, Sofi no responde.
+   */
+  GESTORIA_LLM_MODEL: z.string().trim().default(""),
+  GESTORIA_OPENAI_API_KEY: z.string().trim().default(""),
+  /** Solo si no es la API pública de OpenAI. */
+  GESTORIA_OPENAI_BASE_URL: z.string().trim().default(""),
 })
 
 export type Env = z.infer<typeof schema>

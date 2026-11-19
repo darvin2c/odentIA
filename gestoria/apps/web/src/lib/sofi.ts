@@ -1,0 +1,100 @@
+import type { OrderChannel, OrderState } from "./pedidos"
+
+/** Lo que la pantalla sabe de Sofi, Argos y Reportes (paso B5), como lo dice el servidor. */
+
+export interface AgentSettings {
+  enabled: boolean
+  displayName: string | null
+  knowledge: string
+  followPayment: boolean
+  followThanks: boolean
+  followRestock: boolean
+  followReturn: boolean
+}
+
+export interface SofiOverview {
+  settings: AgentSettings
+  /** Hay modelo configurado: Sofi puede responder. */
+  modelReady: boolean
+  tests: { id: string; createdAt: string; updatedAt: string; customerName: string | null }[]
+}
+
+export interface ConversationMessage {
+  id: string
+  author: "cliente" | "sofi" | "persona"
+  text: string
+  createdAt: string
+  delivery: "prueba" | "sin_enviar" | null
+  needsTemplate: boolean
+  followUp: "pago" | "gracias" | "volvio" | "volver" | null
+  byArgos: boolean
+  basis?: { tools: string[]; stopped: string[]; handoff: string | null; costMicros: number | null }
+}
+
+export interface ConversationView {
+  id: string
+  channel: "whatsapp" | "instagram" | "messenger" | "prueba"
+  customerName: string | null
+  handler: "sofi" | "persona"
+  waitingReason: string | null
+  costMicros: number
+  messages: ConversationMessage[]
+  orders: { id: string; number: string; state: OrderState; totalCents: number; test: boolean }[]
+}
+
+export type AnswerStatus = "respondio" | "persona" | "apagada" | "nada" | "ocupada" | "sin_modelo"
+
+export interface StoreReport {
+  period: "hoy" | "semana" | "mes"
+  sold: { cents: number; orders: number; ticketCents: number }
+  pending: Record<"toConfirm" | "toPay" | "onDelivery", { orders: number; cents: number }>
+  conversations: { total: number; bought: number }
+  returning: number
+  channels: { channel: OrderChannel; orders: number; cents: number }[]
+  products: {
+    productId: string
+    name: string
+    sold: number
+    stock: number
+    daysLeft: number | null
+  }[]
+  agent: {
+    conversations: number
+    passedToPerson: number
+    orders: number
+    cents: number
+    marginCents: number
+    marginUsedCents: number
+    costMicros: number
+    costPerConversationMicros: number
+  }
+}
+
+export interface ArgosBoard {
+  toDo: {
+    kind: "pago" | "stock_pedido" | "reponer" | "conversacion"
+    title: string
+    detail: string
+    orderId?: string
+    conversationId?: string
+    at?: string
+  }[]
+  done: {
+    kind: "pago" | "gracias" | "volvio" | "volver"
+    title: string
+    messages: { customer: string | null; text: string; needsTemplate: boolean; at: string }[]
+  }[]
+  week: {
+    collectedCents: number
+    previousCents: number
+    changePercent: number | null
+    conversations: number
+    passedToPerson: number
+  }
+}
+
+/** Lo que costó, en dólares («US$ 0.004»): el modelo se paga en dólares. */
+export function usd(micros: number): string {
+  const value = micros / 1_000_000
+  return `US$ ${value < 0.01 && value > 0 ? value.toFixed(4) : value.toFixed(2)}`
+}
