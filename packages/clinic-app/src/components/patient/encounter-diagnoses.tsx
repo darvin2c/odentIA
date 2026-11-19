@@ -1,5 +1,11 @@
 import { productUi } from "../../product/product-ui"
-import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel } from "@odentia/clinical"
+import {
+  DENTAL_WITHOUT_DISEASE,
+  DIAGNOSIS_VERIFICATION,
+  diagnosisCodeLabel,
+  isWithoutDiseaseCode,
+  MEDICAL_WITHOUT_DISEASE,
+} from "@odentia/clinical"
 import { Badge, Button } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -33,6 +39,9 @@ import {
 } from "./diagnosis-picker"
 import type { PlaceWithParts } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
+
+/** Los códigos de «Sin enfermedad» de todos los productos: elegidos en el buscador vienen definitivos. */
+const WITHOUT_DISEASE_RULES = [...DENTAL_WITHOUT_DISEASE, ...MEDICAL_WITHOUT_DISEASE]
 
 /** Presuntivo o definitivo (FHIR verificationStatus); «ya diagnosticado antes» lo marca el sistema. */
 const TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = DIAGNOSIS_VERIFICATION.map((type) => ({
@@ -518,6 +527,9 @@ export function EncounterDiagnoses({
                         field.handleChange(choice.code)
                         form.setFieldValue("diagnosisSystem", choice.code ? choice.system : null)
                         form.setFieldValue("description", choice.code ? choice.description : "")
+                        // «Sin enfermedad» (el chequeo, sin hallazgos, el control) no es presuntivo: viene definitivo.
+                        if (choice.code && !form.getFieldValue("diagnosisType") && isWithoutDiseaseCode(WITHOUT_DISEASE_RULES, choice.system ?? "", choice.code))
+                          form.setFieldValue("diagnosisType", "confirmed")
                         // Lo que propone un hallazgo o un tratamiento trae su pieza y sus caras (o su área),
                         // si aún no se eligió otra pieza. Otro código del buscador no hereda el área.
                         const noTooth = form.getFieldValue("site").toothNumber === null
