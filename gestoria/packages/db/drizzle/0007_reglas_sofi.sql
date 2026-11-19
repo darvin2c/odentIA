@@ -62,18 +62,40 @@ CREATE POLICY stock_request_store ON stock_request FOR ALL TO gestoria_app
   USING (store_id = app_store_id()) WITH CHECK (store_id = app_store_id());--> statement-breakpoint
 
 -- Lo que el agente nunca hace (tablero 8, «Nunca lo hace»).
--- Un pago: solo anota una captura, que queda por confirmar; nunca lo revisa.
+-- Un pago: solo anota una captura de un pedido suyo, que queda por confirmar; nunca lo revisa.
 CREATE POLICY order_payment_agent_create ON order_payment AS RESTRICTIVE FOR INSERT TO gestoria_app
-  WITH CHECK (NOT app_is_agent() OR (kind = 'comprobante' AND status = 'por_confirmar' AND reviewed_by IS NULL));--> statement-breakpoint
+  WITH CHECK (
+    NOT app_is_agent() OR (
+      kind = 'comprobante' AND status = 'por_confirmar' AND reviewed_by IS NULL
+      AND EXISTS (SELECT 1 FROM sale_order o WHERE o.id = order_id AND o.created_by = app_user_id())
+    )
+  );--> statement-breakpoint
 CREATE POLICY order_payment_agent_review ON order_payment AS RESTRICTIVE FOR UPDATE TO gestoria_app
   USING (NOT app_is_agent());--> statement-breakpoint
--- Un pedido: solo toca uno por pagar, y solo para dejarlo por confirmar (anotó una captura),
--- guardar su link o anularlo para anotarlo de nuevo. Nunca lo da por pagado ni lo entrega.
+-- Un pedido: solo toca uno suyo por pagar, y solo para dejarlo por confirmar (anotó una
+-- captura), guardar su link o anularlo para anotarlo de nuevo. Nunca lo da por pagado ni lo
+-- entrega. Lo anota por pagar, o por salir solo si se paga al recibir.
 CREATE POLICY sale_order_agent_change ON sale_order AS RESTRICTIVE FOR UPDATE TO gestoria_app
-  USING (NOT app_is_agent() OR state = 'por_pagar')
+  USING (NOT app_is_agent() OR (state = 'por_pagar' AND created_by = app_user_id()))
   WITH CHECK (NOT app_is_agent() OR state IN ('por_pagar', 'por_confirmar', 'anulado'));--> statement-breakpoint
 CREATE POLICY sale_order_agent_create ON sale_order AS RESTRICTIVE FOR INSERT TO gestoria_app
-  WITH CHECK (NOT app_is_agent() OR state IN ('por_pagar', 'por_salir'));--> statement-breakpoint
+  WITH CHECK (
+    NOT app_is_agent() OR state = 'por_pagar'
+    OR (state = 'por_salir' AND payment_collection = 'al_recibir')
+  );--> statement-breakpoint
+-- Las líneas solo al anotar su pedido (en la misma transacción), y la historia solo de lo suyo.
+CREATE POLICY sale_order_line_agent ON sale_order_line AS RESTRICTIVE FOR INSERT TO gestoria_app
+  WITH CHECK (
+    NOT app_is_agent() OR EXISTS (
+      SELECT 1 FROM sale_order o
+      WHERE o.id = order_id AND o.created_by = app_user_id() AND o.created_at = now()
+    )
+  );--> statement-breakpoint
+CREATE POLICY order_event_agent ON order_event AS RESTRICTIVE FOR INSERT TO gestoria_app
+  WITH CHECK (
+    NOT app_is_agent()
+    OR EXISTS (SELECT 1 FROM sale_order o WHERE o.id = order_id AND o.created_by = app_user_id())
+  );--> statement-breakpoint
 -- El stock solo lo mueve una persona (al confirmar un pago, al salir o con una entrada).
 CREATE POLICY stock_movement_agent ON stock_movement AS RESTRICTIVE FOR INSERT TO gestoria_app
   WITH CHECK (NOT app_is_agent());--> statement-breakpoint

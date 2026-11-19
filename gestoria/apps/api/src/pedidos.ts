@@ -564,6 +564,7 @@ export async function createOrderIn(
     id: order!.id,
     number: pad(number),
     state: order!.state,
+    paymentCollection: order!.paymentCollection,
     totalCents: q.totalCents,
     priceExpiresAt: order!.priceExpiresAt,
   }

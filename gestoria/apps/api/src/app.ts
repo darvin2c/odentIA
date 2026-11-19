@@ -572,7 +572,7 @@ export function createApp(deps: AppDeps) {
   })
 
   // Sofi (B5): lo que pone el dueño y la conversación de prueba.
-  const sofi = { appDb: deps.appDb, model: deps.model ?? null, link }
+  const sofi = { appDb: deps.appDb, lockDb: deps.ownerDb, model: deps.model ?? null, link }
   app.get("/api/tiendas/:id/sofi", async (c) =>
     c.json(
       await agentSettings(deps.appDb, c.get("person"), c.req.param("id"), Boolean(sofi.model)),
@@ -597,6 +597,8 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/conversaciones/:conversationId/cliente", async (c) => {
     const input = await bodyOf(c, customerMessageInput)
     const { id, conversationId } = c.req.param()
+    // Primero el permiso: quien no es del equipo no gasta el cupo de la tienda.
+    await inStore(deps.appDb, c.get("person"), id, "ventas.atender", async () => {})
     const now = Date.now()
     const seen = testsBy.get(id)
     if (!seen || now - seen.since > TEST_WINDOW_MS) testsBy.set(id, { since: now, count: 1 })

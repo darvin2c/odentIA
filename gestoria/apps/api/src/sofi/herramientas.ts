@@ -14,6 +14,7 @@ import {
 import { and, asc, eq, inArray, or } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
+import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
 import {
   addReceiptIn,
@@ -136,7 +137,7 @@ const SCHEMAS = {
   ver_pedidos: z.object({}),
   avisar_cuando_vuelva: z.object({ variante_id: z.string() }),
   pasar_a_persona: z.object({
-    motivo: z.string().min(3).max(200).describe("Por qué, en una frase para el equipo"),
+    motivo: z.string().trim().min(3).max(200).describe("Por qué, en una frase para el equipo"),
   }),
 } as const
 
@@ -268,8 +269,10 @@ async function paymentMethodFor(tx: Db, storeId: string, wanted: string | undefi
     .select({ provider: storePaymentLink.provider })
     .from(storePaymentLink)
     .where(eq(storePaymentLink.storeId, storeId))
-  const rank = { link: linked ? 0 : 3, comprobante: 1, al_recibir: 2 }
-  const first = [...methods].sort((a, b) => rank[a.collection] - rank[b.collection])[0]
+  // En el orden de cobro de la tienda; un link sin cuenta conectada no se ofrece.
+  const first = methods
+    .filter((m) => m.collection !== "link" || Boolean(linked))
+    .sort((a, b) => COLLECTION_RANK[a.collection] - COLLECTION_RANK[b.collection])[0]
   if (!first)
     throw new ToolProblem("La tienda no tiene medios de pago encendidos: pásalo a una persona")
   return first.id
@@ -325,13 +328,24 @@ async function orderOf(tx: Db, ctx: SofiToolContext, pedido: string) {
   return found
 }
 
-const STATE_WORDS: Record<string, string> = {
-  por_pagar: "por pagar",
-  por_confirmar: "pago por confirmar: una persona del equipo lo está revisando",
-  por_salir: "pagado, por salir",
-  en_camino: "en camino",
-  entregado: "entregado",
-  anulado: "anulado",
+/**
+ * El estado de un pedido como lo lee Sofi. Uno que se paga al recibir empieza «por salir» sin
+ * pago: nunca se dice pagado (la misma regla que `stateName` de la pantalla).
+ */
+export function stateWords(order: { state: string; paymentCollection: string }): string {
+  const words: Record<string, string> = {
+    por_pagar: "por pagar",
+    por_confirmar: "pago por confirmar: una persona del equipo lo está revisando",
+    por_salir:
+      order.paymentCollection === "al_recibir"
+        ? "por salir; se paga al recibir (todavía no pagó)"
+        : "pagado, por salir",
+    en_camino:
+      order.paymentCollection === "al_recibir" ? "en camino; se paga al recibir" : "en camino",
+    entregado: "entregado",
+    anulado: "anulado",
+  }
+  return words[order.state] ?? order.state
 }
 
 async function search(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.buscar_productos>) {
@@ -486,8 +500,9 @@ async function quote(ctx: SofiToolContext, args: z.infer<typeof quoteSchema>) {
       ...(q.discountCents > 0 ? { descuento: money(q.discountCents) } : {}),
       ...(absorbed > 0 ? { envio_que_pone_la_tienda: money(absorbed) } : {}),
       ...(q.giftCents > 0 ? { regalo_valorado_en: money(q.giftCents) } : {}),
-      margen_usado: money(q.marginUsedCents),
-      margen_que_queda: money(q.marginCents - q.marginUsedCents),
+      // Para que negocie, no para decirlo: no entran en lo que puede escribir (revela el mínimo).
+      margen_usado: formatMoney(q.marginUsedCents, ctx.currency),
+      margen_que_queda: formatMoney(q.marginCents - q.marginUsedCents, ctx.currency),
       ...(q.negotiated ? { vence: "El precio negociado vale 24 horas desde que se anota" } : {}),
     }
   })
@@ -505,11 +520,17 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
         "Antes de anotarlo, mándale el resumen con este mismo total (cotizar) y espera su sí",
         "SIN_RESUMEN",
       )
-    // Si ya hay un pedido suyo sin pagar en esta conversación (cambió la forma de pago o lo que
-    // lleva), se anula y se anota el nuevo: lo acordado no se cambia (ADR 0207).
+    // Si ya hay un pedido suyo sin pagar en esta conversación (cambió lo que lleva, o paga al
+    // recibir), se anula y se anota el nuevo: lo acordado no se cambia (ADR 0207). Uno con un
+    // link de pago ya enviado no: el cliente podría pagarlo después.
     const open = (await conversationOrders(tx, ctx)).filter(
       (o) => o.state === "por_pagar" && o.createdBy === SOFI_ACTOR,
     )
+    if (open.some((o) => o.linkUrl && (!o.linkExpiresAt || o.linkExpiresAt.getTime() > Date.now())))
+      throw new ToolProblem(
+        "Ese pedido ya tiene un link de pago enviado: no lo rehagas. Si prefiere Yape o transferencia, anota su captura en el mismo pedido (anotar_pago); si quiere cambiarlo, pásalo a una persona",
+        "TIENE_LINK",
+      )
     for (const old of open) {
       const [paid] = await tx
         .select({ id: orderPayment.id })
@@ -542,7 +563,7 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     return {
       ok: true,
       pedido: created.number,
-      estado: STATE_WORDS[created.state],
+      estado: stateWords({ state: created.state, paymentCollection: created.paymentCollection }),
       total: formatMoney(created.totalCents, ctx.currency),
       ...(open.length ? { reemplaza: open.map((o) => pad(o.number)) } : {}),
       ...(created.priceExpiresAt ? { vence: "El precio negociado vale 24 horas" } : {}),
@@ -593,7 +614,7 @@ async function receipt(ctx: SofiToolContext, args: z.infer<typeof SCHEMAS.anotar
     return {
       ok: true,
       pedido: pad(order.number),
-      estado: STATE_WORDS.por_confirmar,
+      estado: stateWords({ state: "por_confirmar", paymentCollection: order.paymentCollection }),
       monto_anotado: formatMoney(cents, ctx.currency),
       total_del_pedido: formatMoney(order.totalCents, ctx.currency),
       ...(cents !== order.totalCents ? { ojo: "El monto anotado no es el total del pedido" } : {}),
@@ -609,7 +630,7 @@ async function orders(ctx: SofiToolContext) {
         ctx.trace.amounts.add(o.totalCents)
         return {
           pedido: pad(o.number),
-          estado: STATE_WORDS[o.state],
+          estado: stateWords(o),
           total: formatMoney(o.totalCents, ctx.currency),
           entrega: o.deliveryName,
           pago: o.paymentName,

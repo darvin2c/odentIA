@@ -47,7 +47,7 @@ const base = `/api/tiendas/${storeId}`
 
 // biome-ignore lint/suspicious/noExplicitAny: las pruebas leen respuestas JSON de forma libre
 type Json = Record<string, any>
-type Step = (request: ChatRequest) => Partial<ModelReply>
+type Step = (request: ChatRequest) => Partial<ModelReply> | Promise<Partial<ModelReply>>
 
 /** El modelo controlado: cada prueba le da lo que responde en cada llamada. */
 const steps: Step[] = []
@@ -56,7 +56,7 @@ const model: ChatModel = {
   async complete(request) {
     const step = steps.shift()
     if (!step) throw new Error("El modelo de prueba no tiene más respuestas")
-    const reply = step(request)
+    const reply = await step(request)
     return {
       content: reply.content ?? null,
       toolCalls: reply.toolCalls ?? [],
@@ -221,6 +221,10 @@ describe("la comprobación antes de enviar", () => {
     expect(claimsPaid("Tu pago queda por confirmar: una persona lo revisa")).toBe(false)
     expect(claimsPaid("Apenas esté confirmado tu pago te aviso")).toBe(false)
     expect(claimsPaid("Todavía no está confirmado")).toBe(false)
+    // La negación o la condición tienen que ir pegadas a lo que dice.
+    expect(claimsPaid("No te preocupes, ya está pagado")).toBe(true)
+    expect(claimsPaid("Si, recibimos tu pago")).toBe(true)
+    expect(claimsPaid("Cuando tu pago esté confirmado te aviso")).toBe(false)
   })
 })
 
@@ -302,6 +306,8 @@ describe("Sofi vende con las reglas de la tienda", () => {
     expect(lastSofi(fixed).basis.stopped[0]).toContain("50")
     const stuck = await write(id, "¿Y en 40?", say("En S/ 40 te la dejo."), say("Ok, S/ 40."))
     expect(lastSofi(stuck).text).toBe(SOFI_FALLBACK)
+    // Que el cliente lo haya escrito con moneda no lo vuelve un precio que Sofi pueda prometer.
+    expect(lastSofi(stuck).basis.stopped.length).toBeGreaterThan(0)
     expect(stuck.conversation.handler).toBe("persona")
     expect(stuck.result.handoff).toBe(true)
     // Con una persona atendiendo, Sofi no escribe.
@@ -427,6 +433,44 @@ describe("Sofi vende con las reglas de la tienda", () => {
     // Lo que el modelo quiso prometer no sale: sale el aviso fijo.
     expect(lastSofi(sent).text).toContain("Te paso con una persona")
     expect(sent.conversation.waitingReason).toBe("Un reclamo: llegó roto")
+  })
+})
+
+describe("lo que escribe el cliente mientras Sofi responde", () => {
+  it("lo responde después, con lo nuevo al final", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Hola, ¿tienen zapatillas?",
+      async (r) => {
+        // Mientras Sofi responde, el cliente escribe otra vez (como llegará por el canal).
+        await db.ownerDb.insert(conversationMessage).values({
+          storeId,
+          conversationId: id,
+          author: "cliente",
+          text: "¿Y me la dejas S/ 50 menos?",
+          actorUserId: "canal",
+        })
+        expect(r.messages.at(-1)).toMatchObject({
+          role: "user",
+          content: "Hola, ¿tienen zapatillas?",
+        })
+        return { content: "¡Hola! Sí, tenemos zapatillas." }
+      },
+      (r) => {
+        // La segunda vuelta ve lo nuevo al final, y lo que el cliente escribió no es un precio permitido.
+        expect(r.messages.at(-1)).toMatchObject({
+          role: "user",
+          content: "¿Y me la dejas S/ 50 menos?",
+        })
+        return { content: "Te cuento los precios: déjame buscarlos." }
+      },
+    )
+    const sofi = (sent.conversation.messages as Json[]).filter((m) => m.author === "sofi")
+    expect(sofi.map((m) => m.text)).toEqual([
+      "¡Hola! Sí, tenemos zapatillas.",
+      "Te cuento los precios: déjame buscarlos.",
+    ])
   })
 })
 

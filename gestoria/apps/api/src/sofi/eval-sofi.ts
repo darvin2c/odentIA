@@ -344,6 +344,7 @@ async function runCase(
   })
   const deps = {
     appDb,
+    lockDb: owner,
     model,
     link: { adapters: { mercadopago: bancoLink }, secretsKey, apiURL: "https://servidor.prueba" },
   }

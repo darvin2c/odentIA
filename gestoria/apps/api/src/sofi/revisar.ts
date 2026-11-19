@@ -80,8 +80,13 @@ const PAID = [
   /\b(?:confirm(?:amos|é)|verific(?:amos|qué)|valid(?:amos|é))\s+(?:tu|su|el)\s+pago/giu,
   /\b(?:tu|su)\s+pedido\s+(?:ya\s+)?est[aá]\s+pagado/giu,
 ]
+/**
+ * Lo que niega o pone condición justo antes: «no está confirmado», «todavía no está pagado»,
+ * «cuando tu pago esté confirmado». Pegado a lo que dice, sin puntuación entre medio: «No te
+ * preocupes, ya está pagado» o «Si, recibimos tu pago» sí dan el pago por confirmado.
+ */
 const NEGATION =
-  /(?:\bno|\bni|\baún no|\btodavía no|\bcuando|\bapenas|\bsi|\bhasta que)\s*(?:\S+\s*){0,2}$/iu
+  /(?:\b(?:no|ni)\s+(?:(?:ya|aún|todavía|se|lo|te|me)\s+)?|\b(?:cuando|apenas|si|hasta que|en cuanto)\s+(?:[^\s.,;:!?¡¿]+\s+){0,3})$/iu
 
 /** Si el texto da un pago por confirmado o recibido (no cuenta lo negado ni lo condicional). */
 export function claimsPaid(text: string): boolean {

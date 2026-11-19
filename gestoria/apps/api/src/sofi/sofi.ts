@@ -22,16 +22,18 @@ import {
   runTool,
   SOFI_TOOLS,
   type SofiToolContext,
+  stateWords,
 } from "./herramientas.js"
 import {
   addUsage,
   type ChatMessage,
   type ChatModel,
   costMicros,
+  ModelError,
   NO_USAGE,
   type Usage,
 } from "./modelo.js"
-import { amountsIn, checkReply, percentsIn } from "./revisar.js"
+import { amountsIn, checkReply } from "./revisar.js"
 
 /**
  * Sofi, la vendedora de cada tienda (paso B5 del lienzo B, tableros 8 y 14). Responde un
@@ -84,7 +86,7 @@ NEGOCIAR
 CERRAR Y COBRAR
 - Con todo elegido, usas cotizar y mandas el resumen: lo que lleva, la entrega y el total. Preguntas si lo confirma.
 - Cuando confirma ese mismo resumen, armar_pedido. Si cambia algo, vuelves a cotizar y a mostrar el resumen.
-- Cobras en este orden: 1) link de pago (link_de_pago); 2) si no puede o no quiere, captura: le das los datos del medio de pago (Yape o transferencia) y, cuando manda la captura o los datos, anotar_pago con el monto y el número de operación; 3) al final, pago al recibir, solo si la forma de entrega lo acepta (vuelves a cotizar y armar el pedido con ese medio de pago).
+- Cobras en este orden: 1) link de pago (link_de_pago); 2) si no puede o no quiere, captura: le das los datos del medio de pago (Yape o transferencia) y, cuando manda la captura o los datos, anotar_pago en el mismo pedido, con el monto y el número de operación; 3) al final, pago al recibir, solo si la forma de entrega lo acepta (vuelves a cotizar y a armar el pedido con ese medio de pago; si ya le mandaste un link, no se rehace).
 - Nunca das un pago por recibido, confirmado ni aprobado. Una captura queda por confirmar: dices que una persona del equipo la revisa y que le avisas. Solo está pagado lo que ver_pedidos muestra pagado.
 
 NUNCA
@@ -110,17 +112,14 @@ const COLLECTION_WORDS = {
   al_recibir: "al recibir",
 } as const
 
-const ORDER_WORDS: Record<string, string> = {
-  por_pagar: "por pagar",
-  por_confirmar: "pago por confirmar",
-  por_salir: "pagado, por salir",
-  en_camino: "en camino",
-  entregado: "entregado",
-  anulado: "anulado",
-}
-
 export interface SofiDeps {
   appDb: Db
+  /**
+   * Donde se toma el candado de cada conversación (el dueño de la base): una conexión apartada
+   * mientras responde el modelo no puede salir del grupo de la aplicación, o diez turnos a la vez
+   * lo dejarían sin conexiones.
+   */
+  lockDb: Db
   /** Null: no hay modelo configurado y Sofi no responde. */
   model: ChatModel | null
   link: LinkDeps
@@ -228,8 +227,7 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
         `${i + 1}. ${p.id} · ${p.name} · ${COLLECTION_WORDS[p.collection]}${p.details ? ` · datos para el cliente: ${p.details}` : ""}`,
     )
     const orderLines = orders.map(
-      (o) =>
-        `- ${pad(o.number)} · ${ORDER_WORDS[o.state]} · ${say(o.totalCents)} · ${o.paymentName}`,
+      (o) => `- ${pad(o.number)} · ${stateWords(o)} · ${say(o.totalCents)} · ${o.paymentName}`,
     )
     const facts = [
       `LA TIENDA: ${shop!.name}. Moneda: ${currency}. Hoy: ${todayUTC()}.`,
@@ -247,6 +245,8 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
       "PEDIDOS DE ESTA CONVERSACIÓN:",
       ...(orderLines.length ? orderLines : ["(ninguno todavía)"]),
     ].join("\n")
+    // Lo que escribió el dueño en «Lo que debe saber» también se puede repetir.
+    factAmounts.push(...amountsIn(agent?.knowledge ?? "", currency))
     return {
       conv,
       storeName: shop!.name,
@@ -280,14 +280,19 @@ export async function answer(
   storeId: string,
   conversationId: string,
 ): Promise<AnswerResult> {
-  const result = await withSessionLock(deps.appDb, `sofi:${conversationId}`, async () => {
+  const result = await withSessionLock(deps.lockDb, `sofi:${conversationId}`, async () => {
     let last: AnswerResult = { status: "nada" }
-    // Si el cliente escribió mientras respondía, responde otra vez (como mucho una).
+    // Lo último del cliente que ya se respondió. Si escribió mientras Sofi respondía, su mensaje
+    // quedó antes de esa respuesta: se responde otra vez (como mucho una), con lo nuevo al final.
+    let answered = -1
     for (let round = 0; round < 2; round++) {
       const loaded = await load(deps.appDb, storeId, conversationId)
       if (!loaded) return { status: "nada" } as const
-      const tail = loaded.history.at(-1)
-      if (!tail || tail.author !== "cliente") return last
+      const fresh = loaded.history.filter((m) => m.author === "cliente" && m.seq > answered)
+      if (fresh.length === 0) return last
+      if (round === 0 && loaded.history.at(-1)?.author !== "cliente") return last
+      loaded.history = [...loaded.history.filter((m) => !fresh.includes(m)), ...fresh]
+      answered = Math.max(...fresh.map((m) => m.seq))
       last = await turn(deps, storeId, loaded)
       if (last.status !== "respondio" || last.handoff) return last
     }
@@ -332,10 +337,11 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       trace,
     }
     // Lo que ya se dijo en la conversación también se puede repetir.
-    const said = loaded.history.flatMap((m) => amountsIn(m.text, loaded.currency))
-    const saidPercents = loaded.history
-      .filter((m) => m.author === "cliente")
-      .flatMap((m) => percentsIn(m.text))
+    // Lo que ya dijeron Sofi o el equipo se puede repetir; lo que escribió el cliente no (si
+    // pide «S/ 50», Sofi no puede prometerlo por haberlo leído).
+    const said = loaded.history
+      .filter((m) => m.author !== "cliente")
+      .flatMap((m) => amountsIn(m.text, loaded.currency))
     const messages: ChatMessage[] = [
       { role: "system", content: SOFI_RULES },
       { role: "system", content: loaded.facts },
@@ -369,7 +375,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         const found = checkReply(draft, {
           currency: loaded.currency,
           amounts: new Set([...trace.amounts, ...loaded.factAmounts, ...said]),
-          percents: new Set([...trace.percents, ...saidPercents]),
+          percents: trace.percents,
           paid: loaded.paid,
         })
         if (found.length === 0) {
@@ -390,9 +396,14 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       }
       if (text === null && failure === null) failure = "Se acabaron los pasos sin respuesta"
     } catch (error) {
+      // Lo que ve el equipo no lleva el detalle de la base; el registro del servidor sí.
+      if (!(error instanceof ModelError) && !abort.aborted)
+        console.error("gestoria-api: Sofi", error)
       failure = abort.aborted
         ? "El modelo tardó demasiado"
-        : `Falló el modelo: ${error instanceof Error ? error.message.slice(0, 200) : "sin detalle"}`
+        : error instanceof ModelError
+          ? `Falló el modelo: ${error.message.slice(0, 160)}`
+          : "Falló una de sus herramientas"
     }
   }
 
@@ -402,7 +413,13 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   const cost = deps.model ? costMicros(deps.model.name, usage) : null
   const detail = {
     tools: trace.tools,
-    quotes: [...trace.quotes.keys()],
+    // Solo las cotizaciones cuyo total salió en la respuesta: las que el cliente vio.
+    quotes:
+      text && !trace.handoff
+        ? [...trace.quotes.entries()]
+            .filter(([, total]) => amountsIn(text, loaded.currency).includes(total))
+            .map(([key]) => key)
+        : [],
     ...(problems.length ? { frenado: problems } : {}),
     ...(failure ? { fallo: failure } : {}),
     ...(handoff ? { paso: handoff } : {}),

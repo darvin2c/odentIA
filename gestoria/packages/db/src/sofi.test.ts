@@ -161,6 +161,38 @@ describe("Sofi en la base", () => {
     ).rejects.toThrow()
   })
 
+  it("no toca un pedido que anotó una persona", async () => {
+    const [own] = await inRosa((tx) =>
+      tx.insert(saleOrder).values(anOrder(3, rosa.userId)).returning({ id: saleOrder.id }),
+    )
+    const touched = await asSofi((tx) =>
+      tx
+        .update(saleOrder)
+        .set({ state: "anulado", cancelReason: "no es suyo" })
+        .where(eq(saleOrder.id, own!.id))
+        .returning({ id: saleOrder.id }),
+    )
+    expect(touched).toEqual([])
+    await expect(
+      asSofi((tx) =>
+        tx.insert(orderPayment).values({
+          storeId: calzados,
+          orderId: own!.id,
+          kind: "comprobante",
+          status: "por_confirmar",
+          amountCents: 13900,
+          createdBy: "agente:sofi",
+        }),
+      ),
+    ).rejects.toThrow()
+    // Ni anota uno «por salir» que no se paga al recibir: sería pagado sin pago.
+    await expect(
+      asSofi((tx) =>
+        tx.insert(saleOrder).values({ ...anOrder(4, "agente:sofi"), state: "por_salir" }),
+      ),
+    ).rejects.toThrow()
+  })
+
   it("no mueve el stock ni cambia el catálogo, la configuración o lo que puso el dueño", async () => {
     await expect(
       asSofi((tx) =>
