@@ -6,6 +6,7 @@ import { afterEach, expect, it } from "vitest"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { getDiagnosisSuggestions } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { addEncounterProcedure } from "./encounters.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -122,4 +123,11 @@ it("latidIA: a un niño de 6 años, el control de salud del niño, no el examen 
     ["Control de salud del niño", "Z00.1"],
     ["Sin hallazgos", "Z71.1"],
   ])
+})
+
+it("con algo hecho hoy (dos resinas), ningún atajo: un toque las firmaba como un control", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: f.service.id }))
+  expect((await suggestions(f)).withoutDisease).toEqual([])
 })

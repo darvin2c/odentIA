@@ -1779,7 +1779,7 @@ function ClosingBilling({
               </li>
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">Si algo no lo hiciste, vuelve y quítalo en su fila antes de firmar.</p>
+          <p className="text-xs text-muted-foreground">Si algo no lo hiciste, vuelve y anúlalo en su fila («Anular…») antes de firmar.</p>
         </>
       ) : null}
       {consultation ? (
@@ -1797,14 +1797,21 @@ function ClosingBilling({
                 {(chosen ?? consultation.proposed).name} · {money((chosen ?? consultation.proposed).priceCents, (chosen ?? consultation.proposed).currency)}
               </label>
               <span className="text-xs text-muted-foreground">
-                {chosen && chosen.serviceId !== consultation.proposed.serviceId
-                  ? "La elegiste con «Cambiar»."
-                  : CONSULTATION_REASON[consultation.proposed.reason]}{" "}
-                Desmárcala si hoy no se cobra.
+                {chosen === null
+                  ? "Desmarcada: hoy no se cobra."
+                  : `${chosen.serviceId !== consultation.proposed.serviceId ? "La elegiste con «Cambiar»." : CONSULTATION_REASON[consultation.proposed.reason]} Desmárcala si hoy no se cobra.`}
               </span>
             </div>
             {consultation.options.length > 1 ? (
-              <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => setChanging((open) => !open)}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={disabled}
+                aria-expanded={changing}
+                aria-label="Cambiar la consulta"
+                onClick={() => setChanging((open) => !open)}
+              >
                 Cambiar
               </Button>
             ) : null}
@@ -1824,7 +1831,7 @@ function ClosingBilling({
               className="flex-wrap"
             >
               {consultation.options.map((option) => (
-                <ToggleGroupItem key={option.serviceId} value={option.serviceId} className={CHIP}>
+                <ToggleGroupItem key={option.serviceId} value={option.serviceId} className={`${CHIP} h-auto whitespace-normal text-left`}>
                   {chosen?.serviceId === option.serviceId ? <Check aria-hidden className="size-4" /> : null}
                   {option.name} · {money(option.priceCents, option.currency)}
                 </ToggleGroupItem>

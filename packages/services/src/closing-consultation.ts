@@ -64,7 +64,7 @@ export async function closingConsultationOf(
     ? sql`false`
     : sql`s.id in (select e.evaluation_service_id from service_catalog e
         where e.organization_id = ${orgId} and e.evaluation_service_id is not null)`
-  const rows = await tx.execute<{
+  const all = await tx.execute<{
     id: string
     name: string
     price_cents: number
@@ -80,9 +80,18 @@ export async function closingConsultationOf(
           and e.status = 'finalizada' and e.finalized_at >= now() - interval '6 months') as charged
     from service_catalog s
     left join catalog.treatment_template tt on tt.id = s.template_id
-    where s.organization_id = ${orgId} and s.is_active and s.price_cents > 0
+    where s.organization_id = ${orgId} and s.is_active
       and (tt.key in (${keyList}) or ${evaluations})
     order by s.name, s.id`)
+  const [booked] = visit.appointmentId
+    ? await tx.execute<{ service_id: string | null }>(sql`
+        select service_id from appointment where organization_id = ${orgId} and id = ${visit.appointmentId}`)
+    : []
+  // La cita era de una consulta sin costo (la reevaluación postoperatoria): no se cobra otra (QA del
+  // 19 nov: traía marcada la evaluación de S/ 50).
+  const bookedConsult = all.find((row) => row.id === booked?.service_id)
+  if (bookedConsult && Number(bookedConsult.price_cents) <= 0) return null
+  const rows = all.filter((row) => Number(row.price_cents) > 0)
   if (rows.length === 0) return null
   // Ya se cargó la consulta de esta visita (recepción la cobró al llegar): no se propone otra. Se
   // reconoce por el nombre de una consulta de la clínica o porque lo escrito dice consulta o
@@ -92,16 +101,13 @@ export async function closingConsultationOf(
     where c.organization_id = ${orgId} and c.patient_id = ${visit.patientId} and c.voided_at is null
       and c.encounter_procedure_id is null and c.product_id is null
       and c.created_at >= ${visit.startedAt.toISOString()}::timestamptz - interval '12 hours'
+      and c.created_at < ${visit.startedAt.toISOString()}::timestamptz + interval '1 day'
       and (c.description in (${sql.join(
         rows.map((row) => sql`${row.name}`),
         sql`, `,
       )}) or c.description ~* '(consulta|evaluaci)')
     limit 1`)
   if (already) return null
-  const [booked] = visit.appointmentId
-    ? await tx.execute<{ service_id: string | null }>(sql`
-        select service_id from appointment where organization_id = ${orgId} and id = ${visit.appointmentId}`)
-    : []
   const option = (row: (typeof rows)[number], reason: ConsultationOption["reason"]): ConsultationOption => ({
     serviceId: row.id,
     name: row.name,

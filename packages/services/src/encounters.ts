@@ -3558,6 +3558,10 @@ export async function chargeDecisionsOf(
             eq(patientCharge.planItemId, proc.planItemId),
             isNotNull(patientCharge.encounterProcedureId),
             isNull(patientCharge.voidedAt),
+            // Una visita marcada «No se hizo» no cuenta para el tope, aunque su cobro siga pagado
+            // (QA del 19 nov: la última sesión real quedaba sin cargo).
+            sql`not exists (select 1 from encounter_procedure nd where nd.organization_id = ${patientCharge.organizationId}
+              and nd.id = ${patientCharge.encounterProcedureId} and nd.voided_at is not null)`,
           ),
         )
       const [planItem] = await tx

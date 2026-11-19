@@ -1,5 +1,5 @@
 import { formatMoney } from "@odentia/clinical"
-import { Button, Checkbox, Skeleton } from "@odentia/ui"
+import { Button, Skeleton, toast } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -14,7 +14,7 @@ import { productUi } from "../../product/product-ui"
 const MAX_LENGTH = 2000
 
 const reasonSchema = z.object({
-  reason: z.string().trim().min(1, "Escribe por qué no se hizo.").max(MAX_LENGTH, `Escribe como mucho ${MAX_LENGTH} caracteres.`),
+  reason: z.string().trim().min(1, "Escribe el motivo.").max(MAX_LENGTH, `Escribe como mucho ${MAX_LENGTH} caracteres.`),
   keepInPlan: z.boolean(),
 })
 
@@ -53,7 +53,7 @@ function listWords(items: string[]): string {
 }
 
 /** «Al confirmar»: cada consecuencia en una línea, en palabras de quien atiende. */
-function consequences(preview: NotDonePreview, keepInPlan: boolean): string[] {
+function consequences(preview: NotDonePreview, keepInPlan: boolean, hasPlace: boolean): string[] {
   const locale = activeOrgLocale() ?? "es-PE"
   const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
   const lines: string[] = []
@@ -70,7 +70,7 @@ function consequences(preview: NotDonePreview, keepInPlan: boolean): string[] {
     )
   if (preview.diagnoses.length > 0)
     lines.push(`${listWords(preview.diagnoses)} ${preview.diagnoses.length > 1 ? "vuelven" : "vuelve"} a activo.`)
-  if (productUi().site && item && item.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
+  if (productUi().site && hasPlace && item && item.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
   if (preview.materials.length > 0)
     lines.push(`Vuelven al almacén los materiales de su servicio: ${listWords(preview.materials.map((item) => `${item.name} (${item.quantity})`))}.`)
   if (preview.dictatedMaterials)
@@ -120,6 +120,15 @@ export function NotDoneButton({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const base = `/api/patients/${patientId}/encounters/${encounterId}/procedures/${procedure.id}/not-done`
+  const label = [procedure.description, procedure.place].filter(Boolean).join(" · ")
+  // Cambia mucho de la persona (la atención, la historia, el plan, el odontograma, la cuenta y el
+  // inventario): se vuelve a leer todo lo suyo, menos esta vista previa, que ya no aplica.
+  const refreshPatient = () =>
+    void queryClient.invalidateQueries({
+      predicate: (query) =>
+        query.queryKey[0] !== "not-done" &&
+        (query.queryKey.includes(patientId) || query.queryKey.includes(encounterId)),
+    })
   const preview = useQuery({
     queryKey: ["not-done", patientId, encounterId, procedure.id],
     queryFn: () => apiFetch<{ data: NotDonePreview }>(base).then((r) => r.data),
@@ -128,33 +137,38 @@ export function NotDoneButton({
   })
   const save = useMutation({
     mutationFn: (body: { reason: string; keepInPlan: boolean }) =>
-      apiFetch(base, { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<{ data: NotDonePreview }>(base, { method: "POST", body: JSON.stringify(body) }).then((r) => r.data),
+    // Otra pestaña ya lo marcó: lo de la persona se vuelve a leer igual.
+    onError: () => refreshPatient(),
   })
   const form = useAppForm({
     defaultValues: { reason: "", keepInPlan: true },
     validators: { onSubmit: reasonSchema },
     onSubmit: async ({ value }) => {
-      await save.mutateAsync({ reason: value.reason.trim(), keepInPlan: value.keepInPlan })
+      const done = await save.mutateAsync({ reason: value.reason.trim(), keepInPlan: value.keepInPlan })
+      // Si entre abrir y confirmar cambió algo (caja cobró), se dice lo que de verdad pasó.
+      const promised = (preview.data?.charges ?? []).map((charge) => charge.outcome).join(",")
+      const happened = done.charges.map((charge) => charge.outcome).join(",")
+      if (promised !== happened && done.charges.some((charge) => charge.outcome === "caja"))
+        toast("Mientras lo confirmabas, caja registró un pago: el cobro no se anuló y caja recibió la tarea.")
+      else toast(`Quedó como no hecho: ${label}.`)
       form.reset({ reason: "", keepInPlan: true })
       setOpen(false)
       // Cambia mucho de la persona (la atención, la historia, el plan, el odontograma, la cuenta y
       // el inventario): se vuelve a leer todo lo suyo.
-      void queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey.includes(patientId) || query.queryKey.includes(encounterId),
-      })
+      refreshPatient()
     },
   })
   const surface = useFormSurface(form)
-  const label = [procedure.description, procedure.place].filter(Boolean).join(" · ")
   const keepInPlan = useStore(form.store, (state) => state.values.keepInPlan)
-  const lines = preview.data ? consequences(preview.data, keepInPlan) : []
+  const lines = preview.data ? consequences(preview.data, keepInPlan, procedure.place !== null) : []
 
   return (
     <>
       <Button
         type="button"
         size="sm"
-        variant="ghost"
+        variant="outline"
         aria-label={`No se hizo: ${label}`}
         onClick={() => {
           form.reset({ reason: "", keepInPlan: true })
@@ -178,11 +192,12 @@ export function NotDoneButton({
         <form.AppField name="reason">
           {(field) => (
             <field.TextareaField
-              label="Por qué"
+              label="Motivo"
+              description="Por qué no se hizo. Queda junto a lo tachado."
               maxLength={MAX_LENGTH}
               rows={3}
               disabled={surface.isSubmitting}
-              placeholder="Lo registré en la pieza equivocada: solo hice la 15."
+              autoFocus
             />
           )}
         </form.AppField>
@@ -191,19 +206,11 @@ export function NotDoneButton({
           // fue un error, se quita (QA antes de entregar, 19 nov).
           <form.AppField name="keepInPlan">
             {(field) => (
-              <label className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  checked={field.state.value}
-                  disabled={surface.isSubmitting}
-                  onCheckedChange={(checked) => field.handleChange(checked === true)}
-                />
-                <span>
-                  Dejarlo indicado en el plan, por decidir
-                  <span className="block text-xs text-muted-foreground">
-                    Desmárcalo si no había nada que tratar: sale del plan.
-                  </span>
-                </span>
-              </label>
+              <field.CheckboxField
+                label="Dejarlo indicado en el plan, por decidir"
+                description="Desmárcalo si no había nada que tratar: sale del plan."
+                disabled={surface.isSubmitting}
+              />
             )}
           </form.AppField>
         ) : null}
@@ -220,7 +227,9 @@ export function NotDoneButton({
               {lines.length > 0 ? lines.map((line) => <li key={line}>{line}</li>) : <li>Queda tachado en esta atención.</li>}
             </ul>
           )}
-          <p className="text-xs text-muted-foreground">Si lo hiciste en otra pieza, regístralo en una atención nueva.</p>
+          {procedure.place ? (
+            <p className="text-xs text-muted-foreground">Si lo hiciste en otra pieza, regístralo en una atención nueva.</p>
+          ) : null}
         </div>
       </FormDrawer>
     </>

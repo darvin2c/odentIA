@@ -382,7 +382,12 @@ export async function markProcedureNotDone(
       actorUserId,
       patientId,
       encounterId,
-      { productId: material.productId, quantity: Math.max(0, now - material.quantity), idempotencyKey: `no-se-hizo:${proc.id}` },
+      {
+        productId: material.productId,
+        quantity: Math.max(0, now - material.quantity),
+        idempotencyKey: `no-se-hizo:${proc.id}`,
+        reason: `No se hizo: ${label}`.slice(0, 500),
+      },
       () => true,
     )
   }

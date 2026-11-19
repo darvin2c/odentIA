@@ -3,10 +3,13 @@
  * atención, 19 nov 2026): una consulta sin nada hecho firmaba «No se carga nada» y la evaluación
  * de la cita no la cobraba nadie; y el cierre decía «2 procedimientos» sin nombrarlos ni el total.
  */
-import { auditEvent } from "@odentia/db/schema/org"
-import { clinicalFollowUp, encounterProcedure, patientCharge, serviceCatalog } from "@odentia/db/schema/clinical"
+import { randomUUID } from "node:crypto"
+import { appointment } from "@odentia/db/schema/agenda"
+import { auditEvent, branch } from "@odentia/db/schema/org"
+import { clinicalFollowUp, encounter, encounterProcedure, patientCharge, serviceCatalog } from "@odentia/db/schema/clinical"
 import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { createRoom } from "./appointments.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -116,5 +119,41 @@ it("cobrada al llegar con otro nombre («Consulta»), tampoco se vuelve a propon
     currency: "PEN",
     createdBy: f.actor,
   })
+  expect((await closingOf(f)).consultation).toBeNull()
+})
+
+it("la cita era de una consulta sin costo (la reevaluación): no se propone otra", async () => {
+  const f = await clinicalFixture()
+  await evaluation(f)
+  const [free] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Reevaluación postoperatoria", scope: "general", source: "custom", priceCents: 0, currency: "PEN" })
+    .returning()
+  // Es la evaluación de otro servicio: cuenta como consulta.
+  const [other] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Exodoncia", scope: "general", source: "custom", priceCents: 20_000, currency: "PEN", evaluationServiceId: free!.id })
+    .returning()
+  expect(other).toBeDefined()
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}`, timezone: "America/Lima" }).returning()
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: sede!.id, name: "Unidad" }))
+  const startsAt = new Date(Date.now() + 3_600_000)
+  const [visit] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: sede!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+      status: "confirmada",
+      serviceId: free!.id,
+    })
+    .returning()
+  await ownerDb.update(encounter).set({ appointmentId: visit!.id }).where(eq(encounter.id, f.encounter.id))
+  await f.ready(f.encounter.id)
   expect((await closingOf(f)).consultation).toBeNull()
 })

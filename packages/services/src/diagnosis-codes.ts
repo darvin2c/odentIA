@@ -660,8 +660,11 @@ export async function getDiagnosisSuggestions(
     }
     // Con algo que propone un tratamiento (la caries de su resina), un chequeo «sano» sería falso:
     // queda solo «Control después de un tratamiento», el de la visita de control (QA del 19 nov).
+    // Con lo que hoy se hizo (dos resinas), ningún atajo: un toque las firmaba como un control
+    // (QA de diseño, 19 nov). El control queda solo en la visita que viene a controlar lo de antes.
+    const doneToday = await hasProceduresToday(tx, orgId, input.encounterId)
     withoutDisease =
-      visit.active.length > 0
+      visit.active.length > 0 || doneToday
         ? []
         : nothingElse
           ? visit.options
@@ -702,6 +705,14 @@ export async function getDiagnosisSuggestions(
     fromForms,
     withoutDisease,
   }
+}
+
+/** ¿Hoy se registró algo hecho en la atención? */
+async function hasProceduresToday(tx: Db, orgId: string, encounterId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ yes: boolean }>(sql`
+    select exists (select 1 from encounter_procedure where organization_id = ${orgId}
+      and encounter_id = ${encounterId} and voided_at is null) as yes`)
+  return Boolean(row?.yes)
 }
 
 /** Lo que la persona sigue teniendo activo, de otra atención, sin anular. Hasta 6, lo más reciente primero. */
@@ -764,10 +775,13 @@ async function withoutDiseaseOf(
     ortodoncia: boolean
   }>(sql`
     select person.birth_date::text as birth_date,
-      to_char(e.started_at, 'YYYY-MM-DD') as visit_day,
+      to_char(e.started_at at time zone coalesce((select o.timezone from org_profile o where o.organization_id = ${orgId}), 'UTC'), 'YYYY-MM-DD') as visit_day,
       (exists (
+        -- Un tratamiento de antes: lo realizado en esta misma atención no hace de la visita un control.
         select 1 from treatment_plan_item t
         where t.organization_id = ${orgId} and t.patient_id = ${patientId} and t.status = 'realizado'
+          and not exists (select 1 from encounter_procedure today where today.organization_id = t.organization_id
+            and today.plan_item_id = t.id and today.encounter_id = ${encounterId})
       ) or exists (
         select 1 from clinical_follow_up f
         where f.organization_id = ${orgId} and f.patient_id = ${patientId} and f.status <> 'cancelado'

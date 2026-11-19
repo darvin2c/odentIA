@@ -1828,7 +1828,10 @@ export function EncounterEditor({
   const finalizeDescription =
     recorded.length > 0 || unrecordedAll.length > 0 || unreviewed ? (
       <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-        {recorded.map((section) => (
+        {recorded
+          // Lo hecho ya lo nombra «Lo que firmas como hecho hoy», con su pieza y su precio (QA del 19 nov).
+          .filter((section) => !(section.key === "procedimientos" && (closingQuery.data?.data.billing?.lines.length ?? 0) > 0))
+          .map((section) => (
           <li key={section.key}>
             <span className="font-medium text-foreground">{section.title}:</span> {section.summary}
           </li>
