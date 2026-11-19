@@ -436,6 +436,12 @@ const planBatchInput = z
     diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
+// «No se hizo»: el motivo y si lo hecho directo queda en el plan por decidir o se quita.
+const notDoneInput = z.object({
+  reason: z.string().trim().min(1, "Escribe por qué no se hizo").max(2000),
+  keepInPlan: z.boolean().optional(),
+})
+
 const reasonInput = z
   .object({
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
@@ -1960,7 +1966,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
   app.post("/:id/encounters/:encounterId/procedures/:procedureId/not-done", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = notDoneInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>

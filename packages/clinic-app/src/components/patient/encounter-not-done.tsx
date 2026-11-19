@@ -1,6 +1,7 @@
 import { formatMoney } from "@odentia/clinical"
-import { Button, Skeleton } from "@odentia/ui"
+import { Button, Checkbox, Skeleton } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { z } from "zod"
@@ -14,12 +15,13 @@ const MAX_LENGTH = 2000
 
 const reasonSchema = z.object({
   reason: z.string().trim().min(1, "Escribe por qué no se hizo.").max(MAX_LENGTH, `Escribe como mucho ${MAX_LENGTH} caracteres.`),
+  keepInPlan: z.boolean(),
 })
 
 /** Lo que pasará al marcar «No se hizo» (`getNotDonePreview`). */
 interface NotDonePreview {
   procedure: { id: string; description: string; site: string | null }
-  planItem: { title: string; becomes: "pendiente" | "en_curso" | "cancelado" } | null
+  planItem: { title: string; becomes: "pendiente" | "en_curso" | "cancelado"; direct: boolean } | null
   diagnoses: string[]
   materials: Array<{ productId: string; name: string; quantity: number; quantityText: string }>
   dictatedMaterials: boolean
@@ -50,19 +52,24 @@ function listWords(items: string[]): string {
 }
 
 /** «Al confirmar»: cada consecuencia en una línea, en palabras de quien atiende. */
-function consequences(preview: NotDonePreview): string[] {
+function consequences(preview: NotDonePreview, keepInPlan: boolean): string[] {
   const locale = activeOrgLocale() ?? "es-PE"
   const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
   const lines: string[] = []
-  if (preview.planItem)
+  const item = preview.planItem
+  if (item)
     lines.push(
-      preview.planItem.becomes === "cancelado"
-        ? `${preview.planItem.title} sale del plan: era la consulta de ese día.`
-        : `${preview.planItem.title} vuelve a ${preview.planItem.becomes === "en_curso" ? "en curso" : "pendiente"} en el plan.`,
+      item.becomes === "cancelado"
+        ? `${item.title} sale del plan: era la consulta de ese día.`
+        : item.direct && !keepInPlan
+          ? `${item.title} sale del plan.`
+          : item.direct
+            ? `${item.title} queda indicado en el plan, por decidir.`
+            : `${item.title} vuelve a ${item.becomes === "en_curso" ? "en curso" : "pendiente"} en el plan.`,
     )
   if (preview.diagnoses.length > 0)
     lines.push(`${listWords(preview.diagnoses)} ${preview.diagnoses.length > 1 ? "vuelven" : "vuelve"} a activo.`)
-  if (productUi().site && preview.planItem && preview.planItem.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
+  if (productUi().site && item && item.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
   if (preview.materials.length > 0)
     lines.push(`Vuelven al almacén: ${listWords(preview.materials.map((item) => `${item.quantityText} de ${item.name.toLowerCase()}`))}.`)
   if (preview.dictatedMaterials)
@@ -111,14 +118,15 @@ export function NotDoneButton({
     staleTime: 0,
   })
   const save = useMutation({
-    mutationFn: (reason: string) => apiFetch(base, { method: "POST", body: JSON.stringify({ reason }) }),
+    mutationFn: (body: { reason: string; keepInPlan: boolean }) =>
+      apiFetch(base, { method: "POST", body: JSON.stringify(body) }),
   })
   const form = useAppForm({
-    defaultValues: { reason: "" },
+    defaultValues: { reason: "", keepInPlan: true },
     validators: { onSubmit: reasonSchema },
     onSubmit: async ({ value }) => {
-      await save.mutateAsync(value.reason.trim())
-      form.reset({ reason: "" })
+      await save.mutateAsync({ reason: value.reason.trim(), keepInPlan: value.keepInPlan })
+      form.reset({ reason: "", keepInPlan: true })
       setOpen(false)
       // Cambia mucho de la persona (la atención, la historia, el plan, el odontograma, la cuenta y
       // el inventario): se vuelve a leer todo lo suyo.
@@ -129,7 +137,8 @@ export function NotDoneButton({
   })
   const surface = useFormSurface(form)
   const label = [procedure.description, procedure.place].filter(Boolean).join(" · ")
-  const lines = preview.data ? consequences(preview.data) : []
+  const keepInPlan = useStore(form.store, (state) => state.values.keepInPlan)
+  const lines = preview.data ? consequences(preview.data, keepInPlan) : []
 
   return (
     <>
@@ -139,7 +148,7 @@ export function NotDoneButton({
         variant="ghost"
         aria-label={`No se hizo: ${label}`}
         onClick={() => {
-          form.reset({ reason: "" })
+          form.reset({ reason: "", keepInPlan: true })
           setOpen(true)
         }}
       >
@@ -150,7 +159,7 @@ export function NotDoneButton({
         open={open}
         onClose={() => {
           if (surface.isSubmitting) return
-          form.reset({ reason: "" })
+          form.reset({ reason: "", keepInPlan: true })
           setOpen(false)
         }}
         title={`No se hizo: ${label}`}
@@ -168,6 +177,27 @@ export function NotDoneButton({
             />
           )}
         </form.AppField>
+        {preview.data?.planItem?.direct && preview.data.planItem.becomes !== "cancelado" ? (
+          // Lo hecho directo: si había algo que tratar (la caries de la 24), queda indicado; si todo
+          // fue un error, se quita (QA antes de entregar, 19 nov).
+          <form.AppField name="keepInPlan">
+            {(field) => (
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={field.state.value}
+                  disabled={surface.isSubmitting}
+                  onCheckedChange={(checked) => field.handleChange(checked === true)}
+                />
+                <span>
+                  Dejarlo indicado en el plan, por decidir
+                  <span className="block text-xs text-muted-foreground">
+                    Desmárcalo si no había nada que tratar: sale del plan.
+                  </span>
+                </span>
+              </label>
+            )}
+          </form.AppField>
+        ) : null}
         <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3 text-sm">
           <p className="font-medium">Al confirmar</p>
           {preview.isPending ? (

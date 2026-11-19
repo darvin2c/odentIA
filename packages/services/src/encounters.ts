@@ -4185,10 +4185,15 @@ export async function voidProcedureRow(
         item.sourceEncounterId === encounterId &&
         (item.decisionNote ?? "").startsWith("Tratamiento directo")
       if (direct && directBackToPlan) {
+        // Se dio por aceptado al hacerlo: si no se hizo, nadie lo aceptó. Vuelve indicado y «por
+        // decidir», no como aceptado sin cita (QA antes de entregar, 19 nov).
         await tx
           .update(treatmentPlanItem)
           .set({
-            status: await notStartedStatusOf(tx, orgId, item.id),
+            status: "pendiente",
+            decisionStatus: "pendiente",
+            decisionNote: null,
+            decidedAt: null,
             completedAt: null,
             startedAt: null,
             updatedAt: at,

@@ -220,6 +220,13 @@ export function EncounterDetailView({
   const signedAtTime = encounter.finalizedAt ? new Date(encounter.finalizedAt).getTime() : null
   const markedNotDone = (proc: { voidedAt?: string | null }) =>
     signedAtTime !== null && !!proc.voidedAt && new Date(proc.voidedAt).getTime() > signedAtTime
+  // Una pieza que solo tenía lo marcado «No se hizo» ya no es de la atención.
+  const teethShown = teeth.filter(
+    (tooth) =>
+      !procedures.some((proc) => proc.toothNumber === tooth && markedNotDone(proc)) ||
+      procedures.some((proc) => proc.toothNumber === tooth && !proc.voidedAt) ||
+      (detail.diagnoses ?? []).some((dx) => dx.toothNumber === tooth && !dx.voidedAt),
+  )
   const diagnoses = detail.diagnoses ?? []
   const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
   const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
@@ -379,10 +386,11 @@ export function EncounterDetailView({
               <dd className="whitespace-pre-wrap text-sm">{encounter.registrationSkipReason}</dd>
             </div>
           ) : null}
-          {productUi().site && teeth.length > 0 ? (
+          {productUi().site && teethShown.length > 0 ? (
             <div>
-              <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
-              <dd className="text-sm">{teeth.map((t) => `Pieza ${t}`).join(", ")}</dd>
+              {/* Las piezas de la atención: examinadas, con un hallazgo o tratadas (QA del 19 nov). */}
+              <dt className="text-xs font-medium text-muted-foreground">Piezas de esta atención</dt>
+              <dd className="text-sm">{teethShown.map((t) => `Pieza ${t}`).join(", ")}</dd>
             </div>
           ) : null}
         </dl>

@@ -89,11 +89,12 @@ it("sin pagar: queda tachado con su motivo, vuelve al plan como pendiente, su ca
   expect(row?.voidReason).toBe("No se hizo: Lo registré en la pieza equivocada")
   expect(row?.voidedBy).toBe(f.actor)
   // El directo no se cancela: vuelve al plan por hacer.
+  // Nadie lo aceptó: se dio por aceptado al hacerlo. Queda indicado, por decidir.
   const [item] = await ownerDb
-    .select({ status: treatmentPlanItem.status, completedAt: treatmentPlanItem.completedAt })
+    .select({ status: treatmentPlanItem.status, decision: treatmentPlanItem.decisionStatus, completedAt: treatmentPlanItem.completedAt })
     .from(treatmentPlanItem)
     .where(eq(treatmentPlanItem.id, proc.planItemId!))
-  expect(item).toEqual({ status: "pendiente", completedAt: null })
+  expect(item).toEqual({ status: "pendiente", decision: "pendiente", completedAt: null })
   const [dx] = await ownerDb
     .select({ status: encounterDiagnosis.status, resolvedAt: encounterDiagnosis.resolvedAt })
     .from(encounterDiagnosis)
@@ -209,7 +210,8 @@ it("pagado y devuelto entero por caja: cuando se haga de verdad, se vuelve a cob
     .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Resina de la 24" })
     .returning()
   await f.ready(again!.id)
-  await f.run((tx) => addEncounterProcedure(tx, ...f.args, again!.id, { planItemId: proc.planItemId! }))
+  // Por decidir: hacerlo es aceptarlo, como en la pantalla.
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, again!.id, { planItemId: proc.planItemId!, acceptWhenDone: true }))
   const redone = await f.run((tx) => finalizeEncounter(tx, ...f.args, again!.id))
   expect(redone.charges.map((row) => row.amountCents)).toEqual([18_000])
 })
@@ -264,6 +266,20 @@ it("la consulta marcada «No se hizo» sale del plan, y sin caja no se dicen los
   )
   expect(seen.charges[0]?.amountCents).toBe(5_000)
   await notDone(f, proc.id)
+  const [item] = await ownerDb.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem).where(eq(treatmentPlanItem.id, proc.planItemId!))
+  expect(item?.status).toBe("cancelado")
+})
+
+it("todo fue un error: «Dejarlo indicado» desmarcado lo quita del plan", async () => {
+  const f = await clinicalFixture()
+  const { proc } = await signedDirect(f)
+  const preview = await f.run((tx) =>
+    getNotDonePreview(tx, "org_a", f.actor, f.patient.id, f.encounter.id, proc.id, { memberRole: "clinician" }),
+  )
+  expect(preview.planItem?.direct).toBe(true)
+  await f.run((tx) =>
+    markProcedureNotDone(tx, "org_a", f.actor, f.patient.id, f.encounter.id, proc.id, { reason: "No había nada", keepInPlan: false }, { memberRole: "clinician" }),
+  )
   const [item] = await ownerDb.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem).where(eq(treatmentPlanItem.id, proc.planItemId!))
   expect(item?.status).toBe("cancelado")
 })

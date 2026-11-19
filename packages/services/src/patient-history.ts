@@ -1427,10 +1427,17 @@ export async function getTimeline(
           : {}),
         title: row.reason || "Atención",
         detail: row.evolution,
+        // Sin las piezas que solo tenían lo marcado «No se hizo» (QA antes de entregar, 19 nov).
         toothNumbers: teeth
           .filter((t) => t.encounterId === row.id)
           .map((t) => looseValue(site, t))
           .filter((tooth): tooth is number => tooth != null)
+          .filter(
+            (tooth) =>
+              !notDone.some((p) => looseValue(site, p) === tooth) ||
+              rowProcedures.some((p) => looseValue(site, p) === tooth) ||
+              rowNotes.some((n) => looseValue(site, n) === tooth),
+          )
           .sort((a, b) => a - b),
         authorId: row.professionalUserId,
         status: row.status,

@@ -71,7 +71,12 @@ export interface NotDonePreview {
    * El tratamiento del plan y cómo queda; null si fue algo hecho sin tratamiento. Una consulta no
    * vuelve al plan como algo por hacer: se quita («cancelado»).
    */
-  planItem: { title: string; becomes: "pendiente" | "en_curso" | "cancelado" } | null
+  planItem: {
+    title: string
+    becomes: "pendiente" | "en_curso" | "cancelado"
+    /** Indicado y hecho en la misma atención: se puede quitar del plan en vez de dejarlo por decidir. */
+    direct: boolean
+  } | null
   /** Los diagnósticos que esa firma resolvió con este tratamiento y vuelven a activos. */
   diagnoses: string[]
   /** Lo que vuelve al almacén. */
@@ -231,7 +236,12 @@ async function previewOf(
   const hooks = await productHooks(tx, orgId)
   const [item] = proc.planItemId
     ? await tx
-        .select({ id: treatmentPlanItem.id, title: treatmentPlanItem.title })
+        .select({
+          id: treatmentPlanItem.id,
+          title: treatmentPlanItem.title,
+          sourceEncounterId: treatmentPlanItem.sourceEncounterId,
+          decisionNote: treatmentPlanItem.decisionNote,
+        })
         .from(treatmentPlanItem)
         .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, proc.planItemId)))
         .limit(1)
@@ -279,7 +289,11 @@ async function previewOf(
   return {
     procedure: { id: proc.id, description: proc.description, site: hooks.site.words(proc, "short") },
     planItem: item
-      ? { title: item.title, becomes: (others?.n ?? 0) > 0 ? "en_curso" : consultation ? "cancelado" : "pendiente" }
+      ? {
+          title: item.title,
+          becomes: (others?.n ?? 0) > 0 ? "en_curso" : consultation ? "cancelado" : "pendiente",
+          direct: item.sourceEncounterId === encounterId && (item.decisionNote ?? "").startsWith("Tratamiento directo"),
+        }
       : null,
     diagnoses: (await resolvedBySigning(tx, orgId, encounterId, proc.planItemId)).map((row) => row.title),
     materials: materials.items,
@@ -317,7 +331,11 @@ export async function markProcedureNotDone(
   patientId: string,
   encounterId: string,
   procedureId: string,
-  input: { reason: string },
+  /**
+   * `keepInPlan`: lo hecho directo en la atención queda indicado, por decidir (por defecto); con
+   * `false` se quita del plan (todo fue un error: no hay nada que tratar).
+   */
+  input: { reason: string; keepInPlan?: boolean },
   opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<NotDoneResult> {
   const reason = cleanReason(input.reason)
@@ -329,7 +347,8 @@ export async function markProcedureNotDone(
 
   // Lo resuelto por esa firma, antes de que el tratamiento deje de estar realizado.
   const resolved = await resolvedBySigning(tx, orgId, encounterId, proc.planItemId)
-  const backToPlan = preview.planItem?.becomes !== "cancelado"
+  const backToPlan =
+    preview.planItem?.becomes !== "cancelado" && !(preview.planItem?.direct && input.keepInPlan === false)
   const procedureRow = await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, why, at, null, backToPlan)
   if (resolved.length > 0) {
     const ids = resolved.map((row) => row.id)
