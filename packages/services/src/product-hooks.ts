@@ -14,6 +14,7 @@ import {
   SUGGESTED_CONSENT_TEMPLATES,
   type SuggestedConsentTemplate,
   type VitalSignKey,
+  type WithoutDiseaseRule,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
@@ -591,6 +592,11 @@ export interface ProductHooks {
   /** El título del control de «¿Cuándo vuelve?» a `recallMonths` (ADR 0152). */
   recallControlTitle: string
   /**
+   * «Sin enfermedad»: los atajos de Diagnóstico para la visita en la que no hay enfermedad
+   * (odentIA: chequeo, sin hallazgos, control, prótesis y ortodoncia). Vacío: ninguno.
+   */
+  withoutDisease: readonly WithoutDiseaseRule[]
+  /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
    * `finishingPlanItemIds`: lo que llega hoy a sus sesiones previstas y la firma
@@ -783,6 +789,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   asksAsa: true,
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
+  withoutDisease: [],
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),
   encounterFinalized: async () => ({}),

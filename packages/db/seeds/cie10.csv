@@ -165,3 +165,12 @@ Z00,Examen general e investigación de personas sin quejas o sin diagnóstico in
 Z00.0,Examen médico general
 Z34,Supervisión de embarazo normal
 Z34.9,Supervisión de embarazo normal no especificado
+Z00.1,Control de salud de rutina del niño
+Z09,Examen de seguimiento consecutivo al tratamiento por afecciones diferentes a los tumores malignos
+Z09.0,Examen de seguimiento consecutivo a cirugía por otras afecciones
+Z09.8,Examen de seguimiento consecutivo a otro tratamiento por otras afecciones
+Z46,Prueba y ajuste de otros dispositivos
+Z46.3,Prueba y ajuste de prótesis dental
+Z46.4,Prueba y ajuste de dispositivo ortodóncico
+Z71,"Personas en contacto con los servicios de salud por otras consultas y consejos médicos, no clasificados en otra parte"
+Z71.1,"Persona que teme estar enferma, a quien no se hace diagnóstico"

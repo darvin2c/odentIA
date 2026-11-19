@@ -25,6 +25,8 @@ import {
   normalizeDiagnosisCode,
   normalizeSearchText,
   type SelectableDiagnosisSystem,
+  ageInYears,
+  withoutDiseaseOptions,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -284,8 +286,11 @@ export async function searchDiagnosisCodes(
  * mano (odentIA: el diagnóstico pulpar y apical de la de endodoncia).
  */
 export type ProposedDiagnosis = DiagnosisCodeOption & {
-  /** Qué lo propone: un hallazgo, un tratamiento o una ficha. */
-  source: "hallazgo" | "tratamiento" | "ficha"
+  /**
+   * Qué lo propone: un hallazgo, un tratamiento, una ficha o un diagnóstico que la persona
+   * sigue teniendo activo de otra atención («Sigue activo»; solo cuando hoy nada más propone uno).
+   */
+  source: "hallazgo" | "tratamiento" | "ficha" | "activo"
   /**
    * Lo que lo propone, en palabras: el hallazgo («Lesión de caries dental»),
    * el tratamiento con su pieza («Endodoncia posterior vital · 46») o la
@@ -325,6 +330,18 @@ export interface DiagnosisSuggestions {
   mostUsed: DiagnosisCodeOption[]
   /** Lo que dicen las fichas de la atención, con lo ya registrado (vacío sin atención o sin fichas que digan uno). */
   fromForms: FormProposedDiagnosis[]
+  /**
+   * «Sin enfermedad» (mesa del cierre, 19 nov): los atajos de la visita en la que no hay
+   * enfermedad, con el código de la lista de la clínica. Solo con la atención sin diagnóstico,
+   * sin hallazgos ni fichas que propongan uno y sin diagnósticos activos de la persona.
+   */
+  withoutDisease: WithoutDiseaseOption[]
+}
+
+/** Un atajo de «Sin enfermedad»: «Chequeo» con Z01.2, que se registra definitivo y no queda activo. */
+export interface WithoutDiseaseOption extends DiagnosisCodeOption {
+  key: string
+  label: string
 }
 
 async function codesIn(tx: Db, system: DiagnosisSystemKey, codes: string[]) {
@@ -618,6 +635,29 @@ export async function getDiagnosisSuggestions(
       },
     ]
   })
+  // «Sin enfermedad» y «Sigue activo»: solo si hoy no se registró ningún diagnóstico y ni un
+  // hallazgo ni una ficha proponen uno (lo que propone un tratamiento, como el control, no lo impide).
+  let withoutDisease: WithoutDiseaseOption[] = []
+  const diseaseToday = proposed.some((item) => item.source === "hallazgo" || item.source === "ficha")
+  if (input.patientId && input.encounterId && already.size === 0 && !diseaseToday && !input.finding) {
+    const visit = await withoutDiseaseOf(tx, orgId, system, hooks.withoutDisease, input.patientId, input.encounterId)
+    for (const active of visit.active) {
+      const key = placeKey(active.code, active)
+      if (seen.has(key)) continue
+      seen.add(key)
+      proposed.push({
+        system,
+        code: active.code,
+        description: active.title,
+        isCategory: false,
+        source: "activo",
+        finding: active.title,
+        diagnosisType: active.type,
+        ...hooks.site.fields(active),
+      })
+    }
+    withoutDisease = visit.active.length > 0 ? [] : visit.options
+  }
   const usage = count()
   const used = await tx
     .select({ code: encounterDiagnosis.diagnosisCode, title: diagnosisCatalog.title, uses: usage })
@@ -651,7 +691,118 @@ export async function getDiagnosisSuggestions(
       isCategory: false,
     })),
     fromForms,
+    withoutDisease,
   }
+}
+
+/** Lo que la persona sigue teniendo activo, de otra atención, sin anular. Hasta 6, lo más reciente primero. */
+const ACTIVE_LIMIT = 6
+
+/**
+ * Lo que decide «Sin enfermedad» en esta visita: los diagnósticos que la persona sigue teniendo
+ * activos (si tiene, se proponen y no sale ningún atajo: un chequeo «sano» con una caries activa
+ * sería falso) y, si no, los atajos que le corresponden por su edad y sus tratamientos, con los
+ * códigos que la lista de la clínica trae.
+ */
+async function withoutDiseaseOf(
+  tx: Db,
+  orgId: string,
+  system: DiagnosisSystemKey,
+  rules: Parameters<typeof withoutDiseaseOptions>[0],
+  patientId: string,
+  encounterId: string,
+): Promise<{
+  active: Array<{ code: string; title: string; type: string | null; siteSystem: string | null; siteCode: string | null; siteQualifiers: string[] }>
+  options: WithoutDiseaseOption[]
+}> {
+  const active = await tx.execute<{
+    code: string
+    title: string
+    type: string | null
+    site_system: string | null
+    site_code: string | null
+    site_qualifiers: string[] | null
+  }>(sql`
+    select distinct on (d.diagnosis_code, d.site_system, d.site_code)
+      d.diagnosis_code as code, c.title, d.diagnosis_type as type,
+      d.site_system, d.site_code, d.site_qualifiers
+    from encounter_diagnosis d
+    join diagnosis_code c on c.system_key = d.diagnosis_system and c.code = d.diagnosis_code
+    left join encounter e on e.organization_id = d.organization_id and e.id = d.encounter_id
+    where d.organization_id = ${orgId} and d.patient_id = ${patientId}
+      and d.diagnosis_system = ${system} and d.status = 'activo' and d.voided_at is null
+      and (d.encounter_id is null or d.encounter_id <> ${encounterId})
+      and (e.status is null or e.status <> 'anulada')
+    order by d.diagnosis_code, d.site_system, d.site_code, d.created_at desc`)
+  if (active.length > 0)
+    return {
+      active: active.slice(0, ACTIVE_LIMIT).map((row) => ({
+        code: row.code,
+        title: row.title,
+        type: row.type,
+        siteSystem: row.site_system,
+        siteCode: row.site_code,
+        siteQualifiers: row.site_qualifiers ?? [],
+      })),
+      options: [],
+    }
+  if (rules.length === 0) return { active: [], options: [] }
+  const [facts] = await tx.execute<{
+    birth_date: string | null
+    visit_day: string
+    treated: boolean
+    protesis: boolean
+    ortodoncia: boolean
+  }>(sql`
+    select person.birth_date::text as birth_date,
+      to_char(e.started_at, 'YYYY-MM-DD') as visit_day,
+      (exists (
+        select 1 from treatment_plan_item t
+        where t.organization_id = ${orgId} and t.patient_id = ${patientId} and t.status = 'realizado'
+      ) or exists (
+        select 1 from clinical_follow_up f
+        where f.organization_id = ${orgId} and f.patient_id = ${patientId} and f.status <> 'cancelado'
+      )) as treated,
+      exists (${specialtyPlanItem(orgId, patientId, ["protesis", "implantologia"])}) as protesis,
+      exists (${specialtyPlanItem(orgId, patientId, ["ortodoncia"])}) as ortodoncia
+    from encounter e
+    join patient p on p.organization_id = e.organization_id and p.id = e.patient_id
+    join contact person on person.organization_id = p.organization_id and person.id = p.person_id
+    where e.organization_id = ${orgId} and e.id = ${encounterId} and e.patient_id = ${patientId}`)
+  if (!facts) return { active: [], options: [] }
+  const wanted = withoutDiseaseOptions(rules, {
+    system,
+    ageYears: ageInYears(facts.birth_date, facts.visit_day),
+    treated: facts.treated,
+    protesis: facts.protesis,
+    ortodoncia: facts.ortodoncia,
+  })
+  // Solo lo que la lista de la clínica trae, y no una categoría: el botón registraría un código que no existe.
+  const known = await codesIn(
+    tx,
+    system,
+    wanted.map((option) => option.code),
+  )
+  return {
+    active: [],
+    options: wanted.flatMap((option) => {
+      const row = known.get(option.code)
+      if (!row || row.isCategory) return []
+      return [{ system, code: option.code, description: row.title, isCategory: false, key: option.key, label: option.label }]
+    }),
+  }
+}
+
+/** Un tratamiento vigente de la persona cuyo servicio es de esas especialidades (biblioteca o la de la clínica). */
+function specialtyPlanItem(orgId: string, patientId: string, kinds: string[]) {
+  return sql`
+    select 1 from treatment_plan_item t
+    join service_catalog s on s.organization_id = t.organization_id and s.id = t.service_id
+    left join catalog.treatment_template tt on tt.id = s.template_id
+    left join org_specialty os on os.organization_id = s.organization_id and os.id = s.specialty_id
+    where t.organization_id = ${orgId} and t.patient_id = ${patientId}
+      and t.status not in ('cancelado', 'reemplazado')
+      and coalesce(tt.specialty, os.key) in (${sql.join(kinds.map((kind) => sql`${kind}`), sql`, `)})`
 }
 
 /**

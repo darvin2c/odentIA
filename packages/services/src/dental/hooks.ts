@@ -1,6 +1,7 @@
 import {
   CORE_VITAL_KEYS,
   DENTAL_IMAGING_TYPES,
+  DENTAL_WITHOUT_DISEASE,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   isDiagnosisSystem,
@@ -248,6 +249,7 @@ export const dentalHooks: ProductHooks = {
   asksAsa: true,
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
+  withoutDisease: DENTAL_WITHOUT_DISEASE,
 
   async closingParts(tx, { orgId, patientId, encounterId, finishingPlanItemIds }) {
     const parts: DentalClosingParts = {

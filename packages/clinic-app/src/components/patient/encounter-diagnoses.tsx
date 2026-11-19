@@ -29,6 +29,7 @@ import {
   proposalOrigin,
   proposedSite,
   useDiagnosisSuggestions,
+  type WithoutDiseaseOption,
 } from "./diagnosis-picker"
 import type { PlaceWithParts } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
@@ -108,8 +109,13 @@ export function DiagnosisProposals({
   const suggestions = useDiagnosisSuggestions(patientId, encounterId)
   const [using, setUsing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const proposed = (suggestions.data?.proposed ?? []).filter((item) => item.source === "tratamiento")
-  if (proposed.length === 0) return null
+  // Lo de un tratamiento que continúa y lo que sigue activo de otra atención; lo del odontograma va en el buscador.
+  const proposed = (suggestions.data?.proposed ?? []).filter(
+    (item) => item.source === "tratamiento" || item.source === "activo",
+  )
+  // «Sin enfermedad»: el servidor solo los manda si hoy no hay diagnóstico ni nada que lo proponga.
+  const shortcuts = suggestions.data?.withoutDisease ?? []
+  if (proposed.length === 0 && shortcuts.length === 0) return null
   const keyOf = proposalKey
 
   const use = async (item: ProposedDiagnosis) => {
@@ -118,18 +124,31 @@ export function DiagnosisProposals({
       onChoose(item)
       return
     }
-    setUsing(keyOf(item))
+    await register(keyOf(item), {
+      diagnosisCode: item.code,
+      diagnosisSystem: item.system,
+      diagnosisType: item.diagnosisType,
+      ...proposedSite(item),
+    })
+  }
+
+  // Un toque: sin enfermedad no hay nada que confirmar, se registra definitivo.
+  const useShortcut = (option: WithoutDiseaseOption) =>
+    register(`sin-enfermedad-${option.key}`, {
+      diagnosisCode: option.code,
+      diagnosisSystem: option.system,
+      diagnosisType: "confirmed",
+    })
+
+  const register = async (key: string, body: Parameters<typeof addDiagnosisApi>[2]) => {
+    setError(null)
+    setUsing(key)
     onPendingChange(true)
     try {
       await beforeWrite()
       // El sitio entero, como lo propuso el servidor (también el cuadrante o la arcada):
       // así lo registrado coincide con la propuesta y deja de proponerse.
-      await addDiagnosisApi(patientId, encounterId, {
-        diagnosisCode: item.code,
-        diagnosisSystem: item.system,
-        diagnosisType: item.diagnosisType,
-        ...proposedSite(item),
-      })
+      await addDiagnosisApi(patientId, encounterId, body)
       await queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
@@ -144,6 +163,30 @@ export function DiagnosisProposals({
 
   return (
     <div className="flex w-full flex-col gap-2">
+      {shortcuts.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-lg bg-muted/50 px-3 py-2">
+          <p className="text-sm font-medium">Sin enfermedad</p>
+          <div className="flex flex-wrap gap-2">
+            {shortcuts.map((option) => (
+              <Button
+                key={option.key}
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={disabled || using !== null}
+                aria-label={`Registrar ${option.label}: ${option.description} (${option.code})`}
+                onClick={() => void useShortcut(option)}
+              >
+                {using === `sin-enfermedad-${option.key}` ? "Registrando…" : `${option.label} · ${option.code}`}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Un toque lo registra como definitivo. No queda como enfermedad activa.
+          </p>
+        </div>
+      ) : null}
+      {proposed.length === 0 ? null : (
       <ul className="flex flex-col gap-2" aria-label="Diagnósticos propuestos">
         {proposed.map((item) => {
           const type = item.diagnosisType ? (DIAGNOSIS_TYPE_LABELS[item.diagnosisType] ?? item.diagnosisType) : null
@@ -177,6 +220,7 @@ export function DiagnosisProposals({
           )
         })}
       </ul>
+      )}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
