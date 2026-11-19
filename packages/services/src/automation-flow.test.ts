@@ -809,7 +809,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     expect(sent.contentType).toBe("text")
     // El botón de su enlace va escrito al final, como en los demás mensajes con «Su enlace».
     expect(sent.body).toMatch(
-      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
+      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCompletar mis datos o cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
     )
     expect(sent.replyButtons).toEqual([
       { id: replyId("responder", job.id), title: "No podré ir" },
