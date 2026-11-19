@@ -329,6 +329,18 @@ export function EncounterHistoryCard({
             </ul>
           </Part>
         ) : null}
+        {(item.notDone ?? []).length > 0 ? (
+          <Part label="No se hizo">
+            <ul className="flex flex-col gap-1 text-sm" aria-label="Lo que no se hizo">
+              {(item.notDone ?? []).map((row, index) => (
+                <li key={`${row.label}-${index}`}>
+                  <span className="text-muted-foreground line-through">{row.label}</span>
+                  {row.reason ? <span className="text-muted-foreground"> · {row.reason}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </Part>
+        ) : null}
         {born ? <BornParts patientId={patientId} born={born} /> : null}
         {planned.length > 0 ? (
           <Part label={productUi().plan.budgetRequired ? "Tratamientos vinculados del presupuesto" : "Tratamientos vinculados"}>

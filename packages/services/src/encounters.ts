@@ -4008,7 +4008,7 @@ async function notStartedStatusOf(
  * se cancela; uno planificado queda en curso si le quedan sesiones o, si no,
  * vuelve a por empezar (`notStartedStatusOf`).
  */
-async function voidProcedureRow(
+export async function voidProcedureRow(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -4022,6 +4022,11 @@ async function voidProcedureRow(
    * no cuenta como por venir. Al anular la atención entera, su cita puede volver a atenderse.
    */
   attendingAppointmentId: string | null = null,
+  /**
+   * «No se hizo» en una atención firmada: el tratamiento directo no se cancela, vuelve al plan
+   * como por hacer, para que lo que lo pidió (la caries de la 24) no quede sin nada indicado.
+   */
+  directBackToPlan = false,
 ): Promise<EncounterProcedureRow> {
   const [voided] = await tx
     .update(encounterProcedure)
@@ -4052,7 +4057,17 @@ async function voidProcedureRow(
       const direct =
         item.sourceEncounterId === encounterId &&
         (item.decisionNote ?? "").startsWith("Tratamiento directo")
-      if (direct) {
+      if (direct && directBackToPlan) {
+        await tx
+          .update(treatmentPlanItem)
+          .set({
+            status: await notStartedStatusOf(tx, orgId, item.id),
+            completedAt: null,
+            startedAt: null,
+            updatedAt: at,
+          })
+          .where(eq(treatmentPlanItem.id, item.id))
+      } else if (direct) {
         await tx
           .update(treatmentPlanItem)
           .set({

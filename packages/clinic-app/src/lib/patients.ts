@@ -563,6 +563,8 @@ export interface ProcedureItem {
   createdAt: string
   /** Anulado en borrador: sin cargo ni sesión. */
   voidedAt?: string | null
+  /** Quién la anuló o la marcó «No se hizo». */
+  voidedBy?: string | null
   voidReason?: string | null
 }
 
@@ -916,6 +918,8 @@ export interface TimelineItem {
   surface?: string | null
   status?: string
   procedures?: string[]
+  /** Lo firmado y marcado después «No se hizo», con su motivo. */
+  notDone?: Array<{ label: string; reason: string | null }>
   documentsCount?: number
   indications?: string | null
   diagnoses?: string[]

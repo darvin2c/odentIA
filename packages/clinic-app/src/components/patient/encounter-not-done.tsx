@@ -1,0 +1,179 @@
+import { formatMoney } from "@odentia/clinical"
+import { Button, Skeleton } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
+import { formatDate } from "../../lib/clinical-journey"
+import { useMyRole, useMyUserId, usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
+import { productUi } from "../../product/product-ui"
+
+const MAX_LENGTH = 2000
+
+const reasonSchema = z.object({
+  reason: z.string().trim().min(1, "Escribe por qué no se hizo.").max(MAX_LENGTH, `Escribe como mucho ${MAX_LENGTH} caracteres.`),
+})
+
+/** Lo que pasará al marcar «No se hizo» (`getNotDonePreview`). */
+interface NotDonePreview {
+  procedure: { id: string; description: string; site: string | null }
+  planItem: { title: string; becomes: "pendiente" | "en_curso" } | null
+  diagnoses: string[]
+  materials: Array<{ productId: string; name: string; quantity: number; quantityText: string }>
+  dictatedMaterials: boolean
+  charges: Array<{
+    id: string
+    description: string
+    amountCents: number
+    paidCents: number
+    currency: string
+    outcome: "anula" | "caja" | "sigue"
+  }>
+  bookedControls: Array<{ title: string; dueAt: string }>
+  prescription: boolean
+}
+
+/** Quien firmó o atendió, o quien es dueño o administra: los mismos que deja pasar el servidor. */
+export function useCanMarkNotDone(encounter: { finalizedBy: string | null; professionalUserId: string }): boolean {
+  const canWrite = usePermission("clinical.write")
+  const me = useMyUserId()
+  const role = useMyRole()
+  return canWrite && (encounter.finalizedBy === me || encounter.professionalUserId === me || role === "owner" || role === "admin")
+}
+
+function listWords(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ""
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+}
+
+/** «Al confirmar»: cada consecuencia en una línea, en palabras de quien atiende. */
+function consequences(preview: NotDonePreview): string[] {
+  const locale = activeOrgLocale() ?? "es-PE"
+  const money = (cents: number, currency: string) => formatMoney(cents, currency, locale)
+  const lines: string[] = []
+  if (preview.planItem)
+    lines.push(
+      `${preview.planItem.title} vuelve a ${preview.planItem.becomes === "en_curso" ? "en curso" : "pendiente"} en el plan.`,
+    )
+  if (preview.diagnoses.length > 0)
+    lines.push(`${listWords(preview.diagnoses)} ${preview.diagnoses.length > 1 ? "vuelven" : "vuelve"} a activo.`)
+  if (productUi().site && preview.planItem) lines.push("El odontograma deja de dibujarlo.")
+  if (preview.materials.length > 0)
+    lines.push(`Vuelven al almacén: ${listWords(preview.materials.map((item) => `${item.quantityText} de ${item.name.toLowerCase()}`))}.`)
+  if (preview.dictatedMaterials)
+    lines.push("Hubo material dicho a mano: no se devuelve solo; corrígelo en «Materiales usados».")
+  for (const charge of preview.charges) {
+    if (charge.outcome === "anula") lines.push(`Su cobro de ${money(charge.amountCents, charge.currency)} no está pagado: se anula.`)
+    if (charge.outcome === "caja")
+      lines.push(
+        `Ya lo pagó (${money(charge.paidCents, charge.currency)}): caja recibe la tarea de devolverlo o dejarlo a favor.`,
+      )
+    if (charge.outcome === "sigue") lines.push("Su cobro sigue: el tratamiento continúa con otra sesión.")
+  }
+  for (const control of preview.bookedControls)
+    lines.push(`Su control del ${formatDate(control.dueAt)} sigue en la agenda: muévelo si ya no va.`)
+  if (preview.prescription) lines.push("La receta de esta atención sigue vigente: anúlala en Documentos si ya no va.")
+  return lines
+}
+
+/**
+ * «No se hizo…» de un procedimiento de una atención firmada (mesa del cierre, 19 nov 2026): lo
+ * firmado no se borra, queda tachado con el motivo; el cajón dice antes qué vuelve atrás.
+ */
+export function NotDoneButton({
+  patientId,
+  encounterId,
+  procedure,
+}: {
+  patientId: string
+  encounterId: string
+  procedure: { id: string; description: string; place: string | null }
+}) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const base = `/api/patients/${patientId}/encounters/${encounterId}/procedures/${procedure.id}/not-done`
+  const preview = useQuery({
+    queryKey: ["not-done", patientId, encounterId, procedure.id],
+    queryFn: () => apiFetch<{ data: NotDonePreview }>(base).then((r) => r.data),
+    enabled: open,
+    staleTime: 0,
+  })
+  const save = useMutation({
+    mutationFn: (reason: string) => apiFetch(base, { method: "POST", body: JSON.stringify({ reason }) }),
+  })
+  const form = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.reason.trim())
+      form.reset({ reason: "" })
+      setOpen(false)
+      // Cambia mucho de la persona (la atención, la historia, el plan, el odontograma, la cuenta y
+      // el inventario): se vuelve a leer todo lo suyo.
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey.includes(patientId) || query.queryKey.includes(encounterId),
+      })
+    },
+  })
+  const surface = useFormSurface(form)
+  const label = [procedure.description, procedure.place].filter(Boolean).join(" · ")
+  const lines = preview.data ? consequences(preview.data) : []
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-label={`No se hizo: ${label}`}
+        onClick={() => {
+          form.reset({ reason: "" })
+          setOpen(true)
+        }}
+      >
+        No se hizo…
+      </Button>
+      <FormDrawer
+        {...surface}
+        open={open}
+        onClose={() => {
+          if (surface.isSubmitting) return
+          form.reset({ reason: "" })
+          setOpen(false)
+        }}
+        title={`No se hizo: ${label}`}
+        description="Lo firmado no se borra: queda tachado, con tu motivo, quién y cuándo."
+        submitLabel={surface.isSubmitting ? "Guardando…" : "Confirmar: no se hizo"}
+      >
+        <form.AppField name="reason">
+          {(field) => (
+            <field.TextareaField
+              label="Por qué"
+              maxLength={MAX_LENGTH}
+              rows={3}
+              disabled={surface.isSubmitting}
+              placeholder="Lo registré en la pieza equivocada: solo hice la 15."
+            />
+          )}
+        </form.AppField>
+        <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+          <p className="font-medium">Al confirmar</p>
+          {preview.isPending ? (
+            <Skeleton className="h-16 w-full" />
+          ) : preview.isError ? (
+            <p role="alert" className="text-destructive">
+              No se pudo leer lo que pasará. Cierra y vuelve a abrir.
+            </p>
+          ) : (
+            <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+              {lines.length > 0 ? lines.map((line) => <li key={line}>{line}</li>) : <li>Queda tachado en esta atención.</li>}
+            </ul>
+          )}
+          <p className="text-xs text-muted-foreground">Si lo hiciste en otra pieza, regístralo en una atención nueva.</p>
+        </div>
+      </FormDrawer>
+    </>
+  )
+}

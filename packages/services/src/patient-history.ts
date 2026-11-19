@@ -746,6 +746,8 @@ export interface TimelineItemBase {
   surface?: string | null
   status?: string
   procedures?: string[]
+  /** Lo firmado y marcado después «No se hizo»: tachado, con su motivo (mesa del cierre, 19 nov). */
+  notDone?: Array<{ label: string; reason: string | null }>
   documentsCount?: number
   indications?: string | null
   /** Los diagnósticos de la atención, uno por línea con su pieza y su tipo (`encounterDiagnosisLines`). */
@@ -1311,7 +1313,6 @@ export async function getTimeline(
           and(
             eq(encounterProcedure.organizationId, orgId),
             inArray(encounterProcedure.encounterId, encounters),
-            isNull(encounterProcedure.voidedAt),
           ),
         ),
       tx
@@ -1376,7 +1377,12 @@ export async function getTimeline(
     ])
     const nameOf = new Map(names.map((row) => [row.id, row.name]))
     for (const row of records) {
-      const rowProcedures = procedures.filter((p) => p.encounterId === row.id)
+      const rowProcedures = procedures.filter((p) => p.encounterId === row.id && !p.voidedAt)
+      // Lo anulado después de firmar es «No se hizo»: se ve tachado; lo anulado en el borrador, no.
+      const finalizedAt = row.finalizedAt
+      const notDone = procedures.filter(
+        (p) => p.encounterId === row.id && p.voidedAt && finalizedAt && p.voidedAt > finalizedAt,
+      )
       const rowNotes = notes.filter((n) => n.encounterId === row.id)
       const related = docs.get(row.id) ?? []
       const diagnoses = encounterDiagnosisLines({
@@ -1436,6 +1442,14 @@ export async function getTimeline(
             .filter(Boolean)
             .join(" · ")
         }),
+        ...(notDone.length > 0
+          ? {
+              notDone: notDone.map((p) => ({
+                label: [p.description, site.words(p, "full")].filter(Boolean).join(" · "),
+                reason: p.voidReason?.replace(/^No se hizo: /, "") ?? null,
+              })),
+            }
+          : {}),
         documentsCount: related.length,
         documents: related,
         diagnoses,

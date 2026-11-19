@@ -17,6 +17,7 @@ import { formatTakenAt, takenAt } from "./document-labels"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
+import { NotDoneButton, useCanMarkNotDone } from "./encounter-not-done"
 import { FormRecordView } from "./form-record"
 import { AnesthesiaAtSigningView } from "./encounter-anesthesia"
 import { HealthAtSigningList } from "./health-at-signing"
@@ -214,6 +215,11 @@ export function EncounterDetailView({
     [...detail.plannedItems, ...detail.indicatedItems].find((item) => item.id === planItemId)
       ?.title ?? null
   const canAddendum = showAddendum && encounter.status === "finalizada" && canWrite
+  // «No se hizo» en lo firmado: quien firmó o atendió, o quien es dueño o administra.
+  const canNotDone = useCanMarkNotDone(encounter) && showAddendum && encounter.status === "finalizada"
+  const signedAtTime = encounter.finalizedAt ? new Date(encounter.finalizedAt).getTime() : null
+  const markedNotDone = (proc: { voidedAt?: string | null }) =>
+    signedAtTime !== null && !!proc.voidedAt && new Date(proc.voidedAt).getTime() > signedAtTime
   const diagnoses = detail.diagnoses ?? []
   const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
   const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
@@ -432,12 +438,17 @@ export function EncounterDetailView({
         {(
           <ul className="flex flex-col gap-2">
             {procedures.map((proc) => (
-              <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
+              <li key={proc.id} className="flex items-start justify-between gap-3 border-b pb-2 text-sm last:border-0">
+                <div className="min-w-0">
                 <p className={proc.voidedAt ? "text-muted-foreground line-through" : undefined}>
                   {proc.description}
                 </p>
                 {proc.voidedAt ? (
-                  <p className="text-xs text-muted-foreground">Anulado: {proc.voidReason}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {markedNotDone(proc)
+                      ? `${proc.voidReason ?? "No se hizo"}${proc.voidedBy ? ` · ${memberName(proc.voidedBy)}` : ""} · ${formatDateTime(proc.voidedAt ?? null)}`
+                      : `Anulado: ${proc.voidReason}`}
+                  </p>
                 ) : null}
                 <p className="text-xs text-muted-foreground">
                   {(proc.quantity ?? 1) > 1 ? `× ${proc.quantity} · ` : ""}
@@ -451,6 +462,18 @@ export function EncounterDetailView({
                     : ""}
                   <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
                 </p>
+                </div>
+                {canNotDone && !proc.voidedAt ? (
+                  <NotDoneButton
+                    patientId={patientId}
+                    encounterId={encounter.id}
+                    procedure={{
+                      id: proc.id,
+                      description: proc.description,
+                      place: proc.toothNumber != null ? `Pieza ${proc.toothNumber}` : null,
+                    }}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>

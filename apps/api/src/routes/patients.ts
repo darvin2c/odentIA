@@ -113,6 +113,8 @@ import {
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
+  getNotDonePreview,
+  markProcedureNotDone,
   voidWithCorrection,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -1932,6 +1934,42 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("encounterId"),
           c.req.param("procedureId"),
           parsed.data,
+        ),
+      ),
+    )
+  })
+  // «No se hizo» en una atención firmada: lo que pasará, y marcarlo con su motivo (mesa del 19 nov).
+  app.get("/:id/encounters/:encounterId/procedures/:procedureId/not-done", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getNotDonePreview(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          { memberRole },
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/procedures/:procedureId/not-done", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markProcedureNotDone(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          parsed.data,
+          { memberRole },
         ),
       ),
     )
