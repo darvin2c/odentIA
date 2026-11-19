@@ -247,6 +247,40 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
     },
   },
   {
+    key: "apicectomia",
+    // La cirugía periapical abre la encía y el hueso: no la cubre el de la endodoncia, que no
+    // corta, y sin el suyo no pedía ninguno (QA del 18 nov). Texto de la voz clínica de la mesa,
+    // según la guía de cirugía endodóntica de la AAE; lo valida un endodoncista de la clínica.
+    riskProfile: { wound: true, jawBone: true, localAnesthesia: true, words: "la cirugía" },
+    title: "Apicectomía (cirugía periapical)",
+    serviceFamilies: ["apicectomia"],
+    servicePrefixes: ["apicectomia-"],
+    sections: {
+      procedure:
+        "Con anestesia local, se levanta la encía junto a la raíz de la pieza indicada, se abre una ventana en el hueso, se retira la lesión de la punta de la raíz y unos milímetros de esa punta, se sella el conducto por ese extremo y se sutura la encía. Los puntos se retiran a los pocos días y la curación del hueso se controla con radiografías durante meses.",
+      benefits: [
+        "Conservar la pieza cuando la endodoncia sola no curó la infección",
+        "Eliminar la lesión de la punta de la raíz y el dolor",
+      ],
+      risks: [
+        "Dolor, inflamación o un moretón en la cara por algunos días",
+        "Sangrado o infección de la herida",
+        "Retracción de la encía o una cicatriz, sobre todo en las piezas de adelante",
+        "Alteración de la sensibilidad del labio o del mentón, por lo general temporal, en las piezas inferiores de atrás",
+        "Comunicación con el seno maxilar en las piezas superiores de atrás",
+        "Que la lesión no cure y haya que extraer la pieza",
+        "Reacción al anestésico local, poco frecuente",
+      ],
+      alternatives: [
+        "Repetir la endodoncia (retratamiento), si se puede llegar por la corona",
+        "Extraer la pieza y reponerla después",
+        "Control sin tratamiento, con los riesgos que se explican abajo",
+      ],
+      consequences:
+        "La infección de la punta de la raíz sigue y puede crecer: dolor, hinchazón, pérdida del hueso que sostiene la pieza y, al final, la pieza.",
+    },
+  },
+  {
     key: "periodoncia",
     riskProfile: { wound: true, localAnesthesia: true, words: "el tratamiento de las encías" },
     title: "Tratamiento periodontal",

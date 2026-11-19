@@ -33,6 +33,13 @@ describe("los riesgos propios del consentimiento salen de su ficha y del procedi
     ])
   })
 
+  it("la apicectomía abre hueso: el sangrado y la osteonecrosis, como la extracción", () => {
+    expect(risks("apicectomia", teresa)).toEqual([
+      "Toma un anticoagulante (apixabán): puede sangrar más tiempo después de la cirugía.",
+      "Toma una medicina para los huesos (alendronato): hay un riesgo poco frecuente de que el hueso de la zona no cicatrice (osteonecrosis).",
+    ])
+  })
+
   it("en el implante suma que se pierda; en la endodoncia no hay frase (SDCEP y AAOMS)", () => {
     expect(risks("implante", teresa)).toEqual([
       "Toma un anticoagulante (apixabán): puede sangrar más tiempo después de la cirugía del implante.",
