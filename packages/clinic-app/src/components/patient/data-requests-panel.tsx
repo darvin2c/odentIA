@@ -1,7 +1,6 @@
 import {
   Badge,
   Button,
-  buttonVariants,
   FieldLegend,
   FieldSet,
   RadioGroup,
@@ -17,6 +16,7 @@ import {
   FormDrawer,
   LoadingState,
   PastDateInput,
+  SubmitButton,
   submitErrorMessage,
   submitForm,
   useAppForm,
@@ -26,8 +26,8 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FileText, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { FileText, Link2Off, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ChoiceButtons } from "../choice-buttons"
 import { ApiError } from "../../lib/api"
@@ -57,14 +57,15 @@ import {
   fetchDataRequests,
   fetchErasurePreview,
   fetchRecordSendOptions,
-  patientRecordDownloadUrl,
   respondDataRequestApi,
   sendRecordCopyApi,
+  shortDayWords,
   verifyDataRequestApi,
 } from "../../lib/data-requests"
-import { useOrgLocale } from "../../lib/locale"
+import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
 import { appWords } from "../../lib/product-words"
 import { DataRequestsSkeleton } from "../skeletons/person-sections"
+import { DownloadCopyButton } from "./record-copy-block"
 
 /** Por qué no se pudo cargar algo (la lista, el resumen de lo que se borra). */
 function problemOf(error: unknown): string | null {
@@ -103,8 +104,9 @@ const KIND_ICON = { copia: FileText, corregir: PencilLine, mensajes: MessageSqua
 /**
  * Datos › Pedidos sobre sus datos (ADR 0080): lo que la persona o su
  * representante pidieron, con su plazo de 10 días. Lo atienden Recepción y
- * Administración; «Descargar historia» es solo de quien lee la ficha clínica,
- * porque lleva todo lo clínico, y borrar sus datos es solo de Administración.
+ * Administración; «Descargar copia» es solo de quien lee la ficha clínica,
+ * porque lleva todo lo clínico (el bloque «Copia de su historia», arriba), y
+ * borrar sus datos es solo de Administración.
  */
 export function DataRequestsPanel({ patientId }: { patientId: string }) {
   const canManage = usePermission("patients.write")
@@ -153,15 +155,6 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canReadClinical ? (
-            <a
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              href={patientRecordDownloadUrl(patientId)}
-              download
-            >
-              Descargar historia
-            </a>
-          ) : null}
           {view.requests.length > 0 && view.requesters.length > 0 ? (
             <Button type="button" size="sm" onClick={() => setRegistering(true)}>
               Registrar un pedido
@@ -252,6 +245,51 @@ function statusVariant(status: DataRequest["status"]) {
   return status === "pendiente" ? ("warning" as const) : status === "denegada" ? ("outline" as const) : ("success" as const)
 }
 
+/**
+ * Lo que pasó con la copia enviada (mesa del 18 nov): «Se bajó el 19 nov», «Todavía no se
+ * baja · vence el 25 nov» o por qué el enlace ya no sirve. Recepción lo ve aquí, sin la
+ * bitácora de quien audita. No dice «la bajó ella»: quien abre el PDF podría no ser ella.
+ */
+export function copyStateWords(copy: NonNullable<DataRequest["copy"]>, now: Date, locale: string, timeZone?: string): string {
+  const day = (at: string) => shortDayWords(at, locale, timeZone)
+  const live = new Date(copy.until).getTime() > now.getTime()
+  const done = copy.lastDownloadAt
+    ? `Se bajó el ${day(copy.lastDownloadAt)}${copy.downloads > 1 ? ` (${copy.downloads} veces)` : ""}`
+    : null
+  const before = done ? `${done} · ` : ""
+  if (live && copy.closed === "intentos") return `${before}El enlace ya no sirve: se escribió mal su documento varias veces`
+  if (live && copy.closed === "descargas") return `${before}El enlace ya no sirve: ya se bajó 5 veces`
+  if (done) return `${done}${live ? ` · su enlace vence el ${day(copy.until)}` : ""}`
+  return live ? `Todavía no se baja · vence el ${day(copy.until)}` : `No se bajó · su enlace venció el ${day(copy.until)}`
+}
+
+/** El enlace de la copia ya no sirve antes de vencer: pide «Enviar de nuevo». */
+function copyClosed(request: DataRequest): boolean {
+  return request.copy !== null && request.copy.closed !== null && new Date(request.copy.until).getTime() > Date.now()
+}
+
+/**
+ * El estado de la copia enviada en la fila y en el cajón. Si el enlace ya no sirve, se ve como
+ * lo que pide actuar: con icono y en advertencia, no solo con otro color.
+ */
+function CopyState({ copy, locale }: { copy: NonNullable<DataRequest["copy"]>; locale: string }) {
+  const words = copyStateWords(copy, new Date(), locale, activeOrgTimeZone())
+  const closed = copy.closed !== null && new Date(copy.until).getTime() > Date.now()
+  return closed ? (
+    <p className="flex items-start gap-1.5 text-sm font-medium text-warning">
+      <Link2Off className="mt-0.5 size-4 shrink-0" aria-hidden />
+      {words}
+    </p>
+  ) : (
+    <p className="text-sm font-medium">{words}</p>
+  )
+}
+
+/** Un pedido de copia ya enviado con su enlace se puede enviar de nuevo, con la misma operación. */
+function canSendAgain(request: DataRequest): boolean {
+  return request.kind === "copia" && request.status === "respondida" && request.copy !== null
+}
+
 function RequestRow({
   request,
   today,
@@ -266,6 +304,7 @@ function RequestRow({
   const Icon = KIND_ICON[request.kind]
   const pending = request.status === "pendiente"
   const late = pending && request.dueOn < today
+  const again = canSendAgain(request)
   return (
     <li className="flex flex-wrap items-center gap-3 p-3">
       <span
@@ -298,9 +337,15 @@ function RequestRow({
             {request.resolution ? ` · ${request.resolution}` : ""}
           </p>
         )}
+        {request.copy ? <CopyState copy={request.copy} locale={locale} /> : null}
       </div>
-      <Button type="button" size="sm" variant={pending ? "default" : "ghost"} onClick={onOpen}>
-        {pending ? "Atender" : "Ver"}
+      <Button
+        type="button"
+        size="sm"
+        variant={pending || (again && copyClosed(request)) ? "default" : again ? "outline" : "ghost"}
+        onClick={onOpen}
+      >
+        {pending ? "Atender" : again ? "Enviar de nuevo" : "Ver"}
       </Button>
     </li>
   )
@@ -524,7 +569,21 @@ function AttendDrawer({
     request.requesterRelation === "representante_legal" ? "representante" : request.channel === "portal" ? "portal" : "documento",
   )
   const [denying, setDenying] = useState(false)
-  const verify = useMutation({ mutationFn: () => verifyDataRequestApi(patientId, request.id, how), onSuccess: refresh })
+  // Tras «Comprobé que es ella», el foco va al paso 2 (el botón desaparece y no queda en la nada).
+  const nextStep = useRef<HTMLElement>(null)
+  const [moveToNext, setMoveToNext] = useState(false)
+  const verify = useMutation({
+    mutationFn: () => verifyDataRequestApi(patientId, request.id, how),
+    onSuccess: async () => {
+      await refresh()
+      setMoveToNext(true)
+    },
+  })
+  useEffect(() => {
+    if (!moveToNext || !verified) return
+    nextStep.current?.focus()
+    setMoveToNext(false)
+  }, [moveToNext, verified])
   const respond = useMutation({ mutationFn: (resolution: string) => respondDataRequestApi(patientId, request.id, resolution) })
   const deny = useMutation({ mutationFn: (reason: string) => denyDataRequestApi(patientId, request.id, reason) })
   const respondForm = useAppForm({
@@ -557,19 +616,7 @@ function AttendDrawer({
   const respondSurface = useFormSurface(respondForm)
   const denySurface = useFormSurface(denyForm)
   const surface = denying ? denySurface : respondSurface
-  const sendOptions = useQuery({
-    queryKey: ["data-request-send-options", request.id],
-    queryFn: () => fetchRecordSendOptions(patientId, request.id),
-    enabled: pending && verified && request.kind === "copia",
-  })
-  const send = useMutation({
-    mutationFn: (connectionId: string) => sendRecordCopyApi(patientId, request.id, connectionId),
-    onSuccess: async (result) => {
-      await refresh()
-      toast.success(`Copia enviada por ${result.channel === "email" ? "correo" : "WhatsApp"}: el pedido quedó respondido`)
-      onClose()
-    },
-  })
+  const again = canSendAgain(request)
   const [erasing, setErasing] = useState(false)
   // Borrar se responde al borrar: no hay «Marcar respondida» (ADR 0080).
   const erase = request.kind === "borrar"
@@ -597,16 +644,27 @@ function AttendDrawer({
           {request.said ? ` · «${request.said}»` : ""}
         </p>
         {!pending ? (
-          <div className="rounded-lg border p-3">
-            <p className="font-medium">{DATA_REQUEST_STATUS_TEXT[request.status]}</p>
-            {request.resolution ? <p className="text-muted-foreground">{request.resolution}</p> : null}
-            {request.verifiedHow ? (
-              <p className="text-muted-foreground">
-                Se comprobó: {DATA_REQUEST_VERIFICATION_TEXT[request.verifiedHow].toLowerCase()}
-                {request.verifiedByName ? ` · ${request.verifiedByName}` : ""}
-              </p>
+          <>
+            <div className="rounded-lg border p-3">
+              <p className="font-medium">{DATA_REQUEST_STATUS_TEXT[request.status]}</p>
+              {request.resolution ? <p className="text-muted-foreground">{request.resolution}</p> : null}
+              {request.copy ? <CopyState copy={request.copy} locale={locale} /> : null}
+              {request.verifiedHow ? (
+                <p className="text-muted-foreground">
+                  Se comprobó: {DATA_REQUEST_VERIFICATION_TEXT[request.verifiedHow].toLowerCase()}
+                  {request.verifiedByName ? ` · ${request.verifiedByName}` : ""}
+                </p>
+              ) : null}
+            </div>
+            {again ? (
+              <div role="group" className="flex flex-col gap-2 rounded-lg border p-3" aria-labelledby="data-request-again">
+                <p id="data-request-again" className="font-medium">
+                  Enviar de nuevo
+                </p>
+                <SendCopy patientId={patientId} request={request} canReadClinical={canReadClinical} again onSent={onClose} />
+              </div>
             ) : null}
-          </div>
+          </>
         ) : denying ? (
           <div className="flex flex-col gap-2">
             <denyForm.AppField name="reason">
@@ -667,6 +725,7 @@ function AttendDrawer({
               number={2}
               done={false}
               disabled={!verified}
+              sectionRef={nextStep}
               title={request.kind === "copia" ? "Envía la copia" : erase ? "Borra sus datos y bloquea su historia" : "Haz lo que pidió"}
             >
               {erase ? (
@@ -693,42 +752,7 @@ function AttendDrawer({
                 </div>
               ) : request.kind === "copia" ? (
                 verified ? (
-                  <div className="flex flex-col gap-2">
-                    {sendOptions.isPending ? <p className="text-muted-foreground">Buscando por dónde enviarla…</p> : null}
-                    {sendOptions.data && sendOptions.data.channels.length === 0 ? (
-                      <p className="text-muted-foreground">No tiene WhatsApp ni correo para enviársela: entrégala en mano.</p>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2">
-                      {(sendOptions.data?.channels ?? []).map((option) => (
-                        <Button
-                          key={option.connectionId}
-                          type="button"
-                          size="sm"
-                          variant={option.isProposed ? "default" : "outline"}
-                          disabled={!option.usable || send.isPending}
-                          title={option.reason ?? undefined}
-                          onClick={() => send.mutate(option.connectionId)}
-                        >
-                          Enviar por {option.channel === "email" ? "correo" : "WhatsApp"}
-                        </Button>
-                      ))}
-                      {canReadClinical ? (
-                        <a className={buttonVariants({ variant: "outline", size: "sm" })} href={patientRecordDownloadUrl(patientId)} download>
-                          Descargar
-                        </a>
-                      ) : null}
-                    </div>
-                    <p className="text-muted-foreground">
-                      Le llega el PDF de su historia; el pedido queda respondido solo. Se envía únicamente a ella o a su
-                      representante legal.
-                      {canReadClinical ? " «Descargar» trae además el archivo FHIR y sus imágenes, para entregarlo en mano." : ""}
-                    </p>
-                    {send.error ? (
-                      <p role="alert" className="text-destructive">
-                        {submitErrorMessage(send.error)}
-                      </p>
-                    ) : null}
-                  </div>
+                  <SendCopy patientId={patientId} request={request} canReadClinical={canReadClinical} again={false} onSent={onClose} />
                 ) : (
                   <p className="text-muted-foreground">Primero comprueba que es ella.</p>
                 )
@@ -771,6 +795,100 @@ function AttendDrawer({
         />
       ) : null}
     </FormDrawer>
+  )
+}
+
+/**
+ * Enviar la copia a quien la pidió (mesa del 18 nov): le llega el PDF de su historia y, en
+ * su primera página, «Su enlace» para bajar la copia completa con su documento. Pasadas
+ * las 24 horas de WhatsApp sale con el mensaje aprobado para documentos. Por qué un canal
+ * no sirve se dice a la vista, no solo al pasar el ratón. «Enviar de nuevo» es la misma
+ * operación sobre el pedido ya respondido.
+ */
+function SendCopy({
+  patientId,
+  request,
+  canReadClinical,
+  again,
+  onSent,
+}: {
+  patientId: string
+  request: DataRequest
+  canReadClinical: boolean
+  again: boolean
+  onSent: () => void
+}) {
+  const queryClient = useQueryClient()
+  const locale = useOrgLocale() ?? "es"
+  const sendOptions = useQuery({
+    queryKey: ["data-request-send-options", request.id],
+    queryFn: () => fetchRecordSendOptions(patientId, request.id),
+  })
+  const send = useMutation({
+    mutationFn: (connectionId: string) => sendRecordCopyApi(patientId, request.id, connectionId, again),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: dataRequestsKey(patientId) })
+      const via = result.channel === "email" ? "correo" : "WhatsApp"
+      toast.success(
+        again
+          ? `Copia enviada de nuevo por ${via}. El enlace anterior ya no sirve; el nuevo vale hasta el ${
+              result.request.copy ? shortDayWords(result.request.copy.until, locale, activeOrgTimeZone()) : "final de la semana"
+            }.`
+          : `Copia enviada por ${via}: el pedido quedó respondido`,
+      )
+      onSent()
+    },
+  })
+  const channels = sendOptions.data?.channels ?? []
+  // Lo que cambia pasadas las 24 horas (sale con el mensaje aprobado para documentos); lo de siempre ya lo dice el texto de abajo.
+  const note = channels.find((option) => option.usable && option.isProposed && option.viaTemplate)?.note ?? null
+  return (
+    <div className="flex flex-col gap-2">
+      {sendOptions.isPending ? <p className="text-muted-foreground">Buscando por dónde enviarla…</p> : null}
+      {sendOptions.isError ? (
+        <p role="alert" className="text-destructive">
+          {submitErrorMessage(sendOptions.error)}
+        </p>
+      ) : null}
+      {sendOptions.data && channels.length === 0 ? (
+        <p className="text-muted-foreground">No tiene WhatsApp ni correo para enviársela: entrégala en mano.</p>
+      ) : null}
+      <p className="text-muted-foreground">
+        {again
+          ? "Le llega otro PDF; el enlace del anterior deja de servir."
+          : "Le llega el PDF de su historia con el enlace a la copia completa, también lo que no ve en su portal (sirve 7 días)."}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {channels.map((option) => (
+          <Button
+            key={option.connectionId}
+            type="button"
+            size="sm"
+            variant={option.isProposed ? "default" : "outline"}
+            disabled={!option.usable || send.isPending}
+            onClick={() => send.mutate(option.connectionId)}
+          >
+            {send.isPending && send.variables === option.connectionId
+              ? "Enviando…"
+              : `Enviar por ${option.channel === "email" ? "correo" : "WhatsApp"}`}
+          </Button>
+        ))}
+        {canReadClinical ? <DownloadCopyButton patientId={patientId} size="sm" /> : null}
+      </div>
+      {channels
+        .filter((option) => !option.usable && option.reason)
+        .map((option) => (
+          <p key={option.connectionId} className="text-muted-foreground">
+            {option.channel === "email" ? "Correo" : "WhatsApp"}: {option.reason}
+          </p>
+        ))}
+      {note ? <p className="text-muted-foreground">{note}</p> : null}
+      {send.error ? (
+        <p role="alert" className="text-destructive">
+          {submitErrorMessage(send.error)}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -919,16 +1037,28 @@ function Step({
   done,
   disabled = false,
   title,
+  sectionRef,
   children,
 }: {
   number: number
   done: boolean
   disabled?: boolean
   title: string
+  /** El paso al que se lleva el foco cuando el anterior se completa. */
+  sectionRef?: React.Ref<HTMLElement>
   children: React.ReactNode
 }) {
   return (
-    <section className={`flex flex-col gap-2 rounded-lg border p-3 ${disabled ? "opacity-60" : ""}`} aria-disabled={disabled}>
+    // Un grupo y no una región: el paso vive dentro del cajón, que ya es la región (la prueba de
+    // Inicio busca una sola superficie con «Comprueba que»).
+    <div
+      role="group"
+      ref={sectionRef as React.Ref<HTMLDivElement>}
+      tabIndex={sectionRef ? -1 : undefined}
+      aria-label={sectionRef ? `Paso ${number}: ${title}` : undefined}
+      className={`flex flex-col gap-2 rounded-lg border p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 ${disabled ? "opacity-60" : ""}`}
+      aria-disabled={disabled}
+    >
       <p className="flex items-center gap-2 font-medium">
         <span
           aria-hidden="true"
@@ -939,6 +1069,6 @@ function Step({
         {title}
       </p>
       {children}
-    </section>
+    </div>
   )
 }

@@ -19,6 +19,9 @@ import type { Storage } from "./storage.js"
 
 export type IssuedPaperType = "prescription" | "order" | "medical_leave" | "attention_sheet"
 
+/** Lo que se guarda así; el odontograma firmado lo dibuja su producto (`dental/odontogram-pdf.ts`). */
+export type StoredPaperType = IssuedPaperType | "signed_odontogram"
+
 export type PaperStorage = Partial<
   Pick<Storage, "getAttachment" | "putPatientDocument" | "deleteAttachment">
 >
@@ -26,7 +29,7 @@ export type PaperStorage = Partial<
 async function storedPaperBytes(
   tx: Db,
   orgId: string,
-  type: IssuedPaperType,
+  type: StoredPaperType,
   documentId: string,
   storage: PaperStorage,
 ): Promise<Uint8Array | null> {
@@ -78,7 +81,7 @@ export async function issuedPaperBytes(
     patientId: string
     /** Como sale en el papel: de ahí las iniciales con que el QR lo deja cotejar. */
     patientName: string
-    type: IssuedPaperType
+    type: StoredPaperType
     documentId: string
     /** La palabra y el motivo, si está anulado. */
     voided: { word: string; reason: string | null } | null

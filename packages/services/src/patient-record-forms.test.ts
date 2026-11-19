@@ -46,6 +46,7 @@ import { finalizeEncounter, getEncounterDetail, takeOverEncounter, voidEncounter
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
 import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
+import { type FhirResource, recordResources } from "./patient-record-test-kit.js"
 import { createPatient } from "./patients.js"
 import { setTestPatientIdentity } from "./test-patient.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -133,9 +134,9 @@ async function printedText(record: Awaited<ReturnType<typeof loadPatientRecord>>
   return JSON.stringify(lay.mock.calls.map((call) => call[0]))
 }
 
-type Resource = Record<string, unknown> & { resourceType: string; id: string }
-const resourcesOf = (record: Awaited<ReturnType<typeof loadPatientRecord>>): Resource[] =>
-  (patientRecordFhirBundle(record) as { entry: Array<{ resource: Resource }> }).entry.map((entry) => entry.resource)
+type Resource = FhirResource
+// Las referencias del paquete se resuelven dentro de él (`urn:uuid`); aquí se leen como `Tipo/id`.
+const resourcesOf = (record: Awaited<ReturnType<typeof loadPatientRecord>>): Resource[] => recordResources(record)
 
 it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y en FHIR", async () => {
   const f = await clinicalFixture()

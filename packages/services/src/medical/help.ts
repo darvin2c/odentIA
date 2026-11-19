@@ -5,6 +5,7 @@ import {
   type HelpTopic,
   SHARED_HELP_TOPICS,
 } from "../help-guide.js"
+import { COPY_TEETH_SENTENCE } from "../help-guide/clinica.js"
 
 /*
  * ---------- La guía de la Ayuda en latidIA (issue 229, entrega 11) ----------
@@ -289,6 +290,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * Reportes no tiene sus pasos (`funnelStepsOf`); el plan tiene una sola fase.
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // La numeración de las piezas es un estándar de la copia que solo sigue odentIA: en un consultorio, los demás.
+  "pacientes-copia-historia-estandares": (faq) => [{ ...faq, a: swap(faq.a, COPY_TEETH_SENTENCE, "") }],
   // Anular lo registrado: lo mismo, sin cómo lo preguntó un odontólogo.
   "pacientes-anular-lo-registrado": (faq) => [withoutForms(faq, ...DENTAL_ASKED)],
   // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).

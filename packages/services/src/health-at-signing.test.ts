@@ -9,7 +9,8 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { DocumentKit } from "./document-kit.js"
 import { finalizeEncounter, getEncounterDetail } from "./encounters.js"
 import { getTimeline } from "./patient-history.js"
-import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
+import { loadPatientRecord, renderPatientRecordPdf } from "./patient-record.js"
+import { recordResources } from "./patient-record-test-kit.js"
 import { patientPersonId } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -121,8 +122,7 @@ it("la copia de la historia trae lo que seguía sin revisar al firmar, con quié
   lay.mockRestore()
   expect(printed).toContain("Lo que dijo de su salud al firmar")
   expect(printed).toMatch(/Lo dijo ella el [^"]*, sin revisar: Alergias: dijo que no; Anticoagulante: Warfarina 5 mg/)
-  const observations = (patientRecordFhirBundle(record) as { entry: Array<{ resource: Record<string, unknown> }> }).entry
-    .map((entry) => entry.resource)
+  const observations = recordResources(record)
     .filter((resource) => String(resource.id).startsWith(`${f.encounter.id}-sin-revisar-al-firmar`))
   expect(observations).toHaveLength(1)
   expect(observations[0]).toMatchObject({

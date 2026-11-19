@@ -30,11 +30,22 @@ export interface DataRequest {
   resolvedAt: string | null
   resolvedByName: string | null
   createdAt: string
+  /** La copia que se le envió con su enlace: hasta cuándo sirve y si ya la bajó. */
+  copy: DataRequestCopy | null
+}
+
+export interface DataRequestCopy {
+  until: string
+  /** Las descargas que terminaron. */
+  downloads: number
+  lastDownloadAt: string | null
+  /** El enlace ya no sirve antes de vencer: mal su documento demasiadas veces, o ya se bajó el tope. */
+  closed: "intentos" | "descargas" | null
 }
 
 export const DATA_REQUEST_KIND_TEXT: Record<DataRequestKind, { title: string; detail: string }> = {
   copia: {
-    title: "Una copia de sus datos",
+    title: "Copia de su historia",
     detail: "Su historia en PDF y en un archivo que otra clínica puede cargar.",
   },
   corregir: { title: "Corregir un dato", detail: "Su dirección, su documento o algo de su historia." },
@@ -156,6 +167,10 @@ export interface RecordSendChannel {
   connectionName: string
   usable: boolean
   reason: string | null
+  /** Qué le llega por aquí («…le llega el PDF con el mensaje aprobado para documentos»). */
+  note?: string | null
+  /** Pasaron 24 horas: sale con el mensaje aprobado para documentos. */
+  viaTemplate?: boolean
   isProposed: boolean
 }
 
@@ -168,13 +183,80 @@ export async function fetchRecordSendOptions(
   )).data
 }
 
-export async function sendRecordCopyApi(patientId: string, id: string, connectionId: string): Promise<{ request: DataRequest; channel: string }> {
+/** `again`: «Enviar de nuevo» de un pedido ya respondido; sin él, el servidor no reenvía. */
+export async function sendRecordCopyApi(
+  patientId: string,
+  id: string,
+  connectionId: string,
+  again = false,
+): Promise<{ request: DataRequest; channel: string }> {
   return (
     await apiFetch<{ data: { request: DataRequest; channel: string } }>(`${base(patientId)}/${id}/send`, {
       method: "POST",
-      body: JSON.stringify({ connectionId }),
+      body: JSON.stringify({ connectionId, ...(again ? { again: true } : {}) }),
     })
   ).data
+}
+
+/**
+ * Lo que trae la copia de esta persona, contado de la misma lista que arma el ZIP
+ * (`/record/summary`, solo para quien lee la historia). Lo que es 0 no se nombra.
+ */
+export interface PatientRecordSummary {
+  signedOdontograms: number
+  prescriptions: number
+  orders: number
+  medicalLeaves: number
+  consentsSigned: number
+  images: number
+  tomographies: number
+  otherFiles: number
+  approxBytes: number | null
+  /** Las hojas de atención emitidas. */
+  attentionSheets?: number
+  /** Trae el odontograma de hoy, sin firmar. */
+  odontogramToday?: boolean
+  /** Los papeles propios del producto (vistIA: la receta de lentes). */
+  productPapers?: number
+  /** Las listas de diagnóstico que de verdad usa («CIE-10», «CIE-11»). */
+  diagnosisSystems?: string[]
+  /** Las piezas van con su número FDI (ISO 3950). */
+  toothNumbers?: boolean
+}
+
+export const recordSummaryKey = (patientId: string) => ["patient-record-summary", patientId] as const
+
+export async function fetchRecordSummary(patientId: string): Promise<PatientRecordSummary> {
+  return (await apiFetch<{ data: PatientRecordSummary }>(`/api/patients/${patientId}/record/summary`)).data
+}
+
+/**
+ * «Descargar copia»: el navegador baja el ZIP por su cuenta (un enlace con la sesión), así
+ * se guarda mientras llega y no queda entero en la memoria de la página: con tomografías
+ * pesa cientos de MB. La página no sabe cuándo termina; lo dice el navegador en sus descargas.
+ */
+export function startPatientRecordDownload(patientId: string): void {
+  const anchor = document.createElement("a")
+  anchor.href = patientRecordDownloadUrl(patientId)
+  anchor.rel = "noreferrer"
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+/** «unos 90 MB», «unos 800 KB»: lo que pesa, redondeado, para decidir si bajarla con wifi. */
+export function sizeWords(bytes: number | null): string | null {
+  if (!bytes || bytes <= 0) return null
+  if (bytes < 1024 * 1024) return `unos ${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024 * 1024 * 1024) return `unos ${Math.round(bytes / (1024 * 1024))} MB`
+  return `unos ${(bytes / (1024 * 1024 * 1024)).toFixed(1).replace(".", ",")} GB`
+}
+
+/** «19 nov»: un instante en el día de la clínica, corto, para la fila de un pedido. */
+export function shortDayWords(at: string, locale: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", ...(timeZone ? { timeZone } : {}) })
+    .format(new Date(at))
+    .replaceAll(".", "")
 }
 
 /** Enlace del ZIP con la historia; `?org=` porque un enlace no envía la cabecera de la clínica. */

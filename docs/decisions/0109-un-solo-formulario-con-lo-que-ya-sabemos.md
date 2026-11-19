@@ -21,7 +21,7 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
    - Reservar por el chat cierra la reserva de su enlace.
    - Con datos pendientes, el enlace abre directo «Tus datos».
 6. **En lo que llena la persona, el sexo es «Femenino» o «Masculino».** «Indeterminado» es un dato clínico (CIE-10 Q56), que registra el equipo.
-7. **Por el chat solo se reserva con su sí a quien no le falta nada.** A quien es nuevo, o es paciente y le falta un dato obligatorio o aceptar el aviso, Sofi le da su enlace con la hora que eligió (`sede`, `con` y `hora`): ahí confirma sus datos y queda reservada. Por el chat no se registra a nadie.
+7. **Por el chat solo se reserva con su sí a quien no le falta nada** (cambiado el 18 nov: ver abajo). A quien es nuevo, o es paciente y le falta un dato obligatorio o aceptar el aviso, Sofi le da su enlace con la hora que eligió (`sede`, `con` y `hora`): ahí confirma sus datos y queda reservada. Por el chat no se registra a nadie.
 8. **Para alguien nuevo, aunque quien escribe ya tenga pacientes.** Una madre con su ficha que pide cita para su hijo nuevo recibe un enlace para alguien nuevo (`newPerson`): no se une a su ficha y la página no le pregunta para quién es; registra al hijo y reserva. Sirve también a quien solo está vinculada a su hijo y pide cita para sí misma.
 
 ## Alternativas descartadas
@@ -45,6 +45,18 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
 En su enlace, «Tus datos» exigía responder lo de novedades y promociones para enviar su salud, y el registro no: la misma pregunta frenaba en un lugar y no en el otro. Ahora es opcional en los dos: se le pregunta, con «Sí, quiero» primero y sin marcar, y si no responde se envía igual y queda sin respuesta (se le vuelve a ofrecer otra vez, como a quien nunca la respondió). Sigue sin valer como su sí lo que no marcó: el consentimiento para publicidad es previo y expreso. El aviso de privacidad, si aún no lo aceptó, sí se pide para enviar sus datos. En «Antes de tu cita» (sus datos, su salud y su visita en un solo envío) vale lo mismo.
 
 Con la misma entrega, «Tus datos» y el cuestionario de la clínica dejan de ser dos tarjetas: con una cita por venir, su enlace muestra una sola, «Antes de tu cita», con un solo recorrido y un envío (lo que falta de sus datos, su salud y, al final, «Tu visita»: a qué viene, si le duele y algo más, todo opcional). Lo de la visita guarda su cita: una respuesta por cita (`appointment_visit_answer`), y a la cita siguiente se le vuelve a preguntar. El cuestionario que respondía el paciente se dejó de usar: lo que se le pregunta está en «Preguntas al paciente». Sin cita, sigue «Tus datos» como antes. Los enlaces ya enviados que abrían el cuestionario (`abre=cuestionario`) abren la tarjeta.
+
+## Cambio del 18 nov 2026: la reserva va primero, con nombre y motivo
+
+El punto 7 trababa la reserva más común. Un paciente con todos sus datos, al que solo le faltaba aceptar el aviso, eligió la hora en el chat y recibió un enlace para «confirmar sus datos» (Dental Smile, 18 nov). La regla queda así:
+
+- **La reserva va primero.** Sofi reserva por el chat o por el enlace, como prefiera la persona.
+- **Nombre y motivo, por el chat.** Antes de reservar, Sofi pide el nombre y el motivo, y el motivo queda en la cita.
+- **Quien ya es paciente** reserva con su sí aunque le falte un dato o aceptar el aviso. Los datos que faltan van en la confirmación («Antes de venir, completa tus datos») y en el recordatorio de antes de la cita. El aviso lo acepta cuando complete sus datos o reserve en su enlace.
+- **Quien aún no es paciente** da sus nombres y apellidos por el chat, y con su sí queda registrado y reservado, con el aviso en la misma pregunta. Es lo que hacía la 0101.
+- **Lo que tiene por reservar** (un control, un tratamiento aceptado sin cita) Sofi lo ve, se lo dice y lo suma a la cita si la persona quiere.
+
+El motivo que cuenta en «Tu visita» desde su enlace no pasa a la cita: eso solo lo lee el equipo clínico.
 
 ## Referencias
 

@@ -5,22 +5,32 @@ import { expect } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { readPdfLikeACamera } from "./read-pdf"
 
-/** El PDF de un papel, tal como lo descarga la clínica. */
+/**
+ * El PDF de un papel, tal como lo descarga la clínica: un papel de salud por su tipo y su id,
+ * o uno del producto por su dirección bajo la ficha (el odontograma firmado).
+ */
 export async function downloadPaper(
   page: Page,
-  input: { api: string; slug: string; patientId: string; type: string; id: string },
+  input: { api: string; slug: string; patientId: string } & (
+    | { type: string; id: string }
+    | { path: string }
+  ),
 ): Promise<Buffer> {
-  const base64 = await page.evaluate(async ({ api, slug, patientId, type, id }) => {
-    const response = await fetch(
-      `${api}/api/patients/${patientId}/health-document-pdf?documentType=${type}&documentId=${id}`,
-      { headers: { "x-odentia-org": slug }, credentials: "include" },
-    )
-    if (!response.ok) throw new Error(`PDF ${type}: ${response.status}`)
+  const path =
+    "path" in input
+      ? input.path
+      : `/health-document-pdf?documentType=${input.type}&documentId=${input.id}`
+  const base64 = await page.evaluate(async ({ api, slug, patientId, path }) => {
+    const response = await fetch(`${api}/api/patients/${patientId}${path}`, {
+      headers: { "x-odentia-org": slug },
+      credentials: "include",
+    })
+    if (!response.ok) throw new Error(`PDF ${path}: ${response.status}`)
     let text = ""
     for (const byte of new Uint8Array(await response.arrayBuffer()))
       text += String.fromCharCode(byte)
     return btoa(text)
-  }, input)
+  }, { api: input.api, slug: input.slug, patientId: input.patientId, path })
   return Buffer.from(base64, "base64")
 }
 

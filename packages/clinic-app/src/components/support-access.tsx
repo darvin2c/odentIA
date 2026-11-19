@@ -377,7 +377,7 @@ const RESOURCE_WORDS: Record<string, string> = {
   formularios: "Fichas",
   consentimientos: "Consentimientos",
   ordenes: "Órdenes",
-  descarga: "Descargó la historia completa",
+  descarga: "Descargó la copia de su historia",
   apertura: "Abrió la historia bloqueada",
   descansos: "Descansos médicos",
 }

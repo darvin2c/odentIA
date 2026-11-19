@@ -122,13 +122,15 @@ const COMMON_SECTIONS = [
     permission: "patients.write",
     patient: true,
   },
-  // Quién consultó su historia (audit.read) y lo que pidió sobre sus datos
-  // (patients.write), juntos (ADR 0080). Los atienden Recepción y Administración.
+  // La copia de su historia (clinical.read), lo que pidió sobre sus datos
+  // (patients.write) y quién consultó su historia (audit.read), juntos (ADR 0080).
+  // Los pedidos los atienden Recepción y Administración; el odontólogo ve solo la
+  // copia, para derivarla (mesa del 18 nov).
   {
     id: "pedidos",
     area: "datos",
     label: "Privacidad y pedidos",
-    permission: ["patients.write", "audit.read"],
+    permission: ["clinical.read", "patients.write", "audit.read"],
     patient: true,
   },
 ] as const satisfies ReadonlyArray<SectionDef>

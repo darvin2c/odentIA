@@ -28,6 +28,8 @@ import {
   configurePublicLinks,
   correctAnswer,
   createAppointment,
+  createFollowUp,
+  listFollowUps,
   createConnection,
   createContact,
   createHandoff,
@@ -1172,6 +1174,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     startsAt: optionStart,
     branchId: optionBranch,
     durationMin,
+    reason: "Control",
   })
   const pending = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
@@ -1238,7 +1241,7 @@ function pickOf(sent: string): URL {
   return new URL(resolvePersonalLinkRefs(ref!, KEY))
 }
 
-it("a quien aún no es paciente le da su enlace con la hora que eligió para dejar sus datos y reservar ahí; por el chat no registra a nadie (ADR 0109)", async () => {
+it("a quien aún no es paciente lo registra y reserva por el chat con su sí; sin registro en línea, recepción", async () => {
   const seed = await ingestText("tg:nuevo-enlace-sede", "evt-nuevo-enlace-sede", "Hola")
   // La sede y el profesional del fixture; su paciente es de otra persona.
   const fx = await bookingFixture(seed.conversationId, "nuevo-enlace")
@@ -1256,80 +1259,33 @@ it("a quien aún no es paciente le da su enlace con la hora que eligió para dej
   const contactId = conv!.contactId
   const ctx = publicCtx(conversationId, contactId)
   const [first] = await offeredSlots(ctx, fx.branchId)
-  const book = () => makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(first!.slot).then(String)
+  const person = { givenNames: "Lucía", familyName: "Paredes Soto", reason: "Limpieza" }
+  const book = () => makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...first!.slot, ...person }).then(String)
 
   // Sin registro en línea, ni el chat ni un enlace lo registran: lo hace recepción.
   await saveRegistration(false, current.privacyNotice)
   expect(await book()).toContain("pasa el caso a recepción con request_human_handoff")
 
-  // Con el registro encendido, su enlace con esa hora (el aviso se acepta en la página).
+  // Con el registro encendido (siempre con su aviso), se registra y reserva aquí con su sí.
   await saveRegistration(true, "Usamos tus datos solo para atenderte.")
-  const sent = await book()
-  expect(sent).toContain("Todavía no se reservó nada")
-  expect(sent).toContain("confirma tus datos aquí (1 minuto)")
-  const url = pickOf(sent)
-  expect(url.origin).toBe("https://norte.odentia.test")
-  expect(url.pathname).toBe("/reserva")
-  // Lo que lee la página para abrir la reserva ya elegida: la sede, el usuario del profesional y el inicio.
-  expect(url.searchParams.get("sede")).toBe(fx.branchId)
-  expect(url.searchParams.get("con")).toBe(fx.professionalId)
-  expect(url.searchParams.get("hora")).toBe(new Date(first!.slot.startsAt).toISOString())
-  expect(url.searchParams.get("token")).toMatch(/^[0-9a-f]{64}$/)
-  // El enlace abre la reserva para alguien que aún no es paciente, en esa sede; nada quedó propuesto ni registrado.
-  const links = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, contactId)))
-  expect(links).toMatchObject([{ booking: true, branchId: fx.branchId, patientId: null, conversationId }])
-  expect(await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId }))).toEqual([])
-  const patients = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
-  expect(patients[0]?.n).toBe(0)
-
-  // Con ese enlace ya dado en la atención, otra llamada con la misma hora no lo vuelve a armar (ronda del ADR 0109).
-  ctx.pickLinks = [new Date(first!.slot.startsAt).toISOString()]
-  expect(await book()).toContain("Ya le diste su enlace con esa hora en esta atención")
-  // Pero si lo pide otra vez («mándame el link otra vez, no lo veo»), le devuelve el mismo para escribírselo
-  // (auditoría del 8 nov), con la referencia de su token: el historial lo muestra tapado y copiado de ahí no abre.
-  const resent = await book()
-  expect(resent).toContain(`escríbeselo de nuevo tal cual, en una frase: ${PICK_LINK.exec(sent)![0]}`)
-  expect(pickOf(resent).toString()).toBe(url.toString())
-  expect(await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, contactId)))).toHaveLength(1)
-  ctx.pickLinks = []
+  const asked = await book()
+  expect(asked).toContain("Falta su sí")
+  expect(asked).toContain("Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad")
+  expect(asked).not.toMatch(PICK_LINK)
   // Un servicio inventado (vacío) no sigue sin él: se le pide el de «Servicios».
-  expect(String(await makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...first!.slot, serviceId: "00000000-0000-0000-0000-000000000000" })))
+  expect(String(await makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...first!.slot, ...person, serviceId: "00000000-0000-0000-0000-000000000000" })))
     .toContain("Ese servicio no es de la clínica")
 
-  // Sale tal como lo escribe Sofi: un solo enlace (la agenda no se suma), con la referencia del token.
-  ctx.evidence = [...(ctx.evidence ?? []), linksOf(sent)]
-  ctx.toolsUsed.push("reservar_paciente_nuevo")
-  const ref = PICK_LINK.exec(sent)![0]
-  const outcome = String(await makeAgentTools(ctx).find((t) => t.name === "send_reply")!.invoke({
-    text: `¡Perfecto! Para reservarte el lunes a las ${first!.clock} con Dentista nuevo-enlace, confirma tus datos aquí (1 minuto): ${ref}`,
-  }))
-  expect(outcome).not.toContain("No enviado")
-  const [message] = await agentMessages(conversationId)
-  expect(message).toContain(ref)
-  expect(message!.match(/\/reserva\?/g)).toHaveLength(1)
-  expect(message).not.toContain("La agenda completa")
-
-  // Quien ya es paciente no se registra de nuevo: para ella, proponer_cita.
+  // Quien ya es paciente no se registra de nuevo: para ella, proponer_cita; para su hijo, con forOther.
   const known = await ingestText("tg:nuevo-enlace-ya", "evt-nuevo-enlace-ya", "Quiero una cita")
   const fxKnown = await bookingFixture(known.conversationId, "nuevo-enlace-ya")
-  const bookFor = (input: NonNullable<typeof first>["slot"] & { forOther?: boolean }) =>
-    makeAgentTools(publicCtx(known.conversationId, fxKnown.contactId)).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(input).then(String)
+  const bookFor = (input: NonNullable<typeof first>["slot"] & { forOther?: boolean; minor?: boolean }) =>
+    makeAgentTools(publicCtx(known.conversationId, fxKnown.contactId)).find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...input, ...person }).then(String)
   const again = await bookFor(first!.slot)
   expect(again).toContain("Ya es paciente")
   expect(again).toContain("forOther")
-  // Para su hijo, que aún no es paciente: el enlace para alguien nuevo, que no es el de ella.
-  const forChild = await bookFor({ ...first!.slot, forOther: true })
-  expect(forChild).toContain("confirma tus datos aquí (1 minuto)")
-  const childToken = pickOf(forChild).searchParams.get("token")!
-  const childLinks = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(appointmentBookingLink).where(and(eq(appointmentBookingLink.contactId, fxKnown.contactId), eq(appointmentBookingLink.newPerson, true))))
-  expect(childLinks).toMatchObject([{ booking: true, patientId: null, newPerson: true }])
-  // Abrirlo no lo une a su ficha: la página registra ahí a quien se atiende.
-  const opened = await withOrgContext(appDb, "org_a", (tx) => resolvePersonalLink(tx, "org_a", childToken))
-  expect(opened.patientId).toBeNull()
-  expect(opened.canBook).toBe(true)
+  const forChild = await bookFor({ ...first!.slot, forOther: true, minor: true })
+  expect(forChild).toContain("registro a Lucía Paredes Soto como paciente, contigo como su madre, padre o tutor")
 })
 
 it("no dice que la cita quedó reservada mientras la propuesta espera su sí (auditoría del 8 nov)", async () => {
@@ -1349,38 +1305,32 @@ it("no dice que la cita quedó reservada mientras la propuesta espera su sí (au
   expect(await reply()).not.toContain("No enviado")
 })
 
-it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con esa hora; si no, su sí en el chat; con una cita por venir, el sí y sus datos al confirmar (ADR 0109)", async () => {
-  // Le faltan datos: la hora se reserva en su enlace, donde los confirma.
+it("proponer_cita: quien ya es paciente reserva con su sí en el chat aunque le falte algo; lo pendiente va al confirmar (la reserva va primero, 18 nov)", async () => {
+  // Le faltan datos: igual se le pide su sí aquí, sin mandarlo a la página.
   const lacking = await ingestText("tg:faltan-datos", "evt-faltan-datos", "Quiero una cita")
   const fx = await bookingFixture(lacking.conversationId, "faltan", { complete: false })
   const ctx = publicCtx(lacking.conversationId, fx.contactId)
   const [first] = await offeredSlots(ctx, fx.branchId)
   // Sin la sede, la toma del hueco que se ofreció.
   const { branchId: _branch, ...withoutBranch } = first!.slot
-  const sent = String(await makeAgentTools(ctx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fx.patientId, ...withoutBranch }))
-  expect(sent).toContain("fecha de nacimiento")
-  expect(sent).toContain("confirma tus datos aquí (1 minuto)")
-  const url = pickOf(sent)
-  expect(url.searchParams.get("sede")).toBe(fx.branchId)
-  expect(url.searchParams.get("con")).toBe(fx.professionalId)
-  expect(url.searchParams.get("hora")).toBe(new Date(first!.slot.startsAt).toISOString())
-  expect(await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: lacking.conversationId }))).toEqual([])
-  const [link] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, fx.contactId)))
-  expect(link).toMatchObject({ booking: true, patientId: fx.patientId, branchId: fx.branchId })
+  const sent = String(await makeAgentTools(ctx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fx.patientId, ...withoutBranch, reason: "Control" }))
+  expect(sent).toContain("Falta su sí")
+  expect(sent).not.toMatch(PICK_LINK)
+  expect((await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: lacking.conversationId, status: "propuesta" }))).map((item) => item.action)).toEqual(["reservar_cita"])
 
   // No le falta nada: se le reserva con su sí, como siempre.
   const complete = await ingestText("tg:datos-completos", "evt-datos-completos", "Quiero una cita")
   const fxComplete = await bookingFixture(complete.conversationId, "completos")
   const completeCtx = publicCtx(complete.conversationId, fxComplete.contactId)
   const [slotComplete] = await offeredSlots(completeCtx, fxComplete.branchId)
-  const asked = String(await makeAgentTools(completeCtx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxComplete.patientId, ...slotComplete!.slot }))
+  const asked = String(await makeAgentTools(completeCtx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxComplete.patientId, ...slotComplete!.slot, reason: "Control" }))
   expect(asked).toContain("Falta su sí")
   expect(asked).not.toContain("/reserva?")
   const proposals = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: complete.conversationId, status: "propuesta" }))
   expect(proposals.map((item) => item.action)).toEqual(["reservar_cita"])
 
-  // Tiene sus datos, pero la clínica escribió su aviso y aún no lo aceptó: también su enlace.
+  // Tiene sus datos, pero la clínica escribió su aviso y aún no lo aceptó (Dental Smile, 18 nov): se
+  // reserva con su sí, sin mandarlo a la página.
   const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
   onTestFinished(async () => {
     const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
@@ -1393,9 +1343,22 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
   const fxNotice = await bookingFixture(notice.conversationId, "sin-aviso")
   const noticeCtx = publicCtx(notice.conversationId, fxNotice.contactId)
   const [slotNotice] = await offeredSlots(noticeCtx, fxNotice.branchId)
-  const viaNotice = String(await makeAgentTools(noticeCtx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxNotice.patientId, ...slotNotice!.slot }))
-  expect(viaNotice).toContain("aceptar el aviso de privacidad")
-  expect(viaNotice).toMatch(PICK_LINK)
+  const noticeTools = makeAgentTools(noticeCtx)
+  const viaNotice = String(await noticeTools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxNotice.patientId, ...slotNotice!.slot, reason: "Control" }))
+  expect(viaNotice).toContain("Falta su sí")
+  expect(viaNotice).not.toMatch(PICK_LINK)
+  const [noticePending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: notice.conversationId, status: "propuesta" }))
+  await ingestText("tg:sin-aviso", "evt-sin-aviso-si", "Sí, confirmo")
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" })
+  const noticeConfirmed = await (async () => {
+    try {
+      return String(await noticeTools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: noticePending!.id }))
+    } finally {
+      configurePublicLinks(null)
+    }
+  })()
+  // Reservada; el aviso lo acepta cuando complete sus datos o reserve en su enlace.
+  expect(noticeConfirmed).toBe(`Confirmado y ejecutado (id ${noticePending!.id}).`)
 
   // Con una cita por venir su enlace le mostraría esa cita, no la reserva: la nueva va con su sí en el chat
   // y la confirmación lleva su enlace para completar lo que falta, sin «y tu salud».
@@ -1409,7 +1372,7 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
       branchId: taken.branchId, patientId: fxBooked.patientId, professionalUserId: fxBooked.professionalId, roomId: taken.roomId, startsAt: taken.startsAt, durationMin: 45,
     }))
   const tools = makeAgentTools(bookedCtx)
-  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxBooked.patientId, ...slots.at(-1)!.slot }))
+  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxBooked.patientId, ...slots.at(-1)!.slot, reason: "Control" }))
   expect(proposed).toContain("Falta su sí")
   const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: booked.conversationId, status: "propuesta" }))
   await ingestText("tg:con-cita", "evt-con-cita-si", "Sí, confirmo")
@@ -1425,6 +1388,66 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
   expect(confirmed).toContain("Confirmado y ejecutado")
   expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=\{\{su-enlace:[0-9a-f-]{36}\}\}»/)
   expect(confirmed).not.toContain("tu salud")
+})
+
+it("la reserva va primero, con nombre y motivo: sin motivo lo pregunta, suma su control y a alguien nuevo lo registra por el chat (18 nov)", async () => {
+  // Ya es paciente y tiene un control por reservar.
+  const seed = await ingestText("tg:motivo-control", "evt-motivo-control", "Quiero una cita")
+  const fx = await bookingFixture(seed.conversationId, "motivo-control")
+  const ctx = publicCtx(seed.conversationId, fx.contactId)
+  const [slot] = await offeredSlots(ctx, fx.branchId)
+  const tools = makeAgentTools(ctx)
+  // Sin motivo no se reserva: se le pregunta.
+  expect(String(await tools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fx.patientId, ...slot!.slot }))).toContain("Falta el motivo")
+  const control = await withOrgContext(appDb, "org_a", (tx) =>
+    createFollowUp(tx, "org_a", fx.actorId, fx.patientId, { title: "Control de ortodoncia", kind: "mantenimiento", dueAt: slot!.slot.startsAt }))
+  const summary = String(await tools.find((t) => t.name === "ver_resumen_paciente")!.invoke({ patientId: fx.patientId }))
+  expect(summary).toContain("Por reservar")
+  expect(summary).toContain(`Control: Control de ortodoncia (id ${control.id})`)
+  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fx.patientId, ...slot!.slot, reason: "Me duele una muela", followUpIds: [control.id] }))
+  expect(proposed).toContain("Falta su sí")
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: seed.conversationId, status: "propuesta" }))
+  await ingestText("tg:motivo-control", "evt-motivo-control-si", "Sí, confirmo")
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Confirmado y ejecutado")
+  const [booked] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(appointment).where(eq(appointment.patientId, fx.patientId)))
+  // El motivo queda en la cita, y el control va con ella.
+  expect(booked!.reason).toBe("Me duele una muela")
+  const [after] = await withOrgContext(appDb, "org_a", (tx) => listFollowUps(tx, "org_a", fx.patientId))
+  expect(after!.status).not.toBe("pendiente")
+
+  // Alguien nuevo, con el aviso escrito: con su sí queda registrado y reservado aquí mismo.
+  const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+  onTestFinished(async () => {
+    const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", fx.actorId, { expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice }))
+  })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientRegistrationConfig(tx, "org_a", fx.actorId, { expectedVersion: current.version, enabled: true, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte." }))
+  const fresh = await ingestText("tg:nuevo-chat", "evt-nuevo-chat", "Hola, quiero una cita")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, fresh.conversationId)))
+  const freshCtx = publicCtx(fresh.conversationId, conv!.contactId)
+  const [freeSlot] = await offeredSlots(freshCtx, fx.branchId)
+  const freshTools = makeAgentTools(freshCtx)
+  const asked = String(await freshTools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...freeSlot!.slot, givenNames: "Valeria", familyName: "Rojas Salazar", reason: "Limpieza" }))
+  expect(asked).toContain("Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad: https://")
+  const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)![0]
+  // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
+  freshCtx.evidence = [...(freshCtx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
+  const [freshPending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: fresh.conversationId, status: "propuesta" }))
+  await freshTools.find((t) => t.name === "send_reply")!.invoke({
+    text: `Valeria, te reservo el lunes con el dentista. Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?`,
+  })
+  freshCtx.replySettled = false
+  await ingestText("tg:nuevo-chat", "evt-nuevo-chat-si", "sí porfa")
+  expect(String(await freshTools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: freshPending!.id }))).toContain("Confirmado y ejecutado")
+  const [patientRow] = await ownerDb.execute<{ id: string; display_name: string }>(
+    sql`select p.id, pp.display_name from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id where p.person_id = ${conv!.contactId}`,
+  )
+  expect(patientRow?.display_name).toBe("Valeria Rojas Salazar")
+  const [freshBooked] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(appointment).where(eq(appointment.patientId, patientRow!.id)))
+  expect(freshBooked!.reason).toBe("Limpieza")
 })
 
 it("la cita dura lo que el hueco que se le ofreció: la última hora del turno se puede reservar", async () => {
@@ -1450,6 +1473,7 @@ it("la cita dura lo que el hueco que se le ofreció: la última hora del turno s
     roomId: last.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
     professionalUserId: last.match(/profesional ([^\]\s]+)/)![1]!,
     startsAt: last.match(ISO_INSTANT)![0],
+    reason: "Control",
   }))
   expect(proposed).toContain("Falta su sí")
   const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
@@ -1669,7 +1693,7 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
   // La cita propuesta espera el sí del interlocutor (los datos solo tienen que validar).
   const booked = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
     patientId: randomUUID(), professionalUserId: professionalRef("org_a", professionalId), roomId: randomUUID(),
-    startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
+    startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45, reason: "Control",
   }))
   expect(booked).toContain("pregúntale con naturalidad si se la reservas")
   const before = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1984,6 +2008,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
+          reason: "Control",
         },
         "t1-propuesta",
       )
@@ -2104,6 +2129,7 @@ it("dos búsquedas de huecos en un turno se recuerdan juntas y una hora que no s
           startsAt: invented,
           branchId: fx.branchId,
           durationMin: 45,
+          reason: "Control",
         },
         "b2-inventada",
       )
@@ -2790,6 +2816,7 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
+          reason: "Control",
         },
         "p1-propuesta",
       )
@@ -3163,6 +3190,7 @@ it("con los horarios va siempre su enlace para ver toda la agenda: lo agrega el 
     roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
     startsAt: line.match(ISO_INSTANT)?.[0],
     branchId: fx.branchId,
+    reason: "Control",
   })
   const pending = () => withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect((await pending()).map((item) => item.action)).toEqual(["reservar_cita"])
@@ -3750,7 +3778,7 @@ it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe
   const ref = line.match(/profesional (pro-[0-9a-f]{10})\]/)?.[1]
   expect(ref).toBe(professionalRef("org_a", fx.professionalId))
   const propose = tools.find((t) => t.name === "proponer_cita")!
-  const slot = { patientId: fx.patientId, roomId: fx.roomId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45 }
+  const slot = { patientId: fx.patientId, roomId: fx.roomId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45, reason: "Control" }
   // Un id de usuario escrito por el modelo no sirve.
   expect(String(await propose.invoke({ ...slot, professionalUserId: fx.professionalId }))).toContain("no es de un hueco de buscar_huecos")
   await propose.invoke({ ...slot, professionalUserId: ref })
