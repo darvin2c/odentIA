@@ -826,7 +826,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     const { job, sent } = await sentTo(c, rosa.contactId)
     expect(job).toMatchObject({ status: "enviado", via: "correo" })
     expect(sent.body).toContain("Hola, Rosa. Te esperamos mañana, miércoles 7 de octubre")
-    expect(sent.body).toMatch(/Cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
+    expect(sent.body).toMatch(/Completar mis datos o cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toMatch(/\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     expect(sent.body).not.toContain("Para confirmar")
   })
