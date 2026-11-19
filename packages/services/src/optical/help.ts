@@ -605,6 +605,14 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Los riesgos propios del consentimiento: en una óptica no hay herida ni anestesia, queda el látex.
+  "pacientes-consentimiento-riesgos-propios": (faq) => [
+    {
+      ...faq,
+      a: "Al generar el consentimiento, el sistema propone los riesgos propios de su caso según sus antecedentes (por ejemplo, su alergia al látex). En la fila de Documentos de la atención, «Riesgos propios: 2 · Revisar» dice cuántos lleva y abre el consentimiento con el foco en ellos. Mientras está pendiente, en «Riesgos propios de…» (opcional, antes de «Firmar ahora») los cambias, los agregas o los borras, una frase por línea, y «Guardar». En la hoja salen como «Riesgos propios de su caso», después de «Riesgos y molestias», igual en la tablet, en su enlace y en el PDF; si lo dejas vacío, la hoja queda como siempre. No frena la firma. Si escribiste algo y no lo guardaste, el botón dice «Guardar y firmar» (también en la fila del Plan, en Documentos y en el cierre): guarda primero y la hoja que firma ya lo lleva. Si los borraste o cambiaste por error, «Volver a proponer» trae otra vez lo que propone el sistema (falta «Guardar»). Si los cambias después de mostrarle la hoja en la tablet, al confirmar la tablet trae la hoja nueva: que la lea y firme otra vez. Si la imprimiste, se recuerda la hoja que salió, también si recargas la página o la imprimiste en otro equipo: al subir la foto te pide imprimirla de nuevo, antes de subirla. Firmado, enviado a su enlace o mostrado con su código («Firmar en su teléfono»), no se cambia: lo que la persona leyó es lo que firma (si hace falta, anúlalo y prepara otro). En «Historia del documento» queda quién los cambió y cuándo.",
+      forms: ["riesgos propios del paciente en el consentimiento", "agregar un riesgo al consentimiento", "quitar los riesgos propios del consentimiento"],
+    },
+  ],
   // La numeración de las piezas es un estándar de la copia que solo sigue odentIA: en una óptica, los demás.
   "pacientes-copia-historia-estandares": (faq) => [
     {
@@ -693,11 +701,12 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },
       "pasar un tratamiento a otra fase",
+      "por que el tratamiento salio en urgencia",
     ),
   ],
   // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.

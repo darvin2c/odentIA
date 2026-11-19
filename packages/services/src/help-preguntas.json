@@ -257,7 +257,12 @@
     {"q":"¿Cómo emito una receta?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde hago la receta, el consentimiento o la orden de la atención?"]},
     {"q":"Quiero leer el consentimiento antes de pasarle la tablet","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo firma la persona su consentimiento?"]},
     {"q":"¿Dónde veo cómo le fue en su sesión anterior sin perder lo que estoy haciendo?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde veo cómo le fue en la sesión anterior?"]},
-    {"q":"Llegó una persona nueva que no está registrada, ¿qué hago?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué no puedo registrar a un paciente nuevo?"]}
+    {"q":"Llegó una persona nueva que no está registrada, ¿qué hago?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué no puedo registrar a un paciente nuevo?"]},
+    {"q":"¿por qué no me avisa del alendronato?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?"]},
+    {"q":"¿cuántos cartuchos puedo usar con un hipertenso?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Dónde veo la dosis máxima de anestesia según su peso?"]},
+    {"q":"¿por qué no se firmó el odontograma hoy?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo se firma el odontograma?"]},
+    {"q":"¿cómo agrego los riesgos propios al consentimiento?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo pongo en el consentimiento el riesgo propio de este paciente?"]},
+    {"q":"¿dónde anoto una pulpitis?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Cómo registro una caries en la tablet?"]}
   ],
   "control": [
     {"q":"como le contesto a un paciente que escribio por wasap","expected":["bandeja"],"producto":"odentia","faqs":["¿Cómo respondo yo en vez de Sofi?"],"temas":["bandeja"]},
@@ -629,7 +634,7 @@
     {"q":"¿Lo que escribe el paciente en su enlace se guarda si cierra el celular?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["La paciente dice que se le borró lo que escribió, ¿qué pasó?"]},
     {"q":"¿Cuenta como consulta de Clío si en la atención solo confirmé respuestas de la ficha?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Cuándo cuenta como una consulta de Clío?"]},
     {"q":"¿Qué diferencia hay entre Preguntas al paciente y Fichas de consulta?","expected":["registro_pacientes","fichas"],"producto":"odentia","rol":"owner","faqs":["¿Qué diferencia hay entre «Preguntas al paciente» y «Fichas de consulta»?"]},
-    {"q":"¿Por qué la exodoncia me dice que pida su INR del día?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué la exodoncia dice «pide su INR del día» o «riesgo de osteonecrosis»?"]},
+    {"q":"¿Por qué la exodoncia me dice que pida su INR del día?","expected":["pacientes"],"producto":"odentia","rol":"clinician","faqs":["¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?"]},
     {"q":"¿Cómo registro la segunda sesión de una endodoncia en la atención?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["¿Cómo llevo un tratamiento de varias sesiones?"]},
     {"q":"¿Cuándo se le carga el tratamiento, al registrar el procedimiento o al firmar? ¿Y en la segunda sesión se cobra otra vez?","expected":["pacientes"],"producto":"odentia","rol":"owner","faqs":["Al firmar, ¿qué es «Se cargó hoy a su cuenta» y qué es «Debe en total»?"]},
     {"q":"Me sale la ficha odontoestomatológica, ¿tengo que llenarla para firmar?","expected":["pacientes","fichas"],"producto":"odentia","rol":"owner","faqs":["¿Cuándo lleno la ficha odontoestomatológica?","¿Por qué me aparece esta ficha?"]},

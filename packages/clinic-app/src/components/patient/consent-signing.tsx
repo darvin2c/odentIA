@@ -36,11 +36,15 @@ import { ApiError, apiFetch } from "../../lib/api"
 import {
   CONSENT_SIGNATURE_WORDS,
   type ConsentDocument,
+  checkConsentPaperSheet,
   fetchConsentSheetFrame,
+  fetchConsents,
   generateConsentPdf,
   signConsent,
 } from "../../lib/clinical-forms"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
+import { risksDraftOf, saveRisksDraftsOf } from "../../lib/consent-risks-draft"
+import { personalRisksOf, shownRisksField } from "../../lib/consent-shown"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import {
@@ -175,8 +179,7 @@ export function CompleteSigningData({
   // representante legal y el que falta es el de este (revisión del 17 nov: abría el del paciente,
   // que ya lo tenía, y guardarlo no destrababa la firma).
   const withoutDoc = choices.filter((choice) => choice.kind === "representante" && !choice.doc)
-  const patientSigns =
-    !isMinor && choices[0]?.kind === "paciente" && !patient?.docNumber?.trim()
+  const patientSigns = !isMinor && choices[0]?.kind === "paciente" && !patient?.docNumber?.trim()
   const targets: Array<{ key: string; label: string; target: NonNullable<typeof open> }> =
     gap === "sin-representante"
       ? [{ key: "responsables", label: "Completar", target: { kind: "responsables" } }]
@@ -357,7 +360,7 @@ export function ConsentSigningScreen({
 }): React.JSX.Element | null {
   if (!open) return null
   return (
-    <SigningFlow
+    <SaveRisksThenSign
       key={documents.map((d) => d.id).join(",")}
       documents={documents}
       patientId={patientId}
@@ -367,7 +370,67 @@ export function ConsentSigningScreen({
   )
 }
 
+/**
+ * Lo que la persona firma es lo que se escribió para ella (QA de diseño del 18 nov, H1): si una hoja
+ * tiene riesgos propios escritos y sin guardar, se guardan primero y la hoja se abre ya con ellos
+ * («Guardar y firmar»). Vale para todo lugar desde el que se firma. Si no se pueden guardar (otro
+ * los cambió, ya se envió a su enlace), no se abre la firma: lo dice y lo escrito se conserva.
+ */
+function SaveRisksThenSign({
+  documents,
+  patientId,
+  onClose,
+  onSigned,
+}: {
+  documents: ConsentDocument[]
+  patientId: string
+  onClose: () => void
+  onSigned: () => Promise<void> | void
+}) {
+  const queryClient = useQueryClient()
+  const [ready, setReady] = useState<ConsentDocument[] | null>(() =>
+    documents.some((document) => risksDraftOf(document.id)) ? null : documents,
+  )
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir la firma.
+  useEffect(() => {
+    if (ready) return
+    let alive = true
+    saveRisksDraftsOf(documents)
+      .then(async (saved) => {
+        await queryClient.invalidateQueries({ queryKey: ["consents", patientId] })
+        if (alive) setReady(saved)
+      })
+      .catch((error: unknown) => {
+        void queryClient.invalidateQueries({ queryKey: ["consents", patientId] })
+        if (!alive) return
+        toast.error(`No se guardaron los riesgos propios, y no se abrió la firma. ${submitErrorOf(error).form ?? ""}`.trim())
+        onClose()
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+  if (!ready)
+    return (
+      <p
+        role="status"
+        className="fixed inset-x-0 bottom-6 z-50 mx-auto w-fit rounded-md border bg-popover px-4 py-2 text-sm shadow"
+      >
+        Guardando los riesgos propios…
+      </p>
+    )
+  return <SigningFlow documents={ready} patientId={patientId} onClose={onClose} onSigned={onSigned} />
+}
+
 type Step = { kind: "sign"; index: number } | { kind: "confirm" }
+
+/**
+ * Lo que dice la tablet cuando la hoja cambió después de mostrarse, y ya muestra solo la nueva. Le
+ * habla a quien atiende sin alarmar a quien firma: en tono neutro, no en rojo (QA de diseño del 18
+ * nov, H10).
+ */
+export const CONSENT_CHANGED_NOTICE =
+  "La hoja se puso al día con sus riesgos propios de ahora. Pídele que la lea otra vez y firme."
 
 interface SigningValues extends SignatureRegistration {
   signerContactId: string
@@ -378,7 +441,7 @@ interface SigningValues extends SignatureRegistration {
 }
 
 function SigningFlow({
-  documents,
+  documents: opened,
   patientId,
   onClose,
   onSigned,
@@ -391,6 +454,9 @@ function SigningFlow({
   const ids = useId()
   const rootRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
+  // Las hojas de esta pasada: si el servidor rechaza una porque sus riesgos propios cambiaron, se
+  // vuelve a leer y se muestra la nueva aquí mismo, sin recargar la página (QA del 18 nov).
+  const [documents, setDocuments] = useState(opened)
   const { choices, isMinor, patient, loading } = useSignerChoices(patientId)
   // El membrete, la declaración y la nota de firma vienen del servidor: lo que se lee es lo que se guarda.
   const frame = useQuery({
@@ -411,6 +477,8 @@ function SigningFlow({
   const [rejected, setRejected] = useState<{ error: unknown; index: number; done: number } | null>(
     null,
   )
+  // La hoja cambió después de mostrarse y ya está la nueva: un aviso neutro, no un error (H10).
+  const [sheetChanged, setSheetChanged] = useState<string | null>(null)
   const signAs = useSignAs()
   // Sin colegiatura, «Confirma que informaste» la pide ahí mismo, y la firma de la persona espera.
   const needsRegistration = signAs.missingRegistration
@@ -466,6 +534,8 @@ function SigningFlow({
           method: "clinica",
           // Ya lo firmó en su enlace y prefiere firmarlo de nuevo aquí.
           ...(document.personSignedAt ? { signAgain: true } : {}),
+          // La hoja que tuvo en pantalla: si sus riesgos propios cambiaron después, no se firma.
+          ...shownRisksField(personalRisksOf(document)),
         })
         done.add(document.id)
         setSigned(new Set(done))
@@ -489,6 +559,33 @@ function SigningFlow({
       // El perfil cambió en otra pestaña o no se guardó: se vuelve a leer y la colegiatura se pide.
       if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE")
         void queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+      // Los riesgos propios cambiaron después de mostrarse: se lee la hoja nueva y se vuelve a ella,
+      // con su casilla y su firma en blanco, para que la lea y firme otra vez.
+      if (error instanceof ApiError && error.shape.code === "CONSENT_CHANGED") {
+        const rejectedId = documents[index]?.id
+        const fresh = await fetchConsents({ patientId })
+          .then((response) => response.data.find((row) => row.id === rejectedId) ?? null)
+          .catch(() => null)
+        void queryClient.invalidateQueries({ queryKey: ["consents", patientId] })
+        if (fresh) {
+          setDocuments((sheets) => sheets.map((sheet) => (sheet.id === fresh.id ? fresh : sheet)))
+          const options = { dontUpdateMeta: true, dontValidate: true }
+          form.setFieldValue(`docs[${index}].understood`, false, options)
+          form.setFieldValue(`docs[${index}].strokes`, [], options)
+          setStep({ kind: "sign", index })
+          setSheetChanged(
+            done.size > 0
+              ? `${CONSENT_CHANGED_NOTICE} Quedaron firmados ${done.size} de ${total}.`
+              : CONSENT_CHANGED_NOTICE,
+          )
+          // La hoja se lee desde arriba otra vez.
+          requestAnimationFrame(() => {
+            titleRef.current?.scrollIntoView({ block: "start" })
+            titleRef.current?.focus({ preventScroll: true })
+          })
+          return
+        }
+      }
       setRejected({ error: registrationRejection(error), index, done: done.size })
       return
     }
@@ -624,7 +721,10 @@ function SigningFlow({
     setRejected(null)
   }, [rejected, form, total])
 
-  const advance = () => void submitForm(form, { root: rootRef.current })
+  const advance = () => {
+    setSheetChanged(null)
+    void submitForm(form, { root: rootRef.current })
+  }
   // «Volver»: al paso anterior; desde la primera firma, a elegir quién firma.
   const back =
     step.kind === "confirm"
@@ -735,7 +835,7 @@ function SigningFlow({
                 minor={isMinor}
                 accept={(declarationId) => (
                   <form.AppField
-                    key={`${current.id}-understood`}
+                    key={`${current.id}-${current.updatedAt}-understood`}
                     name={`docs[${step.index}].understood`}
                   >
                     {(field) => (
@@ -789,14 +889,14 @@ function SigningFlow({
                         </form.AppField>
                       ) : null}
                       <form.AppField
-                        key={`${current.id}-strokes`}
+                        key={`${current.id}-${current.updatedAt}-strokes`}
                         name={`docs[${step.index}].strokes`}
                       >
                         {(field) => (
                           <field.Group legend="Firma aquí con el dedo">
                             {(control) => (
                               <FirmaPad
-                                key={current.id}
+                                key={`${current.id}-${current.updatedAt}`}
                                 initialStrokes={field.state.value}
                                 label={`Firma de ${signer.name}`}
                                 id={control.id}
@@ -863,6 +963,10 @@ function SigningFlow({
           {error ? (
             <p role="alert" className="text-base text-destructive">
               {error}
+            </p>
+          ) : sheetChanged ? (
+            <p role="status" className="text-base text-muted-foreground">
+              {sheetChanged}
             </p>
           ) : null}
           {/* El nivel de firma va al pie de la hoja, como en el papel: aquí solo los botones. */}
@@ -1056,6 +1160,15 @@ export function PaperSignDrawer({
       }
       let paperDocumentId = uploaded.current?.file === value.file ? uploaded.current.id : null
       if (!paperDocumentId) {
+        // Antes de subir la foto: si el servidor no la firmaría (los riesgos propios cambiaron después
+        // de imprimirla), lo dice ahora y no queda una «Hoja firmada» que no firma nada.
+        await checkConsentPaperSheet(document.id, personalRisksOf(document)).catch(
+          (error: unknown) => {
+            if (error instanceof ApiError && error.shape.code === "CONSENT_CHANGED")
+              void queryClient.invalidateQueries({ queryKey: ["consents", patientId] })
+            throw error
+          },
+        )
         const sheet = await uploadPatientFile(patientId, value.file, {
           category: "consentimiento",
           label: `Hoja firmada: ${document.titleSnapshot}`,
@@ -1075,6 +1188,8 @@ export function PaperSignDrawer({
         comprehensionConfirmed: true,
         method: "papel",
         paperDocumentId,
+        // La hoja a la vista; el servidor compara con la que anotó al imprimirse, si la hay.
+        ...shownRisksField(personalRisksOf(document)),
       }).catch((error: unknown) => {
         if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE")
           void queryClient.invalidateQueries({ queryKey: ["professional-profile"] })

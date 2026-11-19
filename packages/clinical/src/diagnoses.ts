@@ -325,6 +325,18 @@ export function isPulpNecrosis(code: string | null | undefined): boolean {
   return /^K04\.[15-8]/.test(value)
 }
 
+/**
+ * La pulpa que dice un diagnóstico, para elegir la endodoncia vital o la no vital: la pulpitis
+ * (K04.0, DA09.0) está viva; la necrosis y lo que la presupone (`isPulpNecrosis`), no. Lo demás,
+ * también la periodontitis apical aguda (K04.4, DA09.70), que puede venir con la pulpa viva, no lo
+ * dice: null.
+ */
+export function pulpStateOfDiagnosis(code: string | null | undefined): "vital" | "necrotic" | null {
+  if (!code) return null
+  if (isPulpNecrosis(code)) return "necrotic"
+  return /^(?:K04\.0|DA09\.0)/.test(code.trim().toUpperCase()) ? "vital" : null
+}
+
 /** Los diagnósticos pulpares de esa lista, o ninguno si no tiene atajos. */
 export function pulpDiagnosisChoices(system: DiagnosisSystemKey): readonly PulpDiagnosisChoice[] {
   return PULP_DIAGNOSES[system === "ICD-10-PE" ? "ICD-10" : system] ?? []

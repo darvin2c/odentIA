@@ -1,4 +1,4 @@
-import { medicalLeaveWords } from "@odentia/clinical"
+import { isLeftOut, medicalLeaveWords } from "@odentia/clinical"
 import {
   Button,
   DropdownMenu,
@@ -34,6 +34,7 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { teethWords } from "../../lib/document-list"
 import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
@@ -49,6 +50,7 @@ import {
   consentLinkWords,
   SendToSignDialog,
 } from "./consent-link-actions"
+import { personalRisksEditable } from "./consent-personal-risks"
 import {
   CompleteSigningData,
   ConsentSigningScreen,
@@ -106,13 +108,23 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * formularios, imágenes y archivos. Una sola lectura para el bloque, su
  * resumen y el cierre: React Query comparte las consultas.
  */
+/** Los estados de un tratamiento que todavía se hará: los que el servidor deja consentir. */
+const ITEM_STILL_DONE = new Set(["pendiente", "programado", "en_curso"])
+
 /**
  * Lo que falta firmar lo dice el servidor (lo que la atención pide): uno preparado
- * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) ya no se
- * pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su enlace sigue su
- * curso. Mientras lo que pide se vuelve a leer, nada se da por «ya no se pide», ni
- * el recién preparado para un tratamiento que lo pide y que lo pedido todavía no
- * nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
+ * para lo que la persona dejó fuera (no lo aceptó o eligió otro camino) o para lo
+ * anulado ya no se pide. Queda a la vista, sin «Firmar ahora». Lo que ya va por su
+ * enlace sigue su curso. Mientras lo que pide se vuelve a leer, nada se da por «ya
+ * no se pide», ni el recién preparado para un tratamiento que lo pide y que lo
+ * pedido todavía no nombra: decía «Ya no se pide» de él (QA en pantalla del 17 nov, D3).
+ *
+ * El de un tratamiento de la atención que sigue en pie («Por decidir», aceptado o por
+ * hacer) se sigue pidiendo aunque hoy no se haga: el Plan dice «falta firmarlo» de él,
+ * y Documentos decía «Ya no se pide: no lo aceptó o eligió otra opción» (QA del 18 nov,
+ * novato 1). Lo que pide la atención solo cuenta lo que se hace hoy, porque eso es lo
+ * que se pide al cerrar; «ya no se pide» es otra cosa: lo dejado fuera o anulado
+ * (`isLeftOut`, la misma regla del servidor).
  */
 export function consentsStillAsked<
   T extends {
@@ -130,19 +142,26 @@ export function consentsStillAsked<
     }
     isFetching: boolean
   },
+  /** Los tratamientos de la atención (los traídos y los indicados en ella). */
+  items: ReadonlyArray<{ id: string; status: string; decisionStatus?: string | null }> = [],
 ): { pendingSignatures: T[]; notAsked: T[]; toSign: T[] } {
   const list = needs.data && !needs.isFetching ? needs.data.data : null
+  const stillDone = (doc: T) => {
+    const item = doc.planItemId ? items.find((candidate) => candidate.id === doc.planItemId) : undefined
+    return !!item && ITEM_STILL_DONE.has(item.status) && !isLeftOut(item.decisionStatus)
+  }
   const isAsked = (doc: T) =>
     list != null &&
-    list.some(
-      (need) =>
-        need.documentId === doc.id ||
-        // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
-        (need.documentId == null &&
-          need.planItemId != null &&
-          need.planItemId === doc.planItemId &&
-          (need.templateId == null || need.templateId === doc.templateId)),
-    )
+    (stillDone(doc) ||
+      list.some(
+        (need) =>
+          need.documentId === doc.id ||
+          // Aún sin preparar en lo que se leyó, pero es el de ese tratamiento: el recién preparado.
+          (need.documentId == null &&
+            need.planItemId != null &&
+            need.planItemId === doc.planItemId &&
+            (need.templateId == null || need.templateId === doc.templateId)),
+      ))
   const notAsked = list
     ? pending.filter((doc) => !isAsked(doc) && !doc.linkSentAt && !doc.personSignedAt)
     : []
@@ -153,6 +172,43 @@ export function consentsStillAsked<
     // Lo firmado en su enlace solo falta confirmarlo; lo enviado de algo que ya no se pide, no se ofrece aquí.
     toSign: pendingSignatures.filter((doc) => !doc.personSignedAt && (!list || isAsked(doc))),
   }
+}
+
+/**
+ * Lo que de los pendientes agrupados ya tiene en su enlace: todos, o cuántos de ellos. Decía «lo
+ * tiene en su enlace» de todos aunque solo uno se le mostró (QA del 18 nov, desarrollo).
+ */
+export function inLinkWords(docs: ReadonlyArray<{ linkSentAt?: string | null }>): string {
+  const sent = docs.filter((doc) => doc.linkSentAt).length
+  if (sent === 0) return ""
+  if (sent < docs.length) return ` · ${sent} de ${docs.length} en su enlace`
+  return docs.length === 1 ? " · lo tiene en su enlace" : " · los tiene en su enlace"
+}
+
+type SiteOf = { toothNumber: number | null; quadrant?: number | null; arch?: string | null }
+const hasSite = (row: SiteOf) => row.toothNumber != null || row.quadrant != null || row.arch != null
+
+/**
+ * El diagnóstico con que viene el consentimiento nuevo de la atención: el de lo que se registró
+ * (el suyo o el de la atención en la misma pieza); sin pieza, el que tampoco la tiene. Nunca el de
+ * otra pieza: la exodoncia de la 48 no se firmaba con la pulpitis de la 36 (verificación del
+ * 18 nov). La misma regla que «Preparar» en el servidor.
+ */
+export function consentDefaultDiagnosis(
+  procedures: ReadonlyArray<SiteOf & { diagnosisCode: string | null; diagnosisSystem?: string | null; voidedAt?: string | null }>,
+  diagnoses: ReadonlyArray<SiteOf & { diagnosisCode: string; diagnosisSystem: string; voidedAt: string | null }>,
+): { code: string; system: string | null } | null {
+  const proc = procedures.find((row) => !row.voidedAt)
+  if (proc?.diagnosisCode) return { code: proc.diagnosisCode, system: proc.diagnosisSystem ?? null }
+  const active = diagnoses.filter((dx) => !dx.voidedAt)
+  const tooth = proc?.toothNumber ?? null
+  const found =
+    tooth != null
+      ? active.find((dx) => dx.toothNumber === tooth)
+      : proc && hasSite(proc)
+        ? undefined
+        : active.find((dx) => !hasSite(dx))
+  return found ? { code: found.diagnosisCode, system: found.diagnosisSystem } : null
 }
 
 export function useEncounterDocuments(
@@ -224,10 +280,11 @@ export function useEncounterDocuments(
   const { pendingSignatures, notAsked, toSign } = consentsStillAsked(
     ownConsents.filter((doc) => doc.status === "pendiente"),
     needs,
+    [...detail.plannedItems, ...detail.indicatedItems],
   )
   return {
     needs: needList,
-    /** Preparado para lo que dejó fuera: ya no hace falta firmarlo. */
+    /** Preparado para lo que dejó fuera o se anuló: ya no hace falta firmarlo. */
     notAsked,
     toPrepare: needList.filter((need) => need.status === "sin_preparar"),
     unpublished: needList.filter((need) => need.status === "sin_publicar"),
@@ -253,7 +310,7 @@ export function useEncounterDocuments(
 
 /** El papel que se abre al lado con «Ver»: su PDF, con «Enviar» e «Imprimir». */
 type ViewedPaper =
-  | { kind: "consent"; document: ConsentDocument }
+  | { kind: "consent"; document: ConsentDocument; focusRisks?: boolean }
   | { kind: "prescription"; prescription: Prescription }
   | { kind: "order"; order: ClinicalOrder }
   | { kind: "leave"; leave: MedicalLeave }
@@ -320,6 +377,8 @@ export function EncounterDocumentsBlock({
   const [sendingDoc, setSendingDoc] = useState<ConsentDocument | null>(null)
   const [phoneDoc, setPhoneDoc] = useState<ConsentDocument | null>(null)
   const [viewing, setViewing] = useState<ViewedPaper | null>(null)
+  // Lo escrito en «Riesgos propios» sin guardar: «Guardar y firmar» y la línea de la fila lo dicen.
+  const risksDrafts = useRisksDrafts()
   const [openForm, setOpenForm] = useState<string | null>(null)
   const [paperFor, setPaperFor] = useState<ConsentNeed | null>(null)
 
@@ -390,6 +449,7 @@ export function EncounterDocumentsBlock({
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode
   const firstDiagnosisSystem = firstActive?.diagnosisSystem
+  const consentDiagnosis = consentDefaultDiagnosis(activeProcedures, detail.diagnoses ?? [])
   const who = useConsentSignerWord(patientId, firstName(patient))
 
   const startNew = (kind: NewDocumentKind) => {
@@ -543,7 +603,7 @@ export function EncounterDocumentsBlock({
                 {pendingTitles.length === 1
                   ? `Falta la firma de ${who}`
                   : `Faltan las firmas de ${who}`}
-                {docs.toSign.some((doc) => doc.linkSentAt) ? " · lo tiene en su enlace" : ""}
+                {inLinkWords(docs.toSign)}
               </span>
               {(() => {
                 const block = docs.toSign.find((doc) => doc.phoneSignBlock)?.phoneSignBlock
@@ -564,6 +624,33 @@ export function EncounterDocumentsBlock({
                   </span>
                 )
               })()}
+              {/* Los riesgos propios que lleva la hoja, en la fila (lienzo P5): se ven antes de firmar,
+                  y «Revisar» abre el papel con el foco en ellos (QA de diseño del 18 nov, H2). */}
+              {canWrite
+                ? docs.toSign.filter(personalRisksEditable).map((doc) => {
+                    const count = doc.sectionsSnapshot?.personalRisks?.length ?? 0
+                    const unsaved = risksDrafts.has(doc.id)
+                    if (count === 0 && !unsaved) return null
+                    return (
+                      <span key={`riesgos-${doc.id}`} className="text-xs text-muted-foreground">
+                        {pendingTitles.length === 1
+                          ? "Riesgos propios"
+                          : `Riesgos propios de ${doc.titleSnapshot}`}
+                        : {unsaved ? "cambios sin guardar" : count} ·{" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 text-xs"
+                          aria-label={`Revisar los riesgos propios de ${doc.titleSnapshot}`}
+                          onClick={() => setViewing({ kind: "consent", document: doc, focusRisks: true })}
+                        >
+                          Revisar
+                        </Button>
+                      </span>
+                    )
+                  })
+                : null}
             </div>
             <div className="flex items-center gap-1">
               {/* «Ver» abre el documento tal como lo firmará el paciente, sin firmar nada. Con
@@ -611,7 +698,9 @@ export function EncounterDocumentsBlock({
                 disabled={disabled}
                 onClick={() => setSigning(docs.toSign)}
               >
-                Firmar ahora
+                {hasRisksDraft(risksDrafts, { documentIds: docs.toSign.map((doc) => doc.id) })
+                  ? "Guardar y firmar"
+                  : "Firmar ahora"}
               </Button>
               <RowActions
                 label="Otras formas de firmar"
@@ -699,7 +788,7 @@ export function EncounterDocumentsBlock({
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
               <span className="text-xs text-muted-foreground">
-                Ya no se pide: no lo aceptó o eligió otra opción
+                Ya no se pide: no lo aceptó, eligió otra opción o se anuló
               </span>
             </div>
             <Button
@@ -873,8 +962,8 @@ export function EncounterDocumentsBlock({
           encounterId={encounterId}
           defaultProcedureRef={procedureRef}
           todayPlanItemIds={activeProcedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : []))}
-          defaultDiagnosisCode={firstDiagnosis}
-          defaultDiagnosisSystem={firstDiagnosisSystem}
+          defaultDiagnosisCode={consentDiagnosis?.code}
+          defaultDiagnosisSystem={consentDiagnosis?.system ?? undefined}
           onClose={() => setCreating(null)}
           onCreated={async () => {
             setCreating(null)
@@ -970,6 +1059,7 @@ export function EncounterDocumentsBlock({
           document={docs.consents.find((doc) => doc.id === viewing.document.id) ?? viewing.document}
           onClose={() => setViewing(null)}
           onChanged={refresh}
+          focusRisks={viewing.focusRisks}
         />
       ) : viewing?.kind === "prescription" ? (
         <PrescriptionPaper

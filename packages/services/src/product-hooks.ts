@@ -649,8 +649,17 @@ export interface ProductHooks {
   ): Promise<RecordPaper[]>
   /** Las fases del plan del producto, en su orden (odentIA: urgencia → mantenimiento). */
   planPhases: readonly string[]
-  /** La fase que propone un tipo de tratamiento de la biblioteca. */
-  phaseFor(kind: string | null): string
+  /**
+   * La fase que propone un tratamiento que se indica o se cambia, por el tipo de su servicio en la
+   * biblioteca y sus diagnósticos: el suyo y los vigentes de la atención en su mismo sitio
+   * (odentIA: la pulpitis de la 36 propone «Urgencia» para su endodoncia).
+   */
+  phaseFor(
+    kind: string | null,
+    diagnoses: ReadonlyArray<{ system: string | null; code: string | null }>,
+    /** Su clave en la biblioteca (odentIA: la apicectomía va en la quirúrgica, como cirugía). */
+    libraryKey?: string | null,
+  ): string
   /**
    * Las familias de cada tratamiento de la biblioteca (odentIA: lo que deja en la pieza,
    * «crown», y su familia anatómica, «pulpectomia-deciduo»), por id del tratamiento: con ella se une cada servicio a
@@ -659,8 +668,9 @@ export interface ProductHooks {
    */
   treatmentFamiliesOf?(tx: Db, templateIds: readonly string[]): Promise<Map<string, string[]>>
   /**
-   * De estos servicios, los que son una exodoncia (odentIA: los que dejan la pieza ausente): al
-   * indicarla, el plan dice lo que toma y la cambia (`extractionRisksOf`). Sin él, ninguno.
+   * De estos servicios, los que son una cirugía sobre el hueso de los maxilares (odentIA: los que
+   * dejan la pieza ausente, el implante y la cirugía oral): al indicarla, el plan dice lo que toma y
+   * la cambia (`extractionRisksOf`). Sin él, ninguno.
    */
   extractionServiceIds?(tx: Db, orgId: string, serviceIds: readonly string[]): Promise<Set<string>>
   /**

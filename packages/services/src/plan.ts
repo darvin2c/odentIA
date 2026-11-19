@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import {
   encounter,
+  encounterDiagnosis,
   encounterPlanItem,
   encounterProcedure,
   patientCharge,
@@ -705,6 +706,148 @@ function assertPhase(hooks: ProductHooks, value: string | null | undefined): str
   return value
 }
 
+/**
+ * La fase que propone el producto para un tratamiento que se indica o se cambia (`phaseFor`): por
+ * el tipo de su servicio y por sus diagnósticos, el suyo y los vigentes de las atenciones dadas en
+ * su mismo sitio. Hace falta mirar la atención porque lo dictado se indica sin diagnóstico: la
+ * endodoncia de la 36 junto a la pulpitis de la 36 registrada en la atención (reglas clínicas,
+ * 18 nov). Sin sitio, solo el suyo.
+ */
+async function proposedPhaseOf(
+  tx: Db,
+  orgId: string,
+  hooks: ProductHooks,
+  input: {
+    patientId: string
+    service: { templateId: string | null; specialtyId: string | null } | null
+    encounterIds: readonly string[]
+    site: { siteSystem: string | null; siteCode: string | null }
+    own: { diagnosisSystem: string | null; diagnosisCode: string | null }
+  },
+): Promise<string> {
+  const diagnoses: Array<{ system: string | null; code: string | null }> = input.own.diagnosisCode
+    ? [{ system: input.own.diagnosisSystem, code: input.own.diagnosisCode }]
+    : []
+  if (input.site.siteSystem && input.site.siteCode && input.encounterIds.length) {
+    const rows = await tx
+      .select({ system: encounterDiagnosis.diagnosisSystem, code: encounterDiagnosis.diagnosisCode })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.patientId, input.patientId),
+          inArray(encounterDiagnosis.encounterId, [...input.encounterIds]),
+          eq(encounterDiagnosis.siteSystem, input.site.siteSystem),
+          eq(encounterDiagnosis.siteCode, input.site.siteCode),
+          eq(encounterDiagnosis.status, "activo"),
+          isNull(encounterDiagnosis.voidedAt),
+        ),
+      )
+    diagnoses.push(...rows)
+  }
+  const templateId = input.service?.templateId
+  const [template] = templateId
+    ? await tx
+        .select({ key: treatmentTemplate.key })
+        .from(treatmentTemplate)
+        .where(eq(treatmentTemplate.id, templateId))
+        .limit(1)
+    : []
+  return hooks.phaseFor(
+    input.service ? await serviceKindOf(tx, orgId, input.service) : null,
+    diagnoses,
+    template?.key ?? null,
+  )
+}
+
+/** Alguien eligió su fase con «Planificar…»: lo que se recalcula al cambiarlo no se la pisa. */
+async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: auditEvent.id })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "treatment_plan_item"),
+        eq(auditEvent.entityId, itemId),
+        eq(auditEvent.action, "plan.item_planned"),
+        sql`${auditEvent.metadata}->>'phase' is not null`,
+      ),
+    )
+    .limit(1)
+  return Boolean(row)
+}
+
+/**
+ * Un diagnóstico anotado en la atención vuelve a proponer la fase de lo indicado en ella en ese
+ * mismo sitio (reglas clínicas del 18 nov): la pulpitis de la 36 anotada después de indicar su
+ * endodoncia la lleva a «Urgencia». La misma regla que al indicar (`proposedPhaseOf`); no toca lo
+ * que alguien planificó a mano con «Planificar…» ni lo cerrado, y lo que cambia de fase entra al
+ * final de la nueva, como con «Planificar…».
+ */
+export async function reproposePhasesAtSite(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  site: { siteSystem: string | null; siteCode: string | null },
+): Promise<void> {
+  if (!site.siteSystem || !site.siteCode) return
+  const items = await tx
+    .select({
+      id: treatmentPlanItem.id,
+      planId: treatmentPlanItem.planId,
+      phase: treatmentPlanItem.phase,
+      status: treatmentPlanItem.status,
+      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
+      diagnosisCode: treatmentPlanItem.diagnosisCode,
+      templateId: serviceCatalog.templateId,
+      specialtyId: serviceCatalog.specialtyId,
+      serviceId: serviceCatalog.id,
+    })
+    .from(treatmentPlanItem)
+    .leftJoin(
+      serviceCatalog,
+      and(eq(serviceCatalog.id, treatmentPlanItem.serviceId), eq(serviceCatalog.organizationId, treatmentPlanItem.organizationId)),
+    )
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        eq(treatmentPlanItem.siteSystem, site.siteSystem),
+        eq(treatmentPlanItem.siteCode, site.siteCode),
+      ),
+    )
+  const open = items.filter((item) => !CLOSED_STATUSES.includes(item.status))
+  if (open.length === 0) return
+  const hooks = await hooksOf(tx, orgId)
+  for (const item of open) {
+    if (await phaseChosenByHand(tx, orgId, item.id)) continue
+    const phase = await proposedPhaseOf(tx, orgId, hooks, {
+      patientId,
+      service: item.serviceId ? { templateId: item.templateId, specialtyId: item.specialtyId } : null,
+      encounterIds: [encounterId],
+      site,
+      own: { diagnosisSystem: item.diagnosisSystem, diagnosisCode: item.diagnosisCode },
+    })
+    if (phase === item.phase) continue
+    await lockPlanRow(tx, orgId, patientId, item.planId)
+    await tx
+      .update(treatmentPlanItem)
+      .set({ phase, sortOrder: await nextSortOrder(tx, orgId, item.planId), updatedAt: new Date() })
+      .where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
+    await audit(tx, orgId, actorUserId, "plan.item_phase_proposed", "treatment_plan_item", item.id, {
+      patientId,
+      planId: item.planId,
+      from: item.phase,
+      phase,
+      encounterId,
+    })
+  }
+}
+
 function assertPlannedSessions(value: number | null | undefined): number | null {
   if (value === undefined || value === null) return null
   if (!Number.isInteger(value) || value < 1 || value > 60)
@@ -1102,8 +1245,9 @@ async function planItemSessionsOf(
 }
 
 /**
- * Las exodoncias por hacer (QA final de formularios, Y2): lo que dice el producto que es una
- * (`extractionServiceIds`), sin lo hecho, cancelado o reemplazado.
+ * Las exodoncias, implantes y cirugías por hacer (QA final de formularios, Y2; reglas clínicas del
+ * 18 nov): lo que dice el producto que es una (`extractionServiceIds`), sin lo hecho, cancelado o
+ * reemplazado.
  */
 async function extractionItemsOf(
   tx: Db,
@@ -1142,9 +1286,17 @@ export async function addPlanItem(
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem }, "diagnosisCode")
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
-  // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
+  // La fase la propone la especialidad de la clínica por su clave de la biblioteca y, en odentIA,
+  // su diagnóstico o el de la atención en la misma pieza (la pulpitis propone «Urgencia»).
   const phase =
-    assertPhase(hooks, input.phase) ?? hooks.phaseFor(await serviceKindOf(tx, orgId, service))
+    assertPhase(hooks, input.phase) ??
+    (await proposedPhaseOf(tx, orgId, hooks, {
+      patientId,
+      service,
+      encounterIds: [encounterId],
+      site: itemSite,
+      own: diagnosis,
+    }))
   // Nace con las sesiones habituales de su servicio (ADR 0164): una endodoncia
   // de dos no se termina en su primera firma (ADR 0161).
   const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? service.usualSessions
@@ -1261,9 +1413,16 @@ export async function addPlanItemsBatch(
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   const rows: PlanItemRow[] = []
-  const phase = hooks.phaseFor(await serviceKindOf(tx, orgId, service))
   let sortOrder = await nextSortOrder(tx, orgId, plan.id)
   for (const itemSite of sites) {
+    // Cada pieza con la suya: la pulpitis de la 36 no adelanta la de la 46.
+    const phase = await proposedPhaseOf(tx, orgId, hooks, {
+      patientId,
+      service,
+      encounterIds: [input.sourceEncounterId.trim()],
+      site: itemSite,
+      own: diagnosis,
+    })
     const [row] = await tx
       .insert(treatmentPlanItem)
       .values({
@@ -1362,6 +1521,7 @@ export async function updatePlanItem(
   const set: Partial<typeof treatmentPlanItem.$inferInsert> = {}
   const fields: string[] = []
   const hooks = await hooksOf(tx, orgId)
+  let newService: ServiceRow | null = null
   let itemSite: SiteColumns = { siteSystem: current.siteSystem, siteCode: current.siteCode, siteQualifiers: current.siteQualifiers }
   let scope = assertScopeValue(hooks.site, current.scope)
   // El sitio pedido: lo que llegó sobre lo que ya tenía.
@@ -1392,9 +1552,8 @@ export async function updatePlanItem(
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
       // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
       if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
-      // Y su fase: la exodoncia cambiada por una endodoncia no se queda en la quirúrgica (QA del 9 nov,
-      // repaso 3). Es la misma regla que al indicar; el orden del plan sale de ella («va después»).
-      set.phase = hooks.phaseFor(await serviceKindOf(tx, orgId, service))
+      // Su fase se vuelve a proponer más abajo, con el diagnóstico que quede.
+      newService = service
       fields.push("serviceId")
     }
   }
@@ -1439,6 +1598,38 @@ export async function updatePlanItem(
     fields.push("diagnosisCode")
   }
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
+  // Cambió el servicio, el sitio o el diagnóstico: su fase se vuelve a proponer con la misma regla
+  // que al indicar (la exodoncia cambiada por una endodoncia no se queda en la quirúrgica, QA del
+  // 9 nov; la endodoncia de una pulpitis va a «Urgencia», reglas clínicas del 18 nov), salvo que
+  // alguien la haya elegido a mano con «Planificar…». El orden del plan sale de ella («va después»).
+  if (
+    fields.some((field) => field === "serviceId" || field === "site" || field === "diagnosisCode") &&
+    !(await phaseChosenByHand(tx, orgId, current.id))
+  ) {
+    const [kept] =
+      newService || !current.serviceId
+        ? []
+        : await tx
+            .select({ templateId: serviceCatalog.templateId, specialtyId: serviceCatalog.specialtyId })
+            .from(serviceCatalog)
+            .where(and(eq(serviceCatalog.id, current.serviceId), eq(serviceCatalog.organizationId, orgId)))
+            .limit(1)
+    const encounterIds = [current.sourceEncounterId, patch.encounterId.trim()].filter(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    )
+    set.phase = await proposedPhaseOf(tx, orgId, hooks, {
+      patientId,
+      service: newService ?? kept ?? null,
+      encounterIds: [...new Set(encounterIds)],
+      site: { siteSystem: itemSite.siteSystem, siteCode: itemSite.siteCode },
+      own: {
+        diagnosisSystem: "diagnosisCode" in set ? (set.diagnosisSystem ?? null) : current.diagnosisSystem,
+        diagnosisCode: "diagnosisCode" in set ? (set.diagnosisCode ?? null) : current.diagnosisCode,
+      },
+    })
+    // Al cambiar de fase entra al final de la nueva, como con «Planificar…».
+    if (set.phase !== current.phase) set.sortOrder = await nextSortOrder(tx, orgId, current.planId)
+  }
   const [updated] = await tx
     .update(treatmentPlanItem)
     .set({ ...set, updatedAt: new Date() })

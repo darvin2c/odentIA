@@ -272,12 +272,13 @@ describe("las fases y el precio de cada fila", () => {
     await screen.findByText("Corona")
     const list = screen.getAllByRole("listitem").map((row) => row.textContent ?? "")
     const at = (text: string) => list.findIndex((row) => row.startsWith(text))
-    expect(list.filter((row) => row === "Fase básica")).toHaveLength(1)
-    expect(list.filter((row) => row === "Fase rehabilitadora")).toHaveLength(1)
-    expect(at("Fase básica")).toBeLessThan(at("Profilaxis"))
-    expect(at("Profilaxis")).toBeLessThan(at("Fase rehabilitadora"))
-    expect(at("Fase rehabilitadora")).toBeLessThan(at("Corona"))
-    expect(at("Fase rehabilitadora")).toBeLessThan(at("Resina"))
+    // El mismo nombre que en la ficha: «Fase 1 · Básica», no «Fase básica» (QA de diseño del 18 nov, H11).
+    expect(list.filter((row) => row === "Fase 1 · Básica")).toHaveLength(1)
+    expect(list.filter((row) => row === "Fase 2 · Rehabilitadora")).toHaveLength(1)
+    expect(at("Fase 1 · Básica")).toBeLessThan(at("Profilaxis"))
+    expect(at("Profilaxis")).toBeLessThan(at("Fase 2 · Rehabilitadora"))
+    expect(at("Fase 2 · Rehabilitadora")).toBeLessThan(at("Corona"))
+    expect(at("Fase 2 · Rehabilitadora")).toBeLessThan(at("Resina"))
   })
 
   it("el precio sale solo de lo que aún no empezó, aunque quien mira no vea la caja (QA en pantalla del 17 nov)", async () => {

@@ -7,15 +7,15 @@
 import {
   type AnesthesiaAtSigning,
   ageInYears,
-  epinephrineCapOf,
-  isCardiacCondition,
+  anesthesiaWeightKg,
+  epinephrineCheckOf,
   localAnesthesiaWords,
   localAnestheticOf,
   type Vitals,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientCondition } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientCondition } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { localAnesthesiaSql } from "./service-catalog.js"
@@ -75,9 +75,33 @@ export async function anesthesiaAtSigningOf(
     today: string
     anesthetic: string | null | undefined
     asksAsa: boolean
+    /** La zona de la clínica: sin peso en esta atención, el anotado ese día en otra (`anesthesiaWeightKg`). */
+    timeZone?: string
   },
 ): Promise<AnesthesiaAtSigning | null> {
   if (input.uses.length === 0) return null
+  const sameDay =
+    input.timeZone && !(typeof input.vitals?.peso === "number" && input.vitals.peso > 0)
+      ? await tx
+          .select({ status: encounter.status, vitals: encounter.vitals, startedAt: encounter.startedAt })
+          .from(encounter)
+          .where(
+            and(
+              eq(encounter.organizationId, orgId),
+              eq(encounter.patientId, input.patientId),
+              sql`${encounter.id} <> ${input.encounterId}`,
+              sql`(${encounter.startedAt} at time zone ${input.timeZone})::date = ${input.today}::date`,
+            ),
+          )
+      : []
+  const weight = anesthesiaWeightKg(
+    input.vitals?.peso,
+    sameDay.map((row) => ({
+      status: row.status,
+      weightKg: (row.vitals as Vitals | null)?.peso,
+      startedAt: row.startedAt,
+    })),
+  ).kg
   const [header] = await tx
     .select({ asaClass: patient.asaClass, setAt: patient.asaClassSetAt, setBy: user.name })
     .from(patient)
@@ -103,7 +127,11 @@ export async function anesthesiaAtSigningOf(
         .limit(1)
     : []
   const conditions = await tx
-    .select({ system: patientCondition.diagnosisSystem, code: patientCondition.diagnosisCode })
+    .select({
+      name: patientCondition.name,
+      diagnosisSystem: patientCondition.diagnosisSystem,
+      diagnosisCode: patientCondition.diagnosisCode,
+    })
     .from(patientCondition)
     .where(
       and(
@@ -112,20 +140,24 @@ export async function anesthesiaAtSigningOf(
         eq(patientCondition.status, "activa"),
       ),
     )
-  const cardiac = epinephrineCapOf({
-    cardiacCondition: conditions.some((row) => isCardiacCondition(row.system, row.code)),
-    asaClass: header?.asaClass,
+  const ageYears = ageInYears(input.birthDate, input.today)
+  // La misma regla que la línea de la atención (`epinephrineCheckOf`).
+  const epinephrine = epinephrineCheckOf({
+    conditions,
+    asaClass,
+    vitals: input.vitals ?? null,
+    ageYears,
   })
   const anesthetic = localAnestheticOf(input.anesthetic)
-  const weightKg = input.vitals?.peso ?? null
+  const weightKg = weight
   const words = anesthetic
     ? localAnesthesiaWords({
         weightKg,
         anesthetic: anesthetic.key,
-        ageYears: ageInYears(input.birthDate, input.today),
-        cardiac,
+        ageYears,
+        epinephrine,
       })
-    : { dose: null, warnings: [] }
+    : { cap: null, dose: null, warnings: [] }
   return {
     uses: [...input.uses],
     asaClass,
@@ -136,6 +168,8 @@ export async function anesthesiaAtSigningOf(
     asaSetAt: asaClass ? (header?.setAt?.toISOString() ?? null) : null,
     weightKg,
     anesthetic: anesthetic?.label ?? null,
+    // Lo que manda primero, como en la pantalla (QA de diseño del 18 nov, H7).
+    cap: words.cap,
     dose: words.dose,
     warnings: words.warnings,
   }

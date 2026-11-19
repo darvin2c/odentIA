@@ -26,6 +26,7 @@ import {
   doseText,
   findHabitualMedication,
   HABITUAL_MEDICATIONS,
+  matchHabitualMedication,
   type MedicationCatalog,
   MEDICATION_FREQUENCIES,
   MEDICATION_FREQUENCY_LABELS,
@@ -1538,20 +1539,34 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
   ]
 }
 
+/**
+ * El nombre del medicamento en medio de la frase, en minúscula como en la franja: «Toma apixabán 5 mg»,
+ * no «Toma Apixabán» como viene del catálogo (verificación del 18 nov). Una sigla («AAS») y una marca
+ * que la lista escribe con mayúscula («Eliquis», `HABITUAL_MEDICATIONS`) quedan como están.
+ */
+function drugMidSentence(name: string): string {
+  if (!/^\p{Lu}\p{Ll}/u.test(name)) return name
+  const listed = matchHabitualMedication(name, HABITUAL_MEDICATIONS)?.name
+  if (listed && /^\p{Lu}/u.test(listed)) return name
+  return name.charAt(0).toLocaleLowerCase("es") + name.slice(1)
+}
+
 /** Los antagonistas de la vitamina K (warfarina, acenocumarol): con ellos, el INR del día antes de extraer. */
 const VITAMIN_K_ANTAGONISTS_ATC = "B01AA"
 /**
- * Sus nombres (DCI): la clase la marca el código, pero quien la dijo con su dosis («warfarina 5 mg»)
- * queda con el código del grupo; dentro de la clase ya marcada, el nombre dice si es una de estas.
+ * Lo guardado antes de reconocer los nombres con la dosis quedó con el código del grupo («warfarina 5
+ * mg», B01A): dentro de la clase ya marcada, su nombre estándar dice si es una de estas.
  */
-const VITAMIN_K_ANTAGONISTS = HABITUAL_MEDICATIONS.filter((entry) => entry.atc.startsWith(VITAMIN_K_ANTAGONISTS_ATC)).map(
-  (entry) => normalizeDrugText(entry.dci),
-)
+const isVitaminKAntagonistName = (name: string) =>
+  matchHabitualMedication(name, HABITUAL_MEDICATIONS)?.entry.atc.startsWith(VITAMIN_K_ANTAGONISTS_ATC) ?? false
 
 /**
- * Lo que cambia una exodoncia de lo que toma (QA final de formularios, Y2 de la voz clínica; §D de la
- * entrega 6): un anticoagulante o antiagregante (SDCEP: con warfarina, su INR de las últimas 24 horas)
- * y una medicina para los huesos, también la que ya dejó (AAOMS 2022: el riesgo de osteonecrosis sigue).
+ * Lo que cambia una exodoncia, un implante o una cirugía oral de lo que toma (QA final de formularios,
+ * Y2 de la voz clínica; §D de la entrega 6; reglas clínicas del 18 nov): un anticoagulante o
+ * antiagregante (SDCEP: con warfarina, su INR de las últimas 24 horas) y una medicina para los huesos,
+ * también la que ya dejó (AAOMS 2022: el riesgo de osteonecrosis sigue y es de toda cirugía que
+ * expone hueso). La medicina escrita con su nombre estándar y la dosis («alendronato 70 mg semanal»)
+ * lleva el código de su DCI (`matchHabitualMedication`) y cuenta igual.
  * Con quién lo dijo y cuándo, si nadie lo revisó: «Toma warfarina 5 mg (lo dijo ella el 14 nov): pide
  * su INR del día». Es un aviso: no frena indicar ni hacer nada.
  */
@@ -1582,9 +1597,9 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
     const what =
       row.name === MEDICATION_CLASSES[group].unnamed
         ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
-        : row.name
+        : drugMidSentence(row.name)
     const vitaminK =
-      row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || VITAMIN_K_ANTAGONISTS.some((dci) => normalizeDrugText(row.name).startsWith(dci))
+      row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || isVitaminKAntagonistName(row.name)
     // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
     const advice =
       group === "boneMedicines"

@@ -12,6 +12,7 @@ import {
   encounterPlanItem,
   serviceCatalog,
   treatmentPlanItem,
+  treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { issuedPaper } from "@odentia/db/schema/clinical-forms"
 import {
@@ -30,7 +31,8 @@ import {
   findingDefinition,
   type PeriodontalToothRecord,
   pendingProbingWords,
-  phaseForKind,
+  isSurgicalLibraryKey,
+  phaseForTreatment,
   type SameFaceFinding,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
   SIGNED_ODONTOGRAM_PURPOSE_SHORT,
@@ -40,6 +42,7 @@ import {
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
+import { serviceKindOf } from "../specialties.js"
 import type { TimelineItem } from "../patient-history.js"
 import {
   DENTAL_PRESCRIBING,
@@ -57,6 +60,7 @@ import {
   type ClosingOdontogram,
   closingOdontogramOf,
   getOdontogram,
+  hasSignedOdontogram,
   listOdontogramAssessments,
   type OdontogramAssessmentRow,
   odontogramLines,
@@ -201,6 +205,11 @@ async function resolveTreatedFindings(
 /** Lo que odentIA agrega al «¿se puede cerrar?». */
 export interface DentalClosingParts {
   odontogram: ClosingOdontogram | null
+  /**
+   * Ya tiene su odontograma firmado en curso (`hasSignedOdontogram`): lo que hoy solo trata no
+   * pide registrar el odontograma. En la primera atención, sí.
+   */
+  odontogramSignedBefore: boolean
   periodontal: ClosingPeriodontal | null
   /** Caras con caries y restauración a la vez, alguna de hoy: un aviso suave (C41). */
   sameFace: SameFaceFinding[]
@@ -215,6 +224,13 @@ export interface DentalFinalizeParts {
 export interface DentalEncounterDetailParts {
   odontogramEntries: Array<typeof odontogramEntry.$inferSelect>
 }
+
+/**
+ * Los tipos de la biblioteca que son cirugía sobre el hueso de los maxilares: la cirugía oral y el
+ * implante. Con la exodoncia, son lo que avisa de lo que toma (anticoagulante, medicina para los
+ * huesos) en la fila del plan.
+ */
+const SURGICAL_KINDS: ReadonlySet<string | null> = new Set(["cirugia", "implantologia"])
 
 export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
@@ -237,6 +253,7 @@ export const dentalHooks: ProductHooks = {
     const parts: DentalClosingParts = {
       // En clínicas de Perú, el odontograma que firmará este cierre, con lo que se termina al firmar.
       odontogram: await closingOdontogramOf(tx, orgId, patientId, encounterId, finishingPlanItemIds),
+      odontogramSignedBefore: await hasSignedOdontogram(tx, orgId, patientId),
       // A medias no bloquea: se firma como parcial (ADR 0054).
       periodontal: await closingPeriodontalOf(tx, orgId, encounterId),
       sameFace: await sameFaceFindings(tx, orgId, patientId, encounterId),
@@ -261,8 +278,9 @@ export const dentalHooks: ProductHooks = {
 
   async encounterFinalized(tx, { orgId, actorUserId, patientId, encounterId, at, signer }) {
     await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, at)
-    // En Perú, la atención que cambió el gráfico firma el odontograma con el
-    // mismo perfil y en el mismo paso (NTS 188, 5.3 y 5.10).
+    // En Perú, la atención que llega a un momento de la norma (inicio, hallazgos
+    // observados hoy o culminación) firma el odontograma con el mismo perfil y en
+    // el mismo paso (NTS 188, 5.3 y 5.10). La que solo trata, no.
     const odontogram = await signClosingOdontogram(
       tx,
       orgId,
@@ -422,7 +440,7 @@ export const dentalHooks: ProductHooks = {
   },
 
   planPhases: TREATMENT_PHASES,
-  phaseFor: (kind) => phaseForKind(kind),
+  phaseFor: (kind, diagnoses, libraryKey) => phaseForTreatment(kind, diagnoses, libraryKey),
   async treatmentFamiliesOf(tx, templateIds) {
     if (templateIds.length === 0) return new Map()
     const rows = await tx
@@ -440,7 +458,10 @@ export const dentalHooks: ProductHooks = {
       ]),
     )
   },
-  // La exodoncia es el servicio que deja la pieza ausente (`dental.service_finding`).
+  // La cirugía que cambia lo que toma: la exodoncia, el servicio que deja la pieza ausente
+  // (`dental.service_finding`), y el implante y la cirugía oral, por su tipo en la biblioteca
+  // (`SURGICAL_KINDS`). AAOMS 2022: el riesgo de osteonecrosis es de la cirugía dentoalveolar que
+  // expone hueso, no solo de la extracción; SDCEP 2022: el implante y el colgajo sangran más.
   async extractionServiceIds(tx, orgId, serviceIds) {
     if (serviceIds.length === 0) return new Set()
     const rows = await tx
@@ -453,7 +474,25 @@ export const dentalHooks: ProductHooks = {
           eq(serviceFinding.condition, "missing_tooth"),
         ),
       )
-    return new Set(rows.map((row) => row.serviceId))
+    const out = new Set(rows.map((row) => row.serviceId))
+    const services = await tx
+      .select({
+        id: serviceCatalog.id,
+        templateId: serviceCatalog.templateId,
+        specialtyId: serviceCatalog.specialtyId,
+        libraryKey: treatmentTemplate.key,
+      })
+      .from(serviceCatalog)
+      .leftJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+      .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, [...serviceIds])))
+    for (const service of services) {
+      if (out.has(service.id)) continue
+      const key = service.libraryKey
+      // La cirugía que la biblioteca pone en otra especialidad (`isSurgicalLibraryKey`).
+      if (isSurgicalLibraryKey(key)) out.add(service.id)
+      else if (SURGICAL_KINDS.has(await serviceKindOf(tx, orgId, service))) out.add(service.id)
+    }
+    return out
   },
   // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
   oneOffKinds: ["diagnostico"],

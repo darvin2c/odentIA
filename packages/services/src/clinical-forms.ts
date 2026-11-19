@@ -5,7 +5,10 @@ import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   CONSENT_SIGNATURE_NOTES,
+  type ConsentDocumentSections,
+  type ConsentRiskProfile,
   type ConsentSections,
+  consentPersonalRisks,
   consentSectionsToText,
   documentText,
   type HealthDeclarant,
@@ -13,6 +16,7 @@ import {
   LEFT_OUT_DECISIONS,
   normalizeDrugText,
   parseConsentSections,
+  parsePersonalRisks,
   type SuggestedConsentTemplate,
   typedIdentityDocument,
 } from "@odentia/clinical"
@@ -28,8 +32,11 @@ import {
   encounterSite,
   imagingStudy,
   patient,
+  patientAllergy,
+  patientCondition,
   patientContact,
   patientDocument,
+  patientMedication,
   serviceCatalog,
   treatmentBudget,
   treatmentPlanItem,
@@ -82,6 +89,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import { clinicToday } from "./inventory-stock.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
@@ -3033,6 +3041,57 @@ export async function createConsentDocument(
     "Procedimiento",
     500,
   )
+  // El tratamiento sin diagnóstico propio, en una atención: el de lo registrado de él en ella o el de
+  // esa atención en la misma pieza, como lo propone «Preparar» (`getEncounterConsentNeeds`). Nunca
+  // el de otra pieza.
+  if (!input.diagnosisCode?.trim() && !planDiagnosis && planItemId && encounterId) {
+    const [done] = await tx
+      .select({ code: encounterProcedure.diagnosisCode, system: encounterProcedure.diagnosisSystem })
+      .from(encounterProcedure)
+      .where(
+        and(
+          eq(encounterProcedure.organizationId, orgId),
+          eq(encounterProcedure.encounterId, encounterId),
+          eq(encounterProcedure.planItemId, planItemId),
+          isNull(encounterProcedure.voidedAt),
+          isNotNull(encounterProcedure.diagnosisCode),
+        ),
+      )
+      .orderBy(asc(encounterProcedure.createdAt))
+      .limit(1)
+    if (done?.code) planDiagnosis = { code: done.code, system: done.system }
+  }
+  if (!input.diagnosisCode?.trim() && !planDiagnosis && planItemId && encounterId) {
+    const site = await siteOf(tx, orgId)
+    const loose = (row: SiteColumns) => (row.siteSystem === site.system ? site.value(row.siteCode) : null)
+    const [item] = await tx
+      .select({
+        siteSystem: treatmentPlanItem.siteSystem,
+        siteCode: treatmentPlanItem.siteCode,
+        siteQualifiers: treatmentPlanItem.siteQualifiers,
+      })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.id, planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+      .limit(1)
+    const diagnoses = await tx
+      .select({
+        code: encounterDiagnosis.diagnosisCode,
+        system: encounterDiagnosis.diagnosisSystem,
+        siteSystem: encounterDiagnosis.siteSystem,
+        siteCode: encounterDiagnosis.siteCode,
+        siteQualifiers: encounterDiagnosis.siteQualifiers,
+      })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.encounterId, encounterId),
+          isNull(encounterDiagnosis.voidedAt),
+        ),
+      )
+      .orderBy(asc(encounterDiagnosis.createdAt))
+    planDiagnosis = item ? sameSiteDiagnosis(diagnoses, loose(item), loose) : null
+  }
   const diagnosis = input.diagnosisCode?.trim()
     ? await resolveOptionalDiagnosisCode(
         tx,
@@ -3044,6 +3103,11 @@ export async function createConsentDocument(
         code: planDiagnosis?.code ?? null,
         system: planDiagnosis?.system ?? null,
       })
+  // Los riesgos propios de su caso, propuestos desde su ficha y el procedimiento: se cambian o se
+  // borran mientras está pendiente (`setConsentPersonalRisks`) y no frenan la firma.
+  const personalRisks = template.sections
+    ? await proposedPersonalRisks(tx, orgId, input.patientId, template.key, planItemId)
+    : []
   const [row] = await tx
     .insert(consentDocument)
     .values({
@@ -3052,7 +3116,10 @@ export async function createConsentDocument(
       templateVersion: template.version,
       bodySnapshot: template.body,
       titleSnapshot: template.title,
-      sectionsSnapshot: template.sections,
+      sectionsSnapshot:
+        template.sections && personalRisks.length > 0
+          ? ({ ...(template.sections as ConsentSections), personalRisks } satisfies ConsentDocumentSections)
+          : template.sections,
       ...diagnosis,
       patientId: input.patientId,
       encounterId,
@@ -3077,6 +3144,200 @@ export async function createConsentDocument(
   })
   // Sin aviso a quien lo generó: lo hizo él mismo y lo ve en la ficha.
   return row
+}
+
+/**
+ * Los riesgos propios que se proponen al generar un consentimiento (reglas clínicas del 18 nov):
+ * de su ficha (medicación, enfermedades con código y alergias) y del procedimiento. El procedimiento
+ * lo dice la plantilla sugerida del producto con esa clave (`riskProfile`), y su servicio si es una
+ * cirugía (la exodoncia, el implante, la cirugía oral, periapical o periodontal, por
+ * `extractionServiceIds`). La regla es `consentPersonalRisks` de `@odentia/clinical`.
+ */
+async function proposedPersonalRisks(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  templateKey: string,
+  planItemId: string | null,
+): Promise<string[]> {
+  const hooks = await productHooks(tx, orgId)
+  const suggestion = hooks.consentSuggestions.find((row) => row.key === templateKey)
+  let profile: ConsentRiskProfile = suggestion?.riskProfile ?? {}
+  // El servicio habla por una plantilla propia y por una sugerida de un procedimiento (la que piden
+  // sus servicios): la apicectomía con la de endodoncia o el colgajo con la periodontal llevan el
+  // riesgo de la herida y del hueso, con la misma regla que la fila del plan (`extractionServiceIds`,
+  // QA clínica del 18 nov). La de la anestesia, que ningún servicio pide sola, no consiente la
+  // cirugía: no lleva el riesgo del hueso.
+  const consentsProcedure =
+    !suggestion || !!suggestion.servicePrefixes?.length || !!suggestion.serviceFamilies?.length
+  if (consentsProcedure && planItemId && hooks.extractionServiceIds) {
+    const [item] = await tx
+      .select({ serviceId: treatmentPlanItem.serviceId })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, planItemId)))
+      .limit(1)
+    if (item?.serviceId && (await hooks.extractionServiceIds(tx, orgId, [item.serviceId])).has(item.serviceId))
+      profile = { ...profile, wound: true, jawBone: true }
+  }
+  const [medications, conditions, allergies] = [
+    await tx
+      .select({
+        name: patientMedication.name,
+        genericName: patientMedication.genericName,
+        atcCode: patientMedication.atcCode,
+        endDate: patientMedication.endDate,
+      })
+      .from(patientMedication)
+      .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId))),
+    await tx
+      .select({
+        status: patientCondition.status,
+        diagnosisSystem: patientCondition.diagnosisSystem,
+        diagnosisCode: patientCondition.diagnosisCode,
+      })
+      .from(patientCondition)
+      .where(and(eq(patientCondition.organizationId, orgId), eq(patientCondition.patientId, patientId))),
+    await tx
+      .select({
+        substance: patientAllergy.substance,
+        substanceSystem: patientAllergy.substanceSystem,
+        substanceCode: patientAllergy.substanceCode,
+        isActive: patientAllergy.isActive,
+        verification: patientAllergy.verification,
+      })
+      .from(patientAllergy)
+      .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId))),
+  ]
+  return consentPersonalRisks({
+    profile,
+    health: { medications, conditions, allergies },
+    today: await clinicToday(tx, orgId),
+    habitual: hooks.prescribing.catalog.habitual,
+    allergens: hooks.prescribing.catalog.allergens,
+  })
+}
+
+/**
+ * Lo que el sistema propone hoy para los riesgos propios de un consentimiento (QA clínica del 18
+ * nov, H9): la misma regla que al generarlo, con su ficha de ahora. Para «Volver a proponer» cuando
+ * se borraron o cambiaron: no guarda nada, quien edita decide si lo usa.
+ */
+export async function proposeConsentPersonalRisks(tx: Db, orgId: string, documentId: string): Promise<string[]> {
+  const [doc] = await tx
+    .select({
+      patientId: consentDocument.patientId,
+      planItemId: consentDocument.planItemId,
+      sections: consentDocument.sectionsSnapshot,
+      templateKey: consentTemplate.key,
+    })
+    .from(consentDocument)
+    .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!doc) throw notFound("Consentimiento")
+  if (!doc.sections) return []
+  return proposedPersonalRisks(tx, orgId, doc.patientId, doc.templateKey, doc.planItemId)
+}
+
+/**
+ * Quién cambió los riesgos propios mientras otro los editaba (QA de diseño del 18 nov, H6): el
+ * sistema lo sabe, la Historia del documento lo dice, y el aviso no dice «Alguien». La misma persona
+ * en otra pestaña, «los cambiaste en otra pestaña».
+ */
+async function risksChangedWords(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  actorUserId: string,
+): Promise<string> {
+  const [last] = await tx
+    .select({ actorUserId: consentEvent.actorUserId, name: user.name })
+    .from(consentEvent)
+    .leftJoin(user, eq(user.id, consentEvent.actorUserId))
+    .where(
+      and(
+        eq(consentEvent.organizationId, orgId),
+        eq(consentEvent.documentId, documentId),
+        eq(consentEvent.toStatus, "riesgos_propios"),
+      ),
+    )
+    .orderBy(desc(consentEvent.createdAt))
+    .limit(1)
+  const then = "Mira los de ahora y vuelve a guardar lo tuyo."
+  if (last?.actorUserId && last.actorUserId === actorUserId)
+    return `Los cambiaste en otra pestaña mientras los editabas aquí. ${then}`
+  const who = last?.name?.trim()
+  return `${who || "Alguien"} cambió los riesgos propios mientras los editabas. ${then}`
+}
+
+/**
+ * Cambia o borra los riesgos propios de un consentimiento pendiente (reglas clínicas del 18 nov),
+ * una frase por línea; vacío los quita y la hoja queda como siempre. Con el mismo permiso que
+ * generarlo. Solo mientras nadie lo firmó ni se envió a su enlace: lo que la persona lee en su
+ * teléfono no cambia por detrás (si hace falta, se anula y se prepara otro).
+ */
+export async function setConsentPersonalRisks(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+  text: string | null,
+  /**
+   * Los riesgos que tenía a la vista quien los editó. Si ya no son los guardados (otra pestaña o
+   * persona los cambió), no se pisan: 409. Sin ellos (una pantalla anterior mientras dura un
+   * despliegue), se guarda como antes.
+   */
+  seen?: string[] | null,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente" || current.personSignedAt)
+    throw conflict("CONSENT_STATUS", "Ya está firmado: lo que se firmó no cambia")
+  if (current.linkSentAt)
+    throw conflict(
+      "CONSENT_SENT",
+      "Ya está en su enlace: lo que lee la persona no cambia. Anúlalo y prepara otro si hace falta.",
+    )
+  const sections = current.sectionsSnapshot as ConsentDocumentSections | null
+  if (!sections) throw conflict("CONSENT_STATUS", "Este consentimiento no tiene secciones")
+  let personalRisks: string[] | null
+  try {
+    personalRisks = parsePersonalRisks(text)
+  } catch (cause) {
+    throw invalidField("personalRisks", (cause as Error).message)
+  }
+  const before = sections.personalRisks ?? []
+  // Lo mismo otra vez (un reintento tras perder la respuesta, un doble clic): ya está, sin otro evento.
+  if (sameRisks(before, personalRisks ?? [])) return current
+  if (seen !== undefined && !sameRisks(before, seen ?? []))
+    throw conflict("CONSENT_RISKS_CHANGED", await risksChangedWords(tx, orgId, documentId, actorUserId))
+  const { personalRisks: _before, ...rest } = sections
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      sectionsSnapshot: personalRisks ? { ...rest, personalRisks } : rest,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  await tx.insert(consentEvent).values({
+    organizationId: orgId,
+    documentId,
+    fromStatus: "pendiente",
+    toStatus: "riesgos_propios",
+    actorUserId,
+    reason: personalRisks ? "Cambiados" : "Quitados de la hoja",
+  })
+  // La auditoría no copia el texto: es dato clínico.
+  await audit(tx, orgId, actorUserId, "consent.personal_risks", "consent_document", documentId, {
+    items: personalRisks?.length ?? 0,
+  })
+  return row!
 }
 
 export interface SignConsentInput {
@@ -3109,6 +3370,102 @@ export interface SignConsentInput {
   method?: "clinica" | "papel"
   /** En papel: la foto o el escaneo de la hoja firmada, ya en Documentos. */
   paperDocumentId?: string | null
+  /**
+   * Los riesgos propios de la hoja que la persona vio: la de la tablet o la que se imprimió para
+   * firmar en papel. Sin ellos, la hoja no tenía. Si ya no son los guardados (se cambiaron después
+   * de mostrarse), no se firma: lo firmado tiene que ser lo que leyó.
+   */
+  personalRisksShown?: string[] | null
+}
+
+/** Las mismas frases, en el mismo orden. */
+function sameRisks(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((risk, index) => risk === b[index])
+}
+
+/**
+ * La hoja pendiente salió a papel (se imprimió, se descargó o se abrió aparte): el servidor anota
+ * los riesgos propios que llevaba esa hoja, para que la firma en papel compare con ella aunque la
+ * pestaña se recargue o se firme desde otro equipo. Los dice la pantalla que la sacó: es la hoja
+ * que tenía (una pestaña vieja imprime la hoja vieja, y entonces la firma se rechaza, como debe).
+ * Vale la última que salió. No es un cambio del documento: no mueve `updatedAt` ni deja evento.
+ */
+export async function markConsentPrinted(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  printed: string[],
+): Promise<{ printedPersonalRisks: string[] }> {
+  const [current] = await tx
+    .select({
+      status: consentDocument.status,
+      personSignedAt: consentDocument.personSignedAt,
+      sectionsSnapshot: consentDocument.sectionsSnapshot,
+    })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  const sections = current.sectionsSnapshot as ConsentDocumentSections | null
+  const printedPersonalRisks = printed.map((risk) => risk.trim()).filter(Boolean)
+  // Firmado o sin secciones, la hoja ya no se firma en papel: no hay nada que anotar.
+  if (current.status !== "pendiente" || current.personSignedAt || !sections) return { printedPersonalRisks }
+  if (sections.printedPersonalRisks && sameRisks(sections.printedPersonalRisks, printedPersonalRisks))
+    return { printedPersonalRisks }
+  await tx
+    .update(consentDocument)
+    .set({ sectionsSnapshot: { ...sections, printedPersonalRisks } satisfies ConsentDocumentSections })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+  return { printedPersonalRisks }
+}
+
+/**
+ * Antes de subir la foto de la hoja firmada en papel: ¿la firmaría el servidor? Si los riesgos
+ * propios cambiaron después de imprimirla, lo dice ahora (el mismo 409 que al firmar) y la foto no
+ * se sube, así no queda una «Hoja firmada» que no firma nada.
+ */
+export async function checkConsentPaperSheet(
+  tx: Db,
+  orgId: string,
+  documentId: string,
+  shown: string[] | null | undefined,
+): Promise<void> {
+  const [current] = await tx
+    .select({
+      status: consentDocument.status,
+      personSignedAt: consentDocument.personSignedAt,
+      sectionsSnapshot: consentDocument.sectionsSnapshot,
+    })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente") throw conflict("SIGNED", "El consentimiento ya no está pendiente")
+  assertPersonalRisksShown(current.sectionsSnapshot, shown, "papel")
+}
+
+/**
+ * Lo que vio quien firma es lo que queda firmado: los riesgos propios son lo único de la hoja que
+ * cambia mientras está pendiente (`setConsentPersonalRisks`), así que se comparan frase a frase.
+ */
+function assertPersonalRisksShown(
+  sections: unknown,
+  shown: string[] | null | undefined,
+  method: "clinica" | "papel",
+): void {
+  const snapshot = sections as ConsentDocumentSections | null
+  const saved = snapshot?.personalRisks ?? []
+  // En papel vale la hoja que salió impresa, si el servidor la anotó (`markConsentPrinted`): la
+  // pestaña pudo recargarse o la hoja salir de otro equipo. Sin esa nota, la hoja a la vista.
+  const seen = (method === "papel" ? snapshot?.printedPersonalRisks : undefined) ?? shown ?? []
+  if (sameRisks(saved, seen)) return
+  throw conflict(
+    "CONSENT_CHANGED",
+    method === "papel"
+      ? "Los riesgos propios cambiaron después de imprimir la hoja: imprímela de nuevo y que la firme."
+      : "Los riesgos propios cambiaron después de mostrarse: vuelve a mostrarle la hoja.",
+  )
 }
 
 /**
@@ -3179,6 +3536,7 @@ export async function signConsentDocument(
     throw invalidField("signerContactId", "Elige a la persona que firma: el paciente o su representante legal vigente")
   if (input.comprehensionConfirmed !== true)
     throw invalidField("comprehensionConfirmed", "La persona firmante debe confirmar que comprendió la información")
+  assertPersonalRisksShown(current.sectionsSnapshot, input.personalRisksShown, input.method === "papel" ? "papel" : "clinica")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
   // La edad con el día de la clínica: la misma regla que decide quién firma.
@@ -4183,21 +4541,27 @@ export async function consentDocumentPatientId(
   return doc.patientId
 }
 
+/**
+ * La historia del consentimiento, con quién hizo cada paso (`actorName`, su nombre en la cuenta):
+ * «Riesgos propios de su caso · los cambió Ana Torres» (QA del 18 nov).
+ */
 export async function listConsentEvents(
   tx: Db,
   orgId: string,
   documentId: string,
-): Promise<(typeof consentEvent.$inferSelect)[]> {
+): Promise<(typeof consentEvent.$inferSelect & { actorName: string | null })[]> {
   await consentDocumentPatientId(tx, orgId, documentId)
-  return tx
-    .select()
+  const rows = await tx
+    .select({ event: consentEvent, actorName: user.name })
     .from(consentEvent)
+    .leftJoin(user, eq(user.id, consentEvent.actorUserId))
     .where(and(eq(consentEvent.organizationId, orgId), eq(consentEvent.documentId, documentId)))
     // A igual hora, el orden del flujo: informar precede a firmar.
     .orderBy(
       asc(consentEvent.createdAt),
-      sql`array_position(array['pendiente','enlace_enviado','enlace_firmado','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
+      sql`array_position(array['pendiente','riesgos_propios','enlace_enviado','enlace_firmado','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
     )
+  return rows.map((row) => ({ ...row.event, actorName: row.actorName ?? null }))
 }
 
 // ---------------------------------------------------------------------------
@@ -4367,6 +4731,22 @@ function consentReference(sources: { label: string; where: string | null; whereS
   const cut = short.slice(0, 500)
   const last = cut.lastIndexOf("; ")
   return last > 0 ? cut.slice(0, last) : cut
+}
+
+/**
+ * El diagnóstico de la atención que va con lo que se hace en `tooth`: el de esa misma pieza; sin
+ * pieza, el primero que tampoco tiene sitio. Nunca el de otra pieza ni otra zona.
+ */
+function sameSiteDiagnosis<D extends SiteColumns & { code: string; system: string | null }>(
+  diagnoses: readonly D[],
+  tooth: number | null,
+  loose: (row: SiteColumns) => number | null,
+): { code: string; system: string | null } | null {
+  const found =
+    tooth != null
+      ? diagnoses.find((dx) => loose(dx) === tooth)
+      : diagnoses.find((dx) => !dx.siteSystem && !dx.siteCode)
+  return found ? { code: found.code, system: found.system } : null
 }
 
 const NEED_RANK: Record<ConsentNeedStatus, number> = {
@@ -4565,11 +4945,12 @@ export async function getEncounterConsentNeeds(
       ),
     )
     .orderBy(asc(encounterDiagnosis.createdAt))
+  // El diagnóstico que motiva lo que se consiente: el de su tratamiento o, sin él, el de la
+  // atención en el mismo sitio. Nunca el de otra pieza: la exodoncia de la 48 no lleva a la hoja que
+  // se firma la pulpitis de la 36 (verificación del 18 nov). Lo que no tiene sitio (latidIA, o una
+  // profilaxis) toma el de la atención que tampoco lo tiene.
   const diagnosisFor = (source: NeedSource | undefined): { code: string; system: string | null } | null =>
-    source?.diagnosis ??
-    diagnoses.find((dx) => source?.toothNumber != null && loose(dx) === source.toothNumber) ??
-    diagnoses[0] ??
-    null
+    source?.diagnosis ?? sameSiteDiagnosis(diagnoses, source?.toothNumber ?? null, loose)
 
   const needs: ConsentNeed[] = []
   const covered = new Set<string>()

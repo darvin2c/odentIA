@@ -14,12 +14,15 @@
  *   última revisión y su tabla.
  * La ficha técnica de la lidocaína admite más (7 mg/kg, 500 mg): para un niño se usa el valor más
  * prudente.
+ * A quién le corresponde el tope de epinefrina (reglas clínicas del 18 nov): `epinephrineCheckOf`.
  */
+import { isLocalAnestheticName } from "./medications.js"
+import { ADULT_BLOOD_PRESSURE_FROM_AGE, type Vitals } from "./vitals.js"
 
 /** El cartucho dental: 1,8 mL. */
 export const CARTRIDGE_ML = 1.8
 
-/** Epinefrina por sesión en el paciente cardiópata (Malamed): 0,04 mg. */
+/** Epinefrina por sesión con enfermedad cardiovascular significativa o ASA III–IV (Malamed): 0,04 mg. */
 export const CARDIAC_EPINEPHRINE_MAX_MG = 0.04
 
 export interface LocalAnesthetic {
@@ -113,41 +116,127 @@ export function maxLocalAnestheticDose(
 const number = (value: number) =>
   value.toLocaleString("es", { maximumFractionDigits: 1, minimumFractionDigits: 0 })
 
-/**
- * Por qué se limita la epinefrina, como lo dice la ficha: una enfermedad del corazón o de la
- * presión registrada con su código, la ASA III o IV, o las dos. El aviso nombra el motivo
- * verdadero (QA del 16 nov, Q10: decía «Con su corazón…» a una paciente con ASA III y sin ninguna
- * cardiopatía registrada).
- */
-export interface EpinephrineCap {
-  condition: boolean
-  /** La ASA que lo pide (III o más); nula si es solo por la enfermedad registrada. */
-  asaClass: string | null
+/** «a», «a y b», «a, b y c». */
+function listWords(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? ""
+  return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
 }
 
-/** El tope de epinefrina de esa persona, o nulo si nada de su ficha lo pide. */
-export function epinephrineCapOf(input: {
-  cardiacCondition: boolean
+/**
+ * La presión de hoy que pide limitar la epinefrina: sistólica de 160 o más, o diastólica de 95 o
+ * más, desde los 13 años (como `bloodPressureAlert`). Malamed (*Medical Emergencies in the Dental
+ * Office*, 7.ª ed., 2015, cap. 2, tabla de presión del adulto) pone 160–199 / 95–114 en ASA III,
+ * con protocolo de reducción del estrés; verificar la tabla.
+ */
+export const EPINEPHRINE_CAP_PRESSURE = { systolic: 160, diastolic: 95 } as const
+
+/**
+ * Por qué se limita la epinefrina, con el motivo verdadero (QA del 16 nov, Q10; reglas clínicas del
+ * 18 nov): la ASA III o IV, una enfermedad del corazón registrada con su código o la presión de hoy.
+ * La hipertensión registrada no lo pide por sí sola: la controlada es ASA II (ASA 2020) y en ella la
+ * epinefrina del anestésico da cambios pequeños y casi ningún evento adverso (Bader JD, Bonito AJ,
+ * Shugars DA, *Oral Surg Oral Med Oral Pathol Oral Radiol Endod* 2002;93:647-653). Lo que dice si
+ * está controlada es la presión de hoy.
+ */
+export interface EpinephrineCap {
+  /** Las enfermedades del corazón que lo piden, como se leen: «fibrilación auricular (I48)». */
+  conditions: string[]
+  /** La ASA que lo pide (III o más); nula si no es por la ASA. */
+  asaClass: string | null
+  /** La presión de hoy que lo pide («165/100»); nula si no es por la presión. */
+  pressure: string | null
+}
+
+/** Lo que dice la regla de la epinefrina de esa persona hoy. */
+export interface EpinephrineCheck {
+  /** El tope de 0,04 mg, con sus motivos; nulo si nada lo pide. */
+  cap: EpinephrineCap | null
+  /**
+   * La hipertensión registrada sin la presión de hoy, como se lee («hipertensión esencial (I10)»):
+   * hay que tomarla antes de anestesiar para saber si está controlada (Little y Falace, 9.ª ed.,
+   * 2018, cap. 3: la presión en cada cita del hipertenso). Nula si no tiene o ya se tomó.
+   */
+  takePressure: string | null
+}
+
+/** Una enfermedad de su ficha como la lee la regla: nombre, lista y código. Solo las activas. */
+export interface AnesthesiaCondition {
+  name: string
+  diagnosisSystem?: string | null
+  diagnosisCode?: string | null
+}
+
+/** «Fibrilación auricular» → «fibrilación auricular (I48)»; una sigla («HTA») queda como está. */
+function conditionWords(condition: AnesthesiaCondition): string {
+  const name = condition.name.trim()
+  const lower = /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
+  if (!condition.diagnosisCode) return lower
+  // «Hipertensión esencial (primaria)» de la CIE-10 ya cierra con un paréntesis: el código va dentro,
+  // «(primaria, I10)», no «(primaria) (I10)» (QA clínica del 18 nov).
+  if (lower.endsWith(")")) return `${lower.slice(0, -1)}, ${condition.diagnosisCode})`
+  return `${lower} (${condition.diagnosisCode})`
+}
+
+/**
+ * La regla de la epinefrina: una sola para la línea de la atención y para lo que guarda la firma.
+ * El tope de 0,04 mg por sesión (Malamed, *Handbook of Local Anesthesia*, 7.ª ed., 2020) sale con:
+ * - la ASA III o IV, que pone el profesional (donde el producto la pide; latidIA no la pide y ahí
+ *   llega nula);
+ * - una enfermedad del corazón con su código, sin la hipertensión que no la tiene
+ *   (`isHypertensionWithoutHeartFailure`): la fibrilación auricular (I48) y la cardiopatía
+ *   hipertensiva con insuficiencia cardiaca (I11.0, I13.0, I13.2) sí cuentan;
+ * - la presión de hoy de 160/95 o más, desde los 13 años (`EPINEPHRINE_CAP_PRESSURE`).
+ * Sin edad (sin fecha de nacimiento) la presión cuenta igual, como en `bloodPressureAlert`. La
+ * enfermedad escrita sin código no cuenta: no se reconoce por el nombre. Es un aviso: decide el
+ * profesional.
+ */
+export function epinephrineCheckOf(input: {
+  conditions: readonly AnesthesiaCondition[]
   asaClass: string | null | undefined
-}): EpinephrineCap | null {
+  vitals: Vitals | null | undefined
+  ageYears: number | null | undefined
+}): EpinephrineCheck {
   const asaClass = isSevereAsa(input.asaClass) ? (input.asaClass ?? null) : null
-  return input.cardiacCondition || asaClass ? { condition: input.cardiacCondition, asaClass } : null
+  const cardiac = input.conditions.filter(
+    (row) =>
+      isCardiacCondition(row.diagnosisSystem, row.diagnosisCode) &&
+      !isHypertensionWithoutHeartFailure(row.diagnosisSystem, row.diagnosisCode),
+  )
+  const hypertension = input.conditions.find((row) => isHypertension(row.diagnosisSystem, row.diagnosisCode))
+  const systolic = input.vitals?.presionSistolica
+  const diastolic = input.vitals?.presionDiastolica
+  const measured = systolic !== undefined && diastolic !== undefined
+  const adult =
+    input.ageYears === null || input.ageYears === undefined || input.ageYears >= ADULT_BLOOD_PRESSURE_FROM_AGE
+  const pressure =
+    measured &&
+    adult &&
+    (systolic >= EPINEPHRINE_CAP_PRESSURE.systolic || diastolic >= EPINEPHRINE_CAP_PRESSURE.diastolic)
+      ? `${systolic}/${diastolic}`
+      : null
+  const cap =
+    asaClass || cardiac.length > 0 || pressure ? { conditions: cardiac.map(conditionWords), asaClass, pressure } : null
+  return { cap, takePressure: hypertension && !measured ? conditionWords(hypertension) : null }
 }
 
 /**
  * La línea del máximo y sus avisos: «Máximo para 22 kg con lidocaína 2 % con epinefrina
  * (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos». Sin peso no inventa un máximo (`dose`
  * nulo): la pantalla pide anotarlo en los signos vitales.
+ *
+ * Con tope de epinefrina, lo que manda va primero (QA de diseño del 18 nov, H7): `cap` dice «Epinefrina
+ * hasta 0,04 mg por su ASA III: unos 2,2 cartuchos», y `dose` el máximo por peso, corto, después
+ * («Máximo por peso (64 kg): 7,8»). La pantalla y lo firmado los dicen en ese orden.
  */
 export function localAnesthesiaWords(input: {
   weightKg: number | null | undefined
   anesthetic: LocalAnestheticKey | string
   ageYears: number | null | undefined
-  /** Cardiopatía registrada o ASA III o IV: el tope de epinefrina, con su motivo (`epinephrineCapOf`). */
-  cardiac: EpinephrineCap | null
-}): { dose: string | null; warnings: string[] } {
+  /** El tope de epinefrina con sus motivos y si falta tomar la presión (`epinephrineCheckOf`). */
+  epinephrine: EpinephrineCheck | null
+}): { cap: string | null; dose: string | null; warnings: string[] } {
   const anesthetic = localAnestheticOf(input.anesthetic)
-  if (!anesthetic) return { dose: null, warnings: [] }
+  if (!anesthetic) return { cap: null, dose: null, warnings: [] }
   const warnings: string[] = []
   const { ageYears } = input
   if (
@@ -159,32 +248,38 @@ export function localAnesthesiaWords(input: {
     warnings.push(
       `La ${anesthetic.name.split(" ")[0]} no se recomienda en menores de ${anesthetic.minAgeYears} años.`,
     )
-  if (input.cardiac && anesthetic.epinephrineMgPerMl) {
+  const epinephrineCap = input.epinephrine?.cap ?? null
+  let cap: string | null = null
+  if (epinephrineCap && anesthetic.epinephrineMgPerMl) {
     const perCartridge = anesthetic.epinephrineMgPerMl * CARTRIDGE_ML
-    const why = [
-      input.cardiac.condition ? "su enfermedad cardiovascular registrada" : null,
-      input.cardiac.asaClass ? `su ASA ${input.cardiac.asaClass}` : null,
-    ]
-      .filter(Boolean)
-      .join(" y ")
-    warnings.push(
-      `Por ${why}, la epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por sesión: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos de este anestésico.`,
-    )
+    const why = listWords([
+      ...(epinephrineCap.asaClass ? [`su ASA ${epinephrineCap.asaClass}`] : []),
+      ...epinephrineCap.conditions.map((condition) => `su ${condition}`),
+      ...(epinephrineCap.pressure ? [`la presión de hoy (${epinephrineCap.pressure})`] : []),
+    ])
+    cap = `Epinefrina hasta ${CARDIAC_EPINEPHRINE_MAX_MG.toLocaleString("es")} mg por ${why}: unos ${number(oneDecimal(CARDIAC_EPINEPHRINE_MAX_MG / perCartridge))} cartuchos`
   }
+  // Con cualquier anestésico: la presión de hoy dice si está controlada y si lo electivo se difiere.
+  if (input.epinephrine?.takePressure)
+    warnings.push(`Con su ${input.epinephrine.takePressure}, toma la presión antes de anestesiar.`)
   const weight = input.weightKg
-  if (weight === null || weight === undefined || !(weight > 0)) return { dose: null, warnings }
+  if (weight === null || weight === undefined || !(weight > 0)) return { cap, dose: null, warnings }
   const max = maxLocalAnestheticDose(weight, anesthetic)
+  if (cap) return { cap, dose: `Máximo por peso (${number(weight)} kg): ${number(max.cartridges)}`, warnings }
   const mg = max.capped ? `${number(max.mg)} mg (el tope)` : `${number(max.mg)} mg`
   return {
+    cap,
     dose: `Máximo para ${number(weight)} kg con ${anesthetic.name} (cartucho de ${number(CARTRIDGE_ML)} mL): ${mg}, unos ${number(max.cartridges)} cartuchos`,
     warnings,
   }
 }
 
 /**
- * Una cardiopatía o la hipertensión registradas con su código: CIE-10 I00–I52 (fiebre reumática,
- * hipertensión, isquemia, corazón pulmonar y otras del corazón) o CIE-11 BA00–BC9Z y la
- * insuficiencia cardiaca (BD1x). Lo cerebrovascular y lo de las arterias no cuentan aquí.
+ * Una enfermedad del corazón o de la presión registrada con su código: CIE-10 I00–I52 (fiebre
+ * reumática, hipertensión, isquemia, corazón pulmonar y otras del corazón) o CIE-11 BA00–BC9Z y
+ * la insuficiencia cardiaca (BD1x). Lo cerebrovascular y lo de las arterias no cuentan aquí. Para
+ * el tope de epinefrina se quita la hipertensión sin insuficiencia cardiaca
+ * (`isHypertensionWithoutHeartFailure`).
  */
 export function isCardiacCondition(
   system: string | null | undefined,
@@ -195,6 +290,40 @@ export function isCardiacCondition(
   return /^I(0\d|[1-4]\d|5[0-2])/.test(code)
 }
 
+/**
+ * La hipertensión registrada con su código: CIE-10 I10–I15 (enfermedades hipertensivas) o CIE-11
+ * BA00–BA04. Pide tomar la presión antes de anestesiar. Verificar los rangos de la CIE-11 en el
+ * navegador de la OMS.
+ */
+export function isHypertension(system: string | null | undefined, code: string | null | undefined): boolean {
+  if (!code) return false
+  if (system === "ICD-11") return /^BA0[0-4]/.test(code)
+  return /^I1[0-5]/.test(code)
+}
+
+/**
+ * La hipertensión que por sí sola no lleva el tope de epinefrina: la que no dice insuficiencia
+ * cardiaca. En la CIE-10 de la OMS (versión 2019, cap. IX, «Enfermedades hipertensivas» I10–I15):
+ * I10 (esencial), I11.9 (cardiopatía hipertensiva sin insuficiencia cardiaca), I12.x (enfermedad
+ * renal hipertensiva), I13.1 (cardiorrenal con insuficiencia renal, sin la cardiaca) e I15.x
+ * (secundaria). En la CIE-11 (MMS), lo mismo: BA00 (esencial), BA02 (enfermedad renal
+ * hipertensiva) y BA04 (secundaria); BA01 y BA03 nombran la cardiopatía y, sin saber si hay
+ * insuficiencia cardiaca, llevan el tope como I11 e I13 sin detalle. Las demás sí lo llevan: I11.0 e
+ * I13.0 dicen «con insuficiencia cardiaca (congestiva)», I13.2 «con insuficiencia cardiaca e
+ * insuficiencia renal», y en I11, I13 o I13.9 sin detalle no se sabe; la insuficiencia cardiaca
+ * es enfermedad cardiovascular importante, con el tope de 0,04 mg (Malamed SF, *Handbook of Local
+ * Anesthesia*, 7.ª ed., 2020, evaluación física, enfermedad cardiovascular; verificar la página).
+ * Es un aviso: decide el profesional.
+ */
+export function isHypertensionWithoutHeartFailure(
+  system: string | null | undefined,
+  code: string | null | undefined,
+): boolean {
+  if (!code) return false
+  if (system === "ICD-11") return /^BA0[024]/.test(code)
+  return /^I(10|11\.?9|12|13\.?1|15)/.test(code)
+}
+
 /** La clasificación ASA que se elige en el consultorio (ASA 2020): V y VI no son de consultorio. */
 export const OFFICE_ASA_CLASSES = ["I", "II", "III", "IV"] as const
 export type OfficeAsaClass = (typeof OFFICE_ASA_CLASSES)[number]
@@ -202,6 +331,34 @@ export type OfficeAsaClass = (typeof OFFICE_ASA_CLASSES)[number]
 /** ASA III o IV: el paciente con enfermedad sistémica grave, para el tope de epinefrina. */
 export function isSevereAsa(asaClass: string | null | undefined): boolean {
   return asaClass === "III" || asaClass === "IV" || asaClass === "V" || asaClass === "VI"
+}
+
+/**
+ * Lo de hoy que usa anestesia, separado: los procedimientos y los anestésicos de sus materiales
+ * (`isLocalAnestheticName`). La línea decía «Para Exodoncia simple y Lidocaína 2 % con
+ * epinefrina» y mezclaba un material con los procedimientos (auditor, 18 nov, H7). Lo firmado
+ * antes guarda las dos cosas en `uses`: se separan al leerlo.
+ */
+export function anesthesiaUsesParts(uses: readonly string[]): { procedures: string[]; anesthetics: string[] } {
+  const anesthetics = uses.filter((use) => isLocalAnestheticName(use))
+  return { procedures: uses.filter((use) => !anesthetics.includes(use)), anesthetics }
+}
+
+/**
+ * El peso para el máximo de anestesia: el de esta atención o, si no se anotó, el último anotado
+ * hoy en otra atención no anulada de la persona (QA del 18 nov: la segunda atención del mismo día
+ * volvía a pedirlo media hora después). El peso no cambia en el día. La presión sí, y la que
+ * limita la epinefrina es la de esta atención: no se trae de otra.
+ */
+export function anesthesiaWeightKg(
+  own: number | null | undefined,
+  sameDay: ReadonlyArray<{ status: string; weightKg: unknown; startedAt: string | Date }>,
+): { kg: number | null; fromOther: boolean } {
+  if (typeof own === "number" && own > 0) return { kg: own, fromOther: false }
+  const other = sameDay
+    .filter((row) => row.status !== "anulada" && typeof row.weightKg === "number" && row.weightKg > 0)
+    .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0]
+  return other ? { kg: other.weightKg as number, fromOther: true } : { kg: null, fromOther: false }
 }
 
 /**
@@ -221,7 +378,12 @@ export interface AnesthesiaAtSigning {
   weightKg: number | null
   /** El anestésico elegido para el cálculo («Lidocaína 2 % con epinefrina 1:100 000»). */
   anesthetic: string | null
-  /** «Máximo para 22 kg con…»; nulo sin peso. */
+  /**
+   * El tope de epinefrina, que manda sobre el máximo por peso: «Epinefrina hasta 0,04 mg por su ASA
+   * III: unos 2,2 cartuchos». Lo firmado antes del 18 nov no lo tiene: lo lleva en `warnings`.
+   */
+  cap?: string | null
+  /** «Máximo para 22 kg con…» o, con tope, «Máximo por peso (64 kg): 7,8»; nulo sin peso. */
   dose: string | null
   warnings: string[]
 }

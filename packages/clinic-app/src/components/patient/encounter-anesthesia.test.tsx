@@ -19,7 +19,7 @@ vi.mock("../../lib/patients", async (original) => ({
   setPatientAsaApi: setAsa,
 }))
 
-const { anesthesiaAnswered, anesthesiaHealthWords, EncounterAnesthesiaLine } = await import("./encounter-anesthesia")
+const { AnesthesiaAtSigningView, anesthesiaAnswered, anesthesiaHealthWords, EncounterAnesthesiaLine } = await import("./encounter-anesthesia")
 
 beforeAll(() => {
   setOrgLocale("es-PE", "America/Lima")
@@ -40,6 +40,8 @@ function line(props: {
   ageYears?: number
   uses?: string[]
   atSign?: boolean
+  weightFromOther?: boolean
+  onAddWeight?: () => void
 }) {
   const client = new QueryClient()
   return render(
@@ -58,6 +60,8 @@ function line(props: {
         onAnestheticChange={() => {}}
         canWrite
         atSign={props.atSign ?? false}
+        weightFromOther={props.weightFromOther ?? false}
+        onAddWeight={props.onAddWeight}
       />
     </QueryClientProvider>,
   )
@@ -165,6 +169,40 @@ it("una alergia, una enfermedad, lo que toma o lo que dijo del corazón dejan el
   expect(anesthesiaAnswered({ ...base, health: null })).toBe(false)
 })
 
+// QA del 18 nov (auditor H7 y novato 10).
+it("el anestésico de los materiales va aparte de los procedimientos, en la línea y en la firmada", () => {
+  line({ uses: ["Exodoncia simple", "Lidocaína 2% con epinefrina"] })
+  expect(screen.getByText("Anestesia local · Exodoncia simple · Lidocaína 2% con epinefrina")).toBeTruthy()
+  render(
+    <AnesthesiaAtSigningView
+      value={{
+        uses: ["Exodoncia simple", "Lidocaína 2% con epinefrina"],
+        asaClass: null,
+        asaSetBy: null,
+        asaSetAt: null,
+        weightKg: null,
+        anesthetic: null,
+        dose: null,
+        warnings: [],
+      }}
+    />,
+  )
+  expect(screen.getByText("Para Exodoncia simple")).toBeTruthy()
+  expect(screen.getByText("Anestésico: Lidocaína 2% con epinefrina")).toBeTruthy()
+  expect(screen.queryByText(/y Lidocaína/)).toBeNull()
+})
+
+it("sin peso, «Anotar su peso» lleva a los signos vitales; con el de otra atención de hoy, lo dice", () => {
+  const onAddWeight = vi.fn()
+  const { unmount } = line({ vitals: null, ageYears: 45, uses: ["Endodoncia posterior vital"], onAddWeight })
+  fireEvent.click(screen.getByRole("button", { name: "Anotar su peso" }))
+  expect(onAddWeight).toHaveBeenCalledTimes(1)
+  unmount()
+  line({ vitals: { peso: 80 }, ageYears: 45, uses: ["Endodoncia posterior vital"], weightFromOther: true })
+  expect(screen.getByText(/Con el peso anotado hoy en otra atención\./)).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "Anotar su peso" })).toBeNull()
+})
+
 it("sin nada de hoy con anestesia, no hay línea", () => {
   const { container } = line({ uses: [] })
   expect(container.textContent).toBe("")
@@ -183,6 +221,30 @@ it("dice lo que tiene, lo que toma y lo que dijo del corazón", () => {
     "2026-11-16",
   )
   expect(words).toBe(
-    "Alergia a Penicilina. Tiene Hipertensión. Toma Enalapril 10 mg. Dijo que tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis.",
+    // En medio de la frase, en minúscula (verificación del 18 nov: «Tiene Hipertensión…»).
+    "Alergia a penicilina. Tiene hipertensión. Toma enalapril 10 mg. Dijo que tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis.",
+  )
+})
+
+// QA de diseño del 18 nov (H7): con tope, lo firmado dice primero lo que manda, en la misma línea.
+it("lo firmado con tope de epinefrina dice el tope primero y el máximo por peso después", () => {
+  render(
+    <AnesthesiaAtSigningView
+      value={{
+        uses: ["Exodoncia simple"],
+        asaClass: "III",
+        asaSetBy: null,
+        asaSetAt: null,
+        weightKg: 64,
+        anesthetic: "Lidocaína 2 % con epinefrina 1:100 000",
+        cap: "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos",
+        dose: "Máximo por peso (64 kg): 7,8",
+        warnings: [],
+      }}
+    />,
+  )
+  const item = screen.getByText("Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos").closest("li")
+  expect(item?.textContent).toBe(
+    "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos · Máximo por peso (64 kg): 7,8",
   )
 })

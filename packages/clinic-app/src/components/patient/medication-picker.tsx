@@ -1,4 +1,8 @@
-import { findHabitualMedication, searchHabitualMedications } from "@odentia/clinical"
+import {
+  matchHabitualMedication,
+  normalizeDrugText,
+  searchHabitualMedications,
+} from "@odentia/clinical"
 import {
   Combobox,
   ComboboxContent,
@@ -14,8 +18,9 @@ type Item = { key: string; dci: string; detail: string }
 
 /**
  * El principio activo de la medicación habitual (tablero 7): se escribe y se
- * elige de la lista por su DCI, con su código ATC (el mismo de la receta). Lo
- * que no está se guarda tal cual, sin código.
+ * elige de la lista por su DCI, su nombre local o su marca, con su código ATC
+ * (el mismo de la receta). Lo escrito que empieza por uno de esos nombres queda
+ * tal cual y con su código; lo que no está, tal cual y sin código.
  */
 export function MedicationPicker({
   id,
@@ -36,10 +41,20 @@ export function MedicationPicker({
     const found = searchHabitualMedications(text, 8, habitual).map((entry) => ({
       key: entry.atc + entry.dci,
       dci: entry.dci,
-      detail: `ATC ${entry.atc}`,
+      // Si salió por su marca o su nombre local, lo dice: «Fosamax · ATC M05BA04».
+      detail: entry.via ? `${entry.via} · ATC ${entry.atc}` : `ATC ${entry.atc}`,
     }))
-    if (text && !findHabitualMedication(text, habitual))
-      found.push({ key: `texto:${text}`, dci: text, detail: "Escrito tal cual, sin código" })
+    // Lo escrito con la dosis («alendronato 70 mg semanal») queda tal cual y con el código de su
+    // DCI; lo que no nombra ninguna de la lista, tal cual y sin código.
+    const named = text ? matchHabitualMedication(text, habitual) : null
+    if (text && (!named || normalizeDrugText(text) !== normalizeDrugText(named.entry.dci)))
+      found.push({
+        key: `texto:${text}`,
+        dci: text,
+        detail: named
+          ? `Escrito tal cual: ${named.entry.dci} · ATC ${named.entry.atc}`
+          : "Escrito tal cual, sin código",
+      })
     return found
   }, [typed])
   const selected = value ? { key: `valor:${value}`, dci: value, detail: "" } : null

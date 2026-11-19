@@ -17,6 +17,7 @@ import { resolveDiagnosisCode, wasDiagnosedBefore } from "./diagnosis-codes.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { reproposePhasesAtSite } from "./plan.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 
@@ -160,6 +161,12 @@ export async function recordEncounterDiagnosis(
     encounterId,
     diagnosisSystem: found.system,
     diagnosisCode: found.code,
+  })
+  // Lo indicado hoy en ese sitio vuelve a proponer su fase: la pulpitis anotada después de su
+  // endodoncia la lleva a «Urgencia» (reglas clínicas del 18 nov).
+  await reproposePhasesAtSite(tx, orgId, actorUserId, patientId, encounterId, {
+    siteSystem: columns.siteSystem ?? null,
+    siteCode: columns.siteCode ?? null,
   })
   return { row: withSite(site, row), existing: false }
 }

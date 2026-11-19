@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   budgetAnswerLine,
+  budgetChoiceText,
   budgetAnswerText,
   budgetOptionLabel,
   budgetStateText,
@@ -117,5 +118,37 @@ describe("lo respondido en una línea", () => {
       "Aceptó todo · S/ 1080.00",
     )
     expect(budgetAnswerLine({ status: "presentado", items, options: [] }, money)).toBeNull()
+  })
+})
+
+describe("lo que dice la Historia de un presupuesto", () => {
+  const options = [
+    { id: "a", decision: "elegida", position: 1 },
+    { id: "b", decision: "no_elegida", position: 2 },
+  ]
+  const items = [
+    { decision: "aceptado", optionId: "a", planItemId: "resina" },
+    { decision: "rechazado", optionId: "a", planItemId: "profilaxis" },
+    { decision: "no_elegida", optionId: "b", planItemId: "corona" },
+  ]
+
+  it("con una opción elegida dice cuál, sin importes, aunque haya aceptado una parte", () => {
+    expect(budgetChoiceText({ status: "parcial", items, options })).toBe("Eligió la opción A")
+    expect(budgetStateText({ status: "parcial", items, options })).toBe("Aceptó 1 de 2")
+  })
+
+  it("sin opciones, o reemplazado, dice lo de siempre", () => {
+    const single = { status: "parcial", items: items.slice(0, 2), options: [options[0]!] }
+    expect(budgetChoiceText(single)).toBe(budgetStateText(single))
+    expect(budgetChoiceText({ status: "sustituido", items, options })).toBe("Reemplazado")
+  })
+
+  // Revisión de las reglas clínicas del 18 nov: «Eligió» solo cuando ya respondió.
+  it("con la opción elegida pero sin responder del todo, o sin aceptar, dice su estado", () => {
+    expect(budgetChoiceText({ status: "aceptado", items, options })).toBe("Eligió la opción A")
+    expect(budgetChoiceText({ status: "rechazado", items, options })).toBe("No aceptó")
+    const asked = [{ decision: "pendiente", optionId: "a", planItemId: "profilaxis" }, ...items.filter((line) => line.planItemId !== "profilaxis")]
+    expect(budgetChoiceText({ status: "parcial", items: asked, options })).toBe("Aceptó 1 · 1 por responder")
+    expect(budgetChoiceText({ status: "presentado", items, options })).toBe("Entregado · espera respuesta")
   })
 })

@@ -16,7 +16,7 @@
 import {
   budgetAnswerText,
   budgetOptionLabel,
-  budgetStateText,
+  budgetChoiceText,
   documentText,
   moneyTotalsText,
   sumAcceptedByCurrency,
@@ -65,6 +65,7 @@ import {
   type BudgetPaths,
   type BudgetWithTotals,
   budgetAnswerLabel,
+  budgetChoiceWords,
   budgetNumberLabel,
   ANSWER_ENCOUNTER_KEYS,
   budgetPaths,
@@ -118,8 +119,9 @@ function finalAnswerText(line: BudgetLine, budgetStatus: string): string {
 }
 
 /**
- * Cómo quedará, con las palabras de siempre: misma derivación que `decideBudget`.
- * Con caminos sin elegir, `options` hace decir «falta elegir el camino».
+ * Cómo quedará, con las mismas palabras que Documentos y la Historia (`budgetChoiceText`): misma
+ * derivación que `decideBudget`. Con la opción elegida, «Eligió la opción A»; con caminos sin
+ * elegir, `options` hace decir «falta elegir el camino».
  */
 function expectedState(answers: string[], options?: readonly BudgetOption[]): string {
   const accepted = answers.filter((answer) => answer === "aceptado").length
@@ -131,7 +133,7 @@ function expectedState(answers: string[], options?: readonly BudgetOption[]): st
         : answers.includes("pospuesto")
           ? "pospuesto"
           : "rechazado"
-  return budgetStateText({ status, items: answers.map((decision) => ({ decision })), options })
+  return budgetChoiceText({ status, items: answers.map((decision) => ({ decision })), options })
 }
 
 /**
@@ -855,10 +857,10 @@ export function BudgetResponse({
 
   const statusLine =
     budget.status === "presentado" && budget.presentedAt
-      ? `${budget.stateText} · entregado el ${formatDay(budget.presentedAt)}`
+      ? `${budgetChoiceWords(budget)} · entregado el ${formatDay(budget.presentedAt)}`
       : budget.decidedAt && ["aceptado", "parcial", "rechazado", "pospuesto"].includes(budget.status)
-        ? `${budget.stateText} · respondió el ${formatDay(budget.decidedAt)}`
-        : budget.stateText
+        ? `${budgetChoiceWords(budget)} · respondió el ${formatDay(budget.decidedAt)}`
+        : budgetChoiceWords(budget)
 
   const decidersLoading = active && canPatients && (patientQuery.isPending || responsibilitiesQuery.isPending)
   const decidersError = patientQuery.error ?? responsibilitiesQuery.error
@@ -1201,9 +1203,9 @@ export function BudgetResponse({
               .join(" ")
           : `Quedará como «${expectedState(
               panelAnswered,
-              // Con la opción elegida y todo aceptado, «Eligió la opción A», no «Aceptó todo» (QA del 9
-              // nov). Con algo sin aceptar sigue «Aceptó N de M»: sus líneas no dicen su opción.
-              panelAnswered.every((answer) => answer === "aceptado") && (picked || chosenOption)
+              // Con la opción elegida, «Eligió la opción A», no «Aceptó todo» (QA del 9 nov) ni «Aceptó 1
+              // de 2»: lo mismo que dirán Documentos y la Historia (reglas clínicas, 18 nov).
+              picked || chosenOption
                 ? budget.options.map((option) => ({
                     ...option,
                     decision: option.id === (picked?.option.id ?? chosenOption?.id) ? "elegida" : "no_elegida",

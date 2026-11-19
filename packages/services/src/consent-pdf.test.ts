@@ -268,3 +268,24 @@ it("la hoja para firmar en papel trae el recuadro de la huella de quien no sabe 
     "Profesional que informa",
   ])
 })
+
+// Reglas clínicas del 18 nov (punto 5): los riesgos propios de su caso van en el PDF justo después
+// de «Riesgos y molestias», una viñeta por frase, como en la tablet y en su enlace.
+it("los riesgos propios de su caso salen después de «Riesgos y molestias», y sin ellos la hoja es la de siempre", async () => {
+  const subheading = vi.spyOn(DocumentKit.prototype, "subheading")
+  const bullets = vi.spyOn(DocumentKit.prototype, "bullets")
+  const personalRisks = ["Toma un anticoagulante (apixabán): puede sangrar más tiempo después de la extracción."]
+  await renderConsentPreviewPdf(clinic, {
+    title: "Exodoncia",
+    sections: { ...base, personalRisks } as typeof base,
+    body: consentSectionsToText(base),
+  })
+  const headings = subheading.mock.calls.map(([value]) => value)
+  const at = headings.indexOf("Riesgos y molestias")
+  expect(headings[at + 1]).toBe("Riesgos propios de su caso")
+  expect(bullets.mock.calls.map(([items]) => items)).toContainEqual(personalRisks)
+
+  subheading.mockClear()
+  await renderConsentPreviewPdf(clinic, { title: "Exodoncia", sections: base, body: consentSectionsToText(base) })
+  expect(subheading.mock.calls.map(([value]) => value)).not.toContain("Riesgos propios de su caso")
+})

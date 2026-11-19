@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { SHOWN, shortPatientName } from "./encounter-patient-line"
-import { alertsByRisk } from "./patient-header"
+import { alertsByRisk, clinicalAlerts, drugWords } from "./patient-header"
 
 declareProduct(bareProduct("dental"))
 
@@ -53,12 +53,12 @@ describe("las alertas de la línea fija, por riesgo", () => {
       currentMedications: [{ id: "warfarina", name: "Warfarina", dose: null, atcCode: "B01AA03" }],
     } as unknown as Detail
     expect(alertsByRisk({ ...anticoagulated, allergyReview: "none" }, null).map((alert) => alert.label)).toEqual([
-      "Anticoagulante: Warfarina",
+      "Anticoagulante: warfarina",
       "Niega alergias",
     ])
     expect(alertsByRisk({ ...anticoagulated, allergyReview: "unknown" }, null).map((alert) => alert.label)).toEqual([
       "Alergias: no se le preguntó",
-      "Anticoagulante: Warfarina",
+      "Anticoagulante: warfarina",
     ])
   })
 })
@@ -102,7 +102,7 @@ describe("en el teléfono, la alergia y el anticoagulante se leen sin tocar nada
     const shown = alertsByRisk(carmen, null).slice(0, SHOWN.phone)
     expect(shown.map((alert) => alert.short)).toEqual(["Alergia: Penicilinas", "Warfarina"])
     // El rótulo entero sigue en la tableta y el escritorio, y al pasar el cursor.
-    expect(shown.map((alert) => alert.label)).toEqual(["Alergia: Penicilinas", "Anticoagulante: Warfarina 5 mg"])
+    expect(shown.map((alert) => alert.label)).toEqual(["Alergia: Penicilinas", "Anticoagulante: warfarina 5 mg"])
   })
 })
 
@@ -111,4 +111,38 @@ describe("el nombre corto del teléfono", () => {
     expect(shortPatientName({ givenNames: "Carmen Lucía", familyName: "Rivas Soto", displayName: "Carmen Lucía Rivas Soto" })).toBe("Carmen R.")
     expect(shortPatientName({ givenNames: null, familyName: null, displayName: "Carmen Rivas" })).toBe("Carmen Rivas")
   })
+})
+
+// QA de diseño del 18 nov (H12): arriba iban huesos, anticoagulante y alergia; en la línea fija,
+// alergia, huesos y anticoagulante. Y «alendronato» junto a «Apixabán».
+it("la franja de arriba y la línea fija dicen sus alertas en el mismo orden y con las mismas minúsculas", () => {
+  const teresa = {
+    ...base,
+    activeAllergies: [
+      {
+        id: "penicilinas",
+        substance: "Penicilinas",
+        substanceSystem: null,
+        substanceCode: null,
+        kind: "alergia",
+        severity: "moderada",
+        criticality: "baja",
+        verification: "confirmada",
+      },
+    ],
+    currentMedications: [
+      { id: "alendronato", name: "alendronato 70 mg semanal", dose: null, atcCode: "M05BA04" },
+      { id: "apixaban", name: "Apixabán", dose: null, atcCode: "B01AF02" },
+    ],
+  } as unknown as Detail
+  const top = clinicalAlerts(teresa).map((alert) => alert.id)
+  const fixed = alertsByRisk(teresa, null).map((alert) => alert.id)
+  expect(top).toEqual(["penicilinas", "alendronato", "apixaban"])
+  expect(fixed).toEqual(top)
+  expect(clinicalAlerts(teresa).map((alert) => alert.label).slice(1)).toEqual([
+    "Medicina para los huesos: alendronato 70 mg semanal",
+    "Anticoagulante: apixabán",
+  ])
+  // Una sigla queda como está.
+  expect(drugWords("Antiagregante: AAS 100 mg")).toBe("Antiagregante: AAS 100 mg")
 })

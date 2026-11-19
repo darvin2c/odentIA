@@ -14,6 +14,8 @@
  * pero la pantalla dice cuáles faltan.
  */
 
+import type { ConsentRiskProfile } from "./consent-risks.js"
+
 export interface ConsentSections {
   /** Procedimiento propuesto, en lenguaje comprensible. */
   procedure: string
@@ -35,6 +37,20 @@ export const CONSENT_SECTION_LABELS = {
   consequences: "Consecuencias de no tratarse",
   notes: "Información adicional",
 } as const
+
+/**
+ * Lo que guarda un consentimiento generado (`consent_document.sections_snapshot`): las secciones
+ * de su plantilla y, si tiene, los riesgos propios de su caso (`consentPersonalRisks`), una frase
+ * por elemento. No es parte de la plantilla: el editor de plantillas no lo ofrece.
+ */
+export interface ConsentDocumentSections extends ConsentSections {
+  personalRisks?: string[] | null
+  /**
+   * Los riesgos propios de la última hoja pendiente que salió a papel (`markConsentPrinted`): la
+   * firma en papel compara con ella. No se muestra ni se imprime.
+   */
+  printedPersonalRisks?: string[] | null
+}
 
 /** Declaración que la persona firmante confirma al firmar. */
 export const CONSENT_DECLARATION =
@@ -149,12 +165,15 @@ export interface SuggestedConsentTemplate {
   serviceFamilies?: readonly string[]
   /** Claves que no lo piden aunque su familia sí (la corona de acero de un temporal). */
   exceptPrefixes?: readonly string[]
+  /** Lo que cambia sus riesgos propios (`consentPersonalRisks`): herida, hueso, implante, anestesia. */
+  riskProfile?: ConsentRiskProfile
 }
 
 /** Plantillas sugeridas por procedimiento: cada clínica nace con ellas activas. */
 export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "anestesia-local",
+    riskProfile: { localAnesthesia: true, words: "la anestesia" },
     title: "Anestesia local odontológica",
     sections: {
       procedure:
@@ -177,6 +196,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "exodoncia",
+    riskProfile: { wound: true, jawBone: true, localAnesthesia: true, words: "la extracción" },
     title: "Exodoncia simple o quirúrgica",
     serviceFamilies: ["missing_tooth"],
     servicePrefixes: ["exodoncia-"],
@@ -201,6 +221,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "endodoncia",
+    riskProfile: { localAnesthesia: true, words: "la endodoncia" },
     title: "Tratamiento de conductos (endodoncia)",
     // La de la pieza permanente; la pulpectomía de un temporal tiene el suyo y la pulpotomía va
     // con la odontopediatría (QA del 10 nov, A1 y M3).
@@ -226,7 +247,42 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
     },
   },
   {
+    key: "apicectomia",
+    // La cirugía periapical abre la encía y el hueso: no la cubre el de la endodoncia, que no
+    // corta, y sin el suyo no pedía ninguno (QA del 18 nov). Texto de la voz clínica de la mesa,
+    // según la guía de cirugía endodóntica de la AAE; lo valida un endodoncista de la clínica.
+    riskProfile: { wound: true, jawBone: true, localAnesthesia: true, words: "la cirugía" },
+    title: "Apicectomía (cirugía periapical)",
+    serviceFamilies: ["apicectomia"],
+    servicePrefixes: ["apicectomia-"],
+    sections: {
+      procedure:
+        "Con anestesia local, se levanta la encía junto a la raíz de la pieza indicada, se abre una ventana en el hueso, se retira la lesión de la punta de la raíz y unos milímetros de esa punta, se sella el conducto por ese extremo y se sutura la encía. Los puntos se retiran a los pocos días y la curación del hueso se controla con radiografías durante meses.",
+      benefits: [
+        "Conservar la pieza cuando la endodoncia sola no curó la infección",
+        "Eliminar la lesión de la punta de la raíz y el dolor",
+      ],
+      risks: [
+        "Dolor, inflamación o un moretón en la cara por algunos días",
+        "Sangrado o infección de la herida",
+        "Retracción de la encía o una cicatriz, sobre todo en las piezas de adelante",
+        "Alteración de la sensibilidad del labio o del mentón, por lo general temporal, en las piezas inferiores de atrás",
+        "Comunicación con el seno maxilar en las piezas superiores de atrás",
+        "Que la lesión no cure y haya que extraer la pieza",
+        "Reacción al anestésico local, poco frecuente",
+      ],
+      alternatives: [
+        "Repetir la endodoncia (retratamiento), si se puede llegar por la corona",
+        "Extraer la pieza y reponerla después",
+        "Control sin tratamiento, con los riesgos que se explican abajo",
+      ],
+      consequences:
+        "La infección de la punta de la raíz sigue y puede crecer: dolor, hinchazón, pérdida del hueso que sostiene la pieza y, al final, la pieza.",
+    },
+  },
+  {
     key: "periodoncia",
+    riskProfile: { wound: true, localAnesthesia: true, words: "el tratamiento de las encías" },
     title: "Tratamiento periodontal",
     servicePrefixes: ["raspado-y-alisado-radicular-", "curetaje-subgingival", "cirugia-periodontal-", "colgajo-con-alisado-radicular-"],
     sections: {
@@ -247,6 +303,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "implante",
+    riskProfile: { wound: true, jawBone: true, implant: true, localAnesthesia: true, words: "la cirugía del implante" },
     title: "Implante dental",
     serviceFamilies: ["implant"],
     servicePrefixes: ["colocacion-de-implante-"],
@@ -373,6 +430,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   },
   {
     key: "pulpectomia",
+    riskProfile: { localAnesthesia: true, words: "el tratamiento" },
     title: "Pulpectomía en piezas temporales",
     // La terapia pulpar total de un temporal tiene sus propios riesgos (la raíz que se reabsorbe,
     // la permanente que se forma debajo): el de odontopediatría no los decía (QA del 10 nov, M3).

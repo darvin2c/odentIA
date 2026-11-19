@@ -441,11 +441,12 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },
       "pasar un tratamiento a otra fase",
+      "por que el tratamiento salio en urgencia",
     ),
   ],
   // El bloque se llama «Plan», sin fases, y nada «va después» de otro tratamiento.
@@ -462,6 +463,17 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
           ", y lo que «va después» de otro tratamiento que aún no termina no trae «Hacer hoy»: no toca hoy.",
           ".",
         ],
+      ),
+    },
+  ],
+  // En el consultorio no hay cirugía de los maxilares: el riesgo de la medicina para los huesos no va.
+  "pacientes-consentimiento-riesgos-propios": (faq) => [
+    {
+      ...faq,
+      a: swap(
+        faq.a,
+        "una medicina para los huesos que toma o tomó (en una extracción, un implante o una cirugía, el riesgo poco frecuente de osteonecrosis), ",
+        "",
       ),
     },
   ],
@@ -604,8 +616,8 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-anestesia-dosis-maxima",
       q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
-      forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo"],
+      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, avisa el tope de epinefrina (0,04 mg por sesión) y dice por cuál: con el tope son unos 2,2 cartuchos de lidocaína con epinefrina 1:100 000; la hipertensión controlada no lo pide, y si tiene hipertensión y no anotaste la presión de hoy, te dice «toma la presión antes de anestesiar». Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo", "por que me limita la epinefrina", "cuantos cartuchos puedo usar con un hipertenso"],
       area: "clinica",
       needs: "clinical.write",
     },

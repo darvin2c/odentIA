@@ -38,13 +38,51 @@ function currentAbsoluteUrl(href: string): string {
   return result.href
 }
 
+/**
+ * La API no respondió (un corte, un despliegue o un fallo suyo): no se sabe si hay sesión ni de
+ * qué clínica. No es «sin sesión», así que no se manda a nadie al login (QA del 18 nov, novato 5:
+ * con la API reiniciándose, la app sacaba al login a mitad de la atención). Lo muestra la pantalla
+ * de error de la ruta, con «Reintentar»; con lo ya comprobado en esta pantalla, se sigue en ella.
+ */
+export class ApiUnavailableError extends Error {
+  constructor() {
+    super("No se pudo comprobar tu acceso: puede ser un corte momentáneo.")
+    this.name = "ApiUnavailableError"
+  }
+}
+
+/**
+ * Lo que dice la API al preguntar por la sesión: `none` solo cuando responde que no la hay (sin
+ * datos y sin error, o 401/403). Cualquier otro error, o no responder, es `unavailable`.
+ */
+export function sessionAnswer(result: { data: unknown; error?: { status?: number } | null }): "session" | "none" | "unavailable" {
+  if (result.data) return "session"
+  const status = result.error?.status
+  if (!result.error || status === 401 || status === 403) return "none"
+  return "unavailable"
+}
+
+/** Un error de la API que no dice nada de quién es ni de su clínica: no respondió bien. */
+export function apiUnavailable(error: { status?: number } | null | undefined): boolean {
+  if (!error) return false
+  const status = error.status
+  return status === undefined || status === 0 || status === 408 || status === 429 || status >= 500
+}
+
 /** Sesión actual o redirect al login del panel (con `next` de vuelta al tenant). */
 export async function requireSession(location: { href: string }): Promise<SessionInfo> {
   // En SSR el fetch corre en el servidor y no ve las cookies del navegador: hay que
   // reenviar la de la petición entrante.
-  const { data } = await authClient.getSession({
-    fetchOptions: ssrFetchOptions(),
-  })
+  const result = await authClient
+    .getSession({
+      fetchOptions: ssrFetchOptions(),
+    })
+    .catch(() => {
+      throw new ApiUnavailableError()
+    })
+  const answer = sessionAnswer(result)
+  if (answer === "unavailable") throw new ApiUnavailableError()
+  const { data } = result
   if (!data) {
     throw redirect({
       href: panelUrl(`/login?next=${encodeURIComponent(currentAbsoluteUrl(location.href))}`),

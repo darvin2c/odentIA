@@ -197,6 +197,11 @@ export interface BudgetWithTotals extends Budget {
   /** El estado con su nombre de siempre («Por enviar», «Aceptó 2 de 3»…), del servidor. */
   stateText: string
   /**
+   * Lo que dicen las pantallas («Eligió la opción A» con una opción elegida), del servidor, igual
+   * que la Historia (`budgetChoiceText`). Opcional mientras dura un despliegue: sin él, `stateText`.
+   */
+  choiceText?: string
+  /**
    * Quien mira puede cambiarlo, enviarlo o anularlo: el odontólogo lee los de sus
    * colegas, pero solo cambia lo suyo. Lo dice el servidor.
    */
@@ -211,6 +216,23 @@ export function valueOption(budget: Pick<BudgetWithTotals, "options">): BudgetOp
     budget.options[0] ??
     null
   )
+}
+
+/**
+ * El monto de la fila de un presupuesto en Documentos: ya respondido (aceptado o parcial), lo que
+ * aceptó, con «aceptó» delante; si no, el total de la opción que vale (verificación del 18 nov, 10:
+ * «Eligió la opción A» iba junto al total de la opción, S/ 1,550, cuando aceptó S/ 650).
+ */
+export function budgetRowAmount(
+  budget: Pick<
+    BudgetWithTotals,
+    "status" | "options" | "currency" | "totals" | "totalCents" | "acceptedCents" | "tariffTotalCents" | "discountCents"
+  >,
+): { accepted: boolean; totals: Array<{ currency: string; totalCents: number | null }> } {
+  const totals = totalsOf(valueOption(budget) ?? budget, budget.currency)
+  const accepted = budget.status === "aceptado" || budget.status === "parcial"
+  if (!accepted) return { accepted, totals }
+  return { accepted, totals: totals.map((row) => ({ currency: row.currency, totalCents: row.acceptedCents })) }
 }
 
 /** Las líneas de una opción. */
@@ -402,6 +424,11 @@ export function revisionDroppedOptions(
   return dropped.length === budget.options.length
     ? new Set()
     : new Set(dropped.map((option) => option.id))
+}
+
+/** Lo que dice la pantalla del estado de un presupuesto completo: las mismas palabras que la Historia. */
+export function budgetChoiceWords(budget: Pick<BudgetWithTotals, "choiceText" | "stateText">): string {
+  return budget.choiceText ?? budget.stateText
 }
 
 /**

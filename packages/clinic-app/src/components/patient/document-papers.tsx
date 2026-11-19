@@ -18,6 +18,7 @@ import { z } from "zod"
 import {
   BUDGET_SENDABLE_STATUSES,
   type BudgetWithTotals,
+  budgetChoiceWords,
   budgetNumberLabel,
 } from "../../lib/budgets"
 import {
@@ -28,6 +29,7 @@ import {
   consentSignatureWords,
   consentStatusWord,
   fetchConsentHistory,
+  markConsentPrinted,
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
@@ -38,6 +40,8 @@ import {
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
+import { personalRisksOf } from "../../lib/consent-shown"
 import { CHANNEL_WORDS, fetchHealthDocumentSent } from "../../lib/encounter-documents"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -45,8 +49,9 @@ import { cancelMedicalLeaveApi, type MedicalLeave } from "../../lib/medical-leav
 import { appWords } from "../../lib/product-words"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { ConsentPersonalRisksField, personalRisksEditable } from "./consent-personal-risks"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
-import { CONSENT_EVENT_LABELS, RevokeForm } from "./consentimientos-tab"
+import { consentEventWords, groupConsentEvents, RevokeForm } from "./consentimientos-tab"
 import { DocumentPaperPanel } from "./document-paper-panel"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { OrderCancelDrawer, OrderResultDrawer } from "./ordenes-tab"
@@ -509,14 +514,19 @@ function ConsentHistoryDrawer({
       onClose={onClose}
     >
       <ol className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {(history.data?.data ?? []).map((event) => (
+        {/* Los cambios seguidos de una misma persona, en una línea: «· 5 veces, la última a las 11:02». */}
+        {groupConsentEvents(history.data?.data ?? []).map(({ event, times, lastAt }) => (
           <li key={event.id}>
             {new Date(event.createdAt).toLocaleString(activeOrgLocale(), {
               dateStyle: "medium",
               timeStyle: "short",
             })}{" "}
-            · {CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus}
-            {event.reason && event.reason !== "Documento creado" ? ` · ${event.reason}` : ""}
+            · {consentEventWords(event)}
+            {times > 1
+              ? ` · ${times} veces, la última a las ${new Date(lastAt).toLocaleTimeString(activeOrgLocale(), {
+                  timeStyle: "short",
+                })}`
+              : ""}
           </li>
         ))}
       </ol>
@@ -531,14 +541,21 @@ export function ConsentPaper({
   onChanged,
   confirmIn = null,
   signedSummary = null,
+  focusRisks = false,
 }: PaperSurface & {
   document: ConsentDocument
   /** Abierto desde la atención en curso: ahí se confirma lo firmado por enlace. */
   confirmIn?: string | null
   /** Quién firmó, con qué documento (abreviado en el servidor), cuándo y qué (`linkSignedSummary`). */
   signedSummary?: string | null
+  /** Desde «Revisar» de la fila de Documentos: el foco va a los riesgos propios. */
+  focusRisks?: boolean
 }) {
   const canWrite = usePermission("clinical.write")
+  // Con riesgos propios escritos y sin guardar, firmar los guarda antes de abrir la hoja (H1).
+  const signWord = hasRisksDraft(useRisksDrafts(), { documentIds: [document.id] })
+    ? "Guardar y firmar"
+    : "Firmar ahora"
   const refresh = useRefreshPapers(document.patientId, onChanged)
   const [sending, setSending] = useState(false)
   const [signing, setSigning] = useState(false)
@@ -572,7 +589,7 @@ export function ConsentPaper({
     // Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces.
     ...(canWrite && pending && !document.personSignedAt
       ? [
-          { key: "firmar", label: "Firmar ahora", onSelect: () => setSigning(true) },
+          { key: "firmar", label: signWord, onSelect: () => setSigning(true) },
           { key: "papel", label: "Firmado en papel", onSelect: () => setPaperOpen(true) },
         ]
       : []),
@@ -627,9 +644,16 @@ export function ConsentPaper({
                 }
       }
       menu={menu}
-      revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}`}
+      revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}-${document.updatedAt}`}
       page={page}
       onClose={onClose}
+      // La hoja pendiente que sale a papel: el servidor anota qué riesgos propios llevaba, y la firma
+      // en papel compara con eso aunque se recargue la página o se firme desde otro equipo.
+      onTakeAway={
+        pending && canWrite
+          ? () => void markConsentPrinted(document.id, personalRisksOf(document)).catch(() => null)
+          : undefined
+      }
       notice={
         canWrite && pending ? (
           <div className="flex flex-col gap-2 rounded-md border p-3">
@@ -646,10 +670,15 @@ export function ConsentPaper({
                   `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. ${document.phoneSignBlock ? "Puedes enviárselo para que lo lea antes; lo firma en la cita." : "También puedes enviárselo para que lo firme desde su teléfono."}`}
               </p>
             )}
+            {/* Los riesgos propios van antes del botón que firma: se revisan y después se firma (QA de
+                diseño del 18 nov, H1). */}
+            {personalRisksEditable(document) ? (
+              <ConsentPersonalRisksField document={document} onSaved={refresh} autoFocus={focusRisks} />
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {document.personSignedAt ? null : (
                 <Button type="button" size="sm" onClick={() => setSigning(true)}>
-                  Firmar ahora
+                  {signWord}
                 </Button>
               )}
               <ConsentLinkActions document={document} onChanged={refresh} encounterId={confirmIn} />
@@ -751,7 +780,7 @@ export function BudgetPaper({
       type="budget"
       documentId={budget.id}
       title={budgetNumberLabel(budget.budgetNumber)}
-      status={`${budget.stateText} · ${formatDate(budget.presentedAt ?? budget.createdAt)}`}
+      status={`${budgetChoiceWords(budget)} · ${formatDate(budget.presentedAt ?? budget.createdAt)}`}
       send={
         !canSend
           ? null
@@ -769,7 +798,7 @@ export function BudgetPaper({
                     />
                   ),
                 }
-              : { kind: "blocked", reason: `${budget.stateText}: ya no se envía.` }
+              : { kind: "blocked", reason: `${budgetChoiceWords(budget)}: ya no se envía.` }
       }
       menu={[
         ...(draft

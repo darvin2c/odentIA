@@ -4,16 +4,26 @@
  * que nadie cerró en «Qué sigue».
  */
 import { appointment } from "@odentia/db/schema/agenda"
-import { appointmentPlanItem, encounter } from "@odentia/db/schema/clinical"
+import { appointmentPlanItem, encounter, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, createRoom } from "./appointments.js"
-import { adjustBudgetLines, cancelBudget, createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import {
+  addBudgetItems,
+  adjustBudgetLines,
+  cancelBudget,
+  createBudget,
+  decideBudget,
+  deliverBudget,
+  duplicateBudgetOption,
+  removeBudgetItems,
+} from "./budgets.js"
 import { createClinicalOrder } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { namedDiagnosis } from "./diagnosis-codes.js"
+import { getEncounterDetail } from "./encounters.js"
 import { getTimeline } from "./patient-history.js"
 import { addPlanItem, listPlanItems } from "./plan.js"
 import { getPlanNextStep, getPlanNextSteps } from "./plan-next.js"
@@ -232,4 +242,77 @@ it("un presupuesto cancelado de lo indicado en una atención queda dentro de ell
   expect(data.find((row) => row.type === "encounter")?.born?.budgets).toEqual([
     expect.objectContaining({ id: budget.id, retired: true }),
   ])
+})
+
+it("la Historia y la atención firmada dicen la opción elegida, sin importes, no «Aceptó 1 de 2»", async () => {
+  const f = await clinicalFixture()
+  const indicate = () =>
+    f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+  const resina = await indicate()
+  const profilaxis = await indicate()
+  const corona = await indicate()
+  // Opción A: resina y profilaxis; opción B: resina y corona.
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [resina.id, profilaxis.id] }))
+  const optionA = draft.options[0]!
+  const optionB = (await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, optionA.id))).options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [profilaxis.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  // Elige la A, acepta la resina y no la profilaxis: un presupuesto parcial.
+  const decided = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: optionA.id,
+      decisions: [
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: profilaxis.id, decision: "rechazado" },
+      ],
+    }),
+  )
+  expect(decided.status).toBe("parcial")
+  // Lo que leen Sofi y Argos no cambia.
+  expect(decided.stateText).toBe("Aceptó 1 de 2")
+  // Documentos y el cajón de la respuesta dicen lo mismo que la Historia (QA del 18 nov).
+  expect(decided.choiceText).toBe("Eligió la opción A")
+  // «Qué sigue» de recepción dice lo mismo, no «Aceptó 1 de 2» (verificación del 18 nov, 9).
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).text).toMatch(/^Eligió la opción A: /)
+
+  // La atención firmada y su tarjeta en la Historia dicen la opción; cada tratamiento, su respuesta.
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))).budgets).toEqual([
+    expect.objectContaining({ id: draft.id, stateText: "Eligió la opción A" }),
+  ])
+  await sign(f)
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  expect(data.find((row) => row.type === "encounter")?.born?.budgets).toEqual([
+    expect.objectContaining({ id: draft.id, stateText: "Eligió la opción A" }),
+  ])
+})
+
+it("un presupuesto suelto de la Historia también dice la opción elegida", async () => {
+  const f = await clinicalFixture()
+  const indicate = () =>
+    f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+  const resina = await indicate()
+  const profilaxis = await indicate()
+  const corona = await indicate()
+  // Lo indicado antes de que cada tratamiento naciera de una atención: el presupuesto va suelto en la
+  // Historia, no dentro de una tarjeta.
+  await ownerDb.update(treatmentPlanItem).set({ sourceEncounterId: null }).where(eq(treatmentPlanItem.planId, f.plan.id))
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [resina.id, profilaxis.id] }))
+  const optionA = draft.options[0]!
+  const optionB = (await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, optionA.id))).options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [profilaxis.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: optionA.id,
+      decisions: [
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: profilaxis.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  const budgetRow = async () =>
+    (await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))).data.find((row) => row.type === "budget" && row.refId === draft.id)
+  expect(await budgetRow()).toMatchObject({ statusText: "Eligió la opción A" })
 })
