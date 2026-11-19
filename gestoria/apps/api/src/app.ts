@@ -43,6 +43,36 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
+import { defaultLinkAdapters } from "./link-de-pago.js"
+import {
+  addReceipt,
+  cancelInput,
+  cancelOrder,
+  connectPaymentLink,
+  createOrder,
+  createPaymentLink,
+  deliverInput,
+  disconnectPaymentLink,
+  type LinkDeps,
+  linkConnectionInput,
+  listOrders,
+  markDelivered,
+  markShipped,
+  ORDER_FILTERS,
+  type OrderFilter,
+  orderDetail,
+  orderInput,
+  paymentLinkStatus,
+  quoteOrder,
+  receiptInput,
+  receiptPhoto,
+  receiveLinkNotice,
+  reviewInput,
+  reviewPayment,
+  sellable,
+  shipInput,
+  todayUTC,
+} from "./pedidos.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
@@ -70,6 +100,8 @@ export interface AppDeps {
   account: AccountConfig
   /** La dirección de la app (`https://app.gestoria24.com`): el único origen que la llama y la base de los enlaces. */
   webURL: string
+  /** El link de pago: sus proveedores, la llave de las credenciales y la dirección de este servidor. */
+  link?: LinkDeps
 }
 
 type Env = { Variables: { person: Person } }
@@ -79,6 +111,14 @@ const MAX_BODY_BYTES = 64 * 1024
 /** Una foto (ya achicada por la pantalla) y una hoja del catálogo pesan más: su ruta tiene su tope. */
 const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
+/** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
+const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
+
+/** La fecha de hoy de la persona («2026-11-19»), para «Para entregar hoy»; si no llega, la de UTC. */
+function todayOf(c: Context): string {
+  const value = c.req.query("hoy") ?? ""
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayUTC()
+}
 
 function errorBody(c: Context, code: string, message: string, fields?: Record<string, string>) {
   return {
@@ -105,6 +145,11 @@ async function bodyOf<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
 export function createApp(deps: AppDeps) {
   const keys: JWTVerifyGetKey = accountKeys(deps.account)
   const webOrigin = new URL(deps.webURL).origin
+  const link: LinkDeps = deps.link ?? {
+    adapters: defaultLinkAdapters(),
+    secretsKey: null,
+    apiURL: deps.webURL,
+  }
   const app = new Hono<Env>()
 
   app.use("*", requestId())
@@ -159,9 +204,14 @@ export function createApp(deps: AppDeps) {
   const small = limit(MAX_BODY_BYTES, "Pedido demasiado grande")
   const photo = limit(MAX_PHOTO_BYTES, "La foto pesa demasiado. Prueba con otra más chica.")
   const sheet = limit(MAX_SHEET_BYTES, "La hoja es muy grande: divídela en partes")
+  const receipt = limit(
+    MAX_PHOTO_BYTES + 16 * 1024,
+    "La captura pesa demasiado. Prueba con otra más chica.",
+  )
   app.use("*", (c, next) => {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
+    if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
     return small(c, next)
   })
 
@@ -178,6 +228,19 @@ export function createApp(deps: AppDeps) {
       headers: c.req.raw.headers,
       body,
     })
+    return c.json({ message: result.message }, result.status)
+  })
+
+  // Los avisos del proveedor del link de pago (B4): de servidor a servidor. El pago se lee del
+  // proveedor; el aviso solo dice cuál mirar.
+  app.post("/avisos/link-de-pago/:storeId", async (c) => {
+    const body = await c.req.text()
+    const result = await receiveLinkNotice(
+      deps.ownerDb,
+      c.req.param("storeId"),
+      { query: new URL(c.req.url).searchParams, headers: c.req.raw.headers, body },
+      link,
+    )
     return c.json({ message: result.message }, result.status)
   })
 
@@ -360,6 +423,105 @@ export function createApp(deps: AppDeps) {
     const { id, variantId } = c.req.param()
     const movement = await addMovement(deps.appDb, c.get("person"), id, variantId, input)
     return c.json({ movement }, 201)
+  })
+
+  // Los pedidos (B4): armar, cobrar y entregar.
+  app.get("/api/tiendas/:id/pedidos", async (c) => {
+    const filter = (c.req.query("filtro") ?? "abiertos") as OrderFilter
+    if (!Object.hasOwn(ORDER_FILTERS, filter))
+      throw new StoreError(400, "VALIDATION_ERROR", "Ese filtro no existe")
+    return c.json(
+      await listOrders(deps.appDb, c.get("person"), c.req.param("id"), filter, todayOf(c)),
+    )
+  })
+  app.get("/api/tiendas/:id/pedidos/para-vender", async (c) =>
+    c.json(await sellable(deps.appDb, c.get("person"), c.req.param("id"), todayOf(c))),
+  )
+  app.post("/api/tiendas/:id/pedidos/calcular", async (c) => {
+    const input = await bodyOf(c, orderInput)
+    return c.json(
+      await quoteOrder(deps.appDb, c.get("person"), c.req.param("id"), input, todayOf(c)),
+    )
+  })
+  app.post("/api/tiendas/:id/pedidos", async (c) => {
+    const input = await bodyOf(c, orderInput)
+    const order = await createOrder(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.json({ order }, 201)
+  })
+  app.get("/api/tiendas/:id/pedidos/:orderId", async (c) => {
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await orderDetail(deps.appDb, c.get("person"), id, orderId) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/link", async (c) => {
+    const { id, orderId } = c.req.param()
+    return c.json(await createPaymentLink(deps.appDb, c.get("person"), id, orderId, link))
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/comprobante", async (c) => {
+    const { id, orderId } = c.req.param()
+    let form: FormData
+    try {
+      form = await c.req.formData()
+    } catch {
+      throw new StoreError(400, "VALIDATION_ERROR", "El comprobante no se pudo leer")
+    }
+    const file = form.get("captura")
+    const input = receiptInput.parse({
+      amountCents: Number(form.get("amountCents")),
+      operation: String(form.get("operation") ?? ""),
+    })
+    const photo =
+      file instanceof File && file.size > 0 ? new Uint8Array(await file.arrayBuffer()) : null
+    const order = await addReceipt(deps.appDb, c.get("person"), id, orderId, input, photo)
+    return c.json({ order })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/revision", async (c) => {
+    const input = await bodyOf(c, reviewInput)
+    const { id, orderId, paymentId } = c.req.param()
+    return c.json({
+      order: await reviewPayment(deps.appDb, c.get("person"), id, orderId, paymentId, input),
+    })
+  })
+  app.get("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/captura", async (c) => {
+    const { id, orderId, paymentId } = c.req.param()
+    const photo = await receiptPhoto(deps.appDb, c.get("person"), id, orderId, paymentId)
+    return c.body(new Uint8Array(photo.content), 200, {
+      "content-type": photo.contentType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "cache-control": "private, max-age=86400, immutable",
+    })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/salio", async (c) => {
+    const input = await bodyOf(c, shipInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await markShipped(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/entregado", async (c) => {
+    const input = await bodyOf(c, deliverInput)
+    const { id, orderId } = c.req.param()
+    return c.json({
+      order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
+    })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
+    const input = await bodyOf(c, cancelInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await cancelOrder(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+
+  // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
+  app.get("/api/tiendas/:id/link-de-pago", async (c) =>
+    c.json(await paymentLinkStatus(deps.appDb, c.get("person"), c.req.param("id"), link)),
+  )
+  app.patch("/api/tiendas/:id/link-de-pago", async (c) => {
+    const input = await bodyOf(c, linkConnectionInput)
+    return c.json(
+      await connectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"), input, link),
+    )
+  })
+  app.delete("/api/tiendas/:id/link-de-pago", async (c) => {
+    await disconnectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"))
+    return c.body(null, 204)
   })
 
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))

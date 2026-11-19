@@ -663,3 +663,292 @@ export const productLink = pgTable(
     index("product_link_b_idx").on(table.productB),
   ],
 )
+
+/*
+ * Los pedidos (paso B4 del lienzo B, tableros 2, 5 y 14): lo que se vendió, cómo se cobra y
+ * cómo se entrega. Un pedido guarda una copia de lo que se acordó (nombres, precios, la forma
+ * de entrega y el medio de pago): lo que cambie después en la configuración no lo toca.
+ */
+
+/**
+ * Los estados de un pedido (tablero 2). «Pago por confirmar» nunca se muestra como pagado.
+ * Uno que se paga al recibir empieza en `por_salir`: se cobra en la puerta.
+ */
+export const ORDER_STATES = [
+  "por_pagar",
+  "por_confirmar",
+  "por_salir",
+  "en_camino",
+  "entregado",
+  "anulado",
+] as const
+export type OrderState = (typeof ORDER_STATES)[number]
+
+/** Por dónde llegó la venta. «otro» es la que llega por otro lado: una llamada o la tienda. */
+export const ORDER_CHANNELS = ["whatsapp", "instagram", "messenger", "otro"] as const
+export type OrderChannel = (typeof ORDER_CHANNELS)[number]
+
+export const saleOrder = pgTable(
+  "sale_order",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** El número que ve la persona («0142»), seguido en cada tienda. */
+    number: integer("number").notNull(),
+    state: text("state").$type<OrderState>().notNull(),
+    channel: text("channel").$type<OrderChannel>().notNull(),
+    /** La conversación de la que salió (B2); nulo si se anotó a mano. */
+    conversationId: text("conversation_id"),
+    customerName: text("customer_name").notNull(),
+    customerPhone: text("customer_phone"),
+    address: text("address").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    /** La forma de entrega, copiada al armar el pedido. */
+    deliveryMethodId: uuid("delivery_method_id"),
+    deliveryName: text("delivery_name").notNull(),
+    deliveryType: text("delivery_type").$type<DeliveryType>().notNull(),
+    deliveryZone: text("delivery_zone"),
+    /** Lo que costaba el envío y lo que paga el cliente: la diferencia la pone la tienda. */
+    deliveryListCents: integer("delivery_list_cents").notNull(),
+    deliveryCents: integer("delivery_cents").notNull(),
+    /** El envío es gratis por la compra mínima de la forma de entrega, no por negociar. */
+    deliveryFreeByPolicy: boolean("delivery_free_by_policy").notNull().default(false),
+    /** El medio de pago, copiado al armar el pedido. */
+    paymentMethodId: uuid("payment_method_id"),
+    paymentName: text("payment_name").notNull(),
+    paymentCollection: text("payment_collection").$type<PaymentCollection>().notNull(),
+    paymentDetails: text("payment_details").notNull().default(""),
+    /** Lo de los productos sin negociar (con su promoción), lo que paga y lo que cedió. */
+    itemsAutoCents: integer("items_auto_cents").notNull(),
+    subtotalCents: integer("subtotal_cents").notNull(),
+    discountCents: integer("discount_cents").notNull().default(0),
+    giftCents: integer("gift_cents").notNull().default(0),
+    totalCents: integer("total_cents").notNull(),
+    /** El margen que había hasta los mínimos y cuánto se usó (tablero 14: todo queda escrito). */
+    marginCents: integer("margin_cents").notNull().default(0),
+    marginUsedCents: integer("margin_used_cents").notNull().default(0),
+    /** Un precio negociado vale 24 horas: si no paga antes, vence. Nulo sin negociar. */
+    priceExpiresAt: timestamp("price_expires_at", { withTimezone: true }),
+    deliverOn: date("deliver_on"),
+    /** El número de envío de la agencia, si lo hay. */
+    tracking: text("tracking"),
+    /** El link de pago vigente: su dirección, su referencia en el proveedor y cuándo vence. */
+    linkUrl: text("link_url"),
+    linkRef: text("link_ref"),
+    linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("sale_order_state_check", inList("state", ORDER_STATES)),
+    check("sale_order_channel_check", inList("channel", ORDER_CHANNELS)),
+    check("sale_order_number_check", sql`${table.number} > 0`),
+    check(
+      "sale_order_customer_check",
+      sql`char_length(btrim(${table.customerName})) between 1 and 120 and (${table.customerPhone} is null or char_length(${table.customerPhone}) <= 30) and char_length(${table.address}) <= 300 and char_length(${table.notes}) <= 500`,
+    ),
+    check(
+      "sale_order_payment_collection_check",
+      inList("payment_collection", PAYMENT_COLLECTIONS),
+    ),
+    check(
+      "sale_order_amounts_check",
+      sql`${table.deliveryCents} between 0 and ${table.deliveryListCents} and ${table.subtotalCents} >= 0 and ${table.discountCents} >= 0 and ${table.giftCents} >= 0 and ${table.totalCents} = ${table.subtotalCents} + ${table.deliveryCents} and ${table.marginUsedCents} between 0 and ${table.marginCents}`,
+    ),
+    check(
+      "sale_order_cancel_check",
+      sql`(${table.state} = 'anulado') = (${table.cancelReason} is not null) and (${table.cancelReason} is null or char_length(btrim(${table.cancelReason})) between 3 and 300)`,
+    ),
+    check(
+      "sale_order_tracking_check",
+      sql`${table.tracking} is null or char_length(${table.tracking}) between 1 and 80`,
+    ),
+    foreignKey({
+      name: "sale_order_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("sale_order_store_id_key").on(table.storeId, table.id),
+    unique("sale_order_number_key").on(table.storeId, table.number),
+    index("sale_order_state_idx").on(table.storeId, table.state, table.createdAt),
+  ],
+)
+
+/** Una línea del pedido: una variante, con su precio de lista, el sin negociar, el mínimo y el acordado. */
+export const saleOrderLine = pgTable(
+  "sale_order_line",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    position: smallint("position").notNull(),
+    productId: uuid("product_id").notNull(),
+    variantId: uuid("variant_id").notNull(),
+    productName: text("product_name").notNull(),
+    variantName: text("variant_name").notNull(),
+    sku: text("sku").notNull(),
+    quantity: integer("quantity").notNull(),
+    /** El precio de lista de la variante. */
+    listUnitCents: integer("list_unit_cents").notNull(),
+    /** El mejor precio sin negociar: la promoción o el precio por cantidad, sin sumarlos. */
+    autoUnitCents: integer("auto_unit_cents").notNull(),
+    /** Lo más bajo a lo que se puede vender: el mínimo del producto, o el sin negociar si no hay. */
+    floorUnitCents: integer("floor_unit_cents").notNull(),
+    /** El acordado; 0 si va de regalo. */
+    unitCents: integer("unit_cents").notNull(),
+    gift: boolean("gift").notNull().default(false),
+  },
+  (table) => [
+    check("sale_order_line_quantity_check", sql`${table.quantity} between 1 and 1000`),
+    check(
+      "sale_order_line_price_check",
+      sql`${table.floorUnitCents} <= ${table.autoUnitCents} and ${table.autoUnitCents} <= ${table.listUnitCents} and (case when ${table.gift} then ${table.unitCents} = 0 else ${table.unitCents} between ${table.floorUnitCents} and ${table.autoUnitCents} end)`,
+    ),
+    foreignKey({
+      name: "sale_order_line_order_fkey",
+      columns: [table.storeId, table.orderId],
+      foreignColumns: [saleOrder.storeId, saleOrder.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "sale_order_line_variant_fkey",
+      columns: [table.storeId, table.variantId],
+      foreignColumns: [productVariant.storeId, productVariant.id],
+    }),
+    index("sale_order_line_order_idx").on(table.orderId, table.position),
+    index("sale_order_line_variant_idx").on(table.variantId),
+  ],
+)
+
+/** Cómo va un pago anotado: espera a una persona, confirmado o no coincide. */
+export const ORDER_PAYMENT_STATES = ["por_confirmar", "confirmado", "no_coincide"] as const
+export type OrderPaymentState = (typeof ORDER_PAYMENT_STATES)[number]
+
+/** Un pago de un pedido: por el link (lo confirma el proveedor), una captura o al recibir. */
+export const orderPayment = pgTable(
+  "order_payment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    kind: text("kind").$type<PaymentCollection>().notNull(),
+    status: text("status").$type<OrderPaymentState>().notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** El número de operación que se ve en la captura. */
+    operation: text("operation"),
+    /** El proveedor del link y su número de pago: un mismo pago no se anota dos veces. */
+    provider: text("provider"),
+    providerRef: text("provider_ref"),
+    /** La captura, guardada como las fotos del catálogo (ADR 0206). */
+    photoType: text("photo_type").$type<PhotoType>(),
+    photo: bytea("photo"),
+    /** Por qué no coincide, o lo que anotó el sistema. */
+    note: text("note"),
+    /** Quién lo anotó; nulo si llegó del proveedor del link. */
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("order_payment_kind_check", inList("kind", PAYMENT_COLLECTIONS)),
+    check("order_payment_status_check", inList("status", ORDER_PAYMENT_STATES)),
+    check("order_payment_amount_check", sql`${table.amountCents} >= 0`),
+    check(
+      "order_payment_texts_check",
+      sql`(${table.operation} is null or char_length(${table.operation}) between 1 and 60) and (${table.note} is null or char_length(${table.note}) <= 300)`,
+    ),
+    check(
+      "order_payment_photo_check",
+      sql`(${table.photo} is null) = (${table.photoType} is null) and (${table.photoType} is null or ${inList("photo_type", PHOTO_TYPES)}) and (${table.photo} is null or octet_length(${table.photo}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))})`,
+    ),
+    check(
+      "order_payment_reviewed_check",
+      sql`(${table.status} = 'por_confirmar') = (${table.reviewedAt} is null) and (${table.status} <> 'no_coincide' or char_length(btrim(coalesce(${table.note}, ''))) >= 3)`,
+    ),
+    foreignKey({
+      name: "order_payment_order_fkey",
+      columns: [table.storeId, table.orderId],
+      foreignColumns: [saleOrder.storeId, saleOrder.id],
+    }).onDelete("cascade"),
+    unique("order_payment_store_id_key").on(table.storeId, table.id),
+    uniqueIndex("order_payment_provider_uidx")
+      .on(table.storeId, table.provider, table.providerRef)
+      .where(sql`provider_ref is not null`),
+    index("order_payment_order_idx").on(table.orderId, table.createdAt),
+  ],
+)
+
+/**
+ * Lo que pasó con cada pedido, con quién y cuándo (tablero 2: «cada estado dice quién lo
+ * cambió y cuándo»). También los avisos al cliente: hoy no salen (WhatsApp llega con B2) y
+ * quedan aquí con lo que dirían. Solo se agrega.
+ */
+export const ORDER_EVENT_ACTIONS = [
+  "creado",
+  "link",
+  "comprobante",
+  "pago_confirmado",
+  "pago_no_coincide",
+  "pago_link",
+  "salio",
+  "entregado",
+  "anulado",
+  "aviso",
+] as const
+export type OrderEventAction = (typeof ORDER_EVENT_ACTIONS)[number]
+
+export const orderEvent = pgTable(
+  "order_event",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    /** Quién lo hizo; nulo si fue el proveedor del link. */
+    actorUserId: text("actor_user_id"),
+    action: text("action").$type<OrderEventAction>().notNull(),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("order_event_action_check", inList("action", ORDER_EVENT_ACTIONS)),
+    foreignKey({
+      name: "order_event_order_fkey",
+      columns: [table.storeId, table.orderId],
+      foreignColumns: [saleOrder.storeId, saleOrder.id],
+    }).onDelete("cascade"),
+    index("order_event_order_idx").on(table.orderId, table.createdAt),
+  ],
+)
+
+/** Los proveedores de link de pago que se pueden conectar (adaptadores intercambiables). */
+export const PAYMENT_LINK_PROVIDERS = ["mercadopago"] as const
+export type PaymentLinkProvider = (typeof PAYMENT_LINK_PROVIDERS)[number]
+
+/**
+ * La cuenta del proveedor del link de pago de la tienda, con sus credenciales cifradas
+ * (`secretos.ts` de la API). Nunca vuelven al navegador: la pantalla solo sabe si está conectada.
+ */
+export const storePaymentLink = pgTable(
+  "store_payment_link",
+  {
+    storeId: uuid("store_id").primaryKey(),
+    provider: text("provider").$type<PaymentLinkProvider>().notNull(),
+    accessTokenEnc: text("access_token_enc").notNull(),
+    webhookSecretEnc: text("webhook_secret_enc"),
+    /** Los últimos caracteres del token, para reconocer la cuenta sin mostrarla. */
+    hint: text("hint").notNull(),
+    connectedBy: text("connected_by").notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("store_payment_link_provider_check", inList("provider", PAYMENT_LINK_PROVIDERS)),
+    check("store_payment_link_hint_check", sql`char_length(${table.hint}) between 1 and 8`),
+    foreignKey({
+      name: "store_payment_link_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
