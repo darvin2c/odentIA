@@ -5,7 +5,7 @@
  */
 import { accountCopy, storeEvent, storeMember } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
@@ -135,6 +135,20 @@ describe("entrar con la cuenta", () => {
     })
   })
 
+  it("una copia vista hace rato, con la hora de la base en microsegundos, se pone al día sin colgarse", async () => {
+    await db.ownerDb.execute(
+      sql`insert into account_copy (user_id, name, email, state_changed_at, seen_at)
+          values ('u-vieja', 'Vieja', 'vieja@calzados.test', now() - interval '1 day 0.000123 seconds', now() - interval '1 day')`,
+    )
+    const token = await tokenFor("u-vieja", "vieja@calzados.test", "Vieja")
+    const response = await app.request("https://servidor.gestoria.test/api/yo", {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.status).toBe(200)
+    // No se queda: la revisión diaria de más abajo cuenta las copias.
+    await db.ownerDb.execute(sql`delete from account_copy where user_id = 'u-vieja'`)
+  })
+
   it("CORS solo deja llamar a la app de gestorIA", async () => {
     const preflight = (origin: string) =>
       app.request("https://servidor.gestoria.test/api/yo", {
@@ -262,6 +276,7 @@ describe("los permisos de cada rol (decisión 7)", () => {
     expect(lucia.json.store.permissions).toEqual([
       "tienda.ver",
       "equipo.ver",
+      "catalogo.ver",
       "ventas.atender",
       "pagos.confirmar",
       "entregas",

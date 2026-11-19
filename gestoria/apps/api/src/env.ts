@@ -24,6 +24,20 @@ const schema = z.object({
   /** La app (`https://app.gestoria24.com`): el único origen que llama y la base de los enlaces. */
   GESTORIA_WEB_URL: z.string().url(),
   GESTORIA_PORT: z.coerce.number().int().positive().default(3201),
+  /** La dirección pública de este servidor (`https://servidor.gestoria24.com`): adonde avisa el link de pago. */
+  GESTORIA_API_URL: z.string().url().optional(),
+  /**
+   * La llave de las credenciales que pone cada tienda (el link de pago), 32 bytes en base64.
+   * Vacía: el link de pago no está disponible; lo demás funciona.
+   */
+  GESTORIA_SECRETS_KEY: z
+    .string()
+    .trim()
+    .default("")
+    .refine(
+      (value) => value === "" || Buffer.from(value, "base64").length === 32,
+      "Son 32 bytes en base64 (openssl rand -base64 32)",
+    ),
 })
 
 export type Env = z.infer<typeof schema>

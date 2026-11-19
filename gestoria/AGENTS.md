@@ -33,6 +33,39 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   No cambia lo que dice: se anula y se hace otra. Cada cambio del equipo queda en `store_event`
   con quién lo hizo.
 
+## La configuración de la tienda (B3)
+
+- Medios de pago con los tipos de UN/CEFACT 4461 y cómo se confirma el pago, en el orden en que
+  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Formas de entrega con la
+  lista `DeliveryMethod` de Schema.org, su costo y lo que Sofi puede negociar del envío.
+- El catálogo: un producto agrupa hasta tres opciones (Schema.org `ProductGroup`); cada
+  combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
+  mínimo, el producto no se negocia; el aviso del mínimo frente al costo solo avisa.
+- El stock no lo escribe la aplicación: solo cambia con un movimiento del kardex, que la base pone
+  al día (ADR 0206). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
+  agregar un movimiento. Las ventas de B4 usan `recordSale` y `cancelSale` (`apps/api/src/stock.ts`).
+- Ventas ve el catálogo, el stock y la configuración (`catalogo.ver`, `tienda.ver`), sin cambiarlos
+  (`configuracion`). Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
+  `costos.ver`: la API no se lo devuelve a Ventas.
+- Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+
+## Los pedidos (B4)
+
+- Una sola operación arma un pedido para el equipo y para Sofi: `createOrderIn` (`apps/api/src/pedidos.ts`),
+  con el precio de `precio.ts`. Ningún precio baja del mínimo; lo cedido (descuento, envío que pone
+  la tienda, regalo a su mínimo) sale de un solo margen y queda escrito; el precio negociado vence
+  a las 24 horas (ADR 0207). Lo acordado no se cambia: un pedido se anula con motivo y se anota otro.
+- El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
+  pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
+- El cobro va en orden: link de pago (se confirma solo), captura (la confirma quien tiene
+  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró).
+  Un pedido pagado lo anula solo quien confirma pagos; uno entregado no se anula.
+- El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
+  mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
+  nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
+- Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
+  hasta B2. Ninguna pantalla dice que se enviaron.
+
 ## Trabajo
 
 - Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.

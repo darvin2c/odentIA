@@ -40,6 +40,8 @@ let branchId: string
 let roomId: string
 let room2Id: string
 let patientId: string
+/** Otra persona: el mismo paciente no puede tener dos citas que se crucen. */
+let otherPatientId: string
 let serviceId: string
 
 // 2026-10-05 America/Lima (UTC-5): 09:00–09:45 local.
@@ -73,6 +75,8 @@ beforeAll(async () => {
       ('m-agenda-professional-2', ${ORG}, ${PROFESSIONAL_2}, 'clinician', now())`)
   const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
   patientId = createdPatient!.id
+  const [otherPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Otra Paciente Agenda", patientNumber: 9180 })
+  otherPatientId = otherPatient!.id
   const [service] = await ownerDb
     .insert(serviceCatalog)
     .values({
@@ -214,6 +218,22 @@ it("la doble reserva de la misma unidad dental o profesional responde 409 APPOIN
     code: "APPOINTMENT_CONFLICT",
     status: 409,
     fields: { professionalUserId: "El profesional ya tiene otra cita en ese horario" },
+  })
+  // El mismo paciente con otro profesional y otra unidad, a la misma hora: tampoco.
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        professionalUserId: PROFESSIONAL_2,
+        roomId: room2Id,
+        startsAt: OVERLAP,
+        endsAt: OVERLAP_END,
+      }),
+    ),
+  ).rejects.toMatchObject({
+    code: "APPOINTMENT_CONFLICT",
+    status: 409,
+    fields: { startsAt: "El paciente ya tiene otra cita en ese horario" },
   })
   // Contigua: permitida.
   const contiguous = await run((tx) =>
@@ -590,7 +610,7 @@ it("sin unidad dental indicada la agenda pone una libre, y los tramos libres des
   await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       branchId,
-      patientId,
+      patientId: otherPatientId,
       professionalUserId: PROFESSIONAL_2,
       startsAt: "2026-11-09T15:00:00Z",
     }),
@@ -699,7 +719,7 @@ it("al reprogramar, el hueco de la propia cita cuenta como libre y la unidad den
   await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       branchId,
-      patientId,
+      patientId: otherPatientId,
       professionalUserId: PROFESSIONAL_2,
       roomId,
       startsAt: "2026-11-17T16:00:00Z",

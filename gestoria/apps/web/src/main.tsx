@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
+import { CatalogPage } from "./catalogo"
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -21,7 +22,10 @@ import {
 } from "./entrada"
 import { SignedOut } from "./lib/api"
 import { authClient, authFetch, safeNext } from "./lib/cuenta"
-import { InvitationPage, NewStorePage, StorePage, StoresPage } from "./tiendas"
+import { PaymentsPage } from "./pagos"
+import { OrdersPage } from "./pedidos"
+import { ProductPage } from "./producto"
+import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
 
 // El tema sigue al del equipo de la persona.
 const dark = window.matchMedia("(prefers-color-scheme: dark)")
@@ -90,6 +94,35 @@ const signedIn = createRoute({
   ),
 })
 
+// La tienda y sus secciones: los pedidos, el catálogo (su producto), pagos y entregas, y el equipo.
+const storeRoute = createRoute({
+  getParentRoute: () => signedIn,
+  path: "/tiendas/$id",
+  component: StoreLayout,
+})
+const storeChildren = [
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/",
+    beforeLoad: ({ params }) => {
+      throw redirect({ to: "/tiendas/$id/pedidos", params, replace: true })
+    },
+  }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/pedidos", component: OrdersPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/catalogo/$productId",
+    component: ProductPage,
+  }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/pagos-y-entregas",
+    component: PaymentsPage,
+  }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
+]
+
 const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
@@ -130,7 +163,7 @@ const routeTree = rootRoute.addChildren([
       path: "/tiendas/nueva",
       component: NewStorePage,
     }),
-    createRoute({ getParentRoute: () => signedIn, path: "/tiendas/$id", component: StorePage }),
+    storeRoute.addChildren(storeChildren),
     createRoute({
       getParentRoute: () => signedIn,
       path: "/invitacion/$id",

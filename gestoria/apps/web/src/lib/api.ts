@@ -66,7 +66,16 @@ export class SignedOut extends Error {}
  */
 export async function api<T>(
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: {
+    method?: string
+    body?: unknown
+    /** Un cuerpo que no es JSON: una foto o una hoja. */
+    raw?: { type: string; data: Blob | string }
+    /** Un formulario con archivo (la captura de un pago): el navegador pone su tipo. */
+    form?: FormData
+    /** La respuesta como archivo (una foto, la hoja de ejemplo). */
+    as?: "blob"
+  } = {},
 ): Promise<T> {
   for (const force of [false, true]) {
     // eslint-disable-next-line no-await-in-loop
@@ -79,9 +88,21 @@ export async function api<T>(
         method: init.method ?? "GET",
         headers: {
           authorization: `Bearer ${token}`,
-          ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+          ...(init.form
+            ? {}
+            : init.raw
+              ? { "content-type": init.raw.type }
+              : init.body === undefined
+                ? {}
+                : { "content-type": "application/json" }),
         },
-        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        ...(init.form
+          ? { body: init.form }
+          : init.raw
+            ? { body: init.raw.data }
+            : init.body === undefined
+              ? {}
+              : { body: JSON.stringify(init.body) }),
       })
     } catch {
       throw new ApiError(
@@ -92,6 +113,8 @@ export async function api<T>(
     }
     if (response.status === 401 && !force) continue
     if (response.status === 204) return undefined as T
+    // eslint-disable-next-line no-await-in-loop
+    if (response.ok && init.as === "blob") return (await response.blob()) as T
     // eslint-disable-next-line no-await-in-loop
     const body = (await response.json().catch(() => ({}))) as {
       error?: { code?: string; message?: string; fields?: Record<string, string> }

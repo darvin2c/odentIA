@@ -2958,8 +2958,27 @@ export async function deliverJob(
   let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
   // La cita ya confirmada no pide «Confirmar» (ADR 0109): sale el recordatorio con
   // «Cambiar mi cita», que es su enlace y abre antes lo que le falte de sus datos.
+  // Pero si le faltan datos u otras cosas antes de venir, el recordatorio se lo dice aunque
+  // la cita esté confirmada (la reservó con su sí y no completó): la reserva fue primero y
+  // ahora toca recordarle lo que falta. Si ese aviso no tiene por dónde salir, sale el de confirmada.
+  const reminderPending =
+    spec && job.kind === "recordatorio_cita" ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY) : []
+  // Solo como plantilla aprobada: como respuesta o correo, el aviso de datos es el recordatorio
+  // de siempre, con «Confirmar»; ahí sale el de confirmada y su enlace dice que completa sus datos.
+  const pendingData = reminderPending.some((candidate) => !candidate.soft)
+  let pendingFirst = false
+  for (const candidate of reminderPending) {
+    if (candidate.soft) continue
+    const candidateRoute = await previewMessageRoute(tx, orgId, contactId, candidate.spec)
+    if ("via" in candidateRoute && candidateRoute.via === "plantilla") {
+      pendingFirst = true
+      break
+    }
+  }
   const confirmed =
-    spec && job.kind === "recordatorio_cita" ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps) : null
+    spec && job.kind === "recordatorio_cita" && !pendingFirst
+      ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps)
+      : null
   if (confirmed) spec = confirmed.spec
   // La cita quedó por confirmar en una fecha que eligió el equipo: el aviso del cambio pide confirmarla.
   const askConfirm =
@@ -2975,7 +2994,7 @@ export async function deliverJob(
       : spec && job.kind === "aviso_cita_reservada"
         ? await pendingNoticesFor(tx, orgId, job, contactId, deps)
         : spec && job.kind === "recordatorio_cita"
-          ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+          ? reminderPending
           : []
   // El primero que tiene por dónde salir: mientras WhatsApp no aprueba uno, sale el siguiente
   // o el de siempre, sin su enlace.
@@ -3012,6 +3031,8 @@ export async function deliverJob(
   }
   const route = await routeMessage(tx, orgId, contactId, spec)
   if ("cause" in route) return cannot(route.detail, route.cause)
+  // Confirmada y con datos por completar, como respuesta o correo: su enlace abre primero los datos.
+  if (confirmed && pendingData && route.via !== "plantilla") linkTitle = { title: "Completar mis datos o cambiar mi cita" }
   const linkedText = link ? withLinkLine(composed.text, linkTitle ?? spec.link, link.url) : composed.text
   try {
     let sent: { id: string }
