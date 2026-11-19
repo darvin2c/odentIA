@@ -2963,10 +2963,14 @@ export async function deliverJob(
   // ahora toca recordarle lo que falta. Si ese aviso no tiene por dónde salir, sale el de confirmada.
   const reminderPending =
     spec && job.kind === "recordatorio_cita" ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY) : []
+  // Solo como plantilla aprobada: como respuesta o correo, el aviso de datos es el recordatorio
+  // de siempre, con «Confirmar»; ahí sale el de confirmada y su enlace dice que completa sus datos.
+  const pendingData = reminderPending.some((candidate) => !candidate.soft)
   let pendingFirst = false
   for (const candidate of reminderPending) {
     if (candidate.soft) continue
-    if (!("cause" in (await previewMessageRoute(tx, orgId, contactId, candidate.spec)))) {
+    const candidateRoute = await previewMessageRoute(tx, orgId, contactId, candidate.spec)
+    if ("via" in candidateRoute && candidateRoute.via === "plantilla") {
       pendingFirst = true
       break
     }
@@ -3027,6 +3031,8 @@ export async function deliverJob(
   }
   const route = await routeMessage(tx, orgId, contactId, spec)
   if ("cause" in route) return cannot(route.detail, route.cause)
+  // Confirmada y con datos por completar, como respuesta o correo: su enlace abre primero los datos.
+  if (confirmed && pendingData && route.via !== "plantilla") linkTitle = { title: "Completar mis datos o cambiar mi cita" }
   const linkedText = link ? withLinkLine(composed.text, linkTitle ?? spec.link, link.url) : composed.text
   try {
     let sent: { id: string }
