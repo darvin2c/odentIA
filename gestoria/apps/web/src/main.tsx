@@ -23,6 +23,7 @@ import {
 import { SignedOut } from "./lib/api"
 import { authClient, authFetch, safeNext } from "./lib/cuenta"
 import { PaymentsPage } from "./pagos"
+import { OrdersPage } from "./pedidos"
 import { ProductPage } from "./producto"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
 
@@ -93,7 +94,7 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: el catálogo (su producto), pagos y entregas, y el equipo.
+// La tienda y sus secciones: los pedidos, el catálogo (su producto), pagos y entregas, y el equipo.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -104,9 +105,10 @@ const storeChildren = [
     getParentRoute: () => storeRoute,
     path: "/",
     beforeLoad: ({ params }) => {
-      throw redirect({ to: "/tiendas/$id/catalogo", params, replace: true })
+      throw redirect({ to: "/tiendas/$id/pedidos", params, replace: true })
     },
   }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/pedidos", component: OrdersPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
   createRoute({
     getParentRoute: () => storeRoute,

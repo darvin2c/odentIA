@@ -56,7 +56,7 @@ export const PAYMENT_TYPES: Record<PaymentTypeCode, string> = {
 export const COLLECTIONS: Record<PaymentCollection, { name: string; hint: string }> = {
   link: {
     name: "Link de pago",
-    hint: "Paga en línea y se confirma solo. El proveedor del link se conecta más adelante.",
+    hint: "Paga en línea y se confirma solo. La cuenta del proveedor se conecta en «Link de pago».",
   },
   comprobante: {
     name: "Pide comprobante",

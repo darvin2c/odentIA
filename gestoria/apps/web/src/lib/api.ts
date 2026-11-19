@@ -71,6 +71,8 @@ export async function api<T>(
     body?: unknown
     /** Un cuerpo que no es JSON: una foto o una hoja. */
     raw?: { type: string; data: Blob | string }
+    /** Un formulario con archivo (la captura de un pago): el navegador pone su tipo. */
+    form?: FormData
     /** La respuesta como archivo (una foto, la hoja de ejemplo). */
     as?: "blob"
   } = {},
@@ -86,17 +88,21 @@ export async function api<T>(
         method: init.method ?? "GET",
         headers: {
           authorization: `Bearer ${token}`,
-          ...(init.raw
-            ? { "content-type": init.raw.type }
+          ...(init.form
+            ? {}
+            : init.raw
+              ? { "content-type": init.raw.type }
+              : init.body === undefined
+                ? {}
+                : { "content-type": "application/json" }),
+        },
+        ...(init.form
+          ? { body: init.form }
+          : init.raw
+            ? { body: init.raw.data }
             : init.body === undefined
               ? {}
-              : { "content-type": "application/json" }),
-        },
-        ...(init.raw
-          ? { body: init.raw.data }
-          : init.body === undefined
-            ? {}
-            : { body: JSON.stringify(init.body) }),
+              : { body: JSON.stringify(init.body) }),
       })
     } catch {
       throw new ApiError(

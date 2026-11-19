@@ -32,6 +32,7 @@ import {
   MessageCircle,
   Package,
   Plus,
+  ReceiptText,
   Store,
   Truck,
   UserPlus,
@@ -389,9 +390,10 @@ export function useStoreContext() {
   return value
 }
 
-/** Cada destino de la tienda: lo que vende, cómo cobra y entrega, y su equipo. */
+/** Cada destino de la tienda: sus pedidos, lo que vende, cómo cobra y entrega, y su equipo. */
 function storeSections(id: string) {
   return [
+    { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
     { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
     { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
@@ -421,7 +423,7 @@ function SectionLink({
 
 /**
  * La tienda: su nombre, el rol de quien está y sus secciones (lienzo B, tableros 6 y 7). Lo que
- * llega después (WhatsApp, pedidos) se suma como otra sección.
+ * llega después (WhatsApp) se suma como otra sección.
  */
 export function StoreLayout() {
   const { id } = useParams({ strict: false }) as { id: string }

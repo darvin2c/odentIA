@@ -17,6 +17,7 @@ import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { PaymentLinkSection } from "./link-de-pago"
 import { api } from "./lib/api"
 import {
   COLLECTIONS,
@@ -104,6 +105,7 @@ export function PaymentsPage() {
           </ul>
         )}
       </Section>
+      <PaymentLinkSection storeId={store.id} canEdit={canEdit} />
       <Section
         title="Formas de entrega"
         action={canEdit ? "Agregar forma" : null}
@@ -241,7 +243,7 @@ function PaymentRow({
       <div className="min-w-0 text-sm break-words">
         {method.details ||
           (method.collection === "link" ? (
-            <span className="text-muted-foreground">El link se conecta más adelante</span>
+            <span className="text-muted-foreground">Se paga con el link de la tienda</span>
           ) : (
             <span className="text-muted-foreground">Sin datos para enviar</span>
           ))}
