@@ -75,7 +75,7 @@ beforeAll(async () => {
       ('m-agenda-professional-2', ${ORG}, ${PROFESSIONAL_2}, 'clinician', now())`)
   const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
   patientId = createdPatient!.id
-  const [otherPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Otra Paciente Agenda", patientNumber: 9102 })
+  const [otherPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Otra Paciente Agenda", patientNumber: 9180 })
   otherPatientId = otherPatient!.id
   const [service] = await ownerDb
     .insert(serviceCatalog)
