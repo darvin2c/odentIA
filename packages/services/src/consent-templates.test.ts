@@ -319,10 +319,12 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
   })
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   const byKey = new Map(rows.map((row) => [row.key, row]))
-  // La corona sobre la propia pieza (entrega 10) y la pulpectomía (entrega 12) no están en la
-  // 0028: las crea el worker como toda plantilla sugerida nueva (`ensureSuggestedConsentsEverywhere`).
+  // La corona sobre la propia pieza (entrega 10), la pulpectomía (entrega 12) y la apicectomía
+  // (reglas clínicas) no están en la 0028: las crea el worker como toda plantilla sugerida nueva
+  // (`ensureSuggestedConsentsEverywhere`).
+  const afterMigration = new Set(["corona", "pulpectomia", "apicectomia"])
   expect(byKey.size).toBe(
-    SUGGESTED_CONSENT_TEMPLATES.filter((row) => row.key !== "corona" && row.key !== "pulpectomia").length + 1,
+    SUGGESTED_CONSENT_TEMPLATES.filter((row) => !afterMigration.has(row.key)).length + 1,
   )
   expect(await linkedKeys(orgId, surgical.id)).toEqual(["mi-extraccion"])
   expect(byKey.get("implante")).toMatchObject({ title: "Mi implante", version: 1, status: "publicado" })
