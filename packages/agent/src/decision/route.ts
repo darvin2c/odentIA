@@ -489,7 +489,12 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     const consulted = prefetched
       ? ` Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n`
       : " "
-    return `${head} reservar una cita.${consulted}${ids} ${appointmentStep(progress, propose)}${
+    // Ya tiene una cita por venir: que no termine con dos por no preguntar.
+    const existing =
+      prefetched && !progress?.done
+        ? ` Si ahí tiene una cita por venir y todavía no dijo si quiere otra aparte, antes de buscar horarios recuérdasela (día, hora y con quién) y pregúntale si quiere cambiarla o es otra cita aparte. Si responde que quiere cambiarla, eso es mover esa cita, no reservar otra; si es otra, reserva la nueva como siempre.`
+        : ""
+    return `${head} reservar una cita.${consulted}${ids}${existing} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
       facts.urgency === "urgente" && !progress?.done
         ? facts.urgentFirst === "telefono"
