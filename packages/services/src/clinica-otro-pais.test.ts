@@ -240,5 +240,9 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   // La hoja que se imprime es la neutra: nada de la norma peruana.
   const sheet = await c.run((tx) => getOdontogramPrint(tx, c.orgId, andrea.id))
   expect(sheet.entries.map((entry) => entry.condition)).toEqual(["definitive_restoration"])
-  expect(JSON.stringify({ closing, sheet, closed: closed.encounter })).not.toMatch(PERUVIAN)
+  // El cierre dice lo que se cargará en la moneda de la clínica (COP, el peso colombiano): no es la
+  // sigla del colegio peruano, que es lo que el filtro busca.
+  const { billing, ...said } = closing
+  expect(billing.totals.map((total) => total.currency)).toEqual(["COP"])
+  expect(JSON.stringify({ closing: said, sheet, closed: closed.encounter })).not.toMatch(PERUVIAN)
 })
