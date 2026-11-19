@@ -3491,6 +3491,12 @@ export interface AccountPending {
    * 600», y no los 600 que quedaron (QA del 10 nov, M7). `totalCents` y `paidCents` no lo suman.
    */
   advancePaidCents: number
+  /**
+   * Lo devuelto de este concepto (ADR 0068): la devolución lo reemplaza por otro con lo que queda,
+   * así que `totalCents` ya no es lo que costó. Con esto se dice «Costó 180 · se le devolvió 20»,
+   * y no «Costó 160» de una resina de 180 (QA en local del 19 nov).
+   */
+  returnedCents: number
 }
 
 /**
@@ -3759,6 +3765,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         productId: charge.productId ?? null,
         productQuantity: charge.productQuantity ?? null,
         advancePaidCents: advanceTo(charge, charge.amountCents - paid),
+        returnedCents: charge.returnedCents,
       }
     })
     .filter((row) => row.saldoCents > 0)

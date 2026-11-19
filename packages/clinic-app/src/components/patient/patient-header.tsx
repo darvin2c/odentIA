@@ -42,7 +42,7 @@ import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { accountHeaderWords, fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
 import { clinicToday } from "../../lib/inventory"
 import { useOrgLocale } from "../../lib/locale"
@@ -589,8 +589,8 @@ function BeforeVisitLine({ patientId, sex }: { patientId: string; sex?: string |
  * Lo que la persona tiene por delante, según quien mira (mesa del 9 nov): su
  * próxima cita a quien ve la agenda y lo que debe o tiene a favor a quien ve la
  * caja, en la cabecera de todas las pestañas. Cada moneda por separado, sin
- * sumarlas (ADR 0135), con el saldo que se cobra (lo que debe menos lo que
- * tiene a favor), el mismo de Cobros.
+ * sumarlas (ADR 0135), con las palabras y cifras de la tarjeta de Cobros
+ * (`accountHeaderWords`).
  */
 function HeaderStatus({
   personId,
@@ -613,7 +613,6 @@ function HeaderStatus({
     enabled: canFinance && Boolean(patientId),
   })
   const locale = useOrgLocale() ?? "es"
-  const balances = (account.data?.data.byCurrency ?? []).filter((row) => row.saldo !== 0)
   const showMoney = canFinance && Boolean(patientId)
   const canEditPerson = usePermission("patients.write")
   if (!upcoming && !showMoney && !(canEditPerson && patientId)) return null
@@ -629,15 +628,9 @@ function HeaderStatus({
             ? "consultando…"
             : account.isError
               ? "no se pudo consultar"
-              : balances.length === 0
-                ? "no debe nada"
-                : balances
-                    .map((row) =>
-                      row.saldo > 0
-                        ? `debe ${formatMoney(row.saldo, row.currency, locale)}`
-                        : `tiene ${formatMoney(-row.saldo, row.currency, locale)} a favor`,
-                    )
-                    .join(" y ")}
+              : accountHeaderWords(account.data?.data.byCurrency ?? [], (cents, currency) =>
+                  formatMoney(cents, currency, locale),
+                )}
           {!onAccount && !account.isPending && !account.isError ? (
             <>
               {" · "}

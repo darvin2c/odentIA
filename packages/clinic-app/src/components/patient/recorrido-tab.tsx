@@ -50,7 +50,7 @@ import type {
 } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import type { ServiceCatalogItem } from "../../lib/services"
-import { productUi } from "../../product/product-ui"
+import { findingWords, productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
@@ -632,8 +632,7 @@ export function RecorridoClinicoTab({
             ) : null}
             {journey.originFinding ? (
               <p className="text-sm">
-                Motiva esta indicación el hallazgo «{journey.originFinding.condition}»
-                {journey.originFinding.surface ? ` (${journey.originFinding.surface})` : ""} de{" "}
+                {`Motiva esta indicación el hallazgo «${findingWords(journey.originFinding.condition, journey.originFinding.surface)}» de `}
                 {siteLabel(journey.item)}, registrado el{" "}
                 {formatDate(journey.originFinding.createdAt)}.
               </p>
@@ -646,8 +645,7 @@ export function RecorridoClinicoTab({
                 <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
                   {activeFindings.map((entry) => (
                     <li key={entry.id}>
-                      {formatDate(entry.createdAt)} · {entry.condition}
-                      {entry.surface ? ` (${entry.surface})` : ""}
+                      {formatDate(entry.createdAt)} · {findingWords(entry.condition, entry.surface)}
                       {entry.note ? ` · ${entry.note}` : ""}
                     </li>
                   ))}

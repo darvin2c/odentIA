@@ -699,3 +699,13 @@ export function productUi(): ProductUi {
     throw new Error("La app no declaró su producto: falta declareProduct en router.tsx")
   return declared
 }
+
+/**
+ * Un hallazgo y su parte en palabras («Restauración definitiva · Oclusal»), con los nombres del
+ * producto: nunca la clave del odontograma («definitive_restoration (occlusal)», QA del 19 nov).
+ */
+export function findingWords(condition: string, part?: string | null): string {
+  const site = productUi().site
+  const name = site?.findingName(condition) ?? condition
+  return part ? `${name} · ${site?.partName(part) ?? part}` : name
+}

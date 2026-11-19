@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { balanceDetailWords, paidCommissionWarnings, refundLines } from "./finance-collect"
+import { accountHeaderWords, balanceDetailWords, paidCommissionWarnings, pendingCostWords, refundLines } from "./finance-collect"
 
 // QA del 6 nov (M14): el ticket dice «queda a favor», «A favor» está en cero y la
 // cuenta no decía adónde fueron los S/ 20.
@@ -76,5 +76,37 @@ describe("el detalle del saldo en el Resumen (C19)", () => {
     expect(
       balanceDetailWords(row(30000, 120000), money, [{ currency: "USD", paidCents: 5000 }]),
     ).toBe("Cargos emitidos sin pago aplicado.")
+  })
+})
+
+// QA en local del 19 nov: tras devolver S/ 20 de una resina de S/ 180 (lo devuelto queda a favor,
+// ADR 0068), la cabecera decía «debe S/ 140.00», la tarjeta de Cobros «Debe S/ 160.00» y el
+// renglón «Costó 160.00».
+describe("la cuenta tras una devolución que quedó a favor", () => {
+  const money = (cents: number, currency: string) => `${currency} ${(cents / 100).toFixed(2)}`
+  const afterReturn = { currency: "PEN", porCobrar: 16000, pagado: 2000, aFavor: 2000, saldo: 14000 }
+
+  it("la cabecera dice lo mismo que la tarjeta: «Falta pagar S/ 140.00», no «debe»", () => {
+    expect(accountHeaderWords([afterReturn], money)).toBe("falta pagar PEN 140.00")
+  })
+  it("sin nada a favor, «debe» es lo que dice la tarjeta en «Debe»", () => {
+    expect(accountHeaderWords([{ currency: "PEN", porCobrar: 16000, pagado: 0, aFavor: 0, saldo: 16000 }], money)).toBe(
+      "debe PEN 160.00",
+    )
+  })
+  it("lo que le queda a favor se dice, como «Le queda a favor» de la tarjeta", () => {
+    expect(accountHeaderWords([{ currency: "PEN", porCobrar: 0, pagado: 2000, aFavor: 2000, saldo: 0 }], money)).toBe(
+      "tiene PEN 20.00 a favor",
+    )
+    expect(accountHeaderWords([{ currency: "PEN", porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }], money)).toBe(
+      "no debe nada",
+    )
+  })
+  it("el renglón dice lo que costó y lo que se le devolvió", () => {
+    const plain = (cents: number) => (cents / 100).toFixed(2)
+    expect(pendingCostWords({ totalCents: 16000, paidCents: 0, returnedCents: 2000 }, plain)).toBe(
+      "Costó 180.00 · se le devolvió 20.00 · pagó 0.00",
+    )
+    expect(pendingCostWords({ totalCents: 18000, paidCents: 2000 }, plain)).toBe("Costó 180.00 · pagó 20.00")
   })
 })
