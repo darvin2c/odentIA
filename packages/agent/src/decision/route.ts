@@ -162,6 +162,8 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   clinico: [...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "enviar_enlace_cita", "confirmar_propuesta", "ver_contexto_paciente", "guardar_contacto"],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
+    // Quien ya tiene una cita puede querer cambiarla en vez de sumar otra.
+    "reprogramar_cita",
     "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato", "guardar_contacto",
   ],
   cambio_cita: [
@@ -489,7 +491,12 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     const consulted = prefetched
       ? ` Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n`
       : " "
-    return `${head} reservar una cita.${consulted}${ids} ${appointmentStep(progress, propose)}${
+    // Ya tiene una cita por venir: que no termine con dos por no preguntar.
+    const existing =
+      prefetched && !progress?.done
+        ? ` Si ahí tiene una cita por venir y todavía no dijo si quiere otra aparte, antes de buscar horarios recuérdasela (día, hora y con quién) y pregúntale si quiere cambiarla o es otra cita aparte. Si quiere cambiarla, muévela con ${has("reprogramar_cita") ? "reprogramar_cita" : "el equipo (request_human_handoff)"}; si es otra, reserva la nueva como siempre.`
+        : ""
+    return `${head} reservar una cita.${consulted}${ids}${existing} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
       facts.urgency === "urgente" && !progress?.done
         ? facts.urgentFirst === "telefono"

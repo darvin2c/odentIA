@@ -215,6 +215,22 @@ it("la doble reserva de la misma unidad dental o profesional responde 409 APPOIN
     status: 409,
     fields: { professionalUserId: "El profesional ya tiene otra cita en ese horario" },
   })
+  // El mismo paciente con otro profesional y otra unidad, a la misma hora: tampoco.
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        patientId,
+        professionalUserId: PROFESSIONAL_2,
+        roomId: room2Id,
+        startsAt: OVERLAP,
+        endsAt: OVERLAP_END,
+      }),
+    ),
+  ).rejects.toMatchObject({
+    code: "APPOINTMENT_CONFLICT",
+    status: 409,
+    fields: { startsAt: "El paciente ya tiene otra cita en ese horario" },
+  })
   // Contigua: permitida.
   const contiguous = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
