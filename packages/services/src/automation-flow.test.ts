@@ -774,6 +774,18 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     expect(AUTOMATION_MESSAGES.recordatorio_cita_confirmada.buttons.map((button) => button.action)).not.toContain("confirmar")
   })
 
+  it("confirmada pero con datos por completar: el recordatorio le pide completarlos antes de venir", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_confirmada", "recordatorio_cita_datos"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    // La reservó con su sí (confirmada) y no completó sus datos: la reserva fue primero, ahora se le recuerda.
+    const lucia = await remind(c, "Lucía Paredes", "confirmada")
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const { sent } = await sentTo(c, lucia.contactId)
+    expect(sent.templateName).toBe("odentia_recordatorio_cita_datos_v1")
+    expect(sent.body).toContain("Aún nos faltan algunos datos tuyos")
+  })
+
   it("mientras WhatsApp no aprueba su plantilla sale el recordatorio de siempre, antes que el correo", async () => {
     const c = await clinic({ approved: ["recordatorio_cita"], email: true })
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })

@@ -2958,8 +2958,23 @@ export async function deliverJob(
   let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
   // La cita ya confirmada no pide «Confirmar» (ADR 0109): sale el recordatorio con
   // «Cambiar mi cita», que es su enlace y abre antes lo que le falte de sus datos.
+  // Pero si le faltan datos u otras cosas antes de venir, el recordatorio se lo dice aunque
+  // la cita esté confirmada (la reservó con su sí y no completó): la reserva fue primero y
+  // ahora toca recordarle lo que falta. Si ese aviso no tiene por dónde salir, sale el de confirmada.
+  const reminderPending =
+    spec && job.kind === "recordatorio_cita" ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY) : []
+  let pendingFirst = false
+  for (const candidate of reminderPending) {
+    if (candidate.soft) continue
+    if (!("cause" in (await previewMessageRoute(tx, orgId, contactId, candidate.spec)))) {
+      pendingFirst = true
+      break
+    }
+  }
   const confirmed =
-    spec && job.kind === "recordatorio_cita" ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps) : null
+    spec && job.kind === "recordatorio_cita" && !pendingFirst
+      ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps)
+      : null
   if (confirmed) spec = confirmed.spec
   // La cita quedó por confirmar en una fecha que eligió el equipo: el aviso del cambio pide confirmarla.
   const askConfirm =
@@ -2975,7 +2990,7 @@ export async function deliverJob(
       : spec && job.kind === "aviso_cita_reservada"
         ? await pendingNoticesFor(tx, orgId, job, contactId, deps)
         : spec && job.kind === "recordatorio_cita"
-          ? await pendingNoticesFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+          ? reminderPending
           : []
   // El primero que tiene por dónde salir: mientras WhatsApp no aprueba uno, sale el siguiente
   // o el de siempre, sin su enlace.
