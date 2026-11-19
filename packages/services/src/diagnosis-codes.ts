@@ -658,7 +658,14 @@ export async function getDiagnosisSuggestions(
         ...hooks.site.fields(active),
       })
     }
-    withoutDisease = visit.active.length > 0 ? [] : visit.options
+    // Con algo que propone un tratamiento (la caries de su resina), un chequeo «sano» sería falso:
+    // queda solo «Control después de un tratamiento», el de la visita de control (QA del 19 nov).
+    withoutDisease =
+      visit.active.length > 0
+        ? []
+        : nothingElse
+          ? visit.options
+          : visit.options.filter((option) => option.key === "control")
   }
   const usage = count()
   const used = await tx

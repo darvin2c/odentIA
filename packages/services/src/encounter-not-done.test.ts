@@ -284,3 +284,31 @@ it("todo fue un error: «Dejarlo indicado» desmarcado lo quita del plan", async
   const [item] = await ownerDb.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem).where(eq(treatmentPlanItem.id, proc.planItemId!))
   expect(item?.status).toBe("cancelado")
 })
+
+it("pagado y rehecho desde el catálogo: usa su misma fila del plan y no se cobra otra vez", async () => {
+  const f = await clinicalFixture()
+  const { proc, signed } = await signedDirect(f)
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId: sede!.id,
+      chargeIds: [signed.charges[0]!.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: signed.charges[0]!.amountCents }],
+      requestId: randomUUID(),
+    }),
+  )
+  await notDone(f, proc.id)
+  const [again] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Resina de la 24" })
+    .returning()
+  await f.ready(again!.id)
+  // «Registrar algo fuera del plan» con el mismo servicio y la misma pieza.
+  const redone = await f.run((tx) =>
+    addEncounterProcedure(tx, ...f.args, again!.id, { serviceId: proc.serviceId!, toothNumber: 24 }),
+  )
+  expect(redone.planItemId).toBe(proc.planItemId)
+  const signedAgain = await f.run((tx) => finalizeEncounter(tx, ...f.args, again!.id))
+  expect(signedAgain.charges).toEqual([])
+})

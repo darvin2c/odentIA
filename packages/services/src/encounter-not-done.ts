@@ -88,6 +88,8 @@ export interface NotDonePreview {
   bookedControls: Array<{ title: string; dueAt: Date }>
   /** La atención tiene una receta vigente: no se anula sola. */
   prescription: boolean
+  /** Cómo se cobra: por tratamiento, lo pagado queda para cuando se haga si sigue en el plan. */
+  billingMode: "session" | "treatment"
 }
 
 export interface NotDoneResult extends NotDonePreview {
@@ -301,6 +303,7 @@ async function previewOf(
     charges: await chargesOf(tx, orgId, patientId, proc),
     bookedControls: booked,
     prescription: Boolean(recipe),
+    billingMode: await billingModeOfProcedure(tx, orgId, patientId, proc),
   }
 }
 

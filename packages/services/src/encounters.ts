@@ -1710,7 +1710,9 @@ async function openAcceptedPlanItemFor(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.serviceId, serviceId),
-        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        // Lo aceptado, o lo que se marcó «No se hizo» y quedó por decidir: hacerlo es aceptarlo, en
+        // su misma fila y con su cobro (QA del 19 nov: se cobraba otra vez y quedaban dos filas).
+        or(eq(treatmentPlanItem.decisionStatus, "aceptado"), notDoneByDecideSql()),
         ne(treatmentPlanItem.status, "realizado"),
         ne(treatmentPlanItem.status, "cancelado"),
         ne(treatmentPlanItem.status, "reemplazado"),
@@ -1720,6 +1722,15 @@ async function openAcceptedPlanItemFor(
     .orderBy(asc(treatmentPlanItem.id))
   const row = rows.find((item) => !siteCode || !item.siteCode || item.siteCode === siteCode)
   return row?.id ?? null
+}
+
+/** Indicado y hecho en una atención, marcado «No se hizo» después de firmar y aún por decidir. */
+function notDoneByDecideSql(): SQL {
+  return sql`(${treatmentPlanItem.decisionStatus} = 'pendiente' and exists (
+    select 1 from encounter_procedure nd
+    join encounter ne on ne.organization_id = nd.organization_id and ne.id = nd.encounter_id
+    where nd.organization_id = ${treatmentPlanItem.organizationId} and nd.plan_item_id = ${treatmentPlanItem.id}
+      and nd.voided_at is not null and ne.status = 'finalizada' and nd.voided_at > ne.finalized_at))`
 }
 
 /** La pieza (o el sitio) que trae lo pedido, si se dijo; sin ella, ninguna. */
@@ -1840,7 +1851,7 @@ export async function addEncounterProcedure(
     // vuelve a exigirlo, pero aquí el error es específico antes de insertar.
     if (plan.decisionStatus !== "aceptado") {
       const awaiting = plan.decisionStatus === "pendiente" && (!budget || budget.status === "borrador")
-      if (!input.acceptWhenDone || !awaiting) {
+      if (!(input.acceptWhenDone || linkedPlanItemId === plan.id) || !awaiting) {
         throw conflict(
           "ITEM_NOT_ACCEPTED",
           budget && budget.status !== "borrador" && input.acceptWhenDone

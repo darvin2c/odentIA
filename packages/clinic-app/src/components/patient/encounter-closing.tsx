@@ -317,12 +317,16 @@ export function noNewChargesWords(input: {
   dayWord: string
   /** Lo registrado como hecho en la atención (sin lo anulado): sin nada, no hay «actos sin costo». */
   registeredCount?: number
+  /** La consulta que el cierre propondrá cobrar («Evaluación odontológica · S/ 50.00»), si hay. */
+  consultation?: string | null
 }): string {
   const charges = input.plannedIds.some(
     (id) => !input.registeredIds.has(id) && !input.chargedIds.has(id),
   )
   if (!charges && input.plannedIds.length === 0 && input.registeredCount === 0)
-    return "Sin cargos todavía: no hay nada registrado como hecho."
+    return input.consultation
+      ? `Sin cargos todavía: al firmar se propone cobrar ${input.consultation}.`
+      : "Sin cargos todavía: no hay nada registrado como hecho."
   return charges
     ? `Sin cargos nuevos por ahora: lo marcado «${input.dayWord}» se carga al registrarlo, según su presupuesto.`
     : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."

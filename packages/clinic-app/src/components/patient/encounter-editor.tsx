@@ -3057,6 +3057,13 @@ export function EncounterEditor({
                         chargedIds: new Set(accountQuery.data?.data.conCargo ?? []),
                         dayWord: pastVisit ? "Ese día" : "Hoy",
                         registeredCount: detail.procedures.filter((proc) => !proc.voidedAt).length,
+                        consultation: closingQuery.data?.data.consultation
+                          ? `${closingQuery.data.data.consultation.proposed.name} · ${formatMoney(
+                              closingQuery.data.data.consultation.proposed.priceCents,
+                              closingQuery.data.data.consultation.proposed.currency,
+                              activeOrgLocale() ?? "es-PE",
+                            )}`
+                          : null,
                       })
                   : accountQuery.isError
                     ? "No se pudo consultar la cuenta para estimar los cargos."

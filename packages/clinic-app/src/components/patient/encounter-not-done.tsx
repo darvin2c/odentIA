@@ -36,6 +36,7 @@ interface NotDonePreview {
   }>
   bookedControls: Array<{ title: string; dueAt: string }>
   prescription: boolean
+  billingMode: "session" | "treatment"
 }
 
 /** Quien firmó o atendió, o quien es dueño o administra: los mismos que deja pasar el servidor. */
@@ -81,12 +82,20 @@ function consequences(preview: NotDonePreview, keepInPlan: boolean): string[] {
           ? `Su cobro de ${money(charge.amountCents, charge.currency)} no está pagado: se anula.`
           : "Su cobro no está pagado: se anula.",
       )
-    if (charge.outcome === "caja")
+    if (charge.outcome === "caja") {
+      // Lo mismo que dice la tarea de caja: por tratamiento y en el plan, lo pagado es de él.
+      const stays =
+        preview.billingMode === "treatment" &&
+        item !== null &&
+        item.becomes !== "cancelado" &&
+        !(item.direct && !keepInPlan)
+      const paid = charge.paidCents != null ? `Ya lo pagó (${money(charge.paidCents, charge.currency)})` : "Ya tiene un pago"
       lines.push(
-        charge.paidCents != null
-          ? `Ya lo pagó (${money(charge.paidCents, charge.currency)}): caja recibe la tarea de devolverlo o dejarlo a favor.`
-          : "Ya tiene un pago: caja recibe la tarea de devolverlo o dejarlo a favor.",
+        stays
+          ? `${paid}: queda pagado para cuando se haga; caja recibe una tarea por si lo pide de vuelta.`
+          : `${paid}: caja recibe la tarea de devolverlo o dejarlo a favor.`,
       )
+    }
     if (charge.outcome === "sigue") lines.push("Su cobro sigue: el tratamiento continúa con otra sesión.")
   }
   for (const control of preview.bookedControls)
