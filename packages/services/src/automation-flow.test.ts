@@ -774,6 +774,18 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     expect(AUTOMATION_MESSAGES.recordatorio_cita_confirmada.buttons.map((button) => button.action)).not.toContain("confirmar")
   })
 
+  it("confirmada pero con datos por completar: el recordatorio le pide completarlos antes de venir", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_confirmada", "recordatorio_cita_datos"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    // La reservó con su sí (confirmada) y no completó sus datos: la reserva fue primero, ahora se le recuerda.
+    const lucia = await remind(c, "Lucía Paredes", "confirmada")
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const { sent } = await sentTo(c, lucia.contactId)
+    expect(sent.templateName).toBe("odentia_recordatorio_cita_datos_v1")
+    expect(sent.body).toContain("Aún nos faltan algunos datos tuyos")
+  })
+
   it("mientras WhatsApp no aprueba su plantilla sale el recordatorio de siempre, antes que el correo", async () => {
     const c = await clinic({ approved: ["recordatorio_cita"], email: true })
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
@@ -797,7 +809,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     expect(sent.contentType).toBe("text")
     // El botón de su enlace va escrito al final, como en los demás mensajes con «Su enlace».
     expect(sent.body).toMatch(
-      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
+      /^Hola, Lucía\. Te esperamos mañana, miércoles 7 de octubre, a las 10:00.*, con Dra\. Ana Torres en Clínica Sonríe, sede Centro\. Si necesitas cambiar la cita, responde a este mensaje\.\n\nCompletar mis datos o cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
     )
     expect(sent.replyButtons).toEqual([
       { id: replyId("responder", job.id), title: "No podré ir" },
@@ -814,7 +826,7 @@ describe("el recordatorio de una cita ya confirmada no pide «Confirmar» (ADR 0
     const { job, sent } = await sentTo(c, rosa.contactId)
     expect(job).toMatchObject({ status: "enviado", via: "correo" })
     expect(sent.body).toContain("Hola, Rosa. Te esperamos mañana, miércoles 7 de octubre")
-    expect(sent.body).toMatch(/Cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
+    expect(sent.body).toMatch(/Completar mis datos o cambiar mi cita: https:\/\/auto-\S+\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}\n/)
     expect(sent.body).toMatch(/\nSi no podrás ir: https:\/\/auto-\S+\.odentia\.test\/c\/\S+/)
     expect(sent.body).not.toContain("Para confirmar")
   })

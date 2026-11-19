@@ -1463,6 +1463,7 @@ export async function createAppointment(
       allowOutsideSchedule: input.outsideSchedule === true,
       allowBusy: input.overrideBusy === true,
       forTest,
+      patientId: input.patientId,
     })
   }
 
@@ -1728,6 +1729,7 @@ export async function moveAppointment(
       allowOutsideSchedule: input.outsideSchedule === true,
       allowBusy: input.overrideBusy === true,
       forTest: current.isTest,
+      patientId: current.patientId,
     })
   }
   // Llegó hoy: si la cita pasa a otro día, esa llegada ya no es de ella.
@@ -1916,6 +1918,7 @@ export async function updateAppointment(
       allowOutsideSchedule: sameProfessional,
       allowBusy: sameProfessional && current.overlapAllowed,
       forTest: current.isTest,
+      patientId: current.patientId,
     })
     if (!sameProfessional) set.overlapAllowed = false
   }

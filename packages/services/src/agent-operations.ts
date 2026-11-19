@@ -2887,6 +2887,7 @@ async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, u
       startsAt,
       endsAt,
       forTest,
+      ...(typeof payload.patientId === "string" ? { patientId: payload.patientId } : {}),
     })
     return true
   } catch (error) {

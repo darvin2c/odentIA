@@ -504,6 +504,12 @@ export interface AvailabilityCheck {
    * choca con las reales: una prueba no ocupa el horario de nadie.
    */
   forTest?: boolean
+  /**
+   * El paciente de la cita: no puede tener dos a la misma hora, la reserve quien
+   * la reserve (Sofi, su enlace o recepción). Solo la excepción del equipo
+   * (`allowBusy`) lo deja pasar.
+   */
+  patientId?: string
 }
 
 /** La ausencia de un profesional (no un bloqueo de sede o de unidad): vale en todas las sedes. */
@@ -638,6 +644,29 @@ export async function validateAvailability(
       (await roomWord(tx, orgId)).one,
     )
   }
+  if (check.patientId && !check.allowBusy && (await patientBusy(tx, orgId, check.patientId, check))) {
+    const message = "El paciente ya tiene otra cita en ese horario"
+    throw new ServiceError("APPOINTMENT_CONFLICT", 409, message, { startsAt: message })
+  }
+}
+
+/** Otra cita por venir del mismo paciente que se cruza con este horario. */
+async function patientBusy(tx: Db, orgId: string, patientId: string, check: AvailabilityCheck): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        lt(appointment.startsAt, check.endsAt),
+        gt(appointment.endsAt, check.startsAt),
+        check.ignoreAppointmentId ? ne(appointment.id, check.ignoreAppointmentId) : undefined,
+      ),
+    )
+    .limit(1)
+  return row !== undefined
 }
 
 /**
