@@ -187,6 +187,7 @@ export const STORE_EVENT_ACTIONS = [
   "configuracion.entrega",
   "catalogo.producto",
   "catalogo.hoja",
+  "configuracion.sofi",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 
@@ -699,7 +700,7 @@ export const saleOrder = pgTable(
     state: text("state").$type<OrderState>().notNull(),
     channel: text("channel").$type<OrderChannel>().notNull(),
     /** La conversación de la que salió (B2); nulo si se anotó a mano. */
-    conversationId: text("conversation_id"),
+    conversationId: uuid("conversation_id"),
     customerName: text("customer_name").notNull(),
     customerPhone: text("customer_phone"),
     address: text("address").notNull().default(""),
@@ -738,6 +739,11 @@ export const saleOrder = pgTable(
     linkRef: text("link_ref"),
     linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
     cancelReason: text("cancel_reason"),
+    /**
+     * Salió de «Probar a Sofi» (B5): es un pedido de verdad para ver el recorrido, pero no mueve
+     * el stock, no crea un link de pago real y no cuenta en Reportes ni en Argos.
+     */
+    test: boolean("test").notNull().default(false),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -770,6 +776,13 @@ export const saleOrder = pgTable(
     }).onDelete("cascade"),
     unique("sale_order_store_id_key").on(table.storeId, table.id),
     unique("sale_order_number_key").on(table.storeId, table.number),
+    // La conversación de la que salió, de la misma tienda (B5).
+    foreignKey({
+      name: "sale_order_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }),
+    index("sale_order_conversation_idx").on(table.conversationId),
     index("sale_order_state_idx").on(table.storeId, table.state, table.createdAt),
   ],
 )
@@ -950,5 +963,193 @@ export const storePaymentLink = pgTable(
       columns: [table.storeId],
       foreignColumns: [store.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/*
+ * Sofi, la vendedora, y Argos, el administrador (paso B5 del lienzo B, tableros 8, 13 y 14).
+ * El núcleo conoce conversaciones y mensajes; el canal (WhatsApp en B2, Instagram y Messenger en
+ * B6) es un adaptador que solo los trae y los lleva. Mientras no hay canal, el equipo prueba a
+ * Sofi con una conversación de prueba («Probar a Sofi») y lo que Argos le encarga queda escrito
+ * sin enviarse.
+ *
+ * Sofi y Argos entran a la base como el rol de la aplicación con un remitente propio
+ * (`agente:sofi`, `agente:argos`): las mismas reglas de cada tienda, y además la base les niega
+ * lo que nunca hacen (confirmar un pago, mover stock, tocar la configuración), en la migración
+ * de reglas de B5.
+ */
+
+/** Lo que el dueño deja escrito para Sofi (tablero 8, «Lo que pone el dueño»). */
+export const storeAgent = pgTable(
+  "store_agent",
+  {
+    storeId: uuid("store_id").primaryKey(),
+    /** Apagada, todas las conversaciones esperan a una persona. */
+    enabled: boolean("enabled").notNull().default(false),
+    /** El nombre con que saluda; nulo: «Sofi, de <tienda>». */
+    displayName: text("display_name"),
+    /** «Lo que debe saber»: horario, cambios de talla, cuidados. Lo cuenta tal cual. */
+    knowledge: text("knowledge").notNull().default(""),
+    /** Los seguimientos que Argos le encarga (decisión 5); cada uno se apaga aparte. */
+    followPayment: boolean("follow_payment").notNull().default(true),
+    followThanks: boolean("follow_thanks").notNull().default(true),
+    followRestock: boolean("follow_restock").notNull().default(true),
+    followReturn: boolean("follow_return").notNull().default(true),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_agent_texts_check",
+      sql`(${table.displayName} is null or char_length(btrim(${table.displayName})) between 1 and 60) and char_length(${table.knowledge}) <= 2000`,
+    ),
+    foreignKey({
+      name: "store_agent_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/** Por dónde llega una conversación. «prueba»: la del equipo en «Probar a Sofi». */
+export const CONVERSATION_CHANNELS = ["whatsapp", "instagram", "messenger", "prueba"] as const
+export type ConversationChannel = (typeof CONVERSATION_CHANNELS)[number]
+
+/** Quién atiende: Sofi, o una persona que la tomó («Atender yo») o a quien Sofi se la pasó. */
+export const CONVERSATION_HANDLERS = ["sofi", "persona"] as const
+export type ConversationHandler = (typeof CONVERSATION_HANDLERS)[number]
+
+export const conversation = pgTable(
+  "conversation",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    channel: text("channel").$type<ConversationChannel>().notNull(),
+    /** El nombre que dio el cliente (o el del canal). */
+    customerName: text("customer_name"),
+    handler: text("handler").$type<ConversationHandler>().notNull().default("sofi"),
+    /** Por qué espera a una persona («El cliente lo pidió», «Un reclamo»); nulo si no espera. */
+    waitingReason: text("waiting_reason"),
+    /** El último mensaje del cliente: pasadas 24 horas, solo sale una plantilla aprobada. */
+    lastCustomerAt: timestamp("last_customer_at", { withTimezone: true }),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("conversation_channel_check", inList("channel", CONVERSATION_CHANNELS)),
+    check("conversation_handler_check", inList("handler", CONVERSATION_HANDLERS)),
+    check(
+      "conversation_texts_check",
+      sql`(${table.customerName} is null or char_length(btrim(${table.customerName})) between 1 and 120) and (${table.waitingReason} is null or char_length(btrim(${table.waitingReason})) between 3 and 200)`,
+    ),
+    foreignKey({
+      name: "conversation_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("conversation_store_id_key").on(table.storeId, table.id),
+    index("conversation_store_idx").on(table.storeId, table.updatedAt),
+  ],
+)
+
+/** Quién escribió: el cliente, Sofi o una persona del equipo. */
+export const MESSAGE_AUTHORS = ["cliente", "sofi", "persona"] as const
+export type MessageAuthor = (typeof MESSAGE_AUTHORS)[number]
+
+/**
+ * Cómo salió un mensaje al cliente: «prueba» (la conversación de prueba: no hay a quién
+ * enviarlo) o «sin_enviar» (no hay canal todavía; B2 lo enviará). Nulo en lo que escribe el
+ * cliente. Ninguna pantalla dice que se envió.
+ */
+export const MESSAGE_DELIVERIES = ["prueba", "sin_enviar"] as const
+export type MessageDelivery = (typeof MESSAGE_DELIVERIES)[number]
+
+/** Los seguimientos que Argos le encarga a Sofi (decisión 5 y tablero 13). */
+export const FOLLOW_UPS = ["pago", "gracias", "volvio", "volver"] as const
+export type FollowUp = (typeof FOLLOW_UPS)[number]
+
+export const conversationMessage = pgTable(
+  "conversation_message",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity(),
+    author: text("author").$type<MessageAuthor>().notNull(),
+    text: text("text").notNull(),
+    delivery: text("delivery").$type<MessageDelivery>(),
+    /** Pasadas 24 horas del último mensaje del cliente: sale solo con plantilla aprobada (B2). */
+    needsTemplate: boolean("needs_template").notNull().default(false),
+    /** Un seguimiento de Argos y sobre qué (el pedido o la variante): cada uno sale una vez. */
+    followUp: text("follow_up").$type<FollowUp>(),
+    followUpRef: text("follow_up_ref"),
+    /**
+     * Lo que hizo Sofi para responder: las herramientas que usó, lo que la comprobación frenó,
+     * el modelo, los tokens y el costo (en millonésimas de USD).
+     */
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    /** Quién lo escribió: la persona del equipo (también al probar como cliente) o el agente. */
+    actorUserId: text("actor_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("conversation_message_author_check", inList("author", MESSAGE_AUTHORS)),
+    check(
+      "conversation_message_text_check",
+      sql`char_length(btrim(${table.text})) between 1 and 4000`,
+    ),
+    check(
+      "conversation_message_delivery_check",
+      sql`(${table.delivery} is null or ${inList("delivery", MESSAGE_DELIVERIES)}) and ((${table.author} = 'cliente') = (${table.delivery} is null))`,
+    ),
+    check(
+      "conversation_message_follow_check",
+      sql`(${table.followUp} is null) = (${table.followUpRef} is null) and (${table.followUp} is null or (${inList("follow_up", FOLLOW_UPS)} and ${table.author} = 'sofi'))`,
+    ),
+    foreignKey({
+      name: "conversation_message_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    index("conversation_message_conversation_idx").on(table.conversationId, table.seq),
+    // Un seguimiento sale una sola vez por motivo y por pedido (o variante): Argos puede correr
+    // dos veces sin duplicarlo.
+    uniqueIndex("conversation_message_follow_uidx")
+      .on(table.storeId, table.conversationId, table.followUp, table.followUpRef)
+      .where(sql`follow_up is not null`),
+  ],
+)
+
+/**
+ * Alguien pidió una variante agotada y Sofi quedó en avisarle (tablero 8: «avisar que volvió una
+ * talla»). Argos lo cuenta en «Te toca: reponer» y, cuando entra stock, Sofi avisa sola.
+ */
+export const stockRequest = pgTable(
+  "stock_request",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    variantId: uuid("variant_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Cuándo Sofi le avisó que volvió; nulo mientras espera. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: "stock_request_variant_fkey",
+      columns: [table.storeId, table.variantId],
+      foreignColumns: [productVariant.storeId, productVariant.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "stock_request_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    uniqueIndex("stock_request_open_uidx")
+      .on(table.variantId, table.conversationId)
+      .where(sql`notified_at is null`),
+    index("stock_request_store_idx").on(table.storeId, table.variantId),
   ],
 )

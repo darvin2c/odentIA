@@ -12,7 +12,8 @@ import type { StoreRole } from "@gestoria/db"
  * en B2 y B4: así la matriz se decide una vez. «configuracion» es cambiar los medios de pago, las
  * formas de entrega, el catálogo, sus precios y el stock (entradas y ajustes); «catalogo.ver» es
  * verlos, sin cambiarlos (B3); «costos.ver» es ver lo que costó cada producto (el costo de las
- * entradas del kardex y el aviso del mínimo), que Ventas no ve.
+ * entradas del kardex y el aviso del mínimo), que Ventas no ve. «reportes.ver» es Reportes y lo
+ * que hizo y le toca a Argos (B5, tablero 13): solo Dueño y Administrador.
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
@@ -21,6 +22,7 @@ export const STORE_PERMISSIONS = [
   "configuracion",
   "catalogo.ver",
   "costos.ver",
+  "reportes.ver",
   "plan",
   "ventas.atender",
   "pagos.confirmar",
