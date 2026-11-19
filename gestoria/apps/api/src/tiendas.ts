@@ -33,6 +33,32 @@ export class StoreError extends Error {
   }
 }
 
+/**
+ * Lo que una regla de la base rechaza, dicho a la persona: el índice o el control decide (dos
+ * pedidos a la vez incluidos) y aquí solo se traduce. Lo que no está en la tabla sigue su curso.
+ */
+const CONSTRAINT_ERRORS: Record<string, () => StoreError> = {
+  product_store_name_uidx: () =>
+    new StoreError(409, "NAME_TAKEN", "Ya hay un producto con ese nombre", {
+      name: "Ya hay un producto con ese nombre",
+    }),
+  product_variant_sku_uidx: () =>
+    new StoreError(409, "SKU_TAKEN", "Ese código ya es de otra variante", {
+      sku: "Ese código ya es de otra variante",
+    }),
+  product_variant_stock_check: () =>
+    new StoreError(409, "NOT_ENOUGH_STOCK", "No alcanza el stock para ese movimiento"),
+  stock_movement_removed_check: () =>
+    new StoreError(409, "VARIANT_REMOVED", "Esa variante ya no se vende"),
+}
+
+/** El error de la base como `StoreError`, si es una regla conocida; si no, null. */
+export function constraintError(error: unknown): StoreError | null {
+  const e = error as { constraint_name?: string; cause?: { constraint_name?: string } }
+  const name = e.constraint_name ?? e.cause?.constraint_name
+  return name && CONSTRAINT_ERRORS[name] ? CONSTRAINT_ERRORS[name]() : null
+}
+
 /** Cuánto vale una invitación. */
 export const INVITATION_DAYS = 7
 /** Lo más que una tienda puede tener pendiente de una vez. */

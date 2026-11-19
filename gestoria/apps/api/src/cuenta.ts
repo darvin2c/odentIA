@@ -123,9 +123,14 @@ export async function syncAccountCopy(
         ...(changed || reopened ? { updatedAt: now } : {}),
         ...(reopened ? { state: "activa" as const, stateChangedAt: now } : {}),
       })
-      // Si el estado cambió entre medio (un aviso o la revisión lo bloqueó), no se pisa.
+      // Si el estado cambió entre medio (un aviso o la revisión lo bloqueó), no se pisa. Se
+      // compara en milisegundos: la base guarda microsegundos y la fecha leída no los trae, y
+      // compararla entera no coincidía nunca (el pedido se quedaba dando vueltas).
       .where(
-        and(eq(accountCopy.userId, who.sub), eq(accountCopy.stateChangedAt, copy.stateChangedAt)),
+        and(
+          eq(accountCopy.userId, who.sub),
+          sql`date_trunc('milliseconds', ${accountCopy.stateChangedAt}) = ${copy.stateChangedAt.toISOString()}::timestamptz`,
+        ),
       )
       .returning({ userId: accountCopy.userId })
     if (updated.length === 0) return syncAccountCopy(ownerDb, who, now)

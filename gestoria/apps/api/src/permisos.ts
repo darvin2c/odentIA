@@ -8,14 +8,19 @@ import type { StoreRole } from "@gestoria/db"
  * - Administrador: todo menos el plan.
  * - Ventas: atiende, confirma pagos y entrega; no toca la configuración ni el equipo.
  *
- * Los permisos de atender, confirmar pagos, entregar y la configuración ya están aquí aunque
- * sus pantallas lleguen en B2 a B4: así la matriz se decide una vez.
+ * Los permisos de atender, confirmar pagos y entregar ya están aquí aunque sus pantallas lleguen
+ * en B2 y B4: así la matriz se decide una vez. «configuracion» es cambiar los medios de pago, las
+ * formas de entrega, el catálogo, sus precios y el stock (entradas y ajustes); «catalogo.ver» es
+ * verlos, sin cambiarlos (B3); «costos.ver» es ver lo que costó cada producto (el costo de las
+ * entradas del kardex y el aviso del mínimo), que Ventas no ve.
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
   "equipo.ver",
   "equipo.gestionar",
   "configuracion",
+  "catalogo.ver",
+  "costos.ver",
   "plan",
   "ventas.atender",
   "pagos.confirmar",
@@ -26,6 +31,7 @@ export type StorePermission = (typeof STORE_PERMISSIONS)[number]
 const SALES: readonly StorePermission[] = [
   "tienda.ver",
   "equipo.ver",
+  "catalogo.ver",
   "ventas.atender",
   "pagos.confirmar",
   "entregas",

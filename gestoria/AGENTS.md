@@ -33,6 +33,22 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   No cambia lo que dice: se anula y se hace otra. Cada cambio del equipo queda en `store_event`
   con quién lo hizo.
 
+## La configuración de la tienda (B3)
+
+- Medios de pago con los tipos de UN/CEFACT 4461 y cómo se confirma el pago, en el orden en que
+  cobrará Sofi: link, comprobante (lo confirma una persona) y al recibir. Formas de entrega con la
+  lista `DeliveryMethod` de Schema.org, su costo y lo que Sofi puede negociar del envío.
+- El catálogo: un producto agrupa hasta tres opciones (Schema.org `ProductGroup`); cada
+  combinación es una variante con su código, su stock y, si quiere, su precio y su foto. Sin precio
+  mínimo, el producto no se negocia; el aviso del mínimo frente al costo solo avisa.
+- El stock no lo escribe la aplicación: solo cambia con un movimiento del kardex, que la base pone
+  al día (ADR 0206). Un ajuste a mano pide motivo escrito. Nunca `on conflict do nothing` al
+  agregar un movimiento. Las ventas de B4 usan `recordSale` y `cancelSale` (`apps/api/src/stock.ts`).
+- Ventas ve el catálogo, el stock y la configuración (`catalogo.ver`, `tienda.ver`), sin cambiarlos
+  (`configuracion`). Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
+  `costos.ver`: la API no se lo devuelve a Ventas.
+- Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+
 ## Trabajo
 
 - Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.

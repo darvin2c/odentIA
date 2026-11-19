@@ -17,11 +17,36 @@ import {
   Input,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
+import {
+  EmptyState,
+  ErrorState,
+  PersonAvatar,
+  SectionNav,
+  SubmitButton,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useNavigate, useParams } from "@tanstack/react-router"
-import { Copy, LogOut, MessageCircle, Plus, Store, UserPlus } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react"
+import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
+import {
+  Copy,
+  LogOut,
+  MessageCircle,
+  Package,
+  Plus,
+  Store,
+  Truck,
+  UserPlus,
+  Users,
+} from "lucide-react"
+import {
+  createContext,
+  type FormEvent,
+  type MouseEventHandler,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import {
   ApiError,
   api,
@@ -48,12 +73,22 @@ async function signOut() {
 }
 
 /** El marco de las pantallas con sesión: la marca, la persona y salir. */
-function Shell({ children, store }: { children: ReactNode; store?: MyStore }) {
+export function Shell({
+  children,
+  store,
+  wide = false,
+}: {
+  children: ReactNode
+  store?: MyStore
+  /** El catálogo y su producto usan más ancho en el escritorio. */
+  wide?: boolean
+}) {
+  const width = wide ? "max-w-6xl" : "max-w-4xl"
   const me = useMe()
   return (
     <div className="flex min-h-dvh flex-col bg-surface-muted">
       <header className="border-b bg-card">
-        <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4">
+        <div className={`mx-auto flex h-14 w-full ${width} items-center gap-3 px-4`}>
           <Link to="/" aria-label="Tus tiendas" className="shrink-0">
             <Logo className="w-28 sm:w-32" />
           </Link>
@@ -78,7 +113,7 @@ function Shell({ children, store }: { children: ReactNode; store?: MyStore }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-6">
+      <main className={`mx-auto flex w-full ${width} min-w-0 flex-1 flex-col gap-6 px-4 py-6`}>
         {children}
       </main>
       <footer className="flex justify-center px-4 pb-5">
@@ -88,7 +123,7 @@ function Shell({ children, store }: { children: ReactNode; store?: MyStore }) {
   )
 }
 
-function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+export function ErrorBlock({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   return (
     <ErrorState error={error instanceof Error ? error : "No se pudo cargar"} onRetry={onRetry} />
   )
@@ -345,13 +380,56 @@ export function NewStorePage() {
   )
 }
 
-/** La tienda: en B1, su equipo. Lo demás (WhatsApp, catálogo, pedidos) llega en las entregas siguientes. */
-export function StorePage() {
+/** La tienda en la que se trabaja, para cada pantalla de dentro. */
+const StoreContext = createContext<{ store: MyStore; meId: string } | null>(null)
+
+export function useStoreContext() {
+  const value = useContext(StoreContext)
+  if (!value) throw new Error("useStoreContext fuera de la tienda")
+  return value
+}
+
+/** Cada destino de la tienda: lo que vende, cómo cobra y entrega, y su equipo. */
+function storeSections(id: string) {
+  return [
+    { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
+    { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
+    { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
+  ]
+}
+
+/** El enlace de cada sección, con el del router (lo que recibe se lo pasa tal cual). */
+function SectionLink({
+  to,
+  search: _search,
+  children,
+  ...rest
+}: {
+  to: string
+  search?: Record<string, string>
+  className?: string
+  children: ReactNode
+  title?: string
+  onClick?: MouseEventHandler<HTMLAnchorElement>
+}) {
+  return (
+    <Link to={to} {...rest}>
+      {children}
+    </Link>
+  )
+}
+
+/**
+ * La tienda: su nombre, el rol de quien está y sus secciones (lienzo B, tableros 6 y 7). Lo que
+ * llega después (WhatsApp, pedidos) se suma como otra sección.
+ */
+export function StoreLayout() {
   const { id } = useParams({ strict: false }) as { id: string }
+  const { pathname } = useLocation()
   const me = useMe()
   const store = me.data?.stores.find((s) => s.id === id)
 
-  if (me.isPending) return <Shell>{null}</Shell>
+  if (me.isPending) return <Shell wide>{null}</Shell>
   if (me.isError)
     return (
       <Shell>
@@ -371,10 +449,10 @@ export function StorePage() {
       </Shell>
     )
   return (
-    <Shell store={store}>
+    <Shell store={store} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-extrabold tracking-[-0.02em]">{store.name}</h1>
+        <div className="flex min-w-0 flex-col gap-1">
+          <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em]">{store.name}</h1>
           <p className="text-sm text-muted-foreground">
             Eres {ROLES[store.role].name}. Vende en {store.currency}.
           </p>
@@ -385,9 +463,27 @@ export function StorePage() {
           </Button>
         ) : null}
       </div>
-      <Team store={store} meId={me.data.person.userId} />
+      <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
+        <SectionNav
+          label={`Secciones de ${store.name}`}
+          items={storeSections(store.id)}
+          pathname={pathname}
+          LinkComponent={SectionLink}
+          mobilePosition="header"
+        >
+          <div className="flex min-w-0 flex-col gap-6">
+            <Outlet />
+          </div>
+        </SectionNav>
+      </StoreContext.Provider>
     </Shell>
   )
+}
+
+/** El equipo de la tienda (B1). */
+export function TeamPage() {
+  const { store, meId } = useStoreContext()
+  return <Team store={store} meId={meId} />
 }
 
 function Team({ store, meId }: { store: MyStore; meId: string }) {
