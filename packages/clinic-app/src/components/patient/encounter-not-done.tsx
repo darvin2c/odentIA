@@ -71,7 +71,7 @@ function consequences(preview: NotDonePreview, keepInPlan: boolean): string[] {
     lines.push(`${listWords(preview.diagnoses)} ${preview.diagnoses.length > 1 ? "vuelven" : "vuelve"} a activo.`)
   if (productUi().site && item && item.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
   if (preview.materials.length > 0)
-    lines.push(`Vuelven al almacén: ${listWords(preview.materials.map((item) => `${item.quantityText} de ${item.name.toLowerCase()}`))}.`)
+    lines.push(`Vuelven al almacén los materiales de su servicio: ${listWords(preview.materials.map((item) => `${item.name} (${item.quantity})`))}.`)
   if (preview.dictatedMaterials)
     lines.push("Hubo material dicho a mano: no se devuelve solo; corrígelo en «Materiales usados».")
   for (const charge of preview.charges) {

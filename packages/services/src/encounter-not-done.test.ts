@@ -138,7 +138,7 @@ it("ya pagado: el cobro no se toca y caja recibe la tarea con lo pagado y el mot
   expect(task?.reason).toContain("Lo registré en la pieza equivocada")
 })
 
-it("la sesión 1 de un tratamiento cobrado entero, con la 2 hecha: el cobro sigue y el tratamiento queda en curso", async () => {
+it("la sesión 1 de un tratamiento cobrado entero, con la 2 que lo terminó: el cobro sigue y el tratamiento sigue terminado", async () => {
   const f = await clinicalFixture()
   const item = await f.run((tx) =>
     addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, plannedSessions: 2 }),
@@ -165,7 +165,8 @@ it("la sesión 1 de un tratamiento cobrado entero, con la 2 hecha: el cobro sigu
     .where(and(eq(patientCharge.encounterProcedureId, first.id)))
   expect(charge?.voidedAt).toBeNull()
   const [after] = await ownerDb.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
-  expect(after?.status).toBe("en_curso")
+  // La sesión 2 lo terminó: sigue realizado, con sus controles (QA del 19 nov).
+  expect(after?.status).toBe("realizado")
 })
 
 it("lo marca quien firmó, o el dueño; otro odontólogo no, y en el borrador tampoco", async () => {

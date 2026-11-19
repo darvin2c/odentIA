@@ -39,6 +39,8 @@ export interface ConsultationVisit {
   startedAt: Date
   hasProcedures: boolean
   controlVisit: boolean
+  /** Venía a una sesión de un tratamiento y no se registró: se avisa eso, no se cobra una consulta. */
+  cameForSession: boolean
 }
 
 export async function closingConsultationOf(
@@ -46,7 +48,9 @@ export async function closingConsultationOf(
   orgId: string,
   visit: ConsultationVisit,
 ): Promise<ClosingConsultation | null> {
-  if (visit.hasProcedures) return null
+  // Con algo hecho, o si venía a la sesión de un tratamiento (que el cierre avisa sin registrar), no
+  // es una consulta (QA del 19 nov: la sesión 2 olvidada traía «Evaluación S/ 50» marcada).
+  if (visit.hasProcedures || visit.cameForSession) return null
   const { consultation } = await productHooks(tx, orgId)
   const keys = visit.controlVisit ? consultation.controlTemplateKeys : consultation.templateKeys
   if (!keys || keys.length === 0) return null

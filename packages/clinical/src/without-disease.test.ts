@@ -28,7 +28,7 @@ describe("«Sin enfermedad»: los atajos que le corresponden a la visita", () =>
     ).toEqual(["chequeo", "sin-hallazgos", "control", "protesis", "ortodoncia"])
   })
 
-  it("con la CIE-11, sus códigos: QA00.8, QA02.Y, QA07.Y, QB31.3 y QB31.2", () => {
+  it("con la CIE-11, sus códigos: QA00.8, QA1C, QA07.Y, QB31.3 y QB31.2", () => {
     const all = withoutDiseaseOptions(DENTAL_WITHOUT_DISEASE, {
       ...base,
       system: "ICD-11",
@@ -36,7 +36,7 @@ describe("«Sin enfermedad»: los atajos que le corresponden a la visita", () =>
       protesis: true,
       ortodoncia: true,
     })
-    expect(all.map((option) => option.code)).toEqual(["QA00.8", "QA02.Y", "QA07.Y", "QB31.3", "QB31.2"])
+    expect(all.map((option) => option.code)).toEqual(["QA00.8", "QA1C", "QA07.Y", "QB31.3", "QB31.2"])
   })
 
   it("latidIA elige por la edad: el examen del adulto o el control del niño (no el del adulto en un niño)", () => {

@@ -162,5 +162,28 @@ export async function voidLeftFindings(
       metadata: { patientId, encounterId, planItemId, reason },
     })
   }
+  // Lo que la firma dio por tratado con él (la caries de la 24) vuelve a estar por tratar: si no,
+  // el odontograma la mostraba tratada con la resina pendiente (QA antes de entregar, 19 nov).
+  const reopened = await tx
+    .update(odontogramEntry)
+    .set({ resolvedAt: null, resolvedBy: null, resolvedByPlanItemId: null, updatedAt: at })
+    .where(
+      and(
+        eq(odontogramEntry.organizationId, orgId),
+        eq(odontogramEntry.patientId, patientId),
+        eq(odontogramEntry.resolvedByPlanItemId, planItemId),
+        isNull(odontogramEntry.voidedAt),
+      ),
+    )
+    .returning({ id: odontogramEntry.id })
+  for (const entry of reopened)
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "odontogram.entry_reopened",
+      entity: "odontogram_entry",
+      entityId: entry.id,
+      metadata: { patientId, encounterId, planItemId, reason },
+    })
   return voided.length
 }

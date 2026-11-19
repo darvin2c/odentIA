@@ -2985,6 +2985,7 @@ export async function checkEncounterClosing(
     appointmentId: row.appointmentId ?? null,
     startedAt: row.startedAt,
     hasProcedures: today.length > 0,
+    cameForSession: sessions.notRegistered.length > 0,
     controlVisit: controls.byAppointment.length > 0 || controls.due.some((control) => control.mine || control.chosen),
   })
   return {
@@ -4150,10 +4151,10 @@ export async function voidProcedureRow(
    */
   attendingAppointmentId: string | null = null,
   /**
-   * «No se hizo» en una atención firmada: el tratamiento directo no se cancela, vuelve al plan
+   * «No se hizo» en una atención firmada (null: se anula en el borrador). Con true, el tratamiento directo no se cancela, vuelve al plan
    * como por hacer, para que lo que lo pidió (la caries de la 24) no quede sin nada indicado.
    */
-  directBackToPlan = false,
+  directBackToPlan: boolean | null = null,
 ): Promise<EncounterProcedureRow> {
   const [voided] = await tx
     .update(encounterProcedure)
@@ -4184,6 +4185,27 @@ export async function voidProcedureRow(
       const direct =
         item.sourceEncounterId === encounterId &&
         (item.decisionNote ?? "").startsWith("Tratamiento directo")
+      // «No se hizo» en una sesión que no fue la última (la sesión 1 de una endodoncia que la
+      // sesión 2 terminó): lo terminado sigue terminado, con sus controles (QA del 19 nov).
+      const finishedLater =
+        directBackToPlan !== null &&
+        item.status === "realizado" &&
+        Boolean(
+          (
+            await tx.execute<{ later: boolean }>(sql`
+              select exists (
+                select 1 from encounter_procedure ep
+                join encounter later on later.organization_id = ep.organization_id and later.id = ep.encounter_id
+                join encounter here on here.organization_id = ep.organization_id and here.id = ${encounterId}
+                where ep.organization_id = ${orgId} and ep.plan_item_id = ${item.id} and ep.voided_at is null
+                  and ep.encounter_id <> ${encounterId} and later.status = 'finalizada'
+                  and later.started_at > here.started_at
+              ) as later`)
+          )[0]?.later,
+        )
+      if (finishedLater) {
+        // Nada del tratamiento cambia: solo deja de contar esta sesión.
+      } else
       if (direct && directBackToPlan) {
         // Se dio por aceptado al hacerlo: si no se hizo, nadie lo aceptó. Vuelve indicado y «por
         // decidir», no como aceptado sin cita (QA antes de entregar, 19 nov).
@@ -4235,7 +4257,7 @@ export async function voidProcedureRow(
           .where(eq(treatmentPlanItem.id, item.id))
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
-      if (direct || item.status === "realizado") {
+      if (!finishedLater && (direct || item.status === "realizado")) {
         await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
         await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
       }

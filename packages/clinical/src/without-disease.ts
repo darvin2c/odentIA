@@ -31,11 +31,11 @@ const icd10 = (code: string): Partial<Record<DiagnosisSystemKey, string>> => ({
   "ICD-10-ES": code,
 })
 
-/** «Sin hallazgos»: consultó y no se encontró nada (Z71.1; en CIE-11, la afección presunta descartada). */
+/** «Sin hallazgos»: consultó y no se encontró nada (Z71.1; en CIE-11, QA1C, su par). */
 const NOTHING_FOUND: WithoutDiseaseRule = {
   key: "sin-hallazgos",
   label: "Sin hallazgos",
-  codes: { ...icd10("Z71.1"), "ICD-11": "QA02.Y" },
+  codes: { ...icd10("Z71.1"), "ICD-11": "QA1C" },
   when: "siempre",
 }
 
