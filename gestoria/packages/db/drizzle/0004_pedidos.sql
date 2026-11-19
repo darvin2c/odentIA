@@ -2,6 +2,7 @@ CREATE TABLE "order_event" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"store_id" uuid NOT NULL,
 	"order_id" uuid NOT NULL,
+	"seq" bigint GENERATED ALWAYS AS IDENTITY (sequence name "order_event_seq_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
 	"actor_user_id" text,
 	"action" text NOT NULL,
 	"detail" jsonb DEFAULT '{}'::jsonb NOT NULL,

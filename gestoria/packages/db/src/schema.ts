@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   check,
   customType,
@@ -905,6 +906,8 @@ export const orderEvent = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     storeId: uuid("store_id").notNull(),
     orderId: uuid("order_id").notNull(),
+    /** El orden en que pasó: varias cosas en un mismo paso comparten la hora. */
+    seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity(),
     /** Quién lo hizo; nulo si fue el proveedor del link. */
     actorUserId: text("actor_user_id"),
     action: text("action").$type<OrderEventAction>().notNull(),

@@ -1,5 +1,5 @@
 {
-  "id": "9da5430c-cc9e-4b3f-b866-451df5a8278f",
+  "id": "a08b0702-4bd7-4605-90b0-70f669364403",
   "prevId": "790fecb7-65fa-4dac-8d70-4430ca8f41f5",
   "version": "7",
   "dialect": "postgresql",
@@ -178,6 +178,23 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "order_event_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
         },
         "actor_user_id": {
           "name": "actor_user_id",

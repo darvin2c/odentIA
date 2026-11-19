@@ -689,7 +689,7 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     .from(orderEvent)
     .leftJoin(accountCopy, eq(accountCopy.userId, orderEvent.actorUserId))
     .where(eq(orderEvent.orderId, orderId))
-    .orderBy(asc(orderEvent.createdAt), asc(orderEvent.id))
+    .orderBy(asc(orderEvent.seq))
   const people = [...new Set(payments.flatMap((p) => [p.createdBy, p.reviewedBy]))].filter(
     (id): id is string => Boolean(id),
   )
@@ -735,10 +735,16 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     conversationId: _c,
     ...rest
   } = order
+  const [connected] = await tx
+    .select({ provider: storePaymentLink.provider })
+    .from(storePaymentLink)
+    .where(eq(storePaymentLink.storeId, storeId))
   const now = Date.now()
   return {
     ...rest,
     number: pad(order.number),
+    /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
+    linkConnected: Boolean(connected),
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
     priceExpired: Boolean(order.priceExpiresAt && order.priceExpiresAt.getTime() <= now),
     paid: payments.some((p) => p.status === "confirmado"),
