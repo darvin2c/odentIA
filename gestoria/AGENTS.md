@@ -49,6 +49,23 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `costos.ver`: la API no se lo devuelve a Ventas.
 - Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
 
+## Los pedidos (B4)
+
+- Una sola operación arma un pedido para el equipo y para Sofi: `createOrderIn` (`apps/api/src/pedidos.ts`),
+  con el precio de `precio.ts`. Ningún precio baja del mínimo; lo cedido (descuento, envío que pone
+  la tienda, regalo a su mínimo) sale de un solo margen y queda escrito; el precio negociado vence
+  a las 24 horas (ADR 0207). Lo acordado no se cambia: un pedido se anula con motivo y se anota otro.
+- El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
+  pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
+- El cobro va en orden: link de pago (se confirma solo), captura (la confirma quien tiene
+  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró).
+  Un pedido pagado lo anula solo quien confirma pagos; uno entregado no se anula.
+- El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
+  mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
+  nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
+- Los avisos al cliente quedan en la historia del pedido (`order_event`, `aviso`) sin enviarse
+  hasta B2. Ninguna pantalla dice que se enviaron.
+
 ## Trabajo
 
 - Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.

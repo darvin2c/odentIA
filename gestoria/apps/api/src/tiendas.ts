@@ -50,6 +50,13 @@ const CONSTRAINT_ERRORS: Record<string, () => StoreError> = {
     new StoreError(409, "NOT_ENOUGH_STOCK", "No alcanza el stock para ese movimiento"),
   stock_movement_removed_check: () =>
     new StoreError(409, "VARIANT_REMOVED", "Esa variante ya no se vende"),
+  // Un producto que ya estuvo en un pedido no se borra: el pedido lo sigue nombrando.
+  sale_order_line_variant_fkey: () =>
+    new StoreError(
+      409,
+      "HAS_ORDERS",
+      "Este producto ya está en pedidos: no se borra. Quita sus variantes para dejar de venderlo.",
+    ),
 }
 
 /** El error de la base como `StoreError`, si es una regla conocida; si no, null. */

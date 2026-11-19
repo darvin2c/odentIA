@@ -9,6 +9,7 @@ import {
 } from "@gestoria/db"
 import { and, eq, isNull } from "drizzle-orm"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
+import { seedDemoOrders } from "./semilla-pedidos.js"
 
 /**
  * La tienda de ejemplo de gestorIA, Calzados Rosa (lienzo B, tablero 2), para desarrollo y
@@ -81,6 +82,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
       })
     }
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     const email = invite?.trim().toLowerCase()
     if (email) {
       const [pending] = await tx

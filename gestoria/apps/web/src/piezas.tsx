@@ -133,6 +133,7 @@ export function FormSheet({
   onSubmit,
   footer,
   dirty = false,
+  wide = false,
   children,
 }: {
   open: boolean
@@ -144,6 +145,8 @@ export function FormSheet({
   children: ReactNode
   /** Hay algo escrito sin guardar: cerrar con × o Escape pregunta antes. */
   dirty?: boolean
+  /** Un formulario largo (anotar un pedido) va en un panel más ancho. */
+  wide?: boolean
 }) {
   const [asking, setAsking] = useState(false)
   return (
@@ -164,7 +167,12 @@ export function FormSheet({
         open={open}
         onOpenChange={(next) => (next ? null : dirty ? setAsking(true) : onClose())}
       >
-        <SheetContent className="w-full sm:max-w-md">
+        <SheetContent
+          className={cn(
+            "data-[side=right]:w-full",
+            wide ? "data-[side=right]:sm:max-w-2xl" : "data-[side=right]:sm:max-w-md",
+          )}
+        >
           <form
             noValidate
             className="flex min-h-0 flex-1 flex-col"
