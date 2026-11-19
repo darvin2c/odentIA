@@ -72,6 +72,14 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Sumado por el estudio de la atención (16 nov 2026):**
 - [ ] En una sesión que no carga, la fila del procedimiento no muestra el precio del tratamiento como si se cobrara hoy (o dice «ya cargado»).
 
+**Sumado por la mesa del cierre de la atención (19 nov 2026):**
+- [ ] Tras «No se hizo» de algo pagado, volver a hacer ese tratamiento no lo cobra dos veces y el plan no tiene dos filas iguales de la misma pieza.
+- [ ] El cajón de «No se hizo», la tarea de caja y la Ayuda dicen lo mismo sobre qué pasa con lo pagado.
+- [ ] Con la consulta propuesta marcada, el pie de la atención no dice «Sin cargos».
+- [ ] Desmarcar la consulta y «No se hizo» se leen en Actividad del equipo.
+
+**Caso:** resina de la 24 pagada S/ 180, marcada no hecha el 19 y hecha el 26: se debe 0, no 180.
+
 ## V-DIN-06 Lo cobrado del día, la caja y las deudas
 **Aparece en:** Inicio › «Caja de hoy» (`CA/home/today.tsx`), Finanzas › Caja, Cobros y Deudas (`R/_org/finance.tsx`), Reportes › Resumen y Finanzas (`CA/reports/summary-tab.tsx`, `finance-tab.tsx`) y Argos (`S/agent-admin.ts`).
 **A mano:** la caja es por sede y cuenta desde el último cierre; Inicio cuenta el día. Caja muestra lo cobrado y, aparte, lo devuelto; Reportes muestra el neto. Efectivo en caja = lo ingresado + cobros en efectivo − devoluciones y gastos en efectivo.

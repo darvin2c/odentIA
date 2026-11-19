@@ -439,6 +439,16 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 **Ya falló:** un borrador con dos opciones no se podía anular y no tenía salida (8 nov, PR 546).
 **Fuentes:** NTS 139-MINSA (la historia no se borra); ADR 0002 y 0068.
 
+**Sumado por la mesa del cierre de la atención (19 nov 2026):**
+- [ ] «No se hizo» en una atención firmada: el acto queda tachado con motivo, quién y cuándo, y una adenda; el tratamiento vuelve como estaba (lo directo, por decidir); el diagnóstico que esa firma resolvió vuelve a activo; el cobro sin pagar se anula; el consentimiento, la receta y el odontograma firmado no cambian.
+- [ ] Tras «No se hizo», el odontograma vivo vuelve a dibujar la lesión que el acto había resuelto, igual que la copia y la hoja «de hoy».
+- [ ] «No se hizo» en una sesión que no terminó el tratamiento no deshace el fin ni retira sus controles.
+- [ ] El cierre no trae la consulta marcada en una visita que venía a la sesión de un tratamiento.
+- [ ] «Sin enfermedad» usa el mismo concepto en CIE-10 y CIE-11 (Z71.1 ↔ QA1C; Z09.8 ↔ QA07.Y), no sale si algo de hoy propone un diagnóstico y no deja nada activo.
+
+**Ya falló:** tras «No se hizo», la caries de la 24 seguía «tratada» en el odontograma con la resina pendiente; en la sesión 1 de una endodoncia que la 2 terminó, volvía a «en curso» y se cancelaba su control al año (19 nov).
+**Caso:** endodoncia de la 46 en 2 sesiones, cobrada en la 1 y terminada en la 2; «No se hizo» en la 1 → el cobro sigue, el tratamiento sigue realizado y su control al año sigue.
+
 ## P-ODO-17 Historia clínica y papeles
 
 **Dónde:** la Historia (`CA/historia-tab.tsx`, `encounter-history-card.tsx`; `S/patient-history.ts`), la hoja para el seguro (`S/attention-sheet.ts`), el odontograma impreso y la copia (`S/patient-record.ts`, `S/patient-record-copy.ts`, `S/dental/record-sections.ts`).
