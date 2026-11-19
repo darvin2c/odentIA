@@ -1,6 +1,6 @@
 import { canAttend } from "@odentia/auth/permissions"
 import {
-  budgetStateText,
+  budgetChoiceText,
   doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
@@ -1412,7 +1412,7 @@ async function encounterBudgetsOf(
     // Anulado en el mismo paso que la atención (`settleEncounterVoidBudgets`, en su transacción).
     voidedWith:
       budget.status === "cancelado" && voidedAt !== null && Math.abs(updatedAt.getTime() - voidedAt.getTime()) < 60_000,
-    stateText: budgetStateText({
+    stateText: budgetChoiceText({
       status: budget.status,
       items: lines.filter((line) => line.budgetId === budget.id),
       options: options.filter((option) => option.budgetId === budget.id),
@@ -3526,6 +3526,7 @@ export async function finalizeEncounter(
         today: dayKeyIn(locked.startedAt, timezone),
         anesthetic: input.anesthetic ?? null,
         asksAsa: hooks.asksAsa,
+        timeZone: timezone,
       }),
       updatedAt: now,
     })
@@ -3533,7 +3534,7 @@ export async function finalizeEncounter(
     .returning()
   if (!row) throw notFound("Atención")
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
-  // firma el odontograma con el mismo perfil; NTS 188, 5.3 y 5.10).
+  // firma el odontograma con el mismo perfil si llega a un momento de la norma; NTS 188, 5.3 y 5.10).
   const product = await hooks.encounterFinalized(tx, {
     orgId,
     actorUserId,

@@ -8,6 +8,7 @@ import {
   encounter,
   encounterPlanItem,
   patient,
+  patientCondition,
   serviceCatalog,
   treatmentPlanItem,
   treatmentTemplate,
@@ -15,8 +16,9 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { anesthesiaAtSigningOf } from "./anesthesia-at-signing.js"
 import { getPatientHealth, setPatientAsa } from "./clinical.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -177,6 +179,55 @@ it("B5d: una endodoncia en un adulto sin peso: la firma guarda la ASA y ningún 
   expect(signed?.anesthesiaAtSigning).toMatchObject({ asaClass: null, weightKg: null, dose: null })
 })
 
+// QA del 18 nov (novato 10): en la segunda atención del mismo día volvía a pedir el peso.
+it("sin peso en esta atención, la firma usa el anotado hoy en otra atención no anulada", async () => {
+  const f = await clinicalFixture()
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+  // La de la mañana, firmada, con su peso; otra anulada después, con otro peso que ya no cuenta.
+  const morningAt = new Date(Date.now() - 30 * 60_000)
+  await ownerDb.insert(encounter).values([
+    {
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      reason: "Dolor",
+      vitals: { peso: 80 },
+      status: "finalizada",
+      startedAt: morningAt,
+      endedAt: morningAt,
+      finalizedAt: morningAt,
+      finalizedBy: f.actor,
+    },
+    {
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      reason: "Abierta por error",
+      vitals: { peso: 95 },
+      status: "anulada",
+      startedAt: new Date(Date.now() - 10 * 60_000),
+      voidedAt: new Date(),
+      voidedBy: f.actor,
+      voidReason: "Abierta por error",
+    },
+  ])
+  const signing = () =>
+    f.run((tx) =>
+      anesthesiaAtSigningOf(tx, "org_a", {
+        patientId: f.patient.id,
+        encounterId: f.encounter.id,
+        uses: ["Endodoncia"],
+        vitals: null,
+        birthDate: "1984-05-02",
+        today,
+        anesthetic: "lidocaina-2-epinefrina",
+        asksAsa: false,
+        timeZone: "America/Lima",
+      }),
+    )
+  expect(await signing()).toMatchObject({ weightKg: 80, dose: expect.stringContaining("80 kg") })
+})
+
 // QA del 16 nov, Q7 (Gloria): la exodoncia se registró, se anuló («se difiere por presión») y la
 // atención se firmó. La firmada decía «Anestesia local · Para Exodoncia…» sobre «Anulado: se difiere».
 it("Q7: el acto anulado deja de pedir la línea de anestesia y la firmada no la afirma", async () => {
@@ -262,4 +313,57 @@ it("R13: setPatientAsa ignora una atención que no es borrador de ese paciente",
     null,
     f.encounter.id,
   ])
+})
+
+// Reglas clínicas del 18 nov, caso C2 (Rodrigo, HTA con losartán, ASA II): la firma guarda el tope
+// de epinefrina solo si la presión de hoy lo pide, con la misma regla que la línea de la atención.
+it("la firma no limita la epinefrina a la hipertensión controlada y sí a la presión de hoy de 165/100", async () => {
+  const f = await clinicalFixture()
+  await seedDiagnosisCodes([
+    { code: "I10", title: "Hipertensión esencial (primaria)" },
+    { code: "I48", title: "Fibrilación y aleteo auricular" },
+  ])
+  await ownerDb.insert(patientCondition).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    name: "Hipertensión arterial",
+    diagnosisSystem: "ICD-10-PE",
+    diagnosisCode: "I10",
+    status: "activa",
+  })
+  await f.run((tx) => setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "II" }))
+  const signing = (vitals: { presionSistolica: number; presionDiastolica: number } | null) =>
+    f.run((tx) =>
+      anesthesiaAtSigningOf(tx, "org_a", {
+        patientId: f.patient.id,
+        encounterId: f.encounter.id,
+        uses: ["Endodoncia"],
+        vitals,
+        birthDate: "1984-05-02",
+        today: "2026-11-18",
+        anesthetic: "lidocaina-2-epinefrina",
+        asksAsa: true,
+      }),
+    )
+  expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.warnings).toEqual([])
+  // El tope va aparte y primero, como en la atención (QA de diseño del 18 nov, H7).
+  expect(await signing({ presionSistolica: 165, presionDiastolica: 100 })).toMatchObject({
+    cap: "Epinefrina hasta 0,04 mg por la presión de hoy (165/100): unos 2,2 cartuchos",
+    warnings: [],
+  })
+  expect((await signing(null))?.warnings).toEqual([
+    "Con su hipertensión arterial (I10), toma la presión antes de anestesiar.",
+  ])
+  // Una fibrilación auricular con su código, aun con ASA II, sí lo pide.
+  await ownerDb.insert(patientCondition).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    name: "Fibrilación auricular",
+    diagnosisSystem: "ICD-10-PE",
+    diagnosisCode: "I48",
+    status: "activa",
+  })
+  expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.cap).toBe(
+    "Epinefrina hasta 0,04 mg por su fibrilación auricular (I48): unos 2,2 cartuchos",
+  )
 })

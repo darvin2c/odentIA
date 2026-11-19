@@ -80,8 +80,18 @@ function rowLabel(item: OdontogramAssessment): string {
 }
 
 /**
+ * Cuándo se firma una copia (reglas clínicas del 18 nov, ADR 0036 ajustado): al cerrar la atención
+ * que llega a un momento de la norma; una sesión que solo trata no firma copia, porque lo tratado ya
+ * queda en su atención firmada y en el gráfico.
+ */
+export function assessmentsNote(norm: string): string {
+  return `Se firman solos al cerrar la atención del inicio del plan, la que anota hallazgos nuevos o la de la culminación (${norm}). Una sesión que solo trata no firma copia: lo tratado queda en su atención firmada y en el gráfico. Lo firmado no se altera.`
+}
+
+/**
  * Odontogramas firmados (solo en clínicas de Perú, NTS 188; ADR 0036). Los
- * firma el cierre de la atención que cambió el gráfico, con su momento; el
+ * firma el cierre de la atención que llega a un momento de la norma (inicio,
+ * hallazgos observados o culminación; la que solo trata, no); el
  * botón «Firmar odontograma» queda para lo judicial, lo personal y el
  * reingreso. Una sola firma, la del perfil profesional, sin trazo. Cada uno se
  * ve con el gráfico de la norma y se imprime con «Firma y sello» en papel.
@@ -144,8 +154,7 @@ export function SignedOdontograms({
             Odontogramas firmados
           </h3>
           <p className="text-sm text-muted-foreground">
-            Se firman solos al cerrar la atención que cambia el gráfico: inicio del plan, nuevos
-            hallazgos o culminación ({official.shortName}). Lo firmado no se altera.
+            {assessmentsNote(official.shortName)}
           </p>
         </div>
         {canSign ? (

@@ -1,8 +1,8 @@
 import {
   type AnesthesiaAtSigning,
-  type EpinephrineCap,
-  epinephrineCapOf,
-  isCardiacCondition,
+  anesthesiaUsesParts,
+  type EpinephrineCheck,
+  epinephrineCheckOf,
   isCurrentMedication,
   LOCAL_ANESTHETICS,
   type LocalAnestheticKey,
@@ -27,6 +27,17 @@ function listWords(words: readonly string[]): string {
   return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
 }
 
+/** «Exodoncia simple · Lidocaína 2 % con epinefrina»: los procedimientos y, aparte, el anestésico. */
+function usesWords(uses: readonly string[]): string {
+  const { procedures, anesthetics } = anesthesiaUsesParts(uses)
+  return [listWords(procedures), listWords(anesthetics)].filter(Boolean).join(" · ")
+}
+
+/** Un nombre en medio de una frase: la primera letra en minúscula si no es una sigla. */
+function midSentence(name: string): string {
+  return /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
+}
+
 const GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
   allergies: "sus alergias",
   conditions: "sus enfermedades",
@@ -45,13 +56,15 @@ export function anesthesiaHealthWords(
 ): string {
   const parts: string[] = []
   if (health) {
-    const allergies = health.allergies.filter((row) => row.isActive).map((row) => row.substance)
+    const allergies = health.allergies.filter((row) => row.isActive).map((row) => midSentence(row.substance))
+    // En medio de la frase, en minúscula: «Tiene hipertensión arterial», no «Tiene Hipertensión…»
+    // (verificación del 18 nov). Una sigla («HTA», «VIH») queda como está.
     const conditions = health.conditions
       .filter((row) => row.status === "activa")
-      .map((row) => row.name)
+      .map((row) => midSentence(row.name))
     const medications = health.medications
       .filter((row) => isCurrentMedication(row, today))
-      .map((row) => [row.genericName ?? row.name, row.dose].filter(Boolean).join(" "))
+      .map((row) => midSentence([row.genericName ?? row.name, row.dose].filter(Boolean).join(" ")))
     const denied = [
       allergies.length === 0 && health.reviewStatus.allergies === "none" ? "alergias" : "",
       conditions.length === 0 && health.reviewStatus.conditions === "none" ? "enfermedades" : "",
@@ -68,14 +81,21 @@ export function anesthesiaHealthWords(
   return parts.join(" ")
 }
 
-/** Cardiopatía registrada con su código, o ASA III o más: el tope de epinefrina, con su motivo. */
-export function cardiacOf(health: Pick<PatientHealth, "conditions" | "asaClass"> | null): EpinephrineCap | null {
+/**
+ * El tope de epinefrina y si falta tomar la presión, con la misma regla que guarda la firma
+ * (`epinephrineCheckOf`): sus enfermedades activas, la ASA donde el producto la pide, la presión de
+ * hoy y su edad.
+ */
+export function epinephrineOf(
+  health: Pick<PatientHealth, "conditions" | "asaClass"> | null,
+  input: { asksAsa: boolean; vitals: Vitals | null; ageYears: number | null },
+): EpinephrineCheck | null {
   if (!health) return null
-  return epinephrineCapOf({
-    cardiacCondition: health.conditions.some(
-      (row) => row.status === "activa" && isCardiacCondition(row.diagnosisSystem, row.diagnosisCode),
-    ),
-    asaClass: health.asaClass,
+  return epinephrineCheckOf({
+    conditions: health.conditions.filter((row) => row.status === "activa"),
+    asaClass: input.asksAsa ? health.asaClass : null,
+    vitals: input.vitals,
+    ageYears: input.ageYears,
   })
 }
 
@@ -130,6 +150,8 @@ export function EncounterAnesthesiaLine({
   disabled = false,
   atSign = false,
   onComplete,
+  weightFromOther = false,
+  onAddWeight,
 }: {
   patientId: string
   encounterId: string
@@ -149,6 +171,10 @@ export function EncounterAnesthesiaLine({
   atSign?: boolean
   /** «Completar en Antecedentes». */
   onComplete?: () => void
+  /** El peso viene de otra atención de hoy: se dice, para que se sepa de dónde salió el máximo. */
+  weightFromOther?: boolean
+  /** «Anotar su peso»: lleva a los signos vitales del examen clínico. */
+  onAddWeight?: () => void
 }): React.JSX.Element | null {
   const ids = useId()
   const queryClient = useQueryClient()
@@ -163,7 +189,7 @@ export function EncounterAnesthesiaLine({
     weightKg: vitals?.peso ?? null,
     anesthetic,
     ageYears,
-    cardiac: cardiacOf(health),
+    epinephrine: epinephrineOf(health, { asksAsa, vitals, ageYears }),
   })
   const said = anesthesiaHealthWords(health, gaps, risks, today)
   const asaMissing = asksAsa && !asa
@@ -184,7 +210,9 @@ export function EncounterAnesthesiaLine({
   const setBy = health?.asaClassSetBy ? memberName(health.asaClassSetBy) : null
   const setAt = health?.asaClassSetAt ? shortDay(health.asaClassSetAt) : null
   // Contestada y sin nada que avisar: dos líneas, sin el color de aviso, con «Cambiar».
-  if (!expanded && anesthesiaAnswered({ asksAsa, health, gaps, risks, warnings: words.warnings, today }))
+  // El tope de epinefrina es un aviso: con él, el bloque va entero.
+  const warnings = [...(words.cap ? [words.cap] : []), ...words.warnings]
+  if (!expanded && anesthesiaAnswered({ asksAsa, health, gaps, risks, warnings, today }))
     return (
       <section
         aria-labelledby={`${ids}-title`}
@@ -192,13 +220,13 @@ export function EncounterAnesthesiaLine({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {listWords([...uses])}
+            Anestesia local · {usesWords(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {[
               asksAsa && asa ? `ASA ${asa}` : null,
               said.replace(/\.$/, "") || null,
-              words.dose ?? "Sin peso anotado: sin dosis máxima",
+              words.dose ? `${words.dose}${weightFromOther ? " (peso anotado hoy en otra atención)" : ""}` : "Sin peso anotado: sin dosis máxima",
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -227,7 +255,7 @@ export function EncounterAnesthesiaLine({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {listWords([...uses])}
+            Anestesia local · {usesWords(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {said}
@@ -293,10 +321,32 @@ export function EncounterAnesthesiaLine({
             </option>
           ))}
         </ChoiceSelect>
-        <p id={`${ids}-dose`} className="text-sm font-medium">
-          {words.dose
-            ? `${words.dose}.`
-            : "Anota su peso en los signos vitales para ver la dosis máxima."}
+        <p id={`${ids}-dose`} className={words.cap ? "text-sm" : "text-sm font-medium"}>
+          {/* Con tope, lo que manda va primero y destacado, y el máximo por peso después, más discreto
+              (QA de diseño del 18 nov, H7). */}
+          {words.cap ? (
+            <>
+              <strong className="font-semibold">{words.cap}</strong>
+              <span className="text-muted-foreground">
+                {words.dose
+                  ? ` · ${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
+                  : " · Sin peso anotado, sin el máximo por peso."}
+              </span>
+            </>
+          ) : words.dose ? (
+            `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
+          ) : (
+            "Anota su peso en los signos vitales para ver la dosis máxima."
+          )}
+          {/* Lleva a los signos vitales del examen clínico (QA del 18 nov: había que adivinarlo). */}
+          {!words.dose && onAddWeight && canWrite ? (
+            <>
+              {" "}
+              <Button type="button" size="sm" variant="link" className="h-auto p-0" disabled={disabled} onClick={onAddWeight}>
+                Anotar su peso
+              </Button>
+            </>
+          ) : null}
         </p>
         {words.warnings.map((warning) => (
           <p key={warning} className="text-sm">
@@ -314,6 +364,7 @@ export function AnesthesiaAtSigningView({
 }: {
   value: AnesthesiaAtSigning
 }): React.JSX.Element {
+  const parts = anesthesiaUsesParts(value.uses)
   const asa = value.asaClass ? asaLabel(value.asaClass) : null
   const before =
     value.asaBefore !== undefined && value.asaBefore !== value.asaClass
@@ -325,7 +376,9 @@ export function AnesthesiaAtSigningView({
       : ""
   return (
     <ul className="flex flex-col gap-0.5 text-sm">
-      <li>Para {listWords(value.uses)}</li>
+      {/* Los procedimientos y, aparte, el anestésico de sus materiales (auditor, 18 nov, H7). */}
+      {parts.procedures.length > 0 ? <li>Para {listWords(parts.procedures)}</li> : null}
+      {parts.anesthetics.length > 0 ? <li>Anestésico: {listWords(parts.anesthetics)}</li> : null}
       {asa ? (
         <li>
           {asa}
@@ -333,7 +386,15 @@ export function AnesthesiaAtSigningView({
           {who}
         </li>
       ) : null}
-      {value.dose ? (
+      {/* Lo que manda primero, como en la atención (QA de diseño del 18 nov, H7). */}
+      {value.cap ? (
+        <li>
+          <strong className="font-semibold">{value.cap}</strong>
+          <span className="text-muted-foreground">
+            {value.dose ? ` · ${value.dose}` : " · Sin peso anotado, sin el máximo por peso"}
+          </span>
+        </li>
+      ) : value.dose ? (
         <li>{value.dose}</li>
       ) : value.weightKg === null ? (
         <li>Sin peso anotado: sin dosis máxima</li>

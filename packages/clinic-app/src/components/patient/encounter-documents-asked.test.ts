@@ -6,7 +6,7 @@
  * salía «Ya no se pide: no lo aceptó o eligió otra opción».
  */
 import { describe, expect, it } from "vitest"
-import { consentsStillAsked } from "./encounter-documents"
+import { consentDefaultDiagnosis, consentsStillAsked, inLinkWords } from "./encounter-documents"
 
 const prepared = {
   id: "doc-1",
@@ -35,5 +35,78 @@ describe("consentsStillAsked", () => {
     const asked = consentsStillAsked([prepared], needs)
     expect(asked.notAsked).toEqual([prepared])
     expect(asked.toSign).toEqual([])
+  })
+
+  // QA del 18 nov (novato 1): la exodoncia «Por decidir» con su consentimiento recién preparado.
+  // Lo que pide la atención vuelve vacío (hoy no se hace), y Documentos decía «Ya no se pide».
+  const empty = { isFetching: false, data: { data: [] } }
+
+  it("el de un tratamiento «Por decidir» de la atención se sigue pidiendo, con «Firmar ahora»", () => {
+    const asked = consentsStillAsked([prepared], empty, [
+      { id: "i-endo", status: "pendiente", decisionStatus: "pendiente" },
+    ])
+    expect(asked.notAsked).toEqual([])
+    expect(asked.toSign).toEqual([prepared])
+  })
+
+  // QA del 18 nov (desarrollo): dos pendientes agrupados decían «lo tiene en su enlace» con uno solo enviado.
+  it("lo que tiene en su enlace dice cuántos, si no son todos", () => {
+    const sent = { linkSentAt: "2026-11-18T13:00:00.000Z" }
+    const kept = { linkSentAt: null }
+    expect(inLinkWords([kept, kept])).toBe("")
+    expect(inLinkWords([sent, kept])).toBe(" · 1 de 2 en su enlace")
+    expect(inLinkWords([sent])).toBe(" · lo tiene en su enlace")
+    expect(inLinkWords([sent, sent])).toBe(" · los tiene en su enlace")
+  })
+
+  it("el de lo que no aceptó, no eligió o se anuló ya no se pide", () => {
+    for (const item of [
+      { id: "i-endo", status: "pendiente", decisionStatus: "rechazado" },
+      { id: "i-endo", status: "pendiente", decisionStatus: "no_elegida" },
+      { id: "i-endo", status: "cancelado", decisionStatus: "aceptado" },
+    ]) {
+      const asked = consentsStillAsked([prepared], empty, [item])
+      expect(asked.notAsked).toEqual([prepared])
+      expect(asked.toSign).toEqual([])
+    }
+  })
+})
+
+// Verificación del 18 nov: el consentimiento de la exodoncia de la 48 decía «Diagnóstico que lo
+// motiva: K04.0», la pulpitis de la 36, porque venía el primer diagnóstico de la atención.
+describe("consentDefaultDiagnosis", () => {
+  const dx = (code: string, toothNumber: number | null) => ({
+    diagnosisCode: code,
+    diagnosisSystem: "ICD-10",
+    toothNumber,
+    voidedAt: null,
+  })
+  const proc = (toothNumber: number | null, diagnosisCode: string | null = null) => ({
+    toothNumber,
+    diagnosisCode,
+    voidedAt: null,
+  })
+
+  it("nunca el de otra pieza", () => {
+    expect(consentDefaultDiagnosis([proc(48)], [dx("K04.0", 36)])).toBeNull()
+  })
+
+  it("el de la misma pieza, o el del procedimiento", () => {
+    expect(consentDefaultDiagnosis([proc(48)], [dx("K04.0", 36), dx("K08.3", 48)])).toEqual({
+      code: "K08.3",
+      system: "ICD-10",
+    })
+    expect(consentDefaultDiagnosis([proc(48, "K01.1")], [dx("K04.0", 36)])).toEqual({
+      code: "K01.1",
+      system: null,
+    })
+  })
+
+  it("sin nada registrado, solo el que no tiene pieza (latidIA)", () => {
+    expect(consentDefaultDiagnosis([], [dx("K04.0", 36)])).toBeNull()
+    expect(consentDefaultDiagnosis([], [dx("K04.0", 36), dx("I10", null)])).toEqual({
+      code: "I10",
+      system: "ICD-10",
+    })
   })
 })

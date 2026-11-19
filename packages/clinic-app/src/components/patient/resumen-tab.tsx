@@ -9,6 +9,7 @@ import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
+import { useRisksDrafts } from "../../lib/consent-risks-draft"
 import { type TaskItem, usePermission } from "../../lib/crm"
 import { balanceDetailWords, fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
@@ -183,6 +184,8 @@ export function PatientPendingCard({
     enabled: canSign && pendingConsents.length > 0,
   })
   const [signingId, setSigningId] = useState<string | null>(null)
+  // Riesgos propios escritos sin guardar: firmar los guarda antes de abrir la hoja (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   const consentOf = (id: string) => consents.data?.data.find((row) => row.id === id) ?? null
   const signing = signingId ? consentOf(signingId) : null
   const consentsChanged = () => {
@@ -236,7 +239,7 @@ export function PatientPendingCard({
             disabled={!document}
             onClick={() => setSigningId(consent.id)}
           >
-            Firmar
+            {risksDrafts.has(consent.id) ? "Guardar y firmar" : "Firmar"}
           </Button>
         ),
       })

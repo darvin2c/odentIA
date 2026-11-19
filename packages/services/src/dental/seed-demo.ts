@@ -5322,6 +5322,7 @@ for (const seed of [
     givenNames: "Gloria",
     familyName: "Huamán Rivas",
     birthDate: "1964-03-08",
+    sex: "F",
     phone: "+51987650733",
     registeredBranchId: miraflores.id,
   })
@@ -5338,6 +5339,37 @@ for (const seed of [
     overrideBusy: true,
     notice: false,
   })
+  // Reglas clínicas del 18 nov: toma alendronato y en recepción lo escribieron a mano, con la dosis,
+  // sin elegirlo de la lista. Se reconoce por su nombre estándar (ácido alendrónico, M05BA04): arriba
+  // de su ficha sale «Medicina para los huesos», la exodoncia de la 48 avisa del riesgo de
+  // osteonecrosis y su consentimiento nace con ese riesgo propio.
+  await savePatientHealth(db, ORG_A, ANA_ID, gloria.id, {
+    expectedRevision: 0,
+    reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+    conditions: [],
+    medications: [{ name: "alendronato 70 mg semanal" }],
+  })
+  // Su consentimiento de la exodoncia, preparado y sin enviar: nace con «Riesgos propios de su caso»
+  // (la osteonecrosis por el alendronato), que se cambia o se borra en su fila de Documentos.
+  const [gloriaExodoncia] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "exodoncia"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (gloriaExodoncia)
+    await db.transaction((tx) =>
+      createConsentDocument(tx, ORG_A, SALAS_ID, {
+        templateId: gloriaExodoncia.id,
+        patientId: gloria.id,
+        procedureRef: "Exodoncia de la pieza 48",
+      }),
+    )
 
   const mateo = await createPatient(db, ORG_A, ANA_ID, {
     displayName: "Mateo Flores Guzmán",
@@ -5478,7 +5510,7 @@ await db.transaction(async (tx) => {
 // la foto de la hoja firmada; el pendiente se cierra con método «papel».
 {
   const [paperPending] = await db
-    .select({ id: consentDocument.id })
+    .select({ id: consentDocument.id, sections: consentDocument.sectionsSnapshot })
     .from(consentDocument)
     .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
     .where(
@@ -5506,6 +5538,8 @@ await db.transaction(async (tx) => {
       comprehensionConfirmed: true,
       method: "papel",
       paperDocumentId: sheet.id,
+      // La hoja impresa llevaba los riesgos propios que tenga.
+      personalRisksShown: (paperPending.sections as { personalRisks?: string[] } | null)?.personalRisks ?? null,
     })
   }
 }

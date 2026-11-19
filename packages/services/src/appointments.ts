@@ -398,6 +398,27 @@ async function linkedEncounter(tx: Db, orgId: string, appointmentId: string) {
   return row ?? null
 }
 
+/**
+ * Las citas que ya tienen su atención (no anulada): a esas no se les suma nada, porque lo que se
+ * hace hoy se registra en la atención. La misma regla para «Sumar a su cita» en el servidor
+ * (`setAppointmentPlanItems`) y para ofrecerlo en «Qué sigue» (QA del 18 nov, novato 7: se
+ * ofrecía y respondía 409).
+ */
+export async function appointmentsInAttention(tx: Db, orgId: string, ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const rows = await tx
+    .select({ appointmentId: encounter.appointmentId })
+    .from(encounter)
+    .where(
+      and(
+        eq(encounter.organizationId, orgId),
+        inArray(encounter.appointmentId, [...ids]),
+        ne(encounter.status, "anulada"),
+      ),
+    )
+  return new Set(rows.flatMap((row) => (row.appointmentId ? [row.appointmentId] : [])))
+}
+
 function parseInstant(value: string, field: string): Date {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw validation(`${field} debe ser una fecha ISO válida`)
@@ -1966,7 +1987,7 @@ export async function setAppointmentPlanItems(
     throw conflict("STALE_VERSION", "La cita cambió mientras la mirabas; vuelve a abrirla e intenta de nuevo")
   if (!(current.status === "programada" || current.status === "confirmada") || current.startsAt.getTime() <= Date.now())
     throw conflict("APPOINTMENT_STATUS", "Solo se suma a una cita por venir que sigue en pie")
-  if (await linkedEncounter(tx, orgId, current.id))
+  if ((await appointmentsInAttention(tx, orgId, [current.id])).has(current.id))
     throw conflict("APPOINTMENT_IN_ATTENTION", "La cita ya tiene su atención: lo que se hace hoy se registra ahí")
   const clean = (list: string[] | undefined) => [...new Set((list ?? []).map((value) => value.trim()).filter(Boolean))]
   const links = await tx

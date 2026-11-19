@@ -10,6 +10,7 @@ import {
   finishingAtSign,
   needsNextControlDay,
   noNewChargesWords,
+  odontogramReminderCovered,
   resolvingOnSign,
   sessionAnswersBody,
   signFormsOf,
@@ -196,5 +197,20 @@ describe("«Sin cargos nuevos» del cierre de la página", () => {
   it("lo marcado que ya tiene su cargo (cobro único) no promete otro", () => {
     expect(words(["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
     expect(words([], ["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
+  })
+})
+
+// Revisión de las reglas clínicas del 18 nov: los procedimientos de hoy no tapan el recordatorio
+// en la primera atención, cuando todavía no hay odontograma firmado.
+describe("«Sin registrar: odontograma» al cerrar", () => {
+  it("la sesión que solo trata, con su odontograma ya firmado, no lo recuerda", () => {
+    expect(odontogramReminderCovered({ signsOdontogram: false, procedures: 1, signedBefore: true })).toBe(true)
+  })
+  it("la primera atención sin odontograma firmado lo recuerda aunque tenga procedimientos", () => {
+    expect(odontogramReminderCovered({ signsOdontogram: false, procedures: 2, signedBefore: false })).toBe(false)
+  })
+  it("si el cierre lo firma, no se dice como algo sin registrar", () => {
+    expect(odontogramReminderCovered({ signsOdontogram: true, procedures: 0, signedBefore: false })).toBe(true)
+    expect(odontogramReminderCovered({ signsOdontogram: false, procedures: 0, signedBefore: true })).toBe(false)
   })
 })

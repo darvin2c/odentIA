@@ -22,6 +22,7 @@ import { usePermission } from "../../lib/crm"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
 import { fetchServices, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { formatMoney } from "@odentia/clinical"
+import { normalizeSearchText } from "@odentia/ui-patterns"
 import { useOrgProfile } from "../../lib/org"
 import { productUi } from "../../product/product-ui"
 
@@ -52,6 +53,18 @@ const NO_SPECIALTY = "todas"
  * Tras elegir se mantiene abierto para seguir añadiendo uno por uno.
  * No pinta su etiqueta: la pantalla lo nombra con `Field` + `FieldLabel htmlFor={id}`.
  */
+/**
+ * Lo dicho de otro modo («sacar muela» → «exodoncia») busca el servicio por su nombre: solo los que se
+ * llaman así. La búsqueda también encuentra la palabra en medio del nombre, y «Alveoloplastia sin
+ * exodoncias» salía antes que las exodoncias (verificación del 18 nov, H5). Escrito tal cual, el orden
+ * del servidor.
+ */
+export function namedAsSaid<T extends { name: string }>(found: readonly T[], asked: string, typed: string): T[] {
+  if (!asked || asked === typed.trim()) return [...found]
+  const term = normalizeSearchText(asked)
+  return found.filter((row) => normalizeSearchText(row.name).startsWith(term))
+}
+
 export function ServicePicker({
   value,
   onChange,
@@ -77,11 +90,13 @@ export function ServicePicker({
   // Las especialidades de la clínica: la misma lista que Configuración › Especialidades.
   const specialties = (useClinicSpecialties({ activeOnly: true, enabled: canRead && !disabled }).data?.data ?? [])
 
+  // «sacar muela» o «extracción» buscan la exodoncia donde el producto lo dice así.
+  const asked = productUi().services.searchTerm?.(query) ?? query.trim()
   const servicesQuery = useQuery({
-    queryKey: ["services", "picker", query.trim(), specialty],
+    queryKey: ["services", "picker", asked, specialty],
     queryFn: () =>
       fetchServices({
-        q: query.trim() || undefined,
+        q: asked || undefined,
         specialtyId: specialty === NO_SPECIALTY ? undefined : specialty,
         state: "active",
         limit: 30,
@@ -90,8 +105,13 @@ export function ServicePicker({
     staleTime: 30_000,
   })
 
-  const found = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
-  const total = servicesQuery.data?.total ?? 0
+  const found = useMemo(
+    () => namedAsSaid(servicesQuery.data?.data ?? [], asked, query),
+    [servicesQuery.data, asked, query],
+  )
+  // Lo que quedó fuera por no llamarse así no cuenta como «Se ven N de M».
+  const served = servicesQuery.data
+  const total = served && served.total <= served.data.length ? found.length : (served?.total ?? 0)
   // Lo que encaja en la pieza, primero (QA del 10 nov, B3): con la anatomía de la biblioteca, la
   // misma del aviso «La 46 es un molar…». Sin lugar, o en un producto sin anatomía, el orden del servidor.
   const toothFit = place != null ? productUi().services.toothFit : null

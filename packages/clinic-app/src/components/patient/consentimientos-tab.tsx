@@ -21,6 +21,7 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   type ConsentDocument,
+  type ConsentEvent,
   type ConsentTreatmentChoice,
   cancelConsent,
   consentSignatureWords,
@@ -59,6 +60,54 @@ export const CONSENT_EVENT_LABELS: Record<string, string> = {
   firmado: "Firmado",
   revocado: "Revocado",
   anulado: "Anulado",
+  riesgos_propios: "Riesgos propios de su caso",
+}
+
+/**
+ * Un paso de la Historia del documento, después de su fecha: qué pasó y quién lo hizo (QA del 18
+ * nov). «Riesgos propios de su caso · los cambió Ana Torres»; los demás, «Firmado · Ana Torres».
+ */
+export function consentEventWords(
+  event: Pick<ConsentEvent, "toStatus" | "reason" | "actorName">,
+): string {
+  const label = CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus
+  const who = event.actorName?.trim() || null
+  if (event.toStatus === "riesgos_propios") {
+    const removed = event.reason === "Quitados de la hoja"
+    if (who) return `${label} · ${removed ? "los quitó" : "los cambió"} ${who}`
+    return `${label} · ${removed ? "Quitados de la hoja" : "Cambiados"}`
+  }
+  const reason = event.reason && event.reason !== "Documento creado" ? event.reason : null
+  // «Informado por el profesional · Ana Torres · COP 12345» ya lleva su nombre: no se repite al final.
+  const named = who && reason ? reason.includes(who.replace(/^(Dra?|Lic|Mg)\.\s*/i, "")) : false
+  return [label, reason, named ? null : who].filter(Boolean).join(" · ")
+}
+
+/**
+ * La Historia del documento, con los cambios seguidos de los riesgos propios de una misma persona en
+ * una sola línea (QA de diseño del 18 nov, H13: cinco líneas iguales). Cada grupo lleva cuántas
+ * veces y la hora de la última.
+ */
+export function groupConsentEvents<
+  E extends Pick<ConsentEvent, "toStatus" | "reason" | "actorName" | "createdAt">,
+>(events: readonly E[]): { event: E; times: number; lastAt: string }[] {
+  const out: { event: E; times: number; lastAt: string }[] = []
+  for (const event of events) {
+    const previous = out[out.length - 1]
+    if (
+      previous &&
+      event.toStatus === "riesgos_propios" &&
+      previous.event.toStatus === "riesgos_propios" &&
+      previous.event.reason === event.reason &&
+      (previous.event.actorName ?? null) === (event.actorName ?? null)
+    ) {
+      previous.times += 1
+      previous.lastAt = event.createdAt
+      continue
+    }
+    out.push({ event, times: 1, lastAt: event.createdAt })
+  }
+  return out
 }
 
 interface NewConsentValues {
@@ -189,8 +238,14 @@ export function NewConsentDrawer({
   })
   const choices = !planItemId && templateId ? (choicesQuery.data?.data ?? []) : []
   choicesNow.current = choices
+  const chosenPlanItem = useStore(form.store, (state) => state.values.planItemId)
+  const chosenTreatment =
+    Boolean(encounterId) && (Boolean(planItemId) || choices.some((item) => item.planItemId === chosenPlanItem))
+  /** El diagnóstico que se puso solo al elegir un tratamiento. */
+  const autoDiagnosis = useRef<string | null>(null)
   /** Elegir el tratamiento escribe su procedimiento, si no se escribió otro a mano. */
   const followTreatment = (id: string) => {
+    followDiagnosis(id)
     const current = form.getFieldValue("procedureRef").trim()
     const untouched =
       !current ||
@@ -200,6 +255,24 @@ export function NewConsentDrawer({
     const choice = choicesNow.current.find((item) => item.planItemId === id)
     autoProcedure.current = choice?.procedureRef ?? null
     form.setFieldValue("procedureRef", choice?.procedureRef ?? defaultProcedureRef ?? "")
+  }
+  /**
+   * El diagnóstico va con el tratamiento elegido, si no se eligió otro a mano: el del tratamiento o,
+   * sin él, vacío, y el servidor pone el de la atención en esa misma pieza. Lo de lo registrado hoy
+   * en otra pieza no se queda (verificación del 18 nov: la exodoncia de la 48 salía con la pulpitis
+   * de la 36).
+   */
+  function followDiagnosis(id: string) {
+    const current = form.getFieldValue("diagnosisCode")
+    const untouched = !current || current === autoDiagnosis.current || current === (defaultDiagnosisCode ?? "")
+    if (!untouched) return
+    const choice = choicesNow.current.find((item) => item.planItemId === id)
+    const next = choice
+      ? { code: choice.diagnosisCode ?? "", system: choice.diagnosisSystem }
+      : { code: defaultDiagnosisCode ?? "", system: defaultDiagnosisSystem ?? null }
+    autoDiagnosis.current = next.code || null
+    form.setFieldValue("diagnosisSystem", next.code ? next.system : (defaultDiagnosisSystem ?? null))
+    form.setFieldValue("diagnosisCode", next.code)
   }
   // Al llegar los de la plantilla: uno solo viene elegido; lo elegido que ya no está, se quita.
   // Desde una atención que trae lo suyo (lo registrado hoy), viene elegido lo de hoy y nunca otro
@@ -286,7 +359,14 @@ export function NewConsentDrawer({
         </form.AppField>
         <form.AppField name="diagnosisCode">
           {(field) => (
-            <field.Control label="Diagnóstico que lo motiva (opcional)">
+            <field.Control
+              label="Diagnóstico que lo motiva (opcional)"
+              description={
+                chosenTreatment && !field.state.value
+                  ? "Vacío, va el de la atención en esa misma pieza, si lo hay."
+                  : undefined
+              }
+            >
               {(control) => (
                 <DiagnosisSearch
                   id={control.id}

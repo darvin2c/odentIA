@@ -551,6 +551,9 @@ async function planFactsOf(
       // La cita sin objeto no es «su cita» para lo que falta: se dice aparte (revisión de la entrega 12).
       nextAppointmentAt: next && !freed.some((row) => row.id === next.id) ? next.startsAt : null,
       nextAppointmentId: next && !freed.some((row) => row.id === next.id) ? next.id : null,
+      nextAppointmentInAttention: next
+        ? (await (await import("./appointments.js")).appointmentsInAttention(tx, orgId, [next.id])).has(next.id)
+        : false,
       today,
       unclosed: unclosed.map((row) => ({ ...row, startsAt: new Date(row.startsAt) })),
       unrecorded: new Map(
@@ -671,6 +674,11 @@ async function planFactsMany(
     )
     .orderBy(appointment.patientId, asc(appointment.startsAt))
   const nextAppointmentOf = new Map(nextAppointments.map((row) => [row.patientId, row]))
+  const inAttention = await (await import("./appointments.js")).appointmentsInAttention(
+    tx,
+    orgId,
+    nextAppointments.map((row) => row.id),
+  )
   // Los controles abiertos de cada uno, con el mismo orden que los de uno solo.
   const controls = await tx
     .select()
@@ -729,6 +737,7 @@ async function planFactsMany(
       controls: controlsOf.get(person.id) ?? [],
       nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
       nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
+      nextAppointmentInAttention: inAttention.has(nextAppointmentOf.get(person.id)?.id ?? ""),
       today: todayOf.get(person.id) ?? null,
     }
     out.set(person.id, facts)
@@ -806,6 +815,8 @@ interface PlanFacts {
   /** Su próxima cita, aunque no lleve lo aceptado. */
   nextAppointmentAt?: Date | null
   nextAppointmentId?: string | null
+  /** Su próxima cita ya tiene su atención: no se le suma nada (`appointmentsInAttention`). */
+  nextAppointmentInAttention?: boolean
   /** Su primera cita viva de hoy (por venir, en la sala o en atención). */
   today?: { id: string; startsAt: Date } | null
   /** Sus citas de días pasados que nadie cerró, la más reciente primero. Solo de una persona. */
@@ -1166,8 +1177,10 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         ? `${what.charAt(0).toUpperCase()}${what.slice(1)} y ${controlNoun} no van en ${yourAppointment(nextAppointmentAt)}`
         : `Falta su cita: ${what} y ${controlNoun}`
       : decided
-        ? // «Aceptó todo» o, con varias opciones, «Eligió la opción A»: el mismo nombre que el Plan.
-          `${decided.stateText}: ${missing}`
+        ? // «Aceptó todo» o, con varias opciones, «Eligió la opción A»: el mismo nombre que el Plan y
+          // la Historia (`choiceText`; verificación del 18 nov, 9: decía «Aceptó 1 de 2»). El estado
+          // que lee Sofi (`stateText`) no cambia.
+          `${decided.choiceText}: ${missing}`
         : context.budgetRequired
           ? nextAppointmentAt
             ? `Tiene tratamientos aceptados que aún no van en ${yourAppointment(nextAppointmentAt)}`
@@ -1209,9 +1222,15 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       .sort()
       .at(-1)
     // Sumarlo a la cita que ya tiene: solo lo que no espera a otro tratamiento y sin control (el
-    // control se reserva con su propia regla).
+    // control se reserva con su propia regla). No a la que ya tiene su atención: el servidor no lo
+    // deja, y lo de hoy se registra en ella (QA del 18 nov, novato 7).
     const join =
-      nextAppointmentAt && nextAppointmentId && controls.length === 0 && listReady.length > 0 && seesAgenda
+      nextAppointmentAt &&
+      nextAppointmentId &&
+      !facts.nextAppointmentInAttention &&
+      controls.length === 0 &&
+      listReady.length > 0 &&
+      seesAgenda
         ? { appointmentId: nextAppointmentId, label: `Sumar a su cita del ${day(nextAppointmentAt)}` }
         : null
     return {

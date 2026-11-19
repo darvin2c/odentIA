@@ -84,6 +84,7 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
                 disabled={ctx.locked}
                 readOnly={!ctx.canWrite}
                 onSelectionChange={onSelectionChange}
+                onReason={ctx.focusReason}
               />
             )}
             {/* Lo registrado hoy, debajo del dibujo: lo que se ve en la atención firmada. */}
@@ -186,27 +187,14 @@ function DentalClosing({
       {odontogram ? (
         <div className="flex items-start gap-3 rounded-lg border p-3">
           <Badge variant="outline">{odontogram.shortName}</Badge>
+          {/* Solo llega con un momento de la norma: la sesión que solo trata no firma copia (reglas clínicas, 18 nov). */}
           <div className="flex min-w-0 flex-col">
-            {findingsLine(odontogram) || odontogram.purpose !== "new_findings" ? (
-              <>
-                <span className="font-medium">
-                  El odontograma queda firmado como «
-                  {SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
-                </span>
-                {findingsLine(odontogram) ? (
-                  <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
-                ) : null}
-              </>
-            ) : (
-              // Sin hallazgos nuevos y con el momento «Nuevos hallazgos», se firma por lo que hoy queda
-              // tratado: decirlo así no se contradice (segunda mesa del 9 nov). El momento de la norma, aparte.
-              <>
-                <span className="font-medium">El odontograma queda firmado con lo tratado hoy</span>
-                <span className="text-xs text-muted-foreground">
-                  Momento de la norma: «{SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
-                </span>
-              </>
-            )}
+            <span className="font-medium">
+              El odontograma queda firmado como «{SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
+            </span>
+            {findingsLine(odontogram) ? (
+              <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
+            ) : null}
           </div>
         </div>
       ) : null}

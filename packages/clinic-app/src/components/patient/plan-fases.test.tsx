@@ -25,7 +25,7 @@ vi.mock("../../lib/api", async (original) => ({
   apiFetch: async () => ({ data: [] }),
 }))
 
-const { PlanPhases, sameClinicDay } = await import("./plan-fases")
+const { PlanPhases, planPhasesNote, sameClinicDay } = await import("./plan-fases")
 
 const endo = {
   id: "it-endo",
@@ -74,4 +74,24 @@ it("el día de una sesión se compara en la zona de la clínica, no en la del na
   expect(sameClinicDay("2026-11-18T03:00:00Z", "2026-11-17T15:00:00Z")).toBe(true)
   setOrgLocale("es-PE", "Asia/Tokyo")
   expect(sameClinicDay("2026-11-18T03:00:00Z", "2026-11-17T13:00:00Z")).toBe(false)
+})
+
+// QA del 18 nov: la nota decía que la fase sale solo del tipo de servicio; ahora la pulpitis la lleva a «Urgencia».
+it("la nota del plan dice que el diagnóstico de urgencia propone «Urgencia», y nada de fases con una sola", () => {
+  const base = bareProduct("dental")
+  declareProduct({
+    ...base,
+    plan: {
+      ...base.plan,
+      phases: [
+        { key: "urgencia", label: "Urgencia", hint: "Dolor, infección, trauma" },
+        { key: "basica", label: "Básica", hint: "" },
+      ],
+    },
+  })
+  expect(planPhasesNote()).toBe(
+    "La fase la propone el tipo de servicio; si su diagnóstico es de dolor, infección aguda o trauma, «Urgencia». Se puede cambiar con «Planificar…». Cada procedimiento registrado en una atención suma una sesión.",
+  )
+  declareProduct(base)
+  expect(planPhasesNote()).toBe("Cada procedimiento registrado en una atención suma una sesión.")
 })

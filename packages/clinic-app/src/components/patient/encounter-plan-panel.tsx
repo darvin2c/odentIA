@@ -44,6 +44,7 @@ import {
   totalsOf,
 } from "../../lib/budgets"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import {
   bringTreatmentApi,
@@ -92,7 +93,7 @@ import {
   pathCountWord,
   usePlacePath,
 } from "./plan/plan-paths"
-import { PlanItemSessions } from "./plan-fases"
+import { PlanItemSessions, phaseHeading } from "./plan-fases"
 import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
 
@@ -321,6 +322,8 @@ export function EncounterPlanPanel({
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  // Riesgos propios escritos sin guardar: «Guardar y firmar» (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   const orgLocale = useOrgProfile().data?.locale
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
@@ -567,7 +570,11 @@ export function EncounterPlanPanel({
           >
             {/* Abre la firma del paciente (y la prepara si falta): dice lo que hace, no «Preparar»
                 (QA en pantalla del 17 nov, D3). Lo que firmó en su enlace se confirma. */}
-            {item.consent === "por_confirmar" ? "Confirmar" : "Firmar ahora"}
+            {item.consent === "por_confirmar"
+              ? "Confirmar"
+              : hasRisksDraft(risksDrafts, { planItemIds: [item.id] })
+                ? "Guardar y firmar"
+                : "Firmar ahora"}
           </Button>
         ) : null}
         {onRegister ? (
@@ -924,9 +931,10 @@ export function EncounterPlanPanel({
                   // Por fases, como el plan de la ficha: un encabezado por fase (las filas ya van
                   // ordenadas por ella).
                   const previous = rows[index - 1]
+                  const phase = phases[phaseIndexOf(item)]
                   const phaseLabel =
-                    phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
-                      ? (phases[phaseIndexOf(item)]?.label ?? null)
+                    phase && phases.length > 1 && (!previous || phaseIndexOf(previous) !== phaseIndexOf(item))
+                      ? phaseHeading(phaseIndexOf(item), phase.label)
                       : null
                   // El precio, solo de lo que aún no empezó: lo empezado ya se cobró o se cobra por
                   // sesión, y la fila no lo sabe sin la caja (QA en pantalla del 17 nov).
@@ -950,7 +958,7 @@ export function EncounterPlanPanel({
                     <Fragment key={item.id}>
                       {phaseLabel ? (
                         <li className="pt-3 text-xs font-semibold text-muted-foreground">
-                          Fase {phaseLabel.toLowerCase()}
+                          {phaseLabel}
                         </li>
                       ) : null}
                       {/* Una sola fila por tratamiento (el lienzo, tablero 1): con «Hoy», la fila entera

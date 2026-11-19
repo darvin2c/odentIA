@@ -361,6 +361,12 @@ export function medicationGroupOfAtc(code: string): MedicationGroup | null {
 export interface HabitualMedicationEntry {
   dci: string
   atc: string
+  /**
+   * Sus otros nombres estándar, que llevan al mismo código: el nombre con que se escribe en el
+   * Perú y Latinoamérica («alendronato») y su marca registrada («Fosamax»). Como los sinónimos de
+   * una alergia (`AllergenEntry.synonyms`): son datos de la lista, no una regla por nombre.
+   */
+  names?: readonly string[]
 }
 
 /**
@@ -368,15 +374,25 @@ export interface HabitualMedicationEntry {
  * (anticoagulantes, antiagregantes, bifosfonatos, antidiabéticos,
  * antihipertensivos, anticonvulsivos…), además de la lista de la receta. Por
  * DCI y código ATC; lo que no está se escribe.
+ *
+ * Los anticoagulantes, antiagregantes y las medicinas para los huesos llevan además sus otros
+ * nombres (`names`), porque así los escribe quien los toma y cambian una cirugía en la boca:
+ * - código ATC de la DCI: WHO Collaborating Centre for Drug Statistics Methodology, *ATC/DDD
+ *   Index* (grupos B01A y M05B);
+ * - qué medicinas para los huesos dan osteonecrosis de los maxilares: Ruggiero SL y col.,
+ *   «AAOMS Position Paper on Medication-Related Osteonecrosis of the Jaws—2022 Update»,
+ *   *J Oral Maxillofac Surg* 2022;80:920-943 (bifosfonatos, denosumab y romosozumab). Raloxifeno
+ *   (G03XC01), teriparatida (H05AA02) y calcio (A12) no son del grupo M05B y no dan la marca;
+ * - las marcas, las registradas de cada DCI (verificar en el registro sanitario de DIGEMID).
  */
 export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   { dci: "warfarina", atc: "B01AA03" },
-  { dci: "acenocumarol", atc: "B01AA07" },
+  { dci: "acenocumarol", atc: "B01AA07", names: ["Sintrom"] },
   { dci: "enoxaparina", atc: "B01AB05" },
-  { dci: "clopidogrel", atc: "B01AC04" },
-  { dci: "dabigatrán etexilato", atc: "B01AE07" },
-  { dci: "rivaroxabán", atc: "B01AF01" },
-  { dci: "apixabán", atc: "B01AF02" },
+  { dci: "clopidogrel", atc: "B01AC04", names: ["Plavix"] },
+  { dci: "dabigatrán etexilato", atc: "B01AE07", names: ["dabigatrán", "Pradaxa"] },
+  { dci: "rivaroxabán", atc: "B01AF01", names: ["Xarelto"] },
+  { dci: "apixabán", atc: "B01AF02", names: ["Eliquis"] },
   { dci: "metformina", atc: "A10BA02" },
   { dci: "glibenclamida", atc: "A10BB01" },
   { dci: "insulina glargina", atc: "A10AE04" },
@@ -394,9 +410,13 @@ export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   { dci: "atorvastatina", atc: "C10AA05" },
   { dci: "simvastatina", atc: "C10AA01" },
   { dci: "levotiroxina", atc: "H03AA01" },
-  { dci: "ácido alendrónico", atc: "M05BA04" },
-  { dci: "ácido zoledrónico", atc: "M05BA08" },
-  { dci: "denosumab", atc: "M05BX04" },
+  { dci: "ácido alendrónico", atc: "M05BA04", names: ["alendronato", "alendronato sódico", "Fosamax"] },
+  { dci: "ácido risedrónico", atc: "M05BA07", names: ["risedronato", "risedronato sódico", "Actonel"] },
+  { dci: "ácido ibandrónico", atc: "M05BA06", names: ["ibandronato", "Bonviva"] },
+  { dci: "ácido zoledrónico", atc: "M05BA08", names: ["zoledronato", "Aclasta", "Zometa"] },
+  { dci: "ácido pamidrónico", atc: "M05BA03", names: ["pamidronato", "Aredia"] },
+  { dci: "denosumab", atc: "M05BX04", names: ["Prolia", "Xgeva"] },
+  { dci: "romosozumab", atc: "M05BX06", names: ["Evenity"] },
   { dci: "omeprazol", atc: "A02BC01" },
   { dci: "salbutamol", atc: "R03AC02" },
   { dci: "sertralina", atc: "N06AB06" },
@@ -411,12 +431,66 @@ export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   ...DENTAL_MEDICATIONS.map(({ dci, atc }) => ({ dci, atc })),
 ]
 
+/** Los nombres estándar de una medicina, sin tildes ni mayúsculas: su DCI y sus otros nombres. */
+function habitualKeys(entry: HabitualMedicationEntry): string[] {
+  return [entry.dci, ...(entry.names ?? [])].map(normalizeDrugText)
+}
+
+/**
+ * Lo que sigue al nombre dice que es una combinación, no esa medicina sola: un «+» en cualquier
+ * parte («paracetamol + codeína 500/30», «enalapril 10 mg + hidroclorotiazida»), una «/» pegada
+ * al nombre y seguida de otro («ibuprofeno/paracetamol»; «500/30» y «5 mg/día» no lo son) o «y»/«e»
+ * seguida de otro nombre, justo después del nombre o de su dosis («losartán y amlodipino»,
+ * «losartán 50 mg e hidroclorotiazida»). La migración 0150 usa la misma regla en SQL.
+ */
+const COMPOUND_REST = /\+|^\s*\/\s*\p{L}|^\s*(?:[\d.,]+\s*(?:mg|g|mcg|ug|ml|ui|%)?\s*)?\b[ye]\b\s*\p{L}/u
+
+/**
+ * La medicina de la lista que nombra lo escrito y el nombre por el que se reconoció. Se reconoce
+ * si lo escrito es uno de sus nombres estándar o empieza por él y sigue lo que no es una letra:
+ * la dosis o la frecuencia («alendronato 70 mg semanal», «Eliquis 5mg»). Gana el nombre más largo
+ * («amoxicilina + ácido clavulánico 875 mg» no es «amoxicilina»). Nunca un trozo de nombre
+ * («alendro», «ácido»), un nombre dentro de otro texto ni una combinación que la lista no tiene
+ * entera (`COMPOUND_REST`): no adivina.
+ */
+export function matchHabitualMedication(
+  written: string,
+  entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
+): { entry: HabitualMedicationEntry; name: string } | null {
+  const text = normalizeDrugText(written)
+  if (!text) return null
+  let best: { entry: HabitualMedicationEntry; name: string } | null = null
+  let bestLength = 0
+  for (const entry of entries) {
+    const names = [entry.dci, ...(entry.names ?? [])]
+    const keys = habitualKeys(entry)
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index] ?? ""
+      if (!key || !text.startsWith(key) || /\p{L}/u.test(text.charAt(key.length))) continue
+      if (COMPOUND_REST.test(text.slice(key.length))) continue
+      if (key.length > bestLength) {
+        best = { entry, name: names[index] ?? entry.dci }
+        bestLength = key.length
+      }
+    }
+  }
+  return best
+}
+
+/** La medicina de la lista que nombra lo escrito (`matchHabitualMedication`), o null. */
 export function findHabitualMedication(
   dci: string,
   entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
 ): HabitualMedicationEntry | null {
-  const key = normalizeDrugText(dci)
-  return entries.find((entry) => normalizeDrugText(entry.dci) === key) ?? null
+  return matchHabitualMedication(dci, entries)?.entry ?? null
+}
+
+/** La DCI de un código ATC de la lista («M05BA04» → «ácido alendrónico»), o null si no está. */
+export function habitualDciOfAtc(
+  atc: string | null | undefined,
+  entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
+): string | null {
+  return atc ? (entries.find((entry) => entry.atc === atc)?.dci ?? null) : null
 }
 
 /**
@@ -430,11 +504,14 @@ export function findHabitualMedication(
  * - `boneMedicines`: M05B, medicamentos que afectan la estructura ósea y la
  *   mineralización (bifosfonatos y denosumab).
  *
- * La marca sale del código, nunca del nombre escrito: lo tiene la medicina que
- * el paciente dijo al responder «Sí» a la pregunta de su clase (con el código
- * del grupo, `declaredMedicineAtc`) y la que el equipo eligió de la lista (con
- * el suyo). «Sintrom» escrito a mano en «otro medicamento» no lleva código ni
- * marca: reconocer la clase por el nombre queda fuera, a propósito.
+ * La marca sale del código: lo tiene la medicina que el paciente dijo al
+ * responder «Sí» a la pregunta de su clase (con el código del grupo,
+ * `declaredMedicineAtc`), la que el equipo eligió de la lista y la que se
+ * escribió con uno de los nombres estándar de la lista (`matchHabitualMedication`):
+ * su DCI, su nombre local o su marca registrada, sola o seguida de la dosis
+ * («alendronato 70 mg semanal», «Sintrom»). Esos nombres son datos de la lista,
+ * con el código de su DCI; un texto libre cualquiera («la pastilla del hueso»)
+ * no se reconoce ni se adivina: queda sin código y sin marca.
  */
 export const MEDICATION_CLASSES = {
   anticoagulants: { atc: "B01A", label: "Anticoagulante", unnamed: "Anticoagulante (no dijo cuál)" },
@@ -452,9 +529,10 @@ export function medicationClassOf(atc: string | null | undefined): MedicationCla
 
 /**
  * El código ATC de la medicina que alguien dijo al responder «Sí» a la pregunta
- * de una clase: el del medicamento si lo que escribió es exactamente uno de la
- * lista y es de esa clase; si no (lo escribió a su manera, con la dosis, o no
- * dijo cuál), el del grupo. Nunca un código de otra clase: la respuesta manda.
+ * de una clase: el del medicamento si lo que escribió lo nombra por uno de sus
+ * nombres de la lista (también con la dosis, `matchHabitualMedication`) y es de
+ * esa clase; si no (lo escribió a su manera o no dijo cuál), el del grupo.
+ * Nunca un código de otra clase: la respuesta manda.
  */
 export function declaredMedicineAtc(
   group: MedicationClass,
@@ -465,20 +543,28 @@ export function declaredMedicineAtc(
   return found && medicationClassOf(found.atc) === group ? found.atc : MEDICATION_CLASSES[group].atc
 }
 
-/** Medicamentos que coinciden con lo escrito, para elegir la DCI. */
+/**
+ * Medicamentos que coinciden con lo escrito, para elegir la DCI: por su DCI o por sus otros
+ * nombres. `via` es el otro nombre por el que salió («Fosamax»), o null si salió por su DCI.
+ */
 export function searchHabitualMedications(
   query: string,
   limit = 8,
   entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
-): HabitualMedicationEntry[] {
+): Array<HabitualMedicationEntry & { via: string | null }> {
   const needle = normalizeDrugText(query)
   if (!needle) return []
-  const starts: HabitualMedicationEntry[] = []
-  const contains: HabitualMedicationEntry[] = []
+  const starts: Array<HabitualMedicationEntry & { via: string | null }> = []
+  const contains: Array<HabitualMedicationEntry & { via: string | null }> = []
   for (const entry of entries) {
-    const key = normalizeDrugText(entry.dci)
-    if (key.startsWith(needle)) starts.push(entry)
-    else if (key.includes(needle)) contains.push(entry)
+    const names = [entry.dci, ...(entry.names ?? [])]
+    const keys = habitualKeys(entry)
+    const start = keys.findIndex((key) => key.startsWith(needle))
+    const inside = start >= 0 ? start : keys.findIndex((key) => key.includes(needle))
+    if (inside < 0) continue
+    const found = { ...entry, via: inside === 0 ? null : (names[inside] ?? null) }
+    if (start >= 0) starts.push(found)
+    else contains.push(found)
   }
   return [...starts, ...contains].slice(0, limit)
 }

@@ -31,6 +31,7 @@ import { useId, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import type { FormResponse } from "../../lib/clinical-forms"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
+import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
@@ -1194,6 +1195,21 @@ function listWords(words: readonly string[]): string {
   return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
 }
 
+/**
+ * Si «Sin registrar: odontograma» sobra al cerrar: cuando el cierre lo firma (decía a la vez «queda
+ * firmado» y «Sin registrar», QA del 9 nov) o en la sesión que solo trata (la 2 de la endodoncia),
+ * que no firma copia porque ya tiene su odontograma firmado y lo tratado queda en el gráfico y en la
+ * atención firmada. En la primera atención, sin odontograma firmado antes, se recuerda aunque haya
+ * procedimientos (reglas clínicas, 18 nov).
+ */
+export function odontogramReminderCovered(input: {
+  signsOdontogram: boolean
+  procedures: number
+  signedBefore: boolean
+}): boolean {
+  return input.signsOdontogram || (input.procedures > 0 && input.signedBefore)
+}
+
 /** «sus alergias, sus enfermedades y su medicación»: lo que se le pregunta (la ASA no se pregunta, se clasifica). */
 export function healthGapWords(gaps: readonly HealthGap[]): string {
   return listWords(gaps.flatMap((gap) => (gap === "asa" ? [] : [HEALTH_GAP_WORDS[gap]])))
@@ -1444,6 +1460,8 @@ export function EncounterClosingDialog({
   dictated?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
+  // Riesgos propios escritos sin guardar: firmar los guarda antes de abrir la hoja (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   // Quien no ve la caja no recibe lo que debe en «Atención finalizada»: no se le promete (QA antes de entregar).
   const seesFinance = usePermission("finance.read")
   const ProductClosing = productUi().encounter.Closing
@@ -1542,7 +1560,14 @@ export function EncounterClosingDialog({
                     {need.status !== "sin_publicar" ? (
                       <span className="flex flex-wrap gap-2">
                         <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                          {need.personSigned ? "Confirmar" : "Firmar ahora"}
+                          {need.personSigned
+                            ? "Confirmar"
+                            : hasRisksDraft(risksDrafts, {
+                                  documentIds: [need.documentId],
+                                  planItemIds: [need.planItemId],
+                                })
+                              ? "Guardar y firmar"
+                              : "Firmar ahora"}
                         </Button>
                         {/* Firmado en papel: con la foto de la hoja, no una palabra (consentimientos, 10 nov). */}
                         {onPaper && need.documentId && !need.personSigned ? (

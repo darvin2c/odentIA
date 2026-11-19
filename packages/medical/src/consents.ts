@@ -8,6 +8,7 @@ import type { SuggestedConsentTemplate } from "@odentia/clinical"
 export const MEDICAL_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "procedimiento-menor",
+    riskProfile: { wound: true, localAnesthesia: true, words: "el procedimiento" },
     title: "Procedimiento menor en consultorio",
     servicePrefixes: ["sutura-simple", "drenaje-de-absceso", "extraccion-de-una"],
     sections: {

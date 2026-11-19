@@ -1,5 +1,6 @@
 import {
   ageInYears,
+  anesthesiaWeightKg,
   appendDictated,
   type ClinicalProduct,
   DEFAULT_LOCAL_ANESTHETIC,
@@ -150,6 +151,7 @@ import {
   finishesByDefault,
   finishingAtSign,
   healthGapWords,
+  odontogramReminderCovered,
   type SessionAnswers,
   needsNextControlDay,
   noNewChargesWords,
@@ -666,6 +668,8 @@ export function EncounterEditor({
   const [savedAt, setSavedAt] = useState<string>(encounter.updatedAt)
   // Antecedentes y última atención, al lado y sin salir.
   const [contextOpen, setContextOpen] = useState(false)
+  // «Anotar su peso» lleva al peso del examen; desde ahí, «Volver a la anestesia» (QA de diseño del 18 nov, H8).
+  const [weightReturn, setWeightReturn] = useState(false)
   /** Una propuesta de diagnóstico sin tipo, usada desde la tarjeta: el bloque abre su formulario con ella. */
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
   /** «Registrar» desde la fila del plan: el tratamiento con que se abre el registro. */
@@ -1487,7 +1491,7 @@ export function EncounterEditor({
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
         void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
-      // En Perú, el cierre que cambió el gráfico firmó el odontograma.
+      // En Perú, el cierre que llegó a un momento de la norma firmó el odontograma.
       void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
       // Lo que salió de la sede cambia lo que hay en Inventario.
       if (result.data.materials) void queryClient.invalidateQueries({ queryKey: ["inventory"] })
@@ -1607,6 +1611,16 @@ export function EncounterEditor({
   // sin parpadear a «Sin motivo».
   const offeredReason =
     canWrite && attending && !finalizing && reason.trim() === "" ? detail.bookedReason : null
+  /** Lleva al motivo con el cursor al final: lo que cuenta el paciente («dolor») va ahí, no en la pieza. */
+  const focusReason = () => {
+    requestAnimationFrame(() => {
+      const field = document.getElementById(`${uid}-reason`) as HTMLTextAreaElement | null
+      if (!field) return
+      field.scrollIntoView({ block: "center", behavior: "smooth" })
+      field.focus({ preventScroll: true })
+      field.setSelectionRange(field.value.length, field.value.length)
+    })
+  }
   const takeOfferedReason = () => {
     if (offeredReason && !locked) editText("reason", offeredReason)
   }
@@ -1623,6 +1637,7 @@ export function EncounterEditor({
     flush,
     onChanged: handleChildChanged,
     onPendingChange: handlePendingChange,
+    focusReason,
   })
 
   const followUps = (followUpsQuery.data?.data ?? []).filter(
@@ -1779,9 +1794,13 @@ export function EncounterEditor({
     sections,
   })
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
-  // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
-  // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
-  const signsOdontogram = Boolean(closingQuery.data?.data.odontogram)
+  // El odontograma tampoco cuando el cierre lo firma, ni en la sesión que solo trata con su
+  // odontograma ya firmado (`odontogramReminderCovered`).
+  const odontogramCovered = odontogramReminderCovered({
+    signsOdontogram: Boolean(closingQuery.data?.data.odontogram),
+    procedures: activeProcedures,
+    signedBefore: closingQuery.data?.data.odontogramSignedBefore === true,
+  })
   // Lo opcional del producto (el periodontograma) no se dice como algo sin registrar: no falta (P10).
   const optionalKeys = new Set(product.blocks.filter((item) => item.key !== "odontograma").map((item) => item.key))
   const unrecorded = closingSections
@@ -1790,7 +1809,7 @@ export function EncounterEditor({
         section.empty &&
         !optionalKeys.has(section.key) &&
         !(section.key === "plan" && closingControls) &&
-        !(section.key === "odontograma" && signsOdontogram),
+        !(section.key === "odontograma" && odontogramCovered),
     )
     .map((section) => section.title.toLowerCase())
   // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
@@ -2259,6 +2278,22 @@ export function EncounterEditor({
         </div>
         {/* La presión que pide pensar antes de lo electivo, bajo sus campos: avisa y no frena (QA del 16 nov). */}
         <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
+        {weightReturn ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="self-start"
+            onClick={() => {
+              setWeightReturn(false)
+              const line = document.getElementById(`${uid}-anestesia`)
+              line?.scrollIntoView({ block: "center", behavior: "smooth" })
+              line?.focus({ preventScroll: true })
+            }}
+          >
+            Volver a la anestesia
+          </Button>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           La presión se registra completa (sistólica y diastólica).
         </p>
@@ -2494,6 +2529,23 @@ export function EncounterEditor({
       }}
     />
   ) : null
+  // Sin peso en esta atención, el anotado hoy en otra (la misma regla que guarda la firma).
+  const clinicDayOf = (iso: string) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(iso))
+  const anesthesiaWeight = anesthesiaWeightKg(
+    parsedVitals?.peso,
+    (encountersQuery.data?.data ?? [])
+      .filter(
+        (row) =>
+          row.id !== encounterId &&
+          row.startedAt &&
+          encounter.startedAt &&
+          clinicDayOf(row.startedAt) === clinicDayOf(encounter.startedAt),
+      )
+      .map((row) => ({ status: row.status, weightKg: row.vitals?.peso, startedAt: row.startedAt! })),
+  )
+  const anesthesiaVitals: Vitals | null =
+    anesthesiaWeight.fromOther && anesthesiaWeight.kg !== null ? { ...(parsedVitals ?? {}), peso: anesthesiaWeight.kg } : parsedVitals
   /** La línea de anestesia de hoy: arriba del plan antes de anestesiar, y al firmar. */
   const anesthesiaLine = (atSign: boolean) => (
     <EncounterAnesthesiaLine
@@ -2504,7 +2556,18 @@ export function EncounterEditor({
       gaps={healthGaps}
       risks={closingQuery.data?.data.health?.risks ?? []}
       health={stripHealth.data?.data ?? null}
-      vitals={parsedVitals}
+      vitals={anesthesiaVitals}
+      weightFromOther={anesthesiaWeight.fromOther}
+      onAddWeight={() => {
+        setConfirmOpen(false)
+        setContextOpen(false)
+        setWeightReturn(true)
+        openExtra("examen")
+        requestAnimationFrame(() => {
+          goTo(`${uid}-examen`)
+          document.getElementById(`${uid}-vital-peso`)?.focus({ preventScroll: true })
+        })
+      }}
       ageYears={patientAge}
       anesthetic={anesthetic}
       onAnestheticChange={setAnesthetic}
@@ -2858,7 +2921,10 @@ export function EncounterEditor({
             <>
               {/* Antes de anestesiar: en cuanto algo de hoy usa anestesia local (QA del 16 nov), arriba
                   del plan y antes de «Registrar». */}
-              {anesthesiaLine(false)}
+              {/* «Volver a la anestesia» trae aquí, con el foco, después de anotar el peso. */}
+              <div id={`${uid}-anestesia`} tabIndex={-1} className="outline-none empty:hidden">
+                {anesthesiaLine(false)}
+              </div>
               <EncounterPlanPanel
                 patientId={patientId}
                 encounterId={encounterId}

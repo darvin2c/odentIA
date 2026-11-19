@@ -54,6 +54,11 @@ import {
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
+/** El nombre de la fase, igual en la ficha y en la atención: «Fase 1 · Urgencia» (QA de diseño del 18 nov, H11). */
+export function phaseHeading(index: number, label: string): string {
+  return `Fase ${index + 1} · ${label}`
+}
+
 /** « · Pieza 16», « · Boca completa» o, si el producto no registra el «dónde» (latidIA), nada. */
 function site(item: PlanItem): string {
   if (item.toothNumber != null) return ` · Pieza ${item.toothNumber}`
@@ -68,6 +73,21 @@ function statusVariant(status: string): "success" | "outline" | "secondary" {
   if (status === "realizado") return "success"
   if (CLOSED.includes(status)) return "secondary"
   return "outline"
+}
+
+/**
+ * La nota bajo el plan, con la regla de ahora (reglas clínicas del 18 nov): la fase la propone el
+ * tipo de servicio y, si el producto tiene «Urgencia», también el diagnóstico (`phaseFor` del
+ * servidor). Con una sola fase no hay nada que proponer.
+ */
+export function planPhasesNote(): string {
+  const { phases } = productUi().plan
+  const sessions = "Cada procedimiento registrado en una atención suma una sesión."
+  if (phases.length <= 1) return sessions
+  const urgent = phases.find((phase) => phase.key === "urgencia")
+  return urgent
+    ? `La fase la propone el tipo de servicio; si su diagnóstico es de dolor, infección aguda o trauma, «${urgent.label}». Se puede cambiar con «Planificar…». ${sessions}`
+    : `La fase la propone el tipo de servicio y se puede cambiar con «Planificar…». ${sessions}`
 }
 
 function plural(n: number, one: string, many: string) {
@@ -128,10 +148,7 @@ export function PlanPhases({
           />
         )
       })}
-      <p className="text-xs text-muted-foreground">
-        La fase se propone por el tipo de servicio y se puede cambiar. Cada procedimiento registrado
-        en una atención suma una sesión.
-      </p>
+      <p className="text-xs text-muted-foreground">{planPhasesNote()}</p>
     </div>
   )
 }
@@ -246,7 +263,7 @@ function PlanPhasesGroup({
           rows.length === 0 ? null : (
             <div key={phase.key} className="flex flex-col gap-2">
               <h3 className="text-sm font-medium">
-                Fase {phaseIndex + 1} · {phase.label}{" "}
+                {phaseHeading(phaseIndex, phase.label)}{" "}
                 <span className="font-normal text-muted-foreground">· {phase.hint}</span>
               </h3>
               <ol className="flex flex-col divide-y rounded-lg border">

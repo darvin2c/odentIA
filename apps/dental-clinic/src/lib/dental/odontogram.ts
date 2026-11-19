@@ -1,7 +1,7 @@
 /**
  * Cliente del odontograma firmado y de las hojas para imprimir (fase 3, paso
  * 5; ADR 0036). Firmado solo en clínicas de Perú: lo firma el cierre de la
- * atención que cambió el gráfico y, para lo judicial, lo personal y el
+ * atención que llega a un momento de la norma y, para lo judicial, lo personal y el
  * reingreso, «Firmar odontograma». Fuera de Perú se imprime una hoja neutra.
  */
 

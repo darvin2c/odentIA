@@ -1,5 +1,5 @@
 import {
-  budgetStateText,
+  budgetChoiceText,
   DIAGNOSIS_VERIFICATION_LABELS,
   diagnosisCodeLabel,
   doneSessionWords,
@@ -764,7 +764,7 @@ export interface TimelineItemBase {
   planId?: string | null
   /** Decisión vigente del tratamiento (aceptado, pendiente, etc.). */
   decision?: string | null
-  /** El estado dicho con el nombre único de la aplicación (`budgetStateText` para un presupuesto). */
+  /** El estado dicho con el nombre único de la aplicación (`budgetChoiceText` para un presupuesto). */
   statusText?: string | null
   /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
   dueAt?: Date | null
@@ -1015,7 +1015,7 @@ async function loadBornForEncounters(
       of(owner).budgets.push({
         id: budget.id,
         budgetNumber: budget.budgetNumber,
-        stateText: budgetStateText({
+        stateText: budgetChoiceText({
           status: budget.status,
           items: lines.filter((line) => line.budgetId === budget.id),
           options: options.filter((option) => option.budgetId === budget.id),
@@ -1613,8 +1613,8 @@ export async function getTimeline(
         title: row.title && !row.title.includes(`N.º ${row.budgetNumber}`) ? `Presupuesto N.º ${row.budgetNumber} · ${row.title}` : `Presupuesto N.º ${row.budgetNumber}`,
         detail: [`${total} ${total === 1 ? "tratamiento" : "tratamientos"}`, row.revisionNumber > 1 ? `revisión ${row.revisionNumber}` : null].filter(Boolean).join(" · "),
         status: row.status,
-        // Los mismos nombres que Plan (ADR 0034): «Entregado · espera respuesta», «Aceptó 2 de 3»…
-        statusText: budgetStateText({ status: row.status, items: lines, options }),
+        // Los mismos nombres que Plan: «Entregado · espera respuesta» y, elegida una opción, cuál.
+        statusText: budgetChoiceText({ status: row.status, items: lines, options }),
         authorId: row.createdBy,
         planId: row.planId,
         budgetId: row.id,

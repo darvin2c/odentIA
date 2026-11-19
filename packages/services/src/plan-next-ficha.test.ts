@@ -10,6 +10,7 @@ import { professionalSchedule } from "@odentia/db/schema/availability"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
+  encounter,
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -149,6 +150,21 @@ it("lo aceptado se suma a la cita que ya tiene, sin otra visita, y se deshace", 
     f.run((tx) => setAppointmentPlanItems(tx, "org_a", f.actor, visit.id, { expectedVersion: fresh.version, add: [resina.id] })),
   ).rejects.toMatchObject({ code: "ITEM_SCHEDULED" })
   expect(other.id).not.toBe(visit.id)
+})
+
+// QA del 18 nov (novato 7): a recepción se le ofrecía «Sumar a su cita del 18 nov» con la cita ya en
+// atención, y al pulsarlo respondía 409. La misma regla decide ofrecerlo y aceptarlo.
+it("a la cita que ya tiene su atención no se le ofrece sumar nada, porque el servidor no lo deja", async () => {
+  const f = await clinicalFixture()
+  const resina = await item(f, "Resina", { tooth: "15", phase: "basica" })
+  const visit = await book(f, new Date(Date.now() + 3 * DAY))
+  await ownerDb.update(encounter).set({ appointmentId: visit.id }).where(eq(encounter.id, f.encounter.id))
+  const [first] = await steps(f)
+  expect(first).toMatchObject({ kind: "agendar", action: { planItemIds: [resina.id] } })
+  expect(first?.action?.join).toBeUndefined()
+  await expect(
+    f.run((tx) => setAppointmentPlanItems(tx, "org_a", f.actor, visit.id, { expectedVersion: visit.version, add: [resina.id] })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_IN_ATTENTION" })
 })
 
 it("«Sumar a su cita» con quien no atiende ese servicio lo dice, sin frenarlo (entrega 8)", async () => {

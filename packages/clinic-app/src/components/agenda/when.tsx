@@ -36,7 +36,7 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { CalendarDays, ChevronDown } from "lucide-react"
 import * as React from "react"
-import type { AgendaAvailability } from "../../lib/agenda"
+import type { AgendaAvailability, ScheduleBlock } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { appWords } from "../../lib/product-words"
 import { rangeSaid, shortName } from "./shared"
@@ -132,6 +132,8 @@ export interface WhenState {
   hoursThatDay: string[]
   /** Quien se mira (uno solo) no atiende ese día en la sede: su nombre; si no, null. */
   offDuty: string | null
+  /** Quien se mira (uno solo) atiende ese día, pero una ausencia o un bloqueo cae en su horario. */
+  blocked: { label: string; reasons: string[] } | null
   loading: boolean
   failed: boolean
   ready: boolean
@@ -148,6 +150,43 @@ export interface WhenState {
  * El «cuándo» de una cita, igual al reservar y al reprogramar: a quién se
  * mira, qué día y el bloque sobre las horas libres que devuelve el servicio.
  */
+/** Hasta cuántas semanas se busca el primer día con hueco desde el día pedido. */
+const MAX_SKIPPED_WEEKS = 8
+
+/**
+ * Sin hueco el día pedido: el siguiente día de la semana que tiene, o el lunes de la siguiente
+ * (hasta `MAX_SKIPPED_WEEKS`); después, se queda.
+ */
+export function dayWithRoomFrom(
+  date: string,
+  week: readonly string[],
+  hasRoom: (day: string) => boolean,
+  skipped: number,
+): { kind: "day" | "nextWeek"; day: string } | { kind: "stay" } {
+  const later = week.find((day) => day > date && hasRoom(day))
+  if (later) return { kind: "day", day: later }
+  if (skipped < MAX_SKIPPED_WEEKS) return { kind: "nextWeek", day: addDays(week[6] ?? date, 1) }
+  return { kind: "stay" }
+}
+
+/**
+ * El paso desde el día pedido sin hueco: solo se busca otro día si ese está lleno o tiene una
+ * ausencia (quien se mira atiende ese día); si no atiende ese día, se queda en él y se dice que no
+ * atiende (e2e de la sesión 2: sin horario en la sede, saltaba ocho semanas y dejaba esas semanas
+ * leídas sin su horario). Desde ahí, como `dayWithRoomFrom`.
+ */
+export function requestedDayStep(input: {
+  date: string
+  requested: string | undefined
+  week: readonly string[]
+  hasRoom: (day: string) => boolean
+  worksOn: (day: string) => boolean
+  skipped: number
+}): { kind: "day" | "nextWeek"; day: string } | { kind: "stay" } {
+  if (input.date === input.requested && !input.worksOn(input.date)) return { kind: "stay" }
+  return dayWithRoomFrom(input.date, input.week, input.hasRoom, input.skipped)
+}
+
 export function useWhen(input: WhenInput): WhenState {
   const { branchId, timeZone, today, toneOf, duration, moving } = input
   const [professionalFilter, setProfessionalFilter] = React.useState<string | null>(
@@ -282,8 +321,14 @@ export function useWhen(input: WhenInput): WhenState {
   const touched = React.useRef(Boolean(input.startsAt && input.professionalUserId))
   const seedPending = React.useRef(touched.current)
   const autoDate = React.useRef(!touched.current && !moving)
+  // Cuántas semanas se saltó buscando el primer día con hueco desde el día pedido.
+  const skippedWeeks = React.useRef(0)
+  const requested = input.date
+  const placeholder = availabilityQuery.isPlaceholderData
   React.useEffect(() => {
     if (!availability) return
+    // Al cambiar de semana se ve la anterior mientras llega la nueva: no se decide con ella.
+    if (placeholder) return
     if (seedPending.current) {
       // El hueco tocado en la rejilla puede ser más corto que una cita regular: el bloque toma el hueco.
       seedPending.current = false
@@ -314,9 +359,34 @@ export function useWhen(input: WhenInput): WhenState {
         return
       }
     }
+    if (!fit && autoDate.current && date > today) {
+      // Un día pedido («Reservar la sesión 2» desde mañana) que cae en vacaciones o está lleno: se
+      // abre en el primer día con hueco desde él, en esta semana o en las siguientes (verificación
+      // del 18 nov, 11). Hasta ocho semanas; después, el día pedido.
+      const ids = new Set(lanes.map((item) => item.id))
+      const step = requestedDayStep({
+        date,
+        requested,
+        week,
+        hasRoom: (day) => !!firstFit(day, lanes, duration),
+        worksOn: (day) =>
+          open.some((item) => ids.has(item.columnId) && dayRangeOf(item.start, item.end, day, timeZone) !== null),
+        skipped: skippedWeeks.current,
+      })
+      if (step.kind !== "stay") {
+        if (step.kind === "nextWeek") skippedWeeks.current += 1
+        setDate(step.day)
+        return
+      }
+      if (requested && date !== requested) {
+        autoDate.current = false
+        setDate(requested)
+        return
+      }
+    }
     autoDate.current = false
     setValue(fit)
-  }, [availability, free, date, lanes, duration, firstFit, timeZone, today])
+  }, [availability, placeholder, free, open, date, week, lanes, duration, firstFit, timeZone, today, requested])
 
   const choose = (next: ScheduleRangeValue) => {
     touched.current = true
@@ -388,6 +458,7 @@ export function useWhen(input: WhenInput): WhenState {
           })
       : [],
     offDuty: offDutyOn(lanes, open, date, timeZone),
+    blocked: blockedOn(lanes, open, availability?.blocks ?? [], date, timeZone),
     loading: availabilityQuery.isLoading || availabilityQuery.isPlaceholderData,
     failed: availabilityQuery.isError,
     ready: availability !== undefined,
@@ -395,6 +466,8 @@ export function useWhen(input: WhenInput): WhenState {
     choose,
     goToDate: (next) => {
       touched.current = false
+      // Lo elige la persona: ya no se busca solo otro día con hueco.
+      autoDate.current = false
       setDate(next)
     },
     pickProfessional: (next) => {
@@ -451,15 +524,53 @@ export function offDutyOn(
 }
 
 /**
+ * Quien se mira, si es uno solo y atiende ese día pero una ausencia o un bloqueo de la agenda
+ * cae sobre su horario: su nombre y por qué («Vacaciones»). Es lo que le quita lo libre aunque
+ * no tenga citas (QA del 18 nov, novato 8: Luis tenía vacaciones del 23 al 25 y la pantalla
+ * decía «No queda nada libre», que sonaba a agenda llena). Con «Cualquiera», null.
+ */
+export function blockedOn(
+  lanes: ScheduleColumn[],
+  open: ScheduleAvailability[],
+  blocks: ReadonlyArray<Pick<ScheduleBlock, "professionalUserId" | "roomId" | "kind" | "reason" | "startsAt" | "endsAt">>,
+  date: string,
+  timeZone: string,
+): { label: string; reasons: string[] } | null {
+  if (lanes.length !== 1) return null
+  const [only] = lanes
+  if (!only) return null
+  const hours = open.flatMap((item) => {
+    const range = item.columnId === only.id ? dayRangeOf(item.start, item.end, date, timeZone) : null
+    return range ? [range] : []
+  })
+  const reasons = blocks.flatMap((block) => {
+    // Lo de una unidad dental no le quita el día: se reserva en otra.
+    if (block.roomId !== null || (block.professionalUserId !== null && block.professionalUserId !== only.id)) return []
+    const range = dayRangeOf(block.startsAt, block.endsAt, date, timeZone)
+    if (!range || !hours.some((hour) => range.startMinutes < hour.endMinutes && range.endMinutes > hour.startMinutes))
+      return []
+    return [block.reason?.trim() || (block.kind === "ausencia" ? "una ausencia" : "un bloqueo de la agenda")]
+  })
+  return reasons.length ? { label: only.label, reasons: [...new Set(reasons)] } : null
+}
+
+/**
  * Lo que se dice de un día sin nada elegido ni libre: un solo mensaje. Si quien
  * se eligió no atiende ese día, se puede reservar igual tocando una hora (queda
- * fuera de su horario); «No queda nada libre» es solo para quien atiende y lo
- * tiene todo ocupado (QA del 9 nov: salían los dos a la vez).
+ * fuera de su horario); si una ausencia o un bloqueo le quita el día, se dice cuál;
+ * «No queda nada libre» a secas es solo para quien atiende y lo tiene todo ocupado
+ * (QA del 9 nov: salían los dos a la vez).
  */
-export function emptyDaySaid(options: { moving: boolean; offDuty: string | null }): string {
+export function emptyDaySaid(options: {
+  moving: boolean
+  offDuty: string | null
+  blocked?: { label: string; reasons: string[] } | null
+}): string {
   if (options.moving) return "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
   if (options.offDuty)
     return `${options.offDuty} no atiende este día en esta sede. Toca una hora para reservar igual, o elige a otro profesional.`
+  if (options.blocked)
+    return `Este día no queda nada libre con ${options.blocked.label}: ${options.blocked.reasons.join(", ")}. Prueba otro día u otro profesional.`
   return "No queda nada libre este día. Prueba otro día u otro profesional."
 }
 
@@ -727,7 +838,7 @@ function WhenSlot({ when }: { when: WhenState }) {
       ) : when.team.length === 0 && when.ready ? null : (
         // Sin nadie con horario en la sede, eso ya se dijo arriba: un solo mensaje (QA antes de entregar).
         <p className="text-sm text-muted-foreground">
-          {emptyDaySaid({ moving, offDuty: when.offDuty })}
+          {emptyDaySaid({ moving, offDuty: when.offDuty, blocked: when.blocked })}
         </p>
       )}
       {/* Tras enviar, lo que impide reservar o mover se dice aquí una sola vez, unido a las horas. */}

@@ -85,13 +85,20 @@ describe("lo tratado queda dibujado", () => {
 
 describe("momento del odontograma firmado al cerrar la atención", () => {
   it("inicio la primera vez, nuevos hallazgos después y culminación al terminar el plan", () => {
-    expect(closingOdontogramPurpose([], false)).toBe("initial")
-    expect(closingOdontogramPurpose([], true)).toBe("initial")
-    expect(closingOdontogramPurpose(["initial"], false)).toBe("new_findings")
-    expect(closingOdontogramPurpose(["initial", "new_findings"], true)).toBe("completion")
+    expect(closingOdontogramPurpose([], false, false)).toBe("initial")
+    expect(closingOdontogramPurpose([], true, true)).toBe("initial")
+    expect(closingOdontogramPurpose(["initial"], false, true)).toBe("new_findings")
+    // La culminación gana aunque también haya hallazgos, y se firma aunque no los haya.
+    expect(closingOdontogramPurpose(["initial", "new_findings"], true, true)).toBe("completion")
+    expect(closingOdontogramPurpose(["initial", "new_findings"], true, false)).toBe("completion")
     // Tras culminar, lo siguiente abre otro plan; los pedidos no cuentan.
-    expect(closingOdontogramPurpose(["initial", "completion"], false)).toBe("initial")
-    expect(closingOdontogramPurpose(["legal"], false)).toBe("initial")
-    expect(closingOdontogramPurpose(["initial", "personal"], false)).toBe("new_findings")
+    expect(closingOdontogramPurpose(["initial", "completion"], false, false)).toBe("initial")
+    expect(closingOdontogramPurpose(["legal"], false, false)).toBe("initial")
+    expect(closingOdontogramPurpose(["initial", "personal"], false, true)).toBe("new_findings")
+  })
+
+  it("la sesión que solo trata, sin hallazgos ni culminación, no firma copia", () => {
+    expect(closingOdontogramPurpose(["initial"], false, false)).toBeNull()
+    expect(closingOdontogramPurpose(["initial", "new_findings", "personal"], false, false)).toBeNull()
   })
 })

@@ -184,6 +184,32 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     await enable(false)
   })
 
+  it("la cantidad sale también con «8 h», «c/8 h» o «3 veces al día», y con «si hay dolor» solo si dice la duración; en un jarabe, no", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de frecuencias")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const current = async (id: string) => (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === id)
+    const [recipe] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "8 h", duration: "7 días" } }],
+    })).suggestions
+    expect(recipe).toMatchObject({ payload: { quantity: 21, quantityCalculated: true } })
+    for (const frequency of ["c/8 h", "cada 8 hrs", "3 veces al día"]) {
+      await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency } }] })
+      expect(await current(recipe!.id)).toMatchObject({ payload: { frequency, quantity: 21, quantityCalculated: true } })
+    }
+    // «Si hay dolor» con frecuencia y duración: el máximo; sin la duración, nada.
+    await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { frequency: "c/8 h si hay dolor" } }] })
+    expect(await current(recipe!.id)).toMatchObject({ payload: { quantity: 21, quantityCalculated: true } })
+    await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { duration: "hasta que pase el dolor" } }] })
+    expect((await current(recipe!.id))?.payload).not.toHaveProperty("quantity")
+    // Un jarabe se cuenta en frascos, que dependen del frasco: no se propone.
+    const [syrup] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "paracetamol", strength: "120 mg/5 ml", dosageForm: "jarabe", dose: "5 ml", frequency: "c/8 h", duration: "3 días" } }],
+    })).suggestions
+    expect(syrup?.payload).not.toHaveProperty("quantity")
+    await enable(false)
+  })
+
   it("revisar la receta contra una alergia dictada no le quita lo que era calculado", async () => {
     await enable(true)
     const fx = await openSession("Obturación de alergia")

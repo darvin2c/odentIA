@@ -8,6 +8,7 @@ import {
   archiveSpecialty,
   cancelClinicalOrder,
   cancelConsentDocument,
+  checkConsentPaperSheet,
   clinicalOrderPatientId,
   confirmLinkSignedConsent,
   consentDocumentPatientId,
@@ -47,11 +48,13 @@ import {
   listSpecialtiesOverview,
   listSpecialtyProfessionals,
   loadDocumentClinic,
+  markConsentPrinted,
   markConsentSentByLink,
   markConsentTemplateReviewed,
   markFormTemplateLooked,
   parseConsentDraft,
   prepareEncounterConsents,
+  proposeConsentPersonalRisks,
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
@@ -60,6 +63,7 @@ import {
   ServiceError,
   saveConsentTemplate,
   sendConsentToSign,
+  setConsentPersonalRisks,
   setConsentTemplateActive,
   setConsentTemplateServices,
   setProfessionalProfile,
@@ -339,6 +343,8 @@ const consentSign = z
     informedAt: z.iso.datetime({ offset: true }).nullish(),
     method: z.enum(["clinica", "papel"]).optional(),
     paperDocumentId: uuid.nullish(),
+    // Los riesgos propios de la hoja que vio: si cambiaron después, el servicio no la firma.
+    personalRisksShown: z.array(z.string().max(1000)).max(20).nullish(),
   })
   .strict()
   .refine(
@@ -376,6 +382,23 @@ const consentRevoke = z
 
 const consentCancel = z
   .object({ reason: z.string().trim().min(1, "Escribe el motivo").max(2000) })
+  .strict()
+
+// Los riesgos propios de su caso: una frase por línea; vacío los quita. El servicio valida el tope.
+// `seen`: los que tenía a la vista quien los editó; si otra pestaña los cambió, 409 (no se pisan).
+const consentPersonalRisks = z
+  .object({
+    personalRisks: z.string().max(6000).nullable(),
+    seen: z.array(z.string().max(1000)).max(20).nullish(),
+  })
+  .strict()
+
+// La hoja que salió a papel: los riesgos propios que llevaba.
+const consentPrinted = z.object({ personalRisks: z.array(z.string().max(1000)).max(20) }).strict()
+
+// Antes de subir la foto de la hoja en papel: los riesgos de la hoja que se tiene a la vista.
+const consentPaperCheck = z
+  .object({ personalRisksShown: z.array(z.string().max(1000)).max(20).nullish() })
   .strict()
 
 const orderCreate = z
@@ -454,6 +477,9 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/form-templates/:id/*", knownId("Ficha no encontrada"))
   app.use("/form-responses/:id", knownId("Ficha no encontrada"))
   app.use("/form-responses/:id/*", knownId("Ficha no encontrada"))
+  // Lo que cuelga de un consentimiento (`/consents/:id/sign`, `…/personal-risks`…), sin tocar
+  // `/consents/treatments`, que no lleva id: el comodín `/consents/:id/*` también lo tomaría.
+  app.use("/consents/:id/:action{.+}", knownId("Consentimiento no encontrado"))
 
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
@@ -1158,7 +1184,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       const signed = await withOrgContext(deps.db, orgId, (tx) =>
-        signConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+        signConsentDocument(tx, orgId, userId, formId(c), parsed.data),
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
       // el PDF se reintenta con POST …/pdf (no se repite la firma). El aviso del
@@ -1186,7 +1212,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { requestId: parsed.data.requestId ?? null })
+        const consent = await markConsentSentByLink(tx, orgId, userId, formId(c), { requestId: parsed.data.requestId ?? null })
         return sendConsentToSign(
           tx,
           orgId,
@@ -1209,7 +1235,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     c.header("Referrer-Policy", "no-referrer")
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { shown: true })
+        const consent = await markConsentSentByLink(tx, orgId, userId, formId(c), { shown: true })
         return showPersonalLink(tx, orgId, userId, consent.patientId, { secretsKey: deps.secretsKey }, consent.id)
       }),
     )
@@ -1228,7 +1254,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const { encounterId } = parsed.data
     return runService(c, 200, async () => {
       const signed = await withOrgContext(deps.db, orgId, (tx) =>
-        confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id"), { encounterId }),
+        confirmLinkSignedConsent(tx, orgId, userId, formId(c), { encounterId }),
       )
       // Como al firmar en la clínica: el PDF se genera después y se reintenta aparte si falla.
       try {
@@ -1245,7 +1271,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para generar el PDF del consentimiento")
     }
-    return runService(c, 200, () => generateConsentPdf(orgId, userId, c.req.param("id")))
+    return runService(c, 200, () => generateConsentPdf(orgId, userId, formId(c)))
   })
 
   app.get("/consents/:id/print", async (c) => {
@@ -1254,7 +1280,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const data = await getConsentPrint(tx, orgId, c.req.param("id"))
+        const data = await getConsentPrint(tx, orgId, formId(c))
         patientId = data.document.patientId
         return data
       }),
@@ -1262,6 +1288,63 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (response.status === 200 && patientId)
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
     return response
+  })
+
+  // Mientras está pendiente y no se envió a su enlace: con el mismo permiso que generarlo.
+  app.put("/consents/:id/personal-risks", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para cambiar consentimientos")
+    }
+    const parsed = consentPersonalRisks.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setConsentPersonalRisks(tx, orgId, userId, formId(c), parsed.data.personalRisks, parsed.data.seen),
+      ),
+    )
+  })
+
+  // Lo que el sistema propone hoy para sus riesgos propios («Volver a proponer»): no guarda nada.
+  app.get("/consents/:id/personal-risks/proposed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para cambiar consentimientos")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => proposeConsentPersonalRisks(tx, orgId, formId(c))),
+    )
+  })
+
+  // La hoja pendiente salió a papel (imprimir, descargar o abrir aparte): el servidor anota sus
+  // riesgos propios para la firma en papel. Con el mismo permiso que prepararlo.
+  app.post("/consents/:id/printed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para preparar consentimientos")
+    }
+    const parsed = consentPrinted.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => markConsentPrinted(tx, orgId, formId(c), parsed.data.personalRisks)),
+    )
+  })
+
+  // Antes de subir la foto de la hoja firmada: si los riesgos cambiaron después de imprimirla, el
+  // mismo 409 que al firmar, y la foto no se sube.
+  app.post("/consents/:id/paper-check", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para firmar consentimientos")
+    }
+    const parsed = consentPaperCheck.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        checkConsentPaperSheet(tx, orgId, formId(c), parsed.data.personalRisksShown),
+      )
+      return { ok: true }
+    })
   })
 
   app.post("/consents/:id/cancel", async (c) => {
@@ -1273,7 +1356,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        cancelConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
+        cancelConsentDocument(tx, orgId, userId, formId(c), parsed.data.reason),
       ),
     )
   })
@@ -1287,7 +1370,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       const revoked = await withOrgContext(deps.db, orgId, (tx) =>
-        revokeConsentDocument(tx, orgId, userId, c.req.param("id"), parsed.data),
+        revokeConsentDocument(tx, orgId, userId, formId(c), parsed.data),
       )
       // Como al firmar: el PDF de la revocación se genera después y se
       // reintenta con POST …/pdf si falla (no se repite la revocación).
@@ -1306,8 +1389,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        patientId = await consentDocumentPatientId(tx, orgId, c.req.param("id"))
-        return listConsentEvents(tx, orgId, c.req.param("id"))
+        patientId = await consentDocumentPatientId(tx, orgId, formId(c))
+        return listConsentEvents(tx, orgId, formId(c))
       }),
     )
     if (response.status === 200 && patientId)

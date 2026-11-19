@@ -264,6 +264,8 @@ it("cerrar exige motivo, diagnóstico y evolución; sin colegiatura pide el moti
     consents: [],
     // Sin cambios en el gráfico, el cierre no firma odontograma.
     odontogram: null,
+    // La clínica de prueba no firma odontogramas: no hay uno firmado antes.
+    odontogramSignedBefore: false,
     // Sin periodontograma en la atención, el cierre no lo menciona.
     periodontal: null,
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.

@@ -2,6 +2,7 @@ import {
   BUDGET_OPTIONS_MAX,
   BUDGET_SIGN_DECLARATION,
   budgetOptionLabel,
+  budgetChoiceText,
   budgetStateText,
   clinicalProfileFor,
   type ConsentSections,
@@ -217,8 +218,13 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
   hasFindings: boolean
   /** Espera la respuesta de quien decide (`budgetAwaitsAnswer`): la pantalla no lo deduce del estado. */
   awaitsAnswer: boolean
-  /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`). */
+  /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`): lo leen Sofi y Argos. */
   stateText: string
+  /**
+   * Lo que dicen las pantallas de la clínica (Documentos, el cajón de la respuesta): con varias
+   * opciones y una elegida, «Eligió la opción A», como la Historia y la atención (`budgetChoiceText`).
+   */
+  choiceText: string
   /**
    * Quién del equipo anotó la respuesta (`decidedBy`): sin firma, es su palabra y
    * no la de la persona. Nulo si respondió la persona o el agente con su sí.
@@ -736,6 +742,7 @@ function withTotals(
     discountCents: value ? value.discountCents : 0,
     awaitsAnswer: budgetAwaitsAnswer({ status: budget.status, items }),
     stateText: budgetStateText({ status: budget.status, items, options }),
+    choiceText: budgetChoiceText({ status: budget.status, items, options }),
     decidedByName: budget.decidedBy ? (names.get(budget.decidedBy) ?? null) : null,
     canChange: true,
   }

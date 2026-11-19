@@ -33,7 +33,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useBudgetPapers } from "../../lib/budget-papers"
-import { type BudgetWithTotals, budgetNumberLabel, totalsOf, valueOption } from "../../lib/budgets"
+import { type BudgetWithTotals, budgetChoiceWords, budgetNumberLabel, budgetRowAmount } from "../../lib/budgets"
 import {
   type ClinicalOrder,
   type ConsentDocument,
@@ -53,6 +53,7 @@ import {
   formatDate,
   type Prescription,
 } from "../../lib/clinical-journey"
+import { useRisksDrafts } from "../../lib/consent-risks-draft"
 import { usePermission } from "../../lib/crm"
 import {
   countWords,
@@ -264,6 +265,8 @@ export function DocumentosSection({
   const [uploadOpen, setUploadOpen] = useState(false)
   const [opened, setOpened] = useState<Row["open"] | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
+  // Riesgos propios escritos sin guardar: firmar los guarda antes de abrir la hoja (QA de diseño del 18 nov, H1).
+  const risksDrafts = useRisksDrafts()
   const [resultFor, setResultFor] = useState<ClinicalOrder | null>(null)
   // El control que abrió el visor recupera el foco al cerrarlo.
   const openerRef = useRef<HTMLElement | null>(null)
@@ -642,14 +645,13 @@ export function DocumentosSection({
       }
     }),
     ...budgetPapers.budgets.map((budget): Row => {
-      // Un total por moneda de la opción que vale; sin precio de alguna, no se dice ninguno.
-      const total = orgCurrencyLocale
-        ? moneyTotalsText(
-            totalsOf(valueOption(budget) ?? budget, budget.currency),
-            (cents, unit) => formatMoney(cents, unit, orgCurrencyLocale),
-            "",
-          )
+      // Un total por moneda de la opción que vale; ya respondido, lo que aceptó. Sin precio de
+      // alguna, no se dice ninguno.
+      const amount = budgetRowAmount(budget)
+      const sum = orgCurrencyLocale
+        ? moneyTotalsText(amount.totals, (cents, unit) => formatMoney(cents, unit, orgCurrencyLocale), "")
         : ""
+      const total = sum && amount.accepted ? `aceptó ${sum}` : sum
       const date = budget.presentedAt ?? budget.createdAt
       // Sin título propio, el presupuesto se llama «Presupuesto N.º 456»: no se repite (repaso
       // final de la ficha, B3).
@@ -663,7 +665,7 @@ export function DocumentosSection({
         title: budget.title && budget.title !== number ? `${number} · ${budget.title}` : number,
         detail: [formatDate(date), total || null].filter(Boolean).join(" · "),
         date,
-        status: { label: budget.stateText, tone: budgetStatusTone(budget.status) as Tone },
+        status: { label: budgetChoiceWords(budget), tone: budgetStatusTone(budget.status) as Tone },
         needsAction: false,
         action: { type: "ver" },
         open: { kind: "presupuesto", budget },
@@ -740,7 +742,7 @@ export function DocumentosSection({
             aria-label={`Firmar ${row.title}`}
             onClick={() => setSigning([action.consent])}
           >
-            Firmar
+            {risksDrafts.has(action.consent.id) ? "Guardar y firmar" : "Firmar"}
           </Button>
         )
       case "resultado":
