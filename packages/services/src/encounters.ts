@@ -3439,6 +3439,21 @@ async function applySessionAnswers(
   return { addSessions, keptOpen }
 }
 
+/**
+ * Cómo se cobra un acto: «session» (un cargo por visita) o «treatment» (uno por tratamiento). Lo
+ * acordado en su presupuesto manda; sin presupuesto, su servicio (la misma regla de la firma).
+ */
+export async function billingModeOfProcedure(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  proc: Pick<typeof encounterProcedure.$inferSelect, "planItemId" | "serviceId">,
+): Promise<"session" | "treatment"> {
+  const line = proc.planItemId ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId) : null
+  const serviceMode = line || !proc.serviceId ? null : (await readBillingModes(tx, orgId, [proc.serviceId]))[proc.serviceId]
+  return (line?.billingMode ?? serviceMode) === "session" ? "session" : "treatment"
+}
+
 /** Lo que se cargará por un acto al firmar, o por qué no (`finalizeEncounter` y el cierre). */
 export type ChargeDecision =
   | {
@@ -3763,6 +3778,8 @@ export async function finalizeEncounter(
         isNull(encounterProcedure.voidedAt),
       ),
     )
+    // En el orden del cierre: lo que se cargará cae en la misma línea que el cierre mostró.
+    .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
   // El control nuevo se indica con la atención aún abierta, como «Indicar control». Si la persona ya
   // tiene uno, si el que se cumple (por la ventana o por su cita) se repite, o si quien firma deja sin
   // marcar uno suyo, no se crea otro: dos controles no son dos visitas. Uno de un colega sin marcar no

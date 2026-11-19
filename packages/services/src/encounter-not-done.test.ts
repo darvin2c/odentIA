@@ -16,7 +16,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -24,7 +24,7 @@ import { getNotDonePreview, markProcedureNotDone } from "./encounter-not-done.js
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
 import { createPaymentMethod } from "./payment-methods.js"
-import { collectCharge, getAccountSummary } from "./payments.js"
+import { collectCharge, getAccountSummary, returnFromTicket } from "./payments.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -177,4 +177,93 @@ it("lo marca quien firmó, o el dueño; otro odontólogo no, y en el borrador ta
   await expect(notDone(f, draftProc.id, { actor: other.actor })).rejects.toMatchObject({ status: 403 })
   const result = await notDone(f, draftProc.id, { actor: other.actor, memberRole: "owner" })
   expect(result.procedureRow.voidedBy).toBe(other.actor)
+})
+
+it("pagado y devuelto entero por caja: cuando se haga de verdad, se vuelve a cobrar", async () => {
+  const f = await clinicalFixture()
+  const { proc, signed } = await signedDirect(f)
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  const charge = signed.charges[0]!
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId: sede!.id,
+      chargeIds: [charge.id],
+      payments: [{ paymentMethodId: cash.id, amountCents: charge.amountCents }],
+      requestId: randomUUID(),
+    }),
+  )
+  await notDone(f, proc.id)
+  // Caja devuelve lo pagado entero.
+  await f.run((tx) =>
+    returnFromTicket(tx, ...f.args, paid.ticket.id, {
+      branchId: sede!.id,
+      lines: [{ chargeId: charge.id, amountCents: charge.amountCents }],
+      paymentMethodId: cash.id,
+      reason: "No se hizo",
+      requestId: randomUUID(),
+    }),
+  )
+  const [again] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Resina de la 24" })
+    .returning()
+  await f.ready(again!.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, again!.id, { planItemId: proc.planItemId! }))
+  const redone = await f.run((tx) => finalizeEncounter(tx, ...f.args, again!.id))
+  expect(redone.charges.map((row) => row.amountCents)).toEqual([18_000])
+})
+
+it("por sesión, con la siguiente aún en borrador: el cobro de esta visita se anula y la siguiente se cobra una vez", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.update(serviceCatalog).set({ billingMode: "session", priceCents: 15_000 }).where(eq(serviceCatalog.id, f.service.id))
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  await f.ready(f.encounter.id)
+  const first = await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, { addSessionPlanItemIds: [item.id] }))
+  const [second] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Sesión 2" })
+    .returning()
+  await f.ready(second!.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, second!.id, { planItemId: item.id }))
+
+  const result = await notDone(f, first.id)
+  expect(result.charges.map((charge) => charge.outcome)).toEqual(["anula"])
+  const signedSecond = await f.run((tx) => finalizeEncounter(tx, ...f.args, second!.id))
+  expect(signedSecond.charges.map((charge) => charge.amountCents)).toEqual([15_000])
+  const live = await ownerDb
+    .select({ amountCents: patientCharge.amountCents })
+    .from(patientCharge)
+    .where(and(eq(patientCharge.planItemId, item.id), isNull(patientCharge.voidedAt)))
+  expect(live).toEqual([{ amountCents: 15_000 }])
+})
+
+it("la consulta marcada «No se hizo» sale del plan, y sin caja no se dicen los montos", async () => {
+  const f = await clinicalFixture()
+  const [consult] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Evaluación", scope: "general", source: "custom", priceCents: 5_000, currency: "PEN" })
+    .returning()
+  await ownerDb.update(serviceCatalog).set({ evaluationServiceId: consult!.id }).where(eq(serviceCatalog.id, f.service.id))
+  await f.ready(f.encounter.id)
+  const proc = await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: consult!.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const blind = await f.run((tx) =>
+    getNotDonePreview(tx, "org_a", f.actor, f.patient.id, f.encounter.id, proc.id, { memberRole: "clinician" }),
+  )
+  expect(blind.planItem?.becomes).toBe("cancelado")
+  expect(blind.charges).toEqual([expect.objectContaining({ outcome: "anula", amountCents: null, paidCents: null })])
+  const seen = await f.run((tx) =>
+    getNotDonePreview(tx, "org_a", f.actor, f.patient.id, f.encounter.id, proc.id, { memberRole: "owner", seesCharges: true }),
+  )
+  expect(seen.charges[0]?.amountCents).toBe(5_000)
+  await notDone(f, proc.id)
+  const [item] = await ownerDb.select({ status: treatmentPlanItem.status }).from(treatmentPlanItem).where(eq(treatmentPlanItem.id, proc.planItemId!))
+  expect(item?.status).toBe("cancelado")
 })

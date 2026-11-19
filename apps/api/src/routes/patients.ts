@@ -1952,7 +1952,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("id"),
           c.req.param("encounterId"),
           c.req.param("procedureId"),
-          { memberRole },
+          // Sin caja no recibe montos: «odontología no recibe caja».
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )
@@ -1971,7 +1972,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("encounterId"),
           c.req.param("procedureId"),
           parsed.data,
-          { memberRole },
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )

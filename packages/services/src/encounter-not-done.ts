@@ -23,6 +23,7 @@ import {
   clinicalFollowUpItem,
   encounterDiagnosis,
   encounterProcedure,
+  patient,
   prescription,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -30,10 +31,12 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import {
   addEncounterAddendum,
+  billingModeOfProcedure,
   type EncounterProcedureRow,
   lockEncounter,
   voidProcedureRow,
 } from "./encounters.js"
+import { isConsultationService } from "./closing-consultation.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -51,8 +54,9 @@ const MANAGING_ROLES = new Set(["owner", "admin"])
 export interface NotDoneCharge {
   id: string
   description: string
-  amountCents: number
-  paidCents: number
+  /** Null para quien no ve la caja: se le dice qué pasa, no cuánto. */
+  amountCents: number | null
+  paidCents: number | null
   currency: string
   /**
    * `anula`: sin ningún pago, se anula al confirmar. `caja`: tiene algo pagado; no se toca y caja
@@ -63,8 +67,11 @@ export interface NotDoneCharge {
 
 export interface NotDonePreview {
   procedure: { id: string; description: string; site: string | null }
-  /** El tratamiento del plan y cómo queda; null si fue algo hecho sin tratamiento. */
-  planItem: { title: string; becomes: "pendiente" | "en_curso" } | null
+  /**
+   * El tratamiento del plan y cómo queda; null si fue algo hecho sin tratamiento. Una consulta no
+   * vuelve al plan como algo por hacer: se quita («cancelado»).
+   */
+  planItem: { title: string; becomes: "pendiente" | "en_curso" | "cancelado" } | null
   /** Los diagnósticos que esa firma resolvió con este tratamiento y vuelven a activos. */
   diagnoses: string[]
   /** Lo que vuelve al almacén. */
@@ -101,6 +108,12 @@ async function loadScope(
   opts: { memberRole?: string },
 ) {
   await requirePatient(tx, orgId, patientId)
+  // Como al firmar: la cuenta del paciente primero, para que un pago en medio no cambie lo decidido.
+  await tx
+    .select({ id: patient.id })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .for("update")
   const row = await lockEncounter(tx, orgId, patientId, encounterId)
   if (row.status !== "finalizada")
     throw conflict("NOT_FINALIZED", "«No se hizo» es para una atención firmada; en el borrador, anúlalo en su fila")
@@ -189,19 +202,18 @@ async function chargesOf(
     paidCents: Number(row.paid_cents),
   }))
   if (rows.length === 0) return []
-  // ¿Le queda otra sesión vigente al tratamiento que este cobro cubre? Cubre el tratamiento cuando
-  // ninguna de las otras sesiones tiene su propio cobro (lo que se cobra por tratamiento, entero en
-  // la primera); si cada visita tiene el suyo (por sesión), este es solo de esta visita.
+  // Por sesión, el cobro es solo de esta visita. Por tratamiento (entero en la primera), lo cubre
+  // todo: si al tratamiento le queda otra sesión ya firmada, el cobro sigue (revisión del 19 nov:
+  // deducirlo de si las otras tienen su cobro tomaba por «sigue» una sesión aún en borrador).
   let coversOthers = false
-  if (proc.planItemId) {
-    const [others] = await tx.execute<{ sessions: number; own_charges: number }>(sql`
-      select count(*)::int as sessions,
-        count(*) filter (where exists (select 1 from patient_charge c
-          where c.organization_id = ep.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null))::int as own_charges
+  if (proc.planItemId && (await billingModeOfProcedure(tx, orgId, patientId, proc)) === "treatment") {
+    const [others] = await tx.execute<{ sessions: number }>(sql`
+      select count(*)::int as sessions
       from encounter_procedure ep
+      join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
       where ep.organization_id = ${orgId} and ep.plan_item_id = ${proc.planItemId}
-        and ep.id <> ${proc.id} and ep.voided_at is null`)
-    coversOthers = (others?.sessions ?? 0) > 0 && (others?.own_charges ?? 0) === 0
+        and ep.id <> ${proc.id} and ep.voided_at is null and e.status = 'finalizada'`)
+    coversOthers = (others?.sessions ?? 0) > 0
   }
   return rows.map((row) => ({
     ...row,
@@ -263,9 +275,12 @@ async function previewOf(
       ),
     )
     .limit(1)
+  const consultation = await isConsultationService(tx, orgId, proc.serviceId)
   return {
     procedure: { id: proc.id, description: proc.description, site: hooks.site.words(proc, "short") },
-    planItem: item ? { title: item.title, becomes: (others?.n ?? 0) > 0 ? "en_curso" : "pendiente" } : null,
+    planItem: item
+      ? { title: item.title, becomes: (others?.n ?? 0) > 0 ? "en_curso" : consultation ? "cancelado" : "pendiente" }
+      : null,
     diagnoses: (await resolvedBySigning(tx, orgId, encounterId, proc.planItemId)).map((row) => row.title),
     materials: materials.items,
     dictatedMaterials: materials.dictated,
@@ -273,6 +288,12 @@ async function previewOf(
     bookedControls: booked,
     prescription: Boolean(recipe),
   }
+}
+
+/** Sin `finance.read` se dice qué pasa con el cobro, no cuánto («odontología no recibe caja»). */
+function forReader<T extends NotDonePreview>(preview: T, seesCharges: boolean): T {
+  if (seesCharges) return preview
+  return { ...preview, charges: preview.charges.map((charge) => ({ ...charge, amountCents: null, paidCents: null })) }
 }
 
 /** Lo que pasará al marcar «No se hizo», para decirlo antes de confirmar. */
@@ -283,10 +304,10 @@ export async function getNotDonePreview(
   patientId: string,
   encounterId: string,
   procedureId: string,
-  opts: { memberRole?: string } = {},
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<NotDonePreview> {
   const { proc } = await loadScope(tx, orgId, actorUserId, patientId, encounterId, procedureId, opts)
-  return previewOf(tx, orgId, patientId, encounterId, proc)
+  return forReader(await previewOf(tx, orgId, patientId, encounterId, proc), opts.seesCharges ?? false)
 }
 
 export async function markProcedureNotDone(
@@ -297,7 +318,7 @@ export async function markProcedureNotDone(
   encounterId: string,
   procedureId: string,
   input: { reason: string },
-  opts: { memberRole?: string } = {},
+  opts: { memberRole?: string; seesCharges?: boolean } = {},
 ): Promise<NotDoneResult> {
   const reason = cleanReason(input.reason)
   const { proc } = await loadScope(tx, orgId, actorUserId, patientId, encounterId, procedureId, opts)
@@ -308,7 +329,8 @@ export async function markProcedureNotDone(
 
   // Lo resuelto por esa firma, antes de que el tratamiento deje de estar realizado.
   const resolved = await resolvedBySigning(tx, orgId, encounterId, proc.planItemId)
-  const procedureRow = await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, why, at, null, true)
+  const backToPlan = preview.planItem?.becomes !== "cancelado"
+  const procedureRow = await voidProcedureRow(tx, orgId, actorUserId, patientId, encounterId, proc, why, at, null, backToPlan)
   if (resolved.length > 0) {
     const ids = resolved.map((row) => row.id)
     await tx
@@ -350,8 +372,13 @@ export async function markProcedureNotDone(
   for (const charge of preview.charges.filter((row) => row.outcome === "anula"))
     await voidCharge(tx, orgId, actorUserId, patientId, charge.id, { reason: why })
   if (paid.length > 0) {
-    const money = paid.map((charge) => formatMoney(charge.paidCents, charge.currency, locale)).join(" y ")
-    const stays = preview.planItem !== null
+    const money = paid.map((charge) => formatMoney(charge.paidCents ?? 0, charge.currency, locale)).join(" y ")
+    // Lo pagado queda para el tratamiento solo si se cobra por tratamiento y sigue en el plan; por
+    // sesión, esta visita no se hizo y lo pagado es de ella (revisión del 19 nov).
+    const stays =
+      backToPlan &&
+      preview.planItem !== null &&
+      (await billingModeOfProcedure(tx, orgId, patientId, proc)) === "treatment"
     const task = await createTask(tx, orgId, {
       title: `No se hizo y ya estaba pagado: ${label}`.slice(0, 200),
       patientId,
@@ -387,5 +414,5 @@ export async function markProcedureNotDone(
       paidCharges: paid.map((row) => row.id),
     },
   })
-  return { ...preview, procedureRow, cashierTaskId }
+  return { ...forReader(preview, opts.seesCharges ?? false), procedureRow, cashierTaskId }
 }

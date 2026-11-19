@@ -27,7 +27,12 @@ export function wholeReturnedChargeSql(charge: SQL): SQL {
     and not exists (select 1 from patient_charge successor
       where successor.organization_id = ${charge}.organization_id
         and successor.original_charge_id = coalesce(${charge}.original_charge_id, ${charge}.id)
-        and successor.created_at > ${charge}.created_at))`
+        and successor.created_at > ${charge}.created_at)
+    -- Lo de un acto marcado «No se hizo» no se cobró por algo hecho: devuelto, el tratamiento se
+    -- vuelve a cobrar cuando se haga (mesa del cierre, 19 nov).
+    and not exists (select 1 from encounter_procedure not_done
+      where not_done.organization_id = ${charge}.organization_id and not_done.id = ${charge}.encounter_procedure_id
+        and not_done.voided_at is not null))`
 }
 
 /** Lo cobrado de un tratamiento que una devolución se llevó entero. */

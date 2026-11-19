@@ -80,15 +80,18 @@ export async function closingConsultationOf(
       and (tt.key in (${keyList}) or ${evaluations})
     order by s.name, s.id`)
   if (rows.length === 0) return null
-  // Ya se cargó la consulta de esta visita (recepción la cobró al llegar): no se propone otra.
+  // Ya se cargó la consulta de esta visita (recepción la cobró al llegar): no se propone otra. Se
+  // reconoce por el nombre de una consulta de la clínica o porque lo escrito dice consulta o
+  // evaluación (revisión del 19 nov: escrita «Consulta» a mano, se cargaba dos veces).
   const [already] = await tx.execute<{ id: string }>(sql`
     select c.id from patient_charge c
     where c.organization_id = ${orgId} and c.patient_id = ${visit.patientId} and c.voided_at is null
+      and c.encounter_procedure_id is null and c.product_id is null
       and c.created_at >= ${visit.startedAt.toISOString()}::timestamptz - interval '12 hours'
-      and c.description in (${sql.join(
+      and (c.description in (${sql.join(
         rows.map((row) => sql`${row.name}`),
         sql`, `,
-      )})
+      )}) or c.description ~* '(consulta|evaluaci)')
     limit 1`)
   if (already) return null
   const [booked] = visit.appointmentId
@@ -116,4 +119,23 @@ export async function closingConsultationOf(
     proposed,
     options: rows.map((row) => option(row, row.id === proposed.serviceId ? proposed.reason : "biblioteca")),
   }
+}
+
+/**
+ * ¿Es una consulta de la clínica (de la biblioteca de consultas del producto o la evaluación de otro
+ * servicio)? «No se hizo» en una consulta no la vuelve al plan: no es un tratamiento por hacer.
+ */
+export async function isConsultationService(tx: Db, orgId: string, serviceId: string | null): Promise<boolean> {
+  if (!serviceId) return false
+  const { consultation } = await productHooks(tx, orgId)
+  const keys = [...consultation.templateKeys, ...(consultation.controlTemplateKeys ?? [])]
+  const [row] = await tx.execute<{ yes: boolean }>(sql`
+    select exists (
+      select 1 from service_catalog s
+      left join catalog.treatment_template tt on tt.id = s.template_id
+      where s.organization_id = ${orgId} and s.id = ${serviceId}
+        and (${keys.length > 0 ? sql`tt.key in (${sql.join(keys.map((key) => sql`${key}`), sql`, `)})` : sql`false`}
+          or exists (select 1 from service_catalog e where e.organization_id = ${orgId} and e.evaluation_service_id = s.id))
+    ) as yes`)
+  return Boolean(row?.yes)
 }

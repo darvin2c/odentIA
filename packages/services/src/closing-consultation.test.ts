@@ -102,3 +102,19 @@ it("con algo hecho hoy no se propone, y el cierre nombra cada acto con lo que se
   const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   expect(signed.charges.map((charge) => charge.amountCents)).toEqual([120_000])
 })
+
+it("cobrada al llegar con otro nombre («Consulta»), tampoco se vuelve a proponer", async () => {
+  const f = await clinicalFixture()
+  await evaluation(f)
+  await f.ready(f.encounter.id)
+  expect((await closingOf(f)).consultation).not.toBeNull()
+  await ownerDb.insert(patientCharge).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    description: "Consulta",
+    amountCents: 5_000,
+    currency: "PEN",
+    createdBy: f.actor,
+  })
+  expect((await closingOf(f)).consultation).toBeNull()
+})

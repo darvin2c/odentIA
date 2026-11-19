@@ -70,7 +70,7 @@ import { type AnyFormApi, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { MoreHorizontal, Plus, X } from "lucide-react"
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
@@ -337,8 +337,36 @@ export function collectDraftChanged(proposed: CollectDraft, current: CollectDraf
  */
 function useInlineDraft(form: AnyFormApi): void {
   const dirty = useStore(form.store, (state) => state.isDirty)
+  const id = useId()
+  const report = useContext(InlineDraftsContext)
   const draftSaved = useDraftSaved()
-  useEffect(() => draftSaved(!dirty), [draftSaved, dirty])
+  useEffect(() => {
+    // Dentro del cajón, cada bloque cuenta por separado: uno vacío no tapa lo escrito en otro.
+    if (report) {
+      report(id, dirty)
+      return () => report(id, false)
+    }
+    draftSaved(!dirty)
+  }, [report, id, dirty, draftSaved])
+}
+
+/** Junta lo escrito en los bloques en línea del cajón: con alguno a medias, cerrar pregunta. */
+const InlineDraftsContext = createContext<((id: string, dirty: boolean) => void) | null>(null)
+
+function InlineDrafts({ children }: { children: React.ReactNode }) {
+  const draftSaved = useDraftSaved()
+  const [dirtyIds, setDirtyIds] = useState<ReadonlySet<string>>(() => new Set())
+  const report = useCallback((id: string, dirty: boolean) => {
+    setDirtyIds((current) => {
+      if (current.has(id) === dirty) return current
+      const next = new Set(current)
+      if (dirty) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+  useEffect(() => draftSaved(dirtyIds.size === 0), [draftSaved, dirtyIds])
+  return <InlineDraftsContext.Provider value={report}>{children}</InlineDraftsContext.Provider>
 }
 
 const EMPTY_DRAFT: CollectDraft = {
@@ -1539,6 +1567,7 @@ export function CollectDrawer({
     >
       {/* Los cambios los cuenta el cobro (`changed`) y sus bloques en línea (`useInlineDraft`): la
           columna no cuenta cada toque, que avisaba sin que nada cambiara. */}
+      <InlineDrafts>
       <div data-draft-ignore className="flex flex-col gap-6">
         {patientId === null ? (
           // El buscador de personas de toda la aplicación, solo con pacientes (ADR 0029).
@@ -2411,6 +2440,7 @@ export function CollectDrawer({
           </p>
         ) : null}
       </div>
+      </InlineDrafts>
     </FormDrawer>
   )
 }

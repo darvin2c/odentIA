@@ -19,15 +19,16 @@ const reasonSchema = z.object({
 /** Lo que pasará al marcar «No se hizo» (`getNotDonePreview`). */
 interface NotDonePreview {
   procedure: { id: string; description: string; site: string | null }
-  planItem: { title: string; becomes: "pendiente" | "en_curso" } | null
+  planItem: { title: string; becomes: "pendiente" | "en_curso" | "cancelado" } | null
   diagnoses: string[]
   materials: Array<{ productId: string; name: string; quantity: number; quantityText: string }>
   dictatedMaterials: boolean
   charges: Array<{
     id: string
     description: string
-    amountCents: number
-    paidCents: number
+    /** Sin caja (`finance.read`) llegan sin monto. */
+    amountCents: number | null
+    paidCents: number | null
     currency: string
     outcome: "anula" | "caja" | "sigue"
   }>
@@ -55,20 +56,29 @@ function consequences(preview: NotDonePreview): string[] {
   const lines: string[] = []
   if (preview.planItem)
     lines.push(
-      `${preview.planItem.title} vuelve a ${preview.planItem.becomes === "en_curso" ? "en curso" : "pendiente"} en el plan.`,
+      preview.planItem.becomes === "cancelado"
+        ? `${preview.planItem.title} sale del plan: era la consulta de ese día.`
+        : `${preview.planItem.title} vuelve a ${preview.planItem.becomes === "en_curso" ? "en curso" : "pendiente"} en el plan.`,
     )
   if (preview.diagnoses.length > 0)
     lines.push(`${listWords(preview.diagnoses)} ${preview.diagnoses.length > 1 ? "vuelven" : "vuelve"} a activo.`)
-  if (productUi().site && preview.planItem) lines.push("El odontograma deja de dibujarlo.")
+  if (productUi().site && preview.planItem && preview.planItem.becomes !== "cancelado") lines.push("El odontograma deja de dibujarlo.")
   if (preview.materials.length > 0)
     lines.push(`Vuelven al almacén: ${listWords(preview.materials.map((item) => `${item.quantityText} de ${item.name.toLowerCase()}`))}.`)
   if (preview.dictatedMaterials)
     lines.push("Hubo material dicho a mano: no se devuelve solo; corrígelo en «Materiales usados».")
   for (const charge of preview.charges) {
-    if (charge.outcome === "anula") lines.push(`Su cobro de ${money(charge.amountCents, charge.currency)} no está pagado: se anula.`)
+    if (charge.outcome === "anula")
+      lines.push(
+        charge.amountCents != null
+          ? `Su cobro de ${money(charge.amountCents, charge.currency)} no está pagado: se anula.`
+          : "Su cobro no está pagado: se anula.",
+      )
     if (charge.outcome === "caja")
       lines.push(
-        `Ya lo pagó (${money(charge.paidCents, charge.currency)}): caja recibe la tarea de devolverlo o dejarlo a favor.`,
+        charge.paidCents != null
+          ? `Ya lo pagó (${money(charge.paidCents, charge.currency)}): caja recibe la tarea de devolverlo o dejarlo a favor.`
+          : "Ya tiene un pago: caja recibe la tarea de devolverlo o dejarlo a favor.",
       )
     if (charge.outcome === "sigue") lines.push("Su cobro sigue: el tratamiento continúa con otra sesión.")
   }
