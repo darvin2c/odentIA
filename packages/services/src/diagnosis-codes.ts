@@ -641,7 +641,9 @@ export async function getDiagnosisSuggestions(
   const diseaseToday = proposed.some((item) => item.source === "hallazgo" || item.source === "ficha")
   if (input.patientId && input.encounterId && already.size === 0 && !diseaseToday && !input.finding) {
     const visit = await withoutDiseaseOf(tx, orgId, system, hooks.withoutDisease, input.patientId, input.encounterId)
-    for (const active of visit.active) {
+    // «Sigue activo» solo cuando nada más propone: con el tratamiento que continúa, se usa ese.
+    const nothingElse = proposed.length === 0
+    for (const active of nothingElse ? visit.active : []) {
       const key = placeKey(active.code, active)
       if (seen.has(key)) continue
       seen.add(key)
