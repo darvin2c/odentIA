@@ -750,10 +750,7 @@ export const saleOrder = pgTable(
       "sale_order_customer_check",
       sql`char_length(btrim(${table.customerName})) between 1 and 120 and (${table.customerPhone} is null or char_length(${table.customerPhone}) <= 30) and char_length(${table.address}) <= 300 and char_length(${table.notes}) <= 500`,
     ),
-    check(
-      "sale_order_payment_collection_check",
-      inList("payment_collection", PAYMENT_COLLECTIONS),
-    ),
+    check("sale_order_payment_collection_check", inList("payment_collection", PAYMENT_COLLECTIONS)),
     check(
       "sale_order_amounts_check",
       sql`${table.deliveryCents} between 0 and ${table.deliveryListCents} and ${table.subtotalCents} >= 0 and ${table.discountCents} >= 0 and ${table.giftCents} >= 0 and ${table.totalCents} = ${table.subtotalCents} + ${table.deliveryCents} and ${table.marginUsedCents} between 0 and ${table.marginCents}`,

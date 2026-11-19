@@ -48,7 +48,8 @@ export interface LinkAdapter {
     request: { query: URLSearchParams; headers: Headers; body: string },
     secret: string | null,
   ): LinkNotification
-  payment(accessToken: string, ref: string): Promise<LinkPayment>
+  /** El pago, leído del proveedor; null si su cuenta no lo conoce. */
+  payment(accessToken: string, ref: string): Promise<LinkPayment | null>
 }
 
 export type LinkAdapters = Record<PaymentLinkProvider, LinkAdapter>
@@ -160,7 +161,8 @@ export function mercadoPago(fetcher: typeof fetch = fetch): LinkAdapter {
     },
     async payment(accessToken, ref) {
       const response = await call(accessToken, `/v1/payments/${encodeURIComponent(ref)}`)
-      if (!response.ok) throw new Error(`mercadopago: el pago ${ref} respondió ${response.status}`)
+      if (response.status === 404) return null
+      if (!response.ok) throw new Error(`mercadopago: el pago respondió ${response.status}`)
       const body = (await response.json()) as {
         id?: number | string
         status?: string

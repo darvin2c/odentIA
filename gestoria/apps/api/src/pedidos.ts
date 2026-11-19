@@ -32,6 +32,7 @@ import {
   autoUnitCents,
   floorUnitCents,
   NEGOTIATED_PRICE_MS,
+  type PricedVariant,
   type Quote,
   type QuoteLine,
   quote,
@@ -122,6 +123,11 @@ export const orderInput = z.object({
 })
 export type OrderInput = z.infer<typeof orderInput>
 
+/** El resumen antes de guardar: el nombre del cliente todavía puede faltar. */
+export const quoteInput = orderInput.extend({
+  customerName: z.string().trim().max(120).default(""),
+})
+
 export const receiptInput = z.object({
   amountCents: cents.min(1, "Escribe el monto que se ve en la captura"),
   operation: z
@@ -187,6 +193,74 @@ interface Priced {
 }
 
 /**
+ * Las variantes con lo que hace falta para su precio de hoy: lista, mínimo, la promoción vigente
+ * y el precio por cantidad. Lo usan el pedido y la lista para venderlo: el mismo precio en los dos.
+ * Con `ids`, solo esas (también las quitadas, para decir que ya no se venden); sin ellos, las que
+ * se venden.
+ */
+async function variantPrices(tx: Db, storeId: string, today: string, ids?: string[]) {
+  const rows = await tx
+    .select({
+      id: productVariant.id,
+      optionValues: productVariant.optionValues,
+      sku: productVariant.sku,
+      priceCents: productVariant.priceCents,
+      stock: productVariant.stock,
+      removedAt: productVariant.removedAt,
+      productId: product.id,
+      productName: product.name,
+      listPriceCents: product.listPriceCents,
+      minPriceCents: product.minPriceCents,
+    })
+    .from(productVariant)
+    .innerJoin(product, eq(product.id, productVariant.productId))
+    .where(
+      and(
+        eq(productVariant.storeId, storeId),
+        ids ? inArray(productVariant.id, ids) : isNull(productVariant.removedAt),
+      ),
+    )
+    .orderBy(asc(product.name), asc(productVariant.optionValues))
+  const productIds = [...new Set(rows.map((row) => row.productId))]
+  if (productIds.length === 0) return []
+  const promotions = await tx
+    .select({
+      productId: productPromotion.productId,
+      name: productPromotion.name,
+      percentOff: productPromotion.percentOff,
+    })
+    .from(productPromotion)
+    .where(
+      and(
+        inArray(productPromotion.productId, productIds),
+        lte(productPromotion.startsOn, today),
+        gte(productPromotion.endsOn, today),
+      ),
+    )
+  const tiers = await tx
+    .select({
+      productId: productQuantityPrice.productId,
+      minQuantity: productQuantityPrice.minQuantity,
+      unitPriceCents: productQuantityPrice.unitPriceCents,
+    })
+    .from(productQuantityPrice)
+    .where(inArray(productQuantityPrice.productId, productIds))
+  const promoBy = new Map(promotions.map((p) => [p.productId, p]))
+  const tiersBy = Map.groupBy(tiers, (t) => t.productId)
+  return rows.map((row) => ({
+    ...row,
+    variantName: row.optionValues.join(" · ") || "Única",
+    promotion: promoBy.get(row.productId)?.name ?? null,
+    pricing: {
+      listUnitCents: row.priceCents ?? row.listPriceCents,
+      minPriceCents: row.minPriceCents,
+      percentOff: promoBy.get(row.productId)?.percentOff ?? null,
+      quantityPrices: tiersBy.get(row.productId) ?? [],
+    } satisfies PricedVariant,
+  }))
+}
+
+/**
  * Arma el precio de un pedido con lo que la tienda tiene hoy: variantes que se venden y con
  * stock, la forma de entrega y el medio de pago encendidos. Devuelve el precio o lo que falta,
  * campo por campo.
@@ -204,46 +278,8 @@ async function priceOrder(
     if (ids.indexOf(line.variantId) !== i)
       fields[`lines.${i}.variantId`] = "Ya está en el pedido: cambia su cantidad"
   })
-  const rows = await tx
-    .select({
-      id: productVariant.id,
-      optionValues: productVariant.optionValues,
-      sku: productVariant.sku,
-      priceCents: productVariant.priceCents,
-      stock: productVariant.stock,
-      removedAt: productVariant.removedAt,
-      productId: product.id,
-      productName: product.name,
-      listPriceCents: product.listPriceCents,
-      minPriceCents: product.minPriceCents,
-    })
-    .from(productVariant)
-    .innerJoin(product, eq(product.id, productVariant.productId))
-    .where(and(eq(productVariant.storeId, storeId), inArray(productVariant.id, ids)))
+  const rows = await variantPrices(tx, storeId, today, ids)
   const byId = new Map(rows.map((row) => [row.id, row]))
-  const productIds = [...new Set(rows.map((row) => row.productId))]
-  const promotions = productIds.length
-    ? await tx
-        .select({ productId: productPromotion.productId, percentOff: productPromotion.percentOff })
-        .from(productPromotion)
-        .where(
-          and(
-            inArray(productPromotion.productId, productIds),
-            lte(productPromotion.startsOn, today),
-            gte(productPromotion.endsOn, today),
-          ),
-        )
-    : []
-  const tiers = productIds.length
-    ? await tx
-        .select({
-          productId: productQuantityPrice.productId,
-          minQuantity: productQuantityPrice.minQuantity,
-          unitPriceCents: productQuantityPrice.unitPriceCents,
-        })
-        .from(productQuantityPrice)
-        .where(inArray(productQuantityPrice.productId, productIds))
-    : []
   // El precio por cantidad cuenta lo que se compra del producto, sumando sus variantes.
   const bought = new Map<string, number>()
   for (const line of input.lines) {
@@ -262,21 +298,12 @@ async function priceOrder(
     else if (row.stock < line.quantity)
       fields[`lines.${i}.quantity`] =
         row.stock === 0 ? "Está agotado" : `Quedan ${row.stock}: registra una entrada si hay más`
-    const list = row.priceCents ?? row.listPriceCents
-    const auto = autoUnitCents(
-      {
-        listUnitCents: list,
-        minPriceCents: row.minPriceCents,
-        percentOff: promotions.find((p) => p.productId === row.productId)?.percentOff ?? null,
-        quantityPrices: tiers.filter((t) => t.productId === row.productId),
-      },
-      bought.get(row.productId) ?? 0,
-    )
+    const auto = autoUnitCents(row.pricing, bought.get(row.productId) ?? 0)
     lines.push({
       quantity: line.quantity,
-      listUnitCents: list,
+      listUnitCents: row.pricing.listUnitCents,
       autoUnitCents: auto,
-      floorUnitCents: floorUnitCents(auto, row.minPriceCents),
+      floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
       unitCents: line.unitCents,
       gift: line.gift,
     })
@@ -339,7 +366,7 @@ async function priceOrder(
           {
             productId: row.productId,
             productName: row.productName,
-            variantName: row.optionValues.join(" · ") || "Única",
+            variantName: row.variantName,
             sku: row.sku,
           },
         ]),
@@ -432,11 +459,11 @@ export async function createOrderIn(
   storeId: string,
   actorUserId: string,
   input: OrderInput,
-  options: { conversationId?: string | null; now?: Date } = {},
+  options: { conversationId?: string | null; now?: Date; today?: string } = {},
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
-  const result = await priceOrder(tx, storeId, currency, input, todayUTC(now))
+  const result = await priceOrder(tx, storeId, currency, input, options.today ?? todayUTC(now))
   if (!result.ok)
     throw new StoreError(
       400,
@@ -525,9 +552,15 @@ export async function createOrderIn(
   return { id: order!.id, number: pad(number) }
 }
 
-export async function createOrder(appDb: Db, person: Person, storeId: string, input: OrderInput) {
+export async function createOrder(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: OrderInput,
+  today = todayUTC(),
+) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const created = await createOrderIn(tx, storeId, person.userId, input)
+    const created = await createOrderIn(tx, storeId, person.userId, input, { today })
     return orderDetailIn(tx, storeId, created.id)
   })
 }
@@ -612,10 +645,11 @@ export async function listOrders(
     >
     const total = (states: OrderState[]) => states.reduce((n, s) => n + (byState[s] ?? 0), 0)
     const linesBy = Map.groupBy(lines, (line) => line.orderId)
+    const confirmedBy = new Map(confirmed.map((c) => [c.orderId, c]))
     return {
       orders: rows.map((row) => {
         const own = linesBy.get(row.id) ?? []
-        const paid = confirmed.find((c) => c.orderId === row.id)
+        const paid = confirmedBy.get(row.id)
         return {
           ...row,
           number: pad(row.number),
@@ -703,19 +737,29 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
         ).map((row) => [row.userId, row.name])
       : [],
   )
-  const sold = await tx
-    .select({ id: stockMovement.id })
-    .from(stockMovement)
-    .where(
-      and(
-        eq(stockMovement.storeId, storeId),
-        eq(stockMovement.reference, stockReference(order.number)),
-        eq(stockMovement.kind, "venta"),
-      ),
-    )
-    .limit(1)
+  // Pagado y por salir sin venta en el kardex: no alcanzaba el stock al pagar.
+  const stockPending =
+    order.state === "por_salir" &&
+    order.paymentCollection !== "al_recibir" &&
+    (
+      await tx
+        .select({ id: stockMovement.id })
+        .from(stockMovement)
+        .where(
+          and(
+            eq(stockMovement.storeId, storeId),
+            eq(stockMovement.reference, stockReference(order.number)),
+            eq(stockMovement.kind, "venta"),
+          ),
+        )
+        .limit(1)
+    ).length === 0
+  // La primera foto de cada producto.
   const photos = await tx
-    .select({ productId: productPhoto.productId, id: productPhoto.id })
+    .selectDistinctOn([productPhoto.productId], {
+      productId: productPhoto.productId,
+      id: productPhoto.id,
+    })
     .from(productPhoto)
     .where(
       and(
@@ -726,7 +770,8 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
         ),
       ),
     )
-    .orderBy(asc(productPhoto.position))
+    .orderBy(productPhoto.productId, asc(productPhoto.position))
+  const photoBy = new Map(photos.map((p) => [p.productId, p.id]))
   const {
     storeId: _s,
     linkRef: _r,
@@ -735,25 +780,32 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     conversationId: _c,
     ...rest
   } = order
-  const [connected] = await tx
-    .select({ provider: storePaymentLink.provider })
-    .from(storePaymentLink)
-    .where(eq(storePaymentLink.storeId, storeId))
+  // El link solo se ofrece a un pedido por pagar.
+  const linkConnected =
+    order.state === "por_pagar" &&
+    (
+      await tx
+        .select({ provider: storePaymentLink.provider })
+        .from(storePaymentLink)
+        .where(eq(storePaymentLink.storeId, storeId))
+    ).length > 0
   const now = Date.now()
   return {
     ...rest,
     number: pad(order.number),
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
-    linkConnected: Boolean(connected),
+    linkConnected,
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
     priceExpired: Boolean(order.priceExpiresAt && order.priceExpiresAt.getTime() <= now),
-    paid: payments.some((p) => p.status === "confirmado"),
+    /** Ya entró dinero: un pago confirmado, o uno por el link que espera a una persona. */
+    paid: payments.some(
+      (p) => p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar"),
+    ),
     /** Pagado, pero el stock no alcanzaba: se descuenta al salir. */
-    stockPending:
-      order.state === "por_salir" && sold.length === 0 && order.paymentCollection !== "al_recibir",
+    stockPending,
     lines: lines.map((line) => ({
       ...line,
-      photoId: photos.find((p) => p.productId === line.productId)?.id ?? null,
+      photoId: photoBy.get(line.productId) ?? null,
     })),
     payments: payments.map(({ createdBy, reviewedBy, ...p }) => ({
       ...p,
@@ -775,59 +827,21 @@ export async function orderDetail(appDb: Db, person: Person, storeId: string, or
 /** Lo que se puede vender hoy, con su precio sin negociar y su mínimo, para armar un pedido. */
 export async function sellable(appDb: Db, person: Person, storeId: string, today = todayUTC()) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const rows = await tx
-      .select({
-        id: productVariant.id,
-        productId: product.id,
-        productName: product.name,
-        optionValues: productVariant.optionValues,
-        sku: productVariant.sku,
-        stock: productVariant.stock,
-        priceCents: productVariant.priceCents,
-        listPriceCents: product.listPriceCents,
-        minPriceCents: product.minPriceCents,
-      })
-      .from(productVariant)
-      .innerJoin(product, eq(product.id, productVariant.productId))
-      .where(and(eq(productVariant.storeId, storeId), isNull(productVariant.removedAt)))
-      .orderBy(asc(product.name), asc(productVariant.optionValues))
-    const promotions = await tx
-      .select({
-        productId: productPromotion.productId,
-        name: productPromotion.name,
-        percentOff: productPromotion.percentOff,
-      })
-      .from(productPromotion)
-      .where(
-        and(
-          eq(productPromotion.storeId, storeId),
-          lte(productPromotion.startsOn, today),
-          gte(productPromotion.endsOn, today),
-        ),
-      )
+    const rows = await variantPrices(tx, storeId, today)
     return {
+      // El precio de una unidad; el precio por cantidad lo aplica el resumen del pedido.
       variants: rows.map((row) => {
-        const list = row.priceCents ?? row.listPriceCents
-        const promo = promotions.find((p) => p.productId === row.productId) ?? null
-        const auto = autoUnitCents(
-          {
-            listUnitCents: list,
-            minPriceCents: row.minPriceCents,
-            percentOff: promo?.percentOff ?? null,
-            quantityPrices: [],
-          },
-          1,
-        )
+        const auto = autoUnitCents(row.pricing, 1)
         return {
           id: row.id,
           productName: row.productName,
-          variantName: row.optionValues.join(" · ") || "Única",
+          variantName: row.variantName,
           sku: row.sku,
           stock: row.stock,
-          listUnitCents: list,
+          listUnitCents: row.pricing.listUnitCents,
           autoUnitCents: auto,
-          floorUnitCents: floorUnitCents(auto, row.minPriceCents),
-          promotion: promo?.name ?? null,
+          floorUnitCents: floorUnitCents(auto, row.pricing.minPriceCents),
+          promotion: row.promotion,
         }
       }),
     }
@@ -912,8 +926,30 @@ async function mustSale(tx: Db, order: OrderRow, actor: string) {
         "NOT_ENOUGH_STOCK",
         "No alcanza el stock para este pedido. Registra la entrada en el catálogo y vuelve a intentarlo.",
       )
+    if (error instanceof StoreError && error.code === "VARIANT_REMOVED")
+      throw new StoreError(
+        409,
+        "VARIANT_REMOVED",
+        "Una de sus variantes ya no se vende. Anula el pedido y anótalo con otra.",
+      )
     throw error
   }
+}
+
+/**
+ * Si el pedido ya recibió dinero: un pago confirmado, o uno que llegó por el link y espera a una
+ * persona (el dinero ya está en la cuenta aunque el monto no coincida).
+ */
+async function moneyReceived(tx: Db, orderId: string, except?: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: orderPayment.id, kind: orderPayment.kind, status: orderPayment.status })
+    .from(orderPayment)
+    .where(eq(orderPayment.orderId, orderId))
+  return rows.some(
+    (p) =>
+      p.id !== except &&
+      (p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar")),
+  )
 }
 
 /** Anota la captura de un pago: el pedido queda «pago por confirmar» hasta que una persona lo mire. */
@@ -980,9 +1016,22 @@ export async function reviewPayment(
     const { currency } = await storeRow(tx, storeId)
     const now = new Date()
     if (input.decision === "confirmar") {
+      // Un pago más sobre un pedido que ya tenía dinero, o anulado: se confirma (el dinero llegó)
+      // y queda escrito que hay que ver si se devuelve.
+      const extra =
+        order.state === "anulado"
+          ? "Pago sobre un pedido anulado: revisa si hay que devolverlo"
+          : (await moneyReceived(tx, orderId, paymentId))
+            ? "Pago doble: el pedido ya tenía otro pago. Revisa si hay que devolver uno"
+            : null
       await tx
         .update(orderPayment)
-        .set({ status: "confirmado", reviewedBy: person.userId, reviewedAt: now })
+        .set({
+          status: "confirmado",
+          reviewedBy: person.userId,
+          reviewedAt: now,
+          ...(extra ? { note: payment.note ? `${payment.note}. ${extra}` : extra } : {}),
+        })
         .where(eq(orderPayment.id, paymentId))
       let stockPending = false
       if (order.state === "por_confirmar") {
@@ -993,6 +1042,7 @@ export async function reviewPayment(
         monto: payment.amountCents,
         ...(stockPending ? { faltaStock: true } : {}),
         ...(order.state !== "por_confirmar" ? { estado: order.state } : {}),
+        ...(extra ? { porRevisar: extra } : {}),
       })
       if (order.state === "por_confirmar")
         await notifyCustomer(tx, order, person.userId, currency, "pago_confirmado")
@@ -1059,12 +1109,13 @@ export async function markDelivered(
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
-    const [paid] = await tx
-      .select({ id: orderPayment.id })
-      .from(orderPayment)
-      .where(and(eq(orderPayment.orderId, orderId), eq(orderPayment.status, "confirmado")))
-      .limit(1)
+    const paid = await moneyReceived(tx, orderId)
     const { currency } = await storeRow(tx, storeId)
+    // Lo cobrado en la puerta se anota tal cual; si no es el total, queda escrito para revisarlo.
+    const short =
+      !paid && input.collectedCents !== null && input.collectedCents !== order.totalCents
+        ? `Cobró ${formatMoney(input.collectedCents, currency)} de ${formatMoney(order.totalCents, currency)}`
+        : null
     if (!paid) {
       if (input.collectedCents === null || input.collectedCents === 0)
         throw new StoreError(400, "VALIDATION_ERROR", "Escribe cuánto cobraste", {
@@ -1077,6 +1128,7 @@ export async function markDelivered(
         kind: "al_recibir",
         status: "confirmado",
         amountCents: input.collectedCents,
+        note: short,
         createdBy: person.userId,
         reviewedBy: person.userId,
         reviewedAt: now,
@@ -1086,6 +1138,7 @@ export async function markDelivered(
     await setState(tx, order, "entregado")
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
       ...(paid ? {} : { cobrado: input.collectedCents, moneda: currency }),
+      ...(short ? { porRevisar: short } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
     return orderDetailIn(tx, storeId, orderId)
@@ -1107,11 +1160,7 @@ export async function cancelOrder(
   return inStore(appDb, person, storeId, "ventas.atender", async (tx, role) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
-    const [paid] = await tx
-      .select({ id: orderPayment.id })
-      .from(orderPayment)
-      .where(and(eq(orderPayment.orderId, orderId), eq(orderPayment.status, "confirmado")))
-      .limit(1)
+    const paid = await moneyReceived(tx, orderId)
     if (paid && !can(role, "pagos.confirmar"))
       throw new StoreError(403, "FORBIDDEN", "Un pedido pagado lo anula quien confirma pagos")
     const returned = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
@@ -1231,11 +1280,9 @@ export async function createPaymentLink(
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
     const current = await lockOrder(tx, storeId, orderId)
     if (current.state !== "por_pagar") throw stateError(current)
-    if (current.linkUrl && current.linkUrl !== link.url) {
-      // Otro lo creó entre medio: vale el que ya está.
-      if (!current.linkExpiresAt || current.linkExpiresAt.getTime() > Date.now())
-        return { url: current.linkUrl }
-    }
+    // Otro lo creó entre medio (el mismo, porque el proveedor no repite, u otro): vale el que ya está.
+    if (current.linkUrl && (!current.linkExpiresAt || current.linkExpiresAt.getTime() > Date.now()))
+      return { url: current.linkUrl }
     await tx
       .update(saleOrder)
       .set({
@@ -1263,27 +1310,31 @@ export async function receiveLinkNotice(
   storeId: string,
   request: { query: URLSearchParams; headers: Headers; body: string },
   deps: LinkDeps,
-): Promise<{ status: 200 | 401 | 404; message: string }> {
-  if (!z.uuid().safeParse(storeId).success) return { status: 404, message: "Tienda desconocida" }
+): Promise<{ status: 200 | 401; message: string }> {
+  // Lo que no se atiende responde igual que lo atendido: el aviso no le cuenta a nadie qué
+  // tiendas, pagos o pedidos existen.
+  const done = { status: 200 as const, message: "Recibido" }
+  if (!z.uuid().safeParse(storeId).success) return done
   const [connection] = await ownerDb
     .select()
     .from(storePaymentLink)
     .where(eq(storePaymentLink.storeId, storeId))
-  if (!connection || !deps.secretsKey) return { status: 404, message: "Sin link de pago" }
+  if (!connection || !deps.secretsKey) return done
   const adapter = deps.adapters[connection.provider]
   const secret = connection.webhookSecretEnc
     ? openSecret(deps.secretsKey, storeId, connection.webhookSecretEnc)
     : null
   const notice = adapter.read(request, secret)
   if (notice.kind === "firma_invalida") return { status: 401, message: "Firma inválida" }
-  if (notice.kind === "ignorar") return { status: 200, message: "Sin nada que hacer" }
-  // Si el proveedor no responde, el error sube y el aviso vuelve a llegar (leer es seguro).
+  if (notice.kind === "ignorar") return done
+  // Si el proveedor no responde, el error sube y el aviso vuelve a llegar (leer es seguro). Un
+  // pago que su cuenta no conoce (de otra cuenta, o inventado) no se puede leer: no se anota.
   const payment = await adapter.payment(
     openSecret(deps.secretsKey, storeId, connection.accessTokenEnc),
     notice.ref,
   )
-  if (!payment.approved || !payment.orderId || !z.uuid().safeParse(payment.orderId).success)
-    return { status: 200, message: "Pago no aprobado o ajeno" }
+  if (!payment?.approved || !payment.orderId || !z.uuid().safeParse(payment.orderId).success)
+    return done
   const orderId = payment.orderId
   return ownerDb.transaction(async (tx) => {
     const [order] = await tx
@@ -1291,7 +1342,7 @@ export async function receiveLinkNotice(
       .from(saleOrder)
       .where(and(eq(saleOrder.id, orderId), eq(saleOrder.storeId, storeId)))
       .for("update")
-    if (!order) return { status: 200 as const, message: "Pedido ajeno" }
+    if (!order) return done
     const [already] = await tx
       .select({ id: orderPayment.id })
       .from(orderPayment)
@@ -1302,7 +1353,7 @@ export async function receiveLinkNotice(
           eq(orderPayment.providerRef, payment.ref),
         ),
       )
-    if (already) return { status: 200 as const, message: "Ya anotado" }
+    if (already) return done
     const { currency } = await storeRow(tx as unknown as Db, storeId)
     const waiting = order.state === "por_pagar" || order.state === "por_confirmar"
     const matches = payment.currency === currency && payment.amountCents === order.totalCents
@@ -1332,7 +1383,7 @@ export async function receiveLinkNotice(
         ...(stockOk ? {} : { faltaStock: true }),
       })
       await notifyCustomer(db, order, null, currency, "pago_confirmado")
-      return { status: 200 as const, message: "Pagado" }
+      return done
     }
     // No coincide: lo mira una persona. El dinero ya llegó, así que nunca se descarta.
     await tx.insert(orderPayment).values({
@@ -1351,7 +1402,7 @@ export async function receiveLinkNotice(
       proveedor: connection.provider,
       porRevisar: note,
     })
-    return { status: 200 as const, message: "Por revisar" }
+    return done
   })
 }
 
@@ -1365,6 +1416,7 @@ export const linkConnectionInput = z.object({
     .min(20, "Pega el «Access token» completo")
     .max(300, "Ese token es demasiado largo")
     .regex(/^[A-Za-z0-9_-]+$/, "Pega solo el token, sin espacios"),
+  /** Vacía: se queda la que había (al cambiar la cuenta no se pierde la firma sin querer). */
   webhookSecret: z
     .string()
     .trim()
@@ -1373,6 +1425,17 @@ export const linkConnectionInput = z.object({
     .default("")
     .transform((value) => value || null),
 })
+
+/**
+ * Al cambiar o quitar la cuenta del link, los links ya creados de los pedidos por pagar dejan de
+ * valer: eran de la otra cuenta, y sus pagos no se podrían leer. Se vuelve a crear uno.
+ */
+async function forgetOpenLinks(tx: Db, storeId: string) {
+  await tx
+    .update(saleOrder)
+    .set({ linkUrl: null, linkRef: null, linkExpiresAt: null, updatedAt: new Date() })
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.state, "por_pagar")))
+}
 
 export async function paymentLinkStatus(
   appDb: Db,
@@ -1415,10 +1478,18 @@ export async function connectPaymentLink(
   await inStore(appDb, person, storeId, "configuracion", async () => {})
   await deps.adapters[input.provider].verify(input.accessToken)
   await inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(storePaymentLink)
+      .where(eq(storePaymentLink.storeId, storeId))
+    const sameAccount =
+      before && openSecret(key, storeId, before.accessTokenEnc) === input.accessToken
     const values = {
       provider: input.provider,
       accessTokenEnc: sealSecret(key, storeId, input.accessToken),
-      webhookSecretEnc: input.webhookSecret ? sealSecret(key, storeId, input.webhookSecret) : null,
+      webhookSecretEnc: input.webhookSecret
+        ? sealSecret(key, storeId, input.webhookSecret)
+        : (before?.webhookSecretEnc ?? null),
       hint: input.accessToken.slice(-4),
       connectedBy: person.userId,
       connectedAt: new Date(),
@@ -1427,12 +1498,13 @@ export async function connectPaymentLink(
       .insert(storePaymentLink)
       .values({ storeId, ...values })
       .onConflictDoUpdate({ target: storePaymentLink.storeId, set: values })
+    if (!sameAccount) await forgetOpenLinks(tx, storeId)
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,
       action: "configuracion.pago",
       subject: "Link de pago",
-      detail: { conectado: input.provider, firma: Boolean(input.webhookSecret) },
+      detail: { conectado: input.provider, firma: Boolean(values.webhookSecretEnc) },
     })
   })
   return paymentLinkStatus(appDb, person, storeId, deps)
@@ -1445,6 +1517,7 @@ export async function disconnectPaymentLink(appDb: Db, person: Person, storeId: 
       .where(eq(storePaymentLink.storeId, storeId))
       .returning({ provider: storePaymentLink.provider })
     if (!row) throw new StoreError(404, "NOT_FOUND", "El link de pago ya estaba desconectado")
+    await forgetOpenLinks(tx, storeId)
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,

@@ -409,7 +409,20 @@ describe("al recibir (decisión 4)", () => {
       status: "confirmado",
       amountCents: 13900,
       createdByName: "Lucía Torres",
+      note: null,
     })
+  })
+
+  it("si cobró otro monto, se anota tal cual y queda escrito para revisarlo", async () => {
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 10000,
+    })
+    expect(done.json.order.state).toBe("entregado")
+    expect(done.json.order.payments[0].amountCents).toBe(10000)
+    expect(done.json.order.payments[0].note).toMatch(/^Cobró S\/\s100 de S\/\s139$/)
   })
 })
 
@@ -501,12 +514,12 @@ describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
 
   it("pagado por el link pasa a pagado solo, baja el stock y repetir el aviso no duplica", async () => {
     const before = (await stockOf(ids.t38)).stock
-    expect((await mpNotice("9001")).json.message).toBe("Pagado")
+    expect((await mpNotice("9001")).json.message).toBe("Recibido")
     const detail = (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order
     expect(detail).toMatchObject({ state: "por_salir", paid: true })
     expect(detail.payments[0]).toMatchObject({ kind: "link", status: "confirmado", byLink: true })
     expect((await stockOf(ids.t38)).stock).toBe(before - 1)
-    expect((await mpNotice("9001")).json.message).toBe("Ya anotado")
+    expect((await mpNotice("9001")).json.message).toBe("Recibido")
     expect((await stockOf(ids.t38)).stock).toBe(before - 1)
   })
 
@@ -521,13 +534,61 @@ describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
       transaction_amount: 100,
       currency_id: "PEN",
     })
-    expect((await mpNotice("9002")).json.message).toBe("Por revisar")
+    expect((await mpNotice("9002")).status).toBe(200)
     const detail = (await call("lucia", "GET", `${base}/pedidos/${other}`)).json.order
-    expect(detail).toMatchObject({ state: "por_confirmar", paid: false })
+    // El dinero llegó: cuenta como recibido, pero espera a una persona.
+    expect(detail).toMatchObject({ state: "por_confirmar", paid: true })
     expect(detail.payments[0].note).toContain("no coincide")
-    // Un pago rechazado o de otro pedido que no es de la tienda no hace nada.
     mp.payments.set("9003", { id: 9003, status: "rejected", external_reference: other })
-    expect((await mpNotice("9003")).json.message).toMatch(/no aprobado/)
+    // Un pago rechazado o que la cuenta no conoce no hace nada, y responde igual que los demás.
+    expect((await mpNotice("9003")).json.message).toBe("Recibido")
+    expect((await mpNotice("9999")).json.message).toBe("Recibido")
+    const after = (await call("lucia", "GET", `${base}/pedidos/${other}`)).json.order
+    expect(after.payments).toHaveLength(1)
+  })
+
+  it("una captura confirmada después de pagar por el link queda como pago doble", async () => {
+    const id = (await call("lucia", "POST", `${base}/pedidos`, order())).json.order.id
+    const form = new FormData()
+    form.set("amountCents", "13900")
+    const sent = await call("lucia", "POST", `${base}/pedidos/${id}/comprobante`, undefined, form)
+    const receipt = sent.json.order.payments[0].id
+    mp.payments.set("9004", {
+      id: 9004,
+      status: "approved",
+      external_reference: id,
+      transaction_amount: 139,
+      currency_id: "PEN",
+    })
+    await mpNotice("9004")
+    const paid = (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order
+    expect(paid.state).toBe("por_salir")
+    const double = await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${receipt}/revision`, {
+      decision: "confirmar",
+    })
+    const confirmed = (double.json.order.payments as Json[]).find((p) => p.id === receipt)
+    expect(confirmed).toMatchObject({ status: "confirmado" })
+    expect(confirmed?.note).toContain("Pago doble")
+  })
+
+  it("al desconectar la cuenta, los links de los pedidos por pagar dejan de valer", async () => {
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.link }))
+    ).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${id}/link`)
+    expect((await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order.linkUrl).toBeTruthy()
+    expect((await call("lucia", "DELETE", `${base}/link-de-pago`)).status).toBe(403)
+    expect((await call("rosa", "DELETE", `${base}/link-de-pago`)).status).toBe(204)
+    const detail = (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order
+    expect(detail).toMatchObject({ linkUrl: null, linkConnected: false })
+    // Un aviso para una tienda sin cuenta conectada responde igual y no hace nada.
+    expect((await mpNotice("9001")).json.message).toBe("Recibido")
+    // Se vuelve a conectar sin repetir la clave: se queda la que había, si la hubiera.
+    const again = await call("rosa", "PATCH", `${base}/link-de-pago`, {
+      provider: "mercadopago",
+      accessToken: MP_TOKEN,
+    })
+    expect(again.json.connection).toMatchObject({ signed: false })
   })
 })
 
@@ -608,7 +669,7 @@ describe("la lista y quién puede", () => {
     expect((await call("ajena", "GET", `${base}/pedidos`)).status).toBe(404)
     expect((await call("ajena", "GET", `${base}/pedidos/${anyId}`)).status).toBe(404)
     expect((await call("ajena", "POST", `${base}/pedidos`, order())).status).toBe(404)
-    // Un aviso a una tienda sin link conectado no hace nada.
+    // Un aviso a una tienda que no existe no hace nada y responde igual que los demás.
     const response = await app.request(
       `${SERVER}/avisos/link-de-pago/${randomUUID()}?data.id=1&type=payment`,
       {
@@ -616,6 +677,7 @@ describe("la lista y quién puede", () => {
         body: "{}",
       },
     )
-    expect(response.status).toBe(404)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ message: "Recibido" })
   })
 })

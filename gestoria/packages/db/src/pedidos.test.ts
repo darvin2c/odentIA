@@ -167,6 +167,40 @@ describe("los pedidos de cada tienda", () => {
     ).rejects.toThrow()
   })
 
+  it("un pago por el link solo lo anota el sistema, y un pago revisado no se vuelve a revisar", async () => {
+    await expect(
+      inRosa((tx) =>
+        tx.insert(orderPayment).values({
+          storeId: calzados,
+          orderId,
+          kind: "link",
+          status: "confirmado",
+          amountCents: 13900,
+          provider: "mercadopago",
+          providerRef: "1",
+          reviewedAt: new Date(),
+          createdBy: rosa.userId,
+        }),
+      ),
+    ).rejects.toThrow()
+    const reviewed = await inRosa((tx) =>
+      tx
+        .update(orderPayment)
+        .set({ status: "confirmado", reviewedBy: rosa.userId, reviewedAt: new Date() })
+        .where(eq(orderPayment.orderId, orderId))
+        .returning({ id: orderPayment.id }),
+    )
+    expect(reviewed).toHaveLength(1)
+    const again = await inRosa((tx) =>
+      tx
+        .update(orderPayment)
+        .set({ status: "no_coincide", note: "otra vez", reviewedBy: rosa.userId })
+        .where(eq(orderPayment.orderId, orderId))
+        .returning({ id: orderPayment.id }),
+    )
+    expect(again).toEqual([])
+  })
+
   it("el link de pago es de su tienda y nadie más lo lee", async () => {
     await inRosa((tx) =>
       tx.insert(storePaymentLink).values({

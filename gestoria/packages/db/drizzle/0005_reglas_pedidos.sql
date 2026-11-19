@@ -36,9 +36,14 @@ CREATE POLICY sale_order_line_store ON sale_order_line FOR ALL TO gestoria_app
 CREATE POLICY order_payment_read ON order_payment FOR SELECT TO gestoria_app
   USING (store_id = app_store_id());--> statement-breakpoint
 CREATE POLICY order_payment_create ON order_payment FOR INSERT TO gestoria_app
-  WITH CHECK (store_id = app_store_id() AND created_by = app_user_id() AND created_at = now());--> statement-breakpoint
+  WITH CHECK (
+    store_id = app_store_id() AND created_by = app_user_id() AND created_at = now()
+    -- Un pago por el link solo lo anota el aviso del proveedor (el dueño de la base), nunca una persona.
+    AND kind <> 'link' AND provider IS NULL AND provider_ref IS NULL
+  );--> statement-breakpoint
+-- Solo se revisa un pago que espera a una persona, y una sola vez.
 CREATE POLICY order_payment_review ON order_payment FOR UPDATE TO gestoria_app
-  USING (store_id = app_store_id())
+  USING (store_id = app_store_id() AND status = 'por_confirmar')
   WITH CHECK (store_id = app_store_id() AND reviewed_by = app_user_id());--> statement-breakpoint
 
 CREATE POLICY order_event_read ON order_event FOR SELECT TO gestoria_app

@@ -62,6 +62,7 @@ import {
   type OrderFilter,
   orderDetail,
   orderInput,
+  quoteInput,
   paymentLinkStatus,
   quoteOrder,
   receiptInput,
@@ -112,12 +113,21 @@ const MAX_BODY_BYTES = 64 * 1024
 const PHOTO_UPLOAD = /^\/api\/tiendas\/[^/]+\/productos\/[^/]+\/fotos$/
 const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 /** La captura de un pago va en un formulario con su monto: la foto y un poco más. */
+/** Los avisos del link de pago que se atienden por tienda en un minuto (Mercado Pago manda pocos). */
+const MAX_LINK_NOTICES = 120
+const LINK_NOTICE_WINDOW_MS = 60_000
 const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
 
-/** La fecha de hoy de la persona («2026-11-19»), para «Para entregar hoy»; si no llega, la de UTC. */
+/**
+ * La fecha de hoy de la persona («2026-11-19»): con ella se arma «Para entregar hoy» y se elige
+ * la promoción vigente, igual en el resumen y al guardar. Solo vale a un día de la de UTC (las
+ * zonas horarias van de −12 a +14): así no se elige el día de una promoción. Si no, la de UTC.
+ */
 function todayOf(c: Context): string {
   const value = c.req.query("hoy") ?? ""
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayUTC()
+  const now = Date.now()
+  const near = [-1, 0, 1].map((days) => todayUTC(new Date(now + days * 86_400_000)))
+  return near.includes(value) ? value : todayUTC()
 }
 
 function errorBody(c: Context, code: string, message: string, fields?: Record<string, string>) {
@@ -232,12 +242,22 @@ export function createApp(deps: AppDeps) {
   })
 
   // Los avisos del proveedor del link de pago (B4): de servidor a servidor. El pago se lee del
-  // proveedor; el aviso solo dice cuál mirar.
+  // proveedor; el aviso solo dice cuál mirar. Cada aviso consulta al proveedor con la cuenta de
+  // la tienda: con un tope por tienda, nadie la gasta mandando avisos inventados.
+  const noticesBy = new Map<string, { since: number; count: number }>()
   app.post("/avisos/link-de-pago/:storeId", async (c) => {
+    const storeId = c.req.param("storeId")
+    const now = Date.now()
+    const seen = noticesBy.get(storeId)
+    if (!seen || now - seen.since > LINK_NOTICE_WINDOW_MS)
+      noticesBy.set(storeId, { since: now, count: 1 })
+    else if (++seen.count > MAX_LINK_NOTICES)
+      return c.json(errorBody(c, "TOO_MANY", "Demasiados avisos; reintenta en un minuto"), 429)
+    if (noticesBy.size > 10_000) noticesBy.clear()
     const body = await c.req.text()
     const result = await receiveLinkNotice(
       deps.ownerDb,
-      c.req.param("storeId"),
+      storeId,
       { query: new URL(c.req.url).searchParams, headers: c.req.raw.headers, body },
       link,
     )
@@ -438,14 +458,20 @@ export function createApp(deps: AppDeps) {
     c.json(await sellable(deps.appDb, c.get("person"), c.req.param("id"), todayOf(c))),
   )
   app.post("/api/tiendas/:id/pedidos/calcular", async (c) => {
-    const input = await bodyOf(c, orderInput)
+    const input = await bodyOf(c, quoteInput)
     return c.json(
       await quoteOrder(deps.appDb, c.get("person"), c.req.param("id"), input, todayOf(c)),
     )
   })
   app.post("/api/tiendas/:id/pedidos", async (c) => {
     const input = await bodyOf(c, orderInput)
-    const order = await createOrder(deps.appDb, c.get("person"), c.req.param("id"), input)
+    const order = await createOrder(
+      deps.appDb,
+      c.get("person"),
+      c.req.param("id"),
+      input,
+      todayOf(c),
+    )
     return c.json({ order }, 201)
   })
   app.get("/api/tiendas/:id/pedidos/:orderId", async (c) => {

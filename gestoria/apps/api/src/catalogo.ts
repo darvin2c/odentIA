@@ -12,10 +12,12 @@ import {
   productPromotion,
   productQuantityPrice,
   productVariant,
+  saleOrder,
+  saleOrderLine,
   stockMovement,
   storeEvent,
 } from "@gestoria/db"
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
@@ -695,6 +697,24 @@ export async function removeVariant(appDb: Db, person: Person, storeId: string, 
         409,
         "VARIANT_HAS_STOCK",
         `Tiene ${variant.stock} en stock. Para quitarla, primero ajusta su stock a 0 con el motivo.`,
+      )
+    // Un pedido abierto todavía tiene que descontarla: primero se entrega o se anula.
+    const [open] = await tx
+      .select({ number: saleOrder.number })
+      .from(saleOrderLine)
+      .innerJoin(saleOrder, eq(saleOrder.id, saleOrderLine.orderId))
+      .where(
+        and(
+          eq(saleOrderLine.variantId, variantId),
+          notInArray(saleOrder.state, ["entregado", "anulado"]),
+        ),
+      )
+      .limit(1)
+    if (open)
+      throw new StoreError(
+        409,
+        "VARIANT_IN_ORDER",
+        `Está en el pedido ${String(open.number).padStart(4, "0")}, todavía abierto. Entrégalo o anúlalo antes de quitarla.`,
       )
     const others = await tx
       .select({ id: productVariant.id })

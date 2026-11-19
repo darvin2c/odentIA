@@ -501,6 +501,11 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
   const [reason, setReason] = useState("")
   const action = useOrderAction(store.id, order.id, () => setRejecting(false))
   const differs = payment.amountCents !== order.totalCents
+  const otherMoney = order.payments.some(
+    (p) =>
+      p.id !== payment.id &&
+      (p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar")),
+  )
   const review = (body: { decision: "confirmar" } | { decision: "no_coincide"; reason: string }) =>
     action.mutate({
       path: `pagos/${payment.id}/revision`,
@@ -544,8 +549,15 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
                 {money(order.totalCents, cur)}).
               </p>
             ) : null}
-            {order.priceExpired ? (
+            {order.priceExpiresAt && payment.createdAt > order.priceExpiresAt ? (
               <p className="text-sm text-warning">El precio acordado venció antes de este pago.</p>
+            ) : null}
+            {otherMoney || order.state === "anulado" ? (
+              <p className="text-sm text-warning">
+                {order.state === "anulado"
+                  ? "El pedido está anulado: si lo confirmas, queda anotado para ver si hay que devolverlo."
+                  : "El pedido ya tiene otro pago: si lo confirmas, queda como pago doble para revisar."}
+              </p>
             ) : null}
             <div className="flex flex-wrap gap-2">
               <SubmitButton
@@ -571,7 +583,12 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
       <ConfirmDialog
         open={rejecting}
         title="El pago no coincide"
-        description="El pedido vuelve a «Por pagar». Pídele al cliente que lo revise: el aviso queda escrito en el pedido, pero todavía no se envía solo."
+        description={
+          order.state === "por_confirmar" &&
+          order.payments.filter((p) => p.status === "por_confirmar").length === 1
+            ? "El pedido vuelve a «Por pagar». Pídele al cliente que lo revise: el aviso queda escrito en el pedido, pero todavía no se envía solo."
+            : "Queda anotado con tu motivo, y el pedido sigue como está."
+        }
         confirmLabel="Anotar que no coincide"
         cancelLabel="Volver"
         pending={action.isPending}
@@ -884,7 +901,11 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
             value={collected}
             onChange={setCollected}
             error={errors.collectedCents}
-            help={`El total es ${money(order.totalCents, store.currency)}.`}
+            help={
+              collectedCents !== null && collectedCents !== order.totalCents
+                ? `No es el total (${money(order.totalCents, store.currency)}): queda anotado lo que cobraste para revisarlo.`
+                : `El total es ${money(order.totalCents, store.currency)}.`
+            }
           />
         ) : null}
       </ConfirmDialog>
@@ -1054,20 +1075,24 @@ function NewOrderSheet({
   const [localErrors, setLocalErrors] = useState<Record<string, string>>({})
 
   const money_ = (text: string) => (text.trim() === "" ? null : readMoney(text, cur))
+  // Solo van las líneas con producto; `sent[i]` es la posición en pantalla de la línea i que se
+  // envía, para poner cada error y cada precio en su línea.
+  const sent = lines.flatMap((l, i) => (l.variantId ? [i] : []))
   const body = {
     customerName,
     customerPhone,
     channel,
     address,
     notes,
-    lines: lines
-      .filter((l) => l.variantId)
-      .map((l) => ({
+    lines: sent.map((i) => {
+      const l = lines[i]!
+      return {
         variantId: l.variantId,
         quantity: Number(l.quantity) || 0,
         unitCents: l.gift ? null : money_(l.price),
         gift: l.gift,
-      })),
+      }
+    }),
     deliveryMethodId: deliveryId,
     zone: delivery?.cost === "por_zona" ? zone || null : null,
     deliveryListCents: delivery?.cost === "se_acuerda" ? money_(deliveryCost) : null,
@@ -1088,7 +1113,7 @@ function NewOrderSheet({
     queryFn: () =>
       api<{ quote: Quote | null; fields: Record<string, string> }>(
         `/api/tiendas/${store.id}/pedidos/calcular?hoy=${localToday()}`,
-        { method: "POST", body: { ...JSON.parse(debounced), customerName: "-" } },
+        { method: "POST", body: JSON.parse(debounced) },
       ),
     enabled: ready && debounced === quoteKey,
     placeholderData: (previous) => previous,
@@ -1096,7 +1121,10 @@ function NewOrderSheet({
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos`, { method: "POST", body }),
+      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos?hoy=${localToday()}`, {
+        method: "POST",
+        body,
+      }),
     onSuccess: async (data) => {
       queryClient.setQueryData(["pedido", store.id, data.order.id], data.order)
       await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(store.id) })
@@ -1105,9 +1133,23 @@ function NewOrderSheet({
       onCreated(data.order.id)
     },
   })
-  // Lo que el servidor dijo al guardar manda; si no, lo que dice el resumen (sin el nombre, que se pide al guardar).
-  const serverErrors = create.error ? fieldErrors(create.error) : (quote.data?.fields ?? {})
+  // Al cambiar algo, el error de guardar ya no vale: vuelve a mandar el resumen.
+  const resetCreate = create.reset
+  useEffect(() => {
+    if (quoteKey) resetCreate()
+  }, [quoteKey, resetCreate])
+  // Lo que el servidor dijo al guardar manda; si no, lo que dice el resumen. Los errores de
+  // `lines.N` vuelven a la línea de la pantalla.
+  const serverErrors = Object.fromEntries(
+    Object.entries(create.error ? fieldErrors(create.error) : (quote.data?.fields ?? {})).map(
+      ([key, message]) => [
+        key.replace(/^lines\.(\d+)\./, (_, n: string) => `lines.${sent[Number(n)] ?? n}.`),
+        message,
+      ],
+    ),
+  )
   const errors = { ...serverErrors, ...localErrors }
+  const quotedLine = (i: number) => q?.lines[sent.indexOf(i)]
 
   const submit = () => {
     const next: Record<string, string> = {}
@@ -1236,7 +1278,7 @@ function NewOrderSheet({
                       value={line.price}
                       onChange={(price) => update(line.key, { price })}
                       placeholder={
-                        v ? moneyInput(q?.lines[i]?.autoUnitCents ?? v.autoUnitCents, cur) : ""
+                        v ? moneyInput(quotedLine(i)?.autoUnitCents ?? v.autoUnitCents, cur) : ""
                       }
                       error={errors[`lines.${i}.unitCents`]}
                       help={

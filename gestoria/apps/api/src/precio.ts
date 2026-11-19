@@ -80,6 +80,9 @@ export interface Quote {
 /** Cuánto vale un precio negociado (tablero 14). */
 export const NEGOTIATED_PRICE_MS = 24 * 3_600_000
 
+/** Lo más que suma un pedido (la base guarda enteros de 32 bits): diez millones en soles. */
+export const MAX_ORDER_CENTS = 1_000_000_000
+
 /**
  * Arma el precio de un pedido o dice qué no se puede, campo por campo (`lines.0.unitCents`,
  * `deliveryCents`), con el monto en palabras de la persona.
@@ -138,6 +141,8 @@ export function quote(
     if (fromMargin > 0) fields.deliveryCents = message
     else fields.lines = message
   }
+  if (subtotalCents + deliveryCents > MAX_ORDER_CENTS)
+    fields.lines = "El pedido es demasiado grande: divídelo en dos"
   if (Object.keys(fields).length > 0) return { ok: false, fields }
   return {
     ok: true,
@@ -149,7 +154,8 @@ export function quote(
       giftCents,
       deliveryListCents: delivery.listCents,
       deliveryCents,
-      deliveryFreeByPolicy: free,
+      // Gratis por la regla de la tienda solo si de verdad no paga envío.
+      deliveryFreeByPolicy: free && deliveryCents === 0,
       marginCents,
       marginUsedCents,
       totalCents: subtotalCents + deliveryCents,
