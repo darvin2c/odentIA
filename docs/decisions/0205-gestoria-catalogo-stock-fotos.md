@@ -1,4 +1,4 @@
-# 0204 · gestorIA: el stock solo cambia con el kardex, las fotos en su base y la hoja en CSV
+# 0205 · gestorIA: el stock solo cambia con el kardex, las fotos en su base y la hoja en CSV
 
 Fecha: 2026-11-18 · Estado: aceptada · Paso B3 del lienzo B (gestorIA)
 
