@@ -185,6 +185,8 @@ export function NotDoneButton({
           form.reset({ reason: "", keepInPlan: true })
           setOpen(false)
         }}
+        // Como «Anular…»: se decide antes de seguir, en un cajón modal, con el foco en «Motivo».
+        dock={false}
         title={`No se hizo: ${label}`}
         description="Lo firmado no se borra: queda tachado, con tu motivo, quién y cuándo."
         submitLabel={surface.isSubmitting ? "Guardando…" : "Confirmar: no se hizo"}

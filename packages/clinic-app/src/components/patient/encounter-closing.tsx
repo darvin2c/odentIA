@@ -1828,10 +1828,10 @@ function ClosingBilling({
               }}
               disabled={disabled}
               spacing={2}
-              className="flex-wrap"
+              className="w-full min-w-0 flex-wrap"
             >
               {consultation.options.map((option) => (
-                <ToggleGroupItem key={option.serviceId} value={option.serviceId} className={`${CHIP} h-auto whitespace-normal text-left`}>
+                <ToggleGroupItem key={option.serviceId} value={option.serviceId} className={`${CHIP} h-auto min-w-0 max-w-full whitespace-normal break-words text-left`}>
                   {chosen?.serviceId === option.serviceId ? <Check aria-hidden className="size-4" /> : null}
                   {option.name} · {money(option.priceCents, option.currency)}
                 </ToggleGroupItem>
