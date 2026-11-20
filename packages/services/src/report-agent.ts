@@ -194,7 +194,8 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
     with paid as (
       select distinct pa.payment_id
       from encounter e
-      join encounter_procedure ep on ep.organization_id = e.organization_id and ep.encounter_id = e.id and ep.voided_at is null
+      -- Manda el cargo, no si el acto se marcó «No se hizo» después de firmar (19 nov).
+      join encounter_procedure ep on ep.organization_id = e.organization_id and ep.encounter_id = e.id
       join patient_charge c on c.organization_id = e.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null
       join patient_payment_application pa on pa.organization_id = e.organization_id and pa.charge_id = c.id and pa.voided_at is null
       where e.organization_id = ${orgId} and e.status = 'finalizada' and e.voided_at is null
@@ -205,7 +206,7 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
     join patient_payment_application pa on pa.organization_id = ${orgId} and pa.payment_id = paid.payment_id and pa.voided_at is null
     join patient_payment p on p.organization_id = pa.organization_id and p.id = pa.payment_id and p.voided_at is null
     join patient_charge c on c.organization_id = pa.organization_id and c.id = pa.charge_id and c.voided_at is null
-    join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id and ep.voided_at is null
+    join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null`)
   const apps = [...rows].map((row) => ({
     appId: row.id,

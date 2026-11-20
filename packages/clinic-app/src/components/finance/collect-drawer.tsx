@@ -62,14 +62,15 @@ import {
   useAppForm,
   useFieldContext,
   useFieldControl,
+  useDraftSaved,
   useFormSubmitError,
   useFormSurface,
 } from "@odentia/ui-patterns"
-import { useStore } from "@tanstack/react-form"
+import { type AnyFormApi, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { MoreHorizontal, Plus, X } from "lucide-react"
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
@@ -106,6 +107,7 @@ import {
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
+import { sameDraft } from "../../lib/page-draft-guard"
 import { currencyChoices } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
 import { BranchSwitcher } from "../branch-switcher"
@@ -316,6 +318,55 @@ interface CollectDraft {
   rate: string
   /** En qué da el vuelto; vacía, lo que corresponde según lo que paga. */
   changeCurrency: string
+}
+
+/**
+ * Lo que la persona cambió en el cobro, contra lo que el cajón propuso solo al abrir (lo pendiente
+ * marcado, la moneda, el importe, quién paga). Elegir a quién se cobra no es un cambio: con esa
+ * persona vuelve a proponer. Marcar y desmarcar lo mismo tampoco: queda como estaba. Sin esto, abrir
+ * «Cobrar» y cerrarlo, o pasar a otra cuenta, preguntaba «¿Salir sin guardar?» y armaba el aviso del
+ * navegador (QA en local del 19 nov): TanStack marca un campo como cambiado para siempre.
+ */
+export function collectDraftChanged(proposed: CollectDraft, current: CollectDraft): boolean {
+  return !sameDraft({ ...proposed, patient: null }, { ...current, patient: null })
+}
+
+/**
+ * Un bloque en línea (corregir un concepto, agregar otro o un producto) le dice a su cajón si tiene
+ * algo escrito: cerrar o salir con eso pregunta, y sin nada escrito no (`useDraftSaved`).
+ */
+function useInlineDraft(form: AnyFormApi): void {
+  const dirty = useStore(form.store, (state) => state.isDirty)
+  const id = useId()
+  const report = useContext(InlineDraftsContext)
+  const draftSaved = useDraftSaved()
+  useEffect(() => {
+    // Dentro del cajón, cada bloque cuenta por separado: uno vacío no tapa lo escrito en otro.
+    if (report) {
+      report(id, dirty)
+      return () => report(id, false)
+    }
+    draftSaved(!dirty)
+  }, [report, id, dirty, draftSaved])
+}
+
+/** Junta lo escrito en los bloques en línea del cajón: con alguno a medias, cerrar pregunta. */
+const InlineDraftsContext = createContext<((id: string, dirty: boolean) => void) | null>(null)
+
+function InlineDrafts({ children }: { children: React.ReactNode }) {
+  const draftSaved = useDraftSaved()
+  const [dirtyIds, setDirtyIds] = useState<ReadonlySet<string>>(() => new Set())
+  const report = useCallback((id: string, dirty: boolean) => {
+    setDirtyIds((current) => {
+      if (current.has(id) === dirty) return current
+      const next = new Set(current)
+      if (dirty) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+  useEffect(() => draftSaved(dirtyIds.size === 0), [draftSaved, dirtyIds])
+  return <InlineDraftsContext.Provider value={report}>{children}</InlineDraftsContext.Provider>
 }
 
 const EMPTY_DRAFT: CollectDraft = {
@@ -772,6 +823,16 @@ export function CollectDrawer({
   })
 
   const values = useStore(form.store, (state) => state.values)
+  // Lo que tocó la persona (no lo que el cajón puso solo, con `dontUpdateMeta`), sin contar a quién
+  // le cobra: mientras no toque nada, lo propuesto sigue a lo que el cajón va poniendo.
+  const touchedByUser = useStore(form.store, (state) =>
+    Object.entries(state.fieldMeta).some(([name, meta]) => name !== "patient" && meta?.isDirty === true),
+  )
+  const proposedDraft = useRef<CollectDraft>(EMPTY_DRAFT)
+  useEffect(() => {
+    if (!touchedByUser) proposedDraft.current = values
+  }, [touchedByUser, values])
+  const changed = touchedByUser && collectDraftChanged(proposedDraft.current, values)
   const chosen = values.patient
   const effectiveId = patientId ?? chosen?.id ?? null
 
@@ -1025,12 +1086,14 @@ export function CollectDrawer({
     if (!target) return
     presetDone.current = true
     setPendingDraft(null)
-    form.setFieldValue("advance", true)
-    form.setFieldValue("advanceFor", target.budgetItemId)
-    form.setFieldValue("amount", "")
-    form.setFieldValue("payments", [])
-    form.setFieldValue("debtCurrency", target.currency)
-    form.setFieldValue("payCurrency", target.currency)
+    // Lo propone el cajón, como lo pendiente al abrir: no es un cambio de quien cobra.
+    const proposed = { dontUpdateMeta: true }
+    form.setFieldValue("advance", true, proposed)
+    form.setFieldValue("advanceFor", target.budgetItemId, proposed)
+    form.setFieldValue("amount", "", proposed)
+    form.setFieldValue("payments", [], proposed)
+    form.setFieldValue("debtCurrency", target.currency, proposed)
+    form.setFieldValue("payCurrency", target.currency, proposed)
     setAmountTouched(false)
   }, [open, presetAdvanceFor, selectInit, advanceTargets, form])
 
@@ -1475,6 +1538,7 @@ export function CollectDrawer({
   return (
     <FormDrawer
       {...surface}
+      isDirty={changed}
       open={open}
       title="Cobrar"
       headerContent={
@@ -1501,7 +1565,10 @@ export function CollectDrawer({
         if (!busy) onClose()
       }}
     >
-      <div className="flex flex-col gap-6">
+      {/* Los cambios los cuenta el cobro (`changed`) y sus bloques en línea (`useInlineDraft`): la
+          columna no cuenta cada toque, que avisaba sin que nada cambiara. */}
+      <InlineDrafts>
+      <div data-draft-ignore className="flex flex-col gap-6">
         {patientId === null ? (
           // El buscador de personas de toda la aplicación, solo con pacientes (ADR 0029).
           <form.AppField name="patient">
@@ -2373,6 +2440,7 @@ export function CollectDrawer({
           </p>
         ) : null}
       </div>
+      </InlineDrafts>
     </FormDrawer>
   )
 }
@@ -2529,6 +2597,7 @@ function AmountEditor({
       await onSave(parseMoneyOrNull(value.amount, currency, locale) as number, value.reason.trim())
     },
   })
+  useInlineDraft(form)
   const error = useFormSubmitError(form)
   const run = (next: "save" | "remove") => {
     intent.current = next
@@ -2653,6 +2722,7 @@ function PromoPriceEditor({
       await onSave(parseMoneyOrNull(value.amount, currency, locale) as number, value.reason.trim())
     },
   })
+  useInlineDraft(form)
   const error = useFormSubmitError(form)
   const typed = useStore(form.store, (state) => parseMoneyOrNull(state.values.amount, currency, locale))
   const belowFloor = typed !== null && typed < floorCents
@@ -2747,6 +2817,7 @@ function OtherConceptForm({
       await onAdd(value.description.trim(), parseMoneyOrNull(value.amount, currency, locale) as number)
     },
   })
+  useInlineDraft(form)
   const error = useFormSubmitError(form)
   const add = () =>
     void submitForm(form, { fieldMap: CONCEPT_FIELDS, formMessage: financeFormMessage, root: root.current })
@@ -2855,6 +2926,7 @@ function ProductForm({
       await onAdd(value.product as SaleProduct, parseWholeQuantity(value.quantity, locale) as number, saleKey.current)
     },
   })
+  useInlineDraft(form)
   const error = useFormSubmitError(form)
   const chosenProduct = useStore(form.store, (state) => state.values.product)
   const quantityText = useStore(form.store, (state) => state.values.quantity)

@@ -268,6 +268,9 @@ it("cerrar exige motivo, diagnóstico y evolución; sin colegiatura pide el moti
     odontogramSignedBefore: false,
     // Sin periodontograma en la atención, el cierre no lo menciona.
     periodontal: null,
+    // Sin nada hecho hoy no hay nada que cargar, y la clínica de prueba no tiene una consulta con precio.
+    billing: { lines: [], totals: [] },
+    consultation: null,
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.
     materials: null,
     // La persona nueva: nunca se le preguntó por su salud; sin anestesia, nada más que decir.

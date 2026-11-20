@@ -113,6 +113,8 @@ import {
   voidEncounter,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
+  getNotDonePreview,
+  markProcedureNotDone,
   voidWithCorrection,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -434,6 +436,12 @@ const planBatchInput = z
     diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
+// «No se hizo»: el motivo y si lo hecho directo queda en el plan por decidir o se quita.
+const notDoneInput = z.object({
+  reason: z.string().trim().min(1, "Escribe por qué no se hizo").max(2000),
+  keepInPlan: z.boolean().optional(),
+})
+
 const reasonInput = z
   .object({
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
@@ -486,6 +494,8 @@ const finalizeInput = z
     followUpIds: z.array(z.uuid()).max(50).nullish(),
     // El anestésico de la línea de anestesia, solo para el máximo que guarda la atención firmada.
     anesthetic: z.string().max(60).nullish(),
+    // La consulta que el cierre trajo marcada; null si quien firma la desmarcó.
+    consultationServiceId: z.uuid().nullish(),
   })
   .strict()
 /** Lo que se va a registrar como servicio directo, para avisar si ya se hizo (`findEarlierTreatment`). */
@@ -1932,6 +1942,43 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("encounterId"),
           c.req.param("procedureId"),
           parsed.data,
+        ),
+      ),
+    )
+  })
+  // «No se hizo» en una atención firmada: lo que pasará, y marcarlo con su motivo (mesa del 19 nov).
+  app.get("/:id/encounters/:encounterId/procedures/:procedureId/not-done", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getNotDonePreview(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          // Sin caja no recibe montos: «odontología no recibe caja».
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
+        ),
+      ),
+    )
+  })
+  app.post("/:id/encounters/:encounterId/procedures/:procedureId/not-done", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = notDoneInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markProcedureNotDone(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          c.req.param("procedureId"),
+          parsed.data,
+          { memberRole, seesCharges: canAccess(memberRole, "finance.read") },
         ),
       ),
     )

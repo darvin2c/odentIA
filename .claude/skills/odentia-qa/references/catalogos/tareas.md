@@ -209,6 +209,15 @@ Las tareas de un día de consulta. Hasta el estudio de la atención (16 nov 2026
 
 **Palabras que no entiende quien llega** (la Ayuda debe contestarlas en una línea): la sigla de la NTS 188, MB, CE, CD y CDP, CIE-10, ASA, Clío, adenda, «inmutable», «Liberarla», «Lo piensa», «Indicado hoy», «Por decidir», «Trazar forma observada», «Registro gráfico», «Acto libre» y «Otro servicio del catálogo».
 
+### T-ODO-06 Firmé por error lo que no hice
+
+**Qué hace:** registró dos tratamientos que no hizo, firmó y se da cuenta después.
+- [ ] Lo encuentra en la atención firmada («No se hizo…» en su fila), sin buscar en otra pantalla.
+- [ ] La historia (piezas, odontograma), el plan (nada queda «aceptado» que nadie aceptó) y el cobro quedan como deben.
+- [ ] Caja se entera sin que nadie le avise por fuera.
+
+**Ya falló:** solo había «Agregar corrección», de texto (19 nov).
+
 ## Caja
 
 ### T-CAJ-01 Cobrar lo que debe y entregar el ticket

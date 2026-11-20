@@ -10,7 +10,8 @@ import { type DiagnosisOption, DiagnosisSearch } from "./diagnosis-search"
  * endodoncia), con su pieza si el producto la registra.
  */
 export interface ProposedDiagnosis extends DiagnosisOption {
-  source: "hallazgo" | "tratamiento" | "ficha"
+  /** «activo»: lo que la persona sigue teniendo activo de otra atención («Sigue activo»). */
+  source: "hallazgo" | "tratamiento" | "ficha" | "activo"
   /**
    * El hallazgo («Lesión de caries dental»), el tratamiento con su pieza («Endodoncia posterior vital · 46»)
    * o la respuesta de la ficha («Pulpitis irreversible sintomática»).
@@ -61,6 +62,10 @@ export function proposalOrigin(item: ProposedDiagnosis): string {
     const area = areaWords(item)
     return `Del tratamiento «${item.finding}»${area ? ` · ${area.toLowerCase()}` : ""}`
   }
+  if (item.source === "activo") {
+    const where = item.toothNumber != null ? ` · ${item.toothNumber}` : areaWords(item) ? ` · ${areaWords(item)?.toLowerCase()}` : ""
+    return `Sigue activo${where}, de otra atención`
+  }
   if (item.source === "ficha")
     return `De la ficha: «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
   return `Propuesto por el hallazgo «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
@@ -99,6 +104,14 @@ export interface DiagnosisSuggestions {
   mostUsed: DiagnosisOption[]
   /** Lo que dicen las fichas de la atención, esté o no en Diagnóstico (`FormDiagnosisProposals`). */
   fromForms?: FormProposedDiagnosis[]
+  /** «Sin enfermedad»: los atajos de la visita sin enfermedad («Chequeo», «Sin hallazgos»…). */
+  withoutDisease?: WithoutDiseaseOption[]
+}
+
+/** Un atajo de «Sin enfermedad»: se registra definitivo con un toque y no queda activo. */
+export interface WithoutDiseaseOption extends DiagnosisOption {
+  key: string
+  label: string
 }
 
 /** Lo que una ficha de la atención dice que es un diagnóstico: su término, su código y si ya está registrado. */

@@ -168,6 +168,14 @@ type RecordSite = { siteWords: string | null; bodySite: ReturnType<ProductSite["
  * encima si se anuló), en su carpeta del ZIP. `related` es lo que el papel documenta, para
  * enlazarlo en FHIR (`DocumentReference.context.related`, `Consent.sourceAttachment`).
  */
+/** Anulado después de firmar la atención: es «No se hizo», no una corrección del borrador. */
+function notDoneAfterSigning(
+  p: { voidedAt: Date | null },
+  row: { status: string; finalizedAt: Date | null },
+): boolean {
+  return Boolean(p.voidedAt && row.status === "finalizada" && row.finalizedAt && p.voidedAt > row.finalizedAt)
+}
+
 export interface RecordPaperEntry {
   /** «receta», «orden», «descanso», «hoja», «consentimiento» o el del producto («signed_odontogram»). */
   kind: string
@@ -403,6 +411,8 @@ export interface PatientRecord {
     /** Lo anulado de la atención, con su motivo: se corrigió, no se borró. */
     voided: string[]
     procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
+    /** Lo firmado y marcado después «No se hizo»: en FHIR viaja como `entered-in-error`. */
+    notDone: Array<typeof encounterProcedure.$inferSelect & RecordSite>
     /** El examen como lo cuenta el producto: en líneas para el PDF y como Observations para FHIR. */
     exam: { lines: string[]; observations: ExamObservation[] }
     /** Lo corregido después de firmar, con quién y cuándo: también es parte de la historia. */
@@ -1042,10 +1052,18 @@ export async function loadPatientRecord(
           ),
         ...allProcedures
           .filter((p) => p.encounterId === row.id && p.voidedAt)
-          .map((p) => `${p.description}${site.words(p, "short") ? ` · ${site.words(p, "short")}` : ""} · anulado${p.voidReason ? `: ${p.voidReason}` : ""}`),
+          .map((p) => {
+            const where = site.words(p, "short") ? ` · ${site.words(p, "short")}` : ""
+            // Marcado después de firmar: «no se hizo», con su motivo (mesa del cierre, 19 nov).
+            if (notDoneAfterSigning(p, row)) return `${p.description}${where} · no se hizo: ${p.voidReason?.replace(/^No se hizo: /, "") ?? ""}`
+            return `${p.description}${where} · anulado${p.voidReason ? `: ${p.voidReason}` : ""}`
+          }),
       ],
       procedures: procedures
         .filter((p) => p.encounterId === row.id)
+        .map((p) => ({ ...p, ...recordSite(p) })),
+      notDone: allProcedures
+        .filter((p) => p.encounterId === row.id && notDoneAfterSigning(p, row))
         .map((p) => ({ ...p, ...recordSite(p) })),
       exam: {
         lines: hooks.examination.recordLines(row.examination),
@@ -2651,7 +2669,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       targets,
     )
   }
-  for (const { row, diagnoses, procedures, exam } of record.encounters) {
+  for (const { row, diagnoses, procedures, notDone, exam } of record.encounters) {
     const encounterRef = { reference: `Encounter/${row.id}` }
     // Lo observado vale como la atención: definitivo solo si se firmó, en curso si no, y
     // anulado si se anuló (como sus procedimientos). Un borrador no viaja como «final».
@@ -2756,6 +2774,19 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ...(signer ? { performer: [{ actor: signer }] } : {}),
         // El tratamiento del plan que cumple (R4 `basedOn` → su ServiceRequest).
         ...(pr.planItemId ? { basedOn: [{ reference: `ServiceRequest/${pr.planItemId}` }] } : {}),
+      })
+    // Lo firmado por error y marcado «No se hizo»: el registro no debió existir (R4 `entered-in-error`).
+    for (const pr of notDone)
+      resources.push({
+        resourceType: "Procedure",
+        id: pr.id,
+        status: "entered-in-error",
+        subject: patientRef,
+        encounter: encounterRef,
+        code: { text: pr.description },
+        ...(pr.bodySite ? { bodySite: [pr.bodySite] } : {}),
+        performedDateTime: pr.createdAt.toISOString(),
+        ...(pr.voidReason ? { note: [{ text: pr.voidReason }] } : {}),
       })
     // La enfermedad actual de la anamnesis. El relato lleva su sección LOINC (10164-2, «History
     // of present illness Narrative»). El tiempo no tiene código propio: en LOINC la duración es

@@ -183,3 +183,34 @@ it("por sesión: la visita devuelta entera cuenta para el tope y no deja otra po
   // Por sesión, cada visita se carga al firmarla: el pie de la atención no lo da por cobrado.
   expect(account.conCargo).not.toContain(item.id)
 })
+
+// QA en local del 19 nov: tras devolver parte de un tratamiento sin darle el dinero (queda a favor),
+// la cabecera y la tarjeta de Cobros decían dos «debe» distintos y el renglón «Costó» lo que quedó.
+// La cuenta trae lo que hace falta para decirlo igual en los dos lugares: lo devuelto del concepto
+// y, por moneda, lo que debe, lo que tiene a favor y lo que falta pagar.
+it("una devolución parcial que queda a favor: el concepto trae lo devuelto y el saldo descuenta lo que tiene a favor", async () => {
+  const { f, cash, branchId, item } = await acceptedTreatment()
+  const first = await signVisit(f, item.id, f.encounter.id)
+  const charge = first.charges[0]!
+  expect(charge.amountCents).toBe(120_000)
+  const paid = await collect(f, cash.id, branchId, charge.id, 20_000)
+  await f.run((tx) =>
+    returnFromTicket(tx, ...f.args, paid.ticket.id, {
+      branchId,
+      lines: [{ chargeId: charge.id, amountCents: 20_000 }],
+      // Sin medio: no se le da el dinero, queda a favor (ADR 0068).
+      paymentMethodId: null,
+      reason: "Reclamo de la paciente",
+      requestId: randomUUID(),
+    }),
+  )
+  const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+  // Costó 1,200, se le devolvieron 200: el concepto queda en 1,000 y no se pagó nada de él.
+  expect(account.pendiente.map((row) => [row.totalCents, row.returnedCents, row.paidCents, row.saldoCents])).toEqual([
+    [100_000, 20_000, 0, 100_000],
+  ])
+  // Debe 1,000, tiene 200 a favor: falta pagar 800, lo que dice la cabecera.
+  expect(account.byCurrency).toEqual([
+    expect.objectContaining({ currency: "PEN", porCobrar: 100_000, aFavor: 20_000, saldo: 80_000 }),
+  ])
+})

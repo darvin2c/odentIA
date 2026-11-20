@@ -7,6 +7,7 @@
  * problemas.
  */
 
+import { isWithoutDiseaseCode } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
@@ -109,10 +110,15 @@ export async function recordEncounterDiagnosis(
     { code: input.diagnosisCode, system: input.diagnosisSystem },
     { newDiagnosis: true, codable: true, field: "diagnosisCode" },
   )
-  if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
+  const hooks = await productHooks(tx, orgId)
+  // «Sin enfermedad» (el chequeo, sin hallazgos, el control): no hay nada que confirmar, es
+  // definitivo; y no es un problema de la persona: queda resuelto desde que se registra.
+  const withoutDisease = isWithoutDiseaseCode(hooks.withoutDisease, found.system, found.code)
+  const diagnosisType = withoutDisease && !input.diagnosisType ? "confirmed" : input.diagnosisType
+  if (!(DIAGNOSIS_TYPES as readonly string[]).includes(diagnosisType))
     throw invalidField("diagnosisType", "Elige si el diagnóstico es presuntivo o definitivo")
   // Dónde, como lo valida el producto (odentIA: una pieza FDI y sus caras, o un cuadrante o una arcada).
-  const site = await siteOf(tx, orgId)
+  const site = hooks.site
   const columns = site.columns({
     toothNumber: input.toothNumber ?? null,
     surfaces: input.surfaces ?? [],
@@ -148,8 +154,9 @@ export async function recordEncounterDiagnosis(
       encounterId,
       diagnosisSystem: found.system,
       diagnosisCode: found.code,
-      diagnosisType: input.diagnosisType,
+      diagnosisType,
       previouslyDiagnosed,
+      ...(withoutDisease ? { status: "resuelto", resolvedAt: new Date() } : {}),
       ...columns,
       note,
       createdBy: actorUserId,

@@ -99,6 +99,22 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   "¿Por qué la pieza quedó dibujada después del tratamiento?": () => [],
   "¿Cómo se firma el odontograma?": () => [],
   "¿Cómo dicto una atención?": () => [],
+  // Una óptica no tiene atajos «Sin enfermedad» ni consulta propuesta al firmar (19 nov).
+  "¿Cómo agrego o quito un diagnóstico de la atención?": (faq) => [
+    { ...faq, a: faq.a.replace(" Si no tiene ninguna enfermedad, «Sin enfermedad» ofrece «Chequeo» o «Sin hallazgos» con un toque.", "") },
+  ],
+  "¿Qué diagnóstico pongo si el paciente está sano o no tiene nada?": () => [],
+  "¿Por qué al firmar viene marcada la consulta?": () => [],
+  // «No se hizo» es igual, sin odontograma ni piezas.
+  "¿Qué hago si firmé un tratamiento que no hice?": (faq) => [
+    {
+      ...faq,
+      a: faq.a
+        .replace(" el odontograma deja de dibujarlo,", "")
+        .replace("Si lo hiciste en otra pieza, regístralo en una atención nueva.", "Si hiciste otra cosa, regístrala en una atención nueva."),
+      ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "puse la pieza equivocada y ya firme") } : {}),
+    },
+  ],
   "¿Para qué es «Guardar en tu atención de hoy» en la tomografía?": () => [],
   // Las piezas son de odentIA: ni el aviso del tratamiento para otras piezas ni «va después» en la misma pieza.
   "¿Por qué me avisa que el tratamiento es para otras piezas?": () => [],

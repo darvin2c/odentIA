@@ -194,6 +194,15 @@ describe("«Sin cargos nuevos» del cierre de la página", () => {
       "Sin cargos nuevos por ahora: lo marcado «Hoy» se carga al registrarlo, según su presupuesto.",
     )
   })
+  // Mesa del cierre (19 nov): sin nada registrado decía «actos sin costo», que no existían.
+  it("sin nada marcado ni registrado no habla de actos sin costo", () => {
+    expect(
+      noNewChargesWords({ plannedIds: [], registeredIds: new Set(), chargedIds: new Set(), dayWord: "Hoy", registeredCount: 0 }),
+    ).toBe("Sin cargos todavía: no hay nada registrado como hecho.")
+    expect(
+      noNewChargesWords({ plannedIds: [], registeredIds: new Set(), chargedIds: new Set(), dayWord: "Hoy", registeredCount: 1 }),
+    ).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
+  })
   it("lo marcado que ya tiene su cargo (cobro único) no promete otro", () => {
     expect(words(["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
     expect(words([], ["endo"])).toBe("Sin cargos nuevos: actos sin costo o tratamientos ya cargados.")
