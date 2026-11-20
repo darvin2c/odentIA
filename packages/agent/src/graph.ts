@@ -989,7 +989,11 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const route = toolCtx.route ?? null
     // Para reservar o cambiar una cita lo primero que el modelo pide es quién
     // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
-    const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
+    // Quien cuenta un dolor recibe una cita: también se mira si ya tiene una.
+    const prefetched =
+      route?.path === "cambio_cita" || route?.path === "cita" || (route?.path === "clinico" && available.has("buscar_huecos"))
+        ? await prefetchPatientSummary()
+        : null
     // Cómo va la atención (ADR 0104): la indicación del turno dice lo que
     // falta y lo que ya se hizo no se vuelve a ordenar.
     const progress = attentionProgress({ items, startedAt, state, promotions: clinicData.promotions.map((promo) => promo.name), name: givenName })
