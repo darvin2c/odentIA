@@ -13,6 +13,7 @@ import {
 } from "@odentia/ui"
 import { useMemo, useState } from "react"
 import { productUi } from "../../product/product-ui"
+import { type FreeTextCommit, useFreeTextCombobox } from "./free-text-combobox"
 
 type Item = { key: string; dci: string; detail: string }
 
@@ -58,8 +59,20 @@ export function MedicationPicker({
     return found
   }, [typed])
   const selected = value ? { key: `valor:${value}`, dci: value, detail: "" } : null
+  // Lo escrito sin elegir también vale (Enter o salir del campo): queda tal cual.
+  const commitTyped = (): FreeTextCommit => {
+    if (typed === null) return "nada"
+    const text = typed.trim()
+    setTyped(null)
+    // Lo que ya estaba elegido (también el nombre que escribe la lista al elegir) no es nuevo.
+    if (text === value) return "nada"
+    onChange(text)
+    return text ? "guardado" : "nada"
+  }
+  const freeText = useFreeTextCombobox(commitTyped)
   return (
     <Combobox
+      {...freeText.rootProps}
       items={items}
       value={selected}
       inputValue={typed ?? value}
@@ -80,10 +93,9 @@ export function MedicationPicker({
         triggerLabel="Mostrar la lista de medicamentos"
         autoComplete="off"
         disabled={disabled}
+        onKeyDown={freeText.onKeyDown}
         onBlur={() => {
-          // Lo escrito sin elegir también vale: queda tal cual.
-          if (typed !== null && typed.trim() !== value) onChange(typed.trim())
-          setTyped(null)
+          commitTyped()
         }}
       />
       <ComboboxContent aria-label="Medicamentos">
