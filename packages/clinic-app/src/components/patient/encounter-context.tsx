@@ -98,10 +98,13 @@ export function EncounterHealthReview({
   patient,
   disabled,
   dictation = null,
+  anchorId,
 }: {
   patientId: string
   patient: PatientFull
   disabled: boolean
+  /** El id del aviso: la firma lleva a él («Lo que dijo de su salud, sin revisar»). */
+  anchorId?: string
   /** Lo que Clío oyó de su salud en esta consulta se revisa en el mismo aviso. */
   dictation?: DictationSession | null
 }): React.JSX.Element | null {
@@ -121,6 +124,7 @@ export function EncounterHealthReview({
         sex={patient.patient.sex}
         child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
         dictation={dictation}
+        {...(anchorId ? { anchorId } : {})}
       />
       <ConsultHealthReviewed health={health.data.data} patientName={patient.patient.displayName} today={clinicToday()} />
     </>

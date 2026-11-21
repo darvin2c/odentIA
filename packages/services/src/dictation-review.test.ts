@@ -12,6 +12,7 @@ import {
   DICTATION_SENTENCE_CHARS,
   dictationSentences,
   type DictationReviewInput,
+  releaseDictationReview,
   saveDictationReview,
   setDictationTurnSpeaker,
   startDictationReview,
@@ -71,7 +72,7 @@ async function conversation() {
 describe("cuándo toca el repaso", () => {
   it("solo con tramos que ningún repaso leyó: terminar otra vez sin decir nada no vuelve a llamar al modelo", async () => {
     await enable(true)
-    const { pause, start, review } = await conversation()
+    const { fx, pause, start, review } = await conversation()
     expect(await start()).toEqual({ due: false })
     await pause("Buenos días, ¿qué la trae por aquí?")
     await pause("Me duele una muela cuando tomo algo frío.")
@@ -83,6 +84,10 @@ describe("cuándo toca el repaso", () => {
       [2, "Me duele una muela cuando tomo algo frío.", true],
     ])
     expect(first.earlierLeftOut).toBe(false)
+    // Mientras ese repaso lee, otro pedido (otra pestaña) no paga otra llamada (revisión del 21 nov, C1).
+    expect(await start()).toEqual({ due: false, inProgress: true })
+    // Si el primero falla, lo nuevo deja de estar en curso y se puede pedir ya.
+    await fx.run((tx) => releaseDictationReview(tx, ORG, fx.encounter.id, first.readIds))
     await review()
     expect(await start()).toEqual({ due: false })
     await pause("Te veo la próxima semana para la otra resina.")
@@ -92,11 +97,12 @@ describe("cuándo toca el repaso", () => {
 
   it("con más de lo que lee de una vez, lee los últimos tramos enteros y dice que dejó lo de antes", async () => {
     await enable(true)
-    const { pause, start, review } = await conversation()
+    const { fx, pause, start, review } = await conversation()
     const long = `${"Le molesta al masticar del lado izquierdo desde hace semanas. ".repeat(180)}Fin.`
     for (let index = 0; index < 4; index += 1) await pause(`${index}. ${long}`)
     const started = await start()
     if (!started.due) throw new Error("No tocaba el repaso")
+    await fx.run((tx) => releaseDictationReview(tx, ORG, fx.encounter.id, started.readIds))
     expect(started.earlierLeftOut).toBe(true)
     expect(started.segments.reduce((sum, item) => sum + item.transcript.length + 1, 0)).toBeLessThanOrEqual(DICTATION_REVIEW_CHARS)
     expect(started.segments.at(-1)?.transcript.startsWith("3.")).toBe(true)
@@ -232,6 +238,8 @@ describe("lo que propone el repaso", () => {
     const started = await fx.run((tx) => startDictationReview(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { openForms: [form!.id] }))
     if (!started.due) throw new Error("No tocaba el repaso")
     const number = (fieldId: string) => started.forms.find((item) => item.fieldId === fieldId)?.number
+    // Ese repaso solo sirvió para ver los números de las preguntas: no queda en curso.
+    await fx.run((tx) => releaseDictationReview(tx, ORG, fx.encounter.id, started.readIds))
     const result = await review(
       {
         drafts: [

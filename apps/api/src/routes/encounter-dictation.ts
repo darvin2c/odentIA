@@ -25,11 +25,13 @@ import {
   listVoiceRemovedDictation,
   pendingFormValues,
   productDictation,
-  requireClinicalAssistant,
+  releaseDictationReview,
+  releaseDictationSegment,
   saveDictationReview,
   saveDictationSegment,
   setDictationTurnSpeaker,
   settleDictationMedicalLeave,
+  settleDictationRetry,
   settleDictationSegment,
   startDictationReview,
   startDictationSegment,
@@ -46,18 +48,33 @@ import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
+/** Lo que responde una pausa que no llamó al modelo: ya ordenada, o otro pedido la está ordenando. */
+const NOTHING_NEW = { suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, unusedFor: {}, model: null }
+
+/** Si falla, quita la marca de «en curso» (sin tapar el error): se puede volver a intentar ya. */
+async function releasingOnError<T>(work: () => Promise<T>, release: () => Promise<void>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    await release().catch(() => undefined)
+    throw error
+  }
+}
+
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
 /** Descartar: en una respuesta de ficha en la que Clío dudaba, la opción que eligió la persona. */
 const discardInput = z.object({ chosen: z.string().min(1).max(200).optional() })
 // Un tramo del dictado: lo nuevo y su identidad, para que reenviar el mismo tramo no lo ordene
-// otra vez. Lo dicho antes ya está guardado con la atención (ADR 0209): el contexto que mande la
-// pestaña no se usa (se acepta para no rechazar una pantalla de antes).
+// otra vez. Lo dicho antes ya está guardado con la atención (ADR 0209): la pantalla ya no manda
+// contexto, y el de una pestaña abierta desde antes se acepta y no se usa.
 const dictateInput = z
   .object({
     transcript: z.string().trim().min(3).max(12_000),
     context: z.string().max(2_000).optional(),
     segmentId: z.uuid().optional(),
+    /** «Intentar otra vez» una frase de «No lo usé»: el tramo donde se dijo (no se guarda otra vez). */
+    retryOf: z.string().min(1).max(100).optional(),
     /** Las fichas abiertas en pantalla: Clío las lee además de las dos últimas tocadas. */
     openForms: z.array(z.uuid()).max(5).optional(),
   })
@@ -178,7 +195,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = dictateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { transcript, openForms } = parsed.data
+    const { transcript, openForms, retryOf } = parsed.data
     // Sin identidad (una pantalla de antes), el tramo se guarda con una propia.
     const segmentId = parsed.data.segmentId ?? crypto.randomUUID()
     try {
@@ -186,9 +203,10 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo
         // guardado; uno ya ordenado no se vuelve a mandar ni a cobrar, aunque no haya dejado nada.
         const ready = await withOrgContext(deps.db, orgId, async (tx) => {
-          const dictation = await requireClinicalAssistant(tx, orgId)
-          const started = await startDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { segmentId, transcript })
-          if (started.repeated) return null
+          const started = await startDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { segmentId, transcript, retryOf })
+          // Otro pedido del mismo tramo lo está ordenando: no se paga dos veces (la pantalla espera).
+          if (started.repeated || started.inProgress) return started.inProgress ? "en_curso" : null
+          const { dictation } = started
           // Lo dicho antes sale de lo guardado: sirve igual tras recargar o desde otra pestaña.
           const context = started.context || undefined
           // Las pendientes y, detrás, lo confirmado hoy: «quita la endodoncia» también alcanza a lo
@@ -211,18 +229,28 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             ],
           }
         })
-        if (!ready) return { suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, unusedFor: {}, repeated: true, model: null }
-        // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
-        // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
-        await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
-        // La segunda lectura de las fichas va dentro: es la misma pausa, de la misma atención.
-        const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
-          extractDictation(
-            deps.db,
-            { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context: ready.context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
-          ),
-          { encounterId: at.data.encounterId },
+        if (ready === null) return { ...NOTHING_NEW, repeated: true }
+        if (ready === "en_curso") return { ...NOTHING_NEW, repeated: true, inProgress: true }
+        const extracted = await releasingOnError(
+          async () => {
+            // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
+            // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
+            await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
+            // La segunda lectura de las fichas va dentro: es la misma pausa, de la misma atención.
+            return meterAiUse(
+              deps.db,
+              orgId,
+              "dictado",
+              () =>
+                extractDictation(
+                  deps.db,
+                  { secretsKey: deps.secretsKey, platform: deps.llm },
+                  { orgId, transcript, context: ready.context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
+                ),
+              { encounterId: at.data.encounterId },
+            )
+          },
+          () => withOrgContext(deps.db, orgId, (tx) => releaseDictationSegment(tx, orgId, at.data.encounterId, retryOf ?? segmentId)),
         )
         // El número que usó el modelo es la posición en la lista que se le dio.
         const target = (index: number) => ready.list[index]?.id
@@ -247,7 +275,10 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             formQuestions: ready.forms,
           })
           // El tramo queda ordenado, con lo que no se usó y por qué: se ve igual al volver a la atención.
-          if (!result.repeated) await settleDictationSegment(tx, orgId, at.data.encounterId, segmentId, unusedOf(extracted, onConfirmed, result.droppedForms))
+          // Una frase reintentada sale de «No lo usé» de su tramo, o vuelve con lo que se sabe ahora.
+          const left = unusedOf(extracted, onConfirmed, result.droppedForms)
+          if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left)
+          else if (!result.repeated) await settleDictationSegment(tx, orgId, at.data.encounterId, segmentId, left)
           return result
         })
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
@@ -291,27 +322,33 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     try {
       return await runService(c, 200, async () => {
         const ready = await withOrgContext(deps.db, orgId, (tx) => startDictationReview(tx, orgId, userId, at.data.id, at.data.encounterId, { openForms: parsed.data.openForms ?? [] }))
-        if (!ready.due) return idle
-        await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
-        const reviewed = await meterAiUse(
-          deps.db,
-          orgId,
-          "dictado",
-          () =>
-            reviewDictation(
+        // Otro repaso ya lee lo nuevo: este no lo paga otra vez; la pantalla vuelve a mirar al rato.
+        if (!ready.due) return ready.inProgress ? { ...idle, inProgress: true } : idle
+        const reviewed = await releasingOnError(
+          async () => {
+            await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
+            return meterAiUse(
               deps.db,
-              { secretsKey: deps.secretsKey, platform: deps.llm },
-              {
-                orgId,
-                segments: ready.segments,
-                earlierLeftOut: ready.earlierLeftOut,
-                pending: ready.pending,
-                confirmed: ready.confirmed,
-                discarded: ready.discarded,
-                forms: ready.forms,
-              },
-            ),
-          { encounterId: at.data.encounterId },
+              orgId,
+              "dictado",
+              () =>
+                reviewDictation(
+                  deps.db,
+                  { secretsKey: deps.secretsKey, platform: deps.llm },
+                  {
+                    orgId,
+                    segments: ready.segments,
+                    earlierLeftOut: ready.earlierLeftOut,
+                    pending: ready.pending,
+                    confirmed: ready.confirmed,
+                    discarded: ready.discarded,
+                    forms: ready.forms,
+                  },
+                ),
+              { encounterId: at.data.encounterId },
+            )
+          },
+          () => withOrgContext(deps.db, orgId, (tx) => releaseDictationReview(tx, orgId, at.data.encounterId, ready.readIds)),
         )
         const segmentOf = (number: number) => ready.segments.find((segment) => segment.number === number)?.segmentId
         const saved = await withOrgContext(deps.db, orgId, (tx) =>

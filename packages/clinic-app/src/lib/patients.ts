@@ -333,9 +333,25 @@ export interface SaidHealth {
   suggestionId: string
   encounterId: string
   by: HealthDeclarant
-  /** `key`: el grupo («anticoagulants») o el campo de la entrevista («dental.problemaAnestesia»). */
-  rows: Array<{ key: string; label: string; value: string }>
+  /**
+   * `key`: el grupo («anticoagulants») o el campo de la entrevista («dental.problemaAnestesia»);
+   * `by`: quién lo dijo; `before`: lo que dijo antes, si lo dijo distinto.
+   */
+  rows: Array<{
+    key: string
+    label: string
+    value: string
+    group?: string
+    by?: { declarante: "paciente" | "acompanante" | "no_se_sabe"; vinculo?: string }
+    before?: string | null
+    denied?: boolean
+  }>
   at: string
+  /**
+   * Su atención sigue en borrador y se revisa ahí; si no, ya se firmó y lo dicho sigue esperando
+   * (revisión del 21 nov, A3). Un servidor de antes no lo manda: solo avisaba lo de un borrador.
+   */
+  open?: boolean
 }
 
 export { ALLERGY_SEVERITIES } from "@odentia/clinical"

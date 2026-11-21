@@ -589,10 +589,11 @@ describe("las respuestas de una ficha", () => {
  */
 describe("lo de salud dicho en la conversación", () => {
   const fixed = DENTAL_DICTATION_PROFILE.systemPrompt({ services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText() })
-  const schema = z.toJSONSchema(DENTAL_DICTATION_PROFILE.extraction) as { properties: Record<string, { properties?: Record<string, unknown> }> }
+  const schema = z.toJSONSchema(DENTAL_DICTATION_PROFILE.extraction) as { properties: Record<string, { properties?: Record<string, unknown>; items?: { properties?: Record<string, unknown> } }> }
 
   it("tiene su parte `salud`, con quién lo dijo, lo de su registro y lo de la boca", () => {
-    const salud = schema.properties["salud"]?.properties ?? {}
+    // Una entrada por cada persona que lo dijo (revisión del 21 nov, A4).
+    const salud = schema.properties["salud"]?.items?.properties ?? {}
     expect(Object.keys(salud)).toEqual(
       expect.arrayContaining(["declarante", "vinculo", "allergies", "conditions", "medications", "anticoagulants", "boneMedicines", "personal", "dental", "medical", "dicho"]),
     )
@@ -644,5 +645,34 @@ describe("lo de salud dicho en la conversación", () => {
         sourceText: "Tiene asma, usa salbutamol.",
       },
     ])
+  })
+
+  it("una entrada por cada persona que lo dijo, cada una con su frase (A4)", () => {
+    const transcript = "Tomo losartán. Mi papá también toma metformina, doctora."
+    const read = readDictation(
+      {
+        salud: [
+          { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, dicho: "Tomo losartán." },
+          { declarante: "acompanante", vinculo: "hija", medications: { state: "recorded", items: [{ name: "metformina" }] }, dicho: "también toma metformina" },
+        ],
+      },
+      transcript,
+      0,
+    )
+    expect(read?.drafts.map((draft) => [draft.payload["declarante"], draft.sourceText])).toEqual([
+      ["paciente", "Tomo losartán."],
+      ["acompanante", "también toma metformina"],
+    ])
+  })
+
+  it("sin su frase dicha no se propone: va a lo que no usé (A5)", () => {
+    // Antes entraba igual, con la frase vacía: «dijo apixabán, sin confirmar» sin que nadie lo dijera.
+    const read = readDictation(
+      { salud: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, dicho: "tomo apixabán" } },
+      "Tomo warfarina desde el año pasado.",
+      0,
+    )
+    expect(read?.drafts).toEqual([])
+    expect(read?.omitted).toBe(1)
   })
 })

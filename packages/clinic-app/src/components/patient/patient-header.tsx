@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
+import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, shortDay, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { accountHeaderWords, fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -561,17 +561,22 @@ const SAID_IN_STRIP = new Set([
  * «Anticoagulante: dijo apixabán, sin confirmar», «Alergias: no sabe, sin confirmar»: lo que dijo
  * en una consulta en curso y nadie confirmó (`listSaidHealth`), una vez por dato. Lo que nombró
  * avisa en ámbar; su «No» o su «No sé», en gris: no es una alerta, pero tampoco es «no preguntado».
+ * Lo de una atención ya firmada sigue avisándose, con el día en que lo dijo («dijo apixabán el 20
+ * nov»), hasta que alguien lo revise o diga que no lo registra (revisión del 21 nov, A3). De un mismo
+ * dato vale lo último que dijo.
  */
 export function saidHealthAlerts(said: readonly SaidHealth[]): Array<{ id: string; key: string; label: string; tone: "warning" | "secondary" }> {
   const seen = new Set<string>()
-  return said.flatMap((item) =>
+  const latest = [...said].sort((a, b) => b.at.localeCompare(a.at))
+  return latest.flatMap((item) =>
     item.rows.flatMap((row) => {
       if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
       seen.add(row.key)
       const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
       const quiet = row.value === "dijo que no" || row.value === "no sabe"
       const words = quiet ? row.value : row.value.startsWith("sí, no dijo cuál") ? "dijo que sí" : `dijo ${row.value}`
-      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
+      const when = item.open === false && shortDay(item.at) ? ` el ${shortDay(item.at)}` : ""
+      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}${when}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
     }),
   )
 }

@@ -158,6 +158,79 @@ describe("cada tramo se ordena una sola vez", () => {
   })
 })
 
+/**
+ * Revisión del 21 nov 2026 (C1 y C3): dos pedidos del mismo tramo a la vez (el reintento tras un
+ * corte, otra pestaña) no pagan dos veces al modelo; «Intentar otra vez» una frase no la guarda
+ * como otro tramo.
+ */
+describe("un tramo o un repaso en curso", () => {
+  /** Una llamada al modelo que no termina hasta que se la suelta. */
+  function held<T>(value: T) {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return { release: () => release(), answer: async () => (await gate, value) }
+  }
+
+  it("el segundo pedido del mismo tramo, mientras Clío lo ordena, no llama otra vez al modelo", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    const segmentId = crypto.randomUUID()
+    const slow = held(nothing("Me duele al masticar."))
+    extract.mockImplementationOnce(slow.answer)
+    const first = app.request(base, json({ transcript: "Me duele al masticar.", segmentId }))
+    await vi.waitFor(() => expect(extract).toHaveBeenCalledTimes(1))
+    const second = await app.request(base, json({ transcript: "Me duele al masticar.", segmentId }))
+    expect(second.status).toBe(201)
+    expect(((await second.json()) as { data: { inProgress?: boolean } }).data.inProgress).toBe(true)
+    slow.release()
+    expect((await first).status).toBe(201)
+    expect(extract).toHaveBeenCalledTimes(1)
+    // Ya ordenado, el mismo pedido dice que está repetido, sin llamar al modelo.
+    const again = await app.request(base, json({ transcript: "Me duele al masticar.", segmentId }))
+    expect(((await again.json()) as { data: { repeated: boolean; inProgress?: boolean } }).data).toMatchObject({ repeated: true })
+    expect(extract).toHaveBeenCalledTimes(1)
+  })
+
+  it("dos repasos a la vez pagan uno; si falla, se puede pedir otra vez enseguida", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    await app.request(base, json({ transcript: "Te veo la próxima semana.", segmentId: crypto.randomUUID() }))
+    const slow = held(reviewed())
+    review.mockImplementationOnce(slow.answer)
+    const first = app.request(`${base}/review`, json({}))
+    await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(1))
+    const second = await app.request(`${base}/review`, json({}))
+    expect(((await second.json()) as { data: { reviewed: boolean; inProgress?: boolean } }).data).toMatchObject({ reviewed: false, inProgress: true })
+    slow.release()
+    expect((await first).status).toBe(200)
+    expect(review).toHaveBeenCalledTimes(1)
+
+    await app.request(base, json({ transcript: "Gracias, doctora.", segmentId: crypto.randomUUID() }))
+    review.mockRejectedValueOnce(new Error("el proveedor no respondió"))
+    expect((await app.request(`${base}/review`, json({}))).status).toBeGreaterThanOrEqual(500)
+    expect((await app.request(`${base}/review`, json({}))).status).toBe(200)
+    expect(review).toHaveBeenCalledTimes(3)
+  })
+
+  it("«Intentar otra vez» relee la frase con lo dicho antes de su tramo, sin guardarla como otro tramo", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    const segmentId = crypto.randomUUID()
+    await app.request(base, json({ transcript: "Le duele la treinta y seis.", segmentId: crypto.randomUUID() }))
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) => nothing(input.transcript, { omitted: 1, unused: ["y algo de la tiroides"] }))
+    await app.request(base, json({ transcript: "Buenos días, y algo de la tiroides.", segmentId }))
+    const res = await app.request(base, json({ transcript: "y algo de la tiroides", segmentId: crypto.randomUUID(), retryOf: segmentId }))
+    expect(res.status).toBe(201)
+    expect(read(2)).toMatchObject({ transcript: "y algo de la tiroides", context: "Le duele la treinta y seis." })
+    const { data } = (await (await app.request(`${base}/said`)).json()) as { data: { segments: Array<{ transcript: string; unused: unknown[] }> } }
+    // Antes la frase quedaba dos veces en «Lo que se dijo», con otra hora.
+    expect(data.segments.map((item) => item.transcript)).toEqual(["Le duele la treinta y seis.", "Buenos días, y algo de la tiroides."])
+    expect(data.segments[1]?.unused).toEqual([])
+  })
+})
+
 describe("la pausa lee lo dicho antes desde el servidor", () => {
   it("tras recargar, la pausa siguiente lleva el final de lo dicho antes, y no lo que mande la pestaña", async () => {
     const app = buildApp("owner")
@@ -216,6 +289,17 @@ describe("«Lo que se dijo» se lee del servidor", () => {
       const res = await buildApp(role).request(`${base}/said`)
       expect(res.status, role).toBe(403)
     }
+  })
+
+  it("lo que dijo de su salud en una atención firmada solo lo revisa o lo descarta quien escribe en la historia", async () => {
+    const { patientId } = await attention(buildApp("owner"))
+    const id = crypto.randomUUID()
+    for (const role of ["reception", "cashier"])
+      for (const action of ["confirm", "discard"]) {
+        const res = await buildApp(role).request(`/patients/${patientId}/health/said/${id}/${action}`, json({}))
+        expect(res.status, `${role} ${action}`).toBe(403)
+      }
+    expect((await buildApp("owner").request(`/patients/${patientId}/health/said/${id}/discard`, json({}))).status).toBe(404)
   })
 })
 
@@ -282,7 +366,8 @@ describe("«Lo revisé con…» de lo que dijo de su salud", () => {
     expect(res.status).toBe(200)
     const { data } = (await res.json()) as { data: { status: string; payload: Record<string, unknown>; summary: string } }
     expect(data.status).toBe("lista")
-    expect(data.payload).toEqual({ declarante: "paciente", dental: { ansiedadDental: "alta" } })
+    const { quien: _who, ...shown } = data.payload
+    expect(shown).toEqual({ declarante: "paciente", dental: { ansiedadDental: "alta" } })
     expect(data.summary).not.toContain("metformina")
     // Sin nada de su salud, la propuesta no se guarda vacía: la pantalla la descarta.
     expect((await patch({ dental: null })).status).toBe(400)

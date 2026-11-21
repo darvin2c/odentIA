@@ -73,6 +73,7 @@ function sessionWith(over: Partial<Record<keyof Session, unknown>> = {}): Sessio
     save: mutation(),
     confirmReady: mutation(),
     confirmHealth: mutation(),
+    discardHealth: mutation(),
     settleHealthGroups: mutation(),
     noteAddsTo: () => "",
     openEdit: vi.fn(),
@@ -99,6 +100,11 @@ const heard = suggestion({
   payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, conditions: { state: "none", items: [] } },
   sourceText: "tomo warfarina perdón apixabán",
   summary: "Anticoagulante: apixabán (antes dijo «warfarina»)\nEnfermedades: dijo que no\nLo dijo: el paciente",
+  // Las filas las arma el servidor (`healthRows`), con quién dijo cada dato.
+  healthRows: [
+    { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: "warfarina", denied: false },
+    { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", by: { declarante: "paciente" }, before: null, denied: true },
+  ],
 })
 
 const health: PatientHealth = {
@@ -171,15 +177,85 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
     expect(confirmable(none)).toBe(false)
   })
 
-  it("lee la tarjeta del servidor tal cual: el valor, lo de antes y quién lo dijo", () => {
+  it("lee las filas que arma el servidor, sin volver a leer el texto de la tarjeta: el valor, lo de antes y quién lo dijo", () => {
     expect(heardHealth(heard)).toEqual({
       rows: [
-        { group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina" },
-        { group: "conditions", label: "Enfermedades", value: "dijo que no", before: null },
+        { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina", by: "el paciente", denied: false },
+        { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", before: null, by: "el paciente", denied: true },
       ],
       by: "el paciente",
     })
-    expect(heardHealth({ summary: "Alergias: no sabe\nNo se sabe quién lo dijo" }).by).toBeNull()
+    // Un salto de línea en un nombre ya no rompe la lectura.
+    const odd = heardHealth({ healthRows: [{ key: "medications", group: "medications", label: "Medicación", value: "losartán\n50 mg", by: { declarante: "no_se_sabe" }, before: null }] })
+    expect(odd.rows.map((row) => row.value)).toEqual(["losartán\n50 mg"])
+    expect(odd.by).toBeNull()
+  })
+
+  it("lo que dijo cada persona, con su nombre en su fila (A4)", () => {
+    const both = suggestion({
+      id: "salud-2",
+      healthRows: [
+        { key: "medications", group: "medications", label: "Medicación", value: "losartán · metformina (lo dijo su hija)", by: { declarante: "paciente" }, before: null, denied: false },
+        { key: "dental.bruxismo", group: "dental", label: "Rechina o aprieta los dientes", value: "sí", by: { declarante: "acompanante", vinculo: "hija" }, before: null, denied: false },
+      ],
+    })
+    renderNotice(sessionWith({ suggestions: [both] }))
+    const grind = screen.getByRole("heading", { name: "Rechina o aprieta los dientes" }).closest("li") as HTMLElement
+    expect(grind.textContent).toContain("lo dijo su hija")
+    expect((screen.getByRole("heading", { name: "Medicación" }).closest("li") as HTMLElement).textContent).toContain("lo dijo Rosa")
+  })
+
+  it("un «No» no se guarda con «Lo revisé con…»: si es lo único que queda, no se ofrece; «No lo registro» lo deja de avisar (A2)", () => {
+    const onlyNo = suggestion({
+      id: "salud-3",
+      healthRows: [{ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "dijo que no", by: { declarante: "paciente" }, before: null, denied: true }],
+    })
+    const session = sessionWith({ suggestions: [onlyNo] })
+    renderNotice(session)
+    const row = screen.getByRole("heading", { name: "Anticoagulante" }).closest("li") as HTMLElement
+    expect(row.textContent).toContain("un «no»: anótalo en Antecedentes si va")
+    expect(screen.queryByRole("button", { name: "Lo revisé con Rosa" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "No lo registro" }))
+    expect(session.discardHealth.mutate).toHaveBeenCalledWith(onlyNo, expect.anything())
+  })
+
+  it("lo que dijo en una atención ya firmada sigue aquí con su fecha, con «Lo revisé con…» y «No lo registro» (A3)", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    route.mockResolvedValue({ data: { health } })
+    render(
+      <QueryClientProvider client={client}>
+        <HealthReviewNotice
+          patientId="p-1"
+          patientName="Rosa Quispe"
+          health={{
+            ...health,
+            allergyReviewDue: false,
+            reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
+            said: [
+              {
+                suggestionId: "9a3c1c2e-5b7d-4a49-9c55-2a7a1f0e0c11",
+                encounterId: "e-0",
+                by: { kind: "patient", name: null, relation: null },
+                at: "2026-11-20T15:00:00.000Z",
+                open: false,
+                rows: [{ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false }],
+              },
+            ],
+          }}
+          dictation={sessionWith()}
+        />
+      </QueryClientProvider>,
+    )
+    const earlier = screen.getByRole("heading", { name: "Lo que dijo el 20 nov, sin revisar" }).closest("li") as HTMLElement
+    expect(earlier.textContent).toContain("Anticoagulante: apixabán")
+    fireEvent.click(within(earlier).getByRole("button", { name: "Lo revisé con Rosa" }))
+    await waitFor(() =>
+      expect(route).toHaveBeenCalledWith("/api/patients/p-1/health/said/9a3c1c2e-5b7d-4a49-9c55-2a7a1f0e0c11/confirm", expect.objectContaining({ method: "POST" })),
+    )
+    fireEvent.click(within(earlier).getByRole("button", { name: "No lo registro" }))
+    await waitFor(() =>
+      expect(route).toHaveBeenCalledWith("/api/patients/p-1/health/said/9a3c1c2e-5b7d-4a49-9c55-2a7a1f0e0c11/discard", expect.objectContaining({ method: "POST" })),
+    )
   })
 })
 
@@ -202,6 +278,28 @@ describe("la franja avisa lo dicho sin confirmar", () => {
       ["Anticoagulante: dijo apixabán, sin confirmar", "warning"],
       ["Alergias: no sabe, sin confirmar", "secondary"],
     ])
+  })
+
+  it("firmada la atención, lo sigue avisando con el día en que lo dijo; de un dato vale lo último (A3)", () => {
+    const alerts = saidHealthAlerts([
+      {
+        suggestionId: "salud-0",
+        encounterId: "e-0",
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-18T15:00:00.000Z",
+        open: false,
+        rows: [{ key: "anticoagulants", label: "Anticoagulante", value: "warfarina" }],
+      },
+      {
+        suggestionId: "salud-1",
+        encounterId: "e-1",
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-20T15:00:00.000Z",
+        open: false,
+        rows: [{ key: "anticoagulants", label: "Anticoagulante", value: "apixabán" }],
+      },
+    ])
+    expect(alerts.map((alert) => alert.label)).toEqual(["Anticoagulante: dijo apixabán el 20 nov, sin confirmar"])
   })
 })
 
@@ -229,6 +327,7 @@ function renderSaid(segments: Segment[], over: Partial<Record<keyof Session, unk
     interim: "",
     base: "/api/patients/p-1/encounters/e-1/dictation",
     submitTyped: vi.fn(),
+    retryUnused: vi.fn(),
     blocked: null,
     organizing: false,
     ...over,
@@ -267,7 +366,9 @@ describe("«Lo que se dijo», del servidor", () => {
     expect(unused.textContent).toContain("«algo de la tiroides no me acuerdo el nombre»")
     expect(unused.textContent).toContain("no supe dónde va")
     fireEvent.click(within(unused).getByRole("button", { name: "Intentar otra vez: «algo de la tiroides no me acuerdo el nombre»" }))
-    expect(session.submitTyped).toHaveBeenCalledWith("algo de la tiroides no me acuerdo el nombre")
+    // Se relee la frase de su tramo: no se suma a lo que se dijo como si se hubiera dicho otra vez (C3).
+    expect(session.retryUnused).toHaveBeenCalledWith("t-2", "algo de la tiroides no me acuerdo el nombre")
+    expect(session.submitTyped).not.toHaveBeenCalled()
     // Parece de su salud: se lleva a sus antecedentes.
     fireEvent.click(within(unused).getByRole("button", { name: "Llevar a su salud: «algo de la tiroides no me acuerdo el nombre»" }))
     expect(openWide).toHaveBeenCalledWith({ id: "antecedentes", review: true })
@@ -382,6 +483,18 @@ describe("«Lo que se dijo» de una atención firmada", () => {
     ])
   })
 
+  it("si no se pudo cargar, lo dice en vez de esconderse", async () => {
+    route.mockRejectedValue(new Error("sin red"))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <EncounterSaidLink patientId="p-1" encounterId="e-9" />
+      </QueryClientProvider>,
+    )
+    expect((await screen.findByRole("alert")).textContent).toBe("No pude cargar lo que se dijo en esta atención.")
+    expect(screen.getByRole("button", { name: "Intentar otra vez" })).toBeTruthy()
+  })
+
   it("sin nada dicho no aparece", async () => {
     route.mockResolvedValue({ data: { segments: [], used: [] } })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -392,5 +505,26 @@ describe("«Lo que se dijo» de una atención firmada", () => {
     )
     await waitFor(() => expect(route).toHaveBeenCalled())
     expect(screen.queryByRole("button", { name: "Lo que se dijo" })).toBeNull()
+  })
+})
+
+describe("al firmar, lo que dijo de su salud (A3)", () => {
+  it("aparece como lo que es, con un enlace al aviso; no como «Falta completarla» con un cajón vacío", async () => {
+    const { DictationSignList } = await import("./dictation-sign-list")
+    const onComplete = vi.fn()
+    const onReviewHealth = vi.fn()
+    const session = sessionWith({ suggestions: [heard], confirmMany: mutation(), confirmManyFailed: null })
+    render(<DictationSignList session={session} busy={false} toggled={[]} onToggledChange={vi.fn()} onComplete={onComplete} onOpenForm={vi.fn()} onReviewHealth={onReviewHealth} />)
+    const list = screen.getByRole("list", { name: /Lo que propone/ })
+    expect(list.textContent).toContain("Lo que dijo de su salud, sin revisar")
+    expect(list.textContent).toContain("Anticoagulante: apixabán")
+    expect(list.textContent).toContain("Si firmas, sigue avisándose hasta que alguien lo revise.")
+    expect(list.textContent).not.toContain("Falta completarla")
+    expect(within(list).queryByRole("button", { name: "Completar" })).toBeNull()
+    // No frena ni entra con la firma: no tiene casilla.
+    expect(within(list).queryByRole("checkbox")).toBeNull()
+    fireEvent.click(within(list).getByRole("button", { name: "Revisarlo ahora" }))
+    expect(onReviewHealth).toHaveBeenCalled()
+    expect(onComplete).not.toHaveBeenCalled()
   })
 })

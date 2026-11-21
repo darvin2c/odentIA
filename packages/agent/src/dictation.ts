@@ -120,17 +120,20 @@ export const DICTATION_TOOL = "registrar_dictado"
 
 /**
  * Lo de salud dicho en la conversación (mesa del 20 nov 2026), con lo que pregunta el producto
- * (`ProductDictation.health`): una sola entrada por pausa, con quién lo dijo y su frase. La forma es
- * la de su registro; el servicio la valida y guarda solo eso. Sin `dicho`, lo que lee `readDictation`.
+ * (`ProductDictation.health`): una entrada por cada persona que lo dijo en la pausa, con quién lo
+ * dijo y su frase (revisión del 21 nov, A4: con una sola entrada, la metformina que dijo la hija
+ * quedaba a nombre del paciente). La forma es la de su registro; el servicio la valida y guarda solo
+ * eso. Sin `dicho`, lo que lee `readDictation`; una entrada cuya frase no está en lo dicho no se usa.
  */
 export function dictationHealthPart(own: Parameters<typeof dictationHealthSchema>[0]) {
   const schema = dictationHealthSchema(own)
   return {
     schema,
-    part: schema
-      .extend({ dicho: dictationSaid })
-      .optional()
-      .describe("Lo que se dijo de la salud del paciente en la conversación, en una sola entrada. Omítela si no se habló de su salud."),
+    part: z
+      .array(schema.extend({ dicho: dictationSaid }))
+      .max(3)
+      .default([])
+      .describe("Lo que se dijo de la salud del paciente en la conversación: una entrada por cada persona que lo dijo. Vacío si no se habló de su salud."),
   }
 }
 
@@ -144,7 +147,7 @@ export function healthPrompt(input: { topics: string; notInRelato: string; measu
   return [
     `En \`salud\` va lo que se dice de la salud del paciente en la conversación, lo cuente él o quien lo acompaña: ${input.topics}. Solo lo que se dijo: no lo deduzcas de un medicamento, de un diagnóstico ni de lo habitual. Si se corrige («tomo warfarina… perdón, apixabán»), vale lo último.`,
     "Un «No» va solo si respondió que no a una pregunta de ese tema («¿toma alguna medicina?» — «no, ninguna»). «No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`. Lo que no se preguntó ni se dijo no va: el silencio no es «No».",
-    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre») o `no_se_sabe` si no queda claro. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
+    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre») o `no_se_sabe` si no queda claro. Una entrada por persona: si el paciente dice «tomo losartán» y su hija agrega «también toma metformina», son dos entradas, cada una con lo que dijo esa persona y su frase. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
     "Lo que alguien cuenta de sí mismo cuando no es el paciente, o de un familiar («yo soy diabética», dicho por la madre; «mi papá es diabético»; «su papá es alérgico a la penicilina»), no es del paciente: no va en `salud` ni en `alergias`. Los antecedentes de la familia no se registran aquí.",
     `El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida: no va en ${input.measured}ninguna parte.`,
     `${input.notInRelato} van en \`salud\`, no en el relato; en el relato queda lo que tomó para la molestia de hoy («tomó ibuprofeno y le calmó»).`,
@@ -595,7 +598,10 @@ export function readDictation(
       const question = payload["question"]
       const unknownQuestion =
         part.kind === "ficha" && !(typeof question === "number" && Number.isInteger(question) && question >= 1 && question <= forms.length)
-      if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion) skip(item)
+      // Lo de su salud sin su frase dicha tal cual no se propone (revisión del 21 nov, A5): sin ella,
+      // nada dice que se dijo, y la regla de la duda («que yo sepa, no») no tiene qué leer.
+      const unheardHealth = part.kind === "salud" && isRecord(item) && !quote(item)
+      if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion || unheardHealth) skip(item)
       else {
         // Una respuesta citada en pedazos los lleva aparte: el servidor decide con cuáles se comprueba.
         const pieces = part.kind === "ficha" && typeof item["dicho"] === "string" ? groundPieces(item["dicho"], transcript) : null

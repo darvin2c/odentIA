@@ -3839,6 +3839,19 @@ await finalizeEncounter(db, ORG_A, LUIS_ID, andres.id, andresSesion2.id, {
   followUpIds: [],
   completePlanItemIds: [endo21.id],
 })
+// Lo que Andrés dijo de su salud en esa sesión y nadie revisó antes de firmar (revisión del 21 nov
+// 2026, A3): firmar no lo descarta. Sigue en su franja con la fecha, y en «Pregúntale a…» de su
+// próxima atención, con «Lo revisé con…» y «No lo registro».
+await db.insert(encounterDictationSuggestion).values({
+  organizationId: ORG_A,
+  patientId: andres.id,
+  encounterId: andresSesion2.id,
+  professionalUserId: LUIS_ID,
+  kind: "salud",
+  payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina" } },
+  sourceText: "Tomo una aspirina todos los días por el corazón.",
+  status: "lista",
+})
 await db.transaction(async (tx) => {
   const methods = await listPaymentMethods(tx, ORG_A)
   const cash = methods.find((method) => method.typeCode === "10")

@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { dictationContext, listDictationSaid, settleDictationSegment, startDictationSegment } from "./dictation-said.js"
+import { dictationContext, listDictationSaid, releaseDictationSegment, settleDictationRetry, settleDictationSegment, startDictationSegment } from "./dictation-said.js"
 import { saveDictationSegment } from "./encounter-dictation.js"
 import { discardEmptyEncounter } from "./encounters.js"
 import { nextPatientNumber } from "./patients.js"
@@ -39,11 +39,15 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
     const start = (segmentId: string, transcript: string) =>
       fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId, transcript }))
     const first = randomUUID()
-    expect(await start(first, "Tomo losartán de cincuenta.")).toEqual({ repeated: false, context: "" })
-    // Sin ordenar todavía (el proveedor falló): se puede volver a intentar, con el mismo contexto.
-    expect(await start(first, "Tomo losartán de cincuenta.")).toEqual({ repeated: false, context: "" })
+    const shape = (started: Awaited<ReturnType<typeof start>>) => ({ repeated: started.repeated, inProgress: started.inProgress, context: started.context })
+    expect(shape(await start(first, "Tomo losartán de cincuenta."))).toEqual({ repeated: false, inProgress: false, context: "" })
+    // Mientras Clío lo ordena, un segundo pedido del mismo tramo no paga otra llamada (revisión del 21 nov, C1).
+    expect(shape(await start(first, "Tomo losartán de cincuenta."))).toEqual({ repeated: false, inProgress: true, context: "" })
+    // El proveedor falló: deja de estar en curso y se puede volver a intentar, con el mismo contexto.
+    await fx.run((tx) => releaseDictationSegment(tx, ORG, fx.encounter.id, first))
+    expect(shape(await start(first, "Tomo losartán de cincuenta."))).toEqual({ repeated: false, inProgress: false, context: "" })
     await fx.run((tx) => settleDictationSegment(tx, ORG, fx.encounter.id, first, [{ said: "Tomo losartán", why: "sin_lugar" }, { said: "Tomo losartán", why: "sin_lugar" }]))
-    expect(await start(first, "Tomo losartán de cincuenta.")).toEqual({ repeated: true, context: "" })
+    expect(shape(await start(first, "Tomo losartán de cincuenta."))).toEqual({ repeated: true, inProgress: false, context: "" })
     // El servicio que guarda las sugerencias también lo ve ordenado.
     expect((await fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts: [], segmentId: first }))).repeated).toBe(true)
     expect((await start(randomUUID(), "¿Alergias?")).context).toBe("Tomo losartán de cincuenta.")
@@ -54,6 +58,27 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
       ["¿Alergias?", false, []],
     ])
     expect(said[0]?.turns).toBeNull()
+    // Ningún repaso lo leyó todavía.
+    expect(said.map((item) => item.reviewed)).toEqual([false, false])
+    await enable(false)
+  })
+
+  it("«Intentar otra vez» una frase no la guarda como otro tramo: sale de «No lo usé» o vuelve con lo de ahora (C3)", async () => {
+    await enable(true)
+    const fx = await clinicalFixture()
+    const first = randomUUID()
+    await fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId: first, transcript: "Buenos días. Y algo de la tiroides." }))
+    await fx.run((tx) => settleDictationSegment(tx, ORG, fx.encounter.id, first, [{ said: "Y algo de la tiroides", why: "sin_lugar" }]))
+    const retry = (segmentId: string) =>
+      fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId, transcript: "Y algo de la tiroides", retryOf: first }))
+    const again = randomUUID()
+    expect((await retry(again)).inProgress).toBe(false)
+    // Dos toques a la vez: el segundo espera.
+    expect((await retry(randomUUID())).inProgress).toBe(true)
+    await fx.run((tx) => settleDictationRetry(tx, ORG, fx.encounter.id, first, "Y algo de la tiroides", [{ said: "Y algo de la tiroides", why: "sin_lugar", detail: "otra vez" }]))
+    const said = await fx.run((tx) => listDictationSaid(tx, ORG, fx.patient.id, fx.encounter.id))
+    // Antes se guardaba como otro tramo, con otra hora: la frase salía dos veces en «Lo que se dijo».
+    expect(said.map((item) => [item.transcript, item.unused])).toEqual([["Buenos días. Y algo de la tiroides.", [{ said: "Y algo de la tiroides", why: "sin_lugar", detail: "otra vez" }]]])
     await enable(false)
   })
 

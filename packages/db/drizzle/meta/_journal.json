@@ -1086,6 +1086,13 @@
       "when": 1795240125801,
       "tag": "0154_el_repaso_al_terminar",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1795246314222,
+      "tag": "0155_el_tramo_en_curso",
+      "breakpoints": true
     }
   ]
 }

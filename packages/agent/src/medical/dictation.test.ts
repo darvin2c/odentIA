@@ -219,8 +219,11 @@ describe("Clío médica: una clave que llega dos veces", () => {
 describe("Clío médica: lo de salud dicho en la consulta", () => {
   const fixed = MEDICAL_DICTATION_PROFILE.systemPrompt({ services: ["Consulta de medicina general"], diagnosisList: "CIE-10 (OMS)", catalog: examSystemsText() })
   it("tiene `salud` con su entrevista (embarazo, lactancia, tabaco y alcohol) y sin nada de la boca", () => {
-    const schema = z.toJSONSchema(MEDICAL_DICTATION_PROFILE.extraction) as { properties: Record<string, { properties?: Record<string, { properties?: Record<string, unknown> }> }> }
-    const salud = schema.properties["salud"]?.properties ?? {}
+    const schema = z.toJSONSchema(MEDICAL_DICTATION_PROFILE.extraction) as {
+      properties: Record<string, { items?: { properties?: Record<string, { properties?: Record<string, unknown> }> } }>
+    }
+    // Una entrada por cada persona que lo dijo (revisión del 21 nov, A4).
+    const salud = schema.properties["salud"]?.items?.properties ?? {}
     expect(Object.keys(salud)).toEqual(expect.arrayContaining(["declarante", "vinculo", "allergies", "conditions", "medications", "anticoagulants", "personal", "medical", "dicho"]))
     expect(Object.keys(salud)).not.toContain("dental")
     expect(Object.keys(salud["medical"]?.properties ?? {})).toEqual(expect.arrayContaining(["lactancia", "tabaco", "alcohol"]))

@@ -17,6 +17,7 @@ import {
   requireClinicalAssistant,
   saveDictationSegment,
 } from "./encounter-dictation.js"
+import { DICTATION_IN_PROGRESS_MS } from "./dictation-said.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
 import { notFound } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
@@ -55,7 +56,8 @@ export interface DictationReviewSegment {
 }
 
 export type DictationReviewStart =
-  | { due: false }
+  /** `inProgress`: otro repaso está leyendo ahora lo nuevo; este no llama al modelo. */
+  | { due: false; inProgress?: boolean }
   | {
       due: true
       /** La identidad del repaso para `saveDictationSegment`: el mismo repaso no se guarda dos veces. */
@@ -98,7 +100,16 @@ export async function startDictationReview(
       ),
     )
     .orderBy(asc(encounterDictationSegment.saidAt), asc(encounterDictationSegment.id))
-  if (!rows.some((row) => row.reviewedAt === null)) return { due: false }
+  const unread = rows.filter((row) => row.reviewedAt === null)
+  if (!unread.length) return { due: false }
+  // Otro repaso ya está leyendo todo lo nuevo (otra pestaña, «Terminar» en una y «Finalizar» en
+  // otra): este no lo vuelve a pagar (revisión del 21 nov, C1). La marca se quita al guardarlo
+  // (`saveDictationReview`) o si falla (`releaseDictationReview`), y vence sola.
+  if (unread.every((row) => row.reviewingAt !== null && Date.now() - row.reviewingAt.getTime() < DICTATION_IN_PROGRESS_MS)) return { due: false, inProgress: true }
+  await tx
+    .update(encounterDictationSegment)
+    .set({ reviewingAt: new Date(), updatedAt: new Date() })
+    .where(inArray(encounterDictationSegment.id, unread.map((row) => row.id)))
   // El largo acotado: desde el último hacia atrás, los tramos enteros que caben.
   let from = rows.length
   let total = 0
@@ -395,7 +406,7 @@ export async function saveDictationReview(
   if (input.readIds.length) {
     await tx
       .update(encounterDictationSegment)
-      .set({ reviewedAt: new Date(), updatedAt: new Date() })
+      .set({ reviewedAt: new Date(), reviewingAt: null, updatedAt: new Date() })
       .where(
         and(
           eq(encounterDictationSegment.organizationId, orgId),
@@ -406,6 +417,22 @@ export async function saveDictationReview(
       )
   }
   return { ...result, turnsSaved, turnsRejected, unused: added }
+}
+
+/** El repaso falló (el proveedor, la red): lo que iba a leer deja de estar «en curso» y se puede pedir ya. */
+export async function releaseDictationReview(tx: Db, orgId: string, encounterId: string, readIds: readonly string[]): Promise<void> {
+  if (!readIds.length) return
+  await tx
+    .update(encounterDictationSegment)
+    .set({ reviewingAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(encounterDictationSegment.organizationId, orgId),
+        eq(encounterDictationSegment.encounterId, encounterId),
+        inArray(encounterDictationSegment.id, [...readIds]),
+        isNull(encounterDictationSegment.reviewedAt),
+      ),
+    )
 }
 
 /**

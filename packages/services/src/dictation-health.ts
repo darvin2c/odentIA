@@ -7,6 +7,7 @@ import {
   whoWords,
 } from "@odentia/clinical"
 import { z } from "zod"
+import { groundHeard, heardVocabulary, plain } from "./dictation-heard.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import type { DictationPrepared } from "./product-hooks.js"
 
@@ -27,7 +28,7 @@ const HEALTH = DECLARED_HEALTH_SHAPE
 
 /** Los grupos que Clío puede proponer, en el orden de la tarjeta. */
 const GROUPS = ["anticoagulants", "boneMedicines", "medications", "conditions", "allergies", "personal", "medical", "dental"] as const
-type HealthGroup = (typeof GROUPS)[number]
+export type HealthGroup = (typeof GROUPS)[number]
 /** Los grupos que son una lista de lo que dijo (enfermedades, medicinas). */
 const LISTS: readonly HealthGroup[] = ["conditions", "medications"]
 /** Los grupos de una sola respuesta, con cuál: un anticoagulante, una medicina para los huesos. */
@@ -76,8 +77,99 @@ export function healthDeclarantOf(payload: Record<string, unknown>): HealthDecla
   return { kind: "staff", name: null, relation: null }
 }
 
-/** «No que yo sepa», «creo que no», «no sé»: una respuesta con duda es «no sabe», nunca «no». */
-const DOUBT = /\b(?:que yo sepa|creo que no|me parece que no|no s[eé]|no me acuerdo|no recuerdo|no estoy segur[oa]|a lo mejor|tal vez|quiz[aá]s?)\b/u
+/**
+ * Quién dijo un dato de su salud (revisión del 21 nov, A4): el paciente, quien lo acompaña (con su
+ * vínculo, si se dijo) o no se sabe. Lo dicho por dos personas en la misma consulta no queda a
+ * nombre de la primera que habló: cada dato lleva el suyo en `quien`.
+ */
+export interface HealthSaidBy {
+  declarante: "paciente" | "acompanante" | "no_se_sabe"
+  vinculo?: string
+}
+const DECLARANTS = ["paciente", "acompanante", "no_se_sabe"] as const
+/** Dónde guarda la propuesta quién dijo cada dato: su clave (`declarantKeys`) y quién. */
+const QUIEN = "quien"
+
+/** Quién lo dijo según la propuesta entera (o una entrada de Clío); `null` si no lo dice. */
+function topSaidBy(payload: Record<string, unknown>): HealthSaidBy | null {
+  const who = payload["declarante"]
+  if (!DECLARANTS.includes(who as HealthSaidBy["declarante"])) return null
+  const vinculo = who === "acompanante" && typeof payload["vinculo"] === "string" ? payload["vinculo"].trim().slice(0, 80) : ""
+  return { declarante: who as HealthSaidBy["declarante"], ...(vinculo ? { vinculo } : {}) }
+}
+
+/** Un campo de la entrevista que acompaña a otro (las semanas al embarazo, cuántos fuma al tabaco). */
+const FIELD_OF: Record<string, string> = { semanasEmbarazo: "embarazo", cigarrillos: "tabaco" }
+
+/**
+ * Las claves con que se dice quién dijo cada dato de un grupo: el grupo entero; en una lista, cada
+ * enfermedad o medicina por su nombre; en la entrevista, cada campo.
+ */
+function declarantKeys(group: HealthGroup, value: Record<string, unknown>): string[] {
+  if (INTERVIEW.includes(group)) return [...new Set(Object.keys(value).map((key) => `${group}.${FIELD_OF[key] ?? key}`))]
+  if (LISTS.includes(group) && value["state"] === "recorded") {
+    const items = (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>
+    if (items.length) return items.map((item) => itemKey(group, item))
+  }
+  return [group]
+}
+const itemKey = (group: HealthGroup, item: Record<string, unknown>) => `${group}:${normalizeDrugText(text(item["name"]))}`
+
+/** Lo que dice `quien` tal como está guardado, sin lo que no se puede leer. */
+function storedSaidBy(payload: Record<string, unknown>): Record<string, HealthSaidBy> {
+  const stored = payload[QUIEN]
+  if (!isRecord(stored)) return {}
+  return Object.fromEntries(Object.entries(stored).flatMap(([key, value]) => (isRecord(value) && topSaidBy(value) ? [[key, topSaidBy(value) as HealthSaidBy]] : [])))
+}
+
+/**
+ * Quién dijo cada dato que trae: lo guardado en `quien` y, lo que no lo tiene, quien lo dijo según
+ * la propuesta o la entrada (`declarante`). Sin ninguno de los dos, nada: no se supone.
+ */
+function explicitSaidBy(payload: Record<string, unknown>): Record<string, HealthSaidBy> {
+  const top = topSaidBy(payload)
+  const stored = storedSaidBy(payload)
+  const out: Record<string, HealthSaidBy> = {}
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    for (const key of declarantKeys(group, value)) {
+      const who = stored[key] ?? top
+      if (who) out[key] = who
+    }
+  }
+  return out
+}
+
+/** Quién dijo cada dato de la propuesta; lo que no se sabe, «no se sabe». */
+export function healthSaidBy(payload: Record<string, unknown>): Record<string, HealthSaidBy> {
+  const known = explicitSaidBy(payload)
+  const out: Record<string, HealthSaidBy> = {}
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    for (const key of declarantKeys(group, value)) out[key] = known[key] ?? { declarante: "no_se_sabe" }
+  }
+  return out
+}
+
+const sameSaidBy = (a: HealthSaidBy | undefined, b: HealthSaidBy | undefined) =>
+  a?.declarante === b?.declarante && (a?.vinculo ?? "").toLocaleLowerCase("es") === (b?.vinculo ?? "").toLocaleLowerCase("es")
+
+/** `quien` con solo las claves de lo que la propuesta trae: lo que se quitó no deja su declarante. */
+function withSaidBy(payload: Record<string, unknown>, by: Record<string, HealthSaidBy>): Record<string, unknown> {
+  const { [QUIEN]: _old, ...rest } = payload
+  const keys = GROUPS.flatMap((group) => (isRecord(rest[group]) ? declarantKeys(group, rest[group] as Record<string, unknown>) : []))
+  const kept = Object.fromEntries(keys.flatMap((key) => (by[key] ? [[key, by[key]]] : [])))
+  return Object.keys(kept).length ? { ...rest, [QUIEN]: kept } : rest
+}
+
+/**
+ * «No que yo sepa», «creo que no», «no sé»: una respuesta con duda es «no sabe», nunca «no». Los
+ * bordes son de letras Unicode: en JavaScript `\b` solo ve letras ASCII, y «no sé» o «quizá» (con
+ * la tilde al final, como los escribe la voz de Chrome) no se reconocían (revisión del 21 nov).
+ */
+const DOUBT = /(?<![\p{L}\p{N}])(?:que yo sepa|creo que no|me parece que no|no s[eé]|no me acuerdo|no recuerdo|no estoy segur[oa]|a lo mejor|tal vez|quiz[aá]s?)(?![\p{L}\p{N}])/u
 
 export function saidInDoubt(text: string | undefined): boolean {
   return !!text && DOUBT.test(text.toLocaleLowerCase("es"))
@@ -188,7 +280,143 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
     if (!check?.success) delete health[group]
   }
   if (!Object.keys(health).length) return null
-  return { payload: { declarante, ...(vinculo ? { vinculo } : {}), ...health }, status: "lista", note: null }
+  // Quién dijo cada dato: lo que ya traía (una propuesta sumada) y, si no, quien lo dijo en la pausa.
+  const by = healthSaidBy({ ...payload, declarante })
+  return { payload: withSaidBy({ declarante, ...(vinculo ? { vinculo } : {}), ...health }, by), status: "lista", note: null }
+}
+
+/** Palabras de un nombre que no lo distinguen: «inhalador de salbutamol» se reconoce por «salbutamol». */
+const NAME_FILLER = new Set(["de", "del", "la", "las", "los", "el", "en", "con", "para", "por", "una", "uno", "mg", "ml", "cada", "dia", "dias", "pastilla", "tableta"])
+
+/** ¿Esa palabra del nombre está en lo dicho, tal cual, por su raíz o por cómo suena (`groundHeard`)? */
+function wordHeard(word: string, said: string): boolean {
+  const saidWords = plain(said).split(/[^a-z0-9ñ]+/).filter(Boolean)
+  if (saidWords.includes(word)) return true
+  if (word.length >= 5 && saidWords.some((one) => one.length >= 5 && one.slice(0, 5) === word.slice(0, 5))) return true
+  return groundHeard(word, said, heardVocabulary([word])) !== ""
+}
+
+/** ¿El nombre sale de lo dicho? Basta una palabra que lo distinga («losartán 50 mg» de «tomo losartán»). */
+function nameHeard(name: string, said: string): boolean {
+  const words = plain(name)
+    .split(/[^a-z0-9ñ]+/)
+    .filter((word) => word.length >= 3 && !/^\d+$/.test(word) && !NAME_FILLER.has(word))
+  return words.length === 0 || words.some((word) => wordHeard(word, said))
+}
+
+/**
+ * Lo de su salud que sale de su frase (revisión del 21 nov, A5): una enfermedad, una medicina o un
+ * anticoagulante cuyo nombre no está en lo que se dijo («apixabán» cuando dijo «warfarina») no se
+ * propone; se dice en `notHeard`. Una lista que se queda sin nada de lo que nombró se quita entera;
+ * un anticoagulante sin su nombre queda «sí, no dijo cuál». `payload` nulo: no queda nada.
+ */
+export function groundHealthNames(payload: Record<string, unknown>, said: string): { payload: Record<string, unknown> | null; notHeard: string[] } {
+  const out = { ...payload }
+  const notHeard: string[] = []
+  for (const group of LISTS) {
+    const value = out[group]
+    if (!isRecord(value) || value["state"] !== "recorded" || !Array.isArray(value["items"]) || !value["items"].length) continue
+    const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => {
+      const heard = nameHeard(text(item["name"]), said)
+      if (!heard) notHeard.push(text(item["name"]))
+      return heard
+    })
+    if (items.length) out[group] = { ...value, items }
+    else delete out[group]
+  }
+  for (const group of DIRECTED) {
+    const value = out[group]
+    if (!isRecord(value) || !text(value["detail"]) || nameHeard(text(value["detail"]), said)) continue
+    notHeard.push(text(value["detail"]))
+    const { detail: _invented, ...rest } = value
+    out[group] = rest
+  }
+  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard }
+}
+
+/** Una respuesta que niega: «no», «nunca», «ninguna», un «No» a un sí o no. */
+const isDenial = (value: unknown) => value === false || value === "no" || value === "nunca" || value === "ninguna" || value === "ninguno"
+
+/**
+ * Lo que «Lo revisé con…» guarda y lo que no (revisión del 21 nov, A2): lo que nombró y lo que no
+ * sabe se guardan; un «No» (a las enfermedades, a la medicación, a un anticoagulante, a un campo de
+ * la entrevista) se confirma en su fila, nunca de paso con lo demás. `denied`: los «No», con quién
+ * los dijo, para que sigan esperando su propia confirmación.
+ */
+export function splitHealthDenials(payload: Record<string, unknown>): { kept: Record<string, unknown>; denied: Record<string, unknown> } {
+  const by = healthSaidBy(payload)
+  const kept: Record<string, unknown> = {}
+  const denied: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload)) if (!(GROUPS as readonly string[]).includes(key) && key !== QUIEN) kept[key] = denied[key] = value
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    if (!INTERVIEW.includes(group)) {
+      ;(value["state"] === "none" ? denied : kept)[group] = value
+      continue
+    }
+    const yes: Record<string, unknown> = {}
+    const no: Record<string, unknown> = {}
+    for (const [field, answer] of Object.entries(value)) {
+      if (isRecord(answer)) {
+        const inner = Object.entries(answer)
+        const said = Object.fromEntries(inner.filter(([, one]) => !isDenial(one)))
+        const nos = Object.fromEntries(inner.filter(([, one]) => isDenial(one)))
+        if (Object.keys(said).length) yes[field] = said
+        if (Object.keys(nos).length) no[field] = nos
+      } else (isDenial(answer) ? no : yes)[field] = answer
+    }
+    // Lo que acompaña a una respuesta va con ella: las semanas con el embarazo.
+    for (const [field, main] of Object.entries(FIELD_OF)) if (field in yes && main in no) (no[field] = yes[field]), delete yes[field]
+    if (Object.keys(yes).length) {
+      // Lo que sin su «No» no se puede guardar tal cual espera con él: nada se guarda a medias.
+      if ((HEALTH as Record<string, z.ZodType>)[group]?.safeParse(yes).success) kept[group] = yes
+      else Object.assign(no, yes)
+    }
+    if (Object.keys(no).length) denied[group] = no
+  }
+  return { kept: withSaidBy(kept, by), denied: withSaidBy(denied, by) }
+}
+
+/** ¿La propuesta trae algo de su salud? */
+export const hasHealth = (payload: Record<string, unknown>) => GROUPS.some((group) => isRecord(payload[group]))
+
+/**
+ * Lo de su salud separado por quien lo dijo, para registrar una declaración por persona (revisión
+ * del 21 nov, A4): lo del paciente a su nombre y lo de su hija, al de ella.
+ */
+export function healthByDeclarant(payload: Record<string, unknown>): Array<{ by: HealthSaidBy; payload: Record<string, unknown> }> {
+  const saidBy = healthSaidBy(payload)
+  const people: Array<{ by: HealthSaidBy; payload: Record<string, unknown> }> = []
+  const of = (who: HealthSaidBy) => {
+    const known = people.find((one) => sameSaidBy(one.by, who))
+    if (known) return known.payload
+    const person = { by: who, payload: { declarante: who.declarante, ...(who.vinculo ? { vinculo: who.vinculo } : {}) } as Record<string, unknown> }
+    people.push(person)
+    return person.payload
+  }
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    if (INTERVIEW.includes(group)) {
+      for (const [field, answer] of Object.entries(value)) {
+        const target = of(saidBy[`${group}.${FIELD_OF[field] ?? field}`] ?? { declarante: "no_se_sabe" })
+        target[group] = { ...((target[group] as Record<string, unknown> | undefined) ?? {}), [field]: answer }
+      }
+      continue
+    }
+    const items = LISTS.includes(group) && value["state"] === "recorded" && Array.isArray(value["items"]) ? (value["items"] as Array<Record<string, unknown>>) : []
+    if (!items.length) {
+      of(saidBy[group] ?? { declarante: "no_se_sabe" })[group] = value
+      continue
+    }
+    for (const item of items) {
+      const target = of(saidBy[itemKey(group, item)] ?? { declarante: "no_se_sabe" })
+      const before = target[group] as Record<string, unknown> | undefined
+      target[group] = { ...value, items: [...((before?.["items"] as unknown[] | undefined) ?? []), item] }
+    }
+  }
+  return people
 }
 
 /** Lo de su salud que la sugerencia propone, sin quién lo dijo: la forma de su registro. */
@@ -292,7 +520,9 @@ export function mergeHealth(
     }
     payload[group] = merged
   }
-  return { payload, earlier }
+  // Cada dato con quien lo dijo (revisión del 21 nov, A4): lo nuevo, con quien lo dijo en esta pausa;
+  // lo de antes, con quien lo dijo entonces. La metformina que dijo su hija no queda a nombre del paciente.
+  return { payload: withSaidBy(payload, { ...healthSaidBy(current), ...explicitSaidBy(added) }), earlier }
 }
 
 /* ---------- En palabras: la tarjeta, la franja y lo que lee Clío ---------- */
@@ -399,14 +629,53 @@ function groupWords(group: HealthGroup, value: Record<string, unknown>): string 
   return ""
 }
 
-/** Cada dato que propone, en palabras, con la clave de su grupo o de su campo («antes dijo» va con la misma clave). */
-export function healthRows(payload: Record<string, unknown>): Array<{ key: string; label: string; value: string }> {
-  const rows: Array<{ key: string; label: string; value: string }> = []
+/** Un dato que propone, en palabras: su clave (la de su grupo o su campo), quién lo dijo y lo que dijo antes. */
+export interface HealthRow {
+  key: string
+  /** El grupo de su registro: la pantalla lo pone en la fila de su tema. */
+  group: HealthGroup
+  label: string
+  value: string
+  by: HealthSaidBy
+  /** Lo que dijo antes, si lo dijo distinto: «warfarina». */
+  before: string | null
+  /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…» (`splitHealthDenials`). */
+  denied: boolean
+}
+
+/** Quién lo dijo, en pocas palabras: «el paciente», «su madre»; `null` si no se sabe. */
+export function saidByWords(by: HealthSaidBy): string | null {
+  if (by.declarante === "paciente") return "el paciente"
+  if (by.declarante === "acompanante") return whoWords(healthDeclarantOf({ ...by }), null)
+  return null
+}
+
+/**
+ * Cada dato que propone, en palabras, con quién lo dijo («antes dijo» va con la misma clave). Lo
+ * de una lista dicho por otra persona lo dice al lado: «metformina (lo dijo su hija)».
+ */
+export function healthRows(payload: Record<string, unknown>, earlier: Record<string, string> = {}): HealthRow[] {
+  const rows: HealthRow[] = []
+  const saidBy = healthSaidBy(payload)
+  const unknownBy: HealthSaidBy = { declarante: "no_se_sabe" }
+  const push = (row: Omit<HealthRow, "before" | "denied">, denied: boolean) => rows.push({ ...row, denied, before: earlier[row.key] && earlier[row.key] !== row.value ? (earlier[row.key] as string) : null })
   for (const group of GROUPS) {
     const value = payload[group]
     if (!isRecord(value)) continue
     if (!INTERVIEW.includes(group)) {
-      rows.push({ key: group, label: GROUP_LABEL[group], value: groupWords(group, value) })
+      const items = LISTS.includes(group) && value["state"] === "recorded" ? ((value["items"] ?? []) as Array<Record<string, unknown>>) : []
+      const by = (items.length ? saidBy[itemKey(group, items[0] as Record<string, unknown>)] : saidBy[group]) ?? unknownBy
+      const words =
+        items.length && items.some((item) => !sameSaidBy(saidBy[itemKey(group, item)], by))
+          ? items
+              .map((item) => {
+                const own = saidBy[itemKey(group, item)] ?? unknownBy
+                const name = [item["name"], item["dose"], item["frequency"]].filter(Boolean).join(" ")
+                return sameSaidBy(own, by) ? name : `${name} (${saidByWords(own) ? `lo dijo ${saidByWords(own)}` : "no se sabe quién lo dijo"})`
+              })
+              .join(" · ")
+          : groupWords(group, value)
+      push({ key: group, group, label: GROUP_LABEL[group], value: words, by }, value["state"] === "none")
       continue
     }
     for (const [key, item] of Object.entries(value)) {
@@ -415,25 +684,26 @@ export function healthRows(payload: Record<string, unknown>): Array<{ key: strin
       if (group === "personal" && key === "embarazo" && item === true && typeof value["semanasEmbarazo"] === "number") words = `sí, ${value["semanasEmbarazo"]} semanas`
       if (group === "medical" && key === "tabaco" && item === "fuma" && typeof value["cigarrillos"] === "string")
         words = `sí, ${CIGARETTE_BAND_LABELS[value["cigarrillos"] as keyof typeof CIGARETTE_BAND_LABELS] ?? value["cigarrillos"]}`
-      rows.push({ key: `${group}.${key}`, label: FIELD_LABEL[`${group}.${key}`] ?? key, value: words })
+      const denied = isDenial(item) || (isRecord(item) && Object.keys(item).length > 0 && Object.values(item).every(isDenial))
+      push({ key: `${group}.${key}`, group, label: FIELD_LABEL[`${group}.${key}`] ?? key, value: words, by: saidBy[`${group}.${key}`] ?? unknownBy }, denied)
     }
   }
   return rows
 }
 
-/** Quién lo dijo, en pocas palabras: «el paciente», «su madre», «no se sabe». */
+/** Quién lo dijo, para la tarjeta y para Clío: «Lo dijo: el paciente», «Lo dijeron: el paciente y su hija». */
 function declarantWords(payload: Record<string, unknown>): string {
-  if (payload["declarante"] === "paciente") return "Lo dijo: el paciente"
-  if (payload["declarante"] === "acompanante") return `Lo dijo: ${whoWords(healthDeclarantOf(payload), null)}`
-  return "No se sabe quién lo dijo"
+  const people = [...new Set(Object.values(healthSaidBy(payload)).map((by) => saidByWords(by) ?? ""))]
+  const known = people.filter(Boolean)
+  if (!known.length) return "No se sabe quién lo dijo"
+  if (known.length === 1 && people.length === 1) return `Lo dijo: ${known[0]}`
+  const all = people.length > known.length ? [...known, "alguien más"] : known
+  return `Lo dijeron: ${all.slice(0, -1).join(", ")} y ${all.at(-1)}`
 }
 
 /** La tarjeta: cada dato con lo que dijo antes, si lo dijo distinto, y quién lo dijo. */
 export function healthSummary(payload: Record<string, unknown>, earlier: Record<string, string> = {}): string {
-  const lines = healthRows(payload).map((row) => {
-    const before = earlier[row.key]
-    return `${row.label}: ${row.value}${before && before !== row.value ? ` (antes dijo «${before}»)` : ""}`
-  })
+  const lines = healthRows(payload, earlier).map((row) => `${row.label}: ${row.value}${row.before ? ` (antes dijo «${row.before}»)` : ""}`)
   return [...lines, declarantWords(payload)].join("\n")
 }
 

@@ -2552,6 +2552,13 @@ export const encounterDictationSegment = pgTable(
     turns: jsonb("turns").$type<DictationTurn[]>(),
     /** Cuando el repaso al terminar ya leyó este tramo: el siguiente solo se lanza si hay tramos sin leer. */
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    /**
+     * Desde cuándo Clío lo está ordenando (o reintentando una frase suya): un segundo pedido del mismo
+     * tramo, mientras tanto, no llama otra vez al modelo. Vence sola si el pedido se cortó.
+     */
+    organizingAt: timestamp("organizing_at", { withTimezone: true }),
+    /** Desde cuándo un repaso está leyendo este tramo: otro repaso a la vez no lo vuelve a pagar. */
+    reviewingAt: timestamp("reviewing_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [

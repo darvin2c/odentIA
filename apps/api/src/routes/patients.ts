@@ -53,6 +53,8 @@ import {
   getPatientHealth,
   getPatientSummary,
   listSaidHealth,
+  confirmSaidHealth,
+  discardSaidHealth,
   getPlanNextStep,
   getPlanNextSteps,
   getStaffMissingData,
@@ -252,6 +254,14 @@ const allergyAddInput = z
 // El motivo es libre: lo vacío y lo largo los dice el servicio junto a «Motivo» (`removePatientAllergy`).
 const allergyRemoveInput = z.object({ reason: z.string() }).strict()
 const healthReviewedInput = z.object({ expectedRevision: z.number().int().min(0) }).strict()
+/** «Lo revisé con…» de lo que dijo en una atención ya firmada: quién lo dijo, si quien confirma lo corrige. */
+const saidHealthReviewInput = z
+  .object({
+    declarante: z.enum(["paciente", "acompanante", "no_se_sabe"]).optional(),
+    vinculo: z.string().trim().max(80).nullable().optional(),
+  })
+  .strict()
+const saidHealthParams = z.object({ id: z.uuid(), suggestionId: z.uuid() })
 // La ASA de un toque antes de anestesiar (QA del 16 nov): I a VI o nula; en qué atención se puso.
 const healthAsaInput = z
   .object({ asaClass: z.string().max(3).nullable(), encounterId: z.string().uuid().nullish() })
@@ -1145,6 +1155,30 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         }),
       ),
     )
+  })
+  /**
+   * Lo que dijo de su salud en una atención ya firmada y nadie revisó (revisión del 21 nov, A3):
+   * «Lo revisé con…» lo deja en Antecedentes como lo dijo en la consulta; «No lo registro» lo deja de
+   * avisar. Escribe en la historia: `clinical.write`, la guarda de arriba.
+   */
+  app.post("/:id/health/said/:suggestionId/confirm", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = saidHealthParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = saidHealthReviewInput.safeParse((await c.req.json().catch(() => null)) ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => confirmSaidHealth(tx, orgId, userId, at.data.id, at.data.suggestionId, parsed.data)),
+    )
+  })
+  app.post("/:id/health/said/:suggestionId/discard", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = saidHealthParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => discardSaidHealth(tx, orgId, userId, at.data.id, at.data.suggestionId))
+      return { ok: true }
+    })
   })
   // «Lo revisé con ella»: lo que dijo queda revisado tal como está, sin rearmar los antecedentes.
   app.post("/:id/health/reviewed", async (c) => {

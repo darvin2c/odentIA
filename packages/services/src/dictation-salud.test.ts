@@ -7,8 +7,13 @@ import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addDeclaredAllergies, anesthesiaRisksOf, extractionRisksOf, getPatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { finalizeEncounter } from "./encounters.js"
 import {
   confirmDictationHealth,
+  confirmSaidHealth,
+  discardPendingDictation,
+  discardSaidHealth,
+  updateDictationSuggestion,
   confirmDictationSuggestion,
   dictationModelLabel,
   listDictationSuggestions,
@@ -140,7 +145,8 @@ describe("C1 y C2 · la medicación dicha en la conversación", () => {
     expect(said).toHaveLength(1)
     expect(said[0]?.encounterId).toBe(fx.encounter.id)
     expect(said[0]?.by).toEqual({ kind: "patient", name: null, relation: null })
-    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", label: "Anticoagulante", value: "apixabán" })
+    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false })
+    expect(said[0]?.open).toBe(true)
     await enable(false)
   })
 })
@@ -228,7 +234,7 @@ describe("C4 · la mamá de Mateo", () => {
       transcript: "Tiene asma, usa salbutamol. Yo soy diabética. Debe pesar 24.",
     })
     const [said] = await health()
-    expect(Object.keys(said!.payload).sort()).toEqual(["conditions", "declarante", "medications", "vinculo"])
+    expect(Object.keys(said!.payload).sort()).toEqual(["conditions", "declarante", "medications", "quien", "vinculo"])
     expect(said?.summary).toContain("Lo dijo: su madre")
     await confirm(said!.id)
     const [declaration] = await declarations()
@@ -323,6 +329,158 @@ describe("una corrección por voz de la salud", () => {
     expect(back.payload["anticoagulants"]).toEqual({ state: "recorded", detail: "warfarina" })
     expect(back.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán" }] })
     expect(back.voice).toBeNull()
+    await enable(false)
+  })
+})
+
+/* ---------- Revisión del 21 nov 2026 ---------- */
+
+describe("A2 · «Lo revisé con…» no guarda un «No» de paso", () => {
+  it("guarda lo que nombró; «niega enfermedades» queda esperando su fila y no entra a Antecedentes", async () => {
+    await enable(true)
+    const { fx, segment, confirm, health } = await session()
+    const [said] = (
+      await segment({
+        drafts: [
+          {
+            kind: "salud",
+            payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, conditions: { state: "none", items: [] } },
+            sourceText: "tomo losartán, enfermedades ninguna",
+          },
+        ],
+        transcript: "Tomo losartán, enfermedades ninguna.",
+      })
+    ).suggestions
+    const confirmed = await confirm(said!.id)
+    // Antes: quedaba «confirmada» y Antecedentes decía «Niega enfermedades» sin que nadie lo confirmara.
+    expect(confirmed.status).toBe("lista")
+    expect(Object.keys(confirmed.payload).filter((key) => !["declarante", "quien"].includes(key))).toEqual(["conditions"])
+    const after = await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))
+    expect(after.reviewStatus.conditions).not.toBe("none")
+    expect(after.medications.map((row) => row.name)).toEqual(["losartán"])
+    // Lo que queda es solo un «No»: «Lo revisé con…» no tiene nada que guardar.
+    const [waiting] = await health()
+    await expect(confirm(waiting!.id)).rejects.toMatchObject({ code: "HEALTH_ONLY_DENIALS" })
+    await enable(false)
+  })
+})
+
+describe("A4 · una declaración por persona", () => {
+  it("lo del paciente a su nombre y lo de su hija al de ella", async () => {
+    await enable(true)
+    const { segment, confirm, health, declarations } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] } }, sourceText: "tomo losartán" }],
+      transcript: "Tomo losartán.",
+    })
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "acompanante", vinculo: "hija", medications: { state: "recorded", items: [{ name: "metformina" }] } }, sourceText: "también toma metformina" }],
+      transcript: "Y también toma metformina, doctora.",
+    })
+    const [one, ...others] = await health()
+    expect(others).toEqual([])
+    expect(one?.summary).toContain("losartán · metformina (lo dijo su hija)")
+    await confirm(one!.id)
+    const rows = await declarations()
+    expect(
+      rows
+        .map((row) => [row.respondent, row.declarantRelation, (row.health as { medications?: { items: Array<{ name: string }> } }).medications?.items.map((item) => item.name)])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      ["patient", null, ["losartán"]],
+      ["representative", "hija", ["metformina"]],
+    ])
+    await enable(false)
+  })
+})
+
+describe("A5 · lo de su salud sale de su frase", () => {
+  it("un nombre que no se dijo no se propone y «No lo usé» dice por qué", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const result = await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo warfarina" }],
+      transcript: "Tomo warfarina.",
+    })
+    expect(result.droppedForms).toEqual([{ said: "tomo warfarina", why: "No encontré «apixabán» en lo que se dijo: no lo propuse.", targets: [] }])
+    const [one] = await health()
+    expect(one?.payload["anticoagulants"]).toEqual({ state: "recorded" })
+    // Sin su frase, nada.
+    await segment({ drafts: [{ kind: "salud", payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "asma" }] } } }], transcript: "Buenos días." })
+    expect((await health())[0]?.payload["conditions"]).toBeUndefined()
+    await enable(false)
+  })
+})
+
+describe("A3 · al firmar, lo dicho sin revisar no se pierde", () => {
+  it("no se descarta con lo pendiente; firmada sigue en la franja y se revisa después", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixabán" }],
+      transcript: "Tomo apixabán.",
+    })
+    const [said] = await health()
+    // Antes: «Finalizar y firmar» la descartaba con todo lo pendiente, y el anticoagulante se perdía.
+    await fx.run((tx) => discardPendingDictation(tx, ...fx.args, fx.encounter.id))
+    expect((await health()).map((item) => item.id)).toEqual([said!.id])
+    // En borrador se revisa en su atención, no desde la ficha.
+    await expect(fx.run((tx) => confirmSaidHealth(tx, ...fx.args, said!.id))).rejects.toMatchObject({ code: "ENCOUNTER_STILL_OPEN" })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const strip = await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))
+    expect(strip.map((item) => [item.suggestionId, item.open, item.rows.map((row) => row.value)])).toEqual([[said!.id, false, ["apixabán"]]])
+    const { health: after } = await fx.run((tx) => confirmSaidHealth(tx, ...fx.args, said!.id))
+    expect(after.medications.map((row) => row.name)).toEqual(["apixabán"])
+    expect(await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))).toEqual([])
+    await expect(fx.run((tx) => discardSaidHealth(tx, ...fx.args, said!.id))).rejects.toMatchObject({ code: "SUGGESTION_DECIDED" })
+    await enable(false)
+  })
+
+  it("«No lo registro» de lo dicho en una atención firmada: deja de avisarse y no entra", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "asma" }] } }, sourceText: "tengo asma" }],
+      transcript: "Tengo asma.",
+    })
+    const [said] = await health()
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    await fx.run((tx) => discardSaidHealth(tx, ...fx.args, said!.id))
+    expect(await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))).toEqual([])
+    expect((await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))).conditions).toEqual([])
+    await enable(false)
+  })
+})
+
+describe("A6 · lo quitado con «Corregir algo» queda resuelto", () => {
+  it("ni otra pausa ni el repaso lo vuelven a proponer", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, anticoagulants: { state: "recorded", detail: "apixabán" } },
+          sourceText: "tomo losartán y apixabán",
+        },
+      ],
+      transcript: "Tomo losartán y apixabán.",
+    })
+    const [said] = await health()
+    // «Corregir algo» guardó la medicación en Antecedentes: la propuesta la suelta.
+    await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, said!.id, { medications: null }))
+    // El repaso relee toda la conversación y vuelve a oír «losartán».
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] } }, sourceText: "tomo losartán" }],
+      segmentId: "repaso:1",
+      transcript: "Tomo losartán y apixabán.",
+      review: true,
+    })
+    const [one] = await health()
+    expect(one?.payload["medications"]).toBeUndefined()
+    expect(one?.payload["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán" })
     await enable(false)
   })
 })

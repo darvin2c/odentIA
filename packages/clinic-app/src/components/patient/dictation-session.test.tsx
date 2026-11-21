@@ -64,3 +64,76 @@ describe("«Terminar dictado» pide el repaso", () => {
     expect(result.current.review).toMatchObject({ status: "done" })
   })
 })
+
+/*
+ * Revisión del 21 nov 2026: lo que la pestaña pide de más al servidor. Un tramo ya leído sin turnos
+ * pedía otro repaso para siempre (C2); «Intentar otra vez» mandaba la frase como algo dicho otra vez
+ * (C3); y un tramo «en curso» en otro pedido no debe pagarse dos veces (C1).
+ */
+describe("lo que la pestaña no pide de más", () => {
+  const saidReply = (segments: unknown[]) => ({ data: { segments, used: [] } })
+  const said = (over: Record<string, unknown>) => ({ segmentId: "t-1", transcript: "Buenos días.", saidAt: "2026-11-20T15:00:00.000Z", createdBy: "u-1", organized: true, unused: [], turns: null, ...over })
+
+  it("un tramo que el repaso ya leyó, aunque no dejó turnos, no pide otro repaso", async () => {
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
+      if (url === `${BASE}/said`) return saidReply([said({ reviewed: true }), said({ segmentId: "t-2", reviewed: false, turns: [{ quien: "dra", texto: "Hola." }] })])
+      return segmentReply
+    })
+    const { result } = render()
+    await waitFor(() => expect(result.current.said).toHaveLength(2))
+    // El segundo tiene turnos de antes pero ningún repaso lo marcó leído: ese sí pide repaso.
+    expect(result.current.unreviewed).toBe(true)
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
+      if (url === `${BASE}/said`) return saidReply([said({ reviewed: true }), said({ segmentId: "t-2", reviewed: true })])
+      return segmentReply
+    })
+    await act(() => result.current.refreshSaid())
+    await waitFor(() => expect(result.current.said.every((segment) => segment.reviewed)).toBe(true))
+    expect(result.current.unreviewed).toBe(false)
+  })
+
+  it("«Intentar otra vez» relee la frase de su tramo sin sumarla a lo que se dijo", async () => {
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
+      if (url === `${BASE}/said`) return saidReply([said({ transcript: "y algo de la tiroides", unused: [{ said: "y algo de la tiroides", why: "sin_lugar" }] })])
+      return segmentReply
+    })
+    const { result } = render()
+    await waitFor(() => expect(result.current.said).toHaveLength(1))
+    act(() => result.current.retryUnused("t-1", "y algo de la tiroides"))
+    await waitFor(() => expect(posts()).toEqual([BASE]))
+    const body = JSON.parse(String(route.mock.calls.find(([url, init]) => url === BASE && init?.method === "POST")?.[1]?.body))
+    expect(body).toMatchObject({ transcript: "y algo de la tiroides", retryOf: "t-1" })
+    // No es algo dicho otra vez: «Lo que se dijo» lo sigue mostrando una vez, y lo escrito no cambia.
+    expect(result.current.said).toHaveLength(1)
+    expect(result.current.transcript).toBe("")
+    // Ya no manda el final de lo dicho: lo pone el servidor, de lo guardado.
+    expect(body.context).toBeUndefined()
+  })
+
+  it("un tramo que otro pedido está ordenando se espera; no se cuenta como fallido", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let tries = 0
+      route.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
+        if (url === BASE) {
+          tries += 1
+          return tries === 1 ? { data: { ...segmentReply.data, repeated: true, inProgress: true } } : { data: { ...segmentReply.data, repeated: true } }
+        }
+        return segmentReply
+      })
+      const { result } = render()
+      act(() => result.current.submitTyped("Me duele al masticar."))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3500)
+      })
+      await waitFor(() => expect(tries).toBe(2))
+      expect(result.current.failed).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

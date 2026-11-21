@@ -1273,6 +1273,14 @@ export function EncounterEditor({
       setConfirmOpen(false)
       setFinishingForm(formId)
     },
+    // Lo que dijo de su salud se revisa en su aviso, con la persona: el cierre lleva ahí sin frenar la firma.
+    onReviewHealth: () => {
+      setConfirmOpen(false)
+      requestAnimationFrame(() => {
+        goTo(`${uid}-salud`)
+        document.getElementById(`${uid}-salud`)?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true })
+      })
+    },
   }
   /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
   const dictationOf = (key: SectionKey) =>
@@ -2773,7 +2781,7 @@ export function EncounterEditor({
 
       {/* Lo que dijo de su salud, también lo que oyó Clío y la alergia dictada (o «niega alergias»), en la
           fila de su tema del aviso: no en una caja aparte (issue 109; mesa del 20 nov 2026). */}
-      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} dictation={dictation} /> : null}
+      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} dictation={dictation} anchorId={`${uid}-salud`} /> : null}
 
       {canWrite && !attending ? (
         <div

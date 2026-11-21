@@ -44,7 +44,7 @@ import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { product } from "@odentia/db/schema/inventory"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import {
@@ -55,7 +55,22 @@ import {
   recordHealthDeclaration,
   reviewDeclaredHealth,
 } from "./clinical.js"
-import { healthDeclarantOf, healthModelLabel, healthOfPayload, healthRows, healthSummary, mergeHealth, prepareHealth, saidInDoubt, withoutSettledHealth } from "./dictation-health.js"
+import {
+  groundHealthNames,
+  hasHealth,
+  healthByDeclarant,
+  healthDeclarantOf,
+  healthModelLabel,
+  healthOfPayload,
+  type HealthRow,
+  healthRows,
+  healthSummary,
+  mergeHealth,
+  prepareHealth,
+  saidInDoubt,
+  splitHealthDenials,
+  withoutSettledHealth,
+} from "./dictation-health.js"
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { closestDiagnosisCode, type DiagnosisCodeOption, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
@@ -189,6 +204,11 @@ export interface DictationSuggestion {
   /** Ya confirmada, y pidió quitarla en voz alta: espera que una persona lo decida. */
   undoRequest: { said: string } | null
   createdAt: string
+  /**
+   * Lo de su salud, dato por dato y con quién lo dijo (revisión del 21 nov): la pantalla lo pone en la
+   * fila de su tema sin volver a leer el texto de la tarjeta.
+   */
+  healthRows?: HealthRow[]
 }
 
 /**
@@ -222,6 +242,12 @@ interface SuggestionMeta {
    * la persona entre las que Clío dudaba (`choices`); la respuesta la escribió ella.
    */
   discarded?: { status: "lista" | "por_revisar"; chosen?: string } | undefined
+  /**
+   * Lo de su salud que ya se resolvió por otra vía (quedó en Antecedentes con «Corregir algo» o con
+   * «Niega enfermedades», o se revisó con «Lo revisé con…» mientras un «No» espera): ni una pausa ni
+   * el repaso lo vuelven a proponer (revisión del 21 nov, A6).
+   */
+  resolved?: Array<Record<string, unknown>> | undefined
 }
 const META = "_meta"
 
@@ -669,6 +695,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zon
     removal: row.status === "descartada" && meta.removal ? { said: meta.removal.said } : null,
     undoRequest: row.status === "confirmada" && meta.undoRequest ? { said: meta.undoRequest.said } : null,
     createdAt: row.createdAt.toISOString(),
+    ...(row.kind === "salud" ? { healthRows: healthRows(data, meta.earlier) } : {}),
   }
 }
 
@@ -1949,7 +1976,10 @@ export async function saveDictationSegment(
     if (row.kind === "salud") {
       // Lo de su salud también: solo con la frase que lo corrige, y cambia solo el grupo que trae.
       if (!saidToCorrectNote(said, segment.transcript)) return false
-      const merged = mergeHealth(data, changes, true)
+      // Y el nombre que pone tiene que salir de esa frase (A5): «perdón, apixabán» no inventa otro.
+      const heard = groundHealthNames(changes, said ?? "")
+      if (!heard.payload) return false
+      const merged = mergeHealth(data, heard.payload, true)
       const ready = prepareHealth(merged.payload, undefined, dictation.health)
       if (!ready || JSON.stringify(ready.payload) === JSON.stringify(data)) return false
       const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: Object.values(merged.earlier).join(", ") || "otro dato de su salud" }, meta.voice)
@@ -2090,7 +2120,19 @@ export async function saveDictationSegment(
   )
   for (const draft of fromDiagnoses) twins.add(draft)
   const outcomes: Array<{ draft: DictationDraft; ready: boolean }> = []
-  for (const draft of drafts) {
+  for (const said of drafts) {
+    // Lo de su salud, solo con su frase dicha y con lo que nombra en ella (revisión del 21 nov, A5):
+    // un nombre que no se dijo no se propone y «No lo usé» dice por qué.
+    let draft = said
+    if (said.kind === "salud") {
+      const phrase = said.sourceText?.trim() ?? ""
+      if (!phrase) continue
+      const heard = groundHealthNames(said.payload, phrase)
+      if (heard.notHeard.length)
+        droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
+      if (!heard.payload) continue
+      draft = { ...said, payload: heard.payload }
+    }
     const prepared = await prepare(tx, draft, scope)
     outcomes.push({ draft, ready: prepared !== null })
     if (!prepared) continue
@@ -2220,12 +2262,15 @@ export async function saveDictationSegment(
       if (!row) pendingHealthId = undefined
       else {
         const { data, meta } = splitMeta(row.payload)
-        const merged = mergeHealth(data, ready.payload)
+        // Lo que ya se resolvió por otra vía (quedó en Antecedentes, o ya se revisó) no vuelve.
+        const fresh = meta.resolved?.length ? withoutSettledHealth(ready.payload, meta.resolved) : ready.payload
+        if (!fresh) continue
+        const merged = mergeHealth(data, fresh)
         const health = prepareHealth(merged.payload, undefined, dictation.health)
         if (health && JSON.stringify(health.payload) !== JSON.stringify(data)) {
           // Lo sumado también queda en cada paso de «Deshacer», como en la consulta.
           const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
-            step && { ...step, payload: mergeHealth(step.payload, ready.payload).payload, previous: withAdded(step.previous) }
+            step && { ...step, payload: mergeHealth(step.payload, fresh).payload, previous: withAdded(step.previous) }
           await tx
             .update(encounterDictationSuggestion)
             .set({
@@ -2521,9 +2566,16 @@ export async function updateDictationSuggestion(
   // Editada a mano, ya no es «corregida por voz»: no queda nada que deshacer. Lo que escribió en un
   // campo de la consulta tampoco dice ya «antes dijo».
   const earlier = meta.earlier ? Object.fromEntries(Object.entries(meta.earlier).filter(([key]) => !(key in patch))) : undefined
+  // Lo de su salud que se quita de la propuesta porque ya quedó en Antecedentes («Corregir algo»,
+  // «Niega enfermedades») queda resuelto: ni una pausa ni el repaso lo vuelven a proponer (A6).
+  const taken =
+    row.kind === "salud"
+      ? Object.fromEntries(Object.entries(patch).flatMap(([key, value]) => (value === null && key !== "declarante" && key !== "vinculo" && data[key] !== undefined ? [[key, data[key]]] : [])))
+      : {}
+  const resolved = Object.keys(taken).length ? [...(meta.resolved ?? []), taken] : meta.resolved
   const [updated] = await tx
     .update(encounterDictationSuggestion)
-    .set({ payload: withMeta(ready.payload, { ...meta, voice: undefined, earlier: earlier && Object.keys(earlier).length ? earlier : undefined }), status: ready.status, note: ready.note, updatedAt: new Date() })
+    .set({ payload: withMeta(ready.payload, { ...meta, voice: undefined, earlier: earlier && Object.keys(earlier).length ? earlier : undefined, resolved }), status: ready.status, note: ready.note, updatedAt: new Date() })
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo actualizar la sugerencia")
@@ -3003,14 +3055,66 @@ export interface DictationHealthReview {
 
 /**
  * «Lo revisé con …» de lo que dijo de su salud en la consulta (mesa del 20 nov 2026, P3): queda como
- * una declaración hecha en la consulta (`consulta`), con quién lo dijo, y se suma a Antecedentes como
+ * una declaración hecha en la consulta (`consulta`), una por cada persona que lo dijo (revisión del
+ * 21 nov, A4: lo del paciente a su nombre, lo de su hija al de ella), y se suma a Antecedentes como
  * lo que envía desde su enlace (`saveLinkHealth`): si nunca se registró su salud, es la primera; si
  * no, se suma sin tocar lo anotado. Lo revisó quien confirma: si no quedaba nada declarado sin
  * revisar, su salud queda revisada por esa persona; lo que se dijo por otra vía y nadie revisó sigue
  * esperando su propia revisión, no se revisa de paso. Así lo ven la franja, la anestesia, la
- * exodoncia y la receta, que leen Antecedentes. Lo confirma quien lleva la atención en borrador
- * (permiso `clinical.write`, en la ruta).
+ * exodoncia y la receta, que leen Antecedentes.
+ *
+ * Un «No» no se guarda de paso (revisión del 21 nov, A2): «niega enfermedades» o «no toma un
+ * anticoagulante» se confirman en su fila. Si la propuesta trae alguno, lo demás queda revisado y
+ * la sugerencia sigue esperando con solo esos «No» (lo revisado no se vuelve a proponer); si solo
+ * trae «No», no hay nada que guardar con «Lo revisé con…».
  */
+async function confirmHealthRow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  row: typeof encounterDictationSuggestion.$inferSelect,
+  review: DictationHealthReview,
+): Promise<{ updated: typeof encounterDictationSuggestion.$inferSelect; health: PatientHealth }> {
+  if (row.kind !== "salud") throw conflict("NOT_HEALTH", "Esta sugerencia no es de su salud")
+  const { data, meta } = splitMeta(row.payload)
+  const { vinculo: _said, quien: _each, ...rest } = data
+  // Quien confirma corrige quién lo dijo: vale para todo lo que propone.
+  const who =
+    review.declarante === undefined
+      ? data
+      : { ...rest, declarante: review.declarante, ...(review.declarante === "acompanante" && review.vinculo?.trim() ? { vinculo: review.vinculo.trim().slice(0, 80) } : {}) }
+  const { kept, denied } = splitHealthDenials(who)
+  if (!hasHealth(kept))
+    throw conflict("HEALTH_ONLY_DENIALS", "Lo que dijo es un «No»: confírmalo en su fila. «Lo revisé con…» no guarda un «No» de paso.")
+  const health = healthOfPayload(kept)
+  const before = await getPatientHealth(tx, orgId, patientId)
+  const clean = !before.reviewPending && before.declared.length === 0
+  for (const person of healthByDeclarant(kept))
+    await recordHealthDeclaration(tx, orgId, patientId, { via: "consulta", by: healthDeclarantOf(person.payload), health: healthOfPayload(person.payload) })
+  // La primera declaración (`initializeDeclaredPatientHealth`) es la de su registro; quien llega sin
+  // registro en línea (lo más común en la consulta) la tiene igual por aquí, sumada a lo que haya.
+  if (before.revision === 0 && (await hasRegistration(tx, orgId, patientId)))
+    await initializeDeclaredPatientHealth(tx, orgId, patientId, health, actorUserId)
+  else await addDeclaredHealth(tx, orgId, actorUserId, patientId, health, { entity: "encounter", entityId: row.encounterId, at: new Date() })
+  let after = await getPatientHealth(tx, orgId, patientId)
+  if (clean && (after.reviewPending || after.declared.length > 0))
+    after = await reviewDeclaredHealth(tx, orgId, actorUserId, patientId, { expectedRevision: after.revision })
+  const waiting = hasHealth(denied)
+  const [updated] = await tx
+    .update(encounterDictationSuggestion)
+    .set(
+      waiting
+        ? { payload: withMeta(denied, { ...meta, resolved: [...(meta.resolved ?? []), kept] }), updatedAt: new Date() }
+        : { payload: withMeta(kept, meta), status: "confirmada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+    )
+    .where(eq(encounterDictationSuggestion.id, row.id))
+    .returning()
+  if (!updated) throw new Error("No se pudo confirmar lo que dijo de su salud")
+  return { updated, health: after }
+}
+
+/** Lo confirma quien lleva la atención en borrador (permiso `clinical.write`, en la ruta). */
 export async function confirmDictationHealth(
   tx: Db,
   orgId: string,
@@ -3023,34 +3127,61 @@ export async function confirmDictationHealth(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
-  if (row.kind !== "salud") throw conflict("NOT_HEALTH", "Esta sugerencia no es de su salud")
-  const { data, meta } = splitMeta(row.payload)
-  const { vinculo: _said, ...rest } = data
-  const who =
-    review.declarante === undefined
-      ? data
-      : { ...rest, declarante: review.declarante, ...(review.declarante === "acompanante" && review.vinculo?.trim() ? { vinculo: review.vinculo.trim().slice(0, 80) } : {}) }
-  const health = healthOfPayload(who)
-  const before = await getPatientHealth(tx, orgId, patientId)
-  const clean = !before.reviewPending && before.declared.length === 0
-  await recordHealthDeclaration(tx, orgId, patientId, { via: "consulta", by: healthDeclarantOf(who), health })
-  // La primera declaración (`initializeDeclaredPatientHealth`) es la de su registro; quien llega sin
-  // registro en línea (lo más común en la consulta) la tiene igual por aquí, sumada a lo que haya.
-  if (before.revision === 0 && (await hasRegistration(tx, orgId, patientId)))
-    await initializeDeclaredPatientHealth(tx, orgId, patientId, health, actorUserId)
-  else await addDeclaredHealth(tx, orgId, actorUserId, patientId, health, { entity: "encounter", entityId: encounterId, at: new Date() })
-  let after = await getPatientHealth(tx, orgId, patientId)
-  if (clean && (after.reviewPending || after.declared.length > 0))
-    after = await reviewDeclaredHealth(tx, orgId, actorUserId, patientId, { expectedRevision: after.revision })
-  const [updated] = await tx
-    .update(encounterDictationSuggestion)
-    .set({ payload: withMeta(who, meta), status: "confirmada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
-    .where(eq(encounterDictationSuggestion.id, id))
-    .returning()
-  if (!updated) throw new Error("No se pudo confirmar lo que dijo de su salud")
+  const { updated, health } = await confirmHealthRow(tx, orgId, actorUserId, patientId, row, review)
   // Con lo que toma ya en Antecedentes, las recetas que esperaban avisan con eso.
   await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
-  return { ...toItem(updated, await findOrgLocale(tx, orgId), dictation), health: after }
+  return { ...toItem(updated, await findOrgLocale(tx, orgId), dictation), health }
+}
+
+/**
+ * Lo que dijo de su salud en una atención ya firmada y nadie revisó (revisión del 21 nov, A3): al
+ * firmar no se descarta, sigue avisándose en la franja con su fecha hasta que alguien lo revise con
+ * la persona o diga que no lo registra. La atención ya no es de nadie: lo decide quien escribe en la
+ * historia (`clinical.write`, la guarda de la ruta del paciente). Lo de una atención en borrador se
+ * decide en esa atención, por quien la lleva.
+ */
+async function lockSignedSaidHealth(tx: Db, orgId: string, patientId: string, id: string) {
+  const [row] = await tx
+    .select({ suggestion: encounterDictationSuggestion, encounterStatus: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.kind, "salud"),
+      ),
+    )
+    .for("update", { of: encounterDictationSuggestion })
+    .limit(1)
+  if (!row) throw notFound("Lo que dijo de su salud")
+  if (row.suggestion.status !== "lista" && row.suggestion.status !== "por_revisar") throw conflict("SUGGESTION_DECIDED", "Esto ya se revisó o se descartó")
+  if (row.encounterStatus !== "finalizada") throw conflict("ENCOUNTER_STILL_OPEN", "Esto se revisa en su atención, que sigue abierta")
+  return row.suggestion
+}
+
+/** «Lo revisé con…» de lo que dijo en una atención ya firmada: lo mismo que en la consulta. */
+export async function confirmSaidHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  id: string,
+  review: DictationHealthReview = {},
+): Promise<{ health: PatientHealth }> {
+  const row = await lockSignedSaidHealth(tx, orgId, patientId, id)
+  const { health } = await confirmHealthRow(tx, orgId, actorUserId, patientId, row, review)
+  return { health }
+}
+
+/** «No lo registro»: lo que dijo en una atención firmada deja de avisarse y no entra a Antecedentes. */
+export async function discardSaidHealth(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
+  const row = await lockSignedSaidHealth(tx, orgId, patientId, id)
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, row.id))
 }
 
 /**
@@ -3060,7 +3191,7 @@ export async function confirmDictationHealth(
  * Vacío si no dijo nada de la entrevista o si no se puede leer.
  */
 export async function dictatedHealthInterview(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const parsed = registrationAnswersSchema.shape.health.unwrap().safeParse(Object.fromEntries(Object.entries(splitMeta(payload).data).filter(([key]) => !["declarante", "vinculo"].includes(key))))
+  const parsed = registrationAnswersSchema.shape.health.unwrap().safeParse(Object.fromEntries(Object.entries(splitMeta(payload).data).filter(([key]) => !["declarante", "vinculo", "quien"].includes(key))))
   if (!parsed.success) return {}
   return (await productHooks(tx, orgId)).interview.declared(parsed.data, await clinicToday(tx, orgId))
 }
@@ -3070,16 +3201,19 @@ export interface SaidHealth {
   suggestionId: string
   encounterId: string
   by: HealthDeclarant
-  rows: Array<{ key: string; label: string; value: string }>
+  rows: HealthRow[]
   /** Cuándo lo dijo por última vez (ISO 8601). */
   at: string
+  /** Su atención sigue en borrador: se revisa ahí. Si no, ya se firmó y la franja dice cuándo lo dijo. */
+  open: boolean
 }
 
 /**
  * Lo que dijo de su salud en la consulta y sigue sin confirmar, para la franja de la cabecera
  * («Anticoagulante: dijo apixabán, sin confirmar», mesa del 20 nov 2026): avisa ya, sin esperar la
- * confirmación, y no entra a Antecedentes hasta que alguien lo revise con la persona. Solo lo de las
- * atenciones en borrador: lo que no se confirmó al firmar no queda como vigente.
+ * confirmación, y no entra a Antecedentes hasta que alguien lo revise con la persona. Firmada la
+ * atención, sigue avisándose con su fecha hasta que alguien lo revise o diga que no lo registra
+ * (revisión del 21 nov, A3): antes se perdía al firmar. Lo de una atención anulada, no.
  */
 export async function listSaidHealth(tx: Db, orgId: string, patientId: string): Promise<SaidHealth[]> {
   const rows = await tx
@@ -3088,6 +3222,7 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
       encounterId: encounterDictationSuggestion.encounterId,
       payload: encounterDictationSuggestion.payload,
       updatedAt: encounterDictationSuggestion.updatedAt,
+      encounterStatus: encounter.status,
     })
     .from(encounterDictationSuggestion)
     .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
@@ -3097,13 +3232,20 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
         eq(encounterDictationSuggestion.patientId, patientId),
         eq(encounterDictationSuggestion.kind, "salud"),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
-        eq(encounter.status, "borrador"),
+        inArray(encounter.status, ["borrador", "finalizada"]),
       ),
     )
     .orderBy(asc(encounterDictationSuggestion.createdAt))
   return rows.map((row) => {
-    const { data } = splitMeta(row.payload)
-    return { suggestionId: row.id, encounterId: row.encounterId, by: healthDeclarantOf(data), rows: healthRows(data), at: row.updatedAt.toISOString() }
+    const { data, meta } = splitMeta(row.payload)
+    return {
+      suggestionId: row.id,
+      encounterId: row.encounterId,
+      by: healthDeclarantOf(data),
+      rows: healthRows(data, meta.earlier),
+      at: row.updatedAt.toISOString(),
+      open: row.encounterStatus === "borrador",
+    }
   })
 }
 
@@ -3528,7 +3670,11 @@ export async function restoreDictationSuggestion(
   return toItem(restored, zone, dictation)
 }
 
-/** Descarta todo lo que quede sin decidir: lo que no se confirma no entra a la historia. */
+/**
+ * Descarta todo lo que quede sin decidir: lo que no se confirma no entra a la historia. Menos lo que
+ * dijo de su salud (revisión del 21 nov, A3): no es de la atención sino de la persona, y descartarlo
+ * al firmar perdía el anticoagulante dicho; sigue avisándose hasta que alguien lo revise.
+ */
 export async function discardPendingDictation(tx: Db, orgId: string, actorUserId: string, patientId: string, encounterId: string): Promise<number> {
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const rows = await tx
@@ -3539,6 +3685,7 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
         eq(encounterDictationSuggestion.organizationId, orgId),
         eq(encounterDictationSuggestion.encounterId, encounterId),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        ne(encounterDictationSuggestion.kind, "salud"),
       ),
     )
     .returning({ id: encounterDictationSuggestion.id })

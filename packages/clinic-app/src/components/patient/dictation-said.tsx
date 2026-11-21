@@ -43,7 +43,7 @@ export type SaidSession = Pick<
   | "mode"
   | "interim"
   | "base"
-  | "submitTyped"
+  | "retryUnused"
   | "blocked"
   | "organizing"
 >
@@ -78,8 +78,9 @@ function unusedWhy(item: UnusedSaid): string {
  * Una frase que parece de su salud (una medicina, una enfermedad, una alergia): solo para ofrecer
  * «Llevar a su salud», que abre sus antecedentes. No decide nada ni propone nada.
  */
-const LOOKS_LIKE_HEALTH =
-  /\b(?:tom[oa]|pastilla|medic|alerg|diab[eé]t|presi[oó]n|asma|coraz[oó]n|anestesi|embaraz|operad|operaci|hospital|tiroides|enfermedad|aspirina|insulina|epilep|hipertens|hepatitis|c[aá]ncer|sangr)/iu
+// El borde es de letras Unicode: `\b` no ve la «ó» de «tomó» ni la «á» de «átomo» como letras.
+export const LOOKS_LIKE_HEALTH =
+  /(?<![\p{L}\p{N}])(?:tom[oaó]|pastilla|medic|alerg|diab[eé]t|presi[oó]n|asma|coraz[oó]n|anestesi|embaraz|operad|operaci|hospital|tiroides|enfermedad|aspirina|insulina|epilep|hipertens|hepatitis|c[aá]ncer|sangr)/iu
 
 /** Lo resaltado: de la consulta (azul), de su salud (ámbar); la charla, sin resaltar. */
 function Marked({ text, sources }: { text: string; sources: { consulta: string[]; salud: string[] } }) {
@@ -384,7 +385,7 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
                       className="min-h-11 sm:min-h-8"
                       aria-label={`Intentar otra vez: «${phrase}»`}
                       disabled={session.organizing}
-                      onClick={() => session.submitTyped(phrase)}
+                      onClick={() => session.retryUnused(item.segmentId, phrase)}
                     >
                       Intentar otra vez
                     </Button>
@@ -418,6 +419,18 @@ export function EncounterSaidLink({ patientId, encounterId }: { patientId: strin
     retry: false,
   })
   const segments = query.data?.data.segments ?? []
+  // Si no se pudo cargar, se dice: esconderlo haría creer que no se dijo nada (revisión del 21 nov).
+  if (canRead && query.isError)
+    return (
+      <section aria-label="Lo que se dijo" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-4 text-sm">
+        <p role="alert" className="min-w-0 text-muted-foreground">
+          No pude cargar lo que se dijo en esta atención.
+        </p>
+        <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => void query.refetch()}>
+          Intentar otra vez
+        </Button>
+      </section>
+    )
   if (!canRead || segments.length === 0) return null
   const session: SaidSession = {
     said: segments,
@@ -433,7 +446,7 @@ export function EncounterSaidLink({ patientId, encounterId }: { patientId: strin
     mode: "off",
     interim: "",
     base,
-    submitTyped: () => {},
+    retryUnused: () => {},
     blocked: null,
     organizing: false,
   }

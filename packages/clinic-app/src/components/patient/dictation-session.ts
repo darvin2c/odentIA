@@ -25,6 +25,28 @@ export interface DictationSuggestion {
   undoRequest?: { said: string } | null
   /** Lo de su salud: lo de la entrevista con sus claves, para dejarlo puesto en Antecedentes. */
   interview?: Record<string, unknown>
+  /** Lo de su salud, dato por dato y con quién lo dijo, como lo arma el servidor (`healthRows`). */
+  healthRows?: SaidHealthRow[]
+}
+
+/** Quién dijo un dato de su salud: el paciente, quien lo acompaña (con su vínculo) o no se sabe. */
+export interface HealthSaidBy {
+  declarante: "paciente" | "acompanante" | "no_se_sabe"
+  vinculo?: string
+}
+
+/** Un dato de su salud que se dijo en la consulta, como lo arma el servidor. */
+export interface SaidHealthRow {
+  /** El grupo («anticoagulants») o el campo de la entrevista («dental.problemaAnestesia»). */
+  key: string
+  group: string
+  label: string
+  value: string
+  by: HealthSaidBy
+  /** Lo que dijo antes, si lo dijo distinto. */
+  before: string | null
+  /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…». */
+  denied?: boolean
 }
 
 /** Una frase de lo que se dijo que está en una sugerencia (pendiente o confirmada), con su clase. */
@@ -70,8 +92,13 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
 const SILENCE_MS = 2500
 /** Por debajo de esto no vale una llamada mientras se sigue hablando; al pausar o terminar se envía igual. */
 const MIN_SEGMENT_CHARS = 12
-/** Lo último ya ordenado que acompaña a cada tramo, para que se entienda a qué se refiere. */
-const CONTEXT_CHARS = 600
+/**
+ * Cada cuánto se vuelve a mirar un tramo o un repaso que otro pedido está ordenando («en curso»):
+ * el servidor no llama dos veces al modelo y esta pestaña espera a que termine.
+ */
+const IN_PROGRESS_MS = 3000
+/** Cuántas veces se vuelve a mirar: de sobra para lo que tarda una llamada al modelo. */
+const IN_PROGRESS_TRIES = 20
 /**
  * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
@@ -134,10 +161,14 @@ export function dictationErrorText(error: unknown, fallback: string): string | n
   return fallback
 }
 
+/**
+ * Un tramo que se manda a ordenar. Lo dicho antes ya está guardado con la atención: el contexto lo
+ * pone el servidor. `retryOf`: «Intentar otra vez» una frase que Clío no usó, del tramo donde se dijo.
+ */
 interface Segment {
   id: string
   text: string
-  context: string
+  retryOf?: string
 }
 
 /** Un tramo que no se pudo ordenar ni al reintentarlo: queda aparte, con su hora, y lo demás sigue. */
@@ -165,6 +196,8 @@ interface SegmentResponse {
     alreadyOnFile?: string[]
     alreadyDone?: string[]
     repeated: boolean
+    /** Otro pedido del mismo tramo lo está ordenando: no se llamó al modelo; se vuelve a mirar. */
+    inProgress?: boolean
     model: string | null
   }
 }
@@ -225,7 +258,7 @@ export type DictationReview =
   | { status: "failed"; message: string }
 
 interface ReviewResponse {
-  data: { reviewed: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[] }
+  data: { reviewed: boolean; inProgress?: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[] }
 }
 
 /** La clave de «Lo que se dijo» de la atención: el repaso la deja vieja (los turnos, lo que no usó). */
@@ -265,6 +298,11 @@ export interface DictationSaidSegment {
   unused: DictationUnusedItem[]
   /** Los turnos, tras el repaso al terminar; nulo antes. */
   turns: DictationTurn[] | null
+  /**
+   * Ya lo leyó un repaso, aunque no haya dejado turnos: no pide otro. Un servidor de antes no lo
+   * manda: entonces vale si tiene turnos.
+   */
+  reviewed?: boolean
 }
 
 /** Lo que refresca lo de su salud: el aviso «Pregúntale a…», la franja y el cierre. */
@@ -357,6 +395,11 @@ export function useDictationSession({
     const known = new Set(saved.map((segment) => segment.segmentId))
     return [...saved, ...sentHere.filter((segment) => !known.has(segment.segmentId))]
   }, [saved, sentHere])
+  // Lo que el servidor ya devuelve sale de lo mandado aquí: la lista no crece mientras la pestaña sigue abierta.
+  useEffect(() => {
+    const known = new Set(saved.map((segment) => segment.segmentId))
+    setSentHere((current) => (current.some((segment) => known.has(segment.segmentId)) ? current.filter((segment) => !known.has(segment.segmentId)) : current))
+  }, [saved])
   const refreshSaid = useCallback(() => queryClient.invalidateQueries({ queryKey: saidKey }), [queryClient, saidKey])
   /** Lo de su salud cambió (una pausa, el repaso, «Lo revisé con…»): el aviso y la franja lo dicen al momento. */
   const refreshHealth = useCallback(
@@ -407,15 +450,23 @@ export function useDictationSession({
   /** Ordena un tramo y refleja lo que volvió: lo resaltado, lo que no se pudo usar y las sugerencias. */
   const send = useCallback(
     async (segment: Segment) => {
-      const response = await apiFetch<SegmentResponse>(base, {
-        method: "POST",
-        body: JSON.stringify({
-          transcript: segment.text,
-          segmentId: segment.id,
-          ...(segment.context ? { context: segment.context } : {}),
-          ...(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
-        }),
-      })
+      const post = () =>
+        apiFetch<SegmentResponse>(base, {
+          method: "POST",
+          body: JSON.stringify({
+            transcript: segment.text,
+            segmentId: segment.id,
+            ...(segment.retryOf ? { retryOf: segment.retryOf } : {}),
+            ...(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
+          }),
+        })
+      let response = await post()
+      // Otro pedido del mismo tramo lo está ordenando (el reintento tras un corte, otra pestaña): no se
+      // paga dos veces; se espera a que termine y entonces se lee lo que dejó.
+      for (let tries = 0; response.data.inProgress && tries < IN_PROGRESS_TRIES && mounted.current; tries += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, IN_PROGRESS_MS))
+        response = await post()
+      }
       if (!mounted.current) return
       const data = response.data
       if (data.model) setDemo(data.model === "fake")
@@ -459,14 +510,22 @@ export function useDictationSession({
     reviewing.current = true
     setReview({ status: "reviewing" })
     try {
-      const response = await apiFetch<ReviewResponse>(`${base}/review`, {
-        method: "POST",
-        body: JSON.stringify(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
-      })
+      const post = () =>
+        apiFetch<ReviewResponse>(`${base}/review`, {
+          method: "POST",
+          body: JSON.stringify(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
+        })
+      let response = await post()
+      // Otro repaso (otra pestaña) ya lee lo nuevo: no se paga dos veces; se espera y se lee lo que dejó.
+      const waited = !!response.data.inProgress
+      for (let tries = 0; response.data.inProgress && tries < IN_PROGRESS_TRIES && mounted.current; tries += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, IN_PROGRESS_MS))
+        response = await post()
+      }
       if (!mounted.current) return
       const data = response.data
-      setReview({ status: "done", reviewed: data.reviewed, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
-      if (data.reviewed) {
+      setReview({ status: "done", reviewed: data.reviewed || waited, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
+      if (data.reviewed || waited) {
         await refresh()
         void refreshSaid()
         if (data.suggestions.length + data.added.length > 0) void refreshHealth()
@@ -531,7 +590,7 @@ export function useDictationSession({
       const segment = failed.find((item) => item.id === id)
       if (!segment) return
       setFailed((current) => current.filter((item) => item.id !== id))
-      queue.current.unshift({ id: segment.id, text: segment.text, context: segment.context })
+      queue.current.unshift({ id: segment.id, text: segment.text, ...(segment.retryOf ? { retryOf: segment.retryOf } : {}) })
       void drain()
     },
     [failed, drain],
@@ -543,11 +602,7 @@ export function useDictationSession({
       const tail = text.current.slice(sent.current).trim()
       if (tail.length < 3 || (!force && tail.length < MIN_SEGMENT_CHARS)) return
       const id = crypto.randomUUID()
-      queue.current.push({
-        id,
-        text: tail.slice(0, 12_000),
-        context: text.current.slice(Math.max(0, sent.current - CONTEXT_CHARS), sent.current).trim(),
-      })
+      queue.current.push({ id, text: tail.slice(0, 12_000) })
       setSentHere((current) => [
         ...current,
         { segmentId: id, transcript: tail.slice(0, 12_000), saidAt: new Date().toISOString(), createdBy: "", organized: false, unused: [], turns: null },
@@ -686,6 +741,18 @@ export function useDictationSession({
       cut(true)
     },
     [append, cut],
+  )
+
+  /**
+   * «Intentar otra vez» una frase de «No lo usé»: Clío la vuelve a leer con lo dicho antes de su
+   * tramo. No es algo dicho otra vez: «Lo que se dijo» la sigue mostrando una sola vez, en su hora.
+   */
+  const retryUnused = useCallback(
+    (segmentId: string, phrase: string) => {
+      queue.current.push({ id: crypto.randomUUID(), text: phrase.slice(0, 12_000), retryOf: segmentId })
+      void drain()
+    },
+    [drain],
   )
 
   const act = useMutation({
@@ -852,6 +919,18 @@ export function useDictationSession({
     },
   })
   /**
+   * «No lo registro» de lo que dijo de su salud: no entra a Antecedentes y deja de avisarse. Lo
+   * decide quien lleva la atención (revisión del 21 nov, A3).
+   */
+  const discardHealth = useMutation({
+    retry: false,
+    mutationFn: (item: DictationSuggestion) => apiFetch(`${base}/${item.id}/discard`, { method: "POST", body: JSON.stringify({}) }),
+    onSettled: () => {
+      void refresh()
+      void refreshHealth()
+    },
+  })
+  /**
    * Lo de su salud que ya quedó en Antecedentes por otra vía («Corregir algo», «Niega enfermedades»):
    * sale de lo que Clío propone, para que «Lo revisé con…» no lo vuelva a sumar. Si no queda nada,
    * la sugerencia se descarta.
@@ -897,8 +976,9 @@ export function useDictationSession({
 
   const ready = suggestions.filter(confirmable).length
   const dictating = mode !== "off"
-  // Tramos ya ordenados que ningún repaso partió en turnos: «Finalizar y firmar» los repasa antes.
-  const unreviewed = said.some((segment) => segment.organized && segment.turns === null)
+  // Tramos ya ordenados que ningún repaso leyó: «Finalizar y firmar» los repasa antes. Uno ya leído
+  // sin turnos (los rechazó, o no empezó ninguno en él) no pide otro repaso.
+  const unreviewed = said.some((segment) => segment.organized && !(segment.reviewed ?? segment.turns !== null))
   return {
     enabled,
     confirmReadyFailed,
@@ -949,6 +1029,7 @@ export function useDictationSession({
     /** Hay tramos sin repasar: el repaso se lanza antes de firmar. */
     unreviewed,
     confirmHealth,
+    discardHealth,
     settleHealthGroups,
     dismissUnused: () => setUnused(NOTHING_UNUSED),
     demo,
@@ -957,6 +1038,7 @@ export function useDictationSession({
     resume,
     finish,
     submitTyped,
+    retryUnused,
     act,
     save,
     confirmReady,
