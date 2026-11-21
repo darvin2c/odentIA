@@ -227,7 +227,9 @@ describe("un tramo o un repaso en curso", () => {
     const { data } = (await (await app.request(`${base}/said`)).json()) as { data: { segments: Array<{ transcript: string; unused: unknown[] }> } }
     // Antes la frase quedaba dos veces en «Lo que se dijo», con otra hora.
     expect(data.segments.map((item) => item.transcript)).toEqual(["Le duele la treinta y seis.", "Buenos días, y algo de la tiroides."])
-    expect(data.segments[1]?.unused).toEqual([])
+    // Clío tampoco la usó esta vez: la frase sigue en «No lo usé» de su tramo, con su motivo (QA del
+    // 21 nov: antes desaparecía sin quedar en ninguna parte).
+    expect(data.segments[1]?.unused).toEqual([{ said: "y algo de la tiroides", why: "sin_lugar" }])
   })
 })
 
