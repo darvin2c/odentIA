@@ -1813,7 +1813,10 @@ export interface DictationSegmentResult {
   undoRequested: string[]
   /** Alergias dichas que ya estaban registradas («penicilinas»): no se proponen, se avisa. */
   alreadyOnFile: string[]
-  /** Lo hecho que ya está registrado en esta atención («Profilaxis»): no se propone otra vez, se avisa. */
+  /**
+   * Lo hecho que ya está registrado en esta atención («Profilaxis»), o la indicación que ya es un camino
+   * de una elección confirmada en ella: no se propone otra vez, se avisa.
+   */
   alreadyDone: string[]
   /**
    * Lo dicho para una ficha que no quedó como propuesta, con por qué: va a «No pude usar esto».
@@ -2133,6 +2136,8 @@ export async function saveDictationSegment(
   const pendingRecipes = new Set(pendingNow.filter((item) => item.kind === "receta").map((item) => recipeKey(item.payload)))
   // Lo mismo con el plan y los diagnósticos: la misma prestación o el mismo diagnóstico en el mismo sitio.
   const pendingPlans: PendingPlan[] = pendingNow.filter((item) => item.kind === "plan").map((item) => planEntry(item.id, item.payload))
+  // Las elecciones de caminos ya confirmadas en la atención, solo si llega una indicación suelta.
+  let confirmedChoices: PendingPlan[] | undefined
   const pendingDiagnoses = new Set(pendingNow.filter((item) => item.kind === "diagnostico").map((item) => diagnosisKey(item.payload)))
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
@@ -2419,6 +2424,19 @@ export async function saveDictationSegment(
         ? same.some((item) => item.choice && covers(item.place, entry.place) && entry.names.every((name) => item.names.includes(name)))
         : same.some((item) => covers(item.place, entry.place))
       if (repeated) continue
+      // Al revés: la elección ya confirmada hoy incluye esta prestación en esa pieza («endodoncia o
+      // exodoncia de la 36», confirmada, y luego «endodoncia de la 36»). Ya es uno de sus caminos en el
+      // plan y el presupuesto: confirmarla otra vez la dejaría dos veces. No se propone; se avisa.
+      if (!entry.choice && entry.place.tooth !== null) {
+        confirmedChoices ??= (await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada"))
+          .filter((item) => isPlanChoice(item.kind, item.payload))
+          .map((item) => planEntry(item.id, item.payload))
+        if (confirmedChoices.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place))) {
+          const name = String(ready.payload["serviceName"] ?? ready.payload["service"] ?? "").trim()
+          if (name && !alreadyDone.includes(name)) alreadyDone.push(name)
+          continue
+        }
+      }
       // La elección incluye la misma prestación que quedó suelta en esa pieza en otra pausa («le planteo
       // endodoncia de la 36» y luego «la otra opción es la exodoncia»): la suelta ya es uno de sus
       // caminos. Si quedaran las dos, el presupuesto la sumaría también en cada opción (QA clínica del

@@ -19,7 +19,7 @@ import { assembleEncounterBudget, findDraftBudget } from "../budgets.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule, zonedTimeToUtc } from "../availability.js"
@@ -458,6 +458,11 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
   // exodoncia de la 36» en otra daban S/ 1 300 y S/ 800: la endodoncia iba suelta y además como camino.
   const twoPaths = async (name: string) => {
     const fx = await openSession(`Endodoncia ${name}`, "tooth")
+    // Al terminar se apaga: cada endodoncia más en la clínica deja fuera de los candidatos la posterior
+    // vital que espera v06 (c3), que se ofrece entre las de la biblioteca.
+    onTestFinished(async () => {
+      await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, fx.service.id))
+    })
     await ownerDb.update(serviceCatalog).set({ priceCents: 65000 }).where(eq(serviceCatalog.id, fx.service.id))
     await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: `Exodoncia ${name}`, scope: "tooth", source: "custom", priceCents: 15000, currency: "PEN" })
     const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
@@ -524,6 +529,29 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
     expect(await endodontics()).toHaveLength(1)
     const firstRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, first!.id)))[0]!
     expect(endo!.id).toBe(firstRow.entityId)
+    await enable(false)
+  })
+
+  it("la endodoncia suelta dictada después de confirmar la elección no se propone otra vez: se avisa como ya registrada (H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("después de elegir")
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    const after = await loose()
+    expect(after.suggestions).toEqual([])
+    expect(after.alreadyDone).toEqual(["Endodoncia después de elegir"])
+    // En otra pieza sí es otra indicación.
+    const other = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "endodoncia después de elegir", toothNumber: 46 } }] }),
+    )
+    expect(other.suggestions).toHaveLength(1)
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, other.suggestions[0]!.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia después de elegir"], total: 65000 },
+      { titles: ["Exodoncia después de elegir"], total: 15000 },
+    ])
+    expect(await endodontics()).toHaveLength(1)
     await enable(false)
   })
 
