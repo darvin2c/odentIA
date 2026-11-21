@@ -88,6 +88,7 @@ import {
   healthFormOptions,
   MedicationRows,
   ReviewStateField,
+  withSaidHealth,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi, type SubFieldErrors } from "../../product/product-ui"
@@ -490,10 +491,16 @@ function baseOf(health: PatientHealth): HealthBase {
 export function AntecedentesTab({
   patientId,
   startEditing = false,
+  said,
+  onSaved,
 }: {
   patientId: string
   /** «Revisar» de Pendientes: se abre con el formulario listo, sin otro clic. */
   startEditing?: boolean
+  /** «Corregir algo» de lo que Clío oyó en la consulta: el formulario abre con eso puesto. */
+  said?: Record<string, unknown>
+  /** Se guardó lo de `said`: la propuesta de Clío ya no lo suma otra vez. */
+  onSaved?: () => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -572,6 +579,10 @@ export function AntecedentesTab({
       }
       setStale(false)
       setDrawerOpen(false)
+      if (prefilled.current) {
+        prefilled.current = false
+        onSaved?.()
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["anamnesis-history", patientId] }),
@@ -625,13 +636,23 @@ export function AntecedentesTab({
     setDrawerOpen(true)
   }
 
-  // «Revisar» de Pendientes: una sola vez, en cuanto hay qué mostrar.
+  // «Revisar» de Pendientes: una sola vez, en cuanto hay qué mostrar. Con lo que Clío oyó en la
+  // consulta («Corregir algo»), el borrador ya lo trae puesto: se corrige, no se escribe de cero.
   const startedEditing = useRef(false)
+  const prefilled = useRef(false)
   // biome-ignore lint/correctness/useExhaustiveDependencies: `openDrawer` cambia en cada render; corre una vez al llegar.
   useEffect(() => {
     if (!startEditing || !canWrite || !health || startedEditing.current) return
     startedEditing.current = true
     openDrawer()
+    if (said) {
+      // Como escrito a mano: cuenta como un cambio, se guarda con «Guardar» y avisa al salir sin guardar.
+      const next = withSaidHealth(buildDrafts(health), said)
+      form.setFieldValue("conditions", next.conditions)
+      form.setFieldValue("medications", next.medications)
+      form.setFieldValue("reviewStatus", next.reviewStatus)
+      prefilled.current = true
+    }
   }, [startEditing, canWrite, health])
 
   async function reload(): Promise<void> {
@@ -1561,7 +1582,11 @@ export function laterDeclarationsOf(
   const ofRegistration = (declaration: HealthDeclarationView) =>
     shown !== null && [declaration.enteredAt, declaration.at].some((at) => new Date(at).getTime() === shown)
   return declarations.filter(
-    (declaration) => declaration.via === "enlace" || (declaration.via === "registro" && !ofRegistration(declaration)),
+    (declaration) =>
+      declaration.via === "enlace" ||
+      // Lo que dijo en la consulta y se revisó con «Lo revisé con…» (mesa del 20 nov 2026).
+      declaration.via === "consulta" ||
+      (declaration.via === "registro" && !ofRegistration(declaration)),
   )
 }
 
@@ -1631,7 +1656,9 @@ function RegistrationSnapshotDialog({
                 ? `${HEALTH_DECLARATION_REASON_LABELS[declaration.reason]}, desde su enlace`
                 : declaration.via === "enlace"
                   ? "Lo que envió desde su enlace"
-                  : "Lo que envió en su registro en línea"
+                  : declaration.via === "consulta"
+                    ? "Lo que dijo en la consulta"
+                    : "Lo que envió en su registro en línea"
           return (
             <section key={declaration.enteredAt} aria-label={title} className="flex flex-col gap-3 text-sm">
               <div className="flex flex-col gap-0.5">

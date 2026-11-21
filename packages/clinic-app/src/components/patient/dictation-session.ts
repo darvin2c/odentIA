@@ -137,6 +137,8 @@ interface SegmentResponse {
   data: {
     suggestions: DictationSuggestion[]
     corrected: string[]
+    /** Las pendientes a las que esta pausa sumó algo (la consulta, lo de su salud). */
+    added?: string[]
     removed: string[]
     sources: string[]
     /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
@@ -216,6 +218,53 @@ interface ReviewResponse {
 /** La clave de «Lo que se dijo» de la atención: el repaso la deja vieja (los turnos, lo que no usó). */
 export const dictationSaidKey = (patientId: string, encounterId: string) => ["encounter-dictation-said", patientId, encounterId] as const
 
+/** Quién habló en un turno, según el repaso: quien atiende, el paciente, quien lo acompaña o no se sabe. */
+export const DICTATION_SPEAKERS = ["dra", "paciente", "acompanante", "no_se_sabe"] as const
+export type DictationSpeaker = (typeof DICTATION_SPEAKERS)[number]
+
+/** Un turno de un tramo de lo que se dijo (lo arma el repaso al terminar). */
+export interface DictationTurn {
+  quien: DictationSpeaker
+  vinculo?: string
+  texto: string
+}
+
+/**
+ * Lo que Clío no usó de un tramo y por qué: no supo dónde va (`sin_lugar`), quiso cambiar algo ya
+ * confirmado (`ya_confirmada`) o no se dejó pasar (`no_propuesta`, con lo que se dice en `detail`).
+ * `said` nulo: no supo citar la frase.
+ */
+export interface DictationUnusedItem {
+  said: string | null
+  why: "sin_lugar" | "ya_confirmada" | "no_propuesta"
+  detail?: string
+  targets?: FormTarget[]
+}
+
+/** Un tramo de «Lo que se dijo», guardado con la atención (`GET …/dictation/said`). */
+export interface DictationSaidSegment {
+  segmentId: string
+  transcript: string
+  saidAt: string
+  createdBy: string
+  /** Clío ya lo ordenó; si no, falló o sigue en curso. */
+  organized: boolean
+  unused: DictationUnusedItem[]
+  /** Los turnos, tras el repaso al terminar; nulo antes. */
+  turns: DictationTurn[] | null
+}
+
+/** Lo que refresca lo de su salud: el aviso «Pregúntale a…», la franja y el cierre. */
+const healthKeys = (patientId: string) => [
+  ["patient-health", patientId],
+  ["patient", patientId],
+  ["patient-summary", patientId],
+  ["encounter-closing", patientId],
+]
+
+/** Los grupos de su salud que puede traer la sugerencia `salud` (la forma de su registro). */
+export const HEALTH_GROUPS: readonly string[] = ["anticoagulants", "boneMedicines", "medications", "conditions", "allergies", "personal", "medical", "dental"]
+
 export type DictationSession = ReturnType<typeof useDictationSession>
 
 /**
@@ -279,6 +328,27 @@ export function useDictationSession({
   const confirmed = query.data?.data.confirmed ?? 0
   const blocked = query.data?.data.blocked ?? null
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: key }), [queryClient, key])
+  // «Lo que se dijo»: guardado con la atención, sigue igual al recargar o al volver otro día.
+  const saidKey = useMemo(() => dictationSaidKey(patientId, encounterId), [patientId, encounterId])
+  const saidQuery = useQuery({
+    queryKey: saidKey,
+    queryFn: () => apiFetch<{ data: { segments: DictationSaidSegment[] } }>(`${base}/said`),
+    retry: false,
+    enabled,
+  })
+  const saved = useMemo(() => saidQuery.data?.data.segments ?? [], [saidQuery.data])
+  // Lo que esta pestaña ya mandó y el servidor aún no devuelve (se está ordenando): se ve igual.
+  const [sentHere, setSentHere] = useState<DictationSaidSegment[]>([])
+  const said = useMemo(() => {
+    const known = new Set(saved.map((segment) => segment.segmentId))
+    return [...saved, ...sentHere.filter((segment) => !known.has(segment.segmentId))]
+  }, [saved, sentHere])
+  const refreshSaid = useCallback(() => queryClient.invalidateQueries({ queryKey: saidKey }), [queryClient, saidKey])
+  /** Lo de su salud cambió (una pausa, el repaso, «Lo revisé con…»): el aviso y la franja lo dicen al momento. */
+  const refreshHealth = useCallback(
+    () => Promise.all(healthKeys(patientId).map((queryKey) => queryClient.invalidateQueries({ queryKey }))),
+    [queryClient, patientId],
+  )
 
   const [mode, setMode] = useState<DictationMode>("off")
   const [seconds, setSeconds] = useState(0)
@@ -339,6 +409,14 @@ export function useDictationSession({
       // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
       for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       for (const name of data.alreadyDone ?? []) toast(`Ya está registrado en esta atención: «${name}». No se vuelve a sumar.`)
+      // Lo de su salud que esta pausa propuso, sumó o corrigió: la franja y el aviso lo dicen ya.
+      const healthIds = new Set(
+        (queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions ?? [])
+          .filter((item) => item.kind === "salud")
+          .map((item) => item.id),
+      )
+      const touchedHealth =
+        data.suggestions.some((item) => item.kind === "salud") || [...(data.added ?? []), ...data.corrected].some((id) => healthIds.has(id))
       setUnused((before) => {
         // Lo avisado antes que esta pausa respondió ya no se avisa; después, lo que esta no pudo usar.
         const current = withoutAnsweredUnused(before, data.suggestions)
@@ -351,8 +429,10 @@ export function useDictationSession({
         }
       })
       await refresh()
+      void refreshSaid()
+      if (touchedHealth) void refreshHealth()
     },
-    [base, refresh],
+    [base, refresh, refreshSaid, refreshHealth, queryClient, key],
   )
 
   /**
@@ -374,14 +454,15 @@ export function useDictationSession({
       setReview({ status: "done", reviewed: data.reviewed, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
       if (data.reviewed) {
         await refresh()
-        void queryClient.invalidateQueries({ queryKey: dictationSaidKey(patientId, encounterId) })
+        void refreshSaid()
+        if (data.suggestions.length + data.added.length > 0) void refreshHealth()
       }
     } catch (error) {
       if (mounted.current) setReview({ status: "failed", message: dictationErrorText(error, "No pude repasar la conversación. Lo que ya ordené sigue igual.") ?? "" })
     } finally {
       reviewing.current = false
     }
-  }, [base, openForms, refresh, queryClient, patientId, encounterId])
+  }, [base, openForms, refresh, refreshSaid, refreshHealth])
 
   /**
    * Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se
@@ -447,11 +528,16 @@ export function useDictationSession({
     (force: boolean) => {
       const tail = text.current.slice(sent.current).trim()
       if (tail.length < 3 || (!force && tail.length < MIN_SEGMENT_CHARS)) return
+      const id = crypto.randomUUID()
       queue.current.push({
-        id: crypto.randomUUID(),
+        id,
         text: tail.slice(0, 12_000),
         context: text.current.slice(Math.max(0, sent.current - CONTEXT_CHARS), sent.current).trim(),
       })
+      setSentHere((current) => [
+        ...current,
+        { segmentId: id, transcript: tail.slice(0, 12_000), saidAt: new Date().toISOString(), createdBy: "", organized: false, unused: [], turns: null },
+      ])
       sent.current = text.current.length
       void drain()
     },
@@ -737,6 +823,40 @@ export function useDictationSession({
     },
   })
 
+  /**
+   * «Lo revisé con…» de lo que dijo de su salud: queda como su declaración en la consulta y entra a
+   * Antecedentes (`confirm-health`). Lo confirma quien lleva la atención; nunca «Confirmar las N».
+   */
+  const confirmHealth = useMutation({
+    retry: false,
+    mutationFn: (item: DictationSuggestion) =>
+      apiFetch<{ data: DictationSuggestion }>(`${base}/${item.id}/confirm-health`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: (_result, item) => onApplied({ ...item, status: "confirmada" }),
+    onSettled: () => {
+      void refresh()
+      void refreshHealth()
+    },
+  })
+  /**
+   * Lo de su salud que ya quedó en Antecedentes por otra vía («Corregir algo», «Niega enfermedades»):
+   * sale de lo que Clío propone, para que «Lo revisé con…» no lo vuelva a sumar. Si no queda nada,
+   * la sugerencia se descarta.
+   */
+  const settleHealthGroups = useMutation({
+    retry: false,
+    mutationFn: async (input: { item: DictationSuggestion; groups: readonly string[] }) => {
+      const taken = input.groups.filter((group) => group in input.item.payload)
+      if (taken.length === 0) return null
+      const left = Object.keys(input.item.payload).filter((group) => HEALTH_GROUPS.includes(group) && !taken.includes(group))
+      if (left.length === 0) return apiFetch(`${base}/${input.item.id}/discard`, { method: "POST", body: JSON.stringify({}) })
+      return apiFetch(`${base}/${input.item.id}`, { method: "PATCH", body: JSON.stringify(Object.fromEntries(taken.map((group) => [group, null]))) })
+    },
+    onSettled: () => {
+      void refresh()
+      void refreshHealth()
+    },
+  })
+
   /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos. */
   const issuePrescription = useMutation({
     retry: false,
@@ -763,6 +883,8 @@ export function useDictationSession({
 
   const ready = suggestions.filter(confirmable).length
   const dictating = mode !== "off"
+  // Tramos ya ordenados que ningún repaso partió en turnos: «Finalizar y firmar» los repasa antes.
+  const unreviewed = said.some((segment) => segment.organized && segment.turns === null)
   return {
     enabled,
     confirmReadyFailed,
@@ -784,7 +906,7 @@ export function useDictationSession({
     mode,
     dictating,
     /** Aún se está dictando u ordenando: no es momento de firmar. */
-    busy: dictating || organizing || queue.current.length > 0,
+    busy: dictating || organizing || queue.current.length > 0 || review.status === "reviewing",
     seconds,
     transcript,
     interim,
@@ -798,9 +920,20 @@ export function useDictationSession({
     discardFailed: (id: string) => setFailed((current) => current.filter((item) => item.id !== id)),
     /** Lo que el asistente no pudo usar, hasta «Entendido». */
     unused,
-    /** El repaso al terminar: cómo va, para el panel de lo que se dijo. */
+    /** El repaso al terminar: cómo va, para la barra y el panel de lo que se dijo. */
     review,
     requestReview,
+    /** Lo que se dijo en la atención, tramo por tramo, del servidor: sigue igual al recargar. */
+    said,
+    /** Lo que se está oyendo y todavía no se mandó a ordenar: «Lo que se dijo» lo muestra al final. */
+    unsent: transcript.slice(sent.current).trim(),
+    saidLoading: enabled && saidQuery.isPending,
+    saidError: saidQuery.isError,
+    refreshSaid,
+    /** Hay tramos sin repasar: el repaso se lanza antes de firmar. */
+    unreviewed,
+    confirmHealth,
+    settleHealthGroups,
     dismissUnused: () => setUnused(NOTHING_UNUSED),
     demo,
     start,
@@ -896,4 +1029,65 @@ export function highlightTranscript(
     else parts.push({ text: transcript[index] ?? "", mark: marks[index] ?? null })
   }
   return parts
+}
+
+/** De qué se usó un trozo de lo que se dijo: de la consulta (azul) o de su salud (ámbar). La charla, sin marca. */
+export type SaidMark = "consulta" | "salud"
+
+/**
+ * Lo que se dijo en trozos, con lo que dio una propuesta de la consulta o de su salud. Como
+ * `highlightTranscript`: un fragmento solo se marca si está tal cual (o frase por frase); lo de su
+ * salud gana si los dos lo cubren.
+ */
+export function markSaid(text: string, sources: { consulta: readonly string[]; salud: readonly string[] }): Array<{ text: string; mark: SaidMark | null }> {
+  const lower = text.toLowerCase()
+  if (lower.length !== text.length) return [{ text, mark: null }]
+  const marks: Array<SaidMark | null> = Array.from({ length: text.length }, () => null)
+  const paint = (fragment: string, mark: SaidMark): boolean => {
+    const needle = fragment.trim().toLowerCase()
+    if (needle.length < 3) return false
+    const at = lower.indexOf(needle)
+    if (at < 0) return false
+    for (let index = at; index < at + needle.length; index += 1) if (marks[index] !== "salud") marks[index] = mark
+    return true
+  }
+  for (const mark of ["consulta", "salud"] as const) {
+    for (const source of sources[mark]) if (!paint(source, mark)) for (const sentence of source.split(/(?<=[.;!?])\s+/)) paint(sentence, mark)
+  }
+  const parts: Array<{ text: string; mark: SaidMark | null }> = []
+  for (let index = 0; index < text.length; index += 1) {
+    const last = parts.at(-1)
+    if (last && last.mark === marks[index]) last.text += text[index]
+    else parts.push({ text: text[index] ?? "", mark: marks[index] ?? null })
+  }
+  return parts
+}
+
+/** Lo que Clío no usó, con su tramo: lo que se lista en «No lo usé». */
+export interface UnusedSaid extends DictationUnusedItem {
+  segmentId: string
+  saidAt: string
+}
+
+/**
+ * «No lo usé (n)» de lo que se dijo, guardado con cada tramo. Una frase que una pausa siguiente
+ * volvió a decir y esa sí usó («Intentar otra vez», o dicha de nuevo) ya no se lista; las repetidas
+ * van una vez.
+ */
+export function unusedOfSaid(segments: readonly DictationSaidSegment[]): UnusedSaid[] {
+  const loose = (value: string) => value.toLocaleLowerCase("es").replace(/\s+/g, " ").trim()
+  const seen = new Set<string>()
+  return segments.flatMap((segment, index) =>
+    segment.unused.flatMap((item): UnusedSaid[] => {
+      const phrase = item.said ? loose(item.said) : null
+      if (phrase) {
+        const usedLater = segments
+          .slice(index + 1)
+          .some((later) => later.organized && loose(later.transcript).includes(phrase) && !later.unused.some((other) => other.said && loose(other.said) === phrase))
+        if (usedLater || seen.has(phrase)) return []
+        seen.add(phrase)
+      }
+      return [{ ...item, segmentId: segment.segmentId, saidAt: segment.saidAt }]
+    }),
+  )
 }

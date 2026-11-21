@@ -433,3 +433,22 @@ describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atenció
     expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
   })
 })
+
+// Clío en una consulta conversada (mesa del 20 nov 2026): las tres preguntas del acta llegan a su
+// respuesta, con los nombres de la pantalla y sin nombrar decisiones internas. latidIA, en `medical/help.test.ts`.
+describe("Clío en una consulta conversada", () => {
+  it.each([
+    ["¿Clío entiende si converso con el paciente?", "pacientes-dictado-conversar"],
+    ["¿Dónde veo lo que se dijo en la consulta?", "pacientes-dictado-lo-que-se-dijo"],
+    ["¿Cómo confirmo lo que el paciente dijo de su salud?", "pacientes-dictado-salud"],
+  ])("«%s» tiene su respuesta", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+    const faq = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === id)
+    expect(faq?.a).not.toMatch(/ADR|decisión \d/)
+  })
+
+  it("la guía ya no nombra los textos de antes del dictado", () => {
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    expect(faqs.filter((faq) => /«Ver lo dictado»|«No pude usar esto»|Tu respaldo/.test(faq.a)).map((faq) => faq.id)).toEqual([])
+  })
+})

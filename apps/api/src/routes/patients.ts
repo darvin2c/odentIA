@@ -52,6 +52,7 @@ import {
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
+  listSaidHealth,
   getPlanNextStep,
   getPlanNextSteps,
   getStaffMissingData,
@@ -1092,7 +1093,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.get("/:id/health", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getPatientHealth(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, async (tx) => ({
+        ...(await getPatientHealth(tx, orgId, c.req.param("id"))),
+        // Lo que dijo de su salud en una consulta en curso y nadie confirmó: la franja lo avisa
+        // como «dijo, sin confirmar» (mesa del 20 nov 2026). No es Antecedentes hasta revisarlo.
+        said: await listSaidHealth(tx, orgId, c.req.param("id")),
+      })),
     )
   })
   app.put("/:id/health", async (c) => {

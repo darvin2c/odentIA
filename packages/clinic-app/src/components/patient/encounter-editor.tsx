@@ -123,7 +123,6 @@ import {
   DictationHeaderButton,
   DictationMobileBar,
   DictationPanel,
-  DictationTranscript,
   dictationMobileBarVisible,
 } from "./dictation-panel"
 import {
@@ -133,6 +132,7 @@ import {
 } from "./dictation-session"
 import { DictationSignList, markedAtSign, setFromDefault, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
+import { DictationSaid } from "./dictation-said"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
@@ -1224,8 +1224,8 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
     }
-    // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
-    if (item.kind === "alergia") {
+    // La alergia confirmada y lo de su salud revisado se ven al momento en la franja de alertas, como al agregarlos a mano.
+    if (item.kind === "alergia" || item.kind === "salud") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
@@ -1569,6 +1569,9 @@ export function EncounterEditor({
       }
       await refreshClosing()
     }
+    // Lo que se dijo después del último repaso se repasa antes de abrir el cierre: lo que deje entra
+    // en la lista de lo que propone Clío al firmar, no después (mesa del 20 nov 2026, P4).
+    if (dictation.enabled && dictation.unreviewed && dictation.review.status !== "reviewing") await dictation.requestReview()
     openSign()
   }
 
@@ -1918,10 +1921,10 @@ export function EncounterEditor({
     ) : null,
   }
   const transcriptSurface = {
-    title: "Lo dictado",
-    description: "Tu respaldo: lo resaltado generó una sugerencia.",
+    title: "Lo que se dijo",
+    description: "Guardado con la atención. Lo resaltado está en una sugerencia.",
     onClose: () => setTranscriptOpen(false),
-    children: <DictationTranscript session={dictation} />,
+    children: <DictationSaid session={dictation} />,
   }
   const closingId = `${uid}-cierre`
   // No se firma lo que no se guardó: sin conexión o con cambios por guardar, espera.
@@ -2713,6 +2716,7 @@ export function EncounterEditor({
                 session={dictation}
                 onStart={startDictation}
                 onType={() => setDictationTyping(true)}
+                onShowSaid={showTranscript}
               />
             ) : null}
             {/* Dónde termina la cabecera: al pasar por arriba, aparece la línea fija del paciente. */}
@@ -2767,9 +2771,9 @@ export function EncounterEditor({
         }}
       />
 
-      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} /> : null}
-      {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
-      {attending ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null}
+      {/* Lo que dijo de su salud, también lo que oyó Clío y la alergia dictada (o «niega alergias»), en la
+          fila de su tema del aviso: no en una caja aparte (issue 109; mesa del 20 nov 2026). */}
+      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} dictation={dictation} /> : null}
 
       {canWrite && !attending ? (
         <div

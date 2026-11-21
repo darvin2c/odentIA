@@ -55,6 +55,7 @@ import {
   isCurrentMedication,
   type PatientFull,
   type PatientHealth,
+  type SaidHealth,
   type PatientSummary,
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
@@ -305,8 +306,14 @@ export function PatientClinicalStrip({
   // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
   // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
   // A un niño no se le preguntan: «Anticoagulante: dijo que no · huesos» no le sirve a quien lo atiende (K7).
+  // Lo que dijo en una consulta en curso y nadie confirmó (lo oyó Clío): avisa ya, como lo declarado,
+  // sin frenar nada (mesa del 20 nov 2026). Lo que cambia la anestesia o la receta, no su boca.
+  const saidNow = saidHealthAlerts(health?.said ?? [])
+  const saidKeys = new Set(saidNow.map((alert) => alert.key))
   const classWords = health?.medicineClasses && !child
     ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+          // Lo dicho en la consulta ya lo dice su aviso: no se contradice con «no se le preguntó».
+          if (saidKeys.has(key)) return []
           const known = health.medicineClasses?.[key]
           if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
           // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
@@ -379,6 +386,7 @@ export function PatientClinicalStrip({
         group: groups.length - 1,
         changed: false,
       })),
+    ...saidNow.map(({ key: _key, ...alert }) => ({ ...alert, group: null, changed: true })),
     // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
     // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
     ...(health?.latestAnamnesis
@@ -415,12 +423,13 @@ export function PatientClinicalStrip({
   // La misma frase en la franja, la ficha, la atención y lo que ve recepción (estudio de la atención del
   // 16 nov, E10a). Su «No sé» no es «no se le preguntó» (QA del 15 nov, K16); su «No» va en su caja.
   const allergyWord =
+    !saidKeys.has("allergies") &&
     saidNoAllergies === null && noAllergies && (detail.allergyReview === "none" || detail.allergyReview === "unknown")
       ? noAllergiesWords({ review: detail.allergyReview, saidUnknown: detail.allergySaidUnknown }, sex)
       : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
-    detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
+    detail.currentMedications.length === 0 && medicationReview === "unknown" && !saidKeys.has("medications") ? "Medicación: no preguntado" : null
   if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0 && !unchanged) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
@@ -534,6 +543,38 @@ export function PatientClinicalStrip({
 
 /** Cuántas alertas caben en la franja antes de «+N»; las severas no cuentan para el corte. */
 const STRIP_LIMIT = 6
+
+/** Lo dicho en la consulta que va en la franja: lo que cambia la anestesia, la exodoncia o la receta. */
+const SAID_IN_STRIP = new Set([
+  "anticoagulants",
+  "boneMedicines",
+  "medications",
+  "conditions",
+  "allergies",
+  "personal.embarazo",
+  "medical.lactancia",
+  "dental.problemaAnestesia",
+  "dental.corazon",
+])
+
+/**
+ * «Anticoagulante: dijo apixabán, sin confirmar», «Alergias: no sabe, sin confirmar»: lo que dijo
+ * en una consulta en curso y nadie confirmó (`listSaidHealth`), una vez por dato. Lo que nombró
+ * avisa en ámbar; su «No» o su «No sé», en gris: no es una alerta, pero tampoco es «no preguntado».
+ */
+export function saidHealthAlerts(said: readonly SaidHealth[]): Array<{ id: string; key: string; label: string; tone: "warning" | "secondary" }> {
+  const seen = new Set<string>()
+  return said.flatMap((item) =>
+    item.rows.flatMap((row) => {
+      if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
+      seen.add(row.key)
+      const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
+      const quiet = row.value === "dijo que no" || row.value === "no sabe"
+      const words = quiet ? row.value : row.value.startsWith("sí, no dijo cuál") ? "dijo que sí" : `dijo ${row.value}`
+      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
+    }),
+  )
+}
 
 /** La ficha con lo clínico de la salud: enfermedades activas y lo que toma hoy (la regla del Resumen). */
 function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {

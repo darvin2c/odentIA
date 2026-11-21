@@ -61,6 +61,8 @@ export const medicalUi: ProductUi = {
       { block: "Control", say: "«Control en una semana si no mejora»" },
       { block: "Descanso", say: "«Descanso de tres días»" },
       { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      // Lo de su salud que cuenta en la consulta: se revisa con la persona en «Pregúntale a…».
+      { block: "Salud", say: "«Tomo enalapril para la presión» · «Que yo sepa, no»" },
       { block: "Procedimientos", say: "«Le hice la nebulización»" },
       // Solo con la ficha ya empezada: Clío propone en sus preguntas y se acepta en la ficha.
       { block: "Ficha", say: "«Pesa veintidós kilos» · «Sin fiebre en casa»" },

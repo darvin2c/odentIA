@@ -134,3 +134,20 @@ describe("la guía de latidIA", () => {
 })
 
 describeHelpSearch("latidIA", MEDICAL_HELP_TOPICS)
+
+// Clío en una consulta conversada (mesa del 20 nov 2026): las mismas tres preguntas en latidIA.
+describe("Clío en una consulta conversada, en latidIA", () => {
+  it.each([
+    ["¿Clío entiende si converso con el paciente?", "pacientes-dictado-conversar"],
+    ["¿Dónde veo lo que se dijo en la consulta?", "pacientes-dictado-lo-que-se-dijo"],
+    ["¿Cómo confirmo lo que el paciente dijo de su salud?", "pacientes-dictado-salud"],
+  ])("«%s» tiene su respuesta", (question, id) => {
+    expect(matchHelpTopics(question, MEDICAL_HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+
+  it("lo de su salud habla de un consultorio: el embarazo, no la anestesia del dentista", () => {
+    const faq = MEDICAL_HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === "pacientes-dictado-salud")
+    expect(faq?.a).toContain("un embarazo")
+    expect(faq?.a).not.toContain("la anestesia)")
+  })
+})

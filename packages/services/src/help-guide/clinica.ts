@@ -242,8 +242,33 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-corregir-pausar",
         q: "¿Cómo corrijo lo que Clío entendió mal en el dictado?",
-        a: "Toca la sugerencia para editarla y «Guardar y confirmar», o quítala con «Descartar sugerencia»; lo confirmado tiene «Deshacer». El micrófono se pausa y se reanuda con su botón, y «Terminar dictado» lo cierra. «Ver lo dictado» muestra tu respaldo: lo resaltado dio una sugerencia y lo marcado «No lo usé» hay que decirlo de nuevo o registrarlo a mano. Una receta dictada se emite con «Emitir receta» y un presupuesto dictado se deja en borrador con «Armar».",
+        a: "Toca la sugerencia para editarla y «Guardar y confirmar», o quítala con «Descartar sugerencia»; lo confirmado tiene «Deshacer». El micrófono se pausa y se reanuda con su botón, y «Terminar dictado» lo cierra. «Lo que se dijo» guarda lo que se habló en la atención: lo resaltado está en una sugerencia y «No lo usé» lista lo que hay que decir de nuevo o anotar a mano. Una receta dictada se emite con «Emitir receta» y un presupuesto dictado se deja en borrador con «Armar».",
         forms: ["clio entendio mal lo que dicte", "como pauso el dictado", "como descarto una sugerencia del dictado", "ver lo dictado"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      // Clío en una consulta conversada (mesa del 20 nov 2026).
+      {
+        id: "pacientes-dictado-conversar",
+        q: "¿Clío entiende si converso con el paciente?",
+        a: "Sí. Conversa con el paciente o díctalo como a un colega: Clío deja cada cosa en su lugar (el motivo, el relato, lo de su salud, el examen) y deja fuera la charla, como el saludo o el precio. Una pregunta y su respuesta dichas en pausas distintas se juntan. Si alguien corrige lo que dijo («tomo warfarina… no, apixabán»), queda lo último y la sugerencia dice «antes dijo». Al tocar «Terminar dictado», Clío repasa toda la conversación una vez: pone quién habló en cada turno y completa lo que las pausas dejaron, como cuándo vuelve. Nada entra a la historia hasta que lo confirmas.",
+        forms: ["clio entiende una conversacion", "puedo conversar con el paciente mientras clio escucha", "clio entiende si hablo con el paciente", "dictar conversando con el paciente", "que hace terminar dictado"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-lo-que-se-dijo",
+        q: "¿Dónde veo lo que se dijo en la consulta?",
+        a: "En «Lo que se dijo», en la barra de Clío o junto a «Dictar». Queda guardado con la atención: sigue igual si recargas o vuelves otro día. «Conversación» muestra quién habló en cada turno (se arma al terminar de dictar; toca el nombre para cambiarlo) y «Tal cual se oyó», cada pausa con su hora, sin editar. Lo resaltado en azul está en una sugerencia de la consulta y en ámbar, en lo de su salud; la charla queda sin resaltar. Arriba, «No lo usé» lista lo que Clío no supo dónde poner, con el motivo y «Intentar otra vez». No es parte de la historia: no se firma ni va en la copia de su historia.",
+        forms: ["donde veo lo que se dijo", "donde quedo lo que dicte", "se perdio lo dictado al recargar", "lo que se dijo", "que es no lo use", "quien hablo en la consulta"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-salud",
+        q: "¿Cómo confirmo lo que el paciente dijo de su salud?",
+        a: "En el aviso de arriba de la atención, «Revisa con … lo que dijo de su salud»: cada dato que oyó Clío (sus medicinas, sus enfermedades, el anticoagulante, la anestesia) sale en la fila de su tema, con quién lo dijo y «dijo, sin confirmar», o «antes dijo…» si lo cambió. Mientras tanto la franja de alertas ya lo avisa. Revísalo con la persona y toca «Lo revisé con…»: queda en sus antecedentes como lo dijo en la consulta. Si algo está mal, «Corregir algo» abre sus antecedentes con lo de Clío ya puesto. Un «No» se confirma en su fila («Niega enfermedades», «No toma medicación»), y «que yo sepa, no» queda como «No sabe», nunca como «No». «Confirmar las N de la consulta» no lleva nada de su salud.",
+        forms: ["como confirmo lo que dijo de su salud", "clio oyo que toma una medicina", "lo revise con", "dijo sin confirmar", "el paciente dijo que toma apixaban", "como paso a antecedentes lo que dijo"],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -258,7 +283,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha-no-lleno",
         q: "¿Por qué Clío no puso en la ficha lo que dije?",
-        a: "Pasa por una de estas razones: la ficha no estaba empezada cuando dictaste (la barra del dictado te lo avisa); la pregunta es de texto o de fecha, que Clío todavía no llena; o lo que dijiste no alcanzaba para elegir una sola opción («clase dos» cuando la ficha separa división 1 y división 2). En ese último caso, debajo de la pregunta dice «Clío no la llenó:» y, si dudaba entre dos opciones, «¿Cuál?» con esas dos: un toque la escribe como tuya y queda registrado que Clío había dudado. Con más de dos fichas a medias, lee las dos que tocaste último y la que tengas abierta: abre la otra antes de dictar. Un número fuera del rango de la pregunta también queda en «Clío no la llenó» para que lo escribas tú. Clío tampoco responde «No» si no lo negaste en voz alta, ni convierte unidades: si la pregunta es en milímetros y dijiste centímetros, la deja vacía. Los términos que el micrófono escribe mal (una sigla con espacios, una palabra en inglés escrita como suena) Clío los lee por cómo suenan. Lo que dijiste y no sirvió sale en «No pude usar esto», con el motivo. Si es de una pregunta de la ficha, al lado sale «Usar en…» con el nombre de esa pregunta: abre la ficha en esa pregunta con lo que dijiste al lado, para que la elijas o la escribas tú; no llena nada sola.",
+        a: "Pasa por una de estas razones: la ficha no estaba empezada cuando dictaste (la barra del dictado te lo avisa); la pregunta es de texto o de fecha, que Clío todavía no llena; o lo que dijiste no alcanzaba para elegir una sola opción («clase dos» cuando la ficha separa división 1 y división 2). En ese último caso, debajo de la pregunta dice «Clío no la llenó:» y, si dudaba entre dos opciones, «¿Cuál?» con esas dos: un toque la escribe como tuya y queda registrado que Clío había dudado. Con más de dos fichas a medias, lee las dos que tocaste último y la que tengas abierta: abre la otra antes de dictar. Un número fuera del rango de la pregunta también queda en «Clío no la llenó» para que lo escribas tú. Clío tampoco responde «No» si no lo negaste en voz alta, ni convierte unidades: si la pregunta es en milímetros y dijiste centímetros, la deja vacía. Los términos que el micrófono escribe mal (una sigla con espacios, una palabra en inglés escrita como suena) Clío los lee por cómo suenan. Lo que dijiste y no sirvió sale en «No lo usé», con el motivo, y queda en «Lo que se dijo». Si es de una pregunta de la ficha, al lado sale «Usar en…» con el nombre de esa pregunta: abre la ficha en esa pregunta con lo que dijiste al lado, para que la elijas o la escribas tú; no llena nada sola.",
         forms: ["clio no lleno la ficha", "por que clio no puso el overjet", "clio no la lleno", "la ficha quedo vacia despues de dictar", "boton usar en", "no pude usar esto", "clio duda entre dos opciones", "boton cual en la ficha"],
         area: "clinica",
         needs: "clinical.write",
@@ -323,7 +348,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-tercera-ficha",
         q: "¿Por qué una de mis fichas quedó vacía si dicté para ella?",
-        a: "Clío lee las dos fichas que tocaste último y la que tienes abierta. Si tenías tres a medias (por ejemplo endodoncia, odontopediatría y la odontoestomatológica), la que no tocaste último no recibió nada: ábrela antes de dictar o responde algo en ella para que pase al frente. Lo que dictaste no se pierde: lo ves en «Ver lo dictado».",
+        a: "Clío lee las dos fichas que tocaste último y la que tienes abierta. Si tenías tres a medias (por ejemplo endodoncia, odontopediatría y la odontoestomatológica), la que no tocaste último no recibió nada: ábrela antes de dictar o responde algo en ella para que pase al frente. Lo que dictaste no se pierde: lo ves en «Lo que se dijo».",
         forms: ["tenia tres fichas y endodoncia quedo vacia", "tenia tres fichas empezadas y la de endodoncia quedo vacia", "una ficha quedo vacia despues de dictar", "clio no lleno una de las fichas"],
         area: "clinica",
         needs: "clinical.write",

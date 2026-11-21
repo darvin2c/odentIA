@@ -138,6 +138,8 @@ export const dentalUi: ProductUi = {
       { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
       { block: "Control", say: "«Control en un mes»" },
       { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      // Lo de su salud que cuenta en la consulta: se revisa con la persona en «Pregúntale a…».
+      { block: "Salud", say: "«Tomo enalapril para la presión» · «Que yo sepa, no»" },
       { block: "Procedimientos", say: "«Le hice la profilaxis» · «Terminé la resina de la 36»" },
       // Solo con la ficha ya empezada: Clío propone en sus preguntas y se acepta en la ficha.
       { block: "Ficha", say: "«Overjet de seis milímetros» · «Clase uno molar izquierda»" },

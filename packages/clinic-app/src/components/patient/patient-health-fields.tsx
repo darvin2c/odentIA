@@ -58,6 +58,76 @@ function nextRowKey(prefix: string): string {
   return `${prefix}-${rowSeq}`
 }
 
+/** Los grupos de lo que dijo en la consulta que «Corregir algo» deja puestos en el formulario. */
+export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines"] as const
+
+/**
+ * «Corregir algo» desde lo que Clío oyó en la consulta (mesa del 20 nov 2026): el formulario de
+ * Antecedentes se abre con sus enfermedades y sus medicinas ya puestas (también el anticoagulante y
+ * la medicina para los huesos, que son medicinas), para corregir y no escribir de cero. Lo que ya
+ * estaba con el mismo nombre no se repite. Lo de la entrevista (la anestesia, el miedo) no va aquí:
+ * se revisa con «Lo revisé con…».
+ */
+export function withSaidHealth(values: HealthFormValues, said: Record<string, unknown>): HealthFormValues {
+  const loose = (text: string) =>
+    text
+      .toLocaleLowerCase("es")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim()
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
+  const group = (key: string) => {
+    const value = said[key]
+    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+  }
+  const items = (key: string) => {
+    const value = group(key)
+    return value?.state === "recorded" && Array.isArray(value.items) ? (value.items as Array<Record<string, unknown>>) : []
+  }
+  const conditions = [...values.conditions]
+  for (const item of items("conditions")) {
+    const name = text(item.name)
+    if (!name || conditions.some((row) => loose(row.name) === loose(name))) continue
+    conditions.push({ key: nextRowKey("con"), name, diagnosisCode: "", diagnosisSystem: null, status: "activa", startDate: "", endDate: "", notes: text(item.notes), persisted: false })
+  }
+  const medications = [...values.medications]
+  const named = [
+    ...items("medications").map((item) => ({ name: text(item.name), dose: text(item.dose), frequency: text(item.frequency), notes: text(item.notes) })),
+    ...(["anticoagulants", "boneMedicines"] as const).flatMap((key) => {
+      const value = group(key)
+      return value?.state === "recorded" && text(value.detail) ? [{ name: text(value.detail), dose: "", frequency: "", notes: "" }] : []
+    }),
+  ]
+  for (const item of named) {
+    if (!item.name || medications.some((row) => loose(row.name) === loose(item.name))) continue
+    medications.push({
+      key: nextRowKey("med"),
+      name: item.name,
+      genericName: "",
+      dose: item.dose,
+      doseValue: "",
+      doseUnit: "",
+      frequency: item.frequency,
+      frequencyCode: item.frequency ? "otra" : "",
+      startDate: "",
+      endDate: "",
+      notes: item.notes,
+      persisted: false,
+    })
+  }
+  // Lo que dijo que no (y nada anotado) queda «No»; lo que nombró, «Sí».
+  const state = (key: "conditions" | "medications", rows: readonly unknown[]): HealthReviewState => {
+    if (rows.length > 0) return "recorded"
+    return group(key)?.state === "none" ? "none" : values.reviewStatus[key]
+  }
+  return {
+    ...values,
+    conditions,
+    medications,
+    reviewStatus: { conditions: state("conditions", conditions), medications: state("medications", medications) },
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Valores del formulario                                              */
 /* ------------------------------------------------------------------ */

@@ -261,7 +261,8 @@ export interface HealthDeclarationView {
   at: string
   /** Cuándo entró a su ficha: el instante de su registro, si vino con él. */
   enteredAt: string
-  via: "enlace" | "registro" | "formulario"
+  /** `consulta`: lo que dijo en la consulta y se revisó con «Lo revisé con…» (mesa del 20 nov 2026). */
+  via: "enlace" | "registro" | "formulario" | "consulta"
   by: HealthDeclarant
   health: Record<string, unknown>
   /**
@@ -319,6 +320,22 @@ export interface PatientHealth {
     createdAt: string
     createdBy: string | null
   } | null
+  /**
+   * Lo que dijo de su salud en una consulta en curso y nadie confirmó todavía (lo oyó Clío): la
+   * franja lo avisa como «dijo, sin confirmar». No está en Antecedentes. Opcional: un servidor de
+   * antes no lo manda.
+   */
+  said?: SaidHealth[]
+}
+
+/** Lo que dijo de su salud en una atención en borrador, dato por dato, sin confirmar (`listSaidHealth`). */
+export interface SaidHealth {
+  suggestionId: string
+  encounterId: string
+  by: HealthDeclarant
+  /** `key`: el grupo («anticoagulants») o el campo de la entrevista («dental.problemaAnestesia»). */
+  rows: Array<{ key: string; label: string; value: string }>
+  at: string
 }
 
 export { ALLERGY_SEVERITIES } from "@odentia/clinical"
