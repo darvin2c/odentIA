@@ -12,7 +12,7 @@ CREATE TABLE "admin"."saas_account" (
 	"external_ref" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "saas_account_kind_check" CHECK ((organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)
-        OR (organization_id IS NULL AND app IN ('odentia','latidia','vistia','gestoria')
+        OR (organization_id IS NULL AND app IN ('gestoria')
           AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200))
 );
 --> statement-breakpoint
@@ -21,12 +21,6 @@ ALTER TABLE "admin"."saas_account" ADD CONSTRAINT "saas_account_organization_id_
 CREATE UNIQUE INDEX "saas_account_organization_uidx" ON "admin"."saas_account" USING btree ("organization_id");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "saas_account_external_uidx" ON "admin"."saas_account" USING btree ("app","external_ref");
---> statement-breakpoint
--- Una cuenta por cada clínica que ya existe, con su mismo id. Determinista e idempotente: volver
--- a correrla no crea ni cambia nada.
-INSERT INTO "admin"."saas_account" ("id", "organization_id")
-SELECT "id", "id" FROM "organization"
-ON CONFLICT ("id") DO NOTHING;
 --> statement-breakpoint
 -- La clínica nueva nace con su cuenta, por cualquier vía (el alta, la administración, una demo o
 -- una prueba), también desde el rol de la aplicación. Corre antes que `saas_trial_on_org_create`
@@ -43,6 +37,13 @@ END;
 $$;
 --> statement-breakpoint
 CREATE TRIGGER saas_account_on_org_create AFTER INSERT ON public.organization FOR EACH ROW EXECUTE FUNCTION public.saas_account_on_org_create();
+--> statement-breakpoint
+-- Una cuenta por cada clínica que ya existe, con su mismo id. Va después del disparador, que bloquea
+-- el alta de clínicas hasta terminar la migración: ninguna queda sin cuenta. Determinista e
+-- idempotente: volver a correrla no crea ni cambia nada.
+INSERT INTO "saas_account" ("id", "organization_id")
+SELECT "id", "id" FROM "organization"
+ON CONFLICT ("id") DO NOTHING;
 --> statement-breakpoint
 -- Lo que colgaba de la organización pasa a colgar de su cuenta, con lo mismo al borrarse: la
 -- organización se lleva su cuenta y la cuenta lo suyo, como antes. El acceso de soporte a los

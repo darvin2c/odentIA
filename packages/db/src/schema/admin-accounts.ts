@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm"
 import { check, foreignKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
-import { ACCOUNT_APPS, organization } from "./auth.js"
+import { organization } from "./auth.js"
 import { adminSchema } from "./schemas.js"
 
 /**
@@ -20,6 +20,13 @@ import { adminSchema } from "./schemas.js"
  * Solo la conexión propietaria la lee y la escribe (sin `GRANT`): las claves foráneas de las
  * tablas de la clínica la comprueban con el dueño de la tabla, sin dársela al rol app.
  */
+/**
+ * Las apps que son otro sistema y pueden tener cuentas sin clínica (las de `ACCOUNT_APPS` cuyo
+ * `ACCOUNT_APP_INFO.product` es nulo; `apps.test.ts` de `@odentia/auth` exige que coincidan).
+ * Una cuenta de odentIA, latidIA o vistIA siempre es una clínica.
+ */
+export const SAAS_ACCOUNT_EXTERNAL_APPS = ["gestoria"] as const
+
 export const saasAccount = adminSchema.table(
   "saas_account",
   {
@@ -39,9 +46,9 @@ export const saasAccount = adminSchema.table(
     uniqueIndex("saas_account_external_uidx").on(table.app, table.externalRef),
     check(
       "saas_account_kind_check",
-      sql.raw(`(organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)
-        OR (organization_id IS NULL AND app IN (${ACCOUNT_APPS.map((app) => `'${app}'`).join(",")})
-          AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)`),
+      sql`(organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)
+        OR (organization_id IS NULL AND app IN (${sql.raw(SAAS_ACCOUNT_EXTERNAL_APPS.map((app) => `'${app}'`).join(","))})
+          AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)`,
     ),
   ],
 )

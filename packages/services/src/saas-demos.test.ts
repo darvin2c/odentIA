@@ -563,6 +563,10 @@ describe("una demo de Pediatría en Colombia", () => {
     expect(
       await ownerDb.select().from(organization).where(eq(organization.id, demo.organizationId)),
     ).toEqual([])
+    // Su cuenta de cliente (ADR 0210) se va con ella, aunque se borre con los disparadores apagados.
+    expect(
+      await ownerDb.execute(sql`select id from saas_account where id = ${demo.organizationId}`),
+    ).toEqual([])
     expect(
       await ownerDb
         .select()

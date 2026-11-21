@@ -99,7 +99,7 @@
       "checkConstraints": {
         "saas_account_kind_check": {
           "name": "saas_account_kind_check",
-          "value": "(organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)\n        OR (organization_id IS NULL AND app IN ('odentia','latidia','vistia','gestoria')\n          AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)"
+          "value": "(organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)\n        OR (organization_id IS NULL AND app IN ('gestoria')\n          AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)"
         }
       },
       "isRLSEnabled": false
