@@ -60,6 +60,20 @@ describe("lo que avisa toda receta (nació en latidIA; QA final de formularios, 
     expect(alerts({}, ["ibuprofeno"], [{ name: "losartán", atcCode: "C09CA01" }]).warnings).toEqual([])
   })
 
+  // QA del 21 nov (H2): con «dijo apixabán, sin confirmar» en la franja, el ibuprofeno salía sin aviso.
+  it("lo que dijo que toma y nadie confirmó también avisa, con esas palabras", () => {
+    const said = (name: string | null, open: boolean) => ({ name, anticoagulant: true, open })
+    const check = (list: ReturnType<typeof said>[], taking: Array<{ name: string; atcCode: string | null }> = []) =>
+      prescribingAlerts({ interview: {}, today: TODAY, taking, said: list }, [{ genericName: "ibuprofeno" }], MEDICATIONS).warnings
+    expect(check([said("apixabán", true)])).toEqual([
+      "Ibuprofeno: dijo que toma apixabán, sin confirmar (anticoagulante o antiagregante), y los AINE aumentan el riesgo de sangrado; el paracetamol es la alternativa habitual.",
+    ])
+    expect(check([said(null, false)])[0]).toContain("dijo que toma un anticoagulante (no dijo cuál), en otra consulta, sin revisar")
+    // Lo dicho que ya está registrado no se avisa dos veces.
+    expect(check([said("apixabán", true)], [{ name: "apixabán", atcCode: "B01AF02" }])).toHaveLength(1)
+    expect(prescribingAlerts({ interview: {}, today: TODAY, taking: [], said: [said("apixabán", true)] }, [{ genericName: "paracetamol" }], MEDICATIONS).warnings).toEqual([])
+  })
+
   // FDA, 15 oct 2020: evitar AINE desde la semana 20. Clínica Y1: a Sofía, de 30 semanas, no se le avisaba.
   it("un AINE desde la semana 20 del embarazo se avisa; antes, solo se recuerda el embarazo", () => {
     expect(alerts(pregnant("2026-10-24", 30), ["ibuprofeno"]).warnings).toEqual([

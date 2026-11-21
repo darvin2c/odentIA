@@ -572,3 +572,27 @@ describe("otro día corrige lo que dijo (QA del 21 nov, H3)", () => {
     await enable(false)
   })
 })
+
+describe("lo dicho sin confirmar también avisa en la receta, la exodoncia y la anestesia (QA del 21 nov, H2)", () => {
+  it("«dijo apixabán, sin confirmar» avisa el AINE y la exodoncia; lo de la anestesia dicho, también", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, dental: { problemaAnestesia: { anestesia: "si", quePaso: "desmayo" } } },
+          sourceText: "tomo apixaban y me desmaye con la anestesia",
+        },
+      ],
+      transcript: "tomo apixaban y me desmaye con la anestesia",
+    })
+    const catalog = DENTAL_PRESCRIBING
+    const situation = await fx.run((tx) => prescribingSituationOf(tx, ORG, fx.patient.id, catalog))
+    // Antes: ningún aviso, porque solo se leía lo registrado.
+    expect(prescribingAlerts(situation, [{ genericName: "ibuprofeno" }], catalog.medications).warnings.join(" ")).toContain("Ibuprofeno: dijo que toma apixabán, sin confirmar")
+    expect(await fx.run((tx) => extractionRisksOf(tx, ORG, fx.patient.id))).toEqual(["Dijo que toma apixabán, sin confirmar: riesgo de sangrado."])
+    expect(await fx.run((tx) => anesthesiaRisksOf(tx, ORG, fx.patient.id))).toEqual(["dijo que tuvo problemas con la anestesia: se desmayó o le bajó la presión, sin confirmar"])
+    await enable(false)
+  })
+})

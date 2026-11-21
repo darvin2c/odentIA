@@ -29,6 +29,7 @@ import { getLatestAnamnesis } from "./clinical.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
+import { saidHealthRisks } from "./said-health-risks.js"
 import type { ProductPrescribing } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -363,7 +364,7 @@ export async function currentMedicationsOf(
 
 /**
  * Lo de la persona que mira toda receta (`prescribingAlerts`): su última entrevista (el embarazo y la
- * lactancia), el día de la clínica y lo que toma hoy. Lo mismo para emitir y para lo que dicta Clío.
+ * lactancia), el día de la clínica, lo que toma hoy y lo que dijo que toma sin confirmar. Lo mismo para emitir y para lo que dicta Clío.
  */
 export async function prescribingSituationOf(
   tx: Db,
@@ -375,6 +376,8 @@ export async function prescribingSituationOf(
     interview: (await getLatestAnamnesis(tx, orgId, patientId))?.answers ?? null,
     today: await clinicToday(tx, orgId),
     taking: await currentMedicationsOf(tx, orgId, patientId, catalog),
+    // Lo que dijo en la consulta y nadie confirmó también avisa (QA del 21 nov, H2).
+    said: (await saidHealthRisks(tx, orgId, patientId, catalog.habitual)).medications,
   }
 }
 

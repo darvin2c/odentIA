@@ -326,6 +326,8 @@ export interface PatientHealth {
    * antes no lo manda.
    */
   said?: SaidHealth[]
+  /** Lo que dijo que toma y nadie confirmó: la receta lo avisa como al emitirla. Opcional. */
+  saidTaking?: Array<{ name: string | null; atcCode: string | null; anticoagulant: boolean; boneMedicine: boolean; at: string; open: boolean }>
 }
 
 /** Lo que dijo de su salud en una atención en borrador, dato por dato, sin confirmar (`listSaidHealth`). */
