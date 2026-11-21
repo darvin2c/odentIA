@@ -91,7 +91,7 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
           tools: [],
         },
       ],
-      sees: "Lo que el médico dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Los servicios de la clínica y la lista de diagnósticos, para reconocer lo dictado.",
+      sees: "Lo que el médico dicta en esa atención. Las sugerencias de ese dictado que aún no decide, con lo que ya dice la consulta, para sumarle lo nuevo y entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Los servicios de la clínica y la lista de diagnósticos, para reconocer lo dictado.",
       notSees:
         "El resto de la historia clínica, las fichas de otras atenciones ni las atenciones anteriores. Conversaciones ni caja.",
       never:

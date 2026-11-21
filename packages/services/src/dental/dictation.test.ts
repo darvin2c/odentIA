@@ -526,20 +526,26 @@ describe("dictado en la atención", () => {
     await enable(true)
     const fx = await openSession("Obturación de la nota")
     await ownerDb.update(encounter).set({ evolution: "Lo escribí a mano.", illnessDuration: "3 días" }).where(eq(encounter.id, fx.encounter.id))
+    // Dos textos de la consulta en la misma pausa son una sola sugerencia (mesa del 20 nov 2026).
     const [first, second] = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
         { kind: "nota", payload: { evolution: "Se anestesió la 36.", illnessDuration: "una semana", prognosis: "Favorable" } },
         { kind: "nota", payload: { evolution: "Se colocó la resina, toleró bien." } },
       ]),
     )
+    expect(second).toBeUndefined()
     const confirm = (id: string) => fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, id))
     const session = async () => (await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id)))[0]!
     // La confirmación devuelve cómo quedó cada texto: la pantalla lo adopta si su borrador va por detrás.
-    expect((await confirm(first!.id)).joined).toEqual({ evolution: "Lo escribí a mano.\nSe anestesió la 36.", illnessDuration: "3 días; una semana", prognosis: "Favorable" })
-    await confirm(second!.id)
+    // El tiempo es un solo valor: queda lo dictado y lo que había, entre paréntesis, nunca con «;».
+    expect((await confirm(first!.id)).joined).toEqual({
+      evolution: "Lo escribí a mano.\nSe anestesió la 36. Se colocó la resina, toleró bien.",
+      illnessDuration: "una semana (antes: 3 días)",
+      prognosis: "Favorable",
+    })
     expect(await session()).toMatchObject({
-      evolution: "Lo escribí a mano.\nSe anestesió la 36.\nSe colocó la resina, toleró bien.",
-      illnessDuration: "3 días; una semana",
+      evolution: "Lo escribí a mano.\nSe anestesió la 36. Se colocó la resina, toleró bien.",
+      illnessDuration: "una semana (antes: 3 días)",
       prognosis: "Favorable",
     })
 
@@ -731,7 +737,7 @@ describe("dictado en la atención", () => {
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
-    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true })
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true })
     expect(await list()).toHaveLength(2)
 
     // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.

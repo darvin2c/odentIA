@@ -11,8 +11,12 @@ describe("appendDictated", () => {
     expect(appendDictated("   ", "Dolor al masticar", "reason")).toBe("Dolor al masticar")
   })
 
-  it("el tiempo de enfermedad sigue en una línea", () => {
-    expect(appendDictated("3 días", "una semana", "illnessDuration")).toBe("3 días; una semana")
+  it("el tiempo de enfermedad es un solo valor: queda lo último, con lo de antes entre paréntesis, nunca juntos con «;»", () => {
+    expect(appendDictated("3 días", "una semana", "illnessDuration")).toBe("una semana (antes: 3 días)")
+    // Un tercero no anida paréntesis: queda lo último y lo inmediatamente anterior.
+    expect(appendDictated("una semana (antes: 3 días)", "dos semanas", "illnessDuration")).toBe("dos semanas (antes: una semana)")
+    // Lo mismo otra vez no cambia nada.
+    expect(appendDictated("una semana (antes: 3 días)", "una semana", "illnessDuration")).toBe("una semana (antes: 3 días)")
   })
 
   it("no repite si el campo ya dice exactamente lo mismo", () => {
