@@ -23,6 +23,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
 import { z } from "zod"
+import { agentName, SOFI_ACTOR } from "./agente.js"
 import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
@@ -198,7 +199,7 @@ interface Priced {
  * Con `ids`, solo esas (también las quitadas, para decir que ya no se venden); sin ellos, las que
  * se venden.
  */
-async function variantPrices(tx: Db, storeId: string, today: string, ids?: string[]) {
+export async function variantPrices(tx: Db, storeId: string, today: string, ids?: string[]) {
   const rows = await tx
     .select({
       id: productVariant.id,
@@ -377,6 +378,18 @@ async function priceOrder(
   }
 }
 
+/**
+ * El precio de un pedido sin guardarlo, dentro de la transacción de la tienda: el resumen de
+ * «Anotar un pedido» y lo que cotiza Sofi (la misma regla).
+ */
+export async function quoteOrderIn(tx: Db, storeId: string, input: OrderInput, today: string) {
+  const { currency } = await storeRow(tx, storeId)
+  const result = await priceOrder(tx, storeId, currency, input, today)
+  return result.ok
+    ? { quote: result.priced.quote, fields: {} as Record<string, string>, currency }
+    : { quote: null, fields: result.fields, currency }
+}
+
 /** El precio de un pedido sin guardarlo, para el resumen de «Anotar un pedido». */
 export async function quoteOrder(
   appDb: Db,
@@ -386,11 +399,8 @@ export async function quoteOrder(
   today = todayUTC(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const { currency } = await storeRow(tx, storeId)
-    const result = await priceOrder(tx, storeId, currency, input, today)
-    return result.ok
-      ? { quote: result.priced.quote, fields: {} }
-      : { quote: null, fields: result.fields }
+    const { quote: q, fields } = await quoteOrderIn(tx, storeId, input, today)
+    return { quote: q, fields }
   })
 }
 
@@ -459,7 +469,7 @@ export async function createOrderIn(
   storeId: string,
   actorUserId: string,
   input: OrderInput,
-  options: { conversationId?: string | null; now?: Date; today?: string } = {},
+  options: { conversationId?: string | null; now?: Date; today?: string; test?: boolean } = {},
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
@@ -511,6 +521,7 @@ export async function createOrderIn(
       marginUsedCents: q.marginUsedCents,
       priceExpiresAt: q.negotiated ? new Date(now.getTime() + NEGOTIATED_PRICE_MS) : null,
       deliverOn: input.deliverOn,
+      test: options.test ?? false,
       createdBy: actorUserId,
     })
     .returning()
@@ -549,7 +560,14 @@ export async function createOrderIn(
       : {}),
   })
   await notifyCustomer(tx, order!, actorUserId, currency, "resumen")
-  return { id: order!.id, number: pad(number) }
+  return {
+    id: order!.id,
+    number: pad(number),
+    state: order!.state,
+    paymentCollection: order!.paymentCollection,
+    totalCents: q.totalCents,
+    priceExpiresAt: order!.priceExpiresAt,
+  }
 }
 
 export async function createOrder(
@@ -596,6 +614,8 @@ export async function listOrders(
         deliverOn: saleOrder.deliverOn,
         priceExpiresAt: saleOrder.priceExpiresAt,
         createdAt: saleOrder.createdAt,
+        test: saleOrder.test,
+        bySofi: sql<boolean>`${saleOrder.createdBy} = ${SOFI_ACTOR}`,
       })
       .from(saleOrder)
       .where(where)
@@ -793,6 +813,8 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
   return {
     ...rest,
     number: pad(order.number),
+    /** Lo armó Sofi en la conversación. */
+    bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
     linkConnected,
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
@@ -809,11 +831,15 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     })),
     payments: payments.map(({ createdBy, reviewedBy, ...p }) => ({
       ...p,
-      createdByName: createdBy ? (names.get(createdBy) ?? null) : null,
+      createdByName: createdBy ? (names.get(createdBy) ?? agentName(createdBy)) : null,
       reviewedByName: reviewedBy ? (names.get(reviewedBy) ?? null) : null,
       byLink: p.kind === "link" && createdBy === null,
     })),
-    events: events.map(({ actorUserId, ...event }) => ({ ...event, byLink: actorUserId === null })),
+    events: events.map(({ actorUserId, ...event }) => ({
+      ...event,
+      actorName: event.actorName ?? agentName(actorUserId),
+      byLink: actorUserId === null,
+    })),
   }
 }
 
@@ -898,6 +924,8 @@ async function saleLines(tx: Db, orderId: string) {
  * dinero ya llegó; queda «falta stock» y se descuenta al salir. Devuelve si se descontó.
  */
 async function trySale(tx: Db, order: OrderRow, actor: string): Promise<boolean> {
+  // Un pedido de prueba (de «Probar a Sofi») no mueve el stock.
+  if (order.test) return true
   const lines = await saleLines(tx, order.id)
   try {
     await tx.transaction((sp) =>
@@ -916,6 +944,7 @@ async function trySale(tx: Db, order: OrderRow, actor: string): Promise<boolean>
 
 /** Al salir (o entregar sin salir), el stock tiene que alcanzar: lo que no hay no sale. */
 async function mustSale(tx: Db, order: OrderRow, actor: string) {
+  if (order.test) return
   const lines = await saleLines(tx, order.id)
   try {
     await recordSale(tx, order.storeId, actor, stockReference(order.number), lines)
@@ -969,27 +998,43 @@ export async function addReceipt(
     if (!photoType) throw new StoreError(400, "PHOTO_TYPE", "Sube la captura en JPG, PNG o WebP")
   }
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const order = await lockOrder(tx, storeId, orderId)
-    if (order.state !== "por_pagar") throw stateError(order)
-    const { currency } = await storeRow(tx, storeId)
-    await tx.insert(orderPayment).values({
-      storeId,
-      orderId,
-      kind: "comprobante",
-      status: "por_confirmar",
-      amountCents: input.amountCents,
-      operation: input.operation,
-      photoType,
-      photo: photo ? Buffer.from(photo) : null,
-      createdBy: person.userId,
-    })
-    await setState(tx, order, "por_confirmar")
-    await logEvent(tx, storeId, orderId, person.userId, "comprobante", {
-      monto: input.amountCents,
-      operacion: input.operation,
-      moneda: currency,
-    })
+    await addReceiptIn(tx, storeId, person.userId, orderId, input, photo, photoType)
     return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * Anota una captura dentro de la transacción de la tienda: la usan el equipo y Sofi. Queda
+ * «pago por confirmar»; confirmarla es de una persona (`reviewPayment`).
+ */
+export async function addReceiptIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  orderId: string,
+  input: z.infer<typeof receiptInput>,
+  photo: Uint8Array | null = null,
+  photoType: (typeof orderPayment.$inferInsert)["photoType"] = null,
+) {
+  const order = await lockOrder(tx, storeId, orderId)
+  if (order.state !== "por_pagar") throw stateError(order)
+  const { currency } = await storeRow(tx, storeId)
+  await tx.insert(orderPayment).values({
+    storeId,
+    orderId,
+    kind: "comprobante",
+    status: "por_confirmar",
+    amountCents: input.amountCents,
+    operation: input.operation,
+    photoType,
+    photo: photo ? Buffer.from(photo) : null,
+    createdBy: actorUserId,
+  })
+  await setState(tx, order, "por_confirmar")
+  await logEvent(tx, storeId, orderId, actorUserId, "comprobante", {
+    monto: input.amountCents,
+    operacion: input.operation,
+    moneda: currency,
   })
 }
 
@@ -1158,22 +1203,39 @@ export async function cancelOrder(
   input: z.infer<typeof cancelInput>,
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx, role) => {
-    const order = await lockOrder(tx, storeId, orderId)
-    if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
-    const paid = await moneyReceived(tx, orderId)
-    if (paid && !can(role, "pagos.confirmar"))
-      throw new StoreError(403, "FORBIDDEN", "Un pedido pagado lo anula quien confirma pagos")
-    const returned = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
-    await setState(tx, order, "anulado", { cancelReason: input.reason })
-    const { currency } = await storeRow(tx, storeId)
-    await logEvent(tx, storeId, orderId, person.userId, "anulado", {
-      motivo: input.reason,
-      ...(paid ? { pagado: true } : {}),
-      ...(returned > 0 ? { stockDevuelto: returned } : {}),
+    await cancelOrderIn(tx, storeId, person.userId, orderId, input.reason, {
+      mayCancelPaid: can(role, "pagos.confirmar"),
     })
-    await notifyCustomer(tx, order, person.userId, currency, "anulado")
     return orderDetailIn(tx, storeId, orderId)
   })
+}
+
+/**
+ * Anula dentro de la transacción de la tienda. Sofi lo usa solo para volver a anotar un pedido
+ * suyo que nadie pagó (cambió la forma de pago): nunca uno pagado (tablero 8).
+ */
+export async function cancelOrderIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  orderId: string,
+  reason: string,
+  options: { mayCancelPaid: boolean; notify?: boolean },
+) {
+  const order = await lockOrder(tx, storeId, orderId)
+  if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
+  const paid = await moneyReceived(tx, orderId)
+  if (paid && !options.mayCancelPaid)
+    throw new StoreError(403, "FORBIDDEN", "Un pedido pagado lo anula quien confirma pagos")
+  const returned = await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
+  await setState(tx, order, "anulado", { cancelReason: reason })
+  const { currency } = await storeRow(tx, storeId)
+  await logEvent(tx, storeId, orderId, actorUserId, "anulado", {
+    motivo: reason,
+    ...(paid ? { pagado: true } : {}),
+    ...(returned > 0 ? { stockDevuelto: returned } : {}),
+  })
+  if (options.notify ?? true) await notifyCustomer(tx, order, actorUserId, currency, "anulado")
 }
 
 /** La captura de un pago, con la sesión (no es pública). */
@@ -1230,14 +1292,43 @@ export async function createPaymentLink(
   orderId: string,
   deps: LinkDeps,
 ) {
+  return createPaymentLinkWith(
+    (fn) => inStore(appDb, person, storeId, "ventas.atender", (tx) => fn(tx)),
+    person.userId,
+    storeId,
+    orderId,
+    deps,
+  )
+}
+
+/** Corre algo dentro de la transacción de la tienda: la de una persona (`inStore`) o la de Sofi. */
+export type StoreRun = <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+
+/**
+ * El link de pago con quien lo pide: el equipo o Sofi. Un pedido de prueba no crea un link real
+ * (nadie va a pagarlo y el proveedor lo cobraría como intento).
+ */
+export async function createPaymentLinkWith(
+  run: StoreRun,
+  actorUserId: string,
+  storeId: string,
+  orderId: string,
+  deps: LinkDeps,
+) {
   uuidOr404(orderId)
-  const prepared = await inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+  const prepared = await run(async (tx) => {
     const [order] = await tx
       .select()
       .from(saleOrder)
       .where(and(eq(saleOrder.id, orderId), eq(saleOrder.storeId, storeId)))
     if (!order) throw new StoreError(404, "NOT_FOUND", "Ese pedido ya no está")
     if (order.state !== "por_pagar") throw stateError(order)
+    if (order.test)
+      throw new StoreError(
+        409,
+        "TEST_ORDER",
+        "En una prueba no se crea un link de pago real: en una conversación de verdad, aquí iría el link.",
+      )
     const now = Date.now()
     if (order.linkUrl && (!order.linkExpiresAt || order.linkExpiresAt.getTime() > now))
       return { url: order.linkUrl }
@@ -1277,7 +1368,7 @@ export async function createPaymentLink(
     expiresAt: order.priceExpiresAt,
     notificationURL: linkNotificationURL(deps, storeId),
   })
-  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+  return run(async (tx) => {
     const current = await lockOrder(tx, storeId, orderId)
     if (current.state !== "por_pagar") throw stateError(current)
     // Otro lo creó entre medio (el mismo, porque el proveedor no repite, u otro): vale el que ya está.
@@ -1292,8 +1383,8 @@ export async function createPaymentLink(
         updatedAt: new Date(),
       })
       .where(eq(saleOrder.id, orderId))
-    await logEvent(tx, storeId, orderId, person.userId, "link", { proveedor: connection.provider })
-    await notifyCustomer(tx, current, person.userId, currency, "link", { url: link.url })
+    await logEvent(tx, storeId, orderId, actorUserId, "link", { proveedor: connection.provider })
+    await notifyCustomer(tx, current, actorUserId, currency, "link", { url: link.url })
     return { url: link.url }
   })
 }

@@ -20,6 +20,7 @@ import {
 import { Textarea } from "@odentia/ui/components/textarea"
 import { ConfirmDialog, EmptyState, SubmitButton, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useSearch } from "@tanstack/react-router"
 import { Copy, ImageOff, Link2, PackageCheck, Plus, ReceiptText, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
@@ -79,7 +80,12 @@ function StateBadge({ order }: { order: Pick<OrderRow, "state" | "paymentCollect
 export function OrdersPage() {
   const { store } = useStoreContext()
   const [filter, setFilter] = useState<OrderFilter>("abiertos")
-  const [open, setOpen] = useState<string | null>(null)
+  // «?pedido=…» llega desde Argos o desde la conversación de prueba: abre ese pedido.
+  const search = useSearch({ strict: false }) as { pedido?: string }
+  const [open, setOpen] = useState<string | null>(search.pedido ?? null)
+  useEffect(() => {
+    if (search.pedido) setOpen(search.pedido)
+  }, [search.pedido])
   const [adding, setAdding] = useState(false)
   const today = localToday()
   const list = useQuery({
@@ -160,8 +166,10 @@ export function OrdersPage() {
                       </span>
                       {order.customerName}
                     </span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                       {CHANNELS[order.channel].replace(/ \(.*\)$/, "")}
+                      {order.bySofi ? " · lo armó Sofi" : ""}
+                      {order.test ? <Badge variant="outline">Prueba</Badge> : null}
                     </span>
                   </span>
                   <span className="col-start-1 min-w-0 text-sm lg:line-clamp-2 lg:col-start-auto">
@@ -244,9 +252,11 @@ function OrderSheet({ orderId, onClose }: { orderId: string; onClose: () => void
             {order ? (
               <span className="flex flex-wrap items-center gap-2">
                 <StateBadge order={order} />
+                {order.test ? <Badge variant="outline">Prueba</Badge> : null}
                 <span>
                   {CHANNELS[order.channel].replace(/ \(.*\)$/, "")} · anotado el{" "}
                   {when(order.createdAt)}
+                  {order.bySofi ? " · lo armó Sofi" : ""}
                 </span>
               </span>
             ) : (

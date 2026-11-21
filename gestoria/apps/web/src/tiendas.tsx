@@ -27,6 +27,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
+  Bot,
+  ChartColumn,
   Copy,
   LogOut,
   MessageCircle,
@@ -391,11 +393,17 @@ export function useStoreContext() {
 }
 
 /** Cada destino de la tienda: sus pedidos, lo que vende, cómo cobra y entrega, y su equipo. */
-function storeSections(id: string) {
+function storeSections(store: MyStore) {
+  const id = store.id
   return [
     { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
+    { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
     { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
     { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
+    // Reportes y Argos: solo Dueño y Administrador.
+    ...(store.permissions.includes("reportes.ver")
+      ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
+      : []),
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
   ]
 }
@@ -468,7 +476,7 @@ export function StoreLayout() {
       <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
         <SectionNav
           label={`Secciones de ${store.name}`}
-          items={storeSections(store.id)}
+          items={storeSections(store)}
           pathname={pathname}
           LinkComponent={SectionLink}
           mobilePosition="header"

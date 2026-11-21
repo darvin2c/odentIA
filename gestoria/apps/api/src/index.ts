@@ -1,10 +1,12 @@
-import { createAppDb, createOwnerDb } from "@gestoria/db"
+import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
 import { createApp } from "./app.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import { readSecretsKey } from "./secretos.js"
+import { runArgos } from "./sofi/argos.js"
+import { modelFromEnv } from "./sofi/modelo.js"
 
 const env = readEnv()
 const ownerDb = createOwnerDb(env.GESTORIA_DATABASE_URL)
@@ -22,7 +24,11 @@ const link = {
   secretsKey,
   apiURL: env.GESTORIA_API_URL ?? env.GESTORIA_WEB_URL,
 }
-const app = createApp({ appDb, ownerDb, account, webURL: env.GESTORIA_WEB_URL, link })
+// El modelo de Sofi (B5). Sin clave, Sofi no responde y la pantalla lo dice.
+const model = modelFromEnv({ ...env, NODE_ENV: process.env.NODE_ENV })
+if (!model)
+  console.warn("gestoria-api: sin GESTORIA_OPENAI_API_KEY Sofi no responde (ni en la prueba).")
+const app = createApp({ appDb, ownerDb, account, webURL: env.GESTORIA_WEB_URL, link, model })
 serve({ fetch: app.fetch, port: env.GESTORIA_PORT }, (info) => {
   console.log(`gestoria-api: escuchando en el puerto ${info.port}`)
 })
@@ -47,3 +53,17 @@ async function review() {
 }
 setTimeout(() => void review(), 60_000).unref()
 setInterval(() => void review(), HOUR).unref()
+
+// Argos (B5): cada 15 minutos mira las tiendas con Sofi encendida y le encarga los seguimientos.
+// Si hay dos servidores, corre en uno solo (candado de la base).
+async function argos() {
+  try {
+    const run = await withSessionLock(ownerDb, "argos", () => runArgos(ownerDb, appDb))
+    if (run?.written)
+      console.log(`gestoria-api: Argos le encargó ${run.written} seguimiento(s) a Sofi`)
+  } catch (error) {
+    console.error("gestoria-api: Argos falló", error)
+  }
+}
+setTimeout(() => void argos(), 90_000).unref()
+setInterval(() => void argos(), 15 * 60_000).unref()

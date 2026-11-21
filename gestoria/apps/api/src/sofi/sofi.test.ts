@@ -1,0 +1,591 @@
+/**
+ * Sofi y Argos (paso B5) contra una base real, con un modelo controlado (nunca la red): las
+ * herramientas usan las mismas operaciones que el equipo, la comprobación frena lo inventado,
+ * nunca da un pago por confirmado, arma el pedido solo con un resumen que el cliente vio, y
+ * Argos escribe cada seguimiento una sola vez. También lo que ve cada rol en Reportes.
+ *
+ * Esto prueba nuestro código, no cómo responde el modelo real: eso lo mide `eval-sofi.ts`.
+ */
+import { randomUUID } from "node:crypto"
+import {
+  conversationMessage,
+  orderEvent,
+  saleOrder,
+  store,
+  storeAgent,
+  storeMember,
+} from "@gestoria/db"
+import { startTestDb, type TestDb } from "@gestoria/db/testing"
+import { and, eq, sql } from "drizzle-orm"
+import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { createApp } from "../app.js"
+import { runArgos } from "./argos.js"
+import type { ChatModel, ChatRequest, ModelReply } from "./modelo.js"
+import { toolCall } from "./modelo.js"
+import { amountsIn, claimsPaid } from "./revisar.js"
+import { SOFI_FALLBACK } from "./sofi.js"
+
+const ACCOUNT = "https://api.gestoria.test"
+const WEB = "https://app.gestoria.test"
+const SERVER = "https://servidor.gestoria.test"
+
+let db: TestDb
+let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
+let app: ReturnType<typeof createApp>
+let keys: ReturnType<typeof createLocalJWKSet>
+
+const people = {
+  rosa: { id: "u-rosa", email: "rosa@calzados.test", name: "Rosa Quispe" },
+  lucia: { id: "u-lucia", email: "lucia@calzados.test", name: "Lucía Torres" },
+  ajena: { id: "u-ajena", email: "ajena@otra.test", name: "Ajena" },
+}
+type Who = keyof typeof people
+const storeId = randomUUID()
+const otherStore = randomUUID()
+const base = `/api/tiendas/${storeId}`
+
+// biome-ignore lint/suspicious/noExplicitAny: las pruebas leen respuestas JSON de forma libre
+type Json = Record<string, any>
+type Step = (request: ChatRequest) => Partial<ModelReply> | Promise<Partial<ModelReply>>
+
+/** El modelo controlado: cada prueba le da lo que responde en cada llamada. */
+const steps: Step[] = []
+const model: ChatModel = {
+  name: "gpt-6-luna",
+  async complete(request) {
+    const step = steps.shift()
+    if (!step) throw new Error("El modelo de prueba no tiene más respuestas")
+    const reply = await step(request)
+    return {
+      content: reply.content ?? null,
+      toolCalls: reply.toolCalls ?? [],
+      usage: reply.usage ?? { input: 3000, cached: 2000, output: 80 },
+    }
+  },
+}
+const say =
+  (content: string): Step =>
+  () => ({ content })
+const use =
+  (name: string, args: (r: ChatRequest) => Json): Step =>
+  (r) => ({
+    toolCalls: [toolCall(name, args(r))],
+  })
+/** Lo que devolvió la última herramienta. */
+const lastTool = (r: ChatRequest): Json => {
+  const last = [...r.messages].reverse().find((m) => m.role === "tool")
+  return JSON.parse((last as { content: string }).content)
+}
+
+async function tokenFor(who: Who) {
+  const p = people[who]
+  const iat = Math.floor(Date.now() / 1000)
+  return new SignJWT({ email: p.email, emailVerified: true, name: p.name, image: null })
+    .setProtectedHeader({ alg: "EdDSA", kid: "k1" })
+    .setSubject(p.id)
+    .setIssuer(ACCOUNT)
+    .setAudience("gestoria")
+    .setIssuedAt(iat)
+    .setExpirationTime(iat + 900)
+    .sign(privateKey)
+}
+
+async function call(who: Who, method: string, path: string, body?: unknown) {
+  const response = await app.request(`${SERVER}${path}`, {
+    method,
+    headers: {
+      origin: WEB,
+      authorization: `Bearer ${await tokenFor(who)}`,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  const text = await response.text()
+  return { status: response.status, json: (text ? JSON.parse(text) : {}) as Json }
+}
+
+const ids = { yape: "", reparto: "", t38: "", t39: "", medias: "", ajena: "" }
+
+async function newTest() {
+  const created = await call("lucia", "POST", `${base}/sofi/pruebas`)
+  expect(created.status).toBe(201)
+  return created.json.id as string
+}
+
+async function write(conversationId: string, text: string, ...script: Step[]) {
+  steps.push(...script)
+  const sent = await call("lucia", "POST", `${base}/conversaciones/${conversationId}/cliente`, {
+    text,
+  })
+  expect(sent.status).toBe(200)
+  expect(steps).toHaveLength(0)
+  return sent.json as { conversation: Json; result: Json }
+}
+
+const lastSofi = (view: Json) =>
+  [...(view.conversation.messages as Json[])].reverse().find((m) => m.author === "sofi")!
+
+beforeAll(async () => {
+  db = await startTestDb()
+  const pair = await generateKeyPair("EdDSA", { crv: "Ed25519" })
+  privateKey = pair.privateKey
+  const jwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "EdDSA", kid: "k1" }
+  keys = createLocalJWKSet({ keys: [jwk] })
+  app = createApp({
+    appDb: db.appDb,
+    ownerDb: db.ownerDb,
+    account: { url: ACCOUNT, eventsSecret: "", keys },
+    webURL: WEB,
+    model,
+  })
+  for (const who of Object.keys(people) as Who[]) await call(who, "GET", "/api/yo")
+  await db.ownerDb.insert(store).values([
+    { id: storeId, name: "Calzados Rosa", currency: "PEN", createdBy: "u-rosa" },
+    { id: otherStore, name: "Otra tienda", currency: "PEN", createdBy: "u-ajena" },
+  ])
+  await db.ownerDb.insert(storeMember).values([
+    { storeId, userId: "u-rosa", role: "owner" },
+    { storeId, userId: "u-lucia", role: "sales", addedBy: "u-rosa" },
+    { storeId: otherStore, userId: "u-ajena", role: "owner" },
+  ])
+  const pay = async (body: Json) =>
+    (await call("rosa", "POST", `${base}/medios-de-pago`, body)).json.method.id as string
+  ids.yape = await pay({
+    name: "Yape",
+    typeCode: "68",
+    collection: "comprobante",
+    details: "Yape al 987 654 321, a nombre de Rosa Quispe",
+  })
+  const deliver = async (body: Json) =>
+    (await call("rosa", "POST", `${base}/formas-de-entrega`, body)).json.method.id as string
+  ids.reparto = await deliver({
+    name: "Reparto en Lima",
+    type: "DeliveryModeOwnFleet",
+    cost: "fijo",
+    priceCents: 1000,
+    maxDiscountCents: 1000,
+  })
+  const zapatilla = await call("rosa", "POST", `${base}/productos`, {
+    name: "Zapatilla urbana blanca",
+    category: "Zapatillas",
+    listPriceCents: 12900,
+    minPriceCents: 10000,
+    options: [{ name: "Talla", values: ["38", "39"] }],
+  })
+  const variants = (await call("rosa", "GET", `${base}/productos/${zapatilla.json.product.id}`))
+    .json.product.variants as Json[]
+  ids.t38 = variants.find((v) => v.optionValues[0] === "38")!.id
+  ids.t39 = variants.find((v) => v.optionValues[0] === "39")!.id
+  const medias = await call("rosa", "POST", `${base}/productos`, {
+    name: "Medias",
+    listPriceCents: 1500,
+  })
+  ids.medias = (
+    await call("rosa", "GET", `${base}/productos/${medias.json.product.id}`)
+  ).json.product.variants[0].id
+  for (const [variantId, quantity] of [
+    [ids.t38, 5],
+    [ids.medias, 10],
+  ] as const)
+    await call("rosa", "POST", `${base}/variantes/${variantId}/movimientos`, {
+      kind: "entrada",
+      quantity,
+    })
+  // Un producto de otra tienda: Sofi no lo puede vender aquí.
+  const other = await call("ajena", "POST", `/api/tiendas/${otherStore}/productos`, {
+    name: "Zapatilla ajena",
+    listPriceCents: 5000,
+  })
+  ids.ajena = (
+    await call("ajena", "GET", `/api/tiendas/${otherStore}/productos/${other.json.product.id}`)
+  ).json.product.variants[0].id
+}, 180_000)
+
+afterAll(async () => {
+  await db?.stop()
+})
+
+describe("la comprobación antes de enviar", () => {
+  it("lee los importes como los escribe Sofi", () => {
+    expect(amountsIn("Cuesta S/ 129, o desde S/89.90; total S/ 1,290.50", "PEN")).toEqual([
+      12900, 8990, 129050,
+    ])
+    expect(amountsIn("Te queda en 120 soles", "PEN")).toEqual([12000])
+    expect(amountsIn("Talla 38, quedan 2", "PEN")).toEqual([])
+  })
+
+  it("distingue un pago dado por confirmado de uno que espera", () => {
+    expect(claimsPaid("¡Listo! Tu pago está confirmado.")).toBe(true)
+    expect(claimsPaid("Recibimos tu pago, gracias")).toBe(true)
+    expect(claimsPaid("Tu pago queda por confirmar: una persona lo revisa")).toBe(false)
+    expect(claimsPaid("Apenas esté confirmado tu pago te aviso")).toBe(false)
+    expect(claimsPaid("Todavía no está confirmado")).toBe(false)
+    // La negación o la condición tienen que ir pegadas a lo que dice.
+    expect(claimsPaid("No te preocupes, ya está pagado")).toBe(true)
+    expect(claimsPaid("Si, recibimos tu pago")).toBe(true)
+    expect(claimsPaid("Cuando tu pago esté confirmado te aviso")).toBe(false)
+  })
+})
+
+describe("Sofi vende con las reglas de la tienda", () => {
+  it("sin modelo no responde, y la prueba lo dice", async () => {
+    const withModel = app
+    app = createApp({
+      appDb: db.appDb,
+      ownerDb: db.ownerDb,
+      account: { url: ACCOUNT, eventsSecret: "", keys },
+      webURL: WEB,
+    })
+    try {
+      expect((await call("rosa", "GET", `${base}/sofi`)).json.modelReady).toBe(false)
+      const id = await newTest()
+      const sent = await write(id, "Hola")
+      expect(sent.result.status).toBe("sin_modelo")
+      expect(sent.conversation.messages).toHaveLength(1)
+    } finally {
+      app = withModel
+    }
+    expect((await call("rosa", "GET", `${base}/sofi`)).json.modelReady).toBe(true)
+  })
+
+  it("da el precio con lo que devuelve el catálogo, y la respuesta lleva lo que hizo", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Hola, ¿tienen la zapatilla blanca en 38?",
+      use("buscar_productos", () => ({ texto: "zapatilla blanca 38" })),
+      (r) => {
+        const found = lastTool(r)
+        const zap = found.productos[0]
+        expect(zap.nombre).toBe("Zapatilla urbana blanca")
+        expect(zap.se_negocia).toBe(true)
+        // Lo agotado viene marcado y nunca muestra el mínimo.
+        expect(zap.variantes.find((v: Json) => v.opciones === "39").agotada).toBe(true)
+        expect(JSON.stringify(found)).not.toContain("S/ 100")
+        return { content: `¡Hola! Soy Sofi. Sí, la tenemos en 38: cuesta ${zap.precio}.` }
+      },
+    )
+    expect(sent.result.status).toBe("respondio")
+    const reply = lastSofi(sent)
+    expect(reply.text).toContain("S/ 129")
+    expect(reply.delivery).toBe("prueba")
+    expect(reply.basis.tools).toEqual(["Buscó en el catálogo"])
+    expect(reply.basis.costMicros).toBeGreaterThan(0)
+  })
+
+  it("no baja del mínimo: cotizar se lo dice y ofrece lo que sí se puede", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Te la compro a 90 soles",
+      use("cotizar", () => ({
+        lineas: [{ variante_id: ids.t38, cantidad: 1, precio_unitario: 90 }],
+        entrega_id: ids.reparto,
+      })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result.ok).toBe(false)
+        expect(result.problemas[0]).toContain("No puede bajar")
+        return { content: "A 90 no llego, pero te puedo regalar el envío." }
+      },
+    )
+    const reply = lastSofi(sent)
+    expect(reply.basis.tools).toEqual(["Calculó el total (no se pudo)"])
+    expect(sent.conversation.handler).toBe("sofi")
+  })
+
+  it("un importe inventado no sale: lo corrige una vez y si insiste pasa a una persona", async () => {
+    const id = await newTest()
+    const fixed = await write(id, "¿Me la dejas en 50?", say("Te la dejo en S/ 50."), (r) => {
+      // La corrección le llega como de la tienda, no del cliente.
+      expect(String(r.messages.at(-1)!.content)).toContain("[Comprobación de la tienda")
+      return { content: "Ese precio no lo puedo dar, pero veamos qué opciones hay." }
+    })
+    expect(lastSofi(fixed).text).toBe("Ese precio no lo puedo dar, pero veamos qué opciones hay.")
+    expect(lastSofi(fixed).basis.stopped[0]).toContain("50")
+    const stuck = await write(id, "¿Y en 40?", say("En S/ 40 te la dejo."), say("Ok, S/ 40."))
+    expect(lastSofi(stuck).text).toBe(SOFI_FALLBACK)
+    // Que el cliente lo haya escrito con moneda no lo vuelve un precio que Sofi pueda prometer.
+    expect(lastSofi(stuck).basis.stopped.length).toBeGreaterThan(0)
+    expect(stuck.conversation.handler).toBe("persona")
+    expect(stuck.result.handoff).toBe(true)
+    // Con una persona atendiendo, Sofi no escribe.
+    const quiet = await write(id, "¿Hola?")
+    expect(quiet.result.status).toBe("persona")
+    // «Devolver a Sofi» y sigue.
+    const back = await call("lucia", "POST", `${base}/conversaciones/${id}/devolver`)
+    expect(back.json.conversation.handler).toBe("sofi")
+  })
+
+  it("arma el pedido solo con el resumen que el cliente vio; anota la captura y nunca la da por pagada", async () => {
+    const id = await newTest()
+    const args = {
+      lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      entrega_id: ids.reparto,
+      envio_cobrado: 0,
+    }
+    // Sin resumen previo, no lo arma.
+    const early = await write(
+      id,
+      "La quiero, soy Carla, Av. Primavera 123, Surco",
+      use("armar_pedido", () => ({ ...args, nombre: "Carla", direccion: "Av. Primavera 123" })),
+      (r) => {
+        expect(lastTool(r).problema).toContain("resumen")
+        return { toolCalls: [toolCall("cotizar", args)] }
+      },
+      (r) => ({ content: `Te queda en ${lastTool(r).total} con envío gratis. ¿Lo confirmo?` }),
+    )
+    expect(lastSofi(early).text).toContain("S/ 129")
+    const confirmed = await write(
+      id,
+      "Sí, confirmo",
+      use("armar_pedido", () => ({ ...args, nombre: "Carla", direccion: "Av. Primavera 123" })),
+      (r) => {
+        const result = lastTool(r)
+        expect(result).toMatchObject({ ok: true, pedido: "0001", total: "S/ 129" })
+        return { toolCalls: [toolCall("link_de_pago", { pedido: "0001" })] }
+      },
+      (r) => {
+        // En una prueba no se crea un link real.
+        expect(lastTool(r).problema).toContain("prueba")
+        return {
+          content: "Listo, tu pedido 0001 por S/ 129. Puedes pagar por Yape al 987 654 321.",
+        }
+      },
+    )
+    expect(confirmed.conversation.orders).toEqual([
+      expect.objectContaining({ number: "0001", state: "por_pagar", test: true }),
+    ])
+    const [order] = await db.ownerDb
+      .select()
+      .from(saleOrder)
+      .where(eq(saleOrder.id, confirmed.conversation.orders[0].id))
+    expect(order).toMatchObject({
+      createdBy: "agente:sofi",
+      conversationId: id,
+      test: true,
+      totalCents: 12900,
+      marginUsedCents: 1000,
+    })
+    // La captura: queda por confirmar, y decir «confirmado» no sale.
+    const paid = await write(
+      id,
+      "Ya te yapeé 129, operación 123456",
+      use("anotar_pago", () => ({ pedido: "0001", monto: 129, operacion: "123456" })),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({ ok: true, monto_anotado: "S/ 129" })
+        return { content: "¡Gracias! Tu pago está confirmado." }
+      },
+      say("¡Gracias! Anoté tu pago de S/ 129: una persona del equipo lo revisa y te aviso."),
+    )
+    expect(lastSofi(paid).text).toContain("lo revisa")
+    expect(paid.conversation.orders[0].state).toBe("por_confirmar")
+    // Una persona lo confirma; el pedido de prueba no mueve el stock.
+    const detail = await call("lucia", "GET", `${base}/pedidos/${order!.id}`)
+    expect(detail.json.order.bySofi).toBe(true)
+    expect(detail.json.order.events[0].actorName).toBe("Sofi")
+    const payment = detail.json.order.payments[0]
+    expect(payment.createdByName).toBe("Sofi")
+    const reviewed = await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos/${order!.id}/pagos/${payment.id}/revision`,
+      { decision: "confirmar" },
+    )
+    expect(reviewed.json.order.state).toBe("por_salir")
+    const kardex = await call("rosa", "GET", `${base}/variantes/${ids.t38}/kardex`)
+    expect(kardex.json.stock).toBe(5)
+  })
+
+  it("no vende lo de otra tienda ni toca pedidos de otra conversación", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Quiero la zapatilla ajena",
+      use("cotizar", () => ({
+        lineas: [{ variante_id: ids.ajena, cantidad: 1 }],
+        entrega_id: ids.reparto,
+      })),
+      (r) => {
+        expect(lastTool(r).ok).toBe(false)
+        return { toolCalls: [toolCall("anotar_pago", { pedido: "0001", monto: 129 })] }
+      },
+      (r) => {
+        expect(lastTool(r).problema).toContain("no es de esta conversación")
+        return { content: "No tengo ese producto. ¿Te muestro las zapatillas que tenemos?" }
+      },
+    )
+    expect(lastSofi(sent).basis.tools).toEqual([
+      "Calculó el total (no se pudo)",
+      "Anotó la captura (no se pudo)",
+    ])
+  })
+
+  it("lo que pide el cliente no cambia sus reglas: pasar a una persona usa el aviso fijo", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Quiero devolver un par que me llegó roto",
+      use("pasar_a_persona", () => ({ motivo: "Un reclamo: llegó roto" })),
+      say("Claro, te devuelvo tu dinero ahora."),
+    )
+    // Lo que el modelo quiso prometer no sale: sale el aviso fijo.
+    expect(lastSofi(sent).text).toContain("Te paso con una persona")
+    expect(sent.conversation.waitingReason).toBe("Un reclamo: llegó roto")
+  })
+})
+
+describe("lo que escribe el cliente mientras Sofi responde", () => {
+  it("lo responde después, con lo nuevo al final", async () => {
+    const id = await newTest()
+    const sent = await write(
+      id,
+      "Hola, ¿tienen zapatillas?",
+      async (r) => {
+        // Mientras Sofi responde, el cliente escribe otra vez (como llegará por el canal).
+        await db.ownerDb.insert(conversationMessage).values({
+          storeId,
+          conversationId: id,
+          author: "cliente",
+          text: "¿Y me la dejas S/ 50 menos?",
+          actorUserId: "canal",
+        })
+        expect(r.messages.at(-1)).toMatchObject({
+          role: "user",
+          content: "Hola, ¿tienen zapatillas?",
+        })
+        return { content: "¡Hola! Sí, tenemos zapatillas." }
+      },
+      (r) => {
+        // La segunda vuelta ve lo nuevo al final, y lo que el cliente escribió no es un precio permitido.
+        expect(r.messages.at(-1)).toMatchObject({
+          role: "user",
+          content: "¿Y me la dejas S/ 50 menos?",
+        })
+        return { content: "Te cuento los precios: déjame buscarlos." }
+      },
+    )
+    const sofi = (sent.conversation.messages as Json[]).filter((m) => m.author === "sofi")
+    expect(sofi.map((m) => m.text)).toEqual([
+      "¡Hola! Sí, tenemos zapatillas.",
+      "Te cuento los precios: déjame buscarlos.",
+    ])
+  })
+})
+
+describe("lo que pone el dueño y lo que ve cada rol", () => {
+  it("Ventas prueba a Sofi pero no la configura ni ve Reportes", async () => {
+    const save = await call("lucia", "PATCH", `${base}/sofi`, {
+      enabled: true,
+      followPayment: true,
+      followThanks: true,
+      followRestock: true,
+      followReturn: true,
+    })
+    expect(save.status).toBe(403)
+    expect((await call("lucia", "GET", `${base}/reportes`)).status).toBe(403)
+    expect((await call("lucia", "GET", `${base}/argos`)).status).toBe(403)
+    expect((await call("ajena", "GET", `${base}/sofi`)).status).toBe(404)
+  })
+
+  it("el dueño la enciende y queda escrito quién", async () => {
+    const save = await call("rosa", "PATCH", `${base}/sofi`, {
+      enabled: true,
+      displayName: "Sofi, de Calzados Rosa",
+      knowledge: "Atendemos de lunes a sábado.",
+      followPayment: true,
+      followThanks: true,
+      followRestock: true,
+      followReturn: true,
+    })
+    expect(save.status).toBe(200)
+    const [row] = await db.ownerDb.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
+    expect(row).toMatchObject({ enabled: true, updatedBy: "u-rosa" })
+  })
+
+  it("Reportes no cuenta los pedidos de prueba", async () => {
+    const report = await call("rosa", "GET", `${base}/reportes?periodo=mes`)
+    expect(report.status).toBe(200)
+    expect(report.json.sold).toEqual({ cents: 0, orders: 0, ticketCents: 0 })
+    expect(report.json.agent.conversations).toBe(0)
+  })
+})
+
+describe("Argos le encarga a Sofi lo de rutina", () => {
+  it("agradece al día siguiente de entregar, recuerda un pago y avisa que volvió una talla, una sola vez", async () => {
+    // Una conversación de verdad (la traerá B2): aquí la escribe el dueño de la base.
+    const conversationId = randomUUID()
+    await db.ownerDb.execute(sql`insert into conversation (id, store_id, channel, customer_name, created_by, last_customer_at)
+      values (${conversationId}, ${storeId}, 'whatsapp', 'Carla Mendoza', 'canal', now() - interval '2 days')`)
+    const make = async (extra: Json = {}) => {
+      const created = await call("lucia", "POST", `${base}/pedidos`, {
+        customerName: "Carla Mendoza",
+        channel: "whatsapp",
+        lines: [{ variantId: ids.medias, quantity: 1 }],
+        deliveryMethodId: ids.reparto,
+        paymentMethodId: ids.yape,
+        ...extra,
+      })
+      expect(created.status).toBe(201)
+      await db.ownerDb.execute(
+        sql`update sale_order set conversation_id = ${conversationId}, created_at = now() - interval '4 hours' where id = ${created.json.order.id}`,
+      )
+      return created.json.order.id as string
+    }
+    const unpaid = await make()
+    const delivered = await make()
+    await db.ownerDb
+      .update(saleOrder)
+      .set({ state: "entregado" })
+      .where(eq(saleOrder.id, delivered))
+    await db.ownerDb.insert(orderEvent).values({
+      storeId,
+      orderId: delivered,
+      actorUserId: "u-lucia",
+      action: "entregado",
+      createdAt: new Date(Date.now() - 21 * 3_600_000),
+    })
+    // Pidió la 39 agotada; entra stock.
+    await db.ownerDb.execute(
+      sql`insert into stock_request (store_id, variant_id, conversation_id) values (${storeId}, ${ids.t39}, ${conversationId})`,
+    )
+    await call("rosa", "POST", `${base}/variantes/${ids.t39}/movimientos`, {
+      kind: "entrada",
+      quantity: 2,
+    })
+
+    const first = await runArgos(db.ownerDb, db.appDb)
+    expect(first.written).toBe(3)
+    const again = await runArgos(db.ownerDb, db.appDb)
+    expect(again.written).toBe(0)
+    const written = await db.ownerDb
+      .select()
+      .from(conversationMessage)
+      .where(eq(conversationMessage.conversationId, conversationId))
+    const byKind = Object.fromEntries(written.map((m) => [m.followUp, m]))
+    expect(byKind.gracias?.text).toBe("Gracias por tu compra, Carla. ¿Te llegó bien?")
+    expect(byKind.pago?.text).toContain("listo para pagar")
+    expect(byKind.pago?.followUpRef).toBe(unpaid)
+    expect(byKind.volvio?.text).toContain("Volvió Zapatilla urbana blanca en 39")
+    // Pasaron más de 24 horas desde que escribió: sale con plantilla aprobada.
+    for (const m of written) {
+      expect(m).toMatchObject({ author: "sofi", delivery: "sin_enviar", needsTemplate: true })
+      expect(m.actorUserId).toBe("agente:argos")
+    }
+
+    const board = await call("rosa", "GET", `${base}/argos`)
+    expect(board.status).toBe(200)
+    expect(board.json.done.map((d: Json) => d.kind).sort()).toEqual(["gracias", "pago", "volvio"])
+    // Lo delicado viene al equipo: el pago por confirmar de la prueba no cuenta.
+    expect(board.json.toDo.filter((t: Json) => t.kind === "pago")).toEqual([])
+  })
+
+  it("con Sofi apagada, Argos no le encarga nada", async () => {
+    await db.ownerDb
+      .update(storeAgent)
+      .set({ enabled: false })
+      .where(and(eq(storeAgent.storeId, storeId)))
+    expect((await runArgos(db.ownerDb, db.appDb)).stores).toBe(0)
+  })
+})

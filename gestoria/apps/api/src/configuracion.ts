@@ -23,7 +23,7 @@ import { inStore, StoreError } from "./tiendas.js"
 export const MAX_METHODS = 30
 
 /** El orden en que cobra Sofi (tablero 14): link, después captura y al final al recibir. */
-const COLLECTION_RANK: Record<(typeof PAYMENT_COLLECTIONS)[number], number> = {
+export const COLLECTION_RANK: Record<(typeof PAYMENT_COLLECTIONS)[number], number> = {
   link: 0,
   comprobante: 1,
   al_recibir: 2,
