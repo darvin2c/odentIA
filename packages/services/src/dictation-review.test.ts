@@ -9,10 +9,13 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { listDictationSaid, settleDictationSegment, startDictationSegment } from "./dictation-said.js"
 import {
   DICTATION_REVIEW_CHARS,
+  DICTATION_SENTENCE_CHARS,
+  dictationSentences,
   type DictationReviewInput,
   saveDictationReview,
   setDictationTurnSpeaker,
   startDictationReview,
+  turnsFromStarts,
   turnsSayTranscript,
 } from "./dictation-review.js"
 import { discardDictationSuggestion, type DictationDraft, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
@@ -355,5 +358,83 @@ describe("lo que el repaso no usó", () => {
     expect(rows.filter((row) => row.reviewedAt === null).map((row) => row.transcript)).toEqual(["Ah, y anoche no me dejó dormir."])
     expect((await start()).due).toBe(true)
     await enable(false)
+  })
+})
+
+describe("las frases de un tramo", () => {
+  const same = (pieces: string[], said: string) => expect(pieces.join("").replace(/\s+/gu, "")).toBe(said.replace(/\s+/gu, ""))
+
+  it("se parten en el punto, la pregunta y la exclamación, y antes de «¿» o «¡»; un decimal no se parte", () => {
+    const said = "Buenos días. ¿Qué la trae por aquí? ¡Me duele mucho! Bien ¿y desde cuándo?… Hace dos semanas, tomé 6.5 mg."
+    expect(dictationSentences(said)).toEqual([
+      "Buenos días.",
+      "¿Qué la trae por aquí?",
+      "¡Me duele mucho!",
+      "Bien",
+      "¿y desde cuándo?…",
+      "Hace dos semanas, tomé 6.5 mg.",
+    ])
+    same(dictationSentences(said), said)
+    // Las comillas que cierran van con su frase.
+    expect(dictationSentences("Dijo «me duele». Y se fue.")).toEqual(["Dijo «me duele».", "Y se fue."])
+  })
+
+  it("lo que llega sin puntuación (la voz de Chrome) se parte por largo, antes de un conector", () => {
+    const said =
+      "me duele una muela de abajo del lado izquierdo cuando tomo algo frío desde hace como dos semanas y anoche me dolió solita no me dejó dormir pero hoy amaneció mejor entonces vine para que me la vean doctora"
+    const pieces = dictationSentences(said)
+    expect(pieces.length).toBeGreaterThan(1)
+    expect(pieces.every((piece) => piece.length <= DICTATION_SENTENCE_CHARS)).toBe(true)
+    expect(pieces.slice(1).every((piece) => /^(y|pero|porque|entonces|bueno|o sea|ya|después|además|también|ahora|mira|oiga|doctora?|sí|no)\s/u.test(piece))).toBe(true)
+    same(pieces, said)
+    // Sin conectores, en el último espacio que cabe.
+    const flat = "palabra ".repeat(60).trim()
+    const cut = dictationSentences(flat)
+    expect(cut.every((piece) => piece.length <= DICTATION_SENTENCE_CHARS)).toBe(true)
+    same(cut, flat)
+  })
+
+  it("es estable: el mismo tramo da siempre las mismas frases, y una corta o vacía no cambia", () => {
+    const said = "¿Alérgica a algo? Que yo sepa no. Bueno."
+    expect(dictationSentences(said)).toEqual(dictationSentences(said))
+    expect(dictationSentences("hola")).toEqual(["hola"])
+    expect(dictationSentences("   ")).toEqual([])
+  })
+})
+
+describe("los turnos armados desde dónde empieza cada uno", () => {
+  const segments = [
+    { transcript: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol.", needsTurns: true },
+    { transcript: "Ya tiene turnos.", needsTurns: false },
+    { transcript: "Y el inhalador lo usa de noche. ¿Algo más?", needsTurns: true },
+  ]
+  it("cada turno sigue hasta el siguiente, también en el tramo que viene; son el tramo tal cual por construcción", () => {
+    const turns = turnsFromStarts(segments, [
+      { desde: 1, quien: "dra" },
+      { desde: 2, quien: "acompanante", vinculo: "madre" },
+      { desde: 5, quien: "dra" },
+    ])
+    expect(turns).toEqual([
+      [
+        { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
+        { quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." },
+      ],
+      null,
+      [
+        { quien: "acompanante", vinculo: "madre", texto: "Y el inhalador lo usa de noche." },
+        { quien: "dra", texto: "¿Algo más?" },
+      ],
+    ])
+    segments.forEach((segment, index) => {
+      const built = turns[index]
+      if (built) expect(turnsSayTranscript(built, segment.transcript)).toBe(true)
+    })
+  })
+  it("sin ningún turno empezado no hay turnos; lo de antes del primero no se sabe de quién es", () => {
+    expect(turnsFromStarts(segments, [])).toEqual([null, null, null])
+    expect(turnsFromStarts(segments, [{ desde: 2, quien: "paciente", vinculo: "madre" }])[0]).toEqual([
+      { quien: "no_se_sabe", texto: "¿Tiene alguna enfermedad?" },
+      { quien: "paciente", texto: "Tiene asma, usa salbutamol." },
+    ])
   })
 })

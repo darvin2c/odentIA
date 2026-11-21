@@ -141,6 +141,131 @@ export function turnsSayTranscript(turns: ReadonlyArray<{ texto: string }>, tran
   return turns.length > 0 && turns.every((turn) => bare(turn.texto).length > 0) && bare(turns.map((turn) => turn.texto).join("")) === bare(transcript)
 }
 
+/**
+ * Largo de una frase sin puntuación, como mucho, antes de partirla. La voz de Chrome casi no pone
+ * puntos: un tramo entero puede llegar como una sola «frase» de cientos de caracteres, y dos
+ * personas cabrían en ella.
+ */
+export const DICTATION_SENTENCE_CHARS = 160
+/** Lo mínimo que queda de un lado al partir una frase larga: un pedazo más corto no se separa. */
+const SENTENCE_MIN_CHARS = 40
+/**
+ * Palabras con que suele empezar otra idea en lo hablado: una frase larga sin puntuación se parte
+ * antes de la última que cabe. No son reglas de gramática: solo eligen un corte razonable.
+ */
+const SENTENCE_CONNECTORS = /\s(?=(?:y|pero|porque|entonces|bueno|o sea|ya|después|además|también|ahora|mira|oiga|doctora?|sí|no)\s)/giu
+
+/** Parte un pedazo largo sin puntuación: antes del último conector que cabe; si no hay, en el último espacio. */
+function splitLong(piece: string): string[] {
+  const parts: string[] = []
+  let rest = piece
+  while (rest.length > DICTATION_SENTENCE_CHARS) {
+    const window = rest.slice(0, DICTATION_SENTENCE_CHARS + 1)
+    let cut = -1
+    for (const found of window.matchAll(SENTENCE_CONNECTORS)) if (found.index >= SENTENCE_MIN_CHARS) cut = found.index
+    if (cut < 0) cut = window.lastIndexOf(" ")
+    if (cut < SENTENCE_MIN_CHARS) cut = rest.indexOf(" ", DICTATION_SENTENCE_CHARS)
+    if (cut < 0) break
+    parts.push(rest.slice(0, cut).trim())
+    rest = rest.slice(cut).trim()
+  }
+  if (rest.trim()) parts.push(rest.trim())
+  return parts.filter(Boolean)
+}
+
+/**
+ * Las frases de un tramo, en orden: lo que el repaso numera para decir dónde empieza cada turno.
+ * Pura y estable (el mismo tramo da siempre las mismas frases), y cada frase es un pedazo exacto
+ * del tramo: juntas, sin los espacios entre ellas, son el tramo tal cual (`turnsSayTranscript`).
+ * - Termina una frase el punto, el signo de cierre de pregunta o exclamación o los puntos
+ *   suspensivos seguidos de un espacio (con las comillas o el paréntesis que cierran): «6.5» no
+ *   se parte. Una abreviatura con punto («Dra. Pérez») sí se parte: es raro en lo dictado y solo
+ *   mueve un corte.
+ * - Empieza otra antes de «¿» o «¡» tras un espacio: «Bien ¿y desde cuándo?» son dos.
+ * - Lo que sigue pasando de `DICTATION_SENTENCE_CHARS` (la voz de Chrome, sin puntuación) se parte
+ *   antes de un conector razonable o, si no hay, en el último espacio que cabe.
+ */
+export function dictationSentences(transcript: string): string[] {
+  const pieces: string[] = []
+  let start = 0
+  for (let at = 0; at < transcript.length; at += 1) {
+    const char = transcript.charAt(at)
+    if ((char === "¿" || char === "¡") && at > start && /\s/u.test(transcript.charAt(at - 1))) {
+      pieces.push(transcript.slice(start, at))
+      start = at
+      continue
+    }
+    if (!/[.?!…]/u.test(char)) continue
+    let end = at + 1
+    while (end < transcript.length && /[.?!…»"”')\]]/u.test(transcript.charAt(end))) end += 1
+    if (end < transcript.length && !/\s/u.test(transcript.charAt(end))) {
+      at = end - 1
+      continue
+    }
+    pieces.push(transcript.slice(start, end))
+    start = end
+    at = end - 1
+  }
+  pieces.push(transcript.slice(start))
+  return pieces.map((piece) => piece.trim()).filter(Boolean).flatMap(splitLong)
+}
+
+const SPEAKER_SET = new Set<string>(DICTATION_SPEAKERS)
+
+/** Dónde empieza un turno, como lo devuelve el repaso: el número de su primera frase y quién habló. */
+export interface DictationTurnStart {
+  desde: number
+  quien: DictationSpeaker
+  vinculo?: string | undefined
+}
+
+/**
+ * Los turnos de cada tramo, armados con el texto exacto de sus frases (`dictationSentences`): así
+ * son el tramo tal cual por construcción. Las frases se numeran seguidas en toda la conversación,
+ * desde 1, en el orden de los tramos. Cada turno empieza en su frase y sigue hasta donde empieza
+ * el siguiente, también en el tramo que viene (quien seguía hablando al cortar la pausa). Una frase
+ * en la que hablaron dos queda con quien la empieza: la frase es lo más fino que se marca.
+ * `null`: el tramo no pide turnos o ningún turno empieza en él ni antes; queda para otro repaso.
+ */
+export function turnsFromStarts(
+  segments: ReadonlyArray<{ transcript: string; needsTurns: boolean }>,
+  starts: readonly DictationTurnStart[],
+): Array<DictationTurn[] | null> {
+  const byNumber = new Map<number, DictationTurnStart>()
+  for (const start of starts) if (Number.isInteger(start.desde) && start.desde >= 1 && SPEAKER_SET.has(start.quien)) byNumber.set(start.desde, start)
+  let number = 0
+  let current: DictationTurnStart | undefined
+  return segments.map((segment) => {
+    const turns: DictationTurn[] = []
+    // Lo del principio sin ningún turno empezado antes: no se sabe quién lo dijo.
+    const leading: string[] = []
+    let open: DictationTurn | undefined
+    for (const sentence of dictationSentences(segment.transcript)) {
+      number += 1
+      const starting = byNumber.get(number)
+      if (starting) {
+        current = starting
+        open = undefined
+      }
+      if (!segment.needsTurns) continue
+      if (!current) {
+        leading.push(sentence)
+        continue
+      }
+      if (open) open.texto = `${open.texto} ${sentence}`
+      else {
+        const vinculo = current.quien === "acompanante" ? current.vinculo?.trim().slice(0, 80) || undefined : undefined
+        open = { quien: current.quien, ...(vinculo ? { vinculo } : {}), texto: sentence }
+        turns.push(open)
+      }
+    }
+    if (!segment.needsTurns || !turns.length) return null
+    if (leading.length) turns.unshift({ quien: "no_se_sabe", texto: leading.join(" ") })
+    return turns
+  })
+}
+
+
 /** Lo que el repaso dejó fuera por ser de otro lugar, con lo que se le dice a la persona. */
 export const DICTATION_OUT_OF_PLACE = {
   familiar: "Es de la salud de un familiar: va en sus antecedentes familiares, no en los suyos.",
@@ -154,7 +279,10 @@ export interface DictationReviewInput {
   segments: ReadonlyArray<Pick<DictationReviewSegment, "segmentId" | "transcript">>
   readIds: readonly string[]
   drafts: DictationDraft[]
-  /** Los turnos de cada tramo, como los devolvió Clío: se guardan solo si son el tramo tal cual. */
+  /**
+   * Los turnos de cada tramo, armados con sus frases desde dónde Clío dijo que empieza cada uno
+   * (`turnsFromStarts`): se vuelven a comprobar contra el tramo antes de guardarlos.
+   */
   turns: ReadonlyArray<{ segmentId: string; turns: DictationTurn[] }>
   /** Lo que Clío no supo dónde poner y pudo citar (`readDictation`). */
   unused: readonly string[]

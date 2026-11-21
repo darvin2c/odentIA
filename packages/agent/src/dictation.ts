@@ -7,6 +7,8 @@ import {
   DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
   dictationHealthSchema,
+  dictationSentences,
+  type DictationTurnStart,
   type DictationDraft,
   type DictationFormQuestion,
   type DictationTurn,
@@ -15,6 +17,7 @@ import {
   heardVocabularyOf,
   operationAgentSchema,
   pauseBridge,
+  turnsFromStarts,
   turnsSayTranscript,
   withPauseBridge,
 } from "@odentia/services"
@@ -902,8 +905,8 @@ export async function askDictationModel(
 
 /* ---------- El repaso al terminar (mesa del 20 nov 2026, «Clío en una consulta conversada», P4) ---------- */
 
-/** Turnos de un tramo que se piden, como mucho: un tramo de 12 000 caracteres no tiene más. */
-const REVIEW_TURNS_PER_SEGMENT = 120
+/** Turnos que se piden en un repaso, como mucho: 30 000 caracteres de conversación no tienen más. */
+const REVIEW_TURNS = 600
 
 /**
  * Lo que el repaso suma al esquema de la pausa: los turnos de cada tramo y lo clínico que no tiene
@@ -914,20 +917,14 @@ const REVIEW_PARTS = {
   turnos: z
     .array(
       z.object({
-        tramo: z.number().int().min(1).describe("El número del tramo, como llega en la conversación."),
-        turnos: z
-          .array(
-            z.object({
-              quien: z.enum(DICTATION_SPEAKERS).describe("Quién habló: `dra` (quien atiende), `paciente`, `acompanante` o `no_se_sabe`."),
-              vinculo: z.string().max(80).optional().describe("De quien acompaña, si se dijo o se nota («madre»)."),
-              texto: z.string().describe("Lo que dijo, copiado tal cual del tramo."),
-            }),
-          )
-          .max(REVIEW_TURNS_PER_SEGMENT),
+        desde: z.number().int().min(1).describe("El número de la frase donde empieza a hablar, como llega entre corchetes."),
+        quien: z.enum(DICTATION_SPEAKERS).describe("Quién habló: `dra` (quien atiende), `paciente`, `acompanante` o `no_se_sabe`."),
+        vinculo: z.string().max(80).optional().describe("De quien acompaña, si se dijo o se nota («madre»)."),
       }),
     )
+    .max(REVIEW_TURNS)
     .default([])
-    .describe("Cada tramo marcado «partir en turnos», partido en turnos en orden: juntos son el tramo entero, tal cual."),
+    .describe("Cada vez que empieza a hablar otra persona en los tramos marcados «partir en turnos»: la frase donde empieza y quién es. Sigue hasta donde empieza el siguiente."),
   sin_lugar: z
     .array(
       z.object({
@@ -960,8 +957,8 @@ export const DICTATION_REVIEW_RULES = [
   "- La consulta y la salud pendientes llegan con lo que ya dicen: en `nota` y en `salud` va solo lo que les falta, y el sistema lo suma.",
   "- Cuándo vuelve: «te veo la próxima semana para la otra resina» o «nos vemos en quince días para ver cómo cicatriza» dicen cuándo vuelve y para qué sin pedir reservar: es un control en `controles`, con la fecha contada desde hoy y, en el título, para qué vuelve («Control: la otra resina»). Si pide reservar la cita, es una cita.",
   "- Con fichas abiertas, responde las preguntas que la conversación responde y siguen sin respuesta, cada una con su frase.",
-  "- En `turnos` va cada tramo marcado «partir en turnos», con su número: quién habló y lo que dijo, en orden. `quien`: `dra` (quien atiende), `paciente`, `acompanante` (con `vinculo` si se dijo o se nota: «madre») o `no_se_sabe`. Quien pregunta, examina o indica es quien atiende; quien cuenta lo que siente, el paciente; quien habla del paciente («le duele», «mi hija no duerme»), quien lo acompaña. Si no queda claro, `no_se_sabe`: no adivines.",
-  "- El `texto` de cada turno se copia tal cual del tramo, sin corregir, completar, resumir ni saltar nada, ni una palabra ni un signo: juntos y en orden son el tramo entero. Si no puedes partirlo así, deja ese tramo fuera de `turnos`.",
+  "- La conversación llega en frases numeradas («[12] ¿Desde cuándo?»). En `turnos` va, en los tramos marcados «partir en turnos», cada vez que empieza a hablar otra persona: `desde`, el número de la frase donde empieza, y quién es. El turno sigue hasta donde empieza el siguiente, también en el tramo que viene; no copies el texto. La primera frase de esos tramos lleva siempre su turno.",
+  "- `quien`: `dra` (quien atiende), `paciente`, `acompanante` (con `vinculo` si se dijo o se nota: «madre») o `no_se_sabe`. Quien pregunta, examina o indica es quien atiende; quien cuenta lo que siente, el paciente; quien habla del paciente («le duele», «mi hija no duerme»), quien lo acompaña. Si no queda claro, `no_se_sabe`: no adivines. Si en una frase hablan dos, va con quien la empieza.",
   "- En `sin_lugar` va lo clínico que se dijo y no tiene dónde ir, con su frase en `dicho` y su motivo: lo de la salud de un familiar («mi papá es diabético») con `familiar`; un peso o una talla que alguien calcula o recuerda («debe pesar 24») con `peso_dicho`; lo demás, con `otro`. La charla, lo administrativo y lo que ya quedó no van.",
 ].join("\n")
 
@@ -987,6 +984,21 @@ export interface DictationReviewAsk extends Omit<DictationAsk, "transcript" | "c
 /** Lo dictado con que se comprueba lo que devuelve el repaso: los tramos, uno por línea. */
 export const reviewHeard = (segments: ReadonlyArray<Pick<DictationReviewSegment, "transcript">>) => segments.map((segment) => segment.transcript).join("\n")
 
+/**
+ * Las frases de cada tramo (`dictationSentences`, del servidor), numeradas seguidas desde 1 en toda
+ * la conversación: el mensaje las muestra así y `turnsFromStarts` arma los turnos con la misma cuenta.
+ */
+export function reviewSentences(segments: readonly DictationReviewSegment[]) {
+  let number = 0
+  return segments.map((segment) => ({
+    segment,
+    sentences: dictationSentences(segment.transcript).map((text) => {
+      number += 1
+      return { number, text }
+    }),
+  }))
+}
+
 /** Los mensajes del repaso: las instrucciones de la pausa con las del repaso, y la conversación. */
 export function dictationReviewMessages(ask: DictationReviewAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({ services: ask.services, diagnosisList: ask.diagnosisList, catalog: ask.catalog })
@@ -1004,8 +1016,10 @@ export function dictationReviewMessages(ask: DictationReviewAsk, profile: Dictat
     known.length ? `Lo que ya quedó de esta conversación (no lo registres otra vez):\n${known.join("\n")}` : "",
     dictationFormsText(forms),
     ask.earlierLeftOut ? "Lo dicho antes del tramo 1 no se incluye: la conversación es más larga de lo que se lee de una vez, y sus pausas ya lo ordenaron." : "",
-    `La conversación, tramo por tramo:\n${ask.segments
-      .map((segment) => `Tramo ${segment.number} (${hour(segment.saidAt)})${segment.needsTurns ? " · partir en turnos" : ""}:\n«${segment.transcript}»`)
+    `La conversación, tramo por tramo y en frases numeradas:\n${reviewSentences(ask.segments)
+      .map(({ segment, sentences }) =>
+        [`Tramo ${segment.number} (${hour(segment.saidAt)})${segment.needsTurns ? " · partir en turnos" : ""}:`, ...sentences.map((sentence) => `[${sentence.number}] ${sentence.text}`)].join("\n"),
+      )
       .join("\n\n")}`,
   ]
     .filter(Boolean)
@@ -1022,7 +1036,7 @@ export interface DictationReviewExtraction {
   unused: string[]
   /** Lo clínico que dejó fuera con su motivo, con la frase tal cual se dijo. */
   outOfPlace: Array<{ said: string; why: "familiar" | "peso_dicho" | "otro" }>
-  /** Los turnos de cada tramo (por su número) que son el tramo tal cual (`turnsSayTranscript`). */
+  /** Los turnos de cada tramo (por su número), armados con sus frases (`turnsFromStarts`). */
   turns: Array<{ number: number; turns: DictationTurn[] }>
   /** Los tramos cuyos turnos no eran el tramo tal cual: no se usan. */
   turnsRejected: number[]
@@ -1034,7 +1048,8 @@ export interface DictationReviewExtraction {
  * Lee la respuesta del repaso. Lo que propone se lee como una pausa (`readDictation`), con toda la
  * conversación para comprobar cada frase, pero sin correcciones ni «quita»: las órdenes de la
  * conversación ya se aplicaron en su pausa y aplicarlas otra vez quitaría lo nuevo o lo cambiaría.
- * Los turnos valen solo si son el tramo tal cual, sin una palabra cambiada, y quien habló, de la lista.
+ * De los turnos solo llega dónde empieza cada uno y quién habló, de la lista: el texto sale de las
+ * frases del tramo, así que nunca es un texto que nadie dijo (ni se paga copiarlo).
  */
 export function readDictationReview(
   args: unknown,
@@ -1047,23 +1062,22 @@ export function readDictationReview(
   const { correcciones: _corrections, quitar: _removals, turnos, sin_lugar: outside, ...rest } = args
   const read = readDictation(rest, heard, 0, parts, forms)
   if (!read) return null
-  const turns: DictationReviewExtraction["turns"] = []
-  const turnsRejected: number[] = []
-  for (const entry of Array.isArray(turnos) ? turnos : []) {
-    if (!isRecord(entry)) continue
-    const segment = segments.find((item) => item.number === entry["tramo"])
-    if (!segment?.needsTurns || turns.some((item) => item.number === segment.number)) continue
-    const list: unknown[] = Array.isArray(entry["turnos"]) ? entry["turnos"] : []
-    const parsed = list.flatMap((turn): DictationTurn[] => {
-      if (!isRecord(turn) || typeof turn["texto"] !== "string" || !SPEAKERS.has(String(turn["quien"]))) return []
-      const link = turn["vinculo"]
-      const vinculo = turn["quien"] === "acompanante" && typeof link === "string" && link.trim() ? link.trim().slice(0, 80) : undefined
-      return [{ quien: turn["quien"] as DictationTurn["quien"], ...(vinculo ? { vinculo } : {}), texto: turn["texto"] }]
-    })
-    // Uno que no se pudo leer, o turnos que no son el tramo tal cual, dejan el tramo sin turnos.
-    if (parsed.length === list.length && turnsSayTranscript(parsed, segment.transcript)) turns.push({ number: segment.number, turns: parsed })
-    else turnsRejected.push(segment.number)
-  }
+  // Solo dónde empieza cada turno y quién: el texto lo ponen las frases del tramo (`turnsFromStarts`).
+  const starts = (Array.isArray(turnos) ? turnos : []).flatMap((entry): DictationTurnStart[] => {
+    if (!isRecord(entry) || typeof entry["desde"] !== "number" || !SPEAKERS.has(String(entry["quien"]))) return []
+    const link = entry["vinculo"]
+    return [{ desde: entry["desde"], quien: entry["quien"] as DictationTurnStart["quien"], ...(typeof link === "string" && link.trim() ? { vinculo: link } : {}) }]
+  })
+  const built = turnsFromStarts(segments, starts)
+  const assembled = segments.flatMap((segment, index) => {
+    const list = built[index]
+    return list ? [{ number: segment.number, turns: list }] : []
+  })
+  // Armados con las frases del tramo, son el tramo tal cual; si alguno no lo fuera, no se usa.
+  const turnsRejected = assembled
+    .filter((item) => !turnsSayTranscript(item.turns, segments.find((segment) => segment.number === item.number)?.transcript ?? ""))
+    .map((item) => item.number)
+  const turns = assembled.filter((item) => !turnsRejected.includes(item.number))
   const outOfPlace: DictationReviewExtraction["outOfPlace"] = []
   for (const item of Array.isArray(outside) ? outside : []) {
     if (!isRecord(item)) continue

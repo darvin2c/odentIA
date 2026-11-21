@@ -30,54 +30,40 @@ const PARTS = DENTAL_DICTATION_PROFILE.parts
 const read = (args: unknown) => readDictationReview(args, SEGMENTS, PARTS)
 
 describe("los turnos del repaso", () => {
-  it("valen si juntos son el tramo tal cual, con quién habló de la lista", () => {
+  // Las frases, numeradas seguidas: [1] ¿Tiene alguna enfermedad? [2] Tiene asma, usa salbutamol.
+  // [3] Mi papá es diabético. [4] Debe pesar veinticuatro. [5] Listo, te veo… (tramo 3, ya con turnos).
+  it("Clío dice solo dónde empieza cada turno y quién; el texto lo ponen las frases del tramo", () => {
     const result = read({
       turnos: [
-        {
-          tramo: 1,
-          turnos: [
-            { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
-            { quien: "acompanante", vinculo: " madre ", texto: "Tiene asma, usa salbutamol." },
-          ],
-        },
+        { desde: 1, quien: "dra" },
+        { desde: 2, quien: "acompanante", vinculo: " madre " },
       ],
     })
     expect(result?.turns).toEqual([
-      {
-        number: 1,
-        turns: [
-          { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
-          { quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." },
-        ],
-      },
+      { number: 1, turns: [{ quien: "dra", texto: "¿Tiene alguna enfermedad?" }, { quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." }] },
+      // El turno sigue en el tramo que viene hasta que empiece otro.
+      { number: 2, turns: [{ quien: "acompanante", vinculo: "madre", texto: "Mi papá es diabético. Debe pesar veinticuatro." }] },
     ])
     expect(result?.turnsRejected).toEqual([])
   })
 
-  it("no valen si cambian una palabra, saltan algo o traen a alguien que no es de la lista", () => {
+  it("lo de antes del primer turno no se sabe de quién es; quien no es de la lista o una frase que no existe no cuentan", () => {
     const result = read({
       turnos: [
-        // «24» por «veinticuatro»: no es lo que se dijo.
-        { tramo: 2, turnos: [{ quien: "acompanante", texto: "Mi papá es diabético. Debe pesar 24." }] },
-        // Le falta la respuesta.
-        { tramo: 1, turnos: [{ quien: "dra", texto: "¿Tiene alguna enfermedad?" }] },
+        { desde: 2, quien: "paciente", vinculo: "madre" },
+        { desde: 3, quien: "asistente" },
+        { desde: 4, quien: "dra" },
+        { desde: 5, quien: "dra" },
+        { desde: 99, quien: "paciente" },
+        { desde: "tres", quien: "dra" },
       ],
     })
-    expect(result?.turns).toEqual([])
-    expect(result?.turnsRejected).toEqual([2, 1])
-    const stranger = read({ turnos: [{ tramo: 1, turnos: [{ quien: "asistente", texto: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol." }] }] })
-    expect(stranger?.turnsRejected).toEqual([1])
-  })
-
-  it("el vínculo es solo de quien acompaña; el tramo que ya tiene turnos o que no existe no se toca", () => {
-    const result = read({
-      turnos: [
-        { tramo: 1, turnos: [{ quien: "paciente", vinculo: "madre", texto: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol." }] },
-        { tramo: 3, turnos: [{ quien: "dra", texto: "Listo, te veo la próxima semana para la otra resina." }] },
-        { tramo: 9, turnos: [{ quien: "dra", texto: "Algo" }] },
-      ],
-    })
-    expect(result?.turns).toEqual([{ number: 1, turns: [{ quien: "paciente", texto: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol." }] }])
+    expect(result?.turns).toEqual([
+      { number: 1, turns: [{ quien: "no_se_sabe", texto: "¿Tiene alguna enfermedad?" }, { quien: "paciente", texto: "Tiene asma, usa salbutamol." }] },
+      { number: 2, turns: [{ quien: "paciente", texto: "Mi papá es diabético." }, { quien: "dra", texto: "Debe pesar veinticuatro." }] },
+    ])
+    // Sin ningún turno, ningún tramo queda partido: otro repaso lo vuelve a pedir.
+    expect(read({ turnos: [] })?.turns).toEqual([])
   })
 })
 
@@ -136,8 +122,8 @@ describe("lo que lee Clío en el repaso", () => {
     expect(blocks[0]?.text.endsWith(DICTATION_REVIEW_RULES)).toBe(true)
     const text = String(human?.content)
     expect(text).toContain("descartada: no la vuelvas a proponer")
-    expect(text).toContain("Tramo 1 (10:00 a. m.) · partir en turnos")
-    expect(text).toContain("Tramo 3 (10:06 a. m.):")
+    expect(text).toContain(["Tramo 1 (10:00 a. m.) · partir en turnos:", "[1] ¿Tiene alguna enfermedad?", "[2] Tiene asma, usa salbutamol."].join("\n"))
+    expect(text).toContain(["Tramo 3 (10:06 a. m.):", "[5] Listo, te veo la próxima semana para la otra resina."].join("\n"))
     expect(text).not.toContain("Lo dicho antes del tramo 1")
     expect(String(dictationReviewMessages({ ...ASK, earlierLeftOut: true }, DENTAL_DICTATION_PROFILE, false)[1]?.content)).toContain("Lo dicho antes del tramo 1 no se incluye")
     // Cada mensaje tal como llega al proveedor, con las instrucciones de siempre abreviadas.

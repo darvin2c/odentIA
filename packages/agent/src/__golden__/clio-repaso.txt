@@ -6,8 +6,8 @@ Repaso al terminar. Esta vez no llega una pausa: llega toda la conversación de 
 - La consulta y la salud pendientes llegan con lo que ya dicen: en `nota` y en `salud` va solo lo que les falta, y el sistema lo suma.
 - Cuándo vuelve: «te veo la próxima semana para la otra resina» o «nos vemos en quince días para ver cómo cicatriza» dicen cuándo vuelve y para qué sin pedir reservar: es un control en `controles`, con la fecha contada desde hoy y, en el título, para qué vuelve («Control: la otra resina»). Si pide reservar la cita, es una cita.
 - Con fichas abiertas, responde las preguntas que la conversación responde y siguen sin respuesta, cada una con su frase.
-- En `turnos` va cada tramo marcado «partir en turnos», con su número: quién habló y lo que dijo, en orden. `quien`: `dra` (quien atiende), `paciente`, `acompanante` (con `vinculo` si se dijo o se nota: «madre») o `no_se_sabe`. Quien pregunta, examina o indica es quien atiende; quien cuenta lo que siente, el paciente; quien habla del paciente («le duele», «mi hija no duerme»), quien lo acompaña. Si no queda claro, `no_se_sabe`: no adivines.
-- El `texto` de cada turno se copia tal cual del tramo, sin corregir, completar, resumir ni saltar nada, ni una palabra ni un signo: juntos y en orden son el tramo entero. Si no puedes partirlo así, deja ese tramo fuera de `turnos`.
+- La conversación llega en frases numeradas («[12] ¿Desde cuándo?»). En `turnos` va, en los tramos marcados «partir en turnos», cada vez que empieza a hablar otra persona: `desde`, el número de la frase donde empieza, y quién es. El turno sigue hasta donde empieza el siguiente, también en el tramo que viene; no copies el texto. La primera frase de esos tramos lleva siempre su turno.
+- `quien`: `dra` (quien atiende), `paciente`, `acompanante` (con `vinculo` si se dijo o se nota: «madre») o `no_se_sabe`. Quien pregunta, examina o indica es quien atiende; quien cuenta lo que siente, el paciente; quien habla del paciente («le duele», «mi hija no duerme»), quien lo acompaña. Si no queda claro, `no_se_sabe`: no adivines. Si en una frase hablan dos, va con quien la empieza.
 - En `sin_lugar` va lo clínico que se dijo y no tiene dónde ir, con su frase en `dicho` y su motivo: lo de la salud de un familiar («mi papá es diabético») con `familiar`; un peso o una talla que alguien calcula o recuerda («debe pesar 24») con `peso_dicho`; lo demás, con `otro`. La charla, lo administrativo y lo que ya quedó no van.
 ⟦corte de caché⟧
 ⟦otro mensaje⟧
@@ -18,12 +18,14 @@ Lo que ya quedó de esta conversación (no lo registres otra vez):
 - Diagnóstico: K02.1 Caries de la dentina, pieza 36 · ya confirmada
 - Controles: Control en 6 meses · descartada: no la vuelvas a proponer
 
-La conversación, tramo por tramo:
+La conversación, tramo por tramo y en frases numeradas:
 Tramo 1 (10:00 a. m.) · partir en turnos:
-«¿Tiene alguna enfermedad? Tiene asma, usa salbutamol.»
+[1] ¿Tiene alguna enfermedad?
+[2] Tiene asma, usa salbutamol.
 
 Tramo 2 (10:03 a. m.) · partir en turnos:
-«Mi papá es diabético. Debe pesar veinticuatro.»
+[3] Mi papá es diabético.
+[4] Debe pesar veinticuatro.
 
 Tramo 3 (10:06 a. m.):
-«Listo, te veo la próxima semana para la otra resina.»
+[5] Listo, te veo la próxima semana para la otra resina.
