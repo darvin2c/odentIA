@@ -14,6 +14,7 @@ import {
   type DictationTurn,
   formAnswerWords,
   groundHeard,
+  groundWords,
   heardVocabularyOf,
   operationAgentSchema,
   pauseBridge,
@@ -545,9 +546,12 @@ export function readDictation(
   const quote = (item: Record<string, unknown>, kind?: DictationDraft["kind"]) => {
     const said = typeof item["dicho"] === "string" ? item["dicho"] : undefined
     const grounded = groundSource(said, transcript)
+    if (grounded || !said) return grounded
     const question = kind === "ficha" ? forms.find((one) => one.number === item["question"]) : undefined
-    if (grounded || !question || !said) return grounded
-    return groundHeard(said.replace(QUOTES, ""), transcript, heardVocabularyOf(question))
+    // La voz de Chrome escribe sin tildes ni puntuación y Clío cita con ellas: la frase se busca también
+    // palabra por palabra y por cómo suena (`groundWords`), como la comprueba el servidor (QA del 21 nov:
+    // el losartán y el asma dichos se perdían por una tilde o una coma).
+    return (question ? groundHeard(said.replace(QUOTES, ""), transcript, heardVocabularyOf(question)) : "") || groundWords(said, transcript)
   }
   /** Algo que no se pudo usar: se cuenta y, si se sabe qué frase lo pidió, se guarda para mostrarla. */
   const skip = (item: unknown) => {

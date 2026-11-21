@@ -665,6 +665,54 @@ describe("lo de salud dicho en la conversación", () => {
     ])
   })
 
+  it("la frase se encuentra aunque la voz de Chrome la escribió sin tildes ni puntuación (QA del 21 nov, C1 y C4)", () => {
+    // Antes se perdía: «losartán» o «Tiene asma, usa salbutamol.» no estaban tal cual en lo dictado.
+    const rosa = readDictation(
+      {
+        salud: {
+          declarante: "paciente",
+          medications: { state: "recorded", items: [{ name: "losartán" }] },
+          dicho: "Sí, tomo losartán para la presión.",
+        },
+      },
+      "toma alguna medicina si tomo losartan para la presion y nada mas",
+      0,
+    )
+    expect(rosa?.omitted).toBe(0)
+    expect(rosa?.drafts.map((draft) => draft.sourceText)).toEqual(["si tomo losartan para la presion"])
+    const mateo = readDictation(
+      {
+        salud: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+          dicho: "Tiene asma, usa salbutamol.",
+        },
+      },
+      "tiene asma usa salbutamol alergico a algo que yo sepa no",
+      0,
+    )
+    expect(mateo?.omitted).toBe(0)
+    expect(mateo?.drafts.map((draft) => draft.sourceText)).toEqual(["tiene asma usa salbutamol"])
+  })
+
+  it("los pedazos dichos de una cita se encuentran como una sola frase seguida", () => {
+    const read = readDictation(
+      {
+        salud: {
+          declarante: "paciente",
+          medications: { state: "recorded", items: [{ name: "losartán" }] },
+          anticoagulants: { state: "recorded", detail: "apixabán" },
+          dicho: "Tomo losartán, ahora es apixabán.",
+        },
+      },
+      "si tomo losartan para la presion y tomo warfarina no perdon ahora es apixaban",
+      0,
+    )
+    expect(read?.drafts.map((draft) => draft.sourceText)).toEqual(["tomo losartan para la presion y tomo warfarina no perdon ahora es apixaban"])
+  })
+
   it("sin su frase dicha no se propone: va a lo que no usé (A5)", () => {
     // Antes entraba igual, con la frase vacía: «dijo apixabán, sin confirmar» sin que nadie lo dijera.
     const read = readDictation(
