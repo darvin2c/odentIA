@@ -245,6 +245,85 @@ describe("«Lo revisé con…» de lo que dijo de su salud", () => {
     expect(data.payload["declarante"]).toBe("acompanante")
     expect(data.health.declarations[0]).toMatchObject({ via: "consulta", by: { kind: "representative", relation: "madre" } })
   })
+
+  /**
+   * «Corregir algo» (mesa del 20 nov 2026, P5): lo que se corrigió en Antecedentes sale de la
+   * propuesta con un PATCH de esos grupos en nulo, y «Lo revisé con…» ya no lo vuelve a sumar.
+   * La pantalla la lee con lo de la entrevista puesto con sus claves.
+   */
+  it("«Corregir algo»: los grupos en nulo salen de la propuesta, lo demás queda y se confirma sin ellos", async () => {
+    const app = buildApp("owner")
+    const { patientId, base } = await attention(app)
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, {
+        drafts: [
+          {
+            kind: "salud",
+            payload: {
+              declarante: "paciente",
+              medications: { state: "recorded", items: [{ name: "metformina" }] },
+              anticoagulants: { state: "recorded", detail: "apixabán" },
+              dental: { ansiedadDental: "alta" },
+            },
+            sourceText: "tomo metformina y apixabán, y le tengo miedo al dentista",
+          },
+        ],
+      }),
+    )
+    const said = await app.request(base, json({ transcript: "Tomo metformina y apixabán, y le tengo miedo al dentista.", segmentId: crypto.randomUUID() }))
+    expect(said.status).toBe(201)
+    const listed = (await (await app.request(base)).json()) as { data: { suggestions: Array<{ id: string; kind: string; interview?: Record<string, unknown> }> } }
+    const health = listed.data.suggestions.find((item) => item.kind === "salud")
+    // Lo de la entrevista, ya con las claves de la entrevista de odentIA.
+    expect(health?.interview).toEqual({ antecedentesOdontologicos: { ansiedadDental: "alta" } })
+    const patch = (body: unknown) =>
+      app.request(`${base}/${health!.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    const res = await patch({ medications: null, anticoagulants: null })
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: { status: string; payload: Record<string, unknown>; summary: string } }
+    expect(data.status).toBe("lista")
+    expect(data.payload).toEqual({ declarante: "paciente", dental: { ansiedadDental: "alta" } })
+    expect(data.summary).not.toContain("metformina")
+    // Sin nada de su salud, la propuesta no se guarda vacía: la pantalla la descarta.
+    expect((await patch({ dental: null })).status).toBe(400)
+    const confirmed = await app.request(`${base}/${health!.id}/confirm-health`, json({}))
+    expect(confirmed.status).toBe(200)
+    const after = (await (await app.request(`/patients/${patientId}/health`)).json()) as { data: { medications: Array<{ name: string }> } }
+    expect(after.data.medications.map((row) => row.name)).toEqual([])
+  })
+})
+
+describe("lo resaltado de lo que se dijo", () => {
+  it("trae las frases de lo pendiente y de lo confirmado, no de lo descartado; sigue al recargar", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, {
+        drafts: [
+          { kind: "nota", payload: { reason: "Dolor con el frío" }, sourceText: "me duele con el frío" },
+          { kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixabán" },
+          { kind: "control", payload: { title: "Control", dueInDays: 30 }, sourceText: "control en un mes" },
+        ],
+      }),
+    )
+    const said = await app.request(base, json({ transcript: "Me duele con el frío, tomo apixabán, control en un mes.", segmentId: crypto.randomUUID() }))
+    expect(said.status).toBe(201)
+    const items = ((await said.json()) as { data: { suggestions: Array<{ id: string; kind: string }> } }).data.suggestions
+    const note = items.find((item) => item.kind === "nota")!
+    const control = items.find((item) => item.kind === "control")
+    expect((await app.request(`${base}/${note.id}/confirm`, json({}))).status).toBe(200)
+    if (control) expect((await app.request(`${base}/${control.id}/discard`, json({}))).status).toBe(200)
+    const res = await app.request(`${base}/said`)
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: { used: Array<{ kind: string; said: string }> } }
+    expect(data.used).toEqual(
+      expect.arrayContaining([
+        { kind: "nota", said: "me duele con el frío" },
+        { kind: "salud", said: "tomo apixabán" },
+      ]),
+    )
+    expect(data.used.some((item) => item.said === "control en un mes")).toBe(false)
+  })
 })
 
 /**

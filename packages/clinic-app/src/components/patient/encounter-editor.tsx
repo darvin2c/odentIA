@@ -132,7 +132,7 @@ import {
 } from "./dictation-session"
 import { DictationSignList, markedAtSign, setFromDefault, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
-import { DictationSaid } from "./dictation-said"
+import { DictationSaid, EncounterSaidLink } from "./dictation-said"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
@@ -2789,6 +2789,9 @@ export function EncounterEditor({
           </Button>
         </div>
       ) : null}
+
+      {/* Quien la lee sin llevarla ve lo que se dijo, sin cambiar nada. */}
+      {!attending ? <EncounterSaidLink patientId={patientId} encounterId={encounterId} /> : null}
 
       {childCount > 0 && (
         <p role="status" className="text-sm text-muted-foreground">

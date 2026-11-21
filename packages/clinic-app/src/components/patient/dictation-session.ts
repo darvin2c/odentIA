@@ -23,6 +23,19 @@ export interface DictationSuggestion {
   joined?: Record<string, string>
   /** Ya confirmada, y se pidió quitarla en voz alta: espera «Quitar del plan» o «Dejarla». */
   undoRequest?: { said: string } | null
+  /** Lo de su salud: lo de la entrevista con sus claves, para dejarlo puesto en Antecedentes. */
+  interview?: Record<string, unknown>
+}
+
+/** Una frase de lo que se dijo que está en una sugerencia (pendiente o confirmada), con su clase. */
+export interface SaidSource {
+  kind: string
+  said: string
+}
+
+/** Lo que devuelve `GET …/dictation/said`. */
+export interface SaidReply {
+  data: { segments: DictationSaidSegment[]; used?: SaidSource[] }
 }
 
 export const NOTE_FIELD_LABEL = {
@@ -332,11 +345,12 @@ export function useDictationSession({
   const saidKey = useMemo(() => dictationSaidKey(patientId, encounterId), [patientId, encounterId])
   const saidQuery = useQuery({
     queryKey: saidKey,
-    queryFn: () => apiFetch<{ data: { segments: DictationSaidSegment[] } }>(`${base}/said`),
+    queryFn: () => apiFetch<SaidReply>(`${base}/said`),
     retry: false,
     enabled,
   })
   const saved = useMemo(() => saidQuery.data?.data.segments ?? [], [saidQuery.data])
+  const saidUsed = useMemo(() => saidQuery.data?.data.used ?? [], [saidQuery.data])
   // Lo que esta pestaña ya mandó y el servidor aún no devuelve (se está ordenando): se ve igual.
   const [sentHere, setSentHere] = useState<DictationSaidSegment[]>([])
   const said = useMemo(() => {
@@ -925,6 +939,8 @@ export function useDictationSession({
     requestReview,
     /** Lo que se dijo en la atención, tramo por tramo, del servidor: sigue igual al recargar. */
     said,
+    /** Las frases de lo que se dijo que están en una sugerencia, pendiente o confirmada (del servidor). */
+    saidUsed,
     /** Lo que se está oyendo y todavía no se mandó a ordenar: «Lo que se dijo» lo muestra al final. */
     unsent: transcript.slice(sent.current).trim(),
     saidLoading: enabled && saidQuery.isPending,

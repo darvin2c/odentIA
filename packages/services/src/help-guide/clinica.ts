@@ -259,7 +259,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-lo-que-se-dijo",
         q: "¿Dónde veo lo que se dijo en la consulta?",
-        a: "En «Lo que se dijo», en la barra de Clío o junto a «Dictar». Queda guardado con la atención: sigue igual si recargas o vuelves otro día. «Conversación» muestra quién habló en cada turno (se arma al terminar de dictar; toca el nombre para cambiarlo) y «Tal cual se oyó», cada pausa con su hora, sin editar. Lo resaltado en azul está en una sugerencia de la consulta y en ámbar, en lo de su salud; la charla queda sin resaltar. Arriba, «No lo usé» lista lo que Clío no supo dónde poner, con el motivo y «Intentar otra vez». No es parte de la historia: no se firma ni va en la copia de su historia.",
+        a: "En «Lo que se dijo», en la barra de Clío o junto a «Dictar». Queda guardado con la atención: sigue igual si recargas o vuelves otro día. «Conversación» muestra quién habló en cada turno (se arma al terminar de dictar; toca el nombre para cambiarlo) y «Tal cual se oyó», cada pausa con su hora, sin editar. Lo resaltado en azul está en una sugerencia de la consulta y en ámbar, en lo de su salud; la charla queda sin resaltar. Arriba, «No lo usé» lista lo que Clío no supo dónde poner, con el motivo y «Intentar otra vez». En una atención ya firmada se abre igual, solo para leer. No es parte de la historia: no se firma ni va en la copia de su historia.",
         forms: ["donde veo lo que se dijo", "donde quedo lo que dicte", "se perdio lo dictado al recargar", "lo que se dijo", "que es no lo use", "quien hablo en la consulta"],
         area: "clinica",
         needs: "clinical.write",

@@ -88,6 +88,7 @@ import {
   healthFormOptions,
   MedicationRows,
   ReviewStateField,
+  type SaidForForm,
   withSaidHealth,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
@@ -498,7 +499,7 @@ export function AntecedentesTab({
   /** «Revisar» de Pendientes: se abre con el formulario listo, sin otro clic. */
   startEditing?: boolean
   /** «Corregir algo» de lo que Clío oyó en la consulta: el formulario abre con eso puesto. */
-  said?: Record<string, unknown>
+  said?: SaidForForm
   /** Se guardó lo de `said`: la propuesta de Clío ya no lo suma otra vez. */
   onSaved?: () => void
 }): React.JSX.Element {
@@ -651,6 +652,9 @@ export function AntecedentesTab({
       form.setFieldValue("conditions", next.conditions)
       form.setFieldValue("medications", next.medications)
       form.setFieldValue("reviewStatus", next.reviewStatus)
+      form.setFieldValue("interview", next.interview)
+      const weeks = pregnancyRecordOf(next.interview)?.semanas
+      if (typeof weeks === "number") form.setFieldValue("pregnancyWeeks", String(weeks))
       prefilled.current = true
     }
   }, [startEditing, canWrite, health])

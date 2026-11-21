@@ -20,6 +20,7 @@ import {
   normalizeDrugText,
   quantityWords,
   prescribingAlerts,
+  registrationAnswersSchema,
   type PrescribingSituation,
   suggestedQuantity,
 } from "@odentia/clinical"
@@ -89,6 +90,7 @@ import {
 } from "./dictation-forms.js"
 import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
 import type { ProductCatalog } from "./product-catalog.js"
+import { clinicToday } from "./inventory-stock.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
 import { patientAge } from "./responsibilities.js"
 import { everydayServiceVariants } from "./search-text.js"
@@ -3049,6 +3051,18 @@ export async function confirmDictationHealth(
   // Con lo que toma ya en Antecedentes, las recetas que esperaban avisan con eso.
   await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
   return { ...toItem(updated, await findOrgLocale(tx, orgId), dictation), health: after }
+}
+
+/**
+ * Lo que oyó Clío de su salud, con las claves de la entrevista de su producto (la anestesia, el
+ * corazón, el embarazo, lo de un niño; en latidIA, sus hábitos): la misma regla que la declaración
+ * al confirmarla (`ProductInterview.declared`). «Corregir algo» deja eso puesto en Antecedentes.
+ * Vacío si no dijo nada de la entrevista o si no se puede leer.
+ */
+export async function dictatedHealthInterview(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const parsed = registrationAnswersSchema.shape.health.unwrap().safeParse(Object.fromEntries(Object.entries(splitMeta(payload).data).filter(([key]) => !["declarante", "vinculo"].includes(key))))
+  if (!parsed.success) return {}
+  return (await productHooks(tx, orgId)).interview.declared(parsed.data, await clinicToday(tx, orgId))
 }
 
 /** Lo que dijo de su salud en una atención y nadie confirmó todavía, dato por dato. */

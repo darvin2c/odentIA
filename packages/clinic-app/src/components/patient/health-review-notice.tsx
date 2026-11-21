@@ -431,7 +431,12 @@ export function HealthReviewNotice({
   // «Corregir algo»: Antecedentes con lo de Clío puesto; al guardar, eso ya no se suma otra vez.
   const correctHeard = () => {
     if (!openWide || !heardItem) return
-    openWide({ id: "antecedentes", review: true, said: heardItem.payload, onSaved: () => settleHeard(SAID_HEALTH_IN_FORM) })
+    openWide({
+      id: "antecedentes",
+      review: true,
+      said: { health: heardItem.payload, ...(heardItem.interview ? { interview: heardItem.interview } : {}) },
+      onSaved: () => settleHeard(SAID_HEALTH_IN_FORM),
+    })
   }
   // Lo que se oyó y no tiene su fila en el aviso (el anticoagulante, la anestesia, el embarazo).
   const mergedGroups = new Set<string>([

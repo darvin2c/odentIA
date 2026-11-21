@@ -2,12 +2,13 @@ import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@odentia/ui"
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@odentia/ui/components/dropdown-menu"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
-import { useMutation } from "@tanstack/react-query"
+import { DetailDrawer } from "@odentia/ui-patterns"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { useMemberName } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { upperFirst } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
@@ -19,7 +20,9 @@ import {
   type DictationSpeaker,
   type DictationTurn,
   dictationErrorText,
+  dictationSaidKey,
   markSaid,
+  type SaidReply,
   type SaidMark,
   type UnusedSaid,
   unusedOfSaid,
@@ -30,6 +33,7 @@ import { useOpenWide } from "./wide-section"
 export type SaidSession = Pick<
   DictationSession,
   | "said"
+  | "saidUsed"
   | "unsent"
   | "saidLoading"
   | "saidError"
@@ -109,7 +113,14 @@ const MARK_CLASS: Record<SaidMark, string> = {
  * con su motivo. Lo resaltado está en una propuesta de la consulta o de su salud; la charla, no.
  * No es historia clínica: no se firma ni va en la copia.
  */
-export function DictationSaid({ session }: { session: SaidSession }) {
+export function DictationSaid({
+  session,
+  readOnly = false,
+}: {
+  session: SaidSession
+  /** La atención firmada, anulada o de otra persona: se lee, sin cambiar quién habló ni volver a intentar. */
+  readOnly?: boolean
+}) {
   const memberName = useMemberName()
   const segments = session.said
   const talked = segments.some((segment) => segment.turns !== null)
@@ -123,9 +134,11 @@ export function DictationSaid({ session }: { session: SaidSession }) {
   const hintId = useId()
   // Lo que dio una propuesta: lo de su salud (y sus alergias) en ámbar, lo demás de la consulta en azul.
   const healthKinds = new Set(["salud", "alergia"])
+  // Del servidor (pendientes y confirmadas, sigue al recargar y ya firmada) y lo de esta pestaña.
+  const used = [...session.saidUsed, ...session.suggestions.map((item) => ({ kind: item.kind, said: item.sourceText }))]
   const sources = {
-    salud: session.suggestions.filter((item) => healthKinds.has(item.kind)).map((item) => item.sourceText),
-    consulta: [...session.suggestions.filter((item) => !healthKinds.has(item.kind)).map((item) => item.sourceText), ...session.highlights],
+    salud: used.filter((item) => healthKinds.has(item.kind)).map((item) => item.said),
+    consulta: [...used.filter((item) => !healthKinds.has(item.kind)).map((item) => item.said), ...session.highlights],
   }
   const turn = useMutation({
     retry: false,
@@ -142,7 +155,7 @@ export function DictationSaid({ session }: { session: SaidSession }) {
   if (session.saidError) return <ErrorState message="No pude cargar lo que se dijo" onRetry={() => void session.refreshSaid()} />
   return (
     <div className="flex flex-col gap-4 text-sm">
-      <UnusedSaidList session={session} />
+      <UnusedSaidList session={session} readOnly={readOnly} />
       {segments.length === 0 ? (
         session.unsent ? null : <p className="text-muted-foreground">Todavía no se dijo nada en esta atención.</p>
       ) : (
@@ -173,6 +186,7 @@ export function DictationSaid({ session }: { session: SaidSession }) {
                     // biome-ignore lint/suspicious/noArrayIndexKey: el turno es su posición en el tramo
                     <p key={index} className="leading-relaxed [overflow-wrap:anywhere]">
                       <SpeakerChoice
+                        readOnly={readOnly}
                         turn={item}
                         professional={professional(segment)}
                         busy={turn.isPending}
@@ -190,7 +204,7 @@ export function DictationSaid({ session }: { session: SaidSession }) {
                 </p>
               ),
             )}
-            <p className="text-xs text-muted-foreground">Toca el nombre de un turno para cambiar quién habló.</p>
+            {readOnly ? null : <p className="text-xs text-muted-foreground">Toca el nombre de un turno para cambiar quién habló.</p>}
           </TabsContent>
           <TabsContent value="tal-cual">
             <ol className="m-0 flex list-none flex-col gap-3 p-0">
@@ -232,6 +246,7 @@ export function DictationSaid({ session }: { session: SaidSession }) {
           Escuchando…{session.interim ? ` «${session.interim}»` : ""}
         </p>
       ) : null}
+      {readOnly ? null : (
       <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
         <p className="font-semibold">Qué puedo decir</p>
         <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
@@ -251,6 +266,7 @@ export function DictationSaid({ session }: { session: SaidSession }) {
           Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo confirmas ahí.
         </p>
       </div>
+      )}
     </div>
   )
 }
@@ -261,13 +277,16 @@ function SpeakerChoice({
   professional,
   busy,
   onChoose,
+  readOnly,
 }: {
   turn: DictationTurn
   professional: string
   busy: boolean
   onChoose: (quien: DictationSpeaker) => void
+  readOnly: boolean
 }) {
   const name = speakerWords(turn, professional)
+  if (readOnly) return <span className="font-semibold">{name}:</span>
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -303,7 +322,7 @@ function SpeakerChoice({
  * queda al recargar. Lo de una ficha lleva «Usar en…»; lo que parece de su salud, «Llevar a su
  * salud» (abre sus antecedentes); lo que no supo dónde va, «Intentar otra vez» (otra pausa).
  */
-function UnusedSaidList({ session }: { session: SaidSession }) {
+function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly: boolean }) {
   const clio = useClioFormProposals()
   const openWide = useOpenWide()
   const titleId = useId()
@@ -330,7 +349,7 @@ function UnusedSaidList({ session }: { session: SaidSession }) {
                   · {hourOf(item.saidAt)} · {unusedWhy(item)}
                 </span>
               </p>
-              {phrase ? (
+              {phrase && !readOnly ? (
                 <div className="flex flex-wrap gap-2">
                   {targets.map((target) => (
                     <Button
@@ -376,7 +395,64 @@ function UnusedSaidList({ session }: { session: SaidSession }) {
           )
         })}
       </ul>
-      <p className="text-xs text-muted-foreground">O anótalo a mano. La charla no se lista: queda sin resaltar en lo que se dijo.</p>
+      <p className="text-xs text-muted-foreground">
+        {readOnly ? "" : "O anótalo a mano. "}La charla no se lista: queda sin resaltar en lo que se dijo.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * «Lo que se dijo» de una atención firmada, anulada o que lleva otra persona: solo para leer, con el
+ * mismo permiso que ver la atención (clínico). No se cambia quién habló ni se vuelve a intentar nada.
+ * Sin nada dicho, no se muestra.
+ */
+export function EncounterSaidLink({ patientId, encounterId }: { patientId: string; encounterId: string }) {
+  const canRead = usePermission("clinical.read")
+  const [open, setOpen] = useState(false)
+  const base = `/api/patients/${patientId}/encounters/${encounterId}/dictation`
+  const query = useQuery({
+    queryKey: dictationSaidKey(patientId, encounterId),
+    queryFn: () => apiFetch<SaidReply>(`${base}/said`),
+    enabled: canRead,
+    retry: false,
+  })
+  const segments = query.data?.data.segments ?? []
+  if (!canRead || segments.length === 0) return null
+  const session: SaidSession = {
+    said: segments,
+    saidUsed: query.data?.data.used ?? [],
+    unsent: "",
+    saidLoading: false,
+    saidError: query.isError,
+    refreshSaid: async () => {
+      await query.refetch()
+    },
+    suggestions: [],
+    highlights: [],
+    mode: "off",
+    interim: "",
+    base,
+    submitTyped: () => {},
+    blocked: null,
+    organizing: false,
+  }
+  return (
+    <section aria-label="Lo que se dijo" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-4 text-sm">
+      <p className="min-w-0 text-muted-foreground">
+        {segments.length === 1 ? "1 pausa" : `${segments.length} pausas`} de lo que se dijo. No es parte de la historia firmada.
+      </p>
+      <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => setOpen(true)}>
+        Lo que se dijo
+      </Button>
+      <DetailDrawer
+        open={open}
+        title="Lo que se dijo"
+        description="Guardado con la atención. Solo para leer: no es parte de la historia firmada."
+        onClose={() => setOpen(false)}
+      >
+        <DictationSaid session={session} readOnly />
+      </DetailDrawer>
     </section>
   )
 }

@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
-import { type DictationTurn, type DictationUnusedItem, encounter, encounterDictationSegment } from "@odentia/db/schema/clinical"
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm"
+import { type DictationTurn, type DictationUnusedItem, encounter, encounterDictationSegment, encounterDictationSuggestion } from "@odentia/db/schema/clinical"
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { DICTATION_CHARS, dictationSegmentSeen, requireClinicalAssistant } from "./encounter-dictation.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
 import { notFound } from "./errors.js"
@@ -151,4 +151,25 @@ export async function listDictationSaid(tx: Db, orgId: string, patientId: string
     unused: row.unused,
     turns: row.turns ?? null,
   }))
+}
+
+/**
+ * Lo que se dijo que está en una sugerencia de la atención, pendiente o ya confirmada, con su
+ * clase: la pantalla lo resalta (lo de su salud aparte) y sigue igual al recargar o ya firmada.
+ * Lo descartado no: ya no está en ninguna parte.
+ */
+export async function listDictationSaidSources(tx: Db, orgId: string, encounterId: string): Promise<Array<{ kind: string; said: string }>> {
+  const rows = await tx
+    .select({ kind: encounterDictationSuggestion.kind, said: encounterDictationSuggestion.sourceText })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar", "confirmada"]),
+        ne(encounterDictationSuggestion.sourceText, ""),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt), asc(encounterDictationSuggestion.id))
+  return rows
 }

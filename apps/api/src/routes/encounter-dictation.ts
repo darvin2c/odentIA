@@ -4,6 +4,7 @@ import {
   assertClioCanListen,
   clioListenBlock,
   confirmDictationHealth,
+  dictatedHealthInterview,
   confirmDictationSuggestion,
   countConfirmedDictation,
   DICTATION_SPEAKERS,
@@ -19,6 +20,7 @@ import {
   keepIssuedPaper,
   listConfirmedDictation,
   listDictationSaid,
+  listDictationSaidSources,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   pendingFormValues,
@@ -127,7 +129,12 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => ({
         enabled: (await getAgentConfig(tx, orgId)).clinicalAssistantEnabled && (await productDictation(tx, orgId)) !== null,
-        suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
+        // Lo de su salud lleva además lo de la entrevista con sus claves: «Corregir algo» lo deja puesto.
+        suggestions: await Promise.all(
+          (await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)).map(async (item) =>
+            item.kind === "salud" ? { ...item, interview: await dictatedHealthInterview(tx, orgId, item.payload) } : item,
+          ),
+        ),
         // Las quitadas por voz, que se pueden devolver hasta firmar.
         removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
         // Ya confirmadas que se pidió quitar en voz alta: esperan «Quitar del plan» o «Dejarla».
@@ -150,9 +157,13 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const { orgId } = orgContextOf(c)
     const at = params.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
-    return runService(c, 200, async () => ({
-      segments: await withOrgContext(deps.db, orgId, (tx) => listDictationSaid(tx, orgId, at.data.id, at.data.encounterId)),
-    }))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({
+        segments: await listDictationSaid(tx, orgId, at.data.id, at.data.encounterId),
+        // Las frases que están en una sugerencia, pendiente o confirmada: lo resaltado sigue al recargar.
+        used: await listDictationSaidSources(tx, orgId, at.data.encounterId),
+      })),
+    )
   })
 
   /**

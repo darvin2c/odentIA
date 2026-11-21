@@ -28,7 +28,8 @@ const openWide = vi.hoisted(() => vi.fn())
 vi.mock("./wide-section", () => ({ useOpenWide: () => openWide }))
 
 const { HealthReviewNotice, heardHealth } = await import("./health-review-notice")
-const { DictationSaid } = await import("./dictation-said")
+const { DictationSaid, EncounterSaidLink } = await import("./dictation-said")
+const { withSaidHealth } = await import("./patient-health-fields")
 const { saidHealthAlerts } = await import("./patient-header")
 const { confirmable } = await import("./dictation-session")
 type Session = import("./dictation-session").DictationSession
@@ -156,7 +157,7 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
     const session = sessionWith({ suggestions: [heard] })
     renderNotice(session)
     fireEvent.click(screen.getByRole("button", { name: "Corregir algo" }))
-    expect(openWide).toHaveBeenCalledWith(expect.objectContaining({ id: "antecedentes", review: true, said: heard.payload }))
+    expect(openWide).toHaveBeenCalledWith(expect.objectContaining({ id: "antecedentes", review: true, said: { health: heard.payload } }))
   })
 
   it("la alergia dictada y su «No tiene alergias» se ven dentro del aviso, en la fila «Alergias», no sueltas", () => {
@@ -218,6 +219,7 @@ const segment = (over: Partial<Segment>): Segment => ({
 function renderSaid(segments: Segment[], over: Partial<Record<keyof Session, unknown>> = {}) {
   const session = sessionWith({
     said: segments,
+    saidUsed: [],
     unsent: "",
     saidLoading: false,
     saidError: false,
@@ -309,5 +311,86 @@ describe("«Lo que se dijo», del servidor", () => {
       ["me duele con el frío.", "consulta"],
       ["tomo apixabán.", "salud"],
     ])
+  })
+})
+
+describe("«Corregir algo» deja puesto lo de la entrevista", () => {
+  it("sus medicinas, sus enfermedades y lo de su entrevista, campo por campo, sin pisar lo que no se dijo", () => {
+    const values = {
+      bloodGroup: "",
+      asaClass: "",
+      reviewStatus: { conditions: "unknown" as const, medications: "unknown" as const },
+      conditions: [],
+      medications: [],
+      familyHistory: [],
+      interview: { antecedentesOdontologicos: { bruxismo: "no" }, antecedentesPersonales: { cirugias: "apendicitis" } },
+      pregnancyWeeks: "",
+    }
+    const next = withSaidHealth(values, {
+      health: { medications: { state: "recorded", items: [{ name: "metformina", frequency: "en el almuerzo" }] }, anticoagulants: { state: "recorded", detail: "apixabán" } },
+      interview: { antecedentesOdontologicos: { ansiedadDental: "alta", problemaAnestesia: { anestesia: "si", quePaso: "desmayo" } } },
+    })
+    expect(next.medications.map((row) => [row.name, row.frequency, row.frequencyCode])).toEqual([
+      ["metformina", "en el almuerzo", "otra"],
+      ["apixabán", "", ""],
+    ])
+    expect(next.reviewStatus.medications).toBe("recorded")
+    expect(next.interview).toEqual({
+      antecedentesOdontologicos: { bruxismo: "no", ansiedadDental: "alta", problemaAnestesia: { anestesia: "si", quePaso: "desmayo" } },
+      antecedentesPersonales: { cirugias: "apendicitis" },
+    })
+  })
+})
+
+describe("«Lo que se dijo» de una atención firmada", () => {
+  it("se lee con lo resaltado del servidor, también lo confirmado; sin cambiar quién habló ni volver a intentar", async () => {
+    route.mockImplementation(async (url: string) =>
+      url === "/api/patients/p-1/encounters/e-9/dictation/said"
+        ? {
+            data: {
+              segments: [
+                segment({
+                  transcript: "me duele con el frío. tomo apixabán. y algo de la tiroides",
+                  turns: [{ quien: "paciente", texto: "me duele con el frío. tomo apixabán. y algo de la tiroides" }],
+                  unused: [{ said: "y algo de la tiroides", why: "sin_lugar" }],
+                }),
+              ],
+              used: [
+                { kind: "nota", said: "me duele con el frío." },
+                { kind: "salud", said: "tomo apixabán." },
+              ],
+            },
+          }
+        : { data: {} },
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <EncounterSaidLink patientId="p-1" encounterId="e-9" />
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Lo que se dijo" }))
+    const drawer = await screen.findByRole("dialog", { name: "Lo que se dijo" })
+    expect(within(drawer).getByText("Paciente:")).toBeTruthy()
+    expect(within(drawer).queryByRole("button", { name: /Cambiar quién habló/ })).toBeNull()
+    expect(within(drawer).queryByRole("button", { name: /Intentar otra vez/ })).toBeNull()
+    expect(within(drawer).getByRole("region", { name: "No lo usé (1)" })).toBeTruthy()
+    const marks = [...within(drawer).getByRole("tabpanel").querySelectorAll("mark")].map((mark) => [mark.textContent, mark.className.includes("warning") ? "salud" : "consulta"])
+    expect(marks).toEqual([
+      ["me duele con el frío.", "consulta"],
+      ["tomo apixabán.", "salud"],
+    ])
+  })
+
+  it("sin nada dicho no aparece", async () => {
+    route.mockResolvedValue({ data: { segments: [], used: [] } })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <EncounterSaidLink patientId="p-1" encounterId="e-9" />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(route).toHaveBeenCalled())
+    expect(screen.queryByRole("button", { name: "Lo que se dijo" })).toBeNull()
   })
 })

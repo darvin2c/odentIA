@@ -5,6 +5,7 @@ import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, u
 import { apiFetch } from "../../lib/api"
 import { type DocumentFilter, isPatientSectionId, sectionOf } from "../../lib/patient-areas"
 import type { PatientFull } from "../../lib/patients"
+import type { SaidForForm } from "./patient-health-fields"
 import { productUi } from "../../product/product-ui"
 
 const AntecedentesTab = lazy(() => import("./antecedentes-tab").then((m) => ({ default: m.AntecedentesTab })))
@@ -39,7 +40,7 @@ export interface WideTarget {
    * «Corregir algo» de lo que Clío oyó de su salud: Antecedentes abre con eso puesto (la forma de
    * su registro) y, al guardar, avisa para que la propuesta no lo vuelva a sumar.
    */
-  said?: Record<string, unknown>
+  said?: SaidForForm
   onSaved?: () => void
 }
 
