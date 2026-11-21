@@ -784,7 +784,15 @@ export function EncounterEditor({
       ? dictation.suggestions.find((candidate) => candidate.kind === "control" && marked.includes(candidate.id))
       : undefined
     const dueAt = item?.payload["dueAt"]
-    return item && typeof dueAt === "string" ? { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) } : null
+    if (item && typeof dueAt === "string") return { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) }
+    // La cita que dictó y entra con la firma también dice cuándo vuelve (QA del 21 nov, C8: el cierre
+    // decía «No indicaste cuándo vuelve» con la cita marcada).
+    const visit = marked ? dictation.suggestions.find((candidate) => candidate.kind === "cita" && marked.includes(candidate.id)) : undefined
+    const startsAt = visit?.payload["startsAt"]
+    const day = typeof startsAt === "string" ? clinicDateTimeValue(startsAt).slice(0, 10) : typeof visit?.payload["date"] === "string" ? String(visit.payload["date"]) : ""
+    if (!visit || !day) return null
+    const what = typeof visit.payload["service"] === "string" && visit.payload["service"].trim() ? visit.payload["service"].trim() : null
+    return { id: visit.id, day, appointment: true, what }
   }
   const closingForm = useClosingForm({
     // Lo dictado va en el mismo cierre: el motivo para seguir sin el consentimiento se pide igual.

@@ -104,6 +104,8 @@ export interface SimRead {
   removals: Array<{ index: number; sourceText: string }>
   omitted: number
   unused: string[]
+  /** Lo de un familiar o un peso dicho, con su frase y su motivo. */
+  outOfPlace?: Array<{ said: string; why: string }> | undefined
 }
 
 const isRecord = (value: unknown): value is Payload => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -199,6 +201,8 @@ export function applyPause(
   }
 
   for (const said of read.unused) state.unused.push({ said, why: "sin_lugar", at: input.at })
+  // Lo de un familiar o un peso dicho ya va a «No lo usé» en la pausa, como en la atención.
+  for (const item of read.outOfPlace ?? []) state.unused.push({ said: item.said, why: item.why, at: input.at })
   if (read.omitted > read.unused.length) state.unused.push({ said: "", why: "sin_lugar", at: input.at })
 
   const pendingNow = pendingOf(state)

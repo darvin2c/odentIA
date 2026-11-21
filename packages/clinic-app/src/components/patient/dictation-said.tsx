@@ -49,10 +49,12 @@ export type SaidSession = Pick<
 >
 
 /** Cómo se nombra a quien habló en un turno; quien atiende, con su nombre. */
-function speakerWords(turn: Pick<DictationTurn, "quien" | "vinculo">, professional: string): string {
+export function speakerWords(turn: Pick<DictationTurn, "quien" | "vinculo">, professional: string): string {
   if (turn.quien === "dra") return professional
   if (turn.quien === "paciente") return "Paciente"
-  if (turn.quien === "acompanante") return turn.vinculo ? `Acompañante (${turn.vinculo})` : "Acompañante"
+  // Una clave interna («no_se_sabe») no es un parentesco: nunca se muestra (QA del 21 nov).
+  const kin = turn.vinculo?.trim() ?? ""
+  if (turn.quien === "acompanante") return kin && !/^(?:dra|paciente|acompanante|no[\s_]*se[\s_]*sabe)$/iu.test(kin) ? `Acompañante (${kin})` : "Acompañante"
   return "No se sabe"
 }
 

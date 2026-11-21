@@ -28,7 +28,7 @@ const openWide = vi.hoisted(() => vi.fn())
 vi.mock("./wide-section", () => ({ useOpenWide: () => openWide }))
 
 const { HealthReviewNotice, heardHealth } = await import("./health-review-notice")
-const { DictationSaid, EncounterSaidLink } = await import("./dictation-said")
+const { DictationSaid, EncounterSaidLink, speakerWords } = await import("./dictation-said")
 const { withSaidHealth } = await import("./patient-health-fields")
 const { saidHealthAlerts } = await import("./patient-header")
 const { confirmable } = await import("./dictation-session")
@@ -292,6 +292,14 @@ describe("lo de otro día que dijo después distinto (QA del 21 nov, H3)", () =>
     expect(earlier.textContent).toContain("después, el 21 nov, dijo algo más nuevo: vale eso")
     expect(within(earlier).queryByRole("button", { name: "Lo revisé con Rosa" })).toBeNull()
     expect(within(earlier).getByRole("button", { name: "No lo registro" })).toBeTruthy()
+  })
+})
+
+describe("quién habló, sin claves internas (QA del 21 nov, C10)", () => {
+  it("«Acompañante (no_se_sabe)» es «Acompañante»; un parentesco dicho sí se ve", () => {
+    expect(speakerWords({ quien: "acompanante", vinculo: "no_se_sabe" }, "Dra. Ana")).toBe("Acompañante")
+    expect(speakerWords({ quien: "acompanante", vinculo: "madre" }, "Dra. Ana")).toBe("Acompañante (madre)")
+    expect(speakerWords({ quien: "dra" }, "Dra. Ana")).toBe("Dra. Ana")
   })
 })
 

@@ -410,6 +410,22 @@ describe("las frases de un tramo", () => {
   })
 })
 
+describe("un turno que empieza a media frase (QA del 21 nov, C10)", () => {
+  it("la pregunta y su respuesta sin puntuación quedan en dos turnos, con el texto exacto; sin sus palabras, empieza en la frase", () => {
+    const segments = [{ transcript: "toma alguna medicina si tomo warfarina no perdon ahora apixaban", needsTurns: true }]
+    const [turns] = turnsFromStarts(segments, [
+      { desde: 1, quien: "dra" },
+      { desde: 1, quien: "paciente", empieza: "Si tomo warfarina" },
+    ])
+    expect(turns).toEqual([
+      { quien: "dra", texto: "toma alguna medicina" },
+      { quien: "paciente", texto: "si tomo warfarina no perdon ahora apixaban" },
+    ])
+    expect(turnsSayTranscript(turns ?? [], segments[0]!.transcript)).toBe(true)
+    expect(turnsFromStarts(segments, [{ desde: 1, quien: "paciente", empieza: "no dijo esto" }])[0]).toEqual([{ quien: "paciente", texto: segments[0]!.transcript }])
+  })
+})
+
 describe("los turnos armados desde dónde empieza cada uno", () => {
   const segments = [
     { transcript: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol.", needsTurns: true },

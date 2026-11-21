@@ -157,6 +157,10 @@ export interface DictatedControl {
   id: string
   /** Su día (`yyyy-MM-dd`) en la zona de la clínica. */
   day: string
+  /** Es la cita que dictó y entra con la firma, no un control (QA del 21 nov, C8). */
+  appointment?: boolean
+  /** Para qué vuelve, si se dijo: «la otra resina». */
+  what?: string | null
 }
 
 /**
@@ -172,7 +176,7 @@ export function fulfills(
 
 /** Lo que ya dice cuándo vuelve, sin preguntar: así no quedan dos controles. */
 type KnownReturn =
-  | { kind: "dictated"; id: string; day: string }
+  | ({ kind: "dictated" } & DictatedControl)
   | { kind: "repeats"; months: number }
   | { kind: "control"; control: ClosingNextControl }
   | { kind: "stays"; control: ClosingDueControl }
@@ -656,7 +660,9 @@ export function ClosingNextVisit({
         ) : known ? (
           <p className="text-sm">
             {known.kind === "dictated"
-              ? `Vuelve el ${controlDaySaid(known.day)}, como dictaste.`
+              ? known.appointment
+                ? `Vuelve el ${controlDaySaid(known.day)}${known.what ? ` para ${known.what}` : ""}, con la cita que dictaste.`
+                : `Vuelve el ${controlDaySaid(known.day)}, como dictaste.`
               : known.kind === "repeats"
                 ? `Su control se repite: el siguiente queda para ${recallWords(known.months)}.`
                 : known.kind === "stays"

@@ -9,6 +9,7 @@ import {
   type DictationReviewSegment,
   dictationReviewExtraction,
   dictationReviewMessages,
+  readDictation,
   readDictationReview,
 } from "./dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
@@ -141,10 +142,11 @@ describe("lo que lee Clío en el repaso", () => {
     expect(String(human?.content)).toContain("Evaluación de endodoncia:")
   })
 
-  it("la herramienta es la de la pausa del producto, con los turnos y lo que no tiene dónde ir (odentIA y latidIA)", () => {
+  it("la herramienta es la de la pausa del producto, con los turnos; lo que no tiene dónde ir ya va en la pausa (odentIA y latidIA)", () => {
     for (const profile of [DENTAL_DICTATION_PROFILE, MEDICAL_DICTATION_PROFILE]) {
       const shape = dictationReviewExtraction(profile).shape
-      expect(Object.keys(shape)).toEqual([...Object.keys(profile.extraction.shape), "turnos", "sin_lugar"])
+      expect(Object.keys(profile.extraction.shape)).toContain("sin_lugar")
+      expect(Object.keys(shape)).toEqual([...Object.keys(profile.extraction.shape), "turnos"])
     }
   })
 
@@ -161,5 +163,46 @@ describe("lo que lee Clío en el repaso", () => {
     } finally {
       await provider.close()
     }
+  })
+})
+
+// QA del 21 nov (C10): sin puntuación, la pregunta y su respuesta son una sola frase y salían de un
+// solo turno; y «Acompañante (no_se_sabe)» mostraba una clave interna.
+describe("un turno que empieza a media frase", () => {
+  const spoken = [{ number: 1, saidAt: at(0), transcript: "toma alguna medicina si tomo losartan para la presion", needsTurns: true }]
+  it("con `empieza`, la frase se parte donde están esas palabras; un vínculo que es una clave no va", () => {
+    const result = readDictationReview(
+      {
+        turnos: [
+          { desde: 1, quien: "dra" },
+          { desde: 1, quien: "acompanante", vinculo: "no_se_sabe", empieza: "si tomo losartan" },
+        ],
+      },
+      spoken,
+      PARTS,
+    )
+    expect(result?.turns).toEqual([
+      { number: 1, turns: [{ quien: "dra", texto: "toma alguna medicina" }, { quien: "acompanante", texto: "si tomo losartan para la presion" }] },
+    ])
+  })
+
+  it("si esas palabras no están, el turno empieza en la frase", () => {
+    const result = readDictationReview({ turnos: [{ desde: 1, quien: "paciente", empieza: "sí, tomo warfarina" }] }, spoken, PARTS)
+    expect(result?.turns).toEqual([{ number: 1, turns: [{ quien: "paciente", texto: "toma alguna medicina si tomo losartan para la presion" }] }])
+  })
+})
+
+describe("lo que no tiene dónde ir, ya en la pausa (QA del 21 nov)", () => {
+  it("el peso dicho y lo de un familiar llegan con su frase y su motivo", () => {
+    const pause = readDictation(
+      { sin_lugar: [{ dicho: "Debe pesar 24.", motivo: "peso_dicho" }, { dicho: "mi papa es diabetico", motivo: "familiar" }] },
+      "debe pesar 24 kilos y mi papa es diabetico",
+      0,
+      PARTS,
+    )
+    expect(pause?.outOfPlace).toEqual([
+      { said: "Debe pesar 24", why: "peso_dicho" },
+      { said: "mi papa es diabetico", why: "familiar" },
+    ])
   })
 })

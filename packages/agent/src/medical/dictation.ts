@@ -19,6 +19,7 @@ import {
   dictationEdits,
   dictationFormAnswers,
   dictationHealthPart,
+  dictationOutOfPlacePart,
   dictationItems,
   dictationList,
   dictationSaid,
@@ -100,6 +101,7 @@ export const extraction = z.object({
   materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   fichas: dictationFormAnswers(),
   salud: HEALTH.part,
+  sin_lugar: dictationOutOfPlacePart(),
   ...dictationEdits("temperatura"),
 })
 

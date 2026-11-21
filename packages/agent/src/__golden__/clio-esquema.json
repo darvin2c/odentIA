@@ -974,6 +974,35 @@
         "additionalProperties": false
       }
     },
+    "sin_lugar": {
+      "default": [],
+      "description": "Lo clínico que se dijo y no tiene dónde ir, con su frase y su motivo. Vacío si no hay.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          },
+          "motivo": {
+            "type": "string",
+            "enum": [
+              "familiar",
+              "peso_dicho",
+              "otro"
+            ],
+            "description": "`familiar`: de la salud de un familiar; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "additionalProperties": false
+      }
+    },
     "correcciones": {
       "default": [],
       "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
@@ -1048,6 +1077,7 @@
     "materiales",
     "fichas",
     "salud",
+    "sin_lugar",
     "correcciones",
     "quitar"
   ],

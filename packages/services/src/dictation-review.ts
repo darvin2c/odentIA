@@ -228,6 +228,22 @@ export interface DictationTurnStart {
   desde: number
   quien: DictationSpeaker
   vinculo?: string | undefined
+  /**
+   * Las primeras palabras del turno, tal cual, si empieza a media frase: la voz de Chrome no pone
+   * puntos y la pregunta y su respuesta llegan en una sola («toma alguna medicina si tomo losartán»;
+   * QA del 21 nov, C10). El servidor las ubica en la frase; si no están, el turno empieza en la frase.
+   */
+  empieza?: string | undefined
+}
+
+/** Dónde empiezan en la frase esas palabras: tal cual, o sin mirar mayúsculas; 0 si no están. */
+function startIn(sentence: string, words: string | undefined): number {
+  const wanted = words?.trim()
+  if (!wanted) return 0
+  const at = sentence.indexOf(wanted)
+  if (at >= 0) return at
+  const folded = sentence.toLocaleLowerCase("es").indexOf(wanted.toLocaleLowerCase("es"))
+  return folded >= 0 ? folded : 0
 }
 
 /**
@@ -242,8 +258,10 @@ export function turnsFromStarts(
   segments: ReadonlyArray<{ transcript: string; needsTurns: boolean }>,
   starts: readonly DictationTurnStart[],
 ): Array<DictationTurn[] | null> {
-  const byNumber = new Map<number, DictationTurnStart>()
-  for (const start of starts) if (Number.isInteger(start.desde) && start.desde >= 1 && SPEAKER_SET.has(start.quien)) byNumber.set(start.desde, start)
+  // Varios turnos pueden empezar en la misma frase: cada uno donde están sus primeras palabras.
+  const byNumber = new Map<number, DictationTurnStart[]>()
+  for (const start of starts)
+    if (Number.isInteger(start.desde) && start.desde >= 1 && SPEAKER_SET.has(start.quien)) byNumber.set(start.desde, [...(byNumber.get(start.desde) ?? []), start])
   let number = 0
   let current: DictationTurnStart | undefined
   return segments.map((segment) => {
@@ -251,24 +269,39 @@ export function turnsFromStarts(
     // Lo del principio sin ningún turno empezado antes: no se sabe quién lo dijo.
     const leading: string[] = []
     let open: DictationTurn | undefined
-    for (const sentence of dictationSentences(segment.transcript)) {
-      number += 1
-      const starting = byNumber.get(number)
-      if (starting) {
-        current = starting
-        open = undefined
-      }
-      if (!segment.needsTurns) continue
+    /** Un pedazo de lo dicho, con quien habla en ese momento. */
+    const say = (piece: string) => {
+      if (!piece) return
       if (!current) {
-        leading.push(sentence)
-        continue
+        leading.push(piece)
+        return
       }
-      if (open) open.texto = `${open.texto} ${sentence}`
+      if (open) open.texto = `${open.texto} ${piece}`
       else {
         const vinculo = current.quien === "acompanante" ? current.vinculo?.trim().slice(0, 80) || undefined : undefined
-        open = { quien: current.quien, ...(vinculo ? { vinculo } : {}), texto: sentence }
+        open = { quien: current.quien, ...(vinculo ? { vinculo } : {}), texto: piece }
         turns.push(open)
       }
+    }
+    for (const sentence of dictationSentences(segment.transcript)) {
+      number += 1
+      // Dónde empieza cada turno en la frase; dos en el mismo lugar: vale el último.
+      const cuts = new Map<number, DictationTurnStart>()
+      for (const start of byNumber.get(number) ?? []) cuts.set(startIn(sentence, start.empieza), start)
+      const ordered = [...cuts.entries()].sort(([a], [b]) => a - b)
+      if (!segment.needsTurns) {
+        if (ordered.length) current = ordered.at(-1)?.[1]
+        continue
+      }
+      let from = 0
+      for (const [at, start] of ordered) {
+        // Lo de antes de las primeras palabras sigue con quien hablaba.
+        say(sentence.slice(from, at).trim())
+        current = start
+        open = undefined
+        from = at
+      }
+      say(sentence.slice(from).trim())
     }
     if (!segment.needsTurns || !turns.length) return null
     if (leading.length) turns.unshift({ quien: "no_se_sabe", texto: leading.join(" ") })

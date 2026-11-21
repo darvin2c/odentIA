@@ -33,6 +33,7 @@ import {
   settleDictationMedicalLeave,
   settleDictationRetry,
   settleDictationSegment,
+  DICTATION_OUT_OF_PLACE,
   startDictationReview,
   startDictationSegment,
   settleDictationPrescription,
@@ -108,12 +109,17 @@ const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000),
  * servidor no dejó pasar, con lo que se le dice a la persona.
  */
 function unusedOf(
-  extracted: { omitted: number; unused: string[] },
+  extracted: { omitted: number; unused: string[]; outOfPlace?: ReadonlyArray<{ said: string; why: keyof typeof DICTATION_OUT_OF_PLACE }> | undefined },
   onConfirmed: ReadonlyArray<{ sourceText?: string | undefined }>,
   dropped: ReadonlyArray<{ said: string; why: string; targets: Array<{ responseId: string; fieldId: string; label: string }> }>,
 ): DictationUnusedItem[] {
   return [
     ...extracted.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
+    // Lo de un familiar o un peso dicho ya en la pausa, con su motivo (QA del 21 nov): no espera al repaso.
+    ...(extracted.outOfPlace ?? []).map(({ said, why }): DictationUnusedItem => {
+      const detail = DICTATION_OUT_OF_PLACE[why]
+      return { said, why: "sin_lugar", ...(detail ? { detail } : {}) }
+    }),
     ...(extracted.omitted > extracted.unused.length ? [{ said: null, why: "sin_lugar" } satisfies DictationUnusedItem] : []),
     ...onConfirmed.flatMap((item): DictationUnusedItem[] => (item.sourceText ? [{ said: item.sourceText, why: "ya_confirmada" }] : [])),
     ...dropped.map((item): DictationUnusedItem => ({ said: item.said, why: "no_propuesta", detail: item.why, ...(item.targets.length ? { targets: item.targets } : {}) })),
@@ -292,14 +298,23 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           .filter(Boolean)
           .concat(saved.formSources)
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
+        const outside = extracted.outOfPlace ?? []
         const unused = [
-          ...new Set([...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said), ...dropped]),
+          ...new Set([
+            ...extracted.unused,
+            ...outside.map((item) => item.said),
+            ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said),
+            ...dropped,
+          ]),
         ]
-        // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor.
-        const unusedWhy = Object.fromEntries(saved.droppedForms.map((item) => [item.said, item.why]))
+        // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor; lo de un familiar o un peso dicho, su motivo.
+        const unusedWhy = Object.fromEntries([
+          ...outside.flatMap((item) => (DICTATION_OUT_OF_PLACE[item.why] ? [[item.said, DICTATION_OUT_OF_PLACE[item.why]] as const] : [])),
+          ...saved.droppedForms.map((item) => [item.said, item.why] as const),
+        ])
         // La pregunta de la ficha que nombra cada frase: «Usar en Percusión» la abre con la frase al lado.
         const unusedFor = Object.fromEntries(saved.droppedForms.filter((item) => item.targets.length).map((item) => [item.said, item.targets]))
-        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
+        return { ...saved, sources, omitted: extracted.omitted + outside.length + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
