@@ -5,7 +5,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 import { byFormOrder, type FormTarget, proposesValue, signOrder } from "./clio-form-proposals"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha" | "salud"
 
 export interface DictationSuggestion {
   id: string
@@ -50,6 +50,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   presupuesto: "Presupuesto",
   material: "Materiales",
   ficha: "Fichas",
+  salud: "Salud",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -63,18 +64,25 @@ const CONTEXT_CHARS = 600
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
  * El descanso médico tampoco (latidIA, issue 229). La respuesta de una ficha
  * tampoco: se confirma en su pregunta, dentro de la ficha (forma B, ADR 0188).
+ *
+ * Lo de su salud tampoco, ni ninguna negación («No tiene alergias»): se revisan con la persona, de a
+ * una (mesa del 20 nov 2026). Lo de su salud se confirma con «Lo revisé con…», nunca al firmar.
  */
-export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha"
+export const confirmable = (item: DictationSuggestion) =>
+  item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha" && item.kind !== "salud" && !deniesHealth(item)
+/** Una negación de su salud: «No tiene alergias». Se confirma de a una. */
+const deniesHealth = (item: DictationSuggestion) => item.kind === "alergia" && item.payload["none"] === true
 /**
  * Lo que se confirma al firmar si está marcado: también las respuestas de ficha, y la que cambia lo
- * escrito, que viene desmarcada (`markedByDefault`).
+ * escrito, que viene desmarcada (`markedByDefault`), y una negación, también desmarcada.
  */
-export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && proposesValue(item))
+export const confirmableAtSign = (item: DictationSuggestion) =>
+  confirmable(item) || (item.kind === "ficha" && proposesValue(item)) || (deniesHealth(item) && item.status === "lista")
 /**
  * Al firmar viene marcado lo que se puede confirmar, menos lo que quedó por revisar (lo que cambia lo
- * escrito a mano, lo de la segunda lectura): eso lo decide una persona.
+ * escrito a mano, lo de la segunda lectura) y las negaciones: eso lo decide una persona.
  */
-export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && item.status === "lista"
+export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && item.status === "lista" && !deniesHealth(item)
 /** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
 const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
 /**

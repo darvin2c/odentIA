@@ -3,6 +3,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertClioCanListen,
   clioListenBlock,
+  confirmDictationHealth,
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationFormQuestions,
@@ -61,6 +62,13 @@ const confirmInput = z
   .object({
     expectedValue: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(200)).max(40), z.null()]).optional(),
     atSign: z.boolean().optional(),
+  })
+  .strict()
+/** «Lo revisé con…» de lo que dijo de su salud: quién lo dijo, si quien confirma lo corrige. */
+const healthReviewInput = z
+  .object({
+    declarante: z.enum(["paciente", "acompanante", "no_se_sabe"]).optional(),
+    vinculo: z.string().trim().max(80).nullable().optional(),
   })
   .strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
@@ -268,6 +276,24 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId, parsed.data),
+      ),
+    )
+  })
+
+  /**
+   * «Lo revisé con…» de lo que dijo de su salud en la consulta (mesa del 20 nov 2026): queda como su
+   * declaración hecha en la consulta y entra a Antecedentes. Escribe en la historia (`clinical.write`,
+   * el guardián de la ruta de pacientes); la confirmación de siempre no la lleva.
+   */
+  app.post(`${base}/:suggestionId/confirm-health`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = healthReviewInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        confirmDictationHealth(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId, parsed.data),
       ),
     )
   })

@@ -5480,6 +5480,34 @@ for (const seed of [
     createdBy: LUIS_ID,
     organizedAt: dictatedAt,
   })
+  // Lo que Mateo contó de su salud en la conversación (mesa del 20 nov 2026): queda propuesto, sin
+  // confirmar, con la forma que guarda el servicio (`prepareHealth`); «que yo sepa no» es «no sabe».
+  const healthSaid = "Tomo loratadina por la rinitis. ¿Alérgico a algo? Que yo sepa no."
+  await db.insert(encounterDictationSegment).values({
+    organizationId: ORG_A,
+    patientId: mateo.id,
+    encounterId: mateoVisit.id,
+    segmentId: "c0a7e000-0000-4000-8000-000000000002",
+    transcript: healthSaid,
+    saidAt: dictatedAt,
+    createdBy: LUIS_ID,
+    organizedAt: dictatedAt,
+  })
+  await db.insert(encounterDictationSuggestion).values({
+    organizationId: ORG_A,
+    patientId: mateo.id,
+    encounterId: mateoVisit.id,
+    professionalUserId: LUIS_ID,
+    kind: "salud",
+    payload: {
+      declarante: "paciente",
+      medications: { state: "recorded", items: [{ name: "loratadina" }] },
+      conditions: { state: "recorded", items: [{ name: "rinitis" }] },
+      allergies: { state: "unknown", items: [] },
+    },
+    sourceText: healthSaid,
+    status: "lista",
+  })
 }
 // Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
 // por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.

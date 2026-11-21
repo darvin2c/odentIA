@@ -439,18 +439,23 @@ export async function codePatientAllergy(
 /**
  * «Sin cambios»: se le preguntó y sus alergias siguen igual. Sin ninguna
  * vigente, queda dicho que no tiene («No tiene alergias»).
+ *
+ * `keepDeclared`: el «no tiene alergias» que oyó Clío en la consulta (mesa del 20 nov 2026): lo
+ * que la persona declaró y nadie revisó sigue sin confirmar y sin revisar, porque nadie lo miró
+ * con ella; las alergias se dan por revisadas solo si no queda nada de eso.
  */
 export async function markAllergiesReviewed(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
+  options: { keepDeclared?: boolean } = {},
 ): Promise<{ reviewedAt: Date }> {
   const locked = await lockHealth(tx, orgId, patientId)
   const active = await activeAllergies(tx, orgId, patientId)
   // Revisadas con ella, lo que dijo sin confirmar queda confirmado (HL7 FHIR R4
   // AllergyIntolerance.verificationStatus: unconfirmed → confirmed; auditor, 14 nov).
-  const unconfirmed = active.filter((row) => row.verification === "no_confirmada").map((row) => row.id)
+  const unconfirmed = options.keepDeclared ? [] : active.filter((row) => row.verification === "no_confirmada").map((row) => row.id)
   if (unconfirmed.length > 0)
     await tx
       .update(patientAllergy)
@@ -463,7 +468,7 @@ export async function markAllergiesReviewed(
     actorUserId,
     locked,
     active.length > 0 ? "recorded" : "none",
-    { all: true },
+    options.keepDeclared ? {} : { all: true },
   )
   await audit(tx, orgId, actorUserId, "health.allergies_reviewed", patientId, {
     active: active.length,

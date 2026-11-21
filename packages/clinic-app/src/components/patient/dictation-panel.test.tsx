@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClioFormProposals, ClioFormProposalsContext, proposesValue, reread } from "./clio-form-proposals"
 import { UnusedNotice } from "./dictation-panel"
-import { type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
+import { confirmable, confirmableAtSign, type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
 
 afterEach(cleanup)
 
@@ -100,6 +100,32 @@ describe("lo de la segunda lectura", () => {
     expect(markedByDefault(read)).toBe(false)
     expect(proposesValue(item("por_revisar", { value: null }))).toBe(false)
     expect(markedByDefault(item("lista", { value: "Positiva" }))).toBe(true)
+  })
+})
+
+// Mesa del 20 nov 2026 (P3): «Confirmar las N» confirmaba de un toque «No tiene alergias», salido de
+// un «no que yo sepa». Lo de su salud y las negaciones se revisan con la persona, de a una.
+describe("«Confirmar las N» no lleva lo de su salud ni una negación", () => {
+  const item = (kind: DictationSuggestion["kind"], payload: Record<string, unknown>): DictationSuggestion => ({
+    id: "s1",
+    kind,
+    payload,
+    sourceText: "",
+    status: "lista",
+    note: null,
+    summary: "",
+    voice: null,
+    removal: null,
+  })
+  it("ni la salud ni «No tiene alergias» van con las demás; al firmar, la negación viene desmarcada y la salud no está", () => {
+    const health = item("salud", { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } })
+    const none = item("alergia", { none: true })
+    expect(confirmable(health)).toBe(false)
+    expect(confirmableAtSign(health)).toBe(false)
+    expect(confirmable(none)).toBe(false)
+    expect(confirmableAtSign(none)).toBe(true)
+    expect(markedByDefault(none)).toBe(false)
+    expect(confirmable(item("alergia", { substance: "Penicilina" }))).toBe(true)
   })
 })
 

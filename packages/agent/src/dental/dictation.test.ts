@@ -2,6 +2,7 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, type DictationFormQuestion, formQuestionsOf, productHooksFor } from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
+import { z } from "zod"
 import {
   askDictationModel,
   DICTATION_FORMS_RULES,
@@ -529,5 +530,70 @@ describe("las respuestas de una ficha", () => {
     const model = { bindTools: () => ({ invoke: async () => { throw new Error("no debía llamar") } }) }
     expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [], ortho)).toEqual([])
     expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [{ said: "algo", questions: [99] }], ortho)).toEqual([])
+  })
+})
+
+/**
+ * Lo de salud dicho en la conversación (mesa del 20 nov 2026, P3): Clío no tenía dónde ponerlo
+ * (la warfarina y la metformina caían en el relato, el asma de un niño se perdía) y «no que yo
+ * sepa» se volvía «No tiene alergias».
+ */
+describe("lo de salud dicho en la conversación", () => {
+  const fixed = DENTAL_DICTATION_PROFILE.systemPrompt({ services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText() })
+  const schema = z.toJSONSchema(DENTAL_DICTATION_PROFILE.extraction) as { properties: Record<string, { properties?: Record<string, unknown> }> }
+
+  it("tiene su parte `salud`, con quién lo dijo, lo de su registro y lo de la boca", () => {
+    const salud = schema.properties["salud"]?.properties ?? {}
+    expect(Object.keys(salud)).toEqual(
+      expect.arrayContaining(["declarante", "vinculo", "allergies", "conditions", "medications", "anticoagulants", "boneMedicines", "personal", "dental", "medical", "dicho"]),
+    )
+    const dental = (salud["dental"] as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}
+    expect(Object.keys(dental)).toEqual(
+      expect.arrayContaining(["problemaAnestesia", "corazon", "ansiedadDental", "bruxismo", "habitos", "ultimaVisita", "biberon", "dulcesEntreComidas"]),
+    )
+    // El alcohol lo pregunta solo latidIA.
+    expect(Object.keys((salud["medical"] as { properties?: Record<string, unknown> } | undefined)?.properties ?? {})).not.toContain("alcohol")
+  })
+
+  it("solo lo dicho: «no que yo sepa» es no sabe, el silencio no es «No» y lo de un familiar no es del paciente", () => {
+    expect(fixed).toContain("«No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`")
+    expect(fixed).toContain("Lo que no se preguntó ni se dijo no va: el silencio no es «No».")
+    expect(fixed).toContain("«mi papá es diabético»")
+    expect(fixed).toContain("no es del paciente: no va en `salud` ni en `alergias`")
+    expect(fixed).toContain("El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida")
+    // Lo de su salud no va al relato.
+    expect(fixed).toContain("Sus medicinas de siempre, sus enfermedades y lo de la anestesia van en `salud`, no en el relato")
+    // La alergia dictada con duda tampoco es `none`.
+    expect(fixed).toContain("«No que yo sepa», «creo que no» o «no sé» no son `none`")
+  })
+
+  it("se lee como una sola entrada, con su frase", () => {
+    const transcript = "Tiene asma, usa salbutamol. Yo soy diabética."
+    const read = readDictation(
+      {
+        salud: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+          dicho: "Tiene asma, usa salbutamol.",
+        },
+      },
+      transcript,
+      0,
+    )
+    expect(read?.omitted).toBe(0)
+    expect(read?.drafts).toEqual([
+      {
+        kind: "salud",
+        payload: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+        },
+        sourceText: "Tiene asma, usa salbutamol.",
+      },
+    ])
   })
 })

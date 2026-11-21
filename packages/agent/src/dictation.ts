@@ -5,6 +5,7 @@ import {
   DICTATION_OPERATION,
   DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
+  dictationHealthSchema,
   type DictationDraft,
   type DictationFormQuestion,
   formAnswerWords,
@@ -112,6 +113,40 @@ export function dictationEdits(example: string) {
 export const DICTATION_TOOL = "registrar_dictado"
 
 /**
+ * Lo de salud dicho en la conversación (mesa del 20 nov 2026), con lo que pregunta el producto
+ * (`ProductDictation.health`): una sola entrada por pausa, con quién lo dijo y su frase. La forma es
+ * la de su registro; el servicio la valida y guarda solo eso. Sin `dicho`, lo que lee `readDictation`.
+ */
+export function dictationHealthPart(own: Parameters<typeof dictationHealthSchema>[0]) {
+  const schema = dictationHealthSchema(own)
+  return {
+    schema,
+    part: schema
+      .extend({ dicho: dictationSaid })
+      .optional()
+      .describe("Lo que se dijo de la salud del paciente en la conversación, en una sola entrada. Omítela si no se habló de su salud."),
+  }
+}
+
+/**
+ * Qué va en `salud` y qué no, igual en los dos productos (mesa del 20 nov 2026, voz clínica): solo
+ * lo dicho, «no que yo sepa» es no sabe, el silencio no es «No», lo de un familiar no es del
+ * paciente y un peso que alguien calcula no es una medida. `topics`: lo que pregunta el producto;
+ * `notInRelato`: lo que no va al relato; `measured`: dónde no va un peso dicho (latidIA: los signos).
+ */
+export function healthPrompt(input: { topics: string; notInRelato: string; measured: string }): string[] {
+  return [
+    `En \`salud\` va lo que se dice de la salud del paciente en la conversación, lo cuente él o quien lo acompaña: ${input.topics}. Solo lo que se dijo: no lo deduzcas de un medicamento, de un diagnóstico ni de lo habitual. Si se corrige («tomo warfarina… perdón, apixabán»), vale lo último.`,
+    "Un «No» va solo si respondió que no a una pregunta de ese tema («¿toma alguna medicina?» — «no, ninguna»). «No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`. Lo que no se preguntó ni se dijo no va: el silencio no es «No».",
+    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre») o `no_se_sabe` si no queda claro. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
+    "Lo que alguien cuenta de sí mismo cuando no es el paciente, o de un familiar («yo soy diabética», dicho por la madre; «mi papá es diabético»; «su papá es alérgico a la penicilina»), no es del paciente: no va en `salud` ni en `alergias`. Los antecedentes de la familia no se registran aquí.",
+    `El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida: no va en ${input.measured}ninguna parte.`,
+    `${input.notInRelato} van en \`salud\`, no en el relato; en el relato queda lo que tomó para la molestia de hoy («tomó ibuprofeno y le calmó»).`,
+    "La salud pendiente llega con lo que ya dice: lo nuevo va en `salud`, solo lo nuevo, y el sistema lo suma. Si alguien corrige en voz alta lo ya dicho, es una corrección de esa pendiente, con su frase en `dicho` y solo el grupo que cambia.",
+  ]
+}
+
+/**
  * Las respuestas a las fichas empezadas, igual en todo producto que dicta
  * (entrega 11). Va siempre en el esquema, que es fijo por la caché; las
  * preguntas y sus reglas llegan en el mensaje de la pausa solo si hay alguna.
@@ -147,7 +182,7 @@ export function consultaPrompt(examples: string): string[] {
   return [
     `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado.`,
     "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años», «desde la caída del sábado»), se cuenta desde ahí («hace dos años»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
-    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
+    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias) va en el relato; lo que toma, en `salud`. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
     // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
     "El relato es lo que cuentan el paciente o quien lo acompaña sobre lo que le pasa. No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente o al asistente mientras se lo atiende («tranquila, ya casi terminamos», «abre grande», «¿te duele cuando comes?», «pásame…») ni lo que el paciente dice o llora mientras lo examinan o lo tratan («¡me duele!», «no quiero», «mamá»): una queja suelta entre eso no es de la historia. Lo que responde sobre lo que le pasa sí es del relato, y lo que el profesional encuentra al examinarlo va donde siempre.",
     // Mesa del 20 nov 2026: con la consulta pendiente sin su texto, cada pausa la «corregía» y reemplazaba el relato.
@@ -172,7 +207,7 @@ export function homeCarePrompt(examples: string): string {
  */
 export function allergyAndDonePrompt(clinician: string, done: string): string[] {
   return [
-    "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si dice que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. Un medicamento que toma o que se receta no es una alergia.",
+    "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si responde que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. «No que yo sepa», «creo que no» o «no sé» no son `none`: van en \`salud\` como que no sabe. Un medicamento que toma o que se receta no es una alergia.",
     // «Hoy hacemos…» también es de hoy (prueba con voz del 15 nov, c3, v10: la profilaxis de «hoy solo hacemos
     // adaptación y profilaxis» quedaba en el plan, en la cita o en ninguna parte).
     `En \`procedimientos\` va lo que el ${clinician} hizo o hace hoy en esta atención, contado como hecho (${done}) o como lo de hoy («hoy hacemos…», «hoy solo…»), uno por prestación y con \`service\` en sus palabras: el sistema lo busca en el plan del paciente y en los servicios. Lo que queda para otro día es una indicación, aunque lo diga en la misma frase. Si no queda claro si es de hoy, es una indicación. Contarlo en la evolución está bien: además va en \`procedimientos\`.`,
@@ -216,7 +251,7 @@ export interface DictationProfile {
    * guardan. Una parte es una lista; con `single`, una sola entrada (latidIA:
    * los signos vitales, el descanso).
    */
-  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"]; single?: true }>
+  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"]; single?: true; schema?: z.ZodObject }>
   /** Lo que dice la herramienta al modelo. */
   toolDescription: string
   /** Las instrucciones fijas, con lo de la clínica que no cambia en la atención. */
@@ -511,12 +546,16 @@ export function readDictation(
     const said = isRecord(item) ? quote(item) : ""
     if (said && !unused.includes(said)) unused.push(said)
   }
-  /** Solo los campos de su operación: la cita y lo que el modelo agregue de más no llegan al servicio. */
+  /**
+   * Solo los campos de su operación (o de su parte, si tiene su propia forma: lo de salud): la cita y
+   * lo que el modelo agregue de más no llegan al servicio.
+   */
   const fields = (
     kind: DictationDraft["kind"],
     item: Record<string, unknown>,
+    own?: z.ZodObject,
   ): Record<string, unknown> => {
-    const schema = operationAgentSchema(DICTATION_OPERATION[kind])
+    const schema = own ?? operationAgentSchema(DICTATION_OPERATION[kind])
     const parsed = schema.safeParse(item)
     if (parsed.success) return parsed.data as Record<string, unknown>
     return Object.fromEntries(
@@ -545,7 +584,7 @@ export function readDictation(
   for (const part of parts) {
     const value = args[part.key]
     for (const item of part.single && isRecord(value) ? [value] : items(value)) {
-      const payload = isRecord(item) ? fields(part.kind, item) : {}
+      const payload = isRecord(item) ? fields(part.kind, item, part.schema) : {}
       // Una respuesta de ficha a una pregunta que no se le dio: no se adivina a cuál se refería.
       const question = payload["question"]
       const unknownQuestion =

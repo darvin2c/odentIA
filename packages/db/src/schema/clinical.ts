@@ -403,8 +403,12 @@ export const patientRegistration = pgTable(
   ],
 )
 
-/** Por dónde declaró la persona su salud: su registro, «Tus datos y tu salud» de su enlace o un cuestionario. */
-export const HEALTH_DECLARATION_VIAS = ["enlace", "registro", "formulario"] as const
+/**
+ * Por dónde declaró la persona su salud: su registro, «Tus datos y tu salud» de su enlace, un
+ * cuestionario o lo que contó en la consulta y el profesional confirmó con ella (`consulta`, mesa
+ * del 20 nov 2026: Clío lo oyó en la conversación).
+ */
+export const HEALTH_DECLARATION_VIAS = ["enlace", "registro", "formulario", "consulta"] as const
 
 /** Quién lo dijo: la persona, quien habla por ella o, si se lo dijo al equipo, quien lo anotó. */
 export const HEALTH_DECLARATION_RESPONDENTS = ["patient", "representative", "staff"] as const
@@ -459,7 +463,7 @@ export const patientHealthDeclaration = pgTable(
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
     }).onDelete("cascade"),
-    check("patient_health_declaration_via_check", sql`${table.via} IN ('enlace','registro','formulario')`),
+    check("patient_health_declaration_via_check", sql`${table.via} IN ('enlace','registro','formulario','consulta')`),
     check(
       "patient_health_declaration_respondent_check",
       sql`${table.respondent} IN ('patient','representative','staff')`,
@@ -2407,7 +2411,8 @@ export const clinicalFollowUpItem = pgTable(
  * issue 109, y el material que se usó, ADR 0106), el odontograma de odentIA y
  * los signos vitales, el examen por sistemas y el descanso médico de latidIA
  * (issue 229, entrega 10), y la respuesta de una ficha de consulta empezada
- * (entrega 11 de la mesa de formularios).
+ * (entrega 11 de la mesa de formularios), y lo que se dijo de la salud del paciente en la
+ * conversación (`salud`, mesa del 20 nov 2026), que se revisa con él y nunca entra de un toque.
  */
 export const DICTATION_KINDS = [
   "nota",
@@ -2425,6 +2430,7 @@ export const DICTATION_KINDS = [
   "presupuesto",
   "material",
   "ficha",
+  "salud",
 ] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
@@ -2472,7 +2478,7 @@ export const encounterDictationSuggestion = pgTable(
     ),
     check(
       "encounter_dictation_suggestion_kind_check",
-      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha')`,
+      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha','salud')`,
     ),
     check(
       "encounter_dictation_suggestion_status_check",

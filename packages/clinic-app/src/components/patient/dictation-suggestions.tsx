@@ -751,6 +751,8 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
   ],
   // La respuesta de una ficha no se corrige aquí: se escribe en la propia pregunta de la ficha.
   ficha: [],
+  // Lo de su salud se corrige en Antecedentes, con lo de Clío puesto: no aquí.
+  salud: [],
 }
 
 /** Lo que no pasa el esquema de la operación, dicho en el campo (los mismos límites que `OPERATIONS`). */

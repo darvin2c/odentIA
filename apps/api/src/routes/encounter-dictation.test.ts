@@ -203,3 +203,31 @@ describe("«Lo que se dijo» se lee del servidor", () => {
     }
   })
 })
+
+/**
+ * Lo de salud dicho en la conversación (mesa del 20 nov 2026, P3): se confirma con «Lo revisé
+ * con…», en su propia ruta, con quién lo dijo; nunca con la confirmación de siempre.
+ */
+describe("«Lo revisé con…» de lo que dijo de su salud", () => {
+  it("lo confirma quien atiende, con quién lo dijo; la confirmación de siempre no lo lleva y recepción no puede", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, {
+        drafts: [{ kind: "salud", payload: { declarante: "no_se_sabe", medications: { state: "recorded", items: [{ name: "salbutamol" }] } }, sourceText: "usa salbutamol" }],
+      }),
+    )
+    const said = await app.request(base, json({ transcript: "Usa salbutamol cuando se agita.", segmentId: crypto.randomUUID() }))
+    expect(said.status).toBe(201)
+    const [health] = ((await said.json()) as { data: { suggestions: Array<{ id: string; kind: string }> } }).data.suggestions
+    expect(health?.kind).toBe("salud")
+    expect((await app.request(`${base}/${health!.id}/confirm`, json({}))).status).toBe(409)
+    expect((await buildApp("reception").request(`${base}/${health!.id}/confirm-health`, json({}))).status).toBe(403)
+    const res = await app.request(`${base}/${health!.id}/confirm-health`, json({ declarante: "acompanante", vinculo: "madre" }))
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: { status: string; payload: Record<string, unknown>; health: { declarations: Array<{ via: string; by: { kind: string; relation: string | null } }> } } }
+    expect(data.status).toBe("confirmada")
+    expect(data.payload["declarante"]).toBe("acompanante")
+    expect(data.health.declarations[0]).toMatchObject({ via: "consulta", by: { kind: "representative", relation: "madre" } })
+  })
+})

@@ -8,4 +8,4 @@
 // no arrancaba).
 import "../products.js"
 
-export { examSystemsText, MEDICAL_DICTATION } from "./dictation.js"
+export { examSystemsText, MEDICAL_DICTATION, MEDICAL_DICTATION_HEALTH } from "./dictation.js"

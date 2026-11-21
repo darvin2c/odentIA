@@ -1072,6 +1072,13 @@
       "when": 1795237149838,
       "tag": "0152_lo_que_se_dijo",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1795238540605,
+      "tag": "0153_salud_dicha_en_la_consulta",
+      "breakpoints": true
     }
   ]
 }
