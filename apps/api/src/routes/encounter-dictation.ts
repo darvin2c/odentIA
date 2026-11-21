@@ -8,7 +8,6 @@ import {
   dictationFormQuestions,
   dictationModelLabel,
   dictationTeeth,
-  dictationSegmentSeen,
   discardDictationSuggestion,
   restoreDictationSuggestion,
   discardPendingDictation,
@@ -17,6 +16,7 @@ import {
   keepConfirmedDictation,
   keepIssuedPaper,
   listConfirmedDictation,
+  listDictationSaid,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   pendingFormValues,
@@ -24,11 +24,14 @@ import {
   requireClinicalAssistant,
   saveDictationSegment,
   settleDictationMedicalLeave,
+  settleDictationSegment,
+  startDictationSegment,
   settleDictationPrescription,
   undoConfirmedDictation,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "@odentia/services"
+import type { DictationUnusedItem } from "@odentia/db/schema/clinical"
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../lib/context.js"
@@ -40,8 +43,9 @@ const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
 /** Descartar: en una respuesta de ficha en la que Clío dudaba, la opción que eligió la persona. */
 const discardInput = z.object({ chosen: z.string().min(1).max(200).optional() })
-// Un tramo del dictado: lo nuevo, lo último ya ordenado (solo para entenderlo) y su identidad,
-// para que reenviar el mismo tramo no duplique sugerencias.
+// Un tramo del dictado: lo nuevo y su identidad, para que reenviar el mismo tramo no lo ordene
+// otra vez. Lo dicho antes ya está guardado con la atención (ADR 0209): el contexto que mande la
+// pestaña no se usa (se acepta para no rechazar una pantalla de antes).
 const dictateInput = z
   .object({
     transcript: z.string().trim().min(3).max(12_000),
@@ -60,6 +64,24 @@ const confirmInput = z
   })
   .strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
+
+/**
+ * Lo que Clío no usó de un tramo, con su motivo, para guardarlo con lo que se dijo: lo que no
+ * supo dónde va (sin frase si no supo citarla), lo que quiso cambiar ya confirmado y lo que el
+ * servidor no dejó pasar, con lo que se le dice a la persona.
+ */
+function unusedOf(
+  extracted: { omitted: number; unused: string[] },
+  onConfirmed: ReadonlyArray<{ sourceText?: string | undefined }>,
+  dropped: ReadonlyArray<{ said: string; why: string; targets: Array<{ responseId: string; fieldId: string; label: string }> }>,
+): DictationUnusedItem[] {
+  return [
+    ...extracted.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
+    ...(extracted.omitted > extracted.unused.length ? [{ said: null, why: "sin_lugar" } satisfies DictationUnusedItem] : []),
+    ...onConfirmed.flatMap((item): DictationUnusedItem[] => (item.sourceText ? [{ said: item.sourceText, why: "ya_confirmada" }] : [])),
+    ...dropped.map((item): DictationUnusedItem => ({ said: item.said, why: "no_propuesta", detail: item.why, ...(item.targets.length ? { targets: item.targets } : {}) })),
+  ]
+}
 
 export interface EncounterDictationDeps extends CrmDeps {
   llm: PlatformLlm
@@ -103,10 +125,23 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
   })
 
   /**
-   * Ordena un tramo del dictado en sugerencias. Llama al modelo una vez; nada
-   * entra a la historia. Mientras se dicta llega un tramo por pausa: el modelo
-   * recibe además las sugerencias de este dictado que siguen sin decidir, para
-   * entender una corrección dicha en voz alta.
+   * Lo que se dijo en la atención, tramo por tramo, con lo que Clío no usó (ADR 0209). Lo ve
+   * quien ve la atención (`clinical.read`, el guardián de la ruta de pacientes), también firmada.
+   */
+  app.get(`${base}/said`, async (c) => {
+    const { orgId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, async () => ({
+      segments: await withOrgContext(deps.db, orgId, (tx) => listDictationSaid(tx, orgId, at.data.id, at.data.encounterId)),
+    }))
+  })
+
+  /**
+   * Ordena un tramo del dictado en sugerencias. Lo guarda antes (lo que se dijo queda con la
+   * atención) y llama al modelo una vez por tramo; nada entra a la historia. Mientras se dicta
+   * llega un tramo por pausa: el modelo recibe además el final de lo dicho antes, guardado, y las
+   * sugerencias de este dictado que siguen sin decidir, para entender una corrección dicha en voz alta.
    */
   app.post(base, async (c) => {
     const { orgId, userId } = orgContextOf(c)
@@ -114,14 +149,19 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = dictateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { transcript, context, segmentId, openForms } = parsed.data
+    const { transcript, openForms } = parsed.data
+    // Sin identidad (una pantalla de antes), el tramo se guarda con una propia.
+    const segmentId = parsed.data.segmentId ?? crypto.randomUUID()
     try {
       return await runService(c, 201, async () => {
-        // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo nuevo.
+        // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo
+        // guardado; uno ya ordenado no se vuelve a mandar ni a cobrar, aunque no haya dejado nada.
         const ready = await withOrgContext(deps.db, orgId, async (tx) => {
           const dictation = await requireClinicalAssistant(tx, orgId)
-          await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { drafts: [] })
-          if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
+          const started = await startDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { segmentId, transcript })
+          if (started.repeated) return null
+          // Lo dicho antes sale de lo guardado: sirve igual tras recargar o desde otra pestaña.
+          const context = started.context || undefined
           // Las pendientes y, detrás, lo confirmado hoy: «quita la endodoncia» también alcanza a lo
           // que ya entró, y queda propuesto para que una persona lo decida.
           const pending = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
@@ -130,6 +170,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
           const forms = await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] })
           return {
+            context,
             list,
             forms,
             // Lo que ya proponen las pendientes: la segunda lectura no repite lo ya propuesto.
@@ -150,7 +191,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           extractDictation(
             deps.db,
             { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
+            { orgId, transcript, context: ready.context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
           ),
           { encounterId: at.data.encounterId },
         )
@@ -158,8 +199,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         const target = (index: number) => ready.list[index]?.id
         // Lo ya confirmado no se corrige por voz: si lo intentó, se avisa con la frase en vez de perderlo.
         const onConfirmed = extracted.corrections.filter((item) => item.index >= ready.pendingCount)
-        const saved = await withOrgContext(deps.db, orgId, (tx) =>
-          saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
+        const saved = await withOrgContext(deps.db, orgId, async (tx) => {
+          const result = await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
             drafts: extracted.drafts,
             corrections: extracted.corrections.flatMap((item) => {
               const suggestionId = item.index < ready.pendingCount ? target(item.index) : undefined
@@ -173,10 +214,13 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             // Lo que comprobó Clío: el tramo, con el final del anterior delante si sigue su frase.
             transcript: extracted.heard,
             // Y lo anterior que leyó: un diagnóstico no contradice lo dicho ahí («presenta fístula»).
-            context,
+            context: ready.context,
             formQuestions: ready.forms,
-          }),
-        )
+          })
+          // El tramo queda ordenado, con lo que no se usó y por qué: se ve igual al volver a la atención.
+          if (!result.repeated) await settleDictationSegment(tx, orgId, at.data.encounterId, segmentId, unusedOf(extracted, onConfirmed, result.droppedForms))
+          return result
+        })
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         // Lo de una ficha solo si quedó como propuesta, y por dato (`formSources`): lo que el servidor
         // no dejó pasar no dio nada (QA del 14 nov, D20; revisión final del 15 nov, U5).

@@ -34,6 +34,7 @@ import {
   clinicalNote,
   encounter,
   encounterDiagnosis,
+  encounterDictationSegment,
   encounterDictationSuggestion,
   encounterPlanItem,
   encounterProcedure,
@@ -5468,6 +5469,17 @@ for (const seed of [
       decidedAt: dictatedAt,
     },
   ])
+  // Lo que se dijo en esa pausa, guardado con la atención (ADR 0209).
+  await db.insert(encounterDictationSegment).values({
+    organizationId: ORG_A,
+    patientId: mateo.id,
+    encounterId: mateoVisit.id,
+    segmentId: "c0a7e000-0000-4000-8000-000000000001",
+    transcript: "Overbite de tres. Overjet de cinco milímetros. Clase uno molar izquierda y clase dos molar derecha.",
+    saidAt: dictatedAt,
+    createdBy: LUIS_ID,
+    organizedAt: dictatedAt,
+  })
 }
 // Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
 // por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.

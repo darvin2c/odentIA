@@ -27,6 +27,7 @@ import {
   DICTATION_KINDS,
   type DictationKind,
   encounter,
+  encounterDictationSegment,
   encounterDictationSuggestion,
   encounterProcedure,
   patientAllergy,
@@ -1772,8 +1773,26 @@ export interface FormTarget {
   label: string
 }
 
-/** ¿Ese tramo del dictado ya dejó algo en esta atención? */
+/**
+ * ¿Ese tramo del dictado ya se ordenó en esta atención? Lo dice lo guardado de lo que se dijo
+ * (`encounter_dictation_segment`, ADR 0209), aunque no haya dejado ninguna sugerencia, y, para
+ * un tramo de antes de guardarlo, las sugerencias que dejó.
+ */
 export async function dictationSegmentSeen(tx: Db, orgId: string, patientId: string, encounterId: string, segmentId: string): Promise<boolean> {
+  const [organized] = await tx
+    .select({ id: encounterDictationSegment.id })
+    .from(encounterDictationSegment)
+    .where(
+      and(
+        eq(encounterDictationSegment.organizationId, orgId),
+        eq(encounterDictationSegment.patientId, patientId),
+        eq(encounterDictationSegment.encounterId, encounterId),
+        eq(encounterDictationSegment.segmentId, segmentId),
+        isNotNull(encounterDictationSegment.organizedAt),
+      ),
+    )
+    .limit(1)
+  if (organized) return true
   const [row] = await tx
     .select({ id: encounterDictationSuggestion.id })
     .from(encounterDictationSuggestion)

@@ -2434,7 +2434,8 @@ export type DictationKind = (typeof DICTATION_KINDS)[number]
  * cuando el odontólogo que lleva la atención lo confirma, con la misma
  * operación y las mismas validaciones que si lo escribiera. `por_revisar`:
  * falta algo que solo una persona puede elegir (una prestación, un código).
- * Guarda el fragmento dictado que la originó, no el dictado completo.
+ * Guarda el fragmento dictado que la originó; lo dicho entero, tramo por tramo, está en
+ * `encounter_dictation_segment` (ADR 0209).
  */
 export const encounterDictationSuggestion = pgTable(
   "encounter_dictation_suggestion",
@@ -2477,6 +2478,70 @@ export const encounterDictationSuggestion = pgTable(
       "encounter_dictation_suggestion_status_check",
       sql`${table.status} IN ('lista','por_revisar','confirmada','descartada')`,
     ),
+  ],
+)
+
+/**
+ * Por qué no se usó algo de un tramo del dictado: Clío no supo dónde va (`sin_lugar`), quiso
+ * cambiar lo ya confirmado (`ya_confirmada`, se cambia a mano) o el servidor no lo dejó pasar
+ * (`no_propuesta`, con lo que se le dice a la persona en `detail`).
+ */
+export const DICTATION_UNUSED_WHY = ["sin_lugar", "ya_confirmada", "no_propuesta"] as const
+export type DictationUnusedWhy = (typeof DICTATION_UNUSED_WHY)[number]
+
+/** Lo que Clío no usó de un tramo. `said` nulo: no supo citar la frase. */
+export interface DictationUnusedItem {
+  said: string | null
+  why: DictationUnusedWhy
+  detail?: string
+  /** Las preguntas de ficha que nombra la frase, para «Usar en…». */
+  targets?: Array<{ responseId: string; fieldId: string; label: string }>
+}
+
+/**
+ * Lo que se dijo en una atención (ADR 0209): cada tramo del dictado o de la conversación, tal
+ * cual llegó y con su hora, guardado antes de que Clío lo ordene. No es historia clínica: no se
+ * firma, no va en la copia de la historia ni en FHIR y lo ven solo los roles clínicos. Da el
+ * contexto de la pausa siguiente aunque se recargue la página y la identidad del tramo
+ * (`segment_id`, única por atención): un tramo ya ordenado (`organized_at`) no se vuelve a
+ * mandar al modelo. Se borra con la atención descartada; la aplicación solo agrega y anota lo
+ * que pasó al ordenarlo (`organized_at`, `unused`) y, en el repaso, los turnos (`turns`).
+ */
+export const encounterDictationSegment = pgTable(
+  "encounter_dictation_segment",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    encounterId: uuid("encounter_id").notNull(),
+    /** La identidad que le dio la pantalla: reenviar el mismo tramo no lo guarda ni lo ordena otra vez. */
+    segmentId: text("segment_id").notNull(),
+    /** Lo que llegó, tal cual (sin el final del tramo anterior que Clío le pone delante). */
+    transcript: text("transcript").notNull(),
+    saidAt: timestamp("said_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    /** Cuando Clío lo ordenó y quedó lo suyo; nulo si falló o sigue en curso: se puede reintentar. */
+    organizedAt: timestamp("organized_at", { withTimezone: true }),
+    /** Lo que no se usó, con su motivo. */
+    unused: jsonb("unused").$type<DictationUnusedItem[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Los turnos con quién habló, del repaso al terminar; nulo hasta entonces. */
+    turns: jsonb("turns").$type<unknown[]>(),
+    ...timestamps,
+  },
+  (table) => [
+    // La atención es del mismo paciente y de la misma clínica; se va con ella si se descarta.
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.encounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "encounter_dictation_segment_encounter_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("encounter_dictation_segment_uidx").on(table.organizationId, table.encounterId, table.segmentId),
+    index("encounter_dictation_segment_said_idx").on(table.organizationId, table.encounterId, table.saidAt),
+    // El tope de lo que acepta una pausa (`DICTATION_CHARS`).
+    check("encounter_dictation_segment_transcript_check", sql`char_length(${table.transcript}) BETWEEN 1 AND 12000`),
+    check("encounter_dictation_segment_unused_check", sql`jsonb_typeof(${table.unused}) = 'array'`),
   ],
 )
 
