@@ -125,7 +125,10 @@ export async function releaseDictationSegment(tx: Db, orgId: string, encounterId
 
 /**
  * «Intentar otra vez» ya ordenado: la frase deja de estar en «No lo usé» de su tramo y, si Clío
- * tampoco la usó esta vez, vuelve con lo que se sabe ahora. Lo que se dijo no cambia.
+ * tampoco la usó esta vez, vuelve con lo que se sabe ahora. `used`: si esta vez dejó algo (una
+ * propuesta, una corrección, algo sumado). Si no dejó nada ni la devolvió, la frase sigue en «No lo
+ * usé» con su motivo de antes: nunca desaparece sin quedar en ninguna parte (QA del 21 nov). Lo que
+ * se dijo no cambia.
  */
 export async function settleDictationRetry(
   tx: Db,
@@ -134,11 +137,13 @@ export async function settleDictationRetry(
   segmentId: string,
   phrase: string,
   unused: readonly DictationUnusedItem[],
+  used = true,
 ): Promise<void> {
   const [row] = await tx.select().from(encounterDictationSegment).where(segmentWhere(orgId, encounterId, segmentId)).limit(1)
   if (!row) return
   const same = (said: string | null) => (said ?? "").trim() === phrase.trim()
-  const kept = row.unused.filter((item) => !same(item.said))
+  const returned = unused.some((item) => same(item.said))
+  const kept = row.unused.filter((item) => !same(item.said) || (!used && !returned))
   const known = new Set(kept.map((item) => item.said ?? ""))
   const more = unused.filter((item) => {
     const key = item.said ?? ""

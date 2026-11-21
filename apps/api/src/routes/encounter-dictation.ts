@@ -277,7 +277,9 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           // El tramo queda ordenado, con lo que no se usó y por qué: se ve igual al volver a la atención.
           // Una frase reintentada sale de «No lo usé» de su tramo, o vuelve con lo que se sabe ahora.
           const left = unusedOf(extracted, onConfirmed, result.droppedForms)
-          if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left)
+          // Si el reintento no dejó nada ni devolvió la frase, sigue en «No lo usé» con su motivo de antes.
+          const used = result.suggestions.length + result.corrected.length + (result.added?.length ?? 0) + result.removed.length > 0
+          if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left, used)
           else if (!result.repeated) await settleDictationSegment(tx, orgId, at.data.encounterId, segmentId, left)
           return result
         })

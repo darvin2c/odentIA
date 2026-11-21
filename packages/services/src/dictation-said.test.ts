@@ -82,6 +82,22 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
     await enable(false)
   })
 
+  it("un reintento que tampoco la usa ni la devuelve la deja en «No lo usé» con su motivo (QA del 21 nov)", async () => {
+    await enable(true)
+    const fx = await clinicalFixture()
+    const first = randomUUID()
+    await fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId: first, transcript: "Yo creo que peso como sesenta kilos." }))
+    await fx.run((tx) => settleDictationSegment(tx, ORG, fx.encounter.id, first, [{ said: "yo creo que peso como sesenta kilos", why: "sin_lugar", detail: "peso dicho, no medido" }]))
+    // Clío no propuso nada ni la devolvió: antes la frase desaparecía de «No lo usé».
+    await fx.run((tx) => settleDictationRetry(tx, ORG, fx.encounter.id, first, "yo creo que peso como sesenta kilos", [], false))
+    const [said] = await fx.run((tx) => listDictationSaid(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(said?.unused).toEqual([{ said: "yo creo que peso como sesenta kilos", why: "sin_lugar", detail: "peso dicho, no medido" }])
+    // Si esta vez sí la usó, sale.
+    await fx.run((tx) => settleDictationRetry(tx, ORG, fx.encounter.id, first, "yo creo que peso como sesenta kilos", [], true))
+    expect((await fx.run((tx) => listDictationSaid(tx, ORG, fx.patient.id, fx.encounter.id)))[0]?.unused).toEqual([])
+    await enable(false)
+  })
+
   it("lo dicho no se reescribe ni se borra, y otra clínica no lo ve", async () => {
     await enable(true)
     const fx = await clinicalFixture()
