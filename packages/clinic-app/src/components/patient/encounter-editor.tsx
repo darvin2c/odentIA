@@ -55,6 +55,7 @@ import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
 import {
@@ -645,6 +646,8 @@ export function EncounterEditor({
   const [budgetSent, setBudgetSent] = useState(false)
   // Lo dictado en el cierre se decide al abrirlo: firmar descarta las sugerencias y la lista no cambia a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
+  // «Finalizar y firmar» ya está ordenando lo último que se dijo: otro clic no lo repite.
+  const signRequestRef = useRef(false)
   // Lo dictado que quien firma cambió de como venía: desmarcado no entra; lo que cambia lo escrito
   // viene desmarcado y entra solo si lo marca. Lo demás que se puede confirmar entra con la firma.
   const [signToggled, setSignToggled] = useState<string[]>([])
@@ -1552,6 +1555,20 @@ export function EncounterEditor({
    * bloque abierto; si no falta nada, se abre el cierre.
    */
   const requestSign = async () => {
+    if (signRequestRef.current) return
+    signRequestRef.current = true
+    try {
+      await requestSignNow()
+    } finally {
+      signRequestRef.current = false
+    }
+  }
+  const requestSignNow = async () => {
+    // El dictado no frena la firma (QA del 21 nov): lo último que se dijo se ordena y lo que ningún
+    // repaso leyó se repasa ahora, antes de ver qué falta; el cierre decide con las pendientes que
+    // dejó el repaso, no con las del render de antes (mesa del 20 nov 2026, P4).
+    let pendingNow = dictationPending
+    if (dictation.enabled && (dictation.busy || dictation.unreviewed)) pendingNow = (await dictation.settle()) ?? pendingNow
     const values = draftForm.state.values
     const first: ClosingRequirement | "vitals" | null = !values.reason.trim()
       ? "reason"
@@ -1577,10 +1594,7 @@ export function EncounterEditor({
       }
       await refreshClosing()
     }
-    // Lo que se dijo después del último repaso se repasa antes de abrir el cierre: lo que deje entra
-    // en la lista de lo que propone Clío al firmar, no después (mesa del 20 nov 2026, P4).
-    if (dictation.enabled && dictation.unreviewed && dictation.review.status !== "reviewing") await dictation.requestReview()
-    openSign()
+    openSign(pendingNow)
   }
 
   const handlePendingChange = (pending: boolean) => {
@@ -1938,16 +1952,12 @@ export function EncounterEditor({
   // No se firma lo que no se guardó: sin conexión o con cambios por guardar, espera.
   const unsaved = saveState !== "saved"
   // Lo que falta registrar no apaga «Finalizar y firmar»: lleva a su bloque y lo marca (`requestSign`).
-  const canSign = !(locked || !closingQuery.isSuccess || dictation.busy || unsaved)
+  // El dictado en curso tampoco: «Finalizar y firmar» lo termina y lo repasa antes (`requestSign`).
+  const canSign = !(locked || !closingQuery.isSuccess || unsaved)
   // El botón del pie no espera al guardado: `requestSign` guarda lo último y vuelve a comprobar
   // antes de abrir el cierre. Si se apagara mientras se guarda, el primer clic justo después de
   // escribir la evolución no haría nada. Sin conexión sí espera: no se podría guardar.
-  const canRequestSign = !(
-    locked ||
-    !closingQuery.isSuccess ||
-    dictation.busy ||
-    saveState === "offline"
-  )
+  const canRequestSign = !(locked || !closingQuery.isSuccess || saveState === "offline")
   const signBlockedReason =
     saveState === "offline"
       ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
@@ -1958,7 +1968,7 @@ export function EncounterEditor({
           : childCount > 0
             ? "Guardando lo último que registraste…"
             : null
-  const openSign = () => {
+  const openSign = (pending: number = dictationPending) => {
     setSignToggled([])
     setFormsToggled([])
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
@@ -1974,7 +1984,7 @@ export function EncounterEditor({
         registrationNumber: profile?.registrationNumber ?? "",
       })
     }
-    setConfirmWithDictation(dictationPending > 0)
+    setConfirmWithDictation(pending > 0)
     setConfirmOpen(true)
   }
   const signer = useConsentSignerWord(patientId, firstNameOf(patient))
@@ -2667,7 +2677,7 @@ export function EncounterEditor({
         ]
       : []
   const footerText = dictation.busy
-    ? "Termina el dictado para poder firmar"
+    ? `Al firmar, ${CLINICAL_NAME} termina de ordenar lo que se dijo`
     : footerWait
       ? footerWait
       : !closingQuery.isSuccess
@@ -3123,7 +3133,7 @@ export function EncounterEditor({
             </div>
             {dictation.busy ? (
               <p className="text-xs text-muted-foreground">
-                Termina el dictado y revisa las sugerencias para poder firmar.
+                Al finalizar, {CLINICAL_NAME} termina de ordenar lo que se dijo y te muestra lo que propone antes de firmar.
               </p>
             ) : dictationPending > 0 ? (
               <p className="text-xs text-muted-foreground">

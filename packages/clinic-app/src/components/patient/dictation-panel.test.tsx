@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClioFormProposals, ClioFormProposalsContext, proposesValue, reread } from "./clio-form-proposals"
-import { UnusedNotice } from "./dictation-panel"
+import { proposesLine, readiness, UnusedNotice } from "./dictation-panel"
 import { confirmable, confirmableAtSign, type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
 
 afterEach(cleanup)
@@ -126,6 +126,23 @@ describe("«Confirmar las N» no lleva lo de su salud ni una negación", () => {
     expect(confirmableAtSign(none)).toBe(true)
     expect(markedByDefault(none)).toBe(false)
     expect(confirmable(item("alergia", { substance: "Penicilina" }))).toBe(true)
+  })
+
+  it("«Clío propone N» y «Confirmar las M» cuadran, o dicen por qué no (QA del 21 nov)", () => {
+    // Antes: «Clío propone 6: 5 en la consulta y 1 receta» con «Confirmar las 3 de la consulta».
+    const list = [
+      { ...item("nota", { reason: "Dolor" }), id: "a" },
+      { ...item("diagnostico", { code: "K04.0" }), id: "b" },
+      { ...item("plan", { service: "endodoncia" }), id: "c", status: "por_revisar" as const },
+      { ...item("alergia", { none: true }), id: "d" },
+      { ...item("salud", { declarante: "paciente" }), id: "e" },
+      { ...item("receta", { drug: "ibuprofeno" }), id: "f" },
+    ]
+    expect(list.filter(confirmable)).toHaveLength(2)
+    expect(proposesLine(list)).toBe("Clío propone 6: 4 en la consulta, 1 receta y 1 de su salud")
+    expect(readiness(list, 0)).toBe(
+      "A 1 le falta un dato: complétala en su bloque · Un «No» se confirma en su fila · Lo de su salud se revisa con la persona, aparte. Nada entra a la historia hasta que lo confirmes.",
+    )
   })
 })
 

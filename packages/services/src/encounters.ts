@@ -3850,6 +3850,20 @@ export async function finalizeEncounter(
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
+  // Lo que Clío proponía y nadie confirmó al firmar ya no tiene dónde entrar: se descarta, para que
+  // ninguna propuesta quede «lista» en una atención firmada (QA del 21 nov). Lo de su salud no: lo
+  // dicho sigue a la vista, sin revisar, hasta que alguien lo revise con la persona.
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", note: "La atención se firmó sin confirmarla.", decidedBy: actorUserId, decidedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        ne(encounterDictationSuggestion.kind, "salud"),
+      ),
+    )
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
   // firma el odontograma con el mismo perfil si llega a un momento de la norma; NTS 188, 5.3 y 5.10).
   const product = await hooks.encounterFinalized(tx, {

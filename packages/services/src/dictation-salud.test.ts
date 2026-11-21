@@ -1,6 +1,6 @@
 import { prescribingAlerts } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
+import { encounterDictationSuggestion, patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -481,6 +481,31 @@ describe("A6 · lo quitado con «Corregir algo» queda resuelto", () => {
     const [one] = await health()
     expect(one?.payload["medications"]).toBeUndefined()
     expect(one?.payload["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán" })
+    await enable(false)
+  })
+})
+
+describe("la firma no deja propuestas de Clío colgando (QA del 21 nov)", () => {
+  it("lo que nadie confirmó se descarta al firmar; lo de su salud sigue a la vista, sin revisar", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [
+        { kind: "nota", payload: { evolution: "Anestesia infiltrativa con lidocaína en la 36." }, sourceText: "le pongo anestesia infiltrativa con lidocaina en la 36" },
+        { kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixaban" },
+      ],
+      transcript: "tomo apixaban. le pongo anestesia infiltrativa con lidocaina en la 36",
+    })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const rows = await ownerDb
+      .select({ kind: encounterDictationSuggestion.kind, status: encounterDictationSuggestion.status })
+      .from(encounterDictationSuggestion)
+      .where(eq(encounterDictationSuggestion.encounterId, fx.encounter.id))
+    expect(rows.map((row) => [row.kind, row.status]).sort()).toEqual([
+      ["nota", "descartada"],
+      ["salud", "lista"],
+    ])
     await enable(false)
   })
 })

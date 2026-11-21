@@ -137,3 +137,48 @@ describe("lo que la pestaña no pide de más", () => {
     }
   })
 })
+
+/*
+ * QA del 21 nov 2026: el cierre que se abría justo después del repaso decidía con las pendientes de
+ * antes (firmaba sin la evolución que trajo el repaso), y escribiendo no había cómo terminar: la firma
+ * quedaba apagada con «Termina el dictado».
+ */
+describe("antes de firmar", () => {
+  const suggestion = { id: "n-1", kind: "nota", payload: { evolution: "Anestesia infiltrativa en la 36." }, sourceText: "", status: "lista", note: null, summary: "", voice: null, removal: null }
+  const afterReview = () => {
+    let reviewed = false
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: reviewed ? [suggestion] : [], removedByVoice: [], confirmed: 0 } }
+      if (url === `${BASE}/review`) {
+        reviewed = true
+        return { data: { reviewed: true, suggestions: [suggestion], added: [], turnsSaved: [] } }
+      }
+      return segmentReply
+    })
+  }
+
+  it("el repaso devuelve las pendientes de ahora, con lo que dejó", async () => {
+    afterReview()
+    const { result } = render()
+    await waitFor(() => expect(result.current.enabled).toBe(true))
+    let pending: number | null = null
+    await act(async () => {
+      pending = await result.current.requestReview()
+    })
+    expect(pending).toBe(1)
+  })
+
+  it("«settle» manda lo escrito que quedaba, repasa y devuelve las pendientes, sin «Terminar dictado»", async () => {
+    afterReview()
+    const { result } = render()
+    await waitFor(() => expect(result.current.enabled).toBe(true))
+    act(() => result.current.submitTyped("Le pongo anestesia infiltrativa con lidocaína en la 36."))
+    let pending: number | null = null
+    await act(async () => {
+      pending = await result.current.settle()
+    })
+    expect(posts()).toEqual([BASE, `${BASE}/review`])
+    expect(pending).toBe(1)
+    expect(result.current.busy).toBe(false)
+  })
+})

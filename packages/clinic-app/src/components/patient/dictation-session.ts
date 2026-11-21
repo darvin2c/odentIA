@@ -99,6 +99,8 @@ const MIN_SEGMENT_CHARS = 12
 const IN_PROGRESS_MS = 3000
 /** Cuántas veces se vuelve a mirar: de sobra para lo que tarda una llamada al modelo. */
 const IN_PROGRESS_TRIES = 20
+/** Cuánto espera «Finalizar y firmar» a que se ordene lo último que se dijo antes de abrir el cierre. */
+const SETTLE_MS = 90_000
 /**
  * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
@@ -423,6 +425,9 @@ export function useDictationSession({
   // La marcada en la que se detuvo «Firmar con N marcadas»: el aviso de la firma dice cuál.
   const [confirmManyFailed, setConfirmManyFailed] = useState<DictationSuggestion | null>(null)
   const [review, setReview] = useState<DictationReview>({ status: "idle" })
+  // Lo escrito en el cuadro y aún no mandado: vive aquí, no en el cuadro, para que no se pierda si la
+  // barra se vuelve a dibujar al llegar las propuestas (QA del 21 nov, novato T3 pausa 3).
+  const [typedDraft, setTypedDraft] = useState("")
 
   const recognition = useRef<SpeechLike | null>(null)
   const wanted = useRef(false)
@@ -439,6 +444,8 @@ export function useDictationSession({
   // «Terminar dictado» pidió el repaso: va cuando la cola de tramos se vacía.
   const reviewWanted = useRef(false)
   const reviewing = useRef(false)
+  // Hay tramos sin repasar (del último render): `settle` lo mira después de esperar.
+  const unreviewedRef = useRef(false)
   const canListen = speechRecognition() !== null
 
   useEffect(() => {
@@ -505,8 +512,8 @@ export function useDictationSession({
    * (y lo podrá pedir «Finalizar y firmar»); si no hay tramos nuevos desde el último, el servidor no
    * llama al modelo. Si falla, lo ya ordenado sigue igual y se puede pedir otra vez.
    */
-  const requestReview = useCallback(async () => {
-    if (reviewing.current) return
+  const requestReview = useCallback(async (): Promise<number | null> => {
+    if (reviewing.current) return null
     reviewing.current = true
     setReview({ status: "reviewing" })
     try {
@@ -522,7 +529,7 @@ export function useDictationSession({
         await new Promise((resolve) => window.setTimeout(resolve, IN_PROGRESS_MS))
         response = await post()
       }
-      if (!mounted.current) return
+      if (!mounted.current) return null
       const data = response.data
       setReview({ status: "done", reviewed: data.reviewed || waited, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
       if (data.reviewed || waited) {
@@ -535,7 +542,10 @@ export function useDictationSession({
     } finally {
       reviewing.current = false
     }
-  }, [base, openForms, refresh, refreshSaid, refreshHealth])
+    // Las pendientes de ahora, con lo que dejó el repaso: el cierre que se abre justo después decide con
+    // estas, no con las del render anterior (QA del 21 nov: firmaba sin lo que trajo el repaso).
+    return queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions.length ?? null
+  }, [base, openForms, refresh, refreshSaid, refreshHealth, queryClient, key])
 
   /**
    * Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se
@@ -733,6 +743,26 @@ export function useDictationSession({
     // al cerrarse (`onend`), que lo envía y lo pide; si no, va ya, aunque no quede nada por enviar.
     if (!listening) void drain()
   }, [stopMic, cut, drain])
+
+  /**
+   * Antes de firmar, sin que nadie tenga que encontrar «Terminar dictado» (QA del 21 nov: escribiendo
+   * no había cómo, y la firma quedaba apagada): el micrófono se apaga, lo último que se dijo se ordena
+   * y, si hay tramos que ningún repaso leyó, se repasa. Devuelve cuántas pendientes hay ahora, con lo
+   * que dejó el repaso, para que el cierre decida con ellas.
+   */
+  const settle = useCallback(async (): Promise<number | null> => {
+    if (wanted.current) stopMic()
+    setMode("off")
+    cut(true)
+    const sentNow = queue.current.length > 0 || draining.current
+    void drain()
+    const busyNow = () => draining.current || queue.current.length > 0 || reviewing.current
+    for (let waited = 0; busyNow() && mounted.current && waited < SETTLE_MS; waited += 200)
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
+    if (!mounted.current) return null
+    if (sentNow || unreviewedRef.current) return requestReview()
+    return queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions.length ?? null
+  }, [stopMic, cut, drain, requestReview, queryClient, key])
 
   /** Dictado escrito o pegado: para navegadores sin reconocimiento de voz. Se ordena de una vez. */
   const submitTyped = useCallback(
@@ -979,6 +1009,7 @@ export function useDictationSession({
   // Tramos ya ordenados que ningún repaso leyó: «Finalizar y firmar» los repasa antes. Uno ya leído
   // sin turnos (los rechazó, o no empezó ninguno en él) no pide otro repaso.
   const unreviewed = said.some((segment) => segment.organized && !(segment.reviewed ?? segment.turns !== null))
+  unreviewedRef.current = unreviewed
   return {
     enabled,
     confirmReadyFailed,
@@ -1037,6 +1068,11 @@ export function useDictationSession({
     pause,
     resume,
     finish,
+    /** Antes de firmar: apaga el micrófono, ordena lo último y repasa lo nuevo; da las pendientes de ahora. */
+    settle,
+    /** Lo escrito en el cuadro sin mandar todavía. */
+    typedDraft,
+    setTypedDraft,
     submitTyped,
     retryUnused,
     act,
