@@ -440,7 +440,9 @@ export function AllergyFormDrawer({
                 description={
                   entry
                     ? `${allergyListDetail(entry)}: el aviso al recetar compara por su código.`
-                    : `Medicamentos y sus grupos (con su código ATC), ${appWords().examples.allergyOthers} y alimentos frecuentes.`
+                    : field.state.value?.kind === "text"
+                      ? "Escrita a mano: al recetar solo avisa si el medicamento se escribe igual. Si está en la lista, elígela."
+                      : `Medicamentos y sus grupos (con su código ATC), ${appWords().examples.allergyOthers} y alimentos frecuentes.`
                 }
               >
                 {(control) => (

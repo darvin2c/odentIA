@@ -14,6 +14,7 @@ import {
 } from "@odentia/ui"
 import { useMemo, useState } from "react"
 import { productUi } from "../../product/product-ui"
+import { type FreeTextCommit, useFreeTextCombobox } from "./free-text-combobox"
 
 /** Lo elegido: una sustancia de la lista o, a propósito, lo escrito sin codificar. */
 export type AllergenChoice =
@@ -41,7 +42,8 @@ function itemOf(choice: AllergenChoice): Item {
 /**
  * La sustancia de una alergia (tablero 7): se escribe y se elige de la lista
  * («Penicilinas (grupo) · medicamento · ATC J01C»), y el tipo de alérgeno sale
- * de ahí. Lo que no está se puede guardar como texto, sin codificar.
+ * de ahí. Lo que no está se puede guardar como texto, sin codificar: eligiéndolo,
+ * con Enter o saliendo del campo.
  */
 export function AllergenPicker({
   id,
@@ -74,13 +76,30 @@ export function AllergenPicker({
     if (allowText && text && !codeAllergySubstance(text, allergens)) found.push(itemOf({ kind: "text", text }))
     return found
   }, [typed, allowText])
+  // Lo escrito sin elegir de la lista (Enter o salir del campo): la de la lista si se llama
+  // exactamente así; si no, como texto, cuando se puede.
+  const commitTyped = (): FreeTextCommit => {
+    const text = (typed ?? "").trim()
+    if (!text || value) return "nada"
+    const entry = codeAllergySubstance(text, productUi().prescribing.catalog.allergens)
+    // «Elegir de la lista»: lo que no está no se guarda escrito; la lista sigue abierta para elegir.
+    if (!entry && !allowText) return "queda"
+    setTyped(null)
+    onChange(entry ? { kind: "entry", entry } : { kind: "text", text })
+    return "guardado"
+  }
+  const freeText = useFreeTextCombobox(commitTyped)
 
   return (
     <Combobox
+      {...freeText.rootProps}
       items={items}
       value={selected}
       inputValue={inputValue}
-      onInputValueChange={(next) => {
+      onInputValueChange={(next, details) => {
+        // Al elegir de la lista, el Combobox escribe su nombre después de `onValueChange`: no
+        // es que se borró lo elegido.
+        if (details.reason === "item-press") return
         setTyped(next)
         if (value) onChange(null)
       }}
@@ -104,6 +123,10 @@ export function AllergenPicker({
         triggerLabel="Mostrar la lista de sustancias"
         autoComplete="off"
         disabled={disabled}
+        onKeyDown={freeText.onKeyDown}
+        onBlur={() => {
+          commitTyped()
+        }}
       />
       <ComboboxContent aria-label="Sustancias">
         <ComboboxList aria-label="Sustancias">
