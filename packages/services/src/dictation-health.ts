@@ -666,7 +666,9 @@ const valueWords = (value: unknown): string =>
 
 /** Lo que dice un campo de la entrevista, en pocas palabras. */
 function fieldWords(group: string, key: string, value: unknown): string {
-  if (group === "dental" && key === "corazon" && isRecord(value)) {
+  // `group` es el grupo de la entrevista («dental.corazon»), no el producto: se compara la clave entera.
+  const field = `${group}.${key}`
+  if (field === "dental.corazon" && isRecord(value)) {
     return [
       value["riesgoEndocarditis"] ? `válvula o endocarditis: ${valueWords(value["riesgoEndocarditis"])}` : "",
       value["antibioticoPrevio"] ? `antibiótico antes: ${valueWords(value["antibioticoPrevio"])}` : "",
@@ -674,7 +676,7 @@ function fieldWords(group: string, key: string, value: unknown): string {
       .filter(Boolean)
       .join(" · ")
   }
-  if (group === "dental" && key === "problemaAnestesia") {
+  if (field === "dental.problemaAnestesia") {
     if (!isRecord(value)) return valueWords(value)
     return [
       value["anestesia"] ? `problemas: ${valueWords(value["anestesia"])}${value["quePaso"] ? ` (${value["quePaso"] === "desmayo" ? "se desmayó o le bajó la presión" : value["quePaso"] === "alergia" ? "alergia o ronchas" : "otra cosa"})` : ""}` : "",
@@ -753,7 +755,7 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
       if (key === "semanasEmbarazo" || key === "cigarrillos") continue
       let words = fieldWords(group, key, item)
       if (group === "personal" && key === "embarazo" && item === true && typeof value["semanasEmbarazo"] === "number") words = `sí, ${value["semanasEmbarazo"]} semanas`
-      if (group === "medical" && key === "tabaco" && item === "fuma" && typeof value["cigarrillos"] === "string")
+      if (`${group}.${key}` === "medical.tabaco" && item === "fuma" && typeof value["cigarrillos"] === "string")
         words = `sí, ${CIGARETTE_BAND_LABELS[value["cigarrillos"] as keyof typeof CIGARETTE_BAND_LABELS] ?? value["cigarrillos"]}`
       const denied = isDenial(item) || (isRecord(item) && Object.keys(item).length > 0 && Object.values(item).every(isDenial))
       push({ key: `${group}.${key}`, group, label: FIELD_LABEL[`${group}.${key}`] ?? key, value: words, by: saidBy[`${group}.${key}`] ?? unknownBy }, denied)
