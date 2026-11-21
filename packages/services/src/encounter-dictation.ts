@@ -2419,6 +2419,21 @@ export async function saveDictationSegment(
         ? same.some((item) => item.choice && covers(item.place, entry.place) && entry.names.every((name) => item.names.includes(name)))
         : same.some((item) => covers(item.place, entry.place))
       if (repeated) continue
+      // La elección incluye la misma prestación que quedó suelta en esa pieza en otra pausa («le planteo
+      // endodoncia de la 36» y luego «la otra opción es la exodoncia»): la suelta ya es uno de sus
+      // caminos. Si quedaran las dos, el presupuesto la sumaría también en cada opción (QA clínica del
+      // 21 nov, H4). Una elección que espera (`choiceBlocked`) no se confirma: no absorbe nada.
+      if (entry.choice && ready.payload["choiceBlocked"] !== true) {
+        for (const loose of same.filter((item) => item.id && !item.choice && item.place.tooth !== null && covers(entry.place, item.place))) {
+          const row = await pendingRow(loose.id!)
+          if (!row) continue
+          await tx
+            .update(encounterDictationSuggestion)
+            .set({ status: "descartada", note: "La incluye la elección de caminos.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+            .where(eq(encounterDictationSuggestion.id, row.id))
+          pendingPlans.splice(pendingPlans.indexOf(loose), 1)
+        }
+      }
       // Lo nuevo solo agrega lo que le faltaba a una pendiente («la corona es en la 25»): se corrige esa.
       if (!entry.choice) {
         const vaguer = same.find((item) => item.id && !item.choice && covers(entry.place, item.place))
@@ -3550,10 +3565,34 @@ async function confirmPlanChoice(
   const services = await activeServices(tx, orgId)
   const site = choiceSite(payload)
   const detail = (payload["detail"] as string | undefined) ?? null
+  const drafted = (await findDraftBudget(tx, orgId, patientId))?.id
+  // Lo mismo ya indicado hoy en esa pieza (la endodoncia suelta confirmada antes de dictar la otra
+  // opción) es ese camino, no otro tratamiento: indicarlo otra vez lo dejaba en el plan dos veces y,
+  // al firmar, la suelta entraba a todas las opciones (QA clínica del 21 nov, H4). Solo lo que aún
+  // espera respuesta y no está en otro presupuesto.
+  const { site: productSite, budgetRequired: required } = await productHooks(tx, orgId)
+  const indicatedHere = (
+    await tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          eq(treatmentPlanItem.sourceEncounterId, encounterId),
+          eq(treatmentPlanItem.status, "pendiente"),
+          eq(treatmentPlanItem.decisionStatus, required ? "pendiente" : "aceptado"),
+        ),
+      )
+      .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  ).filter((item) => item.budgetId === null || item.budgetId === drafted)
   // Cada camino toma de lo dicho solo lo que su prestación lleva: la corona, la pieza; la resina, también las caras.
-  const indicate = (serviceId: string) => {
+  const indicate = async (serviceId: string) => {
     const scope = services.find((service) => service.id === serviceId)?.scope ?? null
     const own = dictation.fitToScope(site, scope).payload
+    const where = doneSite(own)
+    const already = indicatedHere.find((item) => item.serviceId === serviceId && doneSite(productSite.fields(item)) === where)
+    if (already) return already
     return addPlanItem(tx, orgId, actorUserId, patientId, {
       serviceId,
       planId: null,

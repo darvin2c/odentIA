@@ -15,7 +15,7 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { findDraftBudget } from "../budgets.js"
+import { assembleEncounterBudget, findDraftBudget } from "../budgets.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -451,6 +451,79 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
 
     // La misma prestación en otra pieza sí es otra indicación.
     expect((await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 26 } }] })).suggestions).toHaveLength(1)
+    await enable(false)
+  })
+
+  // QA clínica del 21 nov (H4): «le planteo endodoncia de la 36» en una pausa y «la otra opción es la
+  // exodoncia de la 36» en otra daban S/ 1 300 y S/ 800: la endodoncia iba suelta y además como camino.
+  const twoPaths = async (name: string) => {
+    const fx = await openSession(`Endodoncia ${name}`, "tooth")
+    await ownerDb.update(serviceCatalog).set({ priceCents: 65000 }).where(eq(serviceCatalog.id, fx.service.id))
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: `Exodoncia ${name}`, scope: "tooth", source: "custom", priceCents: 15000, currency: "PEN" })
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const loose = () => segment({ drafts: [{ kind: "plan", payload: { service: `endodoncia ${name}`, toothNumber: 36 }, sourceText: "Le planteo endodoncia de la 36." }] })
+    const choice = () =>
+      segment({
+        drafts: [{ kind: "plan", payload: { service: `endodoncia ${name}`, toothNumber: 36, alternatives: [`exodoncia ${name}`] }, sourceText: "La otra opción es la exodoncia de la 36." }],
+      })
+    // Lo que queda en cada opción del borrador, con su total.
+    const budgetOptions = async () => {
+      const budget = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+      const options = await ownerDb.select().from(treatmentBudgetOption).where(eq(treatmentBudgetOption.budgetId, budget!.id))
+      const lines = await ownerDb.select().from(treatmentBudgetItem).where(eq(treatmentBudgetItem.budgetId, budget!.id))
+      return options
+        .sort((a, b) => a.position - b.position)
+        .map((option) => {
+          const own = lines.filter((line) => line.optionId === option.id)
+          return { titles: own.map((line) => line.title).sort(), total: own.reduce((sum, line) => sum + (line.priceCents ?? 0), 0) }
+        })
+    }
+    const endodontics = async () =>
+      (await ownerDb.select().from(treatmentPlanItem).where(and(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id), eq(treatmentPlanItem.serviceId, fx.service.id)))).filter(
+        (item) => item.status !== "cancelado",
+      )
+    return { fx, loose, choice, budgetOptions, endodontics }
+  }
+
+  it("la elección de dos caminos absorbe la endodoncia suelta pendiente de la misma pieza (QA clínica del 21 nov, H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("de la pausa")
+    const [first] = (await loose()).suggestions
+    expect(first).toMatchObject({ status: "lista", payload: { toothNumber: 36 } })
+    const [paths] = (await choice()).suggestions
+    expect(paths).toMatchObject({ payload: { serviceName: "Endodoncia de la pausa", options: [expect.objectContaining({ serviceName: "Exodoncia de la pausa" })] } })
+    // Queda solo la elección: la endodoncia suelta ya es su camino A.
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(pending.map((item) => item.id)).toEqual([paths!.id])
+
+    // Al firmar entra lo que espera y se arma el presupuesto.
+    for (const item of pending) await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, item.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia de la pausa"], total: 65000 },
+      { titles: ["Exodoncia de la pausa"], total: 15000 },
+    ])
+    expect(await endodontics()).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("con la endodoncia suelta ya confirmada al plan, la elección la toma como su camino y el presupuesto no la suma dos veces (H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("ya confirmada")
+    const [first] = (await loose()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, first!.id))
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia ya confirmada"], total: 65000 },
+      { titles: ["Exodoncia ya confirmada"], total: 15000 },
+    ])
+    // Una sola endodoncia de la 36 en el plan: la que se confirmó antes.
+    const [endo] = await endodontics()
+    expect(await endodontics()).toHaveLength(1)
+    const firstRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, first!.id)))[0]!
+    expect(endo!.id).toBe(firstRow.entityId)
     await enable(false)
   })
 
