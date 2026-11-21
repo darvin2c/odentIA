@@ -8,7 +8,11 @@
  * ellos responden. Cada pausa es una llamada al modelo, como en la atención
  * (`askDictationModel` con el perfil del producto): con lo último ya ordenado y
  * las sugerencias pendientes, nombradas como las nombra el servicio
- * (`dictationModelLabel`). Lo que el modelo pide quitar sale de las pendientes.
+ * (`dictationModelLabel`). Lo que devuelve se aplica como en el servidor, con sus
+ * funciones puras (`applyPause` de `eval:dictado-conversado`: la consulta que se
+ * suma, las correcciones y lo que pide quitar), y al final va el repaso
+ * (`askDictationReview`) si la rama lo tiene; su costo se dice aparte. En `main`
+ * se mide con lo que tenía (sin repaso; cada consulta, otra tarjeta).
  * El tipo cobrado sale de lo que quedó, con la misma regla del cobro
  * (`consultationTierOf`, ADR 0085), suponiendo que el profesional lo confirma.
  * Imprime pausas, tokens, costo, lo que se cobraría (con y sin Fundadores) y el
@@ -17,9 +21,11 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { consultationTierOf, type DictationDraft, dictationFor, dictationModelLabel, type ProductDictation } from "@odentia/services"
+import { consultationTierOf, dictationFor, dictationModelLabel, type ProductDictation, productHooksFor } from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
+import * as dictationModule from "./dictation.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
+import { applyPause, newState, pauseContext, pendingOf, type SimProduct } from "./eval-dictado-conversado-cuenta.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
 
@@ -52,15 +58,16 @@ if (spec.provider === "fake") throw new Error("Esta medición es con un modelo r
  * El dictado de cada producto, elegido como en la atención (`products.ts`, ADR
  * 0079): lo común no importa lo dental ni lo médico.
  */
-function productOf(producto: FullEncounter["producto"]): { profile: DictationProfile; dictation: ProductDictation; catalog: string } {
+function productOf(producto: FullEncounter["producto"]): { profile: DictationProfile; dictation: ProductDictation; catalog: string; sim: SimProduct } {
   const product = producto === "medico" ? "medical" : "dental"
   const profile = dictationProfileFor(product)
   const dictation = dictationFor(product)
   if (!profile || !dictation) throw new Error(`Clío no dicta en ${product}`)
-  return { profile, dictation, catalog: dictation.catalogText() }
+  const hooks = productHooksFor(product)
+  return { profile, dictation, catalog: dictation.catalogText(), sim: { dictation, site: hooks.site, formDiagnoses: hooks.forms.diagnoses } }
 }
-/** Lo último ya ordenado que acompaña a cada pausa, como en la pantalla (`CONTEXT_CHARS`). */
-const CONTEXT_CHARS = 600
+/** El repaso al terminar, si la rama lo tiene (mesa del 20 nov 2026, P4). */
+const askReview = (dictationModule as Partial<typeof dictationModule>).askDictationReview
 /** Palabras por minuto de una conversación en consulta: para decir cuánto se habla. */
 const WORDS_PER_MINUTE = 140
 
@@ -72,6 +79,9 @@ interface Result {
   leidoDeCache: number
   salida: number
   micros: number
+  /** Lo del repaso, ya sumado en `micros`. */
+  microsRepaso: number
+  repaso: boolean
   sinPrecio: number
   /** Lo que quedó al final, por clase: lo que el profesional confirmaría. */
   quedo: Record<string, number>
@@ -79,30 +89,17 @@ interface Result {
 }
 
 async function run(encounter: FullEncounter): Promise<Result> {
-  const { profile, dictation, catalog } = productOf(encounter.producto)
+  const { profile, dictation, catalog, sim } = productOf(encounter.producto)
   const model = await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
-  const result = { encounter, palabras: encounter.pausas.join(" ").split(/\s+/).length, sinHerramienta: 0, entrada: 0, leidoDeCache: 0, salida: 0, micros: 0, sinPrecio: 0 }
-  let pending: DictationDraft[] = []
-  let heard = ""
+  const result = { encounter, palabras: encounter.pausas.join(" ").split(/\s+/).length, sinHerramienta: 0, entrada: 0, leidoDeCache: 0, salida: 0, micros: 0, microsRepaso: 0, repaso: false, sinPrecio: 0 }
+  const state = newState()
+  const label = (row: { kind: string; payload: Record<string, unknown> }) => dictationModelLabel(row as Parameters<typeof dictationModelLabel>[0], dictation)
+  const said: string[] = []
   const now = new Date()
-  for (const pause of encounter.pausas) {
-    const { read, reply } = await askDictationModel(
-      model,
-      spec,
-      {
-        provider: spec.provider,
-        services: encounter.producto === "dental" ? bank.servicios.dental : bank.servicios.medico,
-        diagnosisList: "CIE-10 (OMS)",
-        catalog,
-        zone: { locale: "es-PE", timezone: "America/Lima" },
-        now,
-        transcript: pause,
-        context: heard.slice(-CONTEXT_CHARS).trim(),
-        pending: pending.slice(0, 40).map((item) => ({ label: dictationModelLabel(item, dictation) })),
-      },
-      profile,
-    )
-    heard = `${heard} ${pause}`
+  const services = encounter.producto === "dental" ? bank.servicios.dental : bank.servicios.medico
+  const zone = { locale: "es-PE", timezone: "America/Lima" }
+  /** Lo que reportó el proveedor, sumado; `null` si no tiene precio. */
+  const account = (reply: { usage_metadata?: unknown }): number | null => {
     const meta = (reply.usage_metadata ?? {}) as { input_tokens?: number; output_tokens?: number; input_token_details?: { cache_read?: number; cache_creation?: number } }
     result.entrada += meta.input_tokens ?? 0
     result.leidoDeCache += meta.input_token_details?.cache_read ?? 0
@@ -116,17 +113,68 @@ async function run(encounter: FullEncounter): Promise<Result> {
     })
     if (cost === null) result.sinPrecio += 1
     else result.micros += cost
+    return cost
+  }
+  for (const [index, pause] of encounter.pausas.entries()) {
+    const { read, reply, heard } = await askDictationModel(
+      model,
+      spec,
+      {
+        provider: spec.provider,
+        services,
+        diagnosisList: "CIE-10 (OMS)",
+        catalog,
+        zone,
+        now,
+        transcript: pause,
+        // Como la atención: lo dicho antes (de lo guardado en la rama nueva; de la pestaña en `main`).
+        context: pauseContext(said, said),
+        pending: pendingOf(state).slice(0, 40).map((row) => ({ label: label(row) })),
+      },
+      profile,
+    )
+    said.push(pause)
+    account(reply)
     if (!read) {
       result.sinHerramienta += 1
       continue
     }
-    // Lo que pidió quitar deja de estar pendiente; lo nuevo se suma.
-    const removed = new Set(read.removals.map((item) => item.index))
-    pending = pending.filter((_, index) => !removed.has(index))
-    pending.push(...read.drafts)
+    applyPause(state, read, { transcript: heard, at: `pausa ${index + 1}`, questions: [] }, sim)
+  }
+  if (askReview) {
+    const segments = encounter.pausas.map((transcript, index) => ({ number: index + 1, saidAt: new Date(now.getTime() - (encounter.pausas.length - index) * 20_000), transcript, needsTurns: true }))
+    const { read, reply } = await askReview(
+      model,
+      spec,
+      {
+        provider: spec.provider,
+        services,
+        diagnosisList: "CIE-10 (OMS)",
+        catalog,
+        zone,
+        now,
+        segments,
+        earlierLeftOut: false,
+        pending: pendingOf(state).map(label),
+        confirmed: [],
+        discarded: state.suggestions.filter((row) => row.status === "descartada").map(label),
+      },
+      profile,
+    )
+    result.repaso = true
+    result.microsRepaso += account(reply) ?? 0
+    if (!read) result.sinHerramienta += 1
+    else {
+      applyPause(
+        state,
+        { drafts: read.drafts, corrections: [], removals: [], omitted: read.omitted, unused: read.unused },
+        { transcript: segments.map((segment) => segment.transcript).join("\n"), at: "repaso", questions: [], review: true },
+        sim,
+      )
+    }
   }
   const quedo: Record<string, number> = {}
-  for (const item of pending) quedo[item.kind] = (quedo[item.kind] ?? 0) + 1
+  for (const item of pendingOf(state)) quedo[item.kind] = (quedo[item.kind] ?? 0) + 1
   return { ...result, quedo, tipo: consultationTierOf(new Set(Object.keys(quedo))) }
 }
 
@@ -144,8 +192,8 @@ for (const item of results) {
   console.log(
     [
       `${item.encounter.id} (${item.encounter.producto}, cita de ${item.encounter.minutos} min, ${(item.palabras / WORDS_PER_MINUTE).toFixed(0)} min de habla)`,
-      `  ${calls} pausas · ${item.entrada} tokens de entrada (${item.leidoDeCache} leídos de la caché) · ${item.salida} de salida`,
-      `  costo ${money(cost)}${item.sinPrecio ? ` (+${item.sinPrecio} llamadas sin precio)` : ""} · por pausa ${money(cost / calls)}`,
+      `  ${calls} pausas${item.repaso ? " + repaso" : ""} · ${item.entrada} tokens de entrada (${item.leidoDeCache} leídos de la caché) · ${item.salida} de salida`,
+      `  costo ${money(cost)}${item.sinPrecio ? ` (+${item.sinPrecio} llamadas sin precio)` : ""} · por pausa ${money((cost - usd(item.microsRepaso)) / calls)}${item.repaso ? ` · el repaso ${money(usd(item.microsRepaso))}` : ""}`,
       `  se cobra «${item.tipo}»: ${money(price)} (Fundadores ${money(price / 2)}) · el costo es el ${pct(cost, price)} (${pct(cost, price / 2)} con Fundadores)`,
       `  quedó: ${Object.entries(item.quedo).map(([kind, count]) => `${kind} ${count}`).join(", ") || "nada"}${item.sinHerramienta ? ` · ${item.sinHerramienta} pausas sin herramienta` : ""}`,
     ].join("\n"),

@@ -1631,7 +1631,7 @@ const saysAlready = (text: string, part: string) => ` ${normalizeForSearch(text)
  * con lo último y guarda lo anterior en `earlier`, nunca los dos juntos. `null`: algo no cabría
  * en su campo, y no se corta: va en otra sugerencia.
  */
-function mergeNote(current: Record<string, unknown>, added: Record<string, unknown>): { payload: Record<string, unknown>; earlier: Record<string, string> } | null {
+export function mergeNote(current: Record<string, unknown>, added: Record<string, unknown>): { payload: Record<string, unknown>; earlier: Record<string, string> } | null {
   const payload = { ...current }
   const earlier: Record<string, string> = {}
   const fields = OPERATIONS["atencion.nota"].fields
@@ -1656,7 +1656,7 @@ function mergeNote(current: Record<string, unknown>, added: Record<string, unkno
  * pregunta. Sin esto, «¿Y desde cuándo le pasa eso?», sola, o una pausa sin nada de la consulta la
  * reescribían (desarrollo y auditor, mesa del 20 nov 2026).
  */
-function saidToCorrectNote(said: string | undefined, transcript: string | undefined): boolean {
+export function saidToCorrectNote(said: string | undefined, transcript: string | undefined): boolean {
   const text = said?.trim() ?? ""
   if (!text || /^¿|\?$/u.test(text)) return false
   return transcript === undefined || saysAlready(transcript, text)
@@ -1886,7 +1886,7 @@ async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounte
  * una frase de duda, va a lo de su salud como que no sabe, que se revisa con la persona y nunca
  * entra de un toque.
  */
-function doubtfulAllergy(draft: DictationDraft): DictationDraft {
+export function doubtfulAllergy(draft: DictationDraft): DictationDraft {
   if (draft.kind !== "alergia" || draft.payload["none"] !== true || !saidInDoubt(draft.sourceText)) return draft
   return { kind: "salud", payload: { declarante: "no_se_sabe", allergies: { state: "unknown" } }, ...(draft.sourceText ? { sourceText: draft.sourceText } : {}) }
 }
