@@ -141,6 +141,8 @@ describe("Clío en una consulta conversada, en latidIA", () => {
     ["¿Clío entiende si converso con el paciente?", "pacientes-dictado-conversar"],
     ["¿Dónde veo lo que se dijo en la consulta?", "pacientes-dictado-lo-que-se-dijo"],
     ["¿Cómo confirmo lo que el paciente dijo de su salud?", "pacientes-dictado-salud"],
+    ["¿Cómo termino el dictado si escribo en vez de dictar?", "pacientes-dictado-terminar-escribiendo"],
+    ["como hago para que Clio escuche la consulta y me proponga lo que se registra", "pacientes-dictado-conversar"],
   ])("«%s» tiene su respuesta", (question, id) => {
     expect(matchHelpTopics(question, MEDICAL_HELP_TOPICS)[0]?.faq?.id).toBe(id)
   })

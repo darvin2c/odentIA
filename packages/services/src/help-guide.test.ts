@@ -441,6 +441,13 @@ describe("Clío en una consulta conversada", () => {
     ["¿Clío entiende si converso con el paciente?", "pacientes-dictado-conversar"],
     ["¿Dónde veo lo que se dijo en la consulta?", "pacientes-dictado-lo-que-se-dijo"],
     ["¿Cómo confirmo lo que el paciente dijo de su salud?", "pacientes-dictado-salud"],
+    ["¿Cómo termino el dictado si escribo en vez de dictar?", "pacientes-dictado-terminar-escribiendo"],
+    // Como lo preguntó la novata en la QA del 21 nov: antes, «No estoy segura de qué preguntas».
+    ["como hago para que Clio escuche la consulta y me proponga lo que se registra", "pacientes-dictado-conversar"],
+    ["como termino el dictado si escribo en vez de hablar", "pacientes-dictado-terminar-escribiendo"],
+    ["el paciente dijo un medicamento y luego se corrigio, como dejo registrado lo que dijo de su salud", "pacientes-dictado-salud"],
+    ["atiendo a un nino de 7 anos y responde su mama, como lo registro", "pacientes-dictado-conversar"],
+    ["deje una atencion a medias y quiero volver a ella y ver que se dijo", "pacientes-dictado-lo-que-se-dijo"],
   ])("«%s» tiene su respuesta", (question, id) => {
     expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
     const faq = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === id)
