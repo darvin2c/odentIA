@@ -26,7 +26,8 @@ igual sus cargos, sus pagos y sus saldos, sin pasos a mano y sin que nadie note 
   clínica es la misma y ningún servicio cambia lo que lee. Lo único que cambia es a qué apuntan
   las claves foráneas, con lo mismo al borrar: la organización se lleva su cuenta y la cuenta lo
   suyo.
-- **Una cuenta de otra app no tiene organización**: guarda su app (`ACCOUNT_APPS`) y su
+- **Una cuenta de otra app no tiene organización**: guarda su app (solo una que es otro sistema,
+  `SAAS_ACCOUNT_EXTERNAL_APPS`; una de odentIA, latidIA o vistIA siempre es una clínica) y su
   referencia en ese sistema (`external_ref`, una por cuenta y app). Su id nunca es el de una
   clínica, porque toda clínica ya tiene la suya con ese id, y una clínica nueva no puede tomar el
   id de una cuenta que ya existe: la RLS de una clínica nunca alcanza lo de otra app.
