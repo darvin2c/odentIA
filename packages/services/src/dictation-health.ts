@@ -382,6 +382,42 @@ export function splitHealthDenials(payload: Record<string, unknown>): { kept: Re
 export const hasHealth = (payload: Record<string, unknown>) => GROUPS.some((group) => isRecord(payload[group]))
 
 /**
+ * Las claves de lo que dice una propuesta de su salud, como las de sus filas (`healthRows`): su grupo
+ * (las medicinas, el anticoagulante) o, en la entrevista, su campo («dental.corazon»). Con ellas se
+ * sabe qué dato dijo después otra vez (QA del 21 nov, H3: lo dicho otro día y corregido hoy).
+ */
+export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>()
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    if (!INTERVIEW.includes(group)) keys.add(group)
+    else for (const field of Object.keys(value)) keys.add(`${group}.${field}`)
+  }
+  return keys
+}
+
+/**
+ * La propuesta sin los datos que se dijeron después otra vez (`keys`, de `healthKeysOf`): de un dato
+ * vale lo último que dijo. `null` si no le queda nada de su salud.
+ */
+export function withoutHealthKeys(payload: Record<string, unknown>, keys: ReadonlySet<string>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = { ...payload }
+  for (const group of GROUPS) {
+    const value = out[group]
+    if (!isRecord(value)) continue
+    if (!INTERVIEW.includes(group)) {
+      if (keys.has(group)) delete out[group]
+      continue
+    }
+    const fields = Object.fromEntries(Object.entries(value).filter(([field]) => !keys.has(`${group}.${field}`)))
+    if (Object.keys(fields).length) out[group] = fields
+    else delete out[group]
+  }
+  return hasHealth(out) ? out : null
+}
+
+/**
  * Lo de su salud separado por quien lo dijo, para registrar una declaración por persona (revisión
  * del 21 nov, A4): lo del paciente a su nombre y lo de su hija, al de ella.
  */
@@ -641,6 +677,8 @@ export interface HealthRow {
   before: string | null
   /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…» (`splitHealthDenials`). */
   denied: boolean
+  /** Lo volvió a decir después, distinto o igual (ISO 8601): esta fila ya no es lo vigente. */
+  newer?: string | null
 }
 
 /** Quién lo dijo, en pocas palabras: «el paciente», «su madre»; `null` si no se sabe. */

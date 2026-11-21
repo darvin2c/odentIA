@@ -259,6 +259,42 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
   })
 })
 
+describe("lo de otro día que dijo después distinto (QA del 21 nov, H3)", () => {
+  it("dice que hay algo más nuevo, con su fecha, y no ofrece registrarlo desde lo de antes", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <HealthReviewNotice
+          patientId="p-1"
+          patientName="Rosa Quispe"
+          health={{
+            ...health,
+            allergyReviewDue: false,
+            reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
+            said: [
+              {
+                suggestionId: "9a3c1c2e-5b7d-4a49-9c55-2a7a1f0e0c11",
+                encounterId: "e-0",
+                by: { kind: "patient", name: null, relation: null },
+                at: "2026-11-20T15:00:00.000Z",
+                open: false,
+                rows: [
+                  { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, newer: "2026-11-21T15:00:00.000Z" },
+                ],
+              },
+            ],
+          }}
+          dictation={sessionWith()}
+        />
+      </QueryClientProvider>,
+    )
+    const earlier = screen.getByRole("heading", { name: "Lo que dijo el 20 nov, sin revisar" }).closest("li") as HTMLElement
+    expect(earlier.textContent).toContain("después, el 21 nov, dijo algo más nuevo: vale eso")
+    expect(within(earlier).queryByRole("button", { name: "Lo revisé con Rosa" })).toBeNull()
+    expect(within(earlier).getByRole("button", { name: "No lo registro" })).toBeTruthy()
+  })
+})
+
 describe("la franja avisa lo dicho sin confirmar", () => {
   it("«Anticoagulante: dijo apixabán, sin confirmar»; su «No» y su «No sé» sin alarma; lo de su boca no va", () => {
     const alerts = saidHealthAlerts([

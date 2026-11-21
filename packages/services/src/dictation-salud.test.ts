@@ -1,6 +1,6 @@
 import { prescribingAlerts } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { encounterDictationSuggestion, patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
+import { encounter, encounterDictationSuggestion, patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -506,6 +506,69 @@ describe("la firma no deja propuestas de Clío colgando (QA del 21 nov)", () => 
       ["nota", "descartada"],
       ["salud", "lista"],
     ])
+    await enable(false)
+  })
+})
+
+describe("otro día corrige lo que dijo (QA del 21 nov, H3)", () => {
+  async function twoDays() {
+    const { fx, segment } = await session()
+    // Día 1: «tomo losartán 50 y apixabán»; se firma sin revisarlo.
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] }, anticoagulants: { state: "recorded", detail: "apixabán" } },
+          sourceText: "tomo losartan 50 y apixaban",
+        },
+      ],
+      transcript: "tomo losartan 50 y apixaban",
+    })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    // Día 2, otra atención: «ya no tomo apixabán, y el losartán ahora es de 100».
+    const [second] = await ownerDb.insert(encounter).values({ organizationId: ORG, patientId: fx.patient.id, professionalUserId: fx.actor, reason: "Control" }).returning()
+    const [today] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, second!.id, {
+          drafts: [
+            {
+              kind: "salud",
+              payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán", dose: "100 mg" }] }, anticoagulants: { state: "recorded", detail: "apixabán", now: false } },
+              sourceText: "ya no tomo apixaban y el losartan ahora es de 100",
+            },
+          ],
+          transcript: "ya no tomo apixaban y el losartan ahora es de 100",
+        }),
+      )
+    ).suggestions
+    const said = () => fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))
+    return { fx, second: second!, today: today!, said }
+  }
+
+  it("lo de antes dice que hay algo más nuevo; confirmado lo de hoy, lo de antes queda resuelto", async () => {
+    await enable(true)
+    const { fx, second, today, said } = await twoDays()
+    const [before, now] = await said()
+    expect(before?.rows.map((row) => [row.key, !!row.newer])).toEqual([
+      ["anticoagulants", true],
+      ["medications", true],
+    ])
+    expect(now?.rows.every((row) => !row.newer)).toBe(true)
+    await fx.run((tx) => confirmDictationHealth(tx, ...fx.args, second.id, today.id))
+    // Antes volvía «dijo apixabán el 21 nov, sin confirmar».
+    expect(await said()).toEqual([])
+    await enable(false)
+  })
+
+  it("«Lo revisé con…» de lo de antes no registra lo que ya cambió", async () => {
+    await enable(true)
+    const { fx, said } = await twoDays()
+    const [before] = await said()
+    const { health } = await fx.run((tx) => confirmSaidHealth(tx, ...fx.args, before!.suggestionId))
+    // Antes registraba el apixabán y el losartán 50 como vigentes.
+    expect(health.medications.map((row) => row.name)).toEqual([])
+    expect((await said()).map((entry) => entry.rows.map((row) => row.value).sort())).toEqual([["apixabán, ya no la toma", "losartán 100 mg"]])
     await enable(false)
   })
 })

@@ -770,6 +770,10 @@ function SaidEarlierRow({
   const heard = heardHealth({ healthRows: item.rows.map((row) => ({ group: row.group ?? row.key, by: row.by ?? { declarante: "no_se_sabe" }, before: row.before ?? null, ...row })) })
   const who = heard.by && heard.by !== "el paciente" ? heard.by : patientFirst
   const day = shortDay(item.at)
+  // Lo que volvió a decir después ya no es lo vigente: se dice, y «Lo revisé con…» no lo registra
+  // desde aquí (QA del 21 nov, H3: registraba el apixabán que dijo que dejó).
+  const newerOf = (key: string) => item.rows.find((row) => row.key === key)?.newer ?? null
+  const current = heard.rows.filter((row) => !row.denied && !newerOf(row.key))
   const act = useMutation({
     mutationFn: (action: "confirm" | "discard") =>
       apiFetch(`/api/patients/${patientId}/health/said/${item.suggestionId}/${action}`, { method: "POST", body: JSON.stringify({}) }),
@@ -789,6 +793,7 @@ function SaidEarlierRow({
               {" "}
               · {row.by === "el paciente" ? `lo dijo ${patientFirst}` : row.by ? `lo dijo ${row.by}` : "no se sabe quién lo dijo"}
               {row.denied ? " · un «no»: anótalo en Antecedentes si va" : ""}
+              {newerOf(row.key) ? ` · después, el ${shortDay(newerOf(row.key) ?? "") || "otro día"}, dijo algo más nuevo: vale eso` : ""}
             </span>
           </li>
         ))}
@@ -797,7 +802,7 @@ function SaidEarlierRow({
         <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" disabled={disabled || act.isPending} onClick={() => act.mutate("discard")}>
           No lo registro
         </Button>
-        {heard.rows.some((row) => !row.denied) ? (
+        {current.length > 0 ? (
           <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending && act.variables === "confirm"} disabled={disabled || act.isPending} onClick={() => act.mutate("confirm")}>
             {`Lo revisé con ${who}`}
           </SubmitButton>

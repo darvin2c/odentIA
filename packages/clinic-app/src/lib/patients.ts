@@ -345,6 +345,8 @@ export interface SaidHealth {
     by?: { declarante: "paciente" | "acompanante" | "no_se_sabe"; vinculo?: string }
     before?: string | null
     denied?: boolean
+    /** Lo volvió a decir después, en otra consulta (ISO 8601): esta fila ya no es lo vigente. */
+    newer?: string | null
   }>
   at: string
   /**

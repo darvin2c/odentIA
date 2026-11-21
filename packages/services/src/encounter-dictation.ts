@@ -59,6 +59,7 @@ import {
   groundHealthNames,
   hasHealth,
   healthByDeclarant,
+  healthKeysOf,
   healthDeclarantOf,
   healthModelLabel,
   healthOfPayload,
@@ -68,6 +69,7 @@ import {
   mergeHealth,
   prepareHealth,
   saidInDoubt,
+  withoutHealthKeys,
   splitHealthDenials,
   withoutSettledHealth,
 } from "./dictation-health.js"
@@ -3077,7 +3079,21 @@ async function confirmHealthRow(
   review: DictationHealthReview,
 ): Promise<{ updated: typeof encounterDictationSuggestion.$inferSelect; health: PatientHealth }> {
   if (row.kind !== "salud") throw conflict("NOT_HEALTH", "Esta sugerencia no es de su salud")
-  const { data, meta } = splitMeta(row.payload)
+  const { data: dicho, meta } = splitMeta(row.payload)
+  // De un dato vale lo último que dijo (QA del 21 nov, H3): lo que volvió a decir después, en otra
+  // atención y sin revisar todavía, no se registra desde lo de antes como si siguiera vigente.
+  const later = await otherSaidHealth(tx, orgId, patientId, row, "later")
+  const newerKeys = new Set(later.flatMap((other) => [...healthKeysOf(splitMeta(other.payload).data)]))
+  const data = newerKeys.size ? withoutHealthKeys(dicho, newerKeys) : dicho
+  if (!data) {
+    const [settled] = await tx
+      .update(encounterDictationSuggestion)
+      .set({ status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+      .where(eq(encounterDictationSuggestion.id, row.id))
+      .returning()
+    if (!settled) throw new Error("No se pudo confirmar lo que dijo de su salud")
+    return { updated: settled, health: await getPatientHealth(tx, orgId, patientId) }
+  }
   const { vinculo: _said, quien: _each, ...rest } = data
   // Quien confirma corrige quién lo dijo: vale para todo lo que propone.
   const who =
@@ -3111,7 +3127,47 @@ async function confirmHealthRow(
     .where(eq(encounterDictationSuggestion.id, row.id))
     .returning()
   if (!updated) throw new Error("No se pudo confirmar lo que dijo de su salud")
+  // Lo que dijo antes de lo mismo, en otra atención y sin revisar, queda resuelto: la franja no vuelve
+  // a decir «dijo apixabán» después de confirmar que lo dejó (QA del 21 nov, H3).
+  const confirmedKeys = healthKeysOf(kept)
+  for (const older of await otherSaidHealth(tx, orgId, patientId, row, "earlier")) {
+    const parts = splitMeta(older.payload)
+    const left = withoutHealthKeys(parts.data, confirmedKeys)
+    if (left && JSON.stringify(left) === JSON.stringify(parts.data)) continue
+    await tx
+      .update(encounterDictationSuggestion)
+      .set(
+        left
+          ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
+          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+      )
+      .where(eq(encounterDictationSuggestion.id, older.id))
+  }
   return { updated, health: after }
+}
+
+/**
+ * Lo que dijo de su salud en otras atenciones (no anuladas) y sigue sin revisar: lo de antes o lo de
+ * después de `row`, por cuándo se propuso.
+ */
+async function otherSaidHealth(tx: Db, orgId: string, patientId: string, row: typeof encounterDictationSuggestion.$inferSelect, when: "earlier" | "later") {
+  const rows = await tx
+    .select({ suggestion: encounterDictationSuggestion })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.kind, "salud"),
+        ne(encounterDictationSuggestion.id, row.id),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        inArray(encounter.status, ["borrador", "finalizada"]),
+        when === "earlier" ? lt(encounterDictationSuggestion.createdAt, row.createdAt) : gt(encounterDictationSuggestion.createdAt, row.createdAt),
+      ),
+    )
+    .for("update", { of: encounterDictationSuggestion })
+  return rows.map((item) => item.suggestion)
 }
 
 /** Lo confirma quien lleva la atención en borrador (permiso `clinical.write`, en la ruta). */
@@ -3236,7 +3292,7 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
       ),
     )
     .orderBy(asc(encounterDictationSuggestion.createdAt))
-  return rows.map((row) => {
+  const said = rows.map((row) => {
     const { data, meta } = splitMeta(row.payload)
     return {
       suggestionId: row.id,
@@ -3247,6 +3303,15 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
       open: row.encounterStatus === "borrador",
     }
   })
+  // Lo que volvió a decir después (otro día) se marca en lo de antes: esa fila ya no es lo vigente, y
+  // la pantalla dice la fecha y que hay algo más nuevo (QA del 21 nov, H3).
+  return said.map((entry, index) => ({
+    ...entry,
+    rows: entry.rows.map((one) => {
+      const newer = said.slice(index + 1).find((later) => later.rows.some((other) => other.key === one.key))
+      return newer ? { ...one, newer: newer.at } : one
+    }),
+  }))
 }
 
 /**
