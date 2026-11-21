@@ -573,10 +573,21 @@ export function saidHealthAlerts(said: readonly SaidHealth[]): Array<{ id: strin
       if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
       seen.add(row.key)
       const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
-      const quiet = row.value === "dijo que no" || row.value === "no sabe"
-      const words = quiet ? row.value : row.value.startsWith("sí, no dijo cuál") ? "dijo que sí" : `dijo ${row.value}`
+      // «Ya no la toma» no es «dijo que sí»: lo dejó, sin alarma (QA del 21 nov, H3).
+      const stopped = row.value.endsWith("ya no la toma")
+      const quiet = row.value === "dijo que no" || row.value === "no sabe" || stopped
+      const named = row.value.replace(/,? ?ya no la toma$/u, "")
+      const words = stopped
+        ? `dijo que dejó ${named.startsWith("sí, no dijo cuál") ? "de tomarlo" : named}`
+        : quiet
+          ? row.value
+          : row.value.startsWith("sí, no dijo cuál")
+            ? "dijo que sí"
+            : `dijo ${row.value}`
+      // Lo que corrigió al decirlo también se ve aquí: «dijo apixabán (antes dijo warfarina)» (QA del 21 nov, C2).
+      const before = row.before ? ` (antes dijo ${row.before})` : ""
       const when = item.open === false && shortDay(item.at) ? ` el ${shortDay(item.at)}` : ""
-      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}${when}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
+      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}${before}${when}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
     }),
   )
 }

@@ -337,6 +337,25 @@ describe("la franja avisa lo dicho sin confirmar", () => {
     ])
     expect(alerts.map((alert) => alert.label)).toEqual(["Anticoagulante: dijo apixabán el 20 nov, sin confirmar"])
   })
+
+  it("lo que corrigió al decirlo y lo que dejó se dicen como son (QA del 21 nov, C2 y H3)", () => {
+    const alerts = saidHealthAlerts([
+      {
+        suggestionId: "salud-1",
+        encounterId: "e-1",
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-21T15:00:00.000Z",
+        rows: [
+          { key: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina" },
+          { key: "boneMedicines", label: "Medicina para los huesos", value: "sí, no dijo cuál, ya no la toma" },
+        ],
+      },
+    ])
+    expect(alerts.map((alert) => [alert.label, alert.tone])).toEqual([
+      ["Anticoagulante: dijo apixabán (antes dijo warfarina), sin confirmar", "warning"],
+      ["Medicina para los huesos: dijo que dejó de tomarlo, sin confirmar", "secondary"],
+    ])
+  })
 })
 
 const segment = (over: Partial<Segment>): Segment => ({

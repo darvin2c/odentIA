@@ -69,6 +69,7 @@ import {
   mergeHealth,
   prepareHealth,
   saidInDoubt,
+  selfCorrectedHealth,
   withoutHealthKeys,
   splitHealthDenials,
   withoutSettledHealth,
@@ -1681,6 +1682,12 @@ export function mergeNote(current: Record<string, unknown>, added: Record<string
 }
 
 /**
+ * Las palabras con que alguien corrige lo dicho, sin tildes: «perdón», «en realidad», «mejor dicho».
+ * Un «no» o un «digo» solo al empezar («no, es la izquierda»): en una respuesta un «no» es lo común.
+ */
+const CORRECTION_WORDS = / (?:perdon|en realidad|mejor dicho|corrijo|me equivoque|quise decir) /u
+
+/**
  * Lo que se dijo para corregir la consulta: solo vale si está en lo dictado de la pausa y no es una
  * pregunta. Sin esto, «¿Y desde cuándo le pasa eso?», sola, o una pausa sin nada de la consulta la
  * reescribían (desarrollo y auditor, mesa del 20 nov 2026).
@@ -1710,7 +1717,8 @@ function describeBefore(
     else if (key === "diagnosisCode" || key === "title") parts.push(String(old ?? "sin dato"))
     else if (key === "diagnosisType") parts.push(isDiagnosisVerification(old) ? DIAGNOSIS_VERIFICATION_LABELS[old].toLowerCase() : "sin tipo")
     else if (kind === "receta") parts.push(old == null || old === "" ? `sin ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}` : String(old))
-    else parts.push(`otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
+    // «Otro texto» solo si había un texto: sin él, lo que había era nada.
+    else parts.push(old == null || (typeof old === "string" && !old.trim()) ? `sin ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}` : `otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
   }
   return parts.length ? parts.join(", ") : null
 }
@@ -1968,13 +1976,51 @@ export async function saveDictationSegment(
   }
 
   const corrected: string[] = []
+  // La consulta a la que una «corrección» de esta pausa solo le sumó (un campo vacío, o lo amplió).
+  const addedByVoice: string[] = []
+  // Los campos de la consulta que ya tocó una corrección de esta pausa: la nota de la misma pausa no
+  // los vuelve a sumar con otras palabras (QA del 21 nov: «le dura varios minutos. Le duele por varios minutos»).
+  const voiceTouched = new Map<string, Set<string>>()
   /** Aplica a una sugerencia pendiente lo que se corrigió en voz alta. `false`: no encaja o no cambia nada. */
-  const correct = async (suggestionId: string, changes: Record<string, unknown>, said?: string): Promise<boolean> => {
+  const correct = async (suggestionId: string, asked: Record<string, unknown>, said?: string): Promise<boolean> => {
+    let changes = asked
     const row = await pendingRow(suggestionId)
     if (!row) return false
     // La consulta solo se corrige con lo que alguien dijo para corregirla: lo nuevo se suma (`mergeNote`).
     if (row.kind === "nota" && !saidToCorrectNote(said, segment.transcript)) return false
-    const { data, meta } = splitMeta(row.payload)
+    const { data: stored, meta } = splitMeta(row.payload)
+    let data = stored
+    if (row.kind === "nota") {
+      // Solo es una corrección lo que cambia un texto que ya había. Lo que llena un campo vacío o lo
+      // amplía se suma, sin «corregido por voz» ni un «antes» que no existía (QA del 21 nov, H7: la
+      // respuesta a «¿desde cuándo?» salía «corregido por voz, antes otro texto»).
+      const textOf = (value: unknown) => (typeof value === "string" ? value.trim() : "")
+      // «No, perdón, es la del lado izquierdo»: quien corrige lo dice; una respuesta no lo dice.
+      const heard = ` ${normalizeForSearch(said ?? "")} `
+      const corrects = CORRECTION_WORDS.test(heard) || /^ (?:no|digo|era|es) /u.test(heard)
+      const isReal = (key: string, value: unknown) => {
+        const old = textOf(stored[key])
+        const now = textOf(value)
+        return !!old && !!now && !saysAlready(old, now) && (corrects || !saysAlready(now, old))
+      }
+      const real = Object.fromEntries(Object.entries(changes).filter(([key, value]) => isReal(key, value)))
+      const extra = Object.fromEntries(Object.entries(changes).filter(([key, value]) => !isReal(key, value)))
+      const merged = Object.keys(extra).length ? mergeNote(stored, extra) : null
+      voiceTouched.set(row.id, new Set([...(voiceTouched.get(row.id) ?? []), ...Object.keys(changes)]))
+      if (!Object.keys(real).length) {
+        if (!merged || JSON.stringify(merged.payload) === JSON.stringify(stored)) return false
+        const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
+          step && { ...step, payload: mergeNote(step.payload, extra)?.payload ?? step.payload, previous: withAdded(step.previous) }
+        await tx
+          .update(encounterDictationSuggestion)
+          .set({ payload: withMeta(merged.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier } })), updatedAt: new Date() })
+          .where(eq(encounterDictationSuggestion.id, row.id))
+        if (!addedByVoice.includes(row.id)) addedByVoice.push(row.id)
+        return true
+      }
+      if (merged) data = merged.payload
+      changes = real
+    }
     if (row.kind === "salud") {
       // Lo de su salud también: solo con la frase que lo corrige, y cambia solo el grupo que trae.
       if (!saidToCorrectNote(said, segment.transcript)) return false
@@ -2010,7 +2056,7 @@ export async function saveDictationSegment(
         : describeBefore(row.kind, data, ready.payload, Object.keys(patch), dictation)
     if (!before) return false
     // Se conserva cómo estaba antes de esta corrección, con las anteriores detrás: deshacer vuelve un paso.
-    const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before }, meta.voice)
+    const voice = voiceStep({ payload: stored, status: row.status as "lista" | "por_revisar", note: row.note, before }, meta.voice)
     await tx
       .update(encounterDictationSuggestion)
       .set({
@@ -2122,6 +2168,8 @@ export async function saveDictationSegment(
   )
   for (const draft of fromDiagnoses) twins.add(draft)
   const outcomes: Array<{ draft: DictationDraft; ready: boolean }> = []
+  // Lo que dijo antes en la misma frase y corrigió ahí mismo, por propuesta de su salud.
+  const healthEarlier = new Map<DictationDraft, Record<string, string>>()
   for (const said of drafts) {
     // Lo de su salud, solo con su frase dicha y con lo que nombra en ella (revisión del 21 nov, A5):
     // un nombre que no se dijo no se propone y «No lo usé» dice por qué.
@@ -2134,12 +2182,17 @@ export async function saveDictationSegment(
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
       if (!heard.payload) continue
       draft = { ...said, payload: heard.payload }
+      // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).
+      const own = selfCorrectedHealth(heard.payload, scope.transcript ?? phrase)
+      if (Object.keys(own).length) healthEarlier.set(draft, own)
     }
     const prepared = await prepare(tx, draft, scope)
     outcomes.push({ draft, ready: prepared !== null })
     if (!prepared) continue
     // Una respuesta de ficha se muestra con la frase del número que se usó, si no es la que citó Clío.
     const shown = prepared.said ? { ...draft, sourceText: prepared.said } : draft
+    const earlierHere = healthEarlier.get(draft)
+    if (earlierHere) healthEarlier.set(shown, earlierHere)
     preparedDrafts.push({ draft: shown, prepared })
     if (draft.kind === "ficha" && shown.sourceText?.trim()) formSources.push(...formAnswerFragments(shown.sourceText, formQuestionOf(draft)))
   }
@@ -2223,7 +2276,7 @@ export async function saveDictationSegment(
   // Lo de su salud también es uno solo en la atención (mesa del 20 nov 2026, P3): se suma igual.
   let pendingHealthId = pendingNow.filter((item) => item.kind === "salud").at(-1)?.id
   let newHealth: (typeof rows)[number] | undefined
-  const added: string[] = []
+  const added: string[] = [...addedByVoice]
   const joinSource = (before: string, now: string | undefined) => {
     const said = now?.trim() ?? ""
     return (said && !before.includes(said) ? [before, said].filter(Boolean).join(" ") : before).slice(0, DICTATION_SOURCE_CHARS)
@@ -2239,12 +2292,15 @@ export async function saveDictationSegment(
       if (!row) pendingNoteId = undefined
       else {
         const { data, meta } = splitMeta(row.payload)
-        const merged = mergeNote(data, ready.payload)
+        // Lo que una corrección de esta misma pausa ya puso en un campo no se suma otra vez con otras palabras.
+        const touched = voiceTouched.get(row.id)
+        const fresh = touched ? Object.fromEntries(Object.entries(ready.payload).filter(([key]) => !touched.has(key))) : ready.payload
+        const merged = mergeNote(data, fresh)
         if (merged) {
           if (JSON.stringify(merged.payload) !== JSON.stringify(data)) {
             // Lo sumado también queda en cada paso de «Deshacer»: deshacer una corrección no lo borra.
             const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
-              step && { ...step, payload: mergeNote(step.payload, ready.payload)?.payload ?? step.payload, previous: withAdded(step.previous) }
+              step && { ...step, payload: mergeNote(step.payload, fresh)?.payload ?? step.payload, previous: withAdded(step.previous) }
             await tx
               .update(encounterDictationSuggestion)
               .set({
@@ -2276,7 +2332,7 @@ export async function saveDictationSegment(
           await tx
             .update(encounterDictationSuggestion)
             .set({
-              payload: withMeta(health.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier } })),
+              payload: withMeta(health.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) } })),
               sourceText: joinSource(row.sourceText, draft.sourceText),
               updatedAt: new Date(),
             })
@@ -2291,7 +2347,7 @@ export async function saveDictationSegment(
       const merged = mergeHealth(data, ready.payload)
       const health = prepareHealth(merged.payload, undefined, dictation.health)
       if (health) {
-        newHealth.payload = withMeta(health.payload, { ...meta, earlier: { ...meta.earlier, ...merged.earlier } })
+        newHealth.payload = withMeta(health.payload, { ...meta, earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) } })
         newHealth.sourceText = joinSource(newHealth.sourceText ?? "", draft.sourceText)
       }
       continue
@@ -2402,7 +2458,7 @@ export async function saveDictationSegment(
       encounterId,
       professionalUserId: actorUserId,
       kind: draft.kind,
-      payload: withMeta(ready.payload, stamp({})),
+      payload: withMeta(ready.payload, stamp(healthEarlier.has(draft) ? { earlier: healthEarlier.get(draft) } : {})),
       sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),
       status: ready.status,
       note: ready.note,

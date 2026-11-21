@@ -199,3 +199,39 @@ describe("varias consultas pendientes de antes de este cambio", () => {
     await enable(false)
   })
 })
+
+describe("una respuesta no es una corrección (QA del 21 nov, H7 y hallazgo 6 de desarrollo)", () => {
+  it("«hace como dos semanas» tras «¿desde cuándo?» se suma: sin «corregido por voz» ni un «antes» que no existía", async () => {
+    await enable(true)
+    const { segment, notes } = await session()
+    const [note] = (await segment({ drafts: [{ kind: "nota", payload: { reason: "Dolor de muela", presentIllness: "Le duele con el frío." } }], transcript: "me duele una muela con el frio" })).suggestions
+    // Clío lo manda como corrección de la consulta, con la frase de la respuesta.
+    const said = "hace como dos semanas y anoche no me dejo dormir"
+    const reply = await segment({
+      drafts: [],
+      corrections: [{ suggestionId: note!.id, changes: { illnessDuration: "como dos semanas", presentIllness: "Le duele con el frío. Anoche no la dejó dormir." }, said }],
+      transcript: said,
+    })
+    expect(reply.corrected).toEqual([])
+    expect(reply.added).toEqual([note!.id])
+    const [after] = await notes()
+    expect(after?.voice).toBeNull()
+    expect(after?.payload).toEqual({ reason: "Dolor de muela", illnessDuration: "como dos semanas", presentIllness: "Le duele con el frío. Anoche no la dejó dormir." })
+    await enable(false)
+  })
+
+  it("una pausa que corrige y suma lo mismo a la vez no lo repite en el relato", async () => {
+    await enable(true)
+    const { segment, notes } = await session()
+    const [note] = (await segment({ drafts: [{ kind: "nota", payload: { presentIllness: "Le duele al masticar." } }], transcript: "le duele al masticar" })).suggestions
+    const said = "y dice que el dolor le dura varios minutos"
+    await segment({
+      drafts: [{ kind: "nota", payload: { presentIllness: "Le duele por varios minutos." }, sourceText: said }],
+      corrections: [{ suggestionId: note!.id, changes: { presentIllness: "Le duele al masticar. El dolor le dura varios minutos." }, said }],
+      transcript: said,
+    })
+    // Antes: «…El dolor le dura varios minutos. Le duele por varios minutos.»
+    expect((await notes())[0]?.payload["presentIllness"]).toBe("Le duele al masticar. El dolor le dura varios minutos.")
+    await enable(false)
+  })
+})

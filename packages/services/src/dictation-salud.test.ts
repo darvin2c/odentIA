@@ -596,3 +596,17 @@ describe("lo dicho sin confirmar también avisa en la receta, la exodoncia y la 
     await enable(false)
   })
 })
+
+describe("C2 · se corrige a media frase (QA del 21 nov)", () => {
+  it("«tomo warfarina no perdón ahora apixabán» deja apixabán con «antes dijo warfarina»", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo warfarina no perdon ahora apixaban" }],
+      transcript: "toma alguna medicina si tomo warfarina no perdon ahora apixaban",
+    })
+    const [said] = await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))
+    expect(said?.rows.map((row) => [row.key, row.value, row.before])).toEqual([["anticoagulants", "apixabán", "warfarina"]])
+    await enable(false)
+  })
+})

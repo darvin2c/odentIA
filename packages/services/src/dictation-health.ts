@@ -1,7 +1,10 @@
 import {
   CIGARETTE_BAND_LABELS,
+  findHabitualMedication,
+  HABITUAL_MEDICATIONS,
   type HealthDeclarant,
   INTERVIEW_ANSWER_LABELS,
+  medicationClassOf,
   normalizeDrugText,
   registrationAnswersSchema,
   whoWords,
@@ -332,6 +335,36 @@ export function groundHealthNames(payload: Record<string, unknown>, said: string
     out[group] = rest
   }
   return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard }
+}
+
+/** Cómo se corrige uno mismo a media frase: «warfarina, no, perdón, apixabán», «digo», «mejor dicho». */
+const SELF_CORRECTION = / (?:perdon|digo|mejor dicho|me equivoque|corrijo|quise decir) /u
+
+/**
+ * Lo que dijo antes en la misma frase y corrigió ahí mismo («tomo warfarina no perdón ahora
+ * apixabán»): Clío propone lo último y la tarjeta y la franja dicen «antes dijo warfarina» (QA del
+ * 21 nov, C2). Solo un anticoagulante o una medicina para los huesos de la lista, de la misma clase
+ * que el que quedó, nombrado antes de la corrección y distinto de él; si hay más de uno, ninguno.
+ */
+export function selfCorrectedHealth(payload: Record<string, unknown>, phrase: string): Record<string, string> {
+  const said = ` ${plain(phrase).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim()} `
+  const marker = said.search(SELF_CORRECTION)
+  if (marker < 0) return {}
+  const before = `${said.slice(0, marker)} `
+  const after = said.slice(marker)
+  const named = (entry: (typeof HABITUAL_MEDICATIONS)[number], text: string) =>
+    [entry.dci, ...(entry.names ?? [])].some((name) => text.includes(` ${plain(name)} `))
+  const out: Record<string, string> = {}
+  for (const group of DIRECTED) {
+    const value = payload[group]
+    const detail = isRecord(value) ? text(value["detail"]) : ""
+    const chosen = detail ? findHabitualMedication(detail) : null
+    if (!chosen || !named(chosen, after)) continue
+    const kind = medicationClassOf(chosen.atc)
+    const earlier = HABITUAL_MEDICATIONS.filter((entry) => entry.dci !== chosen.dci && medicationClassOf(entry.atc) === kind && named(entry, before))
+    if (earlier.length === 1 && earlier[0]) out[group] = earlier[0].dci
+  }
+  return out
 }
 
 /** Una respuesta que niega: «no», «nunca», «ninguna», un «No» a un sí o no. */
