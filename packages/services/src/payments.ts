@@ -82,6 +82,7 @@ import { findOrgLocale, formatOrgMoney, orgProfileRequired } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { isCashLike, requirePaymentMethod } from "./payment-methods.js"
+import { productHooks } from "./products.js"
 import { requirePromotionPrice } from "./promotions.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
 import { foldedWordsMatch } from "./search-text.js"
@@ -444,7 +445,10 @@ export async function createCharge(
       throw validation("El cargo conserva la sede de su atención")
     branchId = source.branchId
     planItemId = source.procedure.planItemId
-    description = source.procedure.description
+    // Con su pieza: caja distingue la resina de la 26 de la de la 27 (mesa del cierre, 19 nov:
+    // con dos iguales se quitó la que sí se hizo).
+    const where = (await productHooks(tx, orgId)).site.words(source.procedure, "short")
+    description = where ? `${source.procedure.description} · ${where}` : source.procedure.description
     // El costo viaja con el acto: importe y moneda del snapshot registrado.
     amountCents ??= source.procedure.priceCents ?? undefined
     unit ??= source.procedure.currency ?? undefined
@@ -3487,6 +3491,12 @@ export interface AccountPending {
    * 600», y no los 600 que quedaron (QA del 10 nov, M7). `totalCents` y `paidCents` no lo suman.
    */
   advancePaidCents: number
+  /**
+   * Lo devuelto de este concepto (ADR 0068): la devolución lo reemplaza por otro con lo que queda,
+   * así que `totalCents` ya no es lo que costó. Con esto se dice «Costó 180 · se le devolvió 20»,
+   * y no «Costó 160» de una resina de 180 (QA en local del 19 nov).
+   */
+  returnedCents: number
 }
 
 /**
@@ -3755,6 +3765,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         productId: charge.productId ?? null,
         productQuantity: charge.productQuantity ?? null,
         advancePaidCents: advanceTo(charge, charge.amountCents - paid),
+        returnedCents: charge.returnedCents,
       }
     })
     .filter((row) => row.saldoCents > 0)

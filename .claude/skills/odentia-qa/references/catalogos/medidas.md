@@ -78,6 +78,12 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 
 **Ya falló:** 409 y «Registra tu colegiatura en tu perfil profesional para firmar», sin campo; «Volver» perdía la firma de la paciente (16 nov).
 
+**Sumado por la QA del cierre (19 nov 2026), medida a 1440:** 6 bloques en una consulta sin actos y 9 con dos resinas; 0 decisiones necesarias (la consulta viene marcada).
+- [ ] Lo que firmas como hecho hoy y el total no se repiten en «Después: …» ni en «Procedimientos: N».
+- [ ] El texto del cierre llama a la acción de quitar con el mismo nombre que el botón de la fila.
+- [ ] «Cambiar» dice qué cambia y si está abierto.
+- [ ] A 390 px ninguna píldora de consulta se sale de su caja.
+
 ### M-ATE-04 Corregir: quitar, cambiar o anular
 **Quién:** odontólogo; alguna vez al día (supuesto).
 **Dónde:** `CA/patient/encounter-plan-panel.tsx` («Cambiar», «Quitar»), `encounter-void-dialog.tsx`.
@@ -124,6 +130,27 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - **Del profesional nuevo:** un odontólogo sin colegiatura en su perfil hace firmar un consentimiento en la tablet y firma la atención.
 
 **Teclado de la atención (1440, 16 nov 2026):** de la ficha a «Atender», 20 Tab; al abrir, el foco queda en `body`; hasta el primer antecedente, 9; del motivo al arco, 9; de la pieza al buscador, 4; de la lesión a «Registrar hallazgo», unas 34; de la evolución a «Finalizar y firmar», 12.
+
+### M-ATE-08 El diagnóstico de un sano
+**Quién:** odontólogo; varias veces al día (supuesto).
+**Dónde:** `CA/patient/encounter-diagnoses.tsx` (`DiagnosisProposals`).
+**Medida (1440, 19 nov 2026):** 1 clic, 0 tecleos, 0 saltos; antes 4 clics, 1 tecleo y 2 decisiones. **A mantener.**
+
+- [ ] «Sin enfermedad» no sale si algo de hoy (un tratamiento, un hallazgo, una ficha o un acto registrado) propone un diagnóstico.
+- [ ] El atajo y la fila registrada usan el mismo nombre.
+- [ ] Tras el toque, el foco no cae en la página entera.
+**Ya falló:** «Control después de un tratamiento» encima de dos caries de una primera visita (19 nov).
+
+### M-ATE-09 «No se hizo» en lo firmado
+**Quién:** odontólogo; alguna vez al mes (supuesto).
+**Dónde:** `CA/patient/encounter-not-done.tsx`, `encounter-detail-view.tsx`.
+**Medida (1440, 19 nov 2026):** 2 clics y 1 tecleo, 0 saltos; antes no se podía.
+
+- [ ] Mismo nombre de campo («Motivo») y variante de botón que «Anular…»; el foco empieza en «Motivo».
+- [ ] Sin texto de ejemplo que parezca un motivo escrito; sin «otra pieza» cuando no hay pieza.
+- [ ] La vista firmada, el Plan y el cajón llaman igual al estado («Por decidir»).
+
+**Gira «la misma corrección en cada momento»:** anular un acto antes de firmar, desde el cierre, y marcar «No se hizo» después: ¿mismo nombre, mismo patrón, mismo color?
 
 ## Ficha
 

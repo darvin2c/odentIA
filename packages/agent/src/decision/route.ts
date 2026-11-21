@@ -391,6 +391,14 @@ function appointmentStep(progress: RouteProgress | undefined, propose: string): 
 }
 
 /**
+ * Quien ya tiene una cita por venir y pide otra (o cuenta un dolor) no termina con
+ * dos por no preguntar: se le recuerda la suya y elige si la mueve o es otra aparte.
+ */
+function existingAppointment(before: string, change: string): string {
+  return ` Si ahí tiene una cita por venir y todavía no dijo si quiere otra aparte, antes de ${before} recuérdasela (día, hora y con quién) y pregúntale si quiere ${change} o es otra cita aparte. Si responde que quiere ${change}, eso es mover esa cita, no reservar otra; si es otra, reserva la nueva como siempre.`
+}
+
+/**
  * Lo que se le dice al modelo que escribe sobre el camino del turno. Va con lo
  * propio del turno, después de lo estable. Es una indicación: si el dato no
  * está, el modelo aún puede consultar, pedir el resto de herramientas
@@ -468,7 +476,14 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
       ? ` Si solo vuelve sobre lo que le pasa, sin pedir consejo, ya le ofreciste la cita en esta atención: no le preguntes otra vez qué le pasa y sigue con la cita. ${appointmentStep(progress, propose)}`
       : // «Pregúntale qué le pasa» se lo preguntaba también a quien ya lo había contado (auditoría del ADR 0104).
         ` Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""} y, solo si aún no dijo qué le pasa, pregúntaselo en una línea.`
-    return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}.${problem}`
+    // «Me duele la muela» de quien ya tiene cita: la misma pregunta que en el camino de cita.
+    const booked =
+      prefetched && has("buscar_huecos") && !progress?.done
+        ? ` Esto se consultó ahora mismo y no hace falta volver a pedirlo:
+${prefetched}
+${existingAppointment("buscarle horarios", "adelantarla")}`
+        : ""
+    return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}.${problem}${booked}`
   }
   if (path === "cita" && !has("buscar_huecos")) {
     // Con «Agendar» apagado no hay huecos ni propuestas: la cita la elige la persona en su enlace.
@@ -490,10 +505,7 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
       ? ` Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n`
       : " "
     // Ya tiene una cita por venir: que no termine con dos por no preguntar.
-    const existing =
-      prefetched && !progress?.done
-        ? ` Si ahí tiene una cita por venir y todavía no dijo si quiere otra aparte, antes de buscar horarios recuérdasela (día, hora y con quién) y pregúntale si quiere cambiarla o es otra cita aparte. Si responde que quiere cambiarla, eso es mover esa cita, no reservar otra; si es otra, reserva la nueva como siempre.`
-        : ""
+    const existing = prefetched && !progress?.done ? existingAppointment("buscar horarios", "cambiarla") : ""
     return `${head} reservar una cita.${consulted}${ids}${existing} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
       facts.urgency === "urgente" && !progress?.done

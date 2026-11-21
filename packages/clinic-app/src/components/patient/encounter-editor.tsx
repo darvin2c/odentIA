@@ -147,6 +147,7 @@ import {
   closingControlsBody,
   continuingAfterSign,
   type DictatedControl,
+  consultationBody,
   EncounterClosingDialog,
   finishesByDefault,
   finishingAtSign,
@@ -1464,6 +1465,8 @@ export function EncounterEditor({
           ),
           // Con anestesia hoy, la atención firmada guarda el máximo con el anestésico elegido.
           ...(anesthesiaUses.length > 0 ? { anesthetic } : {}),
+          // La consulta que el cierre trajo marcada, otra elegida o desmarcada (mesa del 19 nov).
+          ...consultationBody(value, closingQuery.data?.data.consultation),
         }),
       })
       onSigned?.()
@@ -1825,7 +1828,10 @@ export function EncounterEditor({
   const finalizeDescription =
     recorded.length > 0 || unrecordedAll.length > 0 || unreviewed ? (
       <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-        {recorded.map((section) => (
+        {recorded
+          // Lo hecho ya lo nombra «Lo que firmas como hecho hoy», con su pieza y su precio (QA del 19 nov).
+          .filter((section) => !(section.key === "procedimientos" && (closingQuery.data?.data.billing?.lines.length ?? 0) > 0))
+          .map((section) => (
           <li key={section.key}>
             <span className="font-medium text-foreground">{section.title}:</span> {section.summary}
           </li>
@@ -3053,6 +3059,14 @@ export function EncounterEditor({
                         registeredIds: sessionItemIds,
                         chargedIds: new Set(accountQuery.data?.data.conCargo ?? []),
                         dayWord: pastVisit ? "Ese día" : "Hoy",
+                        registeredCount: detail.procedures.filter((proc) => !proc.voidedAt).length,
+                        consultation: closingQuery.data?.data.consultation
+                          ? `${closingQuery.data.data.consultation.proposed.name} · ${formatMoney(
+                              closingQuery.data.data.consultation.proposed.priceCents,
+                              closingQuery.data.data.consultation.proposed.currency,
+                              activeOrgLocale() ?? "es-PE",
+                            )}`
+                          : null,
                       })
                   : accountQuery.isError
                     ? "No se pudo consultar la cuenta para estimar los cargos."

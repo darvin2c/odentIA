@@ -142,6 +142,12 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] El aviso de anestesia sale de lo clínico (el servicio usa anestesia local) y no solo de los materiales cargados.
 - [ ] La dosis máxima lee un solo peso, el de los signos vitales.
 
+**Sumado por la mesa del cierre de la atención (19 nov 2026):**
+- [ ] El cierre dice lo que la firma carga, acto por acto y el total, con la misma regla (`chargeDecisionsOf`).
+- [ ] La consulta que se propone cargar sale del servicio de la cita aunque valga 0: una cita gratuita no se cobra por omisión; ni se propone con algo hecho, ya cobrada al llegar, o si la visita venía a una sesión.
+
+**Ya falló:** la cita «Reevaluación postoperatoria» de S/ 0 se firmó con «Evaluación odontológica · S/ 50» marcada (19 nov).
+
 ## O-ATE-03 Anular una atención
 
 **Dónde:** `S/encounters.ts` (la vista previa y anular), `S/encounter-void-budgets.ts` (lo que pasa con su presupuesto).
@@ -180,6 +186,21 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** la caries anulada en la 47 dejó «K02.5 · 47 · Definitivo», que se firmaba (16 nov).
 **Caso:** CO29 · caries O y M de la 47 con K02.5 y la endodoncia indicada desde la O, en un presupuesto en borrador; se anula la O. El K02.5 sigue (lo usa la M), la endodoncia sale del borrador y la 47 sigue en la atención.
+
+## O-ATE-06 «No se hizo» en una atención firmada
+
+**Dónde:** `S/encounter-not-done.ts`, `S/encounters.ts` (`voidProcedureRow`), migración `0151_lo_que_no_se_hizo.sql`.
+
+- [ ] Lo marcan solo quien firmó o atendió, el dueño o quien administra; recepción y caja reciben 403 en la vista previa y al marcar.
+- [ ] Repetido (dos pestañas, doble clic) responde «ya está marcado» y no anula, devuelve material ni crea tareas dos veces.
+- [ ] Lo que el cajón dijo (se anula, caja recibe la tarea, sigue) es lo que pasó; si cambió en medio, se avisa.
+- [ ] Lo pagado no se toca: caja recibe la tarea. Devuelto, el tratamiento se vuelve a cobrar al hacerse; si sigue en el plan, rehacerlo no lo cobra otra vez.
+- [ ] El cargo de una visita «No se hizo» que sigue pagado no cuenta para el tope de sesiones.
+- [ ] Finanzas, Reportes y Comisiones no cambian hacia atrás: mandan el cargo hasta que caja devuelve.
+- [ ] Sus palabras son las del producto: sin «pieza» ni odontograma en latidIA, ni en un acto sin pieza.
+
+**Ya falló:** el cajón dijo «se anula» y caja había cobrado en medio, sin aviso; rehacer desde el catálogo lo pagado lo cobraba otra vez y dejaba dos filas de la 24 (19 nov).
+**Caso:** CO32 · Cita gratuita de reevaluación; nada hecho; caja cobra con el cajón de «No se hizo» abierto. → No se propone cobrar; lo que el cajón dijo es lo que pasa o se avisa; una sola tarea de caja.
 
 ## O-PRE-01 Armar, enviar y revisar un presupuesto
 

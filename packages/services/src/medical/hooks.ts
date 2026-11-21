@@ -1,4 +1,4 @@
-import { isDiagnosisSystem } from "@odentia/clinical"
+import { isDiagnosisSystem, MEDICAL_WITHOUT_DISEASE } from "@odentia/clinical"
 import {
   MEDICAL_CONSENT_TEMPLATES,
   MEDICAL_IMAGING_TYPES,
@@ -30,6 +30,22 @@ export const medicalHooks: ProductHooks = {
   asksAsa: false,
   recallMonths: 12,
   recallControlTitle: "Control anual",
+  withoutDisease: MEDICAL_WITHOUT_DISEASE,
+  // En el consultorio el control también se cobra: con un control, su consulta de control.
+  consultation: {
+    templateKeys: [
+      "consulta-medicina-general",
+      "consulta-medicina-familiar",
+      "consulta-medicina-interna",
+      "consulta-pediatria",
+      "consulta-ginecologia",
+      "consulta-a-domicilio",
+      "control-nino-sano-menor-1",
+      "control-nino-sano-1-a-4",
+      "control-nino-sano-5-a-11",
+    ],
+    controlTemplateKeys: ["consulta-de-control"],
+  },
   catalog: medicalCatalog,
   planPhases: [MEDICAL_PLAN_PHASE],
   phaseFor: () => MEDICAL_PLAN_PHASE,

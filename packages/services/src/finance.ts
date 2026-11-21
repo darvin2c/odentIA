@@ -3398,7 +3398,8 @@ async function collectedApplications(
     keptOrReturned(patientPaymentApplication.voidedAt),
     keptOrReturned(patientCharge.voidedAt),
     stillLive(patientPayment.voidedAt),
-    isNull(encounterProcedure.voidedAt),
+    // Manda el cargo: un procedimiento marcado «No se hizo» después de firmar no borra su cobro
+    // hacia atrás; cuenta hasta que caja lo devuelve (mesa del cierre, 19 nov).
     eq(encounter.status, "finalizada"),
     isNull(encounter.voidedAt),
   ]
@@ -4241,7 +4242,7 @@ export async function unassignedCommissionSessions(
       left join treatment_plan_item ti on ti.organization_id = c.organization_id and ti.id = c.plan_item_id
       where a.organization_id = ${orgId} and a.voided_at is null
         and (c.encounter_procedure_id is null
-          or (ep.voided_at is null and e.status = 'finalizada' and e.voided_at is null))
+          or (e.status = 'finalizada' and e.voided_at is null))
     ), done as (
       select ep.plan_item_id, count(distinct e.id) as k
       from encounter_procedure ep
@@ -5003,7 +5004,6 @@ async function returnedApplications(
     gte(patientPaymentApplication.voidedAt, range.start),
     lt(patientPaymentApplication.voidedAt, range.end),
     or(isNull(patientPayment.voidedAt), gte(patientPayment.voidedAt, range.end))!,
-    isNull(encounterProcedure.voidedAt),
     eq(encounter.status, "finalizada"),
     isNull(encounter.voidedAt),
   ]

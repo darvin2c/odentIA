@@ -1,7 +1,7 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { beforeAll, describe, expect, it } from "vitest"
 import { areaNav, navSectionOf, subsectionNav, visibleSections } from "@odentia/clinic-app/lib/patient-areas"
-import { declareProduct } from "@odentia/clinic-app/product/product-ui"
+import { declareProduct, findingWords } from "@odentia/clinic-app/product/product-ui"
 import { dentalUi } from "./index"
 
 const as = (role: string) => (permission: string) => canAccess(role, permission)
@@ -43,5 +43,12 @@ describe("odentIA en la página de la persona (ADR 0035 y 0079)", () => {
     expect(site?.partsOf(16).length).toBeGreaterThan(0)
     // Un número que no es pieza no tiene caras, en vez de fallar.
     expect(site?.partsOf(99)).toEqual([])
+  })
+})
+
+describe("el hallazgo en palabras (QA del 19 nov)", () => {
+  it("el recorrido de un tratamiento nombra el hallazgo y su cara, no la clave del odontograma", () => {
+    expect(findingWords("definitive_restoration", "occlusal")).toBe("Restauración definitiva · Oclusal")
+    expect(findingWords("definitive_restoration")).toBe("Restauración definitiva")
   })
 })

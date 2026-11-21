@@ -277,6 +277,13 @@ it("la indicación de la cita dice lo que falta según cómo va la atención, nu
   const again = routeInstruction("clinico", null, { tools, progress: { offered: true } }) ?? ""
   expect(again).toContain("no le preguntes otra vez qué le pasa")
   expect(again).not.toContain("pregúntaselo en una línea")
+  // «Me duele la muela» de quien ya tiene cita: se le recuerda y elige adelantarla u otra aparte.
+  const summary = "Cita por venir: jue 21 nov 9:00 con la Dra. Díaz (id a1, versión 3)"
+  const booked = routeInstruction("clinico", summary, { tools }) ?? ""
+  expect(booked).toContain(summary)
+  expect(booked).toContain("pregúntale si quiere adelantarla o es otra cita aparte")
+  expect(routeInstruction("clinico", null, { tools }) ?? "").not.toContain("otra cita aparte")
+  expect(routeInstruction("clinico", summary, { tools, progress: { done: "cita reservada" } }) ?? "").not.toContain("otra cita aparte")
 })
 
 it("spam solo con el modelo de decisión muy seguro y nunca si habla de la clínica o pide una persona (ADR 0054)", async () => {

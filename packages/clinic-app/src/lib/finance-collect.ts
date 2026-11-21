@@ -678,6 +678,26 @@ export interface AccountCurrency {
 }
 
 /**
+ * La cuenta en la cabecera de la persona, con las palabras y las cifras de la tarjeta de Cobros
+ * («Debe», «Falta pagar», «Le queda a favor»), por moneda y sin sumarlas (ADR 0135). Decía «debe»
+ * del saldo (lo que debe menos lo que tiene a favor) y la tarjeta «Debe» de lo que debe entero: tras
+ * una devolución que quedó a favor, «debe S/ 140.00» arriba y «Debe S/ 160.00» abajo (QA en local
+ * del 19 nov). Y como el saldo nunca baja de cero, «tiene … a favor» no salía nunca.
+ */
+export function accountHeaderWords(
+  rows: ReadonlyArray<AccountCurrency>,
+  money: (cents: number, currency: string) => string,
+): string {
+  const words = rows.flatMap((row) => {
+    if (row.aFavor > row.porCobrar) return [`tiene ${money(row.aFavor - row.porCobrar, row.currency)} a favor`]
+    if (row.saldo <= 0) return []
+    // Sin nada a favor, lo que debe es lo que falta pagar: la tarjeta dice «Debe» con la misma cifra.
+    return [row.aFavor > 0 ? `falta pagar ${money(row.saldo, row.currency)}` : `debe ${money(row.saldo, row.currency)}`]
+  })
+  return words.length > 0 ? words.join(" y ") : "no debe nada"
+}
+
+/**
  * El detalle del saldo en el Resumen (QA del 16 nov, C19): con algo a favor, las tres cifras; con
  * algo ya pagado de lo que debe, lo que debe y lo que pagó; solo sin ningún pago de eso, «sin pago
  * aplicado». Antes lo decía aunque hubiera pagado una parte.
@@ -753,18 +773,23 @@ export interface AccountPendingItem {
   productQuantity?: number | null
   /** Lo pagado con un adelanto «Para» este tratamiento: no está en `totalCents` ni en `paidCents`. */
   advancePaidCents?: number
+  /** Lo devuelto de este concepto (ADR 0068): tampoco está en `totalCents`, que es lo que queda. */
+  returnedCents?: number
 }
 
 /**
  * «Costó 900 · pagó 300 de adelanto»: con un adelanto para el tratamiento, lo que costó entero y lo
- * pagado contando el adelanto; sin él, las cifras del concepto (QA del 10 nov, M7).
+ * pagado contando el adelanto; sin él, las cifras del concepto (QA del 10 nov, M7). Con una
+ * devolución, lo que costó y lo que se le devolvió: la devolución deja el concepto en lo que queda
+ * (ADR 0068) y decía «Costó 160» de una resina de 180 (QA en local del 19 nov).
  */
 export function pendingCostWords(
-  item: Pick<AccountPendingItem, "totalCents" | "paidCents" | "advancePaidCents">,
+  item: Pick<AccountPendingItem, "totalCents" | "paidCents" | "advancePaidCents" | "returnedCents">,
   money: (cents: number) => string,
 ): string {
   const advance = item.advancePaidCents ?? 0
-  const cost = `Costó ${money(item.totalCents + advance)}`
+  const returned = item.returnedCents ?? 0
+  const cost = `Costó ${money(item.totalCents + returned + advance)}${returned > 0 ? ` · se le devolvió ${money(returned)}` : ""}`
   if (advance <= 0) return `${cost} · pagó ${money(item.paidCents)}`
   const paid = item.paidCents + advance
   return paid === advance

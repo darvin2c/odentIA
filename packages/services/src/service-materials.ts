@@ -906,6 +906,8 @@ export interface CorrectEncounterMaterialInput {
   quantity: number
   /** La clave del formulario: el reintento devuelve lo hecho. */
   idempotencyKey: string
+  /** Lo que dice el movimiento del almacén; sin él, «Corrección de la atención del …». */
+  reason?: string
 }
 
 /**
@@ -965,7 +967,9 @@ export async function correctEncounterMaterial(
   const zone = await findOrgLocale(tx, orgId)
   const site = await branchOf(tx, orgId, row.branchId)
   const day = visitDay(row.startedAt, zone.locale, site?.timezone || zone.timezone)
-  const reason = `Corrección de la atención del ${day}: fueron ${quantityWords(quantity, item.unit, zone.locale)}, no ${quantityWords(used, item.unit, zone.locale)}`
+  const reason =
+    input.reason?.trim() ||
+    `Corrección de la atención del ${day}: fueron ${quantityWords(quantity, item.unit, zone.locale)}, no ${quantityWords(used, item.unit, zone.locale)}`
   const base = {
     actorUserId,
     patientId: row.patientId,

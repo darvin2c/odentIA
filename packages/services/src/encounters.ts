@@ -153,6 +153,7 @@ import {
   withSite,
 } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { type ClosingConsultation, closingConsultationOf } from "./closing-consultation.js"
 import { professionalSignature } from "./professional-profiles.js"
 import { countConsultationAction } from "./saas-actions.js"
 import { requireServiceForIndication } from "./service-catalog.js"
@@ -1709,7 +1710,9 @@ async function openAcceptedPlanItemFor(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.serviceId, serviceId),
-        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        // Lo aceptado, o lo que se marcó «No se hizo» y quedó por decidir: hacerlo es aceptarlo, en
+        // su misma fila y con su cobro (QA del 19 nov: se cobraba otra vez y quedaban dos filas).
+        or(eq(treatmentPlanItem.decisionStatus, "aceptado"), notDoneByDecideSql()),
         ne(treatmentPlanItem.status, "realizado"),
         ne(treatmentPlanItem.status, "cancelado"),
         ne(treatmentPlanItem.status, "reemplazado"),
@@ -1719,6 +1722,15 @@ async function openAcceptedPlanItemFor(
     .orderBy(asc(treatmentPlanItem.id))
   const row = rows.find((item) => !siteCode || !item.siteCode || item.siteCode === siteCode)
   return row?.id ?? null
+}
+
+/** Indicado y hecho en una atención, marcado «No se hizo» después de firmar y aún por decidir. */
+function notDoneByDecideSql(): SQL {
+  return sql`(${treatmentPlanItem.decisionStatus} = 'pendiente' and exists (
+    select 1 from encounter_procedure nd
+    join encounter ne on ne.organization_id = nd.organization_id and ne.id = nd.encounter_id
+    where nd.organization_id = ${treatmentPlanItem.organizationId} and nd.plan_item_id = ${treatmentPlanItem.id}
+      and nd.voided_at is not null and ne.status = 'finalizada' and nd.voided_at > ne.finalized_at))`
 }
 
 /** La pieza (o el sitio) que trae lo pedido, si se dijo; sin ella, ninguna. */
@@ -1839,7 +1851,7 @@ export async function addEncounterProcedure(
     // vuelve a exigirlo, pero aquí el error es específico antes de insertar.
     if (plan.decisionStatus !== "aceptado") {
       const awaiting = plan.decisionStatus === "pendiente" && (!budget || budget.status === "borrador")
-      if (!input.acceptWhenDone || !awaiting) {
+      if (!(input.acceptWhenDone || linkedPlanItemId === plan.id) || !awaiting) {
         throw conflict(
           "ITEM_NOT_ACCEPTED",
           budget && budget.status !== "borrador" && input.acceptWhenDone
@@ -2391,6 +2403,24 @@ export interface ClosingCheckBase {
    * lo avisa y se terminan después de firmar, con su propia fecha.
    */
   openForms: Array<{ id: string; title: string }>
+  /**
+   * Lo que se firma como hecho hoy, con su sitio y lo que se cargará, con la misma regla de la
+   * firma (`chargeDecisionsOf`). El cierre lo nombra antes de firmar (mesa del 19 nov: «2
+   * procedimientos» sin importe no dejaba ver el error a tiempo).
+   */
+  billing: { lines: ClosingBillingLine[]; totals: Array<{ currency: string; totalCents: number }> }
+  /** La consulta que se propone cobrar si hoy no se hizo nada; null si no corresponde. */
+  consultation: ClosingConsultation | null
+}
+
+/** Un acto de hoy en el cierre: qué es, dónde y lo que se cargará (o por qué no). */
+export interface ClosingBillingLine {
+  procedureId: string
+  description: string
+  site: string | null
+  amountCents: number | null
+  currency: string | null
+  reason: SkippedCharge["reason"] | null
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión: «Endodoncia · sesión 2 de 2». */
@@ -2931,6 +2961,44 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
+  // Lo de hoy con lo que se cargará, y la consulta si no se hizo nada (mesa del cierre, 19 nov).
+  const today = await tx
+    .select()
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, row.id),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
+  const site = await siteOf(tx, orgId)
+  const lines: ClosingBillingLine[] = (await chargeDecisionsOf(tx, orgId, row.patientId, today)).map((decision) => ({
+    procedureId: decision.proc.id,
+    description: decision.proc.description,
+    site: site.words(decision.proc, "short"),
+    amountCents: decision.kind === "charge" ? decision.previewCents : null,
+    currency: decision.proc.currency,
+    reason: decision.kind === "skip" ? decision.reason : null,
+  }))
+  const billing = {
+    lines,
+    totals: sumByCurrency(
+      lines.flatMap((line) =>
+        line.currency == null || line.amountCents == null ? [] : [{ currency: line.currency, cents: line.amountCents }],
+      ),
+    ).map(({ currency, cents }) => ({ currency, totalCents: cents })),
+  }
+  const consultation = await closingConsultationOf(tx, orgId, {
+    encounterId: row.id,
+    patientId: row.patientId,
+    appointmentId: row.appointmentId ?? null,
+    startedAt: row.startedAt,
+    hasProcedures: today.length > 0,
+    cameForSession: sessions.notRegistered.length > 0,
+    controlVisit: controls.byAppointment.length > 0 || controls.due.some((control) => control.mine || control.chosen),
+  })
   return {
     ready: missing.length === 0,
     missing,
@@ -2942,6 +3010,8 @@ export async function checkEncounterClosing(
     resolvable,
     openForms,
     controls,
+    billing,
+    consultation,
     ...product,
   }
 }
@@ -3162,6 +3232,8 @@ async function createNextControl(
   day: string,
   controls: ClosingControls,
   timezone: string,
+  /** La consulta marcada al firmar: no es un tratamiento al que se vuelva a controlar. */
+  skipProcedureId: string | null = null,
 ): Promise<{ id: string; title: string; dueAt: Date }> {
   const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone).toISOString()
   if (day === controls.shortcuts.recall) {
@@ -3182,6 +3254,7 @@ async function createNextControl(
         eq(encounterProcedure.organizationId, orgId),
         eq(encounterProcedure.encounterId, row.id),
         isNull(encounterProcedure.voidedAt),
+        ...(skipProcedureId ? [ne(encounterProcedure.id, skipProcedureId)] : []),
       ),
     )
     .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
@@ -3300,6 +3373,11 @@ export interface FinalizeEncounterInput {
    * guarda la atención firmada; sin él, el máximo no se guarda.
    */
   anesthetic?: string | null
+  /**
+   * La consulta que el cierre trajo marcada (`closing.consultation`): se registra como hecha y se
+   * carga. `null`: quien firma la desmarcó (queda en la actividad). Sin él (API sin pantalla), nada.
+   */
+  consultationServiceId?: string | null
 }
 
 /**
@@ -3373,6 +3451,225 @@ async function applySessionAnswers(
   return { addSessions, keptOpen }
 }
 
+/**
+ * Cómo se cobra un acto: «session» (un cargo por visita) o «treatment» (uno por tratamiento). Lo
+ * acordado en su presupuesto manda; sin presupuesto, su servicio (la misma regla de la firma).
+ */
+export async function billingModeOfProcedure(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  proc: Pick<typeof encounterProcedure.$inferSelect, "planItemId" | "serviceId">,
+): Promise<"session" | "treatment"> {
+  const line = proc.planItemId ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId) : null
+  const serviceMode = line || !proc.serviceId ? null : (await readBillingModes(tx, orgId, [proc.serviceId]))[proc.serviceId]
+  return (line?.billingMode ?? serviceMode) === "session" ? "session" : "treatment"
+}
+
+/** Lo que se cargará por un acto al firmar, o por qué no (`finalizeEncounter` y el cierre). */
+export type ChargeDecision =
+  | {
+      proc: typeof encounterProcedure.$inferSelect
+      kind: "charge"
+      /** Sin él, el precio registrado del acto (`createCharge`). */
+      amountCents?: number
+      frozenPromotion?: { id: string; name: string }
+      commissionSessions?: number | null
+      /** Con un adelanto «Para» este tratamiento: lo acordado y lo adelantado. */
+      agreedCents?: number
+      advanceCents?: number
+      /** Lo que se cargará, para decirlo antes de firmar. */
+      previewCents: number | null
+    }
+  | { proc: typeof encounterProcedure.$inferSelect; kind: "skip"; reason: SkippedCharge["reason"] }
+
+/**
+ * Los cargos caen solos al firmar, con el precio final acordado:
+ * - Modo `treatment`: un cargo por tratamiento (anti-doble-cobro por cargo
+ *   activo del mismo tratamiento; el importe respeta el total acordado).
+ * - Modo `session`: un cargo por visita atendida al precio de sesión
+ *   acordado, con tope de visitas previstas y sin duplicar el acto
+ *   (anti-doble-cargo por procedimiento). La deuda nace por visita: su
+ *   línea no se carga antes (`createCharge` lo rechaza, ADR 0159), y lo
+ *   pagado antes es un adelanto a favor que cancela este cargo al cobrarlo.
+ * Se decide sin escribir nada, para que el cierre diga antes lo que se cargará con la misma regla
+ * (mesa del cierre, 19 nov: «2 procedimientos» sin importe no dejaba ver el error a tiempo). Lo
+ * decidido para un acto cuenta para el siguiente del mismo tratamiento en la misma firma.
+ */
+export async function chargeDecisionsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  procedures: ReadonlyArray<typeof encounterProcedure.$inferSelect>,
+): Promise<ChargeDecision[]> {
+  const decisions: ChargeDecision[] = []
+  /** Lo decidido en esta misma firma, por tratamiento: lo que se cargará y las visitas. */
+  const chargedNow = new Map<string, number>()
+  const visitsNow = new Map<string, number>()
+  const skip = (proc: typeof encounterProcedure.$inferSelect, reason: SkippedCharge["reason"]) =>
+    decisions.push({ proc, kind: "skip", reason })
+  // Lo devuelto entero de cada tratamiento de la atención: cuenta como cobrado (ADR 0068).
+  const returnedByPlanItem = new Map<string, WholeReturnedCharge[]>()
+  for (const charge of await wholeReturnedCharges(
+    tx,
+    orgId,
+    patientId,
+    [...new Set(procedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : [])))],
+  )) {
+    returnedByPlanItem.set(charge.planItemId, [...(returnedByPlanItem.get(charge.planItemId) ?? []), charge])
+  }
+  for (const proc of procedures) {
+    if (!proc.serviceId) {
+      skip(proc, "free_act")
+      continue
+    }
+    const line = proc.planItemId ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId) : null
+    // Lo acordado en el presupuesto manda; sin presupuesto aceptado decide el
+    // servicio: un control por sesión se cobra en cada visita igualmente.
+    const serviceMode = line ? null : (await readBillingModes(tx, orgId, [proc.serviceId]))[proc.serviceId]
+    const sessionMode = (line?.billingMode ?? serviceMode) === "session"
+    // La promoción acordada viaja congelada: no se revalida su vigencia.
+    const frozenPromotion =
+      line?.promotionId && line.promotionName ? { id: line.promotionId, name: line.promotionName } : undefined
+    if (sessionMode && proc.planItemId) {
+      const [duplicate] = await tx
+        .select({ id: patientCharge.id })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.encounterProcedureId, proc.id),
+            isNull(patientCharge.voidedAt),
+          ),
+        )
+        .limit(1)
+      if (duplicate) {
+        skip(proc, "covered")
+        continue
+      }
+      const visits = await tx
+        .select({ id: patientCharge.id })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.planItemId, proc.planItemId),
+            isNotNull(patientCharge.encounterProcedureId),
+            isNull(patientCharge.voidedAt),
+            // Una visita marcada «No se hizo» no cuenta para el tope, aunque su cobro siga pagado
+            // (QA del 19 nov: la última sesión real quedaba sin cargo).
+            sql`not exists (select 1 from encounter_procedure nd where nd.organization_id = ${patientCharge.organizationId}
+              and nd.id = ${patientCharge.encounterProcedureId} and nd.voided_at is not null)`,
+          ),
+        )
+      const [planItem] = await tx
+        .select({ plannedSessions: treatmentPlanItem.plannedSessions })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.id, proc.planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+        .limit(1)
+      // El tope son las visitas previstas. Si nadie las fijó no hay tope:
+      // se cobra cada visita atendida, no solo la primera. Una visita cuyo
+      // cobro se devolvió entero también cuenta: no deja otra por cobrar.
+      const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? null
+      const returnedVisits = (returnedByPlanItem.get(proc.planItemId) ?? []).filter(
+        (charge) => charge.encounterProcedureId !== null,
+      )
+      const visitCount = visits.length + (visitsNow.get(proc.planItemId) ?? 0)
+      if (cap !== null && visitCount + returnedVisits.length >= cap) {
+        skip(proc, visitCount >= cap ? "sessions_complete" : "returned")
+        continue
+      }
+      const amount = line?.priceCents ?? proc.priceCents
+      if (amount === null || amount <= 0) {
+        skip(proc, "zero_price")
+        continue
+      }
+      visitsNow.set(proc.planItemId, (visitsNow.get(proc.planItemId) ?? 0) + 1)
+      decisions.push({ proc, kind: "charge", amountCents: amount, frozenPromotion, previewCents: amount })
+      continue
+    }
+    if (proc.priceCents === null || proc.priceCents <= 0) {
+      skip(proc, "zero_price")
+      continue
+    }
+    if (proc.planItemId) {
+      // Lo cobrado incluye lo devuelto (ADR 0068): una devolución no deja otra vez por cobrar el tratamiento.
+      const active = await tx
+        .select({
+          amountCents: patientCharge.amountCents,
+          returnedCents: patientCharge.returnedCents,
+          discountCents: patientCharge.discountCents,
+          requestKey: patientCharge.requestKey,
+        })
+        .from(patientCharge)
+        .where(
+          and(
+            eq(patientCharge.organizationId, orgId),
+            eq(patientCharge.patientId, patientId),
+            eq(patientCharge.planItemId, proc.planItemId),
+            isNull(patientCharge.voidedAt),
+          ),
+        )
+      const agreed = line?.priceCents ?? proc.priceCents
+      // Lo descontado en Cobrar también cuenta: si no, la sesión siguiente volvería a cobrarlo.
+      const charged =
+        active.reduce((sum, c) => sum + c.amountCents + c.returnedCents + c.discountCents, 0) +
+        (chargedNow.get(proc.planItemId) ?? 0)
+      // Lo devuelto entero también se cobró: la recepción lo vuelve a cobrar a mano si corresponde.
+      // Como `active`, sin mirar la moneda: un tratamiento se acuerda en una sola.
+      const returnedWhole = returnedByPlanItem.get(proc.planItemId) ?? []
+      const remaining = agreed - charged - returnedWhole.reduce((sum, c) => sum + c.chargedCents, 0)
+      if (remaining <= 0) {
+        skip(proc, charged < agreed ? "returned" : "covered")
+        continue
+      }
+      // Por tratamiento se cobra lo acordado completo en la primera
+      // atención, también cuando lo acordado supera la tarifa del acto.
+      const amount = remaining
+      // Con varias sesiones previstas, la comisión de cada cobro se reparte por sesión (ADR 0151).
+      const [planned] = await tx
+        .select({ sessions: treatmentPlanItem.plannedSessions })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, proc.planItemId)))
+      const advance = active
+        .filter((c) => c.requestKey?.startsWith(ADVANCE_KEY))
+        .reduce((sum, c) => sum + c.amountCents, 0)
+      chargedNow.set(proc.planItemId, (chargedNow.get(proc.planItemId) ?? 0) + amount)
+      decisions.push({
+        proc,
+        kind: "charge",
+        amountCents: amount,
+        frozenPromotion,
+        commissionSessions: planned && planned.sessions > 1 ? planned.sessions : null,
+        previewCents: amount,
+        ...(advance > 0 ? { agreedCents: agreed, advanceCents: advance } : {}),
+      })
+      continue
+    }
+    const [duplicate] = await tx
+      .select({ id: patientCharge.id })
+      .from(patientCharge)
+      .where(
+        and(
+          eq(patientCharge.organizationId, orgId),
+          eq(patientCharge.patientId, patientId),
+          eq(patientCharge.encounterProcedureId, proc.id),
+          isNull(patientCharge.voidedAt),
+        ),
+      )
+      .limit(1)
+    if (duplicate) {
+      skip(proc, "covered")
+      continue
+    }
+    // El precio registrado del acto (`createCharge` lo toma de él).
+    decisions.push({ proc, kind: "charge", previewCents: proc.priceCents })
+  }
+  return decisions
+}
+
 export async function finalizeEncounter(
   tx: Db,
   orgId: string,
@@ -3424,6 +3721,24 @@ export async function finalizeEncounter(
     }
     if (reason.length > 2000) throw invalidField("registrationSkipReason", "El motivo admite hasta 2000 caracteres")
     registrationSkipReason = reason
+  }
+  // La consulta marcada se registra como hecha, aún en el borrador, para que se cargue con lo demás.
+  let consultationProcedureId: string | null = null
+  if (input.consultationServiceId !== undefined && closing.consultation) {
+    const chosen = input.consultationServiceId
+      ? closing.consultation.options.find((option) => option.serviceId === input.consultationServiceId)
+      : null
+    if (input.consultationServiceId && !chosen)
+      throw invalidField("consultationServiceId", "Esa consulta ya no se puede cobrar: vuelve a abrir el cierre")
+    if (chosen)
+      consultationProcedureId = (
+        await addEncounterProcedure(tx, orgId, actorUserId, patientId, encounterId, { serviceId: chosen.serviceId })
+      ).id
+    else
+      await audit(tx, orgId, actorUserId, "encounter.consultation_unchecked", "encounter", encounterId, {
+        patientId,
+        proposedServiceId: closing.consultation.proposed.serviceId,
+      })
   }
   const now = new Date()
   // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
@@ -3479,6 +3794,8 @@ export async function finalizeEncounter(
         isNull(encounterProcedure.voidedAt),
       ),
     )
+    // En el orden del cierre: lo que se cargará cae en la misma línea que el cierre mostró.
+    .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
   // El control nuevo se indica con la atención aún abierta, como «Indicar control». Si la persona ya
   // tiene uno, si el que se cumple (por la ventana o por su cita) se repite, o si quien firma deja sin
   // marcar uno suyo, no se crea otro: dos controles no son dos visitas. Uno de un colega sin marcar no
@@ -3494,7 +3811,7 @@ export async function finalizeEncounter(
     nextDay !== null && nextDay <= closing.controls.shortcuts.month && closing.controls.returnsTo.length > 0
   const nextControl =
     nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
-      ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
+      ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone, consultationProcedureId)
       : null
   const hooks = await productHooks(tx, orgId)
   const [row] = await tx
@@ -3558,200 +3875,25 @@ export async function finalizeEncounter(
   const charges: FinalizeEncounterResult["charges"] = []
   const skippedCharges: SkippedCharge[] = []
   const billingLines: FinalizeBillingLine[] = []
-  const skip = (
-    proc: { id: string; description: string; currency: string | null },
-    reason: SkippedCharge["reason"],
-  ): void => {
-    skippedCharges.push({ procedureId: proc.id, reason })
-    billingLines.push({
-      procedureId: proc.id,
-      description: proc.description,
-      amountCents: null,
-      currency: proc.currency,
-      status: "skipped",
-      reason,
-    })
-  }
-  // Lo devuelto entero de cada tratamiento de la atención: cuenta como cobrado (ADR 0068).
-  const returnedByPlanItem = new Map<string, WholeReturnedCharge[]>()
-  for (const charge of await wholeReturnedCharges(
-    tx,
-    orgId,
-    patientId,
-    [...new Set(procedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : [])))],
-  )) {
-    returnedByPlanItem.set(charge.planItemId, [...(returnedByPlanItem.get(charge.planItemId) ?? []), charge])
-  }
-  for (const proc of procedures) {
-    if (!proc.serviceId) {
-      skip(proc, "free_act")
-      continue
-    }
-    const line = proc.planItemId
-      ? await acceptedBudgetLine(tx, orgId, patientId, proc.planItemId)
-      : null
-    // Lo acordado en el presupuesto manda; sin presupuesto aceptado decide el
-    // servicio: un control por sesión se cobra en cada visita igualmente.
-    const serviceMode = line ? null : (await readBillingModes(tx, orgId, [proc.serviceId]))[proc.serviceId]
-    const sessionMode = (line?.billingMode ?? serviceMode) === "session"
-    // La promoción acordada viaja congelada: no se revalida su vigencia.
-    const frozenPromotion =
-      line?.promotionId && line.promotionName
-        ? { id: line.promotionId, name: line.promotionName }
-        : undefined
-    if (sessionMode && proc.planItemId) {
-      const [duplicate] = await tx
-        .select({ id: patientCharge.id })
-        .from(patientCharge)
-        .where(
-          and(
-            eq(patientCharge.organizationId, orgId),
-            eq(patientCharge.patientId, patientId),
-            eq(patientCharge.encounterProcedureId, proc.id),
-            isNull(patientCharge.voidedAt),
-          ),
-        )
-        .limit(1)
-      if (duplicate) {
-        skip(proc, "covered")
-        continue
-      }
-      const visits = await tx
-        .select({ id: patientCharge.id })
-        .from(patientCharge)
-        .where(
-          and(
-            eq(patientCharge.organizationId, orgId),
-            eq(patientCharge.patientId, patientId),
-            eq(patientCharge.planItemId, proc.planItemId),
-            isNotNull(patientCharge.encounterProcedureId),
-            isNull(patientCharge.voidedAt),
-          ),
-        )
-      const [planItem] = proc.planItemId
-        ? await tx
-            .select({ plannedSessions: treatmentPlanItem.plannedSessions })
-            .from(treatmentPlanItem)
-            .where(
-              and(
-                eq(treatmentPlanItem.id, proc.planItemId),
-                eq(treatmentPlanItem.organizationId, orgId),
-              ),
-            )
-            .limit(1)
-        : []
-      // El tope son las visitas previstas. Si nadie las fijó no hay tope:
-      // se cobra cada visita atendida, no solo la primera. Una visita cuyo
-      // cobro se devolvió entero también cuenta: no deja otra por cobrar.
-      const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? null
-      const returnedVisits = (returnedByPlanItem.get(proc.planItemId) ?? []).filter(
-        (charge) => charge.encounterProcedureId !== null,
-      )
-      if (cap !== null && visits.length + returnedVisits.length >= cap) {
-        skip(proc, visits.length >= cap ? "sessions_complete" : "returned")
-        continue
-      }
-      const amount = line?.priceCents ?? proc.priceCents
-      if (amount === null || amount <= 0) {
-        skip(proc, "zero_price")
-        continue
-      }
-      const charge = await createCharge(tx, orgId, actorUserId, patientId, {
-        encounterProcedureId: proc.id,
-        amountCents: amount,
-        frozenPromotion,
-      })
-      charges.push(charge)
+  for (const decision of await chargeDecisionsOf(tx, orgId, patientId, procedures)) {
+    const { proc } = decision
+    if (decision.kind === "skip") {
+      skippedCharges.push({ procedureId: proc.id, reason: decision.reason })
       billingLines.push({
         procedureId: proc.id,
-        description: charge.description,
-        amountCents: charge.amountCents,
-        currency: charge.currency,
-        status: "charged",
-        reason: null,
+        description: proc.description,
+        amountCents: null,
+        currency: proc.currency,
+        status: "skipped",
+        reason: decision.reason,
       })
-      continue
-    }
-    if (proc.priceCents === null || proc.priceCents <= 0) {
-      skip(proc, "zero_price")
-      continue
-    }
-    if (proc.planItemId) {
-      // Lo cobrado incluye lo devuelto (ADR 0068): una devolución no deja otra vez por cobrar el tratamiento.
-      const active = await tx
-        .select({
-          amountCents: patientCharge.amountCents,
-          returnedCents: patientCharge.returnedCents,
-          discountCents: patientCharge.discountCents,
-          requestKey: patientCharge.requestKey,
-        })
-        .from(patientCharge)
-        .where(
-          and(
-            eq(patientCharge.organizationId, orgId),
-            eq(patientCharge.patientId, patientId),
-            eq(patientCharge.planItemId, proc.planItemId),
-            isNull(patientCharge.voidedAt),
-          ),
-        )
-      const agreed = line?.priceCents ?? proc.priceCents
-      // Lo descontado en Cobrar también cuenta: si no, la sesión siguiente volvería a cobrarlo.
-      const charged = active.reduce((sum, c) => sum + c.amountCents + c.returnedCents + c.discountCents, 0)
-      // Lo devuelto entero también se cobró: la recepción lo vuelve a cobrar a mano si corresponde.
-      // Como `active`, sin mirar la moneda: un tratamiento se acuerda en una sola.
-      const returnedWhole = returnedByPlanItem.get(proc.planItemId) ?? []
-      const remaining = agreed - charged - returnedWhole.reduce((sum, c) => sum + c.chargedCents, 0)
-      if (remaining <= 0) {
-        skip(proc, charged < agreed ? "returned" : "covered")
-        continue
-      }
-      // Por tratamiento se cobra lo acordado completo en la primera
-      // atención, también cuando lo acordado supera la tarifa del acto.
-      const amount = remaining
-      // Con varias sesiones previstas, la comisión de cada cobro se reparte por sesión (ADR 0151).
-      const [planned] = await tx
-        .select({ sessions: treatmentPlanItem.plannedSessions })
-        .from(treatmentPlanItem)
-        .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, proc.planItemId)))
-      const charge = await createCharge(tx, orgId, actorUserId, patientId, {
-        encounterProcedureId: proc.id,
-        amountCents: amount,
-        frozenPromotion,
-        commissionSessions: planned && planned.sessions > 1 ? planned.sessions : null,
-      })
-      charges.push(charge)
-      const advance = active
-        .filter((c) => c.requestKey?.startsWith(ADVANCE_KEY))
-        .reduce((sum, c) => sum + c.amountCents, 0)
-      billingLines.push({
-        procedureId: proc.id,
-        description: charge.description,
-        amountCents: charge.amountCents,
-        currency: charge.currency,
-        status: "charged",
-        reason: null,
-        ...(advance > 0 ? { agreedCents: agreed, advanceCents: advance } : {}),
-      })
-      continue
-    }
-    const [duplicate] = await tx
-      .select({ id: patientCharge.id })
-      .from(patientCharge)
-      .where(
-        and(
-          eq(patientCharge.organizationId, orgId),
-          eq(patientCharge.patientId, patientId),
-          eq(patientCharge.encounterProcedureId, proc.id),
-          isNull(patientCharge.voidedAt),
-        ),
-      )
-      .limit(1)
-    if (duplicate) {
-      skip(proc, "covered")
       continue
     }
     const charge = await createCharge(tx, orgId, actorUserId, patientId, {
       encounterProcedureId: proc.id,
+      ...(decision.amountCents !== undefined ? { amountCents: decision.amountCents } : {}),
+      ...(decision.frozenPromotion ? { frozenPromotion: decision.frozenPromotion } : {}),
+      ...(decision.commissionSessions !== undefined ? { commissionSessions: decision.commissionSessions } : {}),
     })
     charges.push(charge)
     billingLines.push({
@@ -3761,6 +3903,7 @@ export async function finalizeEncounter(
       currency: charge.currency,
       status: "charged",
       reason: null,
+      ...(decision.advanceCents ? { agreedCents: decision.agreedCents, advanceCents: decision.advanceCents } : {}),
     })
   }
   // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
@@ -4008,7 +4151,7 @@ async function notStartedStatusOf(
  * se cancela; uno planificado queda en curso si le quedan sesiones o, si no,
  * vuelve a por empezar (`notStartedStatusOf`).
  */
-async function voidProcedureRow(
+export async function voidProcedureRow(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -4022,6 +4165,11 @@ async function voidProcedureRow(
    * no cuenta como por venir. Al anular la atención entera, su cita puede volver a atenderse.
    */
   attendingAppointmentId: string | null = null,
+  /**
+   * «No se hizo» en una atención firmada (null: se anula en el borrador). Con true, el tratamiento directo no se cancela, vuelve al plan
+   * como por hacer, para que lo que lo pidió (la caries de la 24) no quede sin nada indicado.
+   */
+  directBackToPlan: boolean | null = null,
 ): Promise<EncounterProcedureRow> {
   const [voided] = await tx
     .update(encounterProcedure)
@@ -4052,7 +4200,43 @@ async function voidProcedureRow(
       const direct =
         item.sourceEncounterId === encounterId &&
         (item.decisionNote ?? "").startsWith("Tratamiento directo")
-      if (direct) {
+      // «No se hizo» en una sesión que no fue la última (la sesión 1 de una endodoncia que la
+      // sesión 2 terminó): lo terminado sigue terminado, con sus controles (QA del 19 nov).
+      const finishedLater =
+        directBackToPlan !== null &&
+        item.status === "realizado" &&
+        Boolean(
+          (
+            await tx.execute<{ later: boolean }>(sql`
+              select exists (
+                select 1 from encounter_procedure ep
+                join encounter later on later.organization_id = ep.organization_id and later.id = ep.encounter_id
+                join encounter here on here.organization_id = ep.organization_id and here.id = ${encounterId}
+                where ep.organization_id = ${orgId} and ep.plan_item_id = ${item.id} and ep.voided_at is null
+                  and ep.encounter_id <> ${encounterId} and later.status = 'finalizada'
+                  and later.started_at > here.started_at
+              ) as later`)
+          )[0]?.later,
+        )
+      if (finishedLater) {
+        // Nada del tratamiento cambia: solo deja de contar esta sesión.
+      } else
+      if (direct && directBackToPlan) {
+        // Se dio por aceptado al hacerlo: si no se hizo, nadie lo aceptó. Vuelve indicado y «por
+        // decidir», no como aceptado sin cita (QA antes de entregar, 19 nov).
+        await tx
+          .update(treatmentPlanItem)
+          .set({
+            status: "pendiente",
+            decisionStatus: "pendiente",
+            decisionNote: null,
+            decidedAt: null,
+            completedAt: null,
+            startedAt: null,
+            updatedAt: at,
+          })
+          .where(eq(treatmentPlanItem.id, item.id))
+      } else if (direct) {
         await tx
           .update(treatmentPlanItem)
           .set({
@@ -4088,7 +4272,7 @@ async function voidProcedureRow(
           .where(eq(treatmentPlanItem.id, item.id))
       }
       // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
-      if (direct || item.status === "realizado") {
+      if (!finishedLater && (direct || item.status === "realizado")) {
         await (await productHooks(tx, orgId)).treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
         await undoFinishControls(tx, { orgId, actorUserId, patientId, planItemId: item.id, reason, at })
       }
