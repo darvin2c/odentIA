@@ -1,5 +1,13 @@
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, type DictationFormQuestion, formQuestionsOf, productHooksFor } from "@odentia/services"
+import {
+  DICTATION_MAX_SUGGESTIONS,
+  DICTATION_SOURCE_CHARS,
+  type DictationFormQuestion,
+  formNetMisses,
+  formQuestionsOf,
+  prepareFormAnswer,
+  productHooksFor,
+} from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
@@ -524,6 +532,47 @@ describe("las respuestas de una ficha", () => {
     expect(String(system?.content)).toContain("Lees de nuevo oraciones de un dictado")
     expect(String(system?.content).length).toBeLessThan(1500)
     expect(String(human?.content)).toBe(`1. «a ver over byte de 4 succión por favor»\n   Ficha de ortodoncia: ${overbite}. Overbite · número en mm, de -10 a 15`)
+  })
+
+  it("consulta conversada (QA del 20 nov, C3): si Clío solo propone la pieza, la segunda lectura recibe cada oración con su pregunta", async () => {
+    const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")
+    const endo = formQuestionsOf([{ id: "endo", title: form?.title ?? "", snapshot: form?.schema, answers: {} }])
+    const site = productHooksFor("dental").site
+    const fieldOf = (number: number) => endo.find((item) => item.number === number)?.fieldId
+    const numberIn = (fieldId: string) => endo.find((item) => item.fieldId === fieldId)?.number ?? 0
+    const transcript =
+      "Hola Lucía, cuénteme qué le pasa. Doctora, me duele mucho la muela de arriba a la izquierda, la 26, ya hace dos semanas, y anoche no pude dormir del dolor, me duele solo, sin tocar nada. Vamos a ver. Le golpeo suave la muela y le duele bastante a la percusión. Con el frío le dura el dolor más de un minuto. En la radiografía veo una caries profunda que llega a la pulpa y una lesión pequeña en el ápice de la raíz. Diagnóstico: pulpitis irreversible con periodontitis apical. Necesita endodoncia de la 26."
+    // Lo que respondió Clío en la QA: de la ficha, solo la pieza.
+    const first = readWith({ fichas: [{ question: numberIn("pieza"), answer: "26", dicho: "la 26" }] }, transcript, 0, DENTAL_DICTATION_PROFILE.parts, endo)
+    const misses = formNetMisses(first?.drafts ?? [], endo, site, transcript)
+    const seen: BaseMessage[][] = []
+    const model = {
+      bindTools: () => ({
+        invoke: async (messages: BaseMessage[]) => {
+          seen.push(messages)
+          const fichas = [
+            { question: numberIn("percusion"), answer: "Positiva", dicho: "le duele bastante a la percusión" },
+            { question: numberIn("frio"), answer: "Aumentada, persiste", dicho: "Con el frío le dura el dolor más de un minuto" },
+            // «Una lesión en el ápice» no dice si es radiolúcida: no vuelve, y el aviso queda en su pregunta.
+            { question: numberIn("hallazgo_radiografico"), answers: ["Radiolucidez periapical"], dicho: "una lesión pequeña en el ápice de la raíz" },
+          ]
+          return new AIMessage({ content: "", tool_calls: [{ id: "relectura-c3", name: "registrar_fichas", args: { fichas } }] })
+        },
+      }),
+    }
+    const reread = await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, misses, endo)
+    const human = String(seen[0]?.[1]?.content)
+    expect(human).toContain("«Le golpeo suave la muela y le duele bastante a la percusión.»\n   Evaluación de endodoncia: ")
+    expect(human).toContain(". Hallazgo radiográfico periapical · varias opciones")
+    expect(human).not.toContain("Sondaje")
+    const kept = reread.flatMap((draft) => {
+      const ready = prepareFormAnswer(draft, endo, site, transcript)
+      return ready ? [[fieldOf(Number(draft.payload["question"])), ready.status, ready.payload["value"]]] : []
+    })
+    expect(kept).toEqual([
+      ["percusion", "por_revisar", "Positiva"],
+      ["frio", "por_revisar", "Aumentada, persiste"],
+    ])
   })
 
   it("sin oraciones que leer de nuevo, no llama al modelo", async () => {
