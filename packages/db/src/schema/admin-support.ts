@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
+import { saasAccount } from "./admin-accounts.js"
 import { organization, user } from "./auth.js"
 import { adminSchema } from "./schemas.js"
 
@@ -25,7 +26,7 @@ export const supportCase = pgTable(
   "support_case",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: text("organization_id").references(() => organization.id),
+    organizationId: text("organization_id").references(() => saasAccount.id),
     kind: text("kind").notNull().default("pregunta"),
     question: text("question").notNull(),
     detail: text("detail"),
@@ -110,7 +111,7 @@ export const supportMessage = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     caseId: uuid("case_id").notNull(),
-    organizationId: text("organization_id").references(() => organization.id),
+    organizationId: text("organization_id").references(() => saasAccount.id),
     authorKind: text("author_kind").notNull().default("cliente"),
     authorUserId: text("author_user_id").references(() => user.id),
     body: text("body").notNull(),
@@ -142,7 +143,7 @@ export const supportAttachment = pgTable(
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     caseId: uuid("case_id").notNull(),
     messageId: uuid("message_id"),
-    organizationId: text("organization_id").references(() => organization.id),
+    organizationId: text("organization_id").references(() => saasAccount.id),
     objectKey: text("object_key").notNull().unique(),
     mimeType: text("mime_type").notNull(),
     filename: text("filename").notNull(),
@@ -355,7 +356,7 @@ export const supportNotice = pgTable(
     caseId: uuid("case_id")
       .notNull()
       .references(() => supportCase.id, { onDelete: "cascade" }),
-    organizationId: text("organization_id").references(() => organization.id, {
+    organizationId: text("organization_id").references(() => saasAccount.id, {
       onDelete: "cascade",
     }),
     kind: text("kind").notNull(),

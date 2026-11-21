@@ -1780,6 +1780,8 @@ export async function purgeDemoOrganization(
   await tx.execute(
     sql`update admin.saas_waitlist_request set organization_id = null where organization_id = ${orgId}`,
   )
+  // Su cuenta de cliente (ADR 0210): con los disparadores apagados no se va sola con la clínica.
+  await tx.execute(sql`delete from admin.saas_account where organization_id = ${orgId}`)
   // La fila de la demo no se toca aquí: mientras se vuelve a armar, el avance la
   // escribe por otra conexión, y bloquearla en esta transacción la dejaría
   // esperando hasta el final. Quien llama la borra (borrar) o le pone la

@@ -1065,6 +1065,13 @@
       "when": 1795130000000,
       "tag": "0151_lo_que_no_se_hizo",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1795240704179,
+      "tag": "0152_cada_clinica_es_una_cuenta",
+      "breakpoints": true
     }
   ]
 }
