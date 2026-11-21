@@ -1,4 +1,4 @@
-# 0208 · gestorIA: Sofi vende con las operaciones del equipo y la base le niega lo que nunca hace
+# 0209 · gestorIA: Sofi vende con las operaciones del equipo y la base le niega lo que nunca hace
 
 Fecha: 2026-11-19 · Estado: aceptada · Paso B5 del lienzo B (gestorIA)
 
