@@ -728,6 +728,11 @@ export async function encounterRecordWords(tx: Db, orgId: string, row: Encounter
       when exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id}) then 'odontograma'
       when exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id}) then 'periodontograma'
       when exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id}) then 'lentes'
+      -- Lo que se dijo en la consulta y lo que Clío propone sin decidir (lo de su salud, entre ello) no
+      -- es una atención vacía: no se borra de un toque (QA del 21 nov). Solo se mira si existe.
+      when exists (select 1 from encounter_dictation_suggestion where organization_id = ${orgId} and encounter_id = ${row.id}
+        and status in ('lista', 'por_revisar')) then 'propuesta'
+      when exists (select 1 from encounter_dictation_segment where organization_id = ${orgId} and encounter_id = ${row.id}) then 'dicho'
     end as first`)
   // Lo que la consulta encuentra y no tiene palabras propias igual cuenta: nunca se da por vacía.
   return found?.first ? (RECORD_WORDS[found.first] ?? "algo registrado") : null
@@ -750,6 +755,8 @@ const RECORD_WORDS: Record<string, string> = {
   odontograma: "el odontograma",
   periodontograma: "el periodontograma",
   lentes: "una medida de lentes",
+  propuesta: "lo que propone Clío, sin decidir",
+  dicho: "lo que se dijo en la consulta",
 }
 
 /**

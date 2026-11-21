@@ -95,7 +95,7 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
     await enable(false)
   })
 
-  it("con la atención cerrada no se agrega nada; descartada vacía, lo dicho se va con ella", async () => {
+  it("con la atención cerrada no se agrega nada; con algo dicho no está vacía: no se descarta de un toque", async () => {
     await enable(true)
     const fx = await clinicalFixture()
     // Una atención anulada: lo que se dijo queda como quedó.
@@ -108,17 +108,22 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
     const [person] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente sin nada", patientNumber: await nextPatientNumber(ownerDb, ORG) })
     const [draft] = await ownerDb.insert(encounter).values({ organizationId: ORG, patientId: person!.id, professionalUserId: fx.actor }).returning()
     await fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, person!.id, draft!.id, { segmentId: randomUUID(), transcript: "Buenos días, ¿encontró estacionamiento?" }))
-    await fx.run((tx) => discardEmptyEncounter(tx, ORG, fx.actor, person!.id, draft!.id))
-    expect(await ownerDb.select().from(encounterDictationSegment).where(eq(encounterDictationSegment.encounterId, draft!.id))).toEqual([])
+    // Antes se borraba con un toque, y con ella la conversación (QA del 21 nov): ahora se anula con su motivo.
+    await expect(fx.run((tx) => discardEmptyEncounter(tx, ORG, fx.actor, person!.id, draft!.id))).rejects.toMatchObject({
+      code: "ENCOUNTER_NOT_EMPTY",
+      message: "Tiene lo que se dijo en la consulta: termínala o anúlala con su motivo",
+    })
+    expect(await ownerDb.select().from(encounterDictationSegment).where(eq(encounterDictationSegment.encounterId, draft!.id))).toHaveLength(1)
     await enable(false)
   })
 })
 
 describe("no es historia clínica", () => {
+  // `encounters.ts` solo mira si hay algo dicho, para no dar la atención por vacía.
   it("solo lo leen el dictado, «Lo que se dijo» y la demo: ni la copia de la historia ni FHIR", () => {
     const root = join(import.meta.dirname)
     const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
     const readers = files.filter((file) => /encounterDictationSegment|encounter_dictation_segment/.test(readFileSync(join(root, file), "utf8")))
-    expect(readers.map((file) => file.replaceAll("\\", "/")).sort()).toEqual(["dental/seed-demo.ts", "dictation-review.ts", "dictation-said.ts", "encounter-dictation.ts"])
+    expect(readers.map((file) => file.replaceAll("\\", "/")).sort()).toEqual(["dental/seed-demo.ts", "dictation-review.ts", "dictation-said.ts", "encounter-dictation.ts", "encounters.ts"])
   })
 })
