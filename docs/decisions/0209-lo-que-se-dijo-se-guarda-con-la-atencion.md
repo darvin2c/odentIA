@@ -19,6 +19,8 @@ La 0012 decidió no guardar el dictado completo: de cada sugerencia quedaba solo
 - **No es historia clínica.** No se firma, no va en la copia de la historia ni en FHIR y no se corrige: lo clínico sigue entrando solo al confirmar una sugerencia (0012). Lo ven los roles con permiso clínico, como la atención (`clinical.read`), también firmada o anulada.
 - **Solo se agrega.** La aplicación no reescribe lo dicho ni lo borra; anota al ordenarlo y, en el repaso al terminar, los turnos (`turns`, nulo hasta entonces). Se escribe con la atención en borrador y se borra con ella si se descarta vacía.
 
+- **El repaso al terminar** (P4 de la misma mesa): una lectura de toda la conversación guardada, con lo pendiente, lo confirmado y lo descartado, que completa lo que las pausas dejaron y parte cada tramo en turnos con quién habló (`turns`). Corre solo si hay tramos que ningún repaso leyó (`reviewed_at`) y lee como mucho los últimos 30 000 caracteres, en tramos enteros. Los turnos se guardan solo si juntos son el tramo tal cual; quién habló lo cambia una persona y otro repaso no lo pisa.
+
 ## Alternativas descartadas
 
 - *Seguir sin guardarlo* (0012): es lo que falló al recargar y al reintentar.
@@ -34,6 +36,6 @@ La 0012 decidió no guardar el dictado completo: de cada sugerencia quedaba solo
 
 ## Referencias
 
-- `packages/db/src/schema/clinical.ts` (`encounterDictationSegment`), migración `0152_lo_que_se_dijo.sql`.
+- `packages/db/src/schema/clinical.ts` (`encounterDictationSegment`), migraciones `0152_lo_que_se_dijo.sql` y `0154_el_repaso_al_terminar.sql`; el repaso en `packages/services/src/dictation-review.ts` y `packages/agent/src/dictation.ts` (`askDictationReview`), `POST …/dictation/review`.
 - `packages/services/src/dictation-said.ts`, `dictationSegmentSeen` en `encounter-dictation.ts`, `apps/api/src/routes/encounter-dictation.ts` (`GET …/dictation/said`).
 - Pruebas: `apps/api/src/routes/encounter-dictation.test.ts`, `packages/services/src/dictation-said.test.ts`.

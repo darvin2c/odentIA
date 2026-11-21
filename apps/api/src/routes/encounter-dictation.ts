@@ -1,4 +1,4 @@
-import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm, reviewDictation } from "@odentia/agent"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertClioCanListen,
@@ -6,6 +6,7 @@ import {
   confirmDictationHealth,
   confirmDictationSuggestion,
   countConfirmedDictation,
+  DICTATION_SPEAKERS,
   dictationFormQuestions,
   dictationModelLabel,
   dictationTeeth,
@@ -23,9 +24,12 @@ import {
   pendingFormValues,
   productDictation,
   requireClinicalAssistant,
+  saveDictationReview,
   saveDictationSegment,
+  setDictationTurnSpeaker,
   settleDictationMedicalLeave,
   settleDictationSegment,
+  startDictationReview,
   startDictationSegment,
   settleDictationPrescription,
   undoConfirmedDictation,
@@ -71,6 +75,12 @@ const healthReviewInput = z
     vinculo: z.string().trim().max(80).nullable().optional(),
   })
   .strict()
+/** El repaso al terminar: las fichas abiertas en pantalla, como en la pausa. */
+const reviewInput = z.object({ openForms: z.array(z.uuid()).max(5).optional() }).strict()
+/** Un turno de un tramo de lo que se dijo: el tramo por su identidad y el turno por su posición. */
+const turnParams = params.extend({ segmentId: z.string().min(1).max(100), turn: z.coerce.number().int().min(0).max(500) })
+/** «Quién habló», cambiado con un toque. */
+const turnInput = z.object({ quien: z.enum(DICTATION_SPEAKERS), vinculo: z.string().trim().max(80).nullable().optional() }).strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
 
 /**
@@ -251,6 +261,99 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
       throw error
     }
+  })
+
+  /**
+   * El repaso al terminar el dictado (mesa del 20 nov 2026, P4): una lectura de toda la conversación
+   * guardada con lo que ya quedó de ella. Completa lo que las pausas dejaron (cuándo vuelve, lo de su
+   * salud, las respuestas de una ficha abierta) y parte cada tramo en turnos con quién habló. Solo
+   * llama al modelo si hay tramos que ningún repaso leyó; lo que propone se guarda como lo de una
+   * pausa, y nada entra a la historia sin confirmar. Se mide como el dictado.
+   */
+  app.post(`${base}/review`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = params.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = reviewInput.safeParse((await c.req.json().catch(() => null)) ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const idle = { reviewed: false, suggestions: [], added: [], corrected: [], alreadyOnFile: [], alreadyDone: [], turnsSaved: [], turnsRejected: [], unused: [], model: null }
+    try {
+      return await runService(c, 200, async () => {
+        const ready = await withOrgContext(deps.db, orgId, (tx) => startDictationReview(tx, orgId, userId, at.data.id, at.data.encounterId, { openForms: parsed.data.openForms ?? [] }))
+        if (!ready.due) return idle
+        await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
+        const reviewed = await meterAiUse(
+          deps.db,
+          orgId,
+          "dictado",
+          () =>
+            reviewDictation(
+              deps.db,
+              { secretsKey: deps.secretsKey, platform: deps.llm },
+              {
+                orgId,
+                segments: ready.segments,
+                earlierLeftOut: ready.earlierLeftOut,
+                pending: ready.pending,
+                confirmed: ready.confirmed,
+                discarded: ready.discarded,
+                forms: ready.forms,
+              },
+            ),
+          { encounterId: at.data.encounterId },
+        )
+        const segmentOf = (number: number) => ready.segments.find((segment) => segment.number === number)?.segmentId
+        const saved = await withOrgContext(deps.db, orgId, (tx) =>
+          saveDictationReview(tx, orgId, userId, at.data.id, at.data.encounterId, {
+            reviewId: ready.reviewId,
+            segments: ready.segments,
+            readIds: ready.readIds,
+            drafts: reviewed.drafts,
+            turns: reviewed.turns.flatMap((item) => {
+              const segmentId = segmentOf(item.number)
+              return segmentId ? [{ segmentId, turns: item.turns }] : []
+            }),
+            unused: reviewed.unused,
+            omitted: reviewed.omitted,
+            outOfPlace: reviewed.outOfPlace,
+            formQuestions: ready.forms,
+          }),
+        )
+        return {
+          reviewed: true,
+          suggestions: saved.suggestions,
+          added: saved.added,
+          corrected: saved.corrected,
+          alreadyOnFile: saved.alreadyOnFile,
+          alreadyDone: saved.alreadyDone,
+          turnsSaved: saved.turnsSaved,
+          // Los que Clío no devolvió tal cual, al leerlos o al guardarlos.
+          turnsRejected: [...new Set([...reviewed.turnsRejected.flatMap((number) => segmentOf(number) ?? []), ...saved.turnsRejected])],
+          unused: saved.unused,
+          model: reviewed.model,
+        }
+      })
+    } catch (error) {
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
+      throw error
+    }
+  })
+
+  /**
+   * «Quién habló» en un turno de lo que se dijo, con un toque. Escribe lo que se dijo de la atención
+   * (`clinical.write`, el guardián de la ruta de pacientes) y solo en borrador, por quien la lleva.
+   */
+  app.patch(`${base}/said/:segmentId/turns/:turn`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = turnParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = turnInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => ({
+      turns: await withOrgContext(deps.db, orgId, (tx) =>
+        setDictationTurnSpeaker(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.segmentId, at.data.turn, parsed.data),
+      ),
+    }))
   })
 
   app.patch(`${base}/:suggestionId`, async (c) => {

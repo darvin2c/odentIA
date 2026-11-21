@@ -5479,6 +5479,9 @@ for (const seed of [
     saidAt: dictatedAt,
     createdBy: LUIS_ID,
     organizedAt: dictatedAt,
+    // El repaso al terminar ya la leyó y la partió en turnos (mesa del 20 nov 2026, P4).
+    turns: [{ quien: "dra", texto: "Overbite de tres. Overjet de cinco milímetros. Clase uno molar izquierda y clase dos molar derecha." }],
+    reviewedAt: dictatedAt,
   })
   // Lo que Mateo contó de su salud en la conversación (mesa del 20 nov 2026): queda propuesto, sin
   // confirmar, con la forma que guarda el servicio (`prepareHealth`); «que yo sepa no» es «no sabe».
@@ -5492,6 +5495,12 @@ for (const seed of [
     saidAt: dictatedAt,
     createdBy: LUIS_ID,
     organizedAt: dictatedAt,
+    turns: [
+      { quien: "paciente", texto: "Tomo loratadina por la rinitis." },
+      { quien: "dra", texto: "¿Alérgico a algo?" },
+      { quien: "paciente", texto: "Que yo sepa no." },
+    ],
+    reviewedAt: dictatedAt,
   })
   await db.insert(encounterDictationSuggestion).values({
     organizationId: ORG_A,

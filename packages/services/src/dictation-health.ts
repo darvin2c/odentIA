@@ -200,6 +200,30 @@ export function healthOfPayload(payload: Record<string, unknown>): NonNullable<z
 const sameName = (a: unknown, b: unknown) => normalizeDrugText(text(a)) === normalizeDrugText(text(b))
 
 /**
+ * El repaso al terminar (mesa del 20 nov 2026, P4): lo de su salud que no repite lo ya decidido
+ * (confirmado con la persona o descartado). Un grupo igual se quita entero; de una lista, la
+ * enfermedad o la medicina ya decidida. `null` si no queda nada nuevo.
+ */
+export function withoutSettledHealth(payload: Record<string, unknown>, settled: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> | null {
+  const kept = { ...payload }
+  for (const group of GROUPS) {
+    const now = kept[group]
+    if (!isRecord(now)) continue
+    const before = settled.map((item) => item[group]).filter(isRecord)
+    if (before.some((item) => JSON.stringify(item) === JSON.stringify(now))) {
+      delete kept[group]
+      continue
+    }
+    if (!LISTS.includes(group) || now["state"] !== "recorded") continue
+    const decided = before.flatMap((item) => (item["state"] === "recorded" && Array.isArray(item["items"]) ? (item["items"] as Array<Record<string, unknown>>) : []))
+    const items = (Array.isArray(now["items"]) ? (now["items"] as Array<Record<string, unknown>>) : []).filter((item) => !decided.some((one) => sameName(one["name"], item["name"])))
+    if (items.length) kept[group] = { ...now, items }
+    else delete kept[group]
+  }
+  return GROUPS.some((group) => isRecord(kept[group])) ? kept : null
+}
+
+/**
  * Lo nuevo de su salud sumado a lo que ya estaba pendiente, como la consulta: lo que no trae no se
  * toca; una enfermedad o una medicina más se suma sin repetir; una respuesta de un solo valor (el
  * anticoagulante, el embarazo) dicha distinto queda con la última y guarda la anterior en

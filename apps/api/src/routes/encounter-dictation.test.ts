@@ -1,6 +1,6 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
-import type { DictationExtraction } from "@odentia/agent"
+import type { DictationExtraction, DictationReviewExtraction } from "@odentia/agent"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { secretsKeyFromEnv, upsertAgentConfig } from "@odentia/services"
 import { sql } from "drizzle-orm"
@@ -20,7 +20,8 @@ import { createPatientsRoute } from "./patients.js"
  * aquí importa cuántas veces se le llama y qué lee.
  */
 const extract = vi.hoisted(() => vi.fn())
-vi.mock("@odentia/agent", async (importOriginal) => ({ ...(await importOriginal<typeof import("@odentia/agent")>()), extractDictation: extract }))
+const review = vi.hoisted(() => vi.fn())
+vi.mock("@odentia/agent", async (importOriginal) => ({ ...(await importOriginal<typeof import("@odentia/agent")>()), extractDictation: extract, reviewDictation: review }))
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -37,6 +38,18 @@ const nothing = (transcript: string, over: Partial<DictationExtraction> = {}): D
   unused: [],
   model: "doble",
   heard: transcript,
+  ...over,
+})
+
+const reviewed = (over: Partial<DictationReviewExtraction> = {}): DictationReviewExtraction => ({
+  drafts: [],
+  omitted: 0,
+  unused: [],
+  outOfPlace: [],
+  turns: [],
+  turnsRejected: [],
+  model: "doble",
+  heard: "",
   ...over,
 })
 
@@ -111,6 +124,8 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
+  review.mockReset()
+  review.mockImplementation(async () => reviewed())
   extract.mockReset()
   extract.mockImplementation(async (_db: unknown, _deps: unknown, input: { transcript: string }) => nothing(input.transcript))
 })
@@ -229,5 +244,78 @@ describe("«Lo revisé con…» de lo que dijo de su salud", () => {
     expect(data.status).toBe("confirmada")
     expect(data.payload["declarante"]).toBe("acompanante")
     expect(data.health.declarations[0]).toMatchObject({ via: "consulta", by: { kind: "representative", relation: "madre" } })
+  })
+})
+
+/**
+ * El repaso al terminar (mesa del 20 nov 2026, P4): una lectura de toda la conversación guardada,
+ * con lo que ya quedó de ella. Aquí importa cuándo se llama al modelo, qué lee y qué queda.
+ */
+describe("el repaso al terminar", () => {
+  type Reviewed = { reviewed: boolean; suggestions: Array<{ id: string; kind: string; payload: Record<string, unknown> }>; turnsSaved: string[]; turnsRejected: string[]; unused: Array<{ said: string | null; detail?: string }> }
+  const ask = (n: number) =>
+    review.mock.calls[n]?.[2] as { segments: Array<{ number: number; transcript: string; needsTurns: boolean }>; pending: string[]; discarded: string[]; earlierLeftOut: boolean }
+
+  it("lee toda la conversación una vez, con lo pendiente y lo descartado; sin tramos nuevos no vuelve a llamar al modelo", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    const first = crypto.randomUUID()
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, { drafts: [{ kind: "nota", payload: { reason: "Dolor de muela" }, sourceText: "me duele una muela" }] }),
+    )
+    await app.request(base, json({ transcript: "Doctora, me duele una muela.", segmentId: first }))
+    const second = crypto.randomUUID()
+    await app.request(base, json({ transcript: "Bueno, te veo la próxima semana para la otra resina.", segmentId: second }))
+    review.mockImplementationOnce(async () =>
+      reviewed({
+        drafts: [{ kind: "control", payload: { title: "Control: la otra resina", dueAt: new Date(Date.now() + 7 * 86_400_000).toISOString() }, sourceText: "te veo la próxima semana para la otra resina" }],
+        turns: [{ number: 1, turns: [{ quien: "paciente", texto: "Doctora, me duele una muela." }] }],
+        outOfPlace: [{ said: "te veo", why: "otro" }],
+      }),
+    )
+    const res = await app.request(`${base}/review`, json({}))
+    expect(res.status).toBe(200)
+    const { data } = (await res.json()) as { data: Reviewed }
+    expect(data.reviewed).toBe(true)
+    expect(data.suggestions.map((item) => [item.kind, item.payload["title"]])).toEqual([["control", "Control: la otra resina"]])
+    expect(data.turnsSaved).toEqual([first])
+    expect(review).toHaveBeenCalledTimes(1)
+    expect(ask(0).segments.map((item) => [item.number, item.transcript, item.needsTurns])).toEqual([
+      [1, "Doctora, me duele una muela.", true],
+      [2, "Bueno, te veo la próxima semana para la otra resina.", true],
+    ])
+    expect(ask(0).pending.some((label) => label.includes("Dolor de muela"))).toBe(true)
+
+    // «Lo que se dijo» trae los turnos del tramo.
+    const said = (await (await app.request(`${base}/said`)).json()) as { data: { segments: Array<{ turns: unknown[] | null }> } }
+    expect(said.data.segments.map((item) => item.turns)).toEqual([[{ quien: "paciente", texto: "Doctora, me duele una muela." }], null])
+
+    // Terminar otra vez sin haber dicho nada: no llama al modelo.
+    const again = await app.request(`${base}/review`, json({}))
+    expect(((await again.json()) as { data: Reviewed }).data.reviewed).toBe(false)
+    expect(review).toHaveBeenCalledTimes(1)
+
+    // Con algo nuevo, sí; lo que ya tiene turnos no los pide otra vez.
+    await app.request(base, json({ transcript: "Gracias, doctora.", segmentId: crypto.randomUUID() }))
+    await app.request(`${base}/review`, json({}))
+    expect(review).toHaveBeenCalledTimes(2)
+    expect(ask(1).segments.map((item) => item.needsTurns)).toEqual([false, true, true])
+  })
+
+  it("cambiar quién habló en un turno: quien lleva la atención, con un toque; recepción no puede", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    const segmentId = crypto.randomUUID()
+    await app.request(base, json({ transcript: "Tiene asma, usa salbutamol.", segmentId }))
+    review.mockImplementationOnce(async () => reviewed({ turns: [{ number: 1, turns: [{ quien: "no_se_sabe", texto: "Tiene asma, usa salbutamol." }] }] }))
+    await app.request(`${base}/review`, json({}))
+    const turn = `${base}/said/${segmentId}/turns/0`
+    const patch = (body: unknown): RequestInit => ({ method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    expect((await buildApp("reception").request(turn, patch({ quien: "acompanante", vinculo: "madre" }))).status).toBe(403)
+    expect((await app.request(turn, patch({ quien: "asistente" }))).status).toBe(400)
+    const res = await app.request(turn, patch({ quien: "acompanante", vinculo: "madre" }))
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { data: { turns: unknown[] } }).data.turns).toEqual([{ quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." }])
+    expect((await app.request(`${base}/said/${segmentId}/turns/3`, patch({ quien: "dra" }))).status).toBe(404)
   })
 })

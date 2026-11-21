@@ -1,0 +1,359 @@
+import { randomUUID } from "node:crypto"
+import { withOrgContext } from "@odentia/db"
+import { encounter, encounterDictationSegment } from "@odentia/db/schema/clinical"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { eq } from "drizzle-orm"
+import { describe, expect, it } from "vitest"
+import { upsertAgentConfig } from "./agentConfig.js"
+import { clinicalFixture } from "./clinical-test-fixture.js"
+import { listDictationSaid, settleDictationSegment, startDictationSegment } from "./dictation-said.js"
+import {
+  DICTATION_REVIEW_CHARS,
+  type DictationReviewInput,
+  saveDictationReview,
+  setDictationTurnSpeaker,
+  startDictationReview,
+  turnsSayTranscript,
+} from "./dictation-review.js"
+import { discardDictationSuggestion, type DictationDraft, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+
+/**
+ * El repaso al terminar el dictado (mesa del 20 nov 2026, «Clío en una consulta conversada», P4):
+ * una lectura de toda la conversación guardada, con lo que ya quedó de ella. Lo que devuelve el
+ * modelo se escribe aquí como lo devolvería Clío; lo que hace la ruta de punta a punta (el modelo
+ * llamado una vez, el permiso) lo prueba `apps/api/src/routes/encounter-dictation.test.ts`.
+ */
+setupTestDb()
+const ORG = "org_a"
+const enable = (on: boolean) => withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: on }))
+
+async function conversation() {
+  const fx = await clinicalFixture()
+  /** Una pausa ya ordenada, como la deja la ruta: guardada y con lo que propuso. */
+  const pause = async (transcript: string, drafts: DictationDraft[] = []) => {
+    const segmentId = randomUUID()
+    await fx.run(async (tx) => {
+      await startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId, transcript })
+      await saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts, segmentId, transcript })
+      await settleDictationSegment(tx, ORG, fx.encounter.id, segmentId, [])
+    })
+    return segmentId
+  }
+  const start = (openForms: string[] = []) => fx.run((tx) => startDictationReview(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { openForms }))
+  /** El repaso entero con lo que «devolvió» Clío. */
+  const review = async (answer: Partial<Omit<DictationReviewInput, "reviewId" | "segments" | "readIds" | "formQuestions">> = {}, openForms: string[] = []) => {
+    const started = await start(openForms)
+    if (!started.due) throw new Error("No tocaba el repaso")
+    return fx.run((tx) =>
+      saveDictationReview(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        reviewId: started.reviewId,
+        segments: started.segments,
+        readIds: started.readIds,
+        formQuestions: started.forms,
+        drafts: [],
+        turns: [],
+        unused: [],
+        omitted: 0,
+        outOfPlace: [],
+        ...answer,
+      }),
+    )
+  }
+  const pending = () => fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+  const said = () => fx.run((tx) => listDictationSaid(tx, ORG, fx.patient.id, fx.encounter.id))
+  return { fx, pause, start, review, pending, said }
+}
+
+describe("cuándo toca el repaso", () => {
+  it("solo con tramos que ningún repaso leyó: terminar otra vez sin decir nada no vuelve a llamar al modelo", async () => {
+    await enable(true)
+    const { pause, start, review } = await conversation()
+    expect(await start()).toEqual({ due: false })
+    await pause("Buenos días, ¿qué la trae por aquí?")
+    await pause("Me duele una muela cuando tomo algo frío.")
+    const first = await start()
+    expect(first.due).toBe(true)
+    if (!first.due) return
+    expect(first.segments.map((item) => [item.number, item.transcript, item.needsTurns])).toEqual([
+      [1, "Buenos días, ¿qué la trae por aquí?", true],
+      [2, "Me duele una muela cuando tomo algo frío.", true],
+    ])
+    expect(first.earlierLeftOut).toBe(false)
+    await review()
+    expect(await start()).toEqual({ due: false })
+    await pause("Te veo la próxima semana para la otra resina.")
+    expect((await start()).due).toBe(true)
+    await enable(false)
+  })
+
+  it("con más de lo que lee de una vez, lee los últimos tramos enteros y dice que dejó lo de antes", async () => {
+    await enable(true)
+    const { pause, start, review } = await conversation()
+    const long = `${"Le molesta al masticar del lado izquierdo desde hace semanas. ".repeat(180)}Fin.`
+    for (let index = 0; index < 4; index += 1) await pause(`${index}. ${long}`)
+    const started = await start()
+    if (!started.due) throw new Error("No tocaba el repaso")
+    expect(started.earlierLeftOut).toBe(true)
+    expect(started.segments.reduce((sum, item) => sum + item.transcript.length + 1, 0)).toBeLessThanOrEqual(DICTATION_REVIEW_CHARS)
+    expect(started.segments.at(-1)?.transcript.startsWith("3.")).toBe(true)
+    expect(started.segments[0]?.transcript.startsWith("0.")).toBe(false)
+    // Lo que dejó fuera por largo tampoco pide otro repaso.
+    await review()
+    expect(await start()).toEqual({ due: false })
+    await enable(false)
+  })
+
+  it("con la atención firmada o de otro profesional, no", async () => {
+    await enable(true)
+    const { fx, pause, start } = await conversation()
+    await pause("Me duele una muela.")
+    const other = await clinicalFixture()
+    await expect(other.run((tx) => startDictationReview(tx, ORG, other.actor, fx.patient.id, fx.encounter.id))).rejects.toMatchObject({ status: 409 })
+    await ownerDb.update(encounter).set({ status: "anulada", voidedAt: new Date(), voidedBy: fx.actor, voidReason: "Prueba" }).where(eq(encounter.id, fx.encounter.id))
+    await expect(start()).rejects.toMatchObject({ code: "VOIDED" })
+    await enable(false)
+  })
+})
+
+describe("lo que propone el repaso", () => {
+  it("C8: «te veo la próxima semana para la otra resina» queda como control con para qué vuelve", async () => {
+    await enable(true)
+    const { pause, review, pending } = await conversation()
+    await pause("Hoy hicimos la resina de la treinta y seis.")
+    await pause("Bueno, te veo la próxima semana para la otra resina.")
+    const dueAt = new Date(Date.now() + 7 * 86_400_000).toISOString()
+    const result = await review({
+      drafts: [{ kind: "control", payload: { title: "Control: la otra resina", dueAt }, sourceText: "te veo la próxima semana para la otra resina" }],
+    })
+    expect(result.suggestions.map((item) => [item.kind, item.payload["title"]])).toEqual([["control", "Control: la otra resina"]])
+    expect((await pending()).filter((item) => item.kind === "control")).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("no repite lo pendiente: la consulta se suma, sin otra tarjeta", async () => {
+    await enable(true)
+    const { pause, review, pending } = await conversation()
+    await pause("Me duele una muela de abajo cuando tomo algo frío.", [
+      { kind: "nota", payload: { reason: "Dolor de muela al frío", presentIllness: "Le duele una muela de abajo al tomar algo frío." }, sourceText: "Me duele una muela de abajo cuando tomo algo frío" },
+    ])
+    await pause("Hace como dos semanas, y anoche me dolió solita.")
+    const result = await review({
+      drafts: [
+        { kind: "nota", payload: { illnessDuration: "dos semanas", presentIllness: "Le duele una muela de abajo al tomar algo frío. Anoche le dolió sin causa." }, sourceText: "Hace como dos semanas, y anoche me dolió solita" },
+      ],
+    })
+    expect(result.suggestions).toEqual([])
+    const notes = (await pending()).filter((item) => item.kind === "nota")
+    expect(notes).toHaveLength(1)
+    expect(notes[0]?.payload).toMatchObject({ reason: "Dolor de muela al frío", illnessDuration: "dos semanas" })
+    expect(String(notes[0]?.payload["presentIllness"])).toContain("Anoche le dolió sin causa")
+    // Lo que ya decía no se repite.
+    expect(String(notes[0]?.payload["presentIllness"]).match(/al tomar algo frío/g)).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("lo descartado no vuelve aunque Clío lo proponga otra vez: lo filtra el servicio, no solo el prompt", async () => {
+    await enable(true)
+    const { fx, pause, review, pending } = await conversation()
+    const dueAt = new Date(Date.now() + 180 * 86_400_000).toISOString()
+    await pause("Control en seis meses.", [{ kind: "control", payload: { title: "Control en 6 meses", dueAt }, sourceText: "Control en seis meses" }])
+    const [control] = await pending()
+    await fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, control!.id))
+    const result = await review({ drafts: [{ kind: "control", payload: { title: "Control en 6 meses", dueAt }, sourceText: "Control en seis meses" }] })
+    expect(result.suggestions).toEqual([])
+    expect(await pending()).toEqual([])
+    await enable(false)
+  })
+
+  it("lo de su salud ya revisado no vuelve; lo nuevo dicho en la conversación, sí", async () => {
+    await enable(true)
+    const { fx, pause, review, pending } = await conversation()
+    await pause("Tomo losartán de cincuenta para la presión.", [
+      { kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] } }, sourceText: "Tomo losartán de cincuenta para la presión" },
+    ])
+    const [health] = await pending()
+    await fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, health!.id))
+    await pause("Y también la metformina, por el azúcar.")
+    const result = await review({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán", dose: "50 mg" }, { name: "metformina" }] } },
+          sourceText: "Y también la metformina, por el azúcar",
+        },
+      ],
+    })
+    const proposed = result.suggestions.find((item) => item.kind === "salud")
+    expect(proposed?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "metformina" }] })
+    await enable(false)
+  })
+
+  it("C9: las respuestas de la ficha abierta que las pausas dejaron se proponen en la ficha", async () => {
+    await enable(true)
+    const { fx, pause, review } = await conversation()
+    const schema = {
+      sections: [
+        {
+          id: "endo",
+          title: "Pruebas",
+          fields: [
+            { id: "percusion", label: "Percusión", type: "opcion_unica", options: ["Positiva", "Negativa"] },
+            { id: "frio", label: "Prueba al frío", type: "opcion_unica", options: ["Normal", "Prolongado", "Sin respuesta"] },
+          ],
+        },
+      ],
+    }
+    const [template] = await ownerDb
+      .insert(clinicalFormTemplate)
+      .values({ organizationId: ORG, key: `endo-${fx.actor}`, title: "Ficha de endodoncia", status: "publicado", schema })
+      .returning()
+    const [form] = await ownerDb
+      .insert(clinicalFormResponse)
+      .values({
+        organizationId: ORG,
+        templateId: template!.id,
+        templateVersion: 1,
+        templateTitle: "Ficha de endodoncia",
+        templateSnapshot: schema,
+        patientId: fx.patient.id,
+        encounterId: fx.encounter.id,
+        professionalUserId: fx.actor,
+        authorUserId: fx.actor,
+        status: "borrador",
+        source: "staff",
+        answers: {},
+      })
+      .returning()
+    await pause("La treinta y seis con percusión positiva y frío prolongado.")
+    const started = await fx.run((tx) => startDictationReview(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { openForms: [form!.id] }))
+    if (!started.due) throw new Error("No tocaba el repaso")
+    const number = (fieldId: string) => started.forms.find((item) => item.fieldId === fieldId)?.number
+    const result = await review(
+      {
+        drafts: [
+          { kind: "ficha", payload: { question: number("percusion"), answer: "Positiva" }, sourceText: "percusión positiva" },
+          { kind: "ficha", payload: { question: number("frio"), answer: "Prolongado" }, sourceText: "frío prolongado" },
+        ],
+      },
+      [form!.id],
+    )
+    expect(result.suggestions.map((item) => [item.payload["fieldId"], item.payload["value"]])).toEqual([
+      ["percusion", "Positiva"],
+      ["frio", "Prolongado"],
+    ])
+    await enable(false)
+  })
+})
+
+describe("los turnos de lo que se dijo", () => {
+  it("son el tramo tal cual: juntos dicen lo que se dijo, sin una palabra cambiada", () => {
+    const said = "¿Desde cuándo le duele? Hace dos semanas, doctora."
+    expect(turnsSayTranscript([{ texto: "¿Desde cuándo le duele?" }, { texto: "Hace dos semanas, doctora." }], said)).toBe(true)
+    // Solo el espacio entre los dos se perdona.
+    expect(turnsSayTranscript([{ texto: "¿Desde cuándo le duele?Hace" }, { texto: " dos semanas, doctora." }], said)).toBe(true)
+    expect(turnsSayTranscript([{ texto: "¿Desde cuándo le duele?" }, { texto: "Hace 2 semanas, doctora." }], said)).toBe(false)
+    expect(turnsSayTranscript([{ texto: "¿Desde cuándo le duele?" }], said)).toBe(false)
+    expect(turnsSayTranscript([], said)).toBe(false)
+  })
+
+  it("C10: se guardan con quién habló; los que no son el tramo no se guardan; una persona los cambia con un toque y otro repaso no los pisa", async () => {
+    await enable(true)
+    const { fx, pause, review, said } = await conversation()
+    const asked = await pause("¿Tiene alguna enfermedad? Tiene asma, usa salbutamol.")
+    const rewritten = await pause("Debe pesar veinticuatro kilos más o menos.")
+    const result = await review({
+      turns: [
+        {
+          segmentId: asked,
+          turns: [
+            { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
+            { quien: "no_se_sabe", texto: "Tiene asma, usa salbutamol." },
+          ],
+        },
+        // Clío reescribió el número: no es lo que se dijo.
+        { segmentId: rewritten, turns: [{ quien: "acompanante", vinculo: "madre", texto: "Debe pesar 24 kilos más o menos." }] },
+      ],
+    })
+    expect(result.turnsSaved).toEqual([asked])
+    expect(result.turnsRejected).toEqual([rewritten])
+    const [first, second] = await said()
+    expect(first?.turns).toEqual([
+      { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
+      { quien: "no_se_sabe", texto: "Tiene asma, usa salbutamol." },
+    ])
+    expect(second?.turns).toBeNull()
+
+    // La mamá de Mateo: un toque.
+    const turns = await fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 1, { quien: "acompanante", vinculo: "madre" }))
+    expect(turns[1]).toEqual({ quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." })
+    // El vínculo es de quien acompaña.
+    expect((await fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 0, { quien: "dra", vinculo: "madre" })))[0]).toEqual({ quien: "dra", texto: "¿Tiene alguna enfermedad?" })
+    await expect(fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 5, { quien: "dra" }))).rejects.toMatchObject({ status: 404 })
+
+    // Otro repaso, con algo nuevo dicho: lo que cambió la persona se queda.
+    await pause("Listo, nos vemos.")
+    await review({ turns: [{ segmentId: asked, turns: [{ quien: "paciente", texto: "¿Tiene alguna enfermedad? Tiene asma, usa salbutamol." }] }] })
+    expect((await said())[0]?.turns?.[1]).toEqual({ quien: "acompanante", vinculo: "madre", texto: "Tiene asma, usa salbutamol." })
+
+    // Con la atención anulada, ya no se cambia.
+    await ownerDb.update(encounter).set({ status: "anulada", voidedAt: new Date(), voidedBy: fx.actor, voidReason: "Prueba" }).where(eq(encounter.id, fx.encounter.id))
+    await expect(fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 0, { quien: "paciente" }))).rejects.toMatchObject({ code: "VOIDED" })
+    await enable(false)
+  })
+})
+
+describe("lo que el repaso no usó", () => {
+  it("C4: lo de un familiar y el peso dicho quedan en «No lo usé» del tramo donde se dijeron, con su motivo, sin repetir lo que la pausa ya avisó", async () => {
+    await enable(true)
+    const { fx, pause, review, said } = await conversation()
+    await pause("Mi papá es diabético, por si acaso.")
+    const weight = randomUUID()
+    await fx.run(async (tx) => {
+      await startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId: weight, transcript: "Debe pesar veinticuatro, más o menos. Y le gusta el fútbol." })
+      await settleDictationSegment(tx, ORG, fx.encounter.id, weight, [{ said: "Debe pesar veinticuatro", why: "sin_lugar" }])
+    })
+    const result = await review({
+      outOfPlace: [
+        { said: "Mi papá es diabético", why: "familiar" },
+        { said: "Debe pesar veinticuatro", why: "peso_dicho" },
+      ],
+      unused: ["le gusta el fútbol"],
+      omitted: 1,
+    })
+    expect(result.unused.map((item) => item.said)).toEqual(["le gusta el fútbol", "Mi papá es diabético"])
+    const [family, kid] = await said()
+    expect(family?.unused).toEqual([{ said: "Mi papá es diabético", why: "sin_lugar", detail: expect.stringContaining("familiar") }])
+    expect(kid?.unused).toEqual([
+      { said: "Debe pesar veinticuatro", why: "sin_lugar" },
+      { said: "le gusta el fútbol", why: "sin_lugar" },
+    ])
+    await enable(false)
+  })
+
+  it("lo que se dijo mientras el repaso leía sigue pidiendo otro repaso", async () => {
+    await enable(true)
+    const { fx, pause, start } = await conversation()
+    await pause("Me duele una muela.")
+    const started = await start()
+    if (!started.due) throw new Error("No tocaba el repaso")
+    await pause("Ah, y anoche no me dejó dormir.")
+    await fx.run((tx) =>
+      saveDictationReview(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        reviewId: started.reviewId,
+        segments: started.segments,
+        readIds: started.readIds,
+        formQuestions: started.forms,
+        drafts: [],
+        turns: [],
+        unused: [],
+        omitted: 0,
+        outOfPlace: [],
+      }),
+    )
+    const rows = await ownerDb.select().from(encounterDictationSegment).where(eq(encounterDictationSegment.encounterId, fx.encounter.id))
+    expect(rows.filter((row) => row.reviewedAt === null).map((row) => row.transcript)).toEqual(["Ah, y anoche no me dejó dormir."])
+    expect((await start()).due).toBe(true)
+    await enable(false)
+  })
+})

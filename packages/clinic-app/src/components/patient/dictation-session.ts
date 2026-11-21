@@ -198,6 +198,24 @@ export function withoutAnsweredUnused(unused: UnusedDictation, suggestions: read
 
 export type DictationMode = "off" | "listening" | "paused"
 
+/**
+ * El repaso al terminar (mesa del 20 nov 2026, P4): «Terminar dictado» lo pide cuando ya se ordenó
+ * lo último que se dijo. El servidor solo llama al modelo si hay tramos que ningún repaso leyó.
+ * `reviewed`: si leyó algo esta vez; `added`: cuántas propuestas nuevas o sumadas dejó.
+ */
+export type DictationReview =
+  | { status: "idle" }
+  | { status: "reviewing" }
+  | { status: "done"; reviewed: boolean; added: number; turns: number }
+  | { status: "failed"; message: string }
+
+interface ReviewResponse {
+  data: { reviewed: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[] }
+}
+
+/** La clave de «Lo que se dijo» de la atención: el repaso la deja vieja (los turnos, lo que no usó). */
+export const dictationSaidKey = (patientId: string, encounterId: string) => ["encounter-dictation-said", patientId, encounterId] as const
+
 export type DictationSession = ReturnType<typeof useDictationSession>
 
 /**
@@ -277,6 +295,7 @@ export function useDictationSession({
   const [confirmReadyFailed, setConfirmReadyFailed] = useState<DictationSuggestion | null>(null)
   // La marcada en la que se detuvo «Firmar con N marcadas»: el aviso de la firma dice cuál.
   const [confirmManyFailed, setConfirmManyFailed] = useState<DictationSuggestion | null>(null)
+  const [review, setReview] = useState<DictationReview>({ status: "idle" })
 
   const recognition = useRef<SpeechLike | null>(null)
   const wanted = useRef(false)
@@ -290,6 +309,9 @@ export function useDictationSession({
   const draining = useRef(false)
   const silence = useRef<number | null>(null)
   const mounted = useRef(true)
+  // «Terminar dictado» pidió el repaso: va cuando la cola de tramos se vacía.
+  const reviewWanted = useRef(false)
+  const reviewing = useRef(false)
   const canListen = speechRecognition() !== null
 
   useEffect(() => {
@@ -334,6 +356,34 @@ export function useDictationSession({
   )
 
   /**
+   * El repaso al terminar: una lectura de toda la conversación guardada. Lo pide «Terminar dictado»
+   * (y lo podrá pedir «Finalizar y firmar»); si no hay tramos nuevos desde el último, el servidor no
+   * llama al modelo. Si falla, lo ya ordenado sigue igual y se puede pedir otra vez.
+   */
+  const requestReview = useCallback(async () => {
+    if (reviewing.current) return
+    reviewing.current = true
+    setReview({ status: "reviewing" })
+    try {
+      const response = await apiFetch<ReviewResponse>(`${base}/review`, {
+        method: "POST",
+        body: JSON.stringify(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
+      })
+      if (!mounted.current) return
+      const data = response.data
+      setReview({ status: "done", reviewed: data.reviewed, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
+      if (data.reviewed) {
+        await refresh()
+        void queryClient.invalidateQueries({ queryKey: dictationSaidKey(patientId, encounterId) })
+      }
+    } catch (error) {
+      if (mounted.current) setReview({ status: "failed", message: dictationErrorText(error, "No pude repasar la conversación. Lo que ya ordené sigue igual.") ?? "" })
+    } finally {
+      reviewing.current = false
+    }
+  }, [base, openForms, refresh, queryClient, patientId, encounterId])
+
+  /**
    * Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se
    * reintenta una vez sin avisar (si el fallo es del proveedor); si vuelve a
    * fallar queda aparte, con su identidad, y los siguientes siguen su curso
@@ -372,8 +422,13 @@ export function useDictationSession({
     } finally {
       draining.current = false
       if (mounted.current) setOrganizing(false)
+      // Terminado el dictado y ordenado lo último que se dijo: el repaso de toda la conversación.
+      if (reviewWanted.current && queue.current.length === 0 && mounted.current) {
+        reviewWanted.current = false
+        void requestReview()
+      }
     }
-  }, [send])
+  }, [send, requestReview])
 
   /** «Reintentar» una parte que quedó aparte: va primero, porque se dictó antes que lo que espera. */
   const retryFailed = useCallback(
@@ -487,13 +542,16 @@ export function useDictationSession({
     // El navegador corta el reconocimiento tras un silencio: se reanuda mientras siga el dictado.
     instance.onend = () => {
       if (wanted.current) instance.start()
-      // Al pausar o terminar, lo último que alcanzó a oír también se ordena.
-      else cut(true)
+      // Al pausar o terminar, lo último que alcanzó a oír también se ordena; al terminar, con el repaso detrás.
+      else {
+        cut(true)
+        if (reviewWanted.current) void drain()
+      }
     }
     recognition.current = instance
     wanted.current = true
     instance.start()
-  }, [append, cut])
+  }, [append, cut, drain])
 
   const start = useCallback(() => {
     if (!canListen) return
@@ -511,10 +569,15 @@ export function useDictationSession({
     listen()
   }, [listen])
   const finish = useCallback(() => {
+    const listening = wanted.current
     stopMic()
     setMode("off")
+    reviewWanted.current = true
     cut(true)
-  }, [stopMic, cut])
+    // El repaso lo pide `drain` al vaciar la cola. Con el micrófono abierto, lo último que oyó llega
+    // al cerrarse (`onend`), que lo envía y lo pide; si no, va ya, aunque no quede nada por enviar.
+    if (!listening) void drain()
+  }, [stopMic, cut, drain])
 
   /** Dictado escrito o pegado: para navegadores sin reconocimiento de voz. Se ordena de una vez. */
   const submitTyped = useCallback(
@@ -735,6 +798,9 @@ export function useDictationSession({
     discardFailed: (id: string) => setFailed((current) => current.filter((item) => item.id !== id)),
     /** Lo que el asistente no pudo usar, hasta «Entendido». */
     unused,
+    /** El repaso al terminar: cómo va, para el panel de lo que se dijo. */
+    review,
+    requestReview,
     dismissUnused: () => setUnused(NOTHING_UNUSED),
     demo,
     start,

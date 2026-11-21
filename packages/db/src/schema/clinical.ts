@@ -2505,13 +2505,29 @@ export interface DictationUnusedItem {
 }
 
 /**
+ * Quién habló en un turno de lo que se dijo, según el repaso al terminar (mesa del 20 nov 2026, P4):
+ * quien atiende (`dra`, la pantalla lo nombra con su título), el paciente, quien lo acompaña (con su
+ * vínculo, si se dijo) o no se sabe. Una persona lo cambia con un toque.
+ */
+export const DICTATION_SPEAKERS = ["dra", "paciente", "acompanante", "no_se_sabe"] as const
+export type DictationSpeaker = (typeof DICTATION_SPEAKERS)[number]
+
+/** Un turno de un tramo: quién habló y lo que dijo, tal cual está en el tramo. */
+export interface DictationTurn {
+  quien: DictationSpeaker
+  vinculo?: string
+  texto: string
+}
+
+/**
  * Lo que se dijo en una atención (ADR 0209): cada tramo del dictado o de la conversación, tal
  * cual llegó y con su hora, guardado antes de que Clío lo ordene. No es historia clínica: no se
  * firma, no va en la copia de la historia ni en FHIR y lo ven solo los roles clínicos. Da el
  * contexto de la pausa siguiente aunque se recargue la página y la identidad del tramo
  * (`segment_id`, única por atención): un tramo ya ordenado (`organized_at`) no se vuelve a
  * mandar al modelo. Se borra con la atención descartada; la aplicación solo agrega y anota lo
- * que pasó al ordenarlo (`organized_at`, `unused`) y, en el repaso, los turnos (`turns`).
+ * que pasó al ordenarlo (`organized_at`, `unused`) y, en el repaso, los turnos (`turns`) y que ya
+ * lo leyó (`reviewed_at`).
  */
 export const encounterDictationSegment = pgTable(
   "encounter_dictation_segment",
@@ -2533,7 +2549,9 @@ export const encounterDictationSegment = pgTable(
     /** Lo que no se usó, con su motivo. */
     unused: jsonb("unused").$type<DictationUnusedItem[]>().notNull().default(sql`'[]'::jsonb`),
     /** Los turnos con quién habló, del repaso al terminar; nulo hasta entonces. */
-    turns: jsonb("turns").$type<unknown[]>(),
+    turns: jsonb("turns").$type<DictationTurn[]>(),
+    /** Cuando el repaso al terminar ya leyó este tramo: el siguiente solo se lanza si hay tramos sin leer. */
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [

@@ -54,7 +54,7 @@ import {
   recordHealthDeclaration,
   reviewDeclaredHealth,
 } from "./clinical.js"
-import { healthDeclarantOf, healthModelLabel, healthOfPayload, healthRows, healthSummary, mergeHealth, prepareHealth, saidInDoubt } from "./dictation-health.js"
+import { healthDeclarantOf, healthModelLabel, healthOfPayload, healthRows, healthSummary, mergeHealth, prepareHealth, saidInDoubt, withoutSettledHealth } from "./dictation-health.js"
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { closestDiagnosisCode, type DiagnosisCodeOption, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
@@ -1756,6 +1756,12 @@ export interface DictationSegment {
    * (`dictationFormQuestions`). Sin ellas se leen otra vez.
    */
   formQuestions?: readonly DictationFormQuestion[] | undefined
+  /**
+   * El repaso al terminar (mesa del 20 nov 2026, P4; `dictation-review.ts`): lee toda la
+   * conversación, también lo que una persona ya decidió. Lo confirmado o descartado en la atención
+   * no vuelve aunque Clío lo proponga otra vez (`unsettled`): no basta con pedírselo en el prompt.
+   */
+  review?: boolean | undefined
 }
 
 export interface DictationSegmentResult {
@@ -2067,8 +2073,15 @@ export async function saveDictationSegment(
   const fromForms = withFormDiagnoses([...dictated, ...fromDiagnoses], scope.formQuestions, scope.formDiagnoses, { site: scope.site, transcript: scope.transcript, known, pending: pendingValues })
   // Lo diagnosticado en la atención decide la variante de una prestación: la endodoncia vital o no vital.
   scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, [...dictated, ...fromDiagnoses], [...pendingNow, ...confirmed], pendingValues) }
-  // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa).
-  const pendingNotes = pendingNow.filter((item) => item.kind === "nota").flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
+  // En el repaso, lo que una persona ya decidió: confirmado o descartado (no vuelve, `unsettled`).
+  const settled = segment.review
+    ? [...(await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada")), ...(await listDecidedDictation(tx, orgId, patientId, encounterId, "descartada"))]
+    : []
+  // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa); en
+  // el repaso, tampoco lo de una consulta ya confirmada o descartada.
+  const pendingNotes = [...pendingNow, ...settled]
+    .filter((item) => item.kind === "nota")
+    .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
   const { drafts, twins } = withFormTwins(
     withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes),
     scope.formQuestions,
@@ -2120,6 +2133,43 @@ export async function saveDictationSegment(
   // Dos respuestas a la misma pregunta en una pausa («seis… no, nueve»): vale la última que dijo.
   const lastForm = new Map(preparedDrafts.flatMap((item, index) => (item.draft.kind === "ficha" ? [[formKey(item.prepared.payload), index] as const] : [])))
   const alreadyOnFile: string[] = []
+  /**
+   * El repaso: lo que queda de una propuesta que no repite lo ya decidido, o `null` si todo lo es.
+   * La misma clave con que no se repite lo pendiente (la pieza y el hallazgo, la prestación en su
+   * sitio, el medicamento, la pregunta de la ficha…); lo de su salud, grupo por grupo
+   * (`withoutSettledHealth`). La consulta ya lo hace `withoutRepeatedNotes`, oración por oración.
+   */
+  const settledKey = (kind: DictationKind, payload: Record<string, unknown>): string | null => {
+    const own = sameKey(kind, payload)
+    if (own !== null) return own
+    if (kind === "receta") return recipeKey(payload)
+    if (kind === "alergia") return allergyKey(payload)
+    if (kind === "procedimiento") return doneKey(payload)
+    if (kind === "diagnostico") return diagnosisKey(payload)
+    if (kind === "ficha") return formKey(payload)
+    if (kind === "control") return normalizeForSearch(String(payload["title"] ?? ""))
+    if (kind === "cita") return String(payload["date"] ?? "")
+    if (kind === "presupuesto") return "presupuesto"
+    return null
+  }
+  const unsettled = (kind: DictationKind, payload: Record<string, unknown>): Record<string, unknown> | null => {
+    const same = settled.filter((item) => item.kind === kind)
+    if (!same.length || kind === "nota") return payload
+    if (kind === "salud") return withoutSettledHealth(payload, same.map((item) => item.payload))
+    if (kind === "plan") {
+      const entry = planEntry(null, payload)
+      const decided = same.map((item) => planEntry(null, item.payload))
+      return decided.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place)) ? null : payload
+    }
+    if (kind === "material") {
+      const keys = materialKeys(payload)
+      return same.some((item) => materialKeys(item.payload).some((key) => keys.includes(key))) ? null : payload
+    }
+    const key = settledKey(kind, payload)
+    if (key !== null) return same.some((item) => settledKey(kind, item.payload) === key) ? null : payload
+    const plain = JSON.stringify(payload)
+    return same.some((item) => JSON.stringify(item.payload) === plain) ? null : payload
+  }
   // La consulta es una sola (mesa del 20 nov 2026): lo nuevo se suma a la pendiente más reciente o a
   // la que nace en esta pausa, nunca es otra tarjeta. No es una corrección: no queda «corregida por voz».
   let pendingNoteId = pendingNow.filter((item) => item.kind === "nota").at(-1)?.id
@@ -2134,7 +2184,10 @@ export async function saveDictationSegment(
   }
   for (const [index, { draft, prepared }] of preparedDrafts.entries()) {
     if (draft.kind === "ficha" && lastForm.get(formKey(prepared.payload)) !== index) continue
-    const ready = await withPatient(tx, orgId, patientId, encounterId, draft.kind, prepared, checks, scope)
+    const checked = await withPatient(tx, orgId, patientId, encounterId, draft.kind, prepared, checks, scope)
+    const kept = settled.length ? unsettled(draft.kind, checked.payload) : checked.payload
+    if (!kept) continue
+    const ready = kept === checked.payload ? checked : { ...checked, payload: kept }
     if (draft.kind === "nota" && pendingNoteId) {
       const row = await pendingRow(pendingNoteId)
       if (!row) pendingNoteId = undefined
@@ -2565,6 +2618,35 @@ export async function listConfirmedDictation(tx: Db, orgId: string, patientId: s
   return rows
     .filter((row) => row.entityId && !Array.isArray(splitMeta(row.payload).data["options"]))
     .map((row) => toItem(row, zone, dictation))
+}
+
+/**
+ * Lo ya decidido en esta atención, confirmado o descartado (también lo quitado por voz), en el orden
+ * en que se dictó: el repaso al terminar lo lee para no proponerlo otra vez (mesa del 20 nov 2026, P4).
+ */
+export async function listDecidedDictation(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+  status: "confirmada" | "descartada",
+): Promise<DictationSuggestion[]> {
+  const { dictation } = await productHooks(tx, orgId)
+  if (!dictation) return []
+  const rows = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.status, status),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt), asc(encounterDictationSuggestion.id))
+  const zone = await findOrgLocale(tx, orgId)
+  return rows.map((row) => toItem(row, zone, dictation))
 }
 
 /**

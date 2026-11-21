@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { type DictationUnusedItem, encounter, encounterDictationSegment } from "@odentia/db/schema/clinical"
+import { type DictationTurn, type DictationUnusedItem, encounter, encounterDictationSegment } from "@odentia/db/schema/clinical"
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm"
 import { DICTATION_CHARS, dictationSegmentSeen, requireClinicalAssistant } from "./encounter-dictation.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
@@ -122,8 +122,8 @@ export interface DictationSaidSegment {
   /** Clío ya lo ordenó; si no, falló o sigue en curso. */
   organized: boolean
   unused: DictationUnusedItem[]
-  /** Los turnos del repaso, si ya se hizo. */
-  turns: unknown[] | null
+  /** Los turnos del repaso, si ya se hizo (`dictation-review.ts`). */
+  turns: DictationTurn[] | null
 }
 
 /**

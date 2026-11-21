@@ -94,6 +94,6 @@ describe("no es historia clínica", () => {
     const root = join(import.meta.dirname)
     const files = readdirSync(root, { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
     const readers = files.filter((file) => /encounterDictationSegment|encounter_dictation_segment/.test(readFileSync(join(root, file), "utf8")))
-    expect(readers.map((file) => file.replaceAll("\\", "/")).sort()).toEqual(["dental/seed-demo.ts", "dictation-said.ts", "encounter-dictation.ts"])
+    expect(readers.map((file) => file.replaceAll("\\", "/")).sort()).toEqual(["dental/seed-demo.ts", "dictation-review.ts", "dictation-said.ts", "encounter-dictation.ts"])
   })
 })
