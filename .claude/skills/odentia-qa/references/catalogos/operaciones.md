@@ -120,8 +120,12 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Un tratamiento de varias sesiones no se cierra en la primera ni se cobra de nuevo en la siguiente. Lo dictado «en dos sesiones» llega al plan con dos.
 - [ ] El mismo gesto deja el mismo estado: lo aceptado y lo «por responder», hechos igual, terminan igual.
 - [ ] «Completar» no cierra un tratamiento cuya única sesión está anulada. «Piezas tratadas» nombra solo lo tratado.
+- [ ] Una respuesta («hace como dos semanas») a una pregunta de la consulta se suma: no se marca «corregido por voz», y «antes …» solo nombra un valor que existía. El mismo tramo no suma y corrige a la vez el mismo campo.
+- [ ] Una atención con lo que se dijo o con propuestas de Clío no es «vacía»: «Descartar» no la borra sin decir qué se pierde.
+- [ ] «Intentar otra vez» que no usa la frase la deja en «No lo usé»; nunca desaparece sin quedar en ninguna parte.
 
 **Ya falló:** se cortó la red y la evolución escrita se perdió sin aviso; con dos pestañas se pisaron los signos, el examen y las piezas; en latidIA, confirmar el examen dictado de un sistema borró el hallazgo escrito ahí; «Atender» abrió la atención que tenía otra profesional; la resina hecha hoy quedó también pendiente y se ofreció en el presupuesto; la endodoncia de dos sesiones se cerró en la primera y se cobró otra vez en la segunda; «Completar» cerró un tratamiento con su única sesión anulada.
+**Ya falló** (QA del 21 nov): «hace como dos semanas» salió «corregido por voz, antes otro texto en tiempo de enfermedad» con el tiempo vacío; «Descartar esta atención» borró sin preguntar una consulta con lo que se dijo. Se corrigieron en la rama `fix/clio-lee-la-conversacion`.
 
 ## O-ATE-02 Firmar la atención
 
@@ -147,6 +151,14 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] La consulta que se propone cargar sale del servicio de la cita aunque valga 0: una cita gratuita no se cobra por omisión; ni se propone con algo hecho, ya cobrada al llegar, o si la visita venía a una sesión.
 
 **Ya falló:** la cita «Reevaluación postoperatoria» de S/ 0 se firmó con «Evaluación odontológica · S/ 50» marcada (19 nov).
+
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] Lo que deja el repaso al abrir el cierre se ve en el cierre («Clío propone…») y se decide antes de firmar; ninguna sugerencia queda `lista` en una atención firmada.
+- [ ] La receta y la anestesia avisan también lo dicho de su salud que aún no se confirmó (anticoagulante, alergia), como «dijo, sin confirmar».
+
+**Ya falló:** (21 nov) el repaso propuso «anestesia infiltrativa con lidocaína en la 36» y el cierre firmó sin mostrarla; se recetó ibuprofeno sin aviso con «dijo apixabán, sin confirmar». Se corrigieron en la rama `fix/clio-lee-la-conversacion`.
+
+**Caso:** CO34 · Escrita de punta a punta y continuada al día siguiente: apixabán dicho y no confirmado, ibuprofeno recetado, una pausa que el repaso completa (anestesia), un reintento de «No lo usé» y «Descartar» en otra atención con lo que se dijo. → La receta avisa del anticoagulante; el cierre muestra lo del repaso antes de firmar; ninguna sugerencia queda lista en la firmada; la frase reintentada sigue en «No lo usé»; el descarte avisa qué se pierde.
 
 ## O-ATE-03 Anular una atención
 
