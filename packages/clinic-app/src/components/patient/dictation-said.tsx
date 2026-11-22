@@ -1,3 +1,4 @@
+import { kinSaid } from "@odentia/clinical"
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@odentia/ui"
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@odentia/ui/components/dropdown-menu"
@@ -52,9 +53,9 @@ export type SaidSession = Pick<
 export function speakerWords(turn: Pick<DictationTurn, "quien" | "vinculo">, professional: string): string {
   if (turn.quien === "dra") return professional
   if (turn.quien === "paciente") return "Paciente"
-  // Una clave interna («no_se_sabe») no es un parentesco: nunca se muestra (QA del 21 nov).
-  const kin = turn.vinculo?.trim() ?? ""
-  if (turn.quien === "acompanante") return kin && !/^(?:dra|paciente|acompanante|no[\s_]*se[\s_]*sabe)$/iu.test(kin) ? `Acompañante (${kin})` : "Acompañante"
+  // Una clave interna («no_se_sabe») o cómo se le habla («señora») no es un parentesco: nunca se muestra (QA del 21 nov).
+  const kin = kinSaid(turn.vinculo)
+  if (turn.quien === "acompanante") return kin ? `Acompañante (${kin})` : "Acompañante"
   return "No se sabe"
 }
 

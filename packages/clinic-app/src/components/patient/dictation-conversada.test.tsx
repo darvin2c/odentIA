@@ -301,6 +301,16 @@ describe("quién habló, sin claves internas (QA del 21 nov, C10)", () => {
     expect(speakerWords({ quien: "acompanante", vinculo: "madre" }, "Dra. Ana")).toBe("Acompañante (madre)")
     expect(speakerWords({ quien: "dra" }, "Dra. Ana")).toBe("Dra. Ana")
   })
+
+  // QA del 21 nov: el repaso anotaba a la madre de Mateo como «señora», como la llamaba la doctora.
+  it("cómo se le habla («señora») no es un parentesco; sin uno dicho, es su representante registrado", () => {
+    expect(speakerWords({ quien: "acompanante", vinculo: "Señora" }, "Dra. Ana")).toBe("Acompañante")
+    const rows = [{ key: "conditions", group: "conditions", label: "Enfermedades", value: "asma", by: { declarante: "acompanante" as const, vinculo: "señora" }, before: null }]
+    expect(heardHealth({ healthRows: rows }, "su madre (Marta Ríos)").by).toBe("su madre (Marta Ríos)")
+    expect(heardHealth({ healthRows: rows }).by).not.toContain("señora")
+    const mother = [{ ...rows[0]!, by: { declarante: "acompanante" as const, vinculo: "abuela" } }]
+    expect(heardHealth({ healthRows: mother }, "su madre (Marta Ríos)").by).toBe("su abuela")
+  })
 })
 
 describe("la franja avisa lo dicho sin confirmar", () => {

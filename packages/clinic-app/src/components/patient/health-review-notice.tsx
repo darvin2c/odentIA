@@ -1,4 +1,4 @@
-import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf, saidWhenWords, specificKin } from "@odentia/clinical"
+import { kinSaid, MEDICATION_CLASSES, type MedicationClass, medicationClassOf, saidWhenWords, specificKin } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { DetailField, DetailList, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -58,9 +58,12 @@ export interface HeardHealthRow {
 const ROW_GROUPS = new Set(["conditions", "medications", "allergies", "anticoagulants", "boneMedicines"])
 
 /** Quién lo dijo, en palabras: «el paciente», «su madre»; nulo si no se sabe. */
-function saidByWords(by: HealthSaidBy | undefined): string | null {
+function saidByWords(by: HealthSaidBy | undefined, representative: string | null): string | null {
   if (by?.declarante === "paciente") return "el paciente"
-  if (by?.declarante === "acompanante") return whoWords({ kind: "representative", name: null, relation: by.vinculo?.trim().toLocaleLowerCase("es") || null }, null)
+  // Sin parentesco dicho, quien lo acompaña es su representante registrado, si lo tiene: «su madre
+  // (Marta Ríos)», como decía el aviso antes del repaso (QA del 21 nov: pasaba a «su señora»).
+  if (by?.declarante === "acompanante" && !kinSaid(by.vinculo) && representative) return representative
+  if (by?.declarante === "acompanante") return whoWords({ kind: "representative", name: null, relation: kinSaid(by.vinculo).toLocaleLowerCase("es") || null }, null)
   return null
 }
 
@@ -69,7 +72,10 @@ function saidByWords(by: HealthSaidBy | undefined): string | null {
  * madre»; nulo si no se sabe o si lo dijeron personas distintas). Las filas las arma el servidor
  * (`healthRows`), con quién dijo cada dato: no se vuelve a leer el texto de la tarjeta.
  */
-export function heardHealth(item: { healthRows?: readonly SaidHealthRow[] | undefined }): { rows: HeardHealthRow[]; by: string | null } {
+export function heardHealth(
+  item: { healthRows?: readonly SaidHealthRow[] | undefined },
+  representative: string | null = null,
+): { rows: HeardHealthRow[]; by: string | null } {
   const rows = (item.healthRows ?? []).map(
     (row): HeardHealthRow => ({
       key: row.key,
@@ -77,7 +83,7 @@ export function heardHealth(item: { healthRows?: readonly SaidHealthRow[] | unde
       label: row.label,
       value: row.value,
       before: row.before ?? null,
-      by: saidByWords(row.by),
+      by: saidByWords(row.by, representative),
       denied: row.denied === true,
     }),
   )
@@ -361,7 +367,7 @@ export function HealthReviewNotice({
   // Lo que Clío oyó de su salud en esta consulta y nadie confirmó: cada dato en la fila de su tema,
   // «dijo, sin confirmar», y las alergias dictadas en la fila «Alergias» (mesa del 20 nov 2026).
   const heardItem = dictation?.enabled ? (dictation.suggestions.find((item) => item.kind === "salud") ?? null) : null
-  const heard = heardItem ? heardHealth(heardItem) : { rows: [], by: null }
+  const heard = heardItem ? heardHealth(heardItem, askTo) : { rows: [], by: null }
   // Lo que dijo en una atención ya firmada y nadie revisó: sigue esperando aquí, con su fecha, hasta
   // que alguien lo revise o diga que no lo registra (revisión del 21 nov, A3).
   const earlierSaid = (health.said ?? []).filter((item) => item.open === false && item.rows.length > 0)

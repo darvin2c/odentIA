@@ -186,6 +186,11 @@ describe("un turno que empieza a media frase", () => {
     ])
   })
 
+  it("«señora» es cómo se le habla, no su parentesco: no va (QA del 21 nov)", () => {
+    const result = readDictationReview({ turnos: [{ desde: 1, quien: "acompanante", vinculo: "señora" }] }, spoken, PARTS)
+    expect(result?.turns).toEqual([{ number: 1, turns: [{ quien: "acompanante", texto: "toma alguna medicina si tomo losartan para la presion" }] }])
+  })
+
   it("si esas palabras no están, el turno empieza en la frase", () => {
     const result = readDictationReview({ turnos: [{ desde: 1, quien: "paciente", empieza: "sí, tomo warfarina" }] }, spoken, PARTS)
     expect(result?.turns).toEqual([{ number: 1, turns: [{ quien: "paciente", texto: "toma alguna medicina si tomo losartan para la presion" }] }])

@@ -16,6 +16,7 @@ import {
   groundHeard,
   groundWords,
   heardVocabularyOf,
+  kinSaid,
   operationAgentSchema,
   pauseBridge,
   turnsFromStarts,
@@ -148,7 +149,7 @@ export function healthPrompt(input: { topics: string; notInRelato: string; measu
   return [
     `En \`salud\` va lo que se dice de la salud del paciente en la conversación, lo cuente él o quien lo acompaña: ${input.topics}. Solo lo que se dijo: no lo deduzcas de un medicamento, de un diagnóstico ni de lo habitual. Si se corrige («tomo warfarina… perdón, apixabán»), vale lo último.`,
     "Un «No» va solo si respondió que no a una pregunta de ese tema («¿toma alguna medicina?» — «no, ninguna»). «No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`. Lo que no se preguntó ni se dijo no va: el silencio no es «No».",
-    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre») o `no_se_sabe` si no queda claro. Una entrada por persona: si el paciente dice «tomo losartán» y su hija agrega «también toma metformina», son dos entradas, cada una con lo que dijo esa persona y su frase. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
+    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre»; «señora» o «don» es cómo se le habla, no su parentesco) o `no_se_sabe` si no queda claro. Una entrada por persona: si el paciente dice «tomo losartán» y su hija agrega «también toma metformina», son dos entradas, cada una con lo que dijo esa persona y su frase. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
     "Lo que alguien cuenta de sí mismo cuando no es el paciente, o de un familiar («yo soy diabética», dicho por la madre; «mi papá es diabético»; «su papá es alérgico a la penicilina»), no es del paciente: no va en `salud` ni en `alergias`. Los antecedentes de la familia no se registran aquí: van en `sin_lugar`, con su frase y `familiar`.",
     `El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida: no va en ${input.measured}ninguna parte de la historia; va solo en \`sin_lugar\`, con su frase y \`peso_dicho\`.`,
     `${input.notInRelato} van en \`salud\`, no en el relato; en el relato queda lo que tomó para la molestia de hoy («tomó ibuprofeno y le calmó»).`,
@@ -948,7 +949,7 @@ const REVIEW_PARTS = {
       z.object({
         desde: z.number().int().min(1).describe("El número de la frase donde empieza a hablar, como llega entre corchetes."),
         quien: z.enum(DICTATION_SPEAKERS).describe("Quién habló: `dra` (quien atiende), `paciente`, `acompanante` o `no_se_sabe`."),
-        vinculo: z.string().max(80).optional().describe("De quien acompaña, el parentesco si se dijo o se nota («madre»). Si no se sabe, no va."),
+        vinculo: z.string().max(80).optional().describe("De quien acompaña, el parentesco si se dijo o se nota («madre»). «Señora» o «don» es cómo se le habla, no un parentesco. Si no se sabe, no va."),
         empieza: z
           .string()
           .max(80)
@@ -1109,10 +1110,9 @@ export function readDictationReview(
   // Solo dónde empieza cada turno y quién: el texto lo ponen las frases del tramo (`turnsFromStarts`).
   const starts = (Array.isArray(turnos) ? turnos : []).flatMap((entry): DictationTurnStart[] => {
     if (!isRecord(entry) || typeof entry["desde"] !== "number" || !SPEAKERS.has(String(entry["quien"]))) return []
-    // Un vínculo que es una de las claves de quién habló («no_se_sabe») no es un parentesco: no va
-    // («Acompañante (no_se_sabe)», QA del 21 nov).
-    const link = typeof entry["vinculo"] === "string" ? entry["vinculo"].trim() : ""
-    const kin = link && !SPEAKERS.has(link) && !/^no[\s_]*se[\s_]*sabe$/iu.test(link) ? link : ""
+    // Una clave de quién habló («no_se_sabe») o cómo se le habla («señora») no es un parentesco: no
+    // va («Acompañante (no_se_sabe)», «su señora» por la madre de un niño; QA del 21 nov).
+    const kin = kinSaid(entry["vinculo"])
     const words = typeof entry["empieza"] === "string" ? entry["empieza"].trim() : ""
     return [{ desde: entry["desde"], quien: entry["quien"] as DictationTurnStart["quien"], ...(kin ? { vinculo: kin } : {}), ...(words ? { empieza: words } : {}) }]
   })

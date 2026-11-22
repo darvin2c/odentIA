@@ -4,12 +4,16 @@ import {
   HABITUAL_MEDICATIONS,
   type HealthDeclarant,
   INTERVIEW_ANSWER_LABELS,
+  kinSaid,
   medicationClassOf,
   normalizeDrugText,
   registrationAnswersSchema,
   whoWords,
 } from "@odentia/clinical"
 import { z } from "zod"
+
+// Lo usan también los turnos del repaso (`@odentia/agent`), que no dependen de `@odentia/clinical`.
+export { kinSaid } from "@odentia/clinical"
 import { groundHeard, heardVocabulary, plain } from "./dictation-heard.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import type { DictationPrepared } from "./product-hooks.js"
@@ -74,7 +78,7 @@ export function healthDeclarantOf(payload: Record<string, unknown>): HealthDecla
   const who = payload["declarante"]
   if (who === "paciente") return { kind: "patient", name: null, relation: null }
   if (who === "acompanante") {
-    const relation = typeof payload["vinculo"] === "string" ? payload["vinculo"].trim().toLocaleLowerCase("es").slice(0, 80) : ""
+    const relation = kinSaid(payload["vinculo"]).toLocaleLowerCase("es").slice(0, 80)
     return { kind: "representative", name: null, relation: relation || null }
   }
   return { kind: "staff", name: null, relation: null }
@@ -97,7 +101,7 @@ const QUIEN = "quien"
 function topSaidBy(payload: Record<string, unknown>): HealthSaidBy | null {
   const who = payload["declarante"]
   if (!DECLARANTS.includes(who as HealthSaidBy["declarante"])) return null
-  const vinculo = who === "acompanante" && typeof payload["vinculo"] === "string" ? payload["vinculo"].trim().slice(0, 80) : ""
+  const vinculo = who === "acompanante" ? kinSaid(payload["vinculo"]).slice(0, 80) : ""
   return { declarante: who as HealthSaidBy["declarante"], ...(vinculo ? { vinculo } : {}) }
 }
 
@@ -259,7 +263,7 @@ function withoutDoubtfulNo(group: HealthGroup, value: Record<string, unknown>): 
 export function prepareHealth(payload: Record<string, unknown>, said: string | undefined, own: z.ZodRawShape): DictationPrepared | null {
   const shape = dictationHealthSchema(own).shape as Record<string, z.ZodType>
   const declarante = ["paciente", "acompanante", "no_se_sabe"].includes(String(payload["declarante"])) ? String(payload["declarante"]) : "no_se_sabe"
-  const vinculo = declarante === "acompanante" ? text(payload["vinculo"]).slice(0, OPERATIONS["salud.dicha"].fields.vinculo.max) : ""
+  const vinculo = declarante === "acompanante" ? kinSaid(payload["vinculo"]).slice(0, OPERATIONS["salud.dicha"].fields.vinculo.max) : ""
   const doubt = saidInDoubt(said)
   const health: Record<string, unknown> = {}
   for (const group of GROUPS) {

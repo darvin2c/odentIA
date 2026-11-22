@@ -6,6 +6,7 @@ import {
   type DictationUnusedItem,
   encounterDictationSegment,
 } from "@odentia/db/schema/clinical"
+import { kinSaid } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { type DictationFormQuestion, dictationFormQuestions } from "./dictation-forms.js"
 import {
@@ -278,7 +279,7 @@ export function turnsFromStarts(
       }
       if (open) open.texto = `${open.texto} ${piece}`
       else {
-        const vinculo = current.quien === "acompanante" ? current.vinculo?.trim().slice(0, 80) || undefined : undefined
+        const vinculo = current.quien === "acompanante" ? kinSaid(current.vinculo).slice(0, 80) || undefined : undefined
         open = { quien: current.quien, ...(vinculo ? { vinculo } : {}), texto: piece }
         turns.push(open)
       }

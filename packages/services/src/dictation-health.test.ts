@@ -86,6 +86,12 @@ describe("A4 · cada dato con quien lo dijo", () => {
     ])
   })
 
+  it("«señora» es cómo le habló la doctora, no su parentesco: no se guarda como vínculo (QA del 21 nov)", () => {
+    const said = prepareHealth({ declarante: "acompanante", vinculo: "Señora", conditions: { state: "recorded", items: [{ name: "asma" }] } }, "tiene asma", {})!.payload
+    expect(said["vinculo"]).toBeUndefined()
+    expect(healthRows(said)[0]?.value).not.toContain("señora")
+  })
+
   it("lo de la entrevista también, campo por campo", () => {
     const fear = prepareHealth({ declarante: "paciente", dental: { ansiedadDental: "alta" } }, "me da miedo", DENTAL)!.payload
     const grind = prepareHealth({ declarante: "acompanante", vinculo: "esposo", dental: { bruxismo: true } }, "rechina de noche", DENTAL)!.payload
