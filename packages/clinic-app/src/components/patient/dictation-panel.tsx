@@ -792,7 +792,10 @@ export function UnusedNotice({ session }: { session: Pick<DictationSession, "unu
             )
           })}
           {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
-          <p className="text-warning">Dilo de nuevo o anótalo a mano. Sigue en «Lo que se dijo».</p>
+          {/* El motivo de cada frase ya dice qué hacer (un familiar, un peso dicho): sin motivo, se dice aquí. */}
+          <p className="text-warning">
+            {unnamed || phrases.some((phrase) => !session.unused.why[phrase]) ? "Dilo de nuevo o anótalo a mano. " : ""}Sigue en «Lo que se dijo».
+          </p>
         </div>
       </div>
       <Button type="button" variant="secondary" size="sm" className="min-h-11 self-start sm:ml-6 sm:min-h-8" onClick={session.dismissUnused}>

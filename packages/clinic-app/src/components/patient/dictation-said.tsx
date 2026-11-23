@@ -89,6 +89,14 @@ function unusedWhy(item: UnusedSaid): string {
 export const LOOKS_LIKE_HEALTH =
   /(?<![\p{L}\p{N}])(?:tom[oaó]|pastilla|medic|alerg|diab[eé]t|presi[oó]n|asma|coraz[oó]n|anestesi|embaraz|operad|operaci|hospital|tiroides|enfermedad|aspirina|insulina|epilep|hipertens|hepatitis|c[aá]ncer|sangr)/iu
 
+/**
+ * ¿Se ofrece «Llevar a su salud»? Solo lo que parece de su salud y no tiene ya su motivo: lo de un
+ * familiar o un peso dicho no va a sus antecedentes, y su motivo ya dice qué hacer (QA del 22 nov, H5).
+ */
+export function takesToHealth(item: Pick<UnusedSaid, "why" | "detail">, phrase: string): boolean {
+  return !(item.why === "sin_lugar" && item.detail) && LOOKS_LIKE_HEALTH.test(phrase)
+}
+
 /** Lo resaltado: de la consulta (azul), de su salud (ámbar); la charla, sin resaltar. */
 function Marked({ text, sources }: { text: string; sources: { consulta: string[]; salud: string[] } }) {
   return (
@@ -407,19 +415,20 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
                       Usar en {target.label.replace(/\s*\([^)]*\)/g, "").trim() || target.label}
                     </Button>
                   ))}
-                  {openWide && LOOKS_LIKE_HEALTH.test(phrase) ? (
+                  {openWide && takesToHealth(item, phrase) ? (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       className="min-h-11 sm:min-h-8"
                       aria-label={`Llevar a su salud: «${phrase}»`}
-                      onClick={() => openWide({ id: "antecedentes", review: true })}
+                      onClick={() => openWide({ id: "antecedentes", review: true, heard: phrase })}
                     >
                       Llevar a su salud
                     </Button>
                   ) : null}
-                  {canRetry && item.why === "sin_lugar" && targets.length === 0 ? (
+                  {/* Con su motivo dicho (es de un familiar, un peso dicho) leerla otra vez da lo mismo. */}
+                  {canRetry && item.why === "sin_lugar" && !item.detail && targets.length === 0 ? (
                     <Button
                       type="button"
                       variant="outline"

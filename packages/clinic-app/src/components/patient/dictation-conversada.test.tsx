@@ -442,9 +442,25 @@ describe("«Lo que se dijo», del servidor", () => {
     // Se relee la frase de su tramo: no se suma a lo que se dijo como si se hubiera dicho otra vez (C3).
     expect(session.retryUnused).toHaveBeenCalledWith("t-2", "algo de la tiroides no me acuerdo el nombre")
     expect(session.submitTyped).not.toHaveBeenCalled()
-    // Parece de su salud: se lleva a sus antecedentes.
+    // Parece de su salud: se lleva a sus antecedentes, con la frase a la vista (QA del 22 nov, H5).
     fireEvent.click(within(unused).getByRole("button", { name: "Llevar a su salud: «algo de la tiroides no me acuerdo el nombre»" }))
-    expect(openWide).toHaveBeenCalledWith({ id: "antecedentes", review: true })
+    expect(openWide).toHaveBeenCalledWith({ id: "antecedentes", review: true, heard: "algo de la tiroides no me acuerdo el nombre" })
+  })
+
+  // QA del 22 nov (H5, UX-4): lo de un familiar abría sus antecedentes vacíos, y releer un peso dicho no cambiaba nada.
+  it("lo de un familiar o un peso dicho no se lleva a su salud ni se vuelve a leer: su motivo dice qué hacer", () => {
+    renderSaid([
+      segment({
+        transcript: "mi mama es diabetica y peso como ochenta kilos",
+        unused: [
+          { said: "mi mama es diabetica", why: "sin_lugar", detail: "Es de la salud de un familiar: va en sus antecedentes familiares, no en los suyos." },
+          { said: "peso como ochenta kilos", why: "sin_lugar", detail: "Es un peso o una talla dichos, no medidos: si hace falta, mídelo." },
+        ],
+      }),
+    ])
+    const unused = screen.getByRole("region", { name: "No lo usé (2)" })
+    expect(within(unused).queryByRole("button", { name: /Llevar a su salud/ })).toBeNull()
+    expect(within(unused).queryByRole("button", { name: /Intentar otra vez/ })).toBeNull()
   })
 
   it("lo que una pausa siguiente sí usó ya no se lista", () => {

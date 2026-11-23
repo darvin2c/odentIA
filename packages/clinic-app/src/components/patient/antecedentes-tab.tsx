@@ -493,6 +493,7 @@ export function AntecedentesTab({
   patientId,
   startEditing = false,
   said,
+  heard,
   onSaved,
 }: {
   patientId: string
@@ -500,6 +501,8 @@ export function AntecedentesTab({
   startEditing?: boolean
   /** «Corregir algo» de lo que Clío oyó en la consulta: el formulario abre con eso puesto. */
   said?: SaidForForm
+  /** «Llevar a su salud»: lo que se dijo y Clío no usó, a la vista arriba del formulario. */
+  heard?: string | undefined
   /** Se guardó lo de `said`: la propuesta de Clío ya no lo suma otra vez. */
   onSaved?: () => void
 }): React.JSX.Element {
@@ -830,6 +833,12 @@ export function AntecedentesTab({
                 ? `entrevista v${base.current.version}`
                 : "sin entrevista registrada"}
             </p>
+            {heard ? (
+              // La frase queda arriba mientras se baja a su grupo: se anota donde va, sin volver a buscarla.
+              <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm [overflow-wrap:anywhere]">
+                <span className="font-medium">Se dijo en la consulta:</span> «{heard}»
+              </p>
+            ) : null}
             {stale ? (
               <div
                 role="alert"

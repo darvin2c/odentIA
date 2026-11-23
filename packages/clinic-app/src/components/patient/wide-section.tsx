@@ -41,6 +41,11 @@ export interface WideTarget {
    * su registro) y, al guardar, avisa para que la propuesta no lo vuelva a sumar.
    */
   said?: SaidForForm
+  /**
+   * «Llevar a su salud» de lo que Clío no usó: la frase tal cual se oyó, a la vista arriba del
+   * formulario mientras se anota donde va (Clío no supo ordenarla, así que no llena nada).
+   */
+  heard?: string
   onSaved?: () => void
 }
 
@@ -125,7 +130,7 @@ export function WideSectionProvider({
   const content = (): ReactNode => {
     if (!target || !patientId) return null
     if (target.id === "antecedentes")
-      return <AntecedentesTab patientId={patientId} startEditing={target.review} said={target.said} onSaved={target.onSaved} />
+      return <AntecedentesTab patientId={patientId} startEditing={target.review} said={target.said} heard={target.heard} onSaved={target.onSaved} />
     if (target.id === "historia") return <HistoriaTab patientId={patientId} initialTooth={target.place} />
     if (target.id === "documentos") return <DocumentosOver key={`${target.documentFilter}-${target.place}-${target.documentId}`} patientId={patientId} target={target} />
     if (target.id === "plan")
