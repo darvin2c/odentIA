@@ -627,9 +627,11 @@ export function OdontogramFront({
   const hintId = useId()
   const ref = useRef<HTMLDivElement | null>(null)
   const shown = rows.filter((row) => row.length > 0)
-  // Las de leche, un poco más chicas que las permanentes cuando van juntas (dentición mixta).
+  // Las de leche, un poco más chicas que las permanentes cuando van en la misma fila larga (la
+  // mixta de la boca entera); en filas de 5 (una arcada), del tamaño que se toca con el dedo.
   const mixed = shown.some(isPrimaryRow) && shown.some((row) => !isPrimaryRow(row))
-  const { width: W, height: H, placed } = layoutRows(shown, mixed ? 0.92 : 1.25)
+  const halfRows = shown.some((row) => isPrimaryRow(row) && row.length <= 5)
+  const { width: W, height: H, placed } = layoutRows(shown, halfRows ? 1.35 : mixed ? 0.92 : 1.25)
   const [visited, setVisited] = useState<number | null>(null)
   const visible = shown.flat()
   const tabStop =

@@ -116,19 +116,24 @@ function useMouthLayout(): { ref: RefObject<HTMLDivElement | null>; layout: Mout
   return { ref, layout }
 }
 
-/** Las filas de una arcada de frente: las permanentes en dos de 8 (derecha, izquierda) y las de leche en una. */
+/**
+ * Las filas de una arcada de frente: las permanentes en dos de 8 (derecha, izquierda) y las de leche
+ * en dos de 5. Así, a 360 px, ninguna pieza baja de 24 px de ancho para tocarla.
+ */
 function singleArchRows(
   permanent: readonly number[],
   primary: readonly number[] | null,
   upper: boolean,
 ): number[][] {
-  const rows: number[][] = []
-  if (permanent.length > 0)
-    rows.push(permanent.slice(0, permanent.length / 2), permanent.slice(permanent.length / 2))
+  const halves = (row: readonly number[]) => [
+    row.slice(0, row.length / 2),
+    row.slice(row.length / 2),
+  ]
+  const rows: number[][] = permanent.length > 0 ? halves(permanent) : []
   // Las de leche quedan del lado de las coronas, como en la boca: abajo en la superior, arriba en la inferior.
   if (primary && primary.length > 0) {
-    if (upper) rows.push([...primary])
-    else rows.unshift([...primary])
+    if (upper) rows.push(...halves(primary))
+    else rows.unshift(...halves(primary))
   }
   return rows
 }
@@ -707,10 +712,7 @@ function StudioBody({
                   : "grid min-w-0 items-start gap-6 grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"
               }
             >
-              <section
-                aria-label="De arriba"
-                className={`flex min-w-0 flex-col gap-2 ${layout === "stacked" ? "mx-auto w-full max-w-[20rem]" : ""}`}
-              >
+              <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   De arriba · las caras
                 </h4>
@@ -718,7 +720,8 @@ function StudioBody({
                   <OdontogramArch
                     key={which}
                     single={which}
-                    aspect={0.8}
+                    // En el celular, la U alta de siempre a todo el ancho: piezas de unos 34 px para el dedo.
+                    aspect={layout === "stacked" ? 1.1 : 0.8}
                     title={which === "upper" ? "Superior" : "Inferior"}
                     teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
                     inner={
