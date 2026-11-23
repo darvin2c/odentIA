@@ -2,7 +2,8 @@
  * El acuerdo con la administración (paso B7) contra una base real y una administración de mentira
  * que habla el acuerdo de verdad (`@odentia/contract`: su esquema y su firma). Prueba que nada se
  * cuenta dos veces aunque se pierda una respuesta, que nada se pierde si la administración no
- * responde, que la app sigue sin ella y que Sofi se detiene solo cuando la administración lo dice.
+ * responde, que la app sigue sin ella y que Sofi y Argos se detienen solo cuando la administración
+ * lo dice.
  */
 import { randomUUID } from "node:crypto"
 import {
@@ -10,6 +11,7 @@ import {
   contractState,
   conversation,
   conversationMessage,
+  stockRequest,
   storeAgent,
   storeMember,
   withPerson,
@@ -32,10 +34,12 @@ import {
   countConversation,
   deliverOutbox,
   refreshStates,
+  saveState,
 } from "./acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "./agente.js"
 import { createApp } from "./app.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
+import { runArgos } from "./sofi/argos.js"
 import type { ChatModel } from "./sofi/modelo.js"
 import { answer, type SofiDeps } from "./sofi/sofi.js"
 
@@ -454,5 +458,95 @@ describe("gestorIA pregunta y nunca se detiene por la administración", () => {
     ).toBe(403)
     const stranger = randomUUID()
     expect((await call("rosa", "GET", `/api/tiendas/${stranger}/plan`)).status).toBe(404)
+  })
+})
+
+describe("Argos se detiene con Sofi", () => {
+  it("no escribe si la administración dice que no puede seguir, sin saldo de prueba o en su tope; sí si nunca respondió", async () => {
+    // Otra tienda, con Sofi encendida y un cliente que espera que vuelva una talla que ya entró.
+    const created = await call("rosa", "POST", "/api/tiendas", {
+      name: "Tienda de Argos",
+      currency: "PEN",
+    })
+    const shopId = created.json.store.id as string
+    const base = `/api/tiendas/${shopId}`
+    await db.ownerDb
+      .insert(storeAgent)
+      .values({ storeId: shopId, enabled: true, updatedBy: "u-rosa" })
+    const made = await call("rosa", "POST", `${base}/productos`, {
+      name: "Sandalia",
+      listPriceCents: 5000,
+    })
+    const variantId = (await call("rosa", "GET", `${base}/productos/${made.json.product.id}`)).json
+      .product.variants[0].id as string
+    expect(
+      (
+        await call("rosa", "POST", `${base}/variantes/${variantId}/movimientos`, {
+          kind: "entrada",
+          quantity: 3,
+        })
+      ).status,
+    ).toBe(201)
+    const [conv] = await db.ownerDb
+      .insert(conversation)
+      .values({ storeId: shopId, channel: "whatsapp", createdBy: "u-rosa", customerName: "Ana" })
+      .returning({ id: conversation.id })
+    await db.ownerDb
+      .insert(stockRequest)
+      .values({ storeId: shopId, variantId, conversationId: conv!.id })
+    const followUps = async () =>
+      (
+        await db.ownerDb
+          .select({ id: conversationMessage.id })
+          .from(conversationMessage)
+          .where(
+            and(
+              eq(conversationMessage.conversationId, conv!.id),
+              eq(conversationMessage.followUp, "volvio"),
+            ),
+          )
+      ).length
+    const known = (change: Partial<AccountState>): AccountState => ({
+      account: shopId,
+      found: true,
+      at: new Date().toISOString(),
+      access: {
+        allowed: true,
+        status: "activa",
+        reason: null,
+        readOnlyAt: null,
+        trialEndsAt: null,
+      },
+      agents: { trialExhausted: false, capReached: false },
+      budget: null,
+      plan: null,
+      charges: [],
+      payments: [],
+      notices: [],
+      support: [],
+      ...change,
+    })
+    const stops: Partial<AccountState>[] = [
+      {
+        access: {
+          allowed: false,
+          status: "restringida",
+          reason: "Pago vencido",
+          readOnlyAt: null,
+          trialEndsAt: null,
+        },
+      },
+      { agents: { trialExhausted: true, capReached: false } },
+      { agents: { trialExhausted: false, capReached: true } },
+    ]
+    for (const stop of stops) {
+      await saveState(db.ownerDb, shopId, known(stop), new Date())
+      await runArgos(db.ownerDb, db.appDb)
+      expect(await followUps()).toBe(0)
+    }
+    // La administración nunca respondió de esta tienda: Argos sigue.
+    await db.ownerDb.delete(contractState).where(eq(contractState.storeId, shopId))
+    await runArgos(db.ownerDb, db.appDb)
+    expect(await followUps()).toBe(1)
   })
 })
