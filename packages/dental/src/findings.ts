@@ -485,11 +485,10 @@ export function findingIssues(
     }
   }
 
-  // Evidencia clínica directa cuando la norma la exige.
+  // «Observé clínicamente» ya no se pide: registrar el hallazgo es la constancia
+  // de quien lo vio. La clave se sigue aceptando por los datos guardados.
   if (details.clinicallyObserved !== undefined && typeof details.clinicallyObserved !== "boolean") {
     add("details.clinicallyObserved", "La observación clínica debe ser verdadero o falso.")
-  } else if (def.requiresEvidence && details.clinicallyObserved !== true) {
-    add("details.clinicallyObserved", `El hallazgo "${def.label}" solo se registra con observación clínica directa.`)
   }
 
   // Dibujo: mínimo dos puntos por trazo; la forma observada de un hallazgo de

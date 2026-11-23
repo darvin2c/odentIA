@@ -152,7 +152,6 @@ export function findingLeftByTreatment(
     (def.code === "missing_tooth" && context.strictVariants ? absenceCauseOf(context) : undefined)
   if (variant) details.variant = variant
   if (def.color === "quality") details.quality = "good"
-  if (def.requiresEvidence) details.clinicallyObserved = true
   const input: FindingInput = { toothNumber, condition: def.code, details }
   if (def.scope === "surface") {
     const valid = new Set<string>(surfacesForTooth(toothNumber))

@@ -102,8 +102,6 @@ interface FindingDraft {
   surfaces: string[]
   abutments: number[]
   drawing: number[][][]
-  /** Evidencia observada: solo lo marcado explícitamente por el clínico. */
-  clinicallyObserved: boolean
   specifications: string
   observations: string
   note: string
@@ -129,7 +127,6 @@ const EMPTY_DETAILS = {
   surfaces: [],
   abutments: [],
   drawing: [],
-  clinicallyObserved: false,
   specifications: "",
   observations: "",
 } satisfies Partial<FindingDraft>
@@ -161,7 +158,6 @@ interface FindingLayout {
   showGrade: boolean
   showPositions: boolean
   showObservations: boolean
-  showEvidence: boolean
   showSpecifications: boolean
 }
 
@@ -186,7 +182,6 @@ function findingLayout(
     showGrade: condition === "pathological_mobility",
     showPositions: condition === "abnormal_position",
     showObservations: condition === "clinical_observation",
-    showEvidence: !!def?.requiresEvidence,
     showSpecifications: !!(SPECIFICATION_HINTS[condition] || def?.code === "temporary_crown" || draft.specifications),
   }
 }
@@ -224,7 +219,6 @@ function draftDetailsOf(draft: FindingDraft, layout: FindingLayout, teeth: reado
   if (draft.condition === "abnormal_position" && draft.positions.length > 0) details.positions = [...draft.positions]
   if (isGroup && teeth.length > 0) details.relatedTeeth = [...teeth]
   if (scope === "span" && draft.abutments.length > 0) details.abutmentTeeth = [...draft.abutments]
-  if (draft.clinicallyObserved) details.clinicallyObserved = true
   if (draft.drawing.length > 0) details.drawing = draft.drawing
   if (draft.specifications.trim()) details.specifications = draft.specifications.trim()
   if (draft.observations.trim()) details.observations = draft.observations.trim()
@@ -246,8 +240,6 @@ function draftFieldOf(field: FindingField, layout: FindingLayout): keyof Finding
       return layout.showPositions ? "positions" : null
     case "details.abutmentTeeth":
       return layout.showAbutments ? "abutments" : null
-    case "details.clinicallyObserved":
-      return layout.showEvidence ? "clinicallyObserved" : null
     case "details.drawing":
       return layout.showDrawing ? "drawing" : null
     case "surfaces":
@@ -271,7 +263,6 @@ const SERVER_FIELDS: Record<string, string> = {
   "details.direction": "direction",
   "details.positions": "positions",
   "details.abutmentTeeth": "abutments",
-  "details.clinicallyObserved": "clinicallyObserved",
   "details.drawing": "drawing",
   "details.specifications": "specifications",
   "details.observations": "observations",
@@ -435,9 +426,6 @@ export function ToothDrawer({
     const layout = findingLayout(value, multi, allowedSurfaces.length > 0)
     if (!layout.def) return { form: "Selecciona el hallazgo a registrar.", fields: {} }
     const fields: Partial<Record<keyof FindingDraft, string>> = {}
-    // La evidencia observada solo vale marcada explícitamente por el clínico.
-    if (layout.def.requiresEvidence && !value.clinicallyObserved)
-      fields.clinicallyObserved = "Confirma que observaste clínicamente este hallazgo antes de registrarlo."
     if (layout.showGrade && value.grade.trim() && writtenGrade(value.grade) === null)
       fields.grade = "Escribe el grado con un número entero: 1, 2, 3…"
     if (value.diagnosisCode.trim() && !value.diagnosisType)
@@ -1210,19 +1198,6 @@ export function ToothDrawer({
                 >
                   {() => null}
                 </field.Group>
-              )}
-            </form.AppField>
-          )}
-
-          {def?.requiresEvidence && (
-            <form.AppField name="clinicallyObserved">
-              {(field) => (
-                <field.CheckboxField
-                  id={`${uid}-observed`}
-                  label="Observé clínicamente este hallazgo (obligatorio)"
-                  disabled={fieldDisabled}
-                  className="min-h-11 rounded-md border p-2 sm:col-span-2"
-                />
               )}
             </form.AppField>
           )}
