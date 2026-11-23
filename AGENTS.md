@@ -43,7 +43,7 @@ Permitir que cada usuario complete su trabajo con facilidad mediante una experie
 
 Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este núcleo, no lo contradicen.
 
-Cada sistema en su carpeta: las clínicas en `apps/`, `packages/` y `e2e/`; la administración en `admin/` (`apps/web` y sus recorridos en `e2e/`); gestorIA en `gestoria/`, aparte de las clínicas, con su base, su servidor y su despliegue (`gestoria-boundaries.test.ts`); lo de uso general en `shared/packages/` (ui, ui-patterns, channels, mail, brand-scene), que no importa a ningún sistema (`shared-boundaries.test.ts`). Un cambio en `shared/` va en su propio PR y corre todas las pruebas de las clínicas.
+Cada sistema en su carpeta: las clínicas en `apps/`, `packages/` y `e2e/`; la administración en `admin/` (`apps/web` y sus recorridos en `e2e/`); gestorIA en `gestoria/`, aparte de las clínicas, con su base, su servidor y su despliegue (`gestoria-boundaries.test.ts`); lo de uso general en `shared/packages/` (ui, ui-patterns, channels, mail, brand-scene, contract: el acuerdo de las apps con la administración, ADR 0211), que no importa a ningún sistema (`shared-boundaries.test.ts`). Un cambio en `shared/` va en su propio PR y corre todas las pruebas de las clínicas.
 
 - `apps/AGENTS.md`: responsabilidades de panel, dental-clinic, API y worker.
 - `gestoria/AGENTS.md`: límites, tiendas y permisos de gestorIA.
