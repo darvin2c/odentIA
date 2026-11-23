@@ -345,7 +345,10 @@ export async function deliverAppContractRequests(
           answer = { status: "fallo", message: "La app no lo aceptó: no es un pedido del acuerdo." }
         } else error = `La app respondió ${response.status}`
       } catch (cause) {
-        error = cause instanceof Error && cause.name === "TimeoutError" ? "La app no respondió a tiempo" : "No se pudo llamar a la app"
+        error =
+          cause instanceof Error && cause.name === "TimeoutError"
+            ? "La app no respondió a tiempo"
+            : "No se pudo llamar a la app"
       }
       // eslint-disable-next-line no-await-in-loop
       await ownerDb

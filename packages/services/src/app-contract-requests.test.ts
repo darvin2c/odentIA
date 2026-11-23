@@ -110,16 +110,22 @@ describe("la configuración", () => {
   it("sin dirección no pide nada; sin https o sin secreto lo dice", () => {
     expect(appContractSendersFromEnv({}).senders).toEqual([])
     expect(
-      appContractSendersFromEnv({ GESTORIA_CONTRACT_URL: "http://gestoria.test", GESTORIA_CONTRACT_SECRET: SECRET })
-        .problems,
+      appContractSendersFromEnv({
+        GESTORIA_CONTRACT_URL: "http://gestoria.test",
+        GESTORIA_CONTRACT_SECRET: SECRET,
+      }).problems,
     ).toHaveLength(1)
     expect(
-      appContractSendersFromEnv({ GESTORIA_CONTRACT_URL: "https://gestoria.test", GESTORIA_CONTRACT_SECRET: "x" })
-        .problems,
+      appContractSendersFromEnv({
+        GESTORIA_CONTRACT_URL: "https://gestoria.test",
+        GESTORIA_CONTRACT_SECRET: "x",
+      }).problems,
     ).toHaveLength(1)
     expect(
-      appContractSendersFromEnv({ GESTORIA_CONTRACT_URL: "https://gestoria.test", GESTORIA_CONTRACT_SECRET: SECRET })
-        .senders,
+      appContractSendersFromEnv({
+        GESTORIA_CONTRACT_URL: "https://gestoria.test",
+        GESTORIA_CONTRACT_SECRET: SECRET,
+      }).senders,
     ).toEqual([{ app: GESTORIA, url: "https://gestoria.test", secret: SECRET }])
   })
 
@@ -127,7 +133,14 @@ describe("la configuración", () => {
     const id = await account("sin-conexion")
     await expect(
       ownerDb.transaction((tx) =>
-        requestAppSupportAccess(tx, [], ACTOR, id, { minutes: 30, reason: "Mirar el catálogo" }, NOW),
+        requestAppSupportAccess(
+          tx,
+          [],
+          ACTOR,
+          id,
+          { minutes: 30, reason: "Mirar el catálogo" },
+          NOW,
+        ),
       ),
     ).rejects.toMatchObject({ code: "NOT_CONNECTED", status: 409 })
     expect(await listAppContractRequests(ownerDb, id)).toEqual([])
@@ -138,20 +151,31 @@ describe("el envío", () => {
   it("sale firmado con su clave, se reintenta con la misma y la respuesta de la app es final", async () => {
     const id = await account("reintento")
     const requestId = await ownerDb.transaction((tx) =>
-      requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 30, reason: "Mirar el catálogo" }, NOW),
+      requestAppSupportAccess(
+        tx,
+        [SENDER],
+        ACTOR,
+        id,
+        { minutes: 30, reason: "Mirar el catálogo" },
+        NOW,
+      ),
     )
     const app = fakeApp([
       new Response("caída", { status: 503 }),
       Response.json({ status: "hecho", message: "Pedido a la tienda" }),
     ])
-    expect(await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) })).toEqual({
+    expect(
+      await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) }),
+    ).toEqual({
       delivered: 0,
       failed: 1,
     })
     // Antes de su hora no sale otra vez.
     await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) })
     expect(app.calls).toHaveLength(1)
-    expect(await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(61_000) })).toEqual({
+    expect(
+      await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(61_000) }),
+    ).toEqual({
       delivered: 1,
       failed: 0,
     })
@@ -175,7 +199,14 @@ describe("el envío", () => {
   it("lo que la app no puede hacer queda como falló con su motivo, y un pedido que no es del acuerdo también", async () => {
     const id = await account("falla")
     await ownerDb.transaction((tx) =>
-      requestAppPersonRemoval(tx, [SENDER], ACTOR, id, { email: "duena@tienda.test", reason: "Lo pidió" }, NOW),
+      requestAppPersonRemoval(
+        tx,
+        [SENDER],
+        ACTOR,
+        id,
+        { email: "duena@tienda.test", reason: "Lo pidió" },
+        NOW,
+      ),
     )
     await ownerDb.transaction((tx) =>
       requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 15, reason: "Mirar" }, NOW),
@@ -197,7 +228,14 @@ describe("el envío", () => {
   it("los de una cuenta salen en orden: lo siguiente espera a que el anterior llegue", async () => {
     const id = await account("orden")
     await ownerDb.transaction((tx) =>
-      requestAppPersonRemoval(tx, [SENDER], ACTOR, id, { email: "VENDEDOR@tienda.test", reason: "Ya no trabaja" }, NOW),
+      requestAppPersonRemoval(
+        tx,
+        [SENDER],
+        ACTOR,
+        id,
+        { email: "VENDEDOR@tienda.test", reason: "Ya no trabaja" },
+        NOW,
+      ),
     )
     await ownerDb.transaction((tx) =>
       requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 60, reason: "Mirar" }, NOW),
@@ -220,15 +258,32 @@ describe("el envío", () => {
     const id = await account("sin-persona")
     await expect(
       ownerDb.transaction((tx) =>
-        requestAppPersonRemoval(tx, [SENDER], ACTOR, id, { email: "nadie@tienda.test", reason: "Lo pidió" }, NOW),
+        requestAppPersonRemoval(
+          tx,
+          [SENDER],
+          ACTOR,
+          id,
+          { email: "nadie@tienda.test", reason: "Lo pidió" },
+          NOW,
+        ),
       ),
-    ).rejects.toMatchObject({ status: 400, fields: { email: "Nadie tiene cuenta con ese correo." } })
+    ).rejects.toMatchObject({
+      status: 400,
+      fields: { email: "Nadie tiene cuenta con ese correo." },
+    })
   })
 
   it("una clínica no recibe pedidos: solo una cuenta de otra app", async () => {
     await expect(
       ownerDb.transaction((tx) =>
-        requestAppSupportAccess(tx, [SENDER], ACTOR, "no-existe", { minutes: 30, reason: "Mirar" }, NOW),
+        requestAppSupportAccess(
+          tx,
+          [SENDER],
+          ACTOR,
+          "no-existe",
+          { minutes: 30, reason: "Mirar" },
+          NOW,
+        ),
       ),
     ).rejects.toBeInstanceOf(ServiceError)
   })
@@ -268,7 +323,11 @@ describe("abrir la cuenta de un cliente", () => {
     })
     const ref = request.data.account
     const before = await answerAppState(ownerDb, GESTORIA, ref, NOW)
-    expect(before).toMatchObject({ found: true, plan: { code: "gestoria-pedidos" }, access: { status: "prueba" } })
+    expect(before).toMatchObject({
+      found: true,
+      plan: { code: "gestoria-pedidos" },
+      access: { status: "prueba" },
+    })
     // La app la abre y avisa: es la misma cuenta, no otra.
     await receiveAppEvent(
       ownerDb,
@@ -319,7 +378,12 @@ describe("el comprobante que sube la app", () => {
   ])
   const stored: string[] = []
   const storage = {
-    putAttachment: async (input: { orgId: string; ext: string; contentType: string; bytes: Uint8Array }) => {
+    putAttachment: async (input: {
+      orgId: string
+      ext: string
+      contentType: string
+      bytes: Uint8Array
+    }) => {
       stored.push(input.contentType)
       return {
         objectKey: `${input.orgId}/comprobante.${input.ext}`,
@@ -357,7 +421,10 @@ describe("el comprobante que sube la app", () => {
     expect(await receiveAppEvent(ownerDb, GESTORIA, "pago-1", event, NOW, { storage })).toEqual({
       repeated: true,
     })
-    const payments = await ownerDb.select().from(saasPayment).where(eq(saasPayment.organizationId, id))
+    const payments = await ownerDb
+      .select()
+      .from(saasPayment)
+      .where(eq(saasPayment.organizationId, id))
     expect(payments).toHaveLength(1)
     expect(payments[0]).toMatchObject({
       status: "pendiente",
@@ -368,7 +435,11 @@ describe("el comprobante que sube la app", () => {
     })
     // La app ve cómo pagar y el pago por confirmar.
     const state = await answerAppState(ownerDb, GESTORIA, "paga", NOW)
-    expect(state.paymentMethods).toContainEqual({ code: "yape-pedidos", name: "Yape", instructions: "Al 999" })
+    expect(state.paymentMethods).toContainEqual({
+      code: "yape-pedidos",
+      name: "Yape",
+      instructions: "Al 999",
+    })
     expect(state.payments).toMatchObject([{ status: "pendiente", amountCents: 500 }])
     // Otro del mismo cargo mientras ese espera: se rechaza por lo que dice (la app no reintenta).
     await expect(
@@ -385,7 +456,9 @@ describe("el comprobante que sube la app", () => {
     })
     const html = Buffer.from("<html><script>alert(1)</script></html>").toString("base64")
     await expect(
-      receiveAppEvent(ownerDb, GESTORIA, "pago-html", receipt("mentira", charge.id, html), NOW, { storage }),
+      receiveAppEvent(ownerDb, GESTORIA, "pago-html", receipt("mentira", charge.id, html), NOW, {
+        storage,
+      }),
     ).rejects.toMatchObject({ status: 400 })
     // Un cargo que no es de la cuenta es un rechazo de lo que dice (409), no una cuenta que falta.
     await expect(
@@ -398,7 +471,10 @@ describe("el comprobante que sube la app", () => {
         { storage },
       ),
     ).rejects.toMatchObject({ status: 409 })
-    const payments = await ownerDb.select().from(saasPayment).where(eq(saasPayment.organizationId, id))
+    const payments = await ownerDb
+      .select()
+      .from(saasPayment)
+      .where(eq(saasPayment.organizationId, id))
     expect(payments).toEqual([])
   })
 })

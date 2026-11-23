@@ -20,8 +20,7 @@ export type SupportAccessRow = typeof storeSupportAccess.$inferSelect
 export type SupportAccessStatus = "por_aceptar" | "vigente" | "terminado" | "rechazado"
 
 export function supportStatusOf(row: SupportAccessRow, now = new Date()): SupportAccessStatus {
-  if (row.state === "pedido")
-    return row.requestExpiresAt > now ? "por_aceptar" : "terminado"
+  if (row.state === "pedido") return row.requestExpiresAt > now ? "por_aceptar" : "terminado"
   if (row.state === "aceptado" && row.expiresAt && row.expiresAt > now) return "vigente"
   if (row.state === "rechazado") return "rechazado"
   return "terminado"
@@ -195,7 +194,12 @@ export async function answerSupportIn(
   const expiresAt = accept ? new Date(now.getTime() + row.minutes * 60_000) : null
   await tx
     .update(storeSupportAccess)
-    .set({ state: accept ? "aceptado" : "rechazado", answeredAt: now, answeredBy: userId, expiresAt })
+    .set({
+      state: accept ? "aceptado" : "rechazado",
+      answeredAt: now,
+      answeredBy: userId,
+      expiresAt,
+    })
     .where(eq(storeSupportAccess.id, row.id))
   await tx.insert(storeEvent).values({
     storeId,

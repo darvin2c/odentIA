@@ -37,10 +37,7 @@ async function openStore(
   data: Extract<AdminRequest, { type: "cuenta.abrir" }>["data"],
   now: Date,
 ): Promise<Result> {
-  const [existing] = await tx
-    .select({ id: store.id })
-    .from(store)
-    .where(eq(store.id, data.account))
+  const [existing] = await tx.select({ id: store.id }).from(store).where(eq(store.id, data.account))
   if (existing) return { status: "hecho", message: "La tienda ya estaba abierta." }
   if (!isCurrency(data.currency))
     return { status: "fallo", message: `gestorIA no vende en ${data.currency}: elige otra moneda.` }
@@ -70,7 +67,12 @@ async function openStore(
     actorUserId: null,
     action: "tienda.creada",
     subject: data.owner.userId,
-    detail: { por: "administracion", name: data.name, currency: data.currency, country: data.country },
+    detail: {
+      por: "administracion",
+      name: data.name,
+      currency: data.currency,
+      country: data.country,
+    },
   })
   // La administración ya la tiene: este aviso solo la pone al día con lo que quedó.
   await noteStoreAccount(tx, data.account, now)

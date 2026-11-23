@@ -76,8 +76,12 @@ export function AppRequestList({ requests }: { requests: AppRequest[] }) {
           </p>
           {request.detail ? <p className="text-muted-foreground">{request.detail}</p> : null}
           {request.message ? (
-            <p className={request.status === "fallo" ? "text-destructive" : "text-muted-foreground"}>
-              {request.status === "pendiente" ? `Todavía no llega: ${request.message}` : request.message}
+            <p
+              className={request.status === "fallo" ? "text-destructive" : "text-muted-foreground"}
+            >
+              {request.status === "pendiente"
+                ? `Todavía no llega: ${request.message}`
+                : request.message}
             </p>
           ) : null}
         </li>
@@ -97,7 +101,9 @@ const requestSchema = (support: boolean) =>
   z.object({
     minutes: z.enum(["15", "30", "60"]),
     reason,
-    email: support ? z.string() : z.string().trim().email("Escribe el correo de su cuenta").max(254),
+    email: support
+      ? z.string()
+      : z.string().trim().email("Escribe el correo de su cuenta").max(254),
   })
 
 /**

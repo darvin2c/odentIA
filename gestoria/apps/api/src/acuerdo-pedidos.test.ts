@@ -25,7 +25,13 @@ import { signMessage } from "@odentia/contract/signing"
 import { and, eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { type ContractConfig, deliverOutbox, OUTBOX_KEEP_MS, purgeOutbox, saveState } from "./acuerdo.js"
+import {
+  type ContractConfig,
+  deliverOutbox,
+  OUTBOX_KEEP_MS,
+  purgeOutbox,
+  saveState,
+} from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import { answer } from "./sofi/sofi.js"
@@ -43,10 +49,17 @@ const admin = { receiptAnswer: 200 as number, receiptMessage: "Ese cargo ya est�
 const adminFetch: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
   const type = (JSON.parse(String(init?.body ?? "{}")) as { type?: string }).type
-  if (url.pathname === CONTRACT_PATHS.events && type === "pago.comprobante" && admin.receiptAnswer !== 200)
-    return Response.json({ error: { code: "CONFLICT", message: admin.receiptMessage } }, {
-      status: admin.receiptAnswer,
-    })
+  if (
+    url.pathname === CONTRACT_PATHS.events &&
+    type === "pago.comprobante" &&
+    admin.receiptAnswer !== 200
+  )
+    return Response.json(
+      { error: { code: "CONFLICT", message: admin.receiptMessage } },
+      {
+        status: admin.receiptAnswer,
+      },
+    )
   return Response.json({ received: true, repeated: false })
 }
 const contract: ContractConfig = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
@@ -176,7 +189,9 @@ describe("los pedidos de la administración", () => {
       body,
     })
     expect(bad.status).toBe(400)
-    expect(await db.ownerDb.select().from(storeMember).where(eq(storeMember.storeId, storeId))).toHaveLength(1)
+    expect(
+      await db.ownerDb.select().from(storeMember).where(eq(storeMember.storeId, storeId)),
+    ).toHaveLength(1)
   })
 
   it("quita a una persona con el motivo, y nunca al único Dueño", async () => {
@@ -210,12 +225,19 @@ describe("los pedidos de la administración", () => {
       timestamp: now(),
       data: { account: storeId, userId: people.mario.id, reason: "Ya no trabaja aquí" },
     })
-    expect(again.json).toEqual({ status: "hecho", message: "Esa persona ya no estaba en la tienda." })
+    expect(again.json).toEqual({
+      status: "hecho",
+      message: "Esa persona ya no estaba en la tienda.",
+    })
   })
 })
 
 describe("la entrada de soporte", () => {
-  const staff = { userId: people.soporte.id, name: people.soporte.name, email: people.soporte.email }
+  const staff = {
+    userId: people.soporte.id,
+    name: people.soporte.name,
+    email: people.soporte.email,
+  }
   let accessId = ""
 
   it("se pide, y soporte no entra hasta que la tienda lo acepta", async () => {
@@ -243,9 +265,15 @@ describe("la entrada de soporte", () => {
 
   it("solo el Dueño o un Administrador lo acepta; aceptado, soporte solo mira, y queda anotado", async () => {
     await db.ownerDb.insert(storeMember).values({ storeId, userId: people.mario.id, role: "sales" })
-    expect((await call("mario", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status).toBe(403)
-    expect((await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status).toBe(204)
-    expect((await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status).toBe(409)
+    expect(
+      (await call("mario", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status,
+    ).toBe(403)
+    expect(
+      (await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status,
+    ).toBe(204)
+    expect(
+      (await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status,
+    ).toBe(409)
     const me = await call("soporte", "GET", "/api/yo")
     expect(me.json.stores).toMatchObject([
       { id: storeId, role: "support", permissions: ["tienda.ver", "equipo.ver", "catalogo.ver"] },
@@ -255,8 +283,12 @@ describe("la entrada de soporte", () => {
     expect((await call("soporte", "GET", `/api/tiendas/${storeId}/equipo`)).status).toBe(200)
     // Nada que cambie ni lo que también escribe (pedidos, conversaciones, el plan).
     expect(
-      (await call("soporte", "POST", `/api/tiendas/${storeId}/productos`, { name: "X", listPriceCents: 100 }))
-        .status,
+      (
+        await call("soporte", "POST", `/api/tiendas/${storeId}/productos`, {
+          name: "X",
+          listPriceCents: 100,
+        })
+      ).status,
     ).toBe(403)
     expect((await call("soporte", "GET", `/api/tiendas/${storeId}/pedidos`)).status).toBe(403)
     expect((await call("soporte", "GET", `/api/tiendas/${storeId}/plan`)).status).toBe(403)
@@ -273,7 +305,9 @@ describe("la entrada de soporte", () => {
   })
 
   it("la tienda lo saca cuando quiere y ya no entra", async () => {
-    expect((await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`)).status).toBe(204)
+    expect(
+      (await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`)).status,
+    ).toBe(204)
     expect((await call("soporte", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(404)
     expect((await call("soporte", "GET", "/api/yo")).json.stores).toEqual([])
     const team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
@@ -282,7 +316,10 @@ describe("la entrada de soporte", () => {
 })
 
 describe("el comprobante del plan", () => {
-  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40, 2)])
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(40, 2),
+  ])
   const state: AccountState = {
     account: "",
     found: true,
@@ -322,13 +359,13 @@ describe("el comprobante del plan", () => {
   it("se mira por su contenido y contra lo último que dijo la administración, y sale por el acuerdo", async () => {
     await saveState(db.ownerDb, storeId, { ...state, account: storeId }, new Date())
     const path = `/api/tiendas/${storeId}/plan/comprobante`
-    expect((await call("rosa", "POST", path, form(Buffer.from("<html></html>")))).json.error.code).toBe(
-      "FILE_TYPE",
-    )
+    expect(
+      (await call("rosa", "POST", path, form(Buffer.from("<html></html>")))).json.error.code,
+    ).toBe("FILE_TYPE")
     expect((await call("rosa", "POST", path, form(null))).status).toBe(400)
-    expect((await call("rosa", "POST", path, form(PNG, { amountCents: "5000" }))).json.error.code).toBe(
-      "AMOUNT",
-    )
+    expect(
+      (await call("rosa", "POST", path, form(PNG, { amountCents: "5000" }))).json.error.code,
+    ).toBe("AMOUNT")
     expect((await call("rosa", "POST", path, form(PNG, { chargeId: "otro" }))).status).toBe(409)
     expect((await call("rosa", "POST", path, form(PNG, { methodCode: "otro" }))).status).toBe(400)
     expect((await call("mario", "POST", path, form(PNG))).status).toBe(403)
@@ -371,7 +408,10 @@ describe("el comprobante del plan", () => {
     // Rechazado, no vuelve a salir.
     const before = row!.attempts
     await deliverOutbox(db.ownerDb, contract, new Date(Date.now() + 7_200_000))
-    const [after] = await db.ownerDb.select().from(contractOutbox).where(eq(contractOutbox.id, row!.id))
+    const [after] = await db.ownerDb
+      .select()
+      .from(contractOutbox)
+      .where(eq(contractOutbox.id, row!.id))
     expect(after?.attempts).toBe(before)
   })
 })
@@ -403,7 +443,10 @@ describe("la bandeja se limpia", () => {
       .where(and(eq(contractOutbox.storeId, storeId), eq(contractOutbox.type, "cuenta.abierta")))
     const removed = await purgeOutbox(db.ownerDb)
     expect(removed).toBeGreaterThanOrEqual(2)
-    const left = await db.ownerDb.select().from(contractOutbox).where(eq(contractOutbox.storeId, storeId))
+    const left = await db.ownerDb
+      .select()
+      .from(contractOutbox)
+      .where(eq(contractOutbox.storeId, storeId))
     expect(left.filter((row) => row.type === "cuenta.abierta")).toHaveLength(1)
     expect(left.filter((row) => row.type === "soporte.pedido")).toEqual([])
     // Lo rechazado de hace menos de una semana queda, para que el Dueño vea por qué.
@@ -435,11 +478,16 @@ describe("Sofi no atiende", () => {
     }
     const off = await talk()
     expect((await answer(deps, storeId, off)).status).toBe("apagada")
-    await db.ownerDb.insert(storeAgent).values({ storeId, enabled: true, updatedBy: people.rosa.id })
+    await db.ownerDb
+      .insert(storeAgent)
+      .values({ storeId, enabled: true, updatedBy: people.rosa.id })
     await saveState(db.ownerDb, storeId, pausedState(storeId), new Date())
     const paused = await talk()
     expect((await answer(deps, storeId, paused)).status).toBe("detenida")
-    const rows = await db.ownerDb.select().from(conversation).where(eq(conversation.storeId, storeId))
+    const rows = await db.ownerDb
+      .select()
+      .from(conversation)
+      .where(eq(conversation.storeId, storeId))
     const byId = new Map(rows.map((row) => [row.id, row]))
     expect(byId.get(off)).toMatchObject({ handler: "persona", waitingReason: "Sofi está apagada" })
     expect(byId.get(paused)).toMatchObject({
