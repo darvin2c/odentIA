@@ -438,8 +438,17 @@ function ToothFront({
       ? Math.min(marks.shift * ch, Math.max(0, reach - ch - rl - 4))
       : marks.shift * ch
   const transform = `translate(${n(t.x)} ${n(yOcc)})${t.up ? " scale(1 -1)" : ""}${shift ? ` translate(0 ${n(shift)})` : ""}`
+  if (marks.buriedPaint) {
+    // La impactada, dentro de la encía y con su contorno del color de la norma.
+    parts.push(
+      <g key="buried" fill="none" stroke={INK[marks.buriedPaint]} strokeWidth={1.6} strokeLinejoin="round">
+        <path d={crown} />
+        <path d={roots.front} />
+      </g>,
+    )
+  }
   return (
-    <g transform={transform} opacity={marks.buried ? 0.62 : undefined}>
+    <g transform={transform} opacity={marks.buried ? 0.75 : undefined}>
       {parts}
     </g>
   )

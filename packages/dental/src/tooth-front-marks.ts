@@ -63,6 +63,8 @@ export interface FrontMarks {
   ringNumber?: Paint
   /** La pieza no erupcionada (impactada): queda dentro de la encía. */
   buried: boolean
+  /** El color de la impactada: su contorno (azul en la norma, NTS 6.1.14). */
+  buriedPaint?: Paint
 }
 
 function paintOf(entry: FrontEntry): Paint | null {
@@ -213,6 +215,7 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
       case "impaction":
         if (hasCrown) {
           marks.buried = true
+          marks.buriedPaint ??= paint
           marks.shift = Math.max(marks.shift, 1.15)
           // La tercera molar inferior retenida suele estar inclinada hacia mesial (Winter); la superior,
           // no tanto (QA del 23 nov, voz clínica).

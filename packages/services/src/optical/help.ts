@@ -98,6 +98,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   "¿Dónde registro un hallazgo del odontograma?": () => [],
   "¿Por qué la pieza quedó dibujada después del tratamiento?": () => [],
   "¿Cómo anoto que tiene un perno, un implante o un puente?": () => [],
+  "¿Dónde veo la raíz de la pieza?": () => [],
   "¿Cómo se firma el odontograma?": () => [],
   "¿Cómo dicto una atención?": () => [],
   // Una óptica no tiene atajos «Sin enfermedad» ni consulta propuesta al firmar (19 nov).
