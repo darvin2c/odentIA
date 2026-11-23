@@ -175,6 +175,27 @@ describe("«No lo usé» dice cada frase una vez y solo lo que no se usó (QA de
   })
 })
 
+// QA del 23 nov (verificador 2): «cuanto pesa lucas mas o menos», que preguntó la doctora sin «?», salía
+// en «No lo usé» con «no supe dónde va».
+describe("una pregunta no es algo que Clío no usó", () => {
+  const item = (said: string) => ({ said, why: "sin_lugar" as const })
+  it("empieza con una palabra de pregunta, con tilde o sin ella: no se lista", () => {
+    const kept = unusedOnce(["cuanto pesa lucas mas o menos", "Qué le duele", "y desde cuando le pasa", "donde le duele", "cual muela es", "como dos semanas", "no que yo sepa", "que yo sepa no", "tiene asma"].map(item))
+    expect(kept.map((one) => one.said)).toEqual(["como dos semanas", "no que yo sepa", "que yo sepa no", "tiene asma"])
+  })
+  it("lo que pregunta quien atiende («tiene», «toma algo») no se lista; dicho por quien acompaña, sí", () => {
+    const turns = [
+      { quien: "dra" as const, texto: "tiene alguna alergia" },
+      { quien: "acompanante" as const, vinculo: "madre", texto: "toma algo para la tiroides pero no me acuerdo" },
+      { quien: "dra" as const, texto: "toma algo mas" },
+    ]
+    const kept = unusedOnce([item("tiene alguna alergia"), item("toma algo para la tiroides pero no me acuerdo"), item("toma algo mas")], turns)
+    expect(kept.map((one) => one.said)).toEqual(["toma algo para la tiroides pero no me acuerdo"])
+    // Sin saber quién lo dijo, «tiene…» puede ser la respuesta («tiene asma»): se lista.
+    expect(unusedOnce([item("tiene alguna alergia")]).map((one) => one.said)).toEqual(["tiene alguna alergia"])
+  })
+})
+
 describe("no es historia clínica", () => {
   // `encounters.ts` solo mira si hay algo dicho, para no dar la atención por vacía.
   it("solo lo leen el dictado, «Lo que se dijo» y la demo: ni la copia de la historia ni FHIR", () => {

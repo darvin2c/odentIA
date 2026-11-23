@@ -51,7 +51,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 /** Lo que responde una pausa que no llamó al modelo: ya ordenada, o otro pedido la está ordenando. */
-const NOTHING_NEW = { suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, unusedFor: {}, model: null }
+const NOTHING_NEW = { suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, unusedKind: {}, unusedFor: {}, model: null }
 
 /** Si falla, quita la marca de «en curso» (sin tapar el error): se puede volver a intentar ya. */
 async function releasingOnError<T>(work: () => Promise<T>, release: () => Promise<void>): Promise<T> {
@@ -289,12 +289,11 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const used = result.suggestions.length + result.corrected.length + (result.added?.length ?? 0) + result.removed.length > 0
           if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left, used)
           else if (!result.repeated) await settleDictationSegment(tx, orgId, at.data.encounterId, segmentId, left)
-          return result
+          return { ...result, left }
         })
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         // Lo de una ficha solo si quedó como propuesta, y por dato (`formSources`): lo que el servidor
         // no dejó pasar no dio nada (QA del 14 nov, D20; revisión final del 15 nov, U5).
-        const dropped = new Set(saved.droppedForms.map((item) => item.said))
         // Lo de su salud (y una alergia) aparte: la pantalla lo resalta en ámbar, no como de la consulta (QA del 22 nov, H7).
         const fromHealth = (kind: string) => kind === "salud" || kind === "alergia"
         const sources = [...extracted.drafts.filter((item) => item.kind !== "ficha" && !fromHealth(item.kind)), ...extracted.corrections, ...extracted.removals]
@@ -306,23 +305,28 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           .map((item) => item.sourceText ?? "")
           .filter(Boolean)
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
-        const outside = extracted.outOfPlace ?? []
-        const unused = [
-          ...new Set([
-            ...extracted.unused,
-            ...outside.map((item) => item.said),
-            ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said),
-            ...dropped,
-          ]),
-        ]
-        // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor; lo de un familiar o un peso dicho, su motivo.
-        const unusedWhy = Object.fromEntries([
-          ...outside.flatMap((item) => (DICTATION_OUT_OF_PLACE[item.why] ? [[item.said, DICTATION_OUT_OF_PLACE[item.why]] as const] : [])),
-          ...saved.droppedForms.map((item) => [item.said, item.why] as const),
-        ])
+        // Es lo mismo que quedó guardado para «Lo que se dijo» (`left`, ya sin preguntas ni repetidas):
+        // el aviso y el panel listan las mismas frases con el mismo motivo (QA del 23 nov, verificador 2).
+        const { left, ...result } = saved
+        const unused = left.flatMap((item) => (item.said ? [item.said] : []))
+        // Por qué no se usó, cuando se sabe (lo de una ficha lo dice el servidor; lo de un familiar o un
+        // peso dicho, su motivo), y de qué clase es: la pantalla lo dice con las mismas palabras que el panel.
+        const unusedWhy = Object.fromEntries(left.flatMap((item) => (item.said && item.detail ? [[item.said, item.detail] as const] : [])))
+        const unusedKind = Object.fromEntries(left.flatMap((item) => (item.said ? [[item.said, item.why] as const] : [])))
         // La pregunta de la ficha que nombra cada frase: «Usar en Percusión» la abre con la frase al lado.
-        const unusedFor = Object.fromEntries(saved.droppedForms.filter((item) => item.targets.length).map((item) => [item.said, item.targets]))
-        return { ...saved, sources, healthSources, omitted: extracted.omitted + outside.length + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
+        const unusedFor = Object.fromEntries(left.flatMap((item) => (item.said && item.targets?.length ? [[item.said, item.targets] as const] : [])))
+        return {
+          ...result,
+          sources,
+          healthSources,
+          // Cuántas partes no se usaron: las de la lista, con la que no supo citar (sin frase).
+          omitted: left.length,
+          unused,
+          unusedWhy,
+          unusedKind,
+          unusedFor,
+          model: extracted.model,
+        }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")

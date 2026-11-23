@@ -393,6 +393,8 @@ export async function saveDictationReview(
     )
   const turnsSaved: string[] = []
   const turnsRejected: string[] = []
+  // Los turnos de cada tramo, los de antes o los de este repaso: dicen quién dijo lo que no se usó.
+  const turnsNow = new Map(rows.map((row) => [row.segmentId, row.turns ?? null] as const))
   for (const { segmentId, turns } of input.turns) {
     const row = rows.find((item) => item.segmentId === segmentId)
     // Los turnos que ya tiene (de otro repaso, o que una persona cambió) no se pisan.
@@ -405,6 +407,7 @@ export async function saveDictationReview(
     }
     await tx.update(encounterDictationSegment).set({ turns, updatedAt: new Date() }).where(eq(encounterDictationSegment.id, row.id))
     turnsSaved.push(segmentId)
+    turnsNow.set(segmentId, turns)
   }
   // Lo que pedía turnos y quedó sin ninguno no espera otro repaso, que no llega si no se dice nada
   // más: «Conversación» quedaba apagada para siempre y no se podía decir quién habló (UX-1). Queda
@@ -440,7 +443,7 @@ export async function saveDictationReview(
     if (!row) continue
     // Lo que la pausa ya avisó de esa frase no se avisa dos veces; si el repaso trae su motivo y la
     // pausa no, la frase queda con el motivo (`unusedOnce`, QA del 22 nov, H6).
-    const merged = unusedOnce([...row.unused, ...fresh])
+    const merged = unusedOnce([...row.unused, ...fresh], turnsNow.get(segmentId) ?? null)
     if (JSON.stringify(merged) === JSON.stringify(row.unused)) continue
     added.push(...merged.filter((item) => !row.unused.some((old) => sameUnusedSaid(old, item))))
     await tx

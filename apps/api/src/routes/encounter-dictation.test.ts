@@ -233,6 +233,35 @@ describe("un tramo o un repaso en curso", () => {
   })
 })
 
+// QA del 23 nov (verificador 2): «cuanto pesa lucas mas o menos», una pregunta de la doctora sin «?»,
+// salía en «No lo usé»; el panel decía «no supe dónde va» y el aviso de la atención, ningún motivo.
+describe("el aviso de la pausa y «Lo que se dijo» dicen lo mismo", () => {
+  it("una pregunta sin signos no se lista, y cada frase lleva el mismo motivo y la misma clase en los dos", async () => {
+    const app = buildApp("owner")
+    const { base } = await attention(app)
+    const transcript = "cuanto pesa lucas mas o menos debe pesar como 24 kilos y algo de la tiroides"
+    extract.mockImplementationOnce(async (_db: unknown, _deps: unknown, input: { transcript: string }) =>
+      nothing(input.transcript, {
+        omitted: 2,
+        unused: ["cuanto pesa lucas mas o menos", "y algo de la tiroides"],
+        outOfPlace: [{ said: "debe pesar como 24 kilos", why: "peso_dicho" }],
+      }),
+    )
+    const res = await app.request(base, json({ transcript, segmentId: crypto.randomUUID() }))
+    expect(res.status).toBe(201)
+    const { data } = (await res.json()) as { data: { omitted: number; unused: string[]; unusedWhy: Record<string, string>; unusedKind: Record<string, string> } }
+    expect(data.unused).toEqual(["y algo de la tiroides", "debe pesar como 24 kilos"])
+    expect(data.omitted).toBe(2)
+    expect(data.unusedWhy).toEqual({ "debe pesar como 24 kilos": "Es un peso o una talla dichos, no medidos: si hace falta, mídelo." })
+    expect(data.unusedKind).toEqual({ "y algo de la tiroides": "sin_lugar", "debe pesar como 24 kilos": "sin_lugar" })
+    const said = (await (await app.request(`${base}/said`)).json()) as { data: { segments: Array<{ unused: Array<{ said: string | null; why: string; detail?: string }> }> } }
+    expect(said.data.segments[0]?.unused).toEqual([
+      { said: "y algo de la tiroides", why: "sin_lugar" },
+      { said: "debe pesar como 24 kilos", why: "sin_lugar", detail: "Es un peso o una talla dichos, no medidos: si hace falta, mídelo." },
+    ])
+  })
+})
+
 describe("la pausa lee lo dicho antes desde el servidor", () => {
   it("tras recargar, la pausa siguiente lleva el final de lo dicho antes, y no lo que mande la pestaña", async () => {
     const app = buildApp("owner")

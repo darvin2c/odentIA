@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { type DictationTurn, type DictationUnusedItem, encounter, encounterDictationSegment, encounterDictationSuggestion } from "@odentia/db/schema/clinical"
+import { type DictationSpeaker, type DictationTurn, type DictationUnusedItem, encounter, encounterDictationSegment, encounterDictationSuggestion } from "@odentia/db/schema/clinical"
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { DICTATION_CHARS, dictationSegmentSeen, requireClinicalAssistant } from "./encounter-dictation.js"
 import type { ProductDictation } from "./product-hooks.js"
@@ -186,8 +186,43 @@ export async function settleDictationSegment(
     .where(and(segmentWhere(orgId, encounterId, segmentId), isNull(encounterDictationSegment.organizedAt)))
 }
 
-/** Una pregunta dicha («¿cuánto pesa?», «y desde cuándo?») no es algo que Clío dejó sin usar. */
-const isQuestion = (said: string) => /^\s*¿|\?\s*$/u.test(said)
+/**
+ * Cómo empieza una pregunta, sin tildes y sin signos (la voz de Chrome no los pone): «cuanto pesa
+ * lucas mas o menos», «y desde cuando le pasa». Con «como» solo si no sigue una cantidad: «como dos
+ * semanas» es una respuesta, como «que yo sepa».
+ */
+const ASKS =
+  /^(?:y |e )?(?:desde |hace |para |por |de |a |con |en )?(?:que(?! yo sepa)|cuanto|cuanta|cuantos|cuantas|cuando|donde|cual|cuales|quien|quienes|como(?! (?:un|una|unos|unas|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|cuarenta|cincuenta|medio|media|mas|menos|\d)\b))\b/u
+
+/**
+ * Lo que pregunta quien atiende sin palabra de pregunta: «tiene alergias», «toma algo», «usa alguna
+ * medicina», «es alérgico a algo». Dicho por el paciente o quien lo acompaña es una respuesta («tiene
+ * asma», «toma algo para la tiroides»): solo cuenta si se sabe que lo dijo quien atiende.
+ */
+const ATTENDING_ASKS =
+  /^(?:y |e )?(?:tiene |tienes |(?:toma|tomas|usa|usas) (?:algo|alguna|alguno|algun|algunas|algunos)\b|es alergic|eres alergic|ha tenido |has tenido |le han |te han |sabe si |le duele |te duele |le molesta |te molesta )/u
+
+/**
+ * ¿Es una pregunta? Las que llevan sus signos, las que empiezan con una palabra de pregunta, con
+ * tilde o sin ella (QA del 23 nov, verificador 2: «cuanto pesa lucas mas o menos» salía en «No lo
+ * usé»), y lo que pregunta quien atiende (`speaker`, de los turnos del repaso, si ya se sabe).
+ */
+export function isQuestion(said: string, speaker: DictationSpeaker | null = null): boolean {
+  if (/^\s*¿|\?\s*$/u.test(said)) return true
+  const flat = normalizeForSearch(said)
+  return ASKS.test(flat) || (speaker === "dra" && ATTENDING_ASKS.test(flat))
+}
+
+/** Quién dijo esa frase, según los turnos del repaso: el turno que la contiene. Nulo si no se sabe. */
+export function speakerOfSaid(said: string, turns: readonly DictationTurn[] | null | undefined): DictationSpeaker | null {
+  const phrase = normalizeForSearch(said)
+  if (!phrase || !turns?.length) return null
+  const turn = turns.find((one) => {
+    const text = normalizeForSearch(one.texto)
+    return !!text && (` ${text} `.includes(` ${phrase} `) || ` ${phrase} `.includes(` ${text} `))
+  })
+  return turn?.quien ?? null
+}
 
 /** ¿Dice lo mismo, o una de las dos contiene a la otra palabra por palabra? Ya sin tildes ni signos. */
 const sameSaid = (a: string, b: string) => a === b || (!!a && !!b && (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `)))
@@ -198,13 +233,13 @@ export const sameUnusedSaid = (a: DictationUnusedItem, b: DictationUnusedItem) =
 /**
  * Lo que no se usó, cada frase una sola vez (QA del 22 nov, H6): si se repite, o una contiene a la
  * otra («debe pesar unos 24 kilos» y «… doctora»), queda la que trae su motivo (`detail`), el mismo
- * que dio el aviso; sin motivo en ninguna, la primera. Las preguntas no entran. Las que no tienen
- * frase quedan una.
+ * que dio el aviso; sin motivo en ninguna, la primera. Las preguntas no entran (`isQuestion`; con los
+ * turnos del tramo, también lo que preguntó quien atiende). Las que no tienen frase quedan una.
  */
-export function unusedOnce(items: readonly DictationUnusedItem[]): DictationUnusedItem[] {
+export function unusedOnce(items: readonly DictationUnusedItem[], turns: readonly DictationTurn[] | null = null): DictationUnusedItem[] {
   const kept: DictationUnusedItem[] = []
   for (const item of items) {
-    if (item.said !== null && isQuestion(item.said)) continue
+    if (item.said !== null && isQuestion(item.said, speakerOfSaid(item.said, turns))) continue
     const at = kept.findIndex((other) => sameUnusedSaid(other, item))
     if (at < 0) kept.push(item)
     else if (item.detail && !kept[at]!.detail) kept[at] = item
@@ -268,7 +303,7 @@ export async function listDictationSaid(tx: Db, orgId: string, patientId: string
     saidAt: row.saidAt.toISOString(),
     createdBy: row.createdBy,
     organized: row.organizedAt !== null,
-    unused: unusedNotInSources(unusedOnce(row.unused), sources),
+    unused: unusedNotInSources(unusedOnce(row.unused, row.turns), sources),
     turns: row.turns ?? null,
     reviewed: row.reviewedAt !== null,
   }))

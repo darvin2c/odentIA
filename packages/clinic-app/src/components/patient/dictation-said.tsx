@@ -28,6 +28,7 @@ import {
   type SaidMark,
   type UnusedSaid,
   unusedOfSaid,
+  unusedReason,
 } from "./dictation-session"
 import { useOpenWide } from "./wide-section"
 
@@ -48,6 +49,7 @@ export type SaidSession = Pick<
   | "base"
   | "retryUnused"
   | "retried"
+  | "clearRetried"
   | "blocked"
   | "organizing"
 >
@@ -72,15 +74,6 @@ const SPEAKER_CHOICE: Record<DictationSpeaker, string> = {
 /** La hora de un tramo, en el formato y la zona de la clínica: «10:38». */
 const hourOf = (iso: string) =>
   new Date(iso).toLocaleTimeString(activeOrgLocale() ?? "es", { hour: "2-digit", minute: "2-digit", timeZone: activeOrgTimeZone() })
-
-/** Por qué no se usó, en palabras de la pantalla. */
-function unusedWhy(item: UnusedSaid): string {
-  // El motivo guardado con la frase es el mismo que dio el aviso de la pausa (QA del 22 nov, H6/UX-5).
-  if (item.detail) return item.detail
-  if (item.why === "ya_confirmada") return "ya estaba confirmado: cámbialo a mano"
-  if (item.why === "no_propuesta") return "no se pudo proponer"
-  return "no supe dónde va"
-}
 
 /**
  * Una frase que parece de su salud (una medicina, una enfermedad, una alergia): solo para ofrecer
@@ -340,6 +333,9 @@ function SpeakerChoice({
   )
 }
 
+/** Cuánto se ve lo que pasó con «Intentar otra vez»: unos segundos, como un aviso de la app. */
+export const RETRIED_SHOWN_MS = 6_000
+
 /**
  * «No lo usé (n)»: lo que Clío no supo dónde poner, guardado con cada tramo, con su motivo. Se
  * queda al recargar. Lo de una ficha lleva «Usar en…»; lo que parece de su salud, «Llevar a su
@@ -352,8 +348,25 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
   // «Intentar otra vez» dice qué pasó, y el foco queda en eso: el botón se apaga mientras lee y, si
   // lo usó, la frase se va de la lista (QA del 22 nov, UX-6).
   const retryRef = useRef<HTMLParagraphElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
   const items = unusedOfSaid(session.said)
   const retried = readOnly ? null : session.retried
+  // Lo que pasó al leerla otra vez se va solo, como los avisos de la app (QA del 23 nov: quedaba
+  // pegado después de «Terminar»). Si tenía el foco, el foco pasa a «No lo usé», no a la página.
+  const clearRetried = session.clearRetried
+  useEffect(() => {
+    if (!retried || retried.where === null) return
+    const timer = window.setTimeout(() => {
+      const line = retryRef.current
+      if (line && line === document.activeElement) {
+        // Sin nada en «No lo usé» (la usó), a la pestaña de lo que se dijo.
+        const next = titleRef.current ?? line.closest('[role="dialog"]')?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+        next?.focus()
+      }
+      clearRetried()
+    }, RETRIED_SHOWN_MS)
+    return () => window.clearTimeout(timer)
+  }, [retried, clearRetried])
   const retryWords = !retried
     ? ""
     : retried.where === null
@@ -377,7 +390,7 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
     <>
     {retryLine}
     <section aria-labelledby={titleId} className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-soft p-3">
-      <h3 id={titleId} className="font-semibold text-warning">
+      <h3 id={titleId} ref={titleRef} tabIndex={-1} className="font-semibold text-warning outline-none">
         No lo usé ({items.length})
       </h3>
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
@@ -391,7 +404,7 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
                 {phrase ? `«${phrase}»` : "Una parte que no supe citar"}
                 <span className="text-muted-foreground">
                   {" "}
-                  · {hourOf(item.saidAt)} · {unusedWhy(item)}
+                  · {hourOf(item.saidAt)} · {unusedReason(item)}
                 </span>
               </p>
               {phrase && !readOnly ? (
@@ -495,6 +508,7 @@ export function EncounterSaidLink({ patientId, encounterId }: { patientId: strin
     base,
     retryUnused: () => {},
     retried: null,
+    clearRetried: () => {},
     blocked: null,
     organizing: false,
   }

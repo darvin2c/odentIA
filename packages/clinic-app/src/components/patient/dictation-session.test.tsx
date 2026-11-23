@@ -16,7 +16,7 @@ vi.mock("../../lib/api", async (original) => ({
   apiFetch: route,
 }))
 
-const { useDictationSession } = await import("./dictation-session")
+const { unusedReason, useDictationSession } = await import("./dictation-session")
 
 const BASE = "/api/patients/p-1/encounters/e-1/dictation"
 
@@ -181,5 +181,33 @@ describe("antes de firmar", () => {
     expect(posts()).toEqual([BASE, `${BASE}/review`])
     expect(pending).toBe(1)
     expect(result.current.busy).toBe(false)
+  })
+})
+
+// QA del 23 nov (verificador 2): el aviso de la atención listaba la frase sin motivo y «Lo que se dijo»,
+// con «no supe dónde va». Los dos dicen ahora lo mismo, con las mismas palabras.
+describe("el aviso dice el motivo de cada frase como «Lo que se dijo»", () => {
+  it("con su motivo propio, ese; sin él, «no supe dónde va», y pide decirlo de nuevo", async () => {
+    const weight = "Es un peso o una talla dichos, no medidos: si hace falta, mídelo."
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
+      if (url === BASE)
+        return {
+          data: {
+            ...segmentReply.data,
+            omitted: 2,
+            unused: ["y algo de la tiroides", "debe pesar como 24 kilos"],
+            unusedWhy: { "debe pesar como 24 kilos": weight },
+            unusedKind: { "y algo de la tiroides": "sin_lugar", "debe pesar como 24 kilos": "sin_lugar" },
+          },
+        }
+      return segmentReply
+    })
+    const { result } = render()
+    act(() => result.current.submitTyped("debe pesar como 24 kilos y algo de la tiroides"))
+    await waitFor(() => expect(result.current.unused.phrases).toEqual(["y algo de la tiroides", "debe pesar como 24 kilos"]))
+    expect(result.current.unused.why).toEqual({ "y algo de la tiroides": unusedReason({ why: "sin_lugar" }), "debe pesar como 24 kilos": weight })
+    expect(unusedReason({ why: "sin_lugar" })).toBe("no supe dónde va")
+    expect(result.current.unused.open).toEqual(["y algo de la tiroides"])
   })
 })

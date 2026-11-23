@@ -196,6 +196,8 @@ interface SegmentResponse {
     unused: string[]
     /** Por qué no se usó una frase, cuando se sabe (lo de una ficha lo dice el servidor). */
     unusedWhy?: Record<string, string>
+    /** De qué clase es cada frase no usada (`DictationUnusedItem["why"]`): el motivo se dice como en «Lo que se dijo». */
+    unusedKind?: Record<string, DictationUnusedItem["why"]>
     /** La pregunta de la ficha que nombra cada frase: «Usar en Percusión». */
     unusedFor?: Record<string, FormTarget[]>
     /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
@@ -212,8 +214,10 @@ interface SegmentResponse {
 export interface UnusedDictation {
   phrases: string[]
   unnamed: boolean
-  /** Por qué no se usó cada frase, cuando se sabe. */
+  /** Por qué no se usó cada frase, con las mismas palabras que «Lo que se dijo» (`unusedReason`). */
   why: Record<string, string>
+  /** Las frases sin un motivo propio («no supe dónde va»): piden decirlo de nuevo o anotarlo a mano. */
+  open?: string[]
   /** La pregunta de la ficha que nombra cada frase, para abrirla con la frase al lado. */
   targets: Record<string, FormTarget[]>
 }
@@ -247,7 +251,13 @@ export function withoutAnsweredUnused(unused: UnusedDictation, suggestions: read
   const gone = new Set(unused.phrases.filter(resolved))
   if (!gone.size) return unused
   const keep = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([phrase]) => !gone.has(phrase)))
-  return { ...unused, phrases: unused.phrases.filter((phrase) => !gone.has(phrase)), why: keep(unused.why), targets: keep(unused.targets) }
+  return {
+    ...unused,
+    phrases: unused.phrases.filter((phrase) => !gone.has(phrase)),
+    why: keep(unused.why),
+    open: unused.open?.filter((phrase) => !gone.has(phrase)),
+    targets: keep(unused.targets),
+  }
 }
 
 export type DictationMode = "off" | "listening" | "paused"
@@ -525,10 +535,13 @@ export function useDictationSession({
         // Lo avisado antes que esta pausa respondió ya no se avisa; después, lo que esta no pudo usar.
         const current = withoutAnsweredUnused(before, data.suggestions)
         if (data.omitted === 0) return current
+        // El motivo de cada frase, dicho como en «Lo que se dijo»: el mismo para la misma frase (QA del 23 nov).
+        const items = data.unused.map((said) => ({ said, why: data.unusedKind?.[said] ?? "sin_lugar", ...(data.unusedWhy?.[said] ? { detail: data.unusedWhy[said] } : {}) }))
         return {
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
           unnamed: current.unnamed || data.unused.length === 0,
-          why: { ...current.why, ...(data.unusedWhy ?? {}) },
+          why: { ...current.why, ...Object.fromEntries(items.map((item) => [item.said, unusedReason(item)])) },
+          open: [...(current.open ?? []), ...items.filter((item) => item.why === "sin_lugar" && !item.detail).map((item) => item.said)],
           targets: { ...current.targets, ...(data.unusedFor ?? {}) },
         }
       })
@@ -554,6 +567,7 @@ export function useDictationSession({
     if (reviewing.current) return null
     reviewing.current = true
     setReview({ status: "reviewing" })
+    setRetried(null)
     try {
       const post = () =>
         apiFetch<ReviewResponse>(`${base}/review`, {
@@ -660,6 +674,8 @@ export function useDictationSession({
       if (tail.length < 3 || (!force && tail.length < MIN_SEGMENT_CHARS)) return
       const id = crypto.randomUUID()
       queue.current.push({ id, text: tail.slice(0, 12_000) })
+      // Se dijo otra cosa: lo de «Intentar otra vez» ya no es lo último que pasó (QA del 23 nov).
+      setRetried(null)
       setSentHere((current) => [
         ...current,
         { segmentId: id, transcript: tail.slice(0, 12_000), saidAt: new Date().toISOString(), createdBy: "", organized: false, unused: [], turns: null },
@@ -1127,6 +1143,7 @@ export function useDictationSession({
     retryUnused,
     /** Lo que pasó con el último «Intentar otra vez»: mientras se lee, `where` es nulo. */
     retried,
+    clearRetried: () => setRetried(null),
     act,
     save,
     confirmReady,
@@ -1267,6 +1284,18 @@ export function markSaid(text: string, sources: { consulta: readonly string[]; s
     else parts.push({ text: text[index] ?? "", mark: marks[index] ?? null })
   }
   return parts
+}
+
+/**
+ * Por qué no se usó una frase, en palabras de la pantalla: lo dicen igual «Lo que se dijo» y el aviso
+ * de la atención (QA del 23 nov, verificador 2: el panel decía «no supe dónde va» y el aviso, nada).
+ */
+export function unusedReason(item: Pick<DictationUnusedItem, "why" | "detail">): string {
+  // El motivo guardado con la frase es el mismo que dio el aviso de la pausa (QA del 22 nov, H6/UX-5).
+  if (item.detail) return item.detail
+  if (item.why === "ya_confirmada") return "ya estaba confirmado: cámbialo a mano"
+  if (item.why === "no_propuesta") return "no se pudo proponer"
+  return "no supe dónde va"
 }
 
 /** Lo que Clío no usó, con su tramo: lo que se lista en «No lo usé». */
