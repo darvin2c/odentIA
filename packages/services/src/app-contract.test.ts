@@ -771,6 +771,12 @@ describe("ninguna clínica alcanza una cuenta de otra app", () => {
       chooseSaasPlan(ownerDb, C.porTerminar, `${C.porTerminar}-owner`, "gestoria-prueba"),
     ).rejects.toMatchObject({ status: 409 })
   })
+  it("un cargo a mano no cruza los planes de una clínica y los de una app", async () => {
+    const period = { periodStart: days(-60), periodEnd: days(-30) }
+    await expect(createSaasCharge(ownerDb, C.cobro, ADMIN, { planCode: "gestoria-prueba", ...period })).rejects.toMatchObject({ status: 400 })
+    await expect(createSaasCharge(ownerDb, accountId, ADMIN, { planCode: "lista", ...period })).rejects.toMatchObject({ status: 400 })
+    expect((await getSaasSubscription(ownerDb, C.cobro))?.planId).toBe(await planId("lista"))
+  })
 })
 
 async function accountOf(ref: string): Promise<string> {

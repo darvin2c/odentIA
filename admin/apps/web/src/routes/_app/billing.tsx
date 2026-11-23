@@ -141,7 +141,7 @@ function BillingPage() {
   const ofProduct = <T extends { organizationId: string }>(rows: readonly T[] | undefined): T[] =>
     (rows ?? []).filter((row) => matchesProduct(product, products[row.organizationId]))
   const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan; product?: ClinicalProduct }>(null)
-  const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
+  const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string; app: string | null }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
 
   const overview = useQuery({
@@ -352,7 +352,7 @@ function BillingPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setChargeDrawer({ orgId: row.organizationId })}
+                  onClick={() => setChargeDrawer({ orgId: row.organizationId, app: row.app })}
                 >
                   Crear cargo
                 </Button>
@@ -500,7 +500,8 @@ function BillingPage() {
       {chargeDrawer ? (
         <ChargeDrawer
           orgId={chargeDrawer.orgId}
-          plans={plans.data ?? []}
+          // El cargo pasa su plan a la suscripción: solo los de la clínica o los de la app de la cuenta.
+          plans={chargeDrawer.app ? (plans.data ?? []).filter((plan) => plan.app === chargeDrawer.app) : clinicPlans}
           onClose={() => setChargeDrawer(null)}
           onSaved={refresh}
         />

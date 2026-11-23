@@ -100,6 +100,9 @@ const appPlanSchema = z
     for (const key of ["attended", "order"] as const)
       if (value[key].trim() && micros(value[key]) === null)
         say(key, "Escribe un importe, o déjalo vacío si el plan no lo cobra")
+    // Sin precio de la que tomó un pedido, la atendida que sube quedaría sin cobrar.
+    if (value.attended.trim() && !value.order.trim())
+      say("order", "Escribe también el precio de la que tomó un pedido")
     const days = Number(value.trialDays.trim())
     if (!/^\d+$/.test(value.trialDays.trim()) || days < 1 || days > 365)
       say("trialDays", "Escribe de 1 a 365 días")
@@ -253,7 +256,7 @@ export function AppPlanDrawer({
               <field.TextField
                 id="app-plan-attended"
                 label={`Conversación atendida (${currency})`}
-                description="Vacío: no se cobra."
+                description="Vacío: se cobra como la que tomó un pedido."
                 inputMode="decimal"
               />
             )}
@@ -263,7 +266,7 @@ export function AppPlanDrawer({
               <field.TextField
                 id="app-plan-order"
                 label={`Conversación que tomó un pedido (${currency})`}
-                description="Reemplaza a la atendida: no se suman."
+                description="Reemplaza a la atendida: no se suman. Vacío: no se cobra ninguna."
                 inputMode="decimal"
               />
             )}

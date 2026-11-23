@@ -34,6 +34,7 @@ import {
   storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { externalAccountOf } from "./app-accounts.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale, orgProduct } from "./locale.js"
@@ -1696,6 +1697,12 @@ export async function createSaasCharge(
   const plan = await planByCode(tx, input.planCode)
   if (input.periodEnd <= input.periodStart)
     throw invalidField("periodEnd", "El período debe terminar después de empezar")
+  // El cargo pasa el plan a la suscripción: el de una app (gestorIA, ADR 0211) solo va a una
+  // cuenta de esa app, y una cuenta de otra app solo lleva un plan suyo. Una clínica tiene su perfil.
+  const [profile] = (await tx.execute(sql`select 1 as one from org_profile where organization_id = ${orgId} limit 1`)) as unknown as unknown[]
+  const external = profile ? null : await externalAccountOf(tx, orgId)
+  if (external ? plan.app !== external.app : plan.app !== null)
+    throw invalidField("planCode", "Ese plan es de otra app: elige uno de esta cuenta.")
   const [row] = await tx
     .insert(saasCharge)
     .values({

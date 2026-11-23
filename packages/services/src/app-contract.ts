@@ -12,7 +12,7 @@ import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
 import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { openSupportCaseFromHelp } from "./admin-support.js"
 import { type ExternalAccount, externalAccountOf, toExternalAccount } from "./app-accounts.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -279,7 +279,8 @@ async function applyUsage(
         tierChangedAt: occurredAt,
         previousPriceMicros: current.priceMicros,
       })
-      .where(eq(saasAction.id, current.id))
+      // Si el cobro la tomó mientras tanto, no se reescribe: no hace nada.
+      .where(and(eq(saasAction.id, current.id), isNull(saasAction.chargeId)))
   }
   return account.id
 }

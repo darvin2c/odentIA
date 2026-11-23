@@ -270,7 +270,11 @@ export function usePlans(enabled: boolean) {
     queryKey: saleKeys.plans,
     enabled,
     staleTime: 60_000,
-    queryFn: async () => z.array(planSchema).parse(await api<unknown>("/api/admin/billing/plans")),
+    // Los planes de una app que es otro sistema (gestorIA, ADR 0211) no se venden a una clínica.
+    queryFn: async () =>
+      z
+        .array(planSchema)
+        .parse((await api<Array<{ product: unknown }>>("/api/admin/billing/plans")).filter((plan) => plan.product !== null)),
   })
 }
 
