@@ -1072,6 +1072,13 @@
       "when": 1795240704179,
       "tag": "0152_cada_clinica_es_una_cuenta",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1795383275405,
+      "tag": "0153_el_acuerdo_de_las_apps",
+      "breakpoints": true
     }
   ]
 }

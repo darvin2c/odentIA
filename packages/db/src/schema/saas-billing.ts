@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { accountFk, saasAccount } from "./admin-accounts.js"
+import { accountFk, SAAS_ACCOUNT_EXTERNAL_APPS, saasAccount } from "./admin-accounts.js"
 import { saasChat, saasClient, saasClientContact, saasProposal } from "./admin-arm.js"
 import { saasDemo } from "./admin-demos.js"
 import { supportCase } from "./admin-support.js"
@@ -127,7 +127,8 @@ export const saasPlan = adminSchema.table(
     trialMaxDays: integer("trial_max_days").notNull().default(60),
     /**
      * El producto del plan (ADR 0093): lo usan solo las clínicas de ese producto
-     * y su web. Se elige al crearlo y no cambia.
+     * y su web. Se elige al crearlo y no cambia. El de una app que es otro sistema
+     * lleva la app (`gestoria`, ADR 0211): lo usan solo sus cuentas, nunca una clínica.
      */
     product: text("product").notNull().default("dental"),
     /** El plan con que se cuenta y se prueba si la clínica aún no eligió uno. Uno como mucho por producto. */
@@ -143,7 +144,10 @@ export const saasPlan = adminSchema.table(
   (table) => [
     unique("saas_plan_code_uidx").on(table.code),
     uniqueIndex("saas_plan_default_uidx").on(table.product).where(sql`${table.isDefault}`),
-    check("saas_plan_product_check", sql`${table.product} IN ('dental','medical','optical')`),
+    check(
+      "saas_plan_product_check",
+      sql`${table.product} IN ('dental','medical','optical',${sql.raw(SAAS_ACCOUNT_EXTERNAL_APPS.map((app) => `'${app}'`).join(","))})`,
+    ),
     check(
       "saas_plan_founders_check",
       sql`(${table.seatLimit} IS NULL OR ${table.seatLimit} > 0) AND (${table.guaranteeMonths} IS NULL OR ${table.guaranteeMonths} BETWEEN 1 AND 120)`,

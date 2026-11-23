@@ -13,6 +13,7 @@ import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct, productWords } f
 import type { Db } from "@odentia/db"
 import type { MailBrand, MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
+import { isSaasAccountExternalApp as isExternalApp, type SaasAccountExternalApp, saasAccount } from "@odentia/db/schema/admin-accounts"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import {
@@ -316,6 +317,8 @@ export interface SaasPlanInput {
   name: string
   /** El producto del plan (ADR 0093): se elige al crearlo y no cambia. Sin decirlo, odentIA. */
   product?: ClinicalProduct
+  /** O la app que es otro sistema cuyas cuentas lo usan (gestorIA, ADR 0211); entonces sin producto. */
+  app?: SaasAccountExternalApp
   description?: string | null
   currency: string
   priceCents: number
@@ -358,8 +361,10 @@ export interface SaasPlanRow {
   id: string
   code: string
   name: string
-  /** El producto del plan (ADR 0093). */
-  product: ClinicalProduct
+  /** El producto del plan (ADR 0093); nulo en el plan de una app que es otro sistema. */
+  product: ClinicalProduct | null
+  /** La app que es otro sistema cuyas cuentas lo usan (ADR 0211); nula en un plan de clínicas. */
+  app: SaasAccountExternalApp | null
   description: string | null
   currency: string
   priceCents: number
@@ -400,7 +405,9 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     id: row.id,
     code: row.code,
     name: row.name,
-    product: isClinicalProduct(row.product) ? row.product : "dental",
+    // El plan de una app que es otro sistema lleva la app en su producto (ADR 0211).
+    product: isClinicalProduct(row.product) ? row.product : isExternalApp(row.product) ? null : "dental",
+    app: isExternalApp(row.product) ? row.product : null,
     description: row.description,
     currency: row.currency,
     priceCents: row.priceCents,
@@ -532,8 +539,11 @@ function assertPlanTerms(plan: Pick<typeof saasPlan.$inferSelect, keyof typeof P
   assertActionPricingFloor(plan)
 }
 
-/** Un solo plan por defecto por producto: marcar uno desmarca el anterior de ese producto (ADR 0093). */
-async function clearOtherDefaults(tx: Db, keepId: string | null, product: ClinicalProduct): Promise<void> {
+/**
+ * Un solo plan por defecto por producto: marcar uno desmarca el anterior de ese producto (ADR 0093).
+ * El de una app que es otro sistema, igual entre los de su app (ADR 0211).
+ */
+async function clearOtherDefaults(tx: Db, keepId: string | null, product: string): Promise<void> {
   const ofProduct = and(eq(saasPlan.isDefault, true), eq(saasPlan.product, product))
   await tx
     .update(saasPlan)
@@ -558,10 +568,13 @@ function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
   if (!code || code.length > 80) throw invalidField("code", "El código del plan debe tener 1–80 caracteres")
   if (!name || name.length > 120) throw invalidField("name", "El nombre del plan debe tener 1–120 caracteres")
   if (value.product !== undefined && !isClinicalProduct(value.product)) throw invalidField("product", "El producto del plan no es válido")
+  if (value.app !== undefined && !isExternalApp(value.app)) throw invalidField("app", "La app del plan no es válida")
+  if (value.app !== undefined && value.product !== undefined) throw invalidField("app", "Un plan es de un producto o de una app, no de los dos")
   return {
     code,
     name,
-    product: value.product ?? "dental",
+    // El de una app que es otro sistema lleva la app: nunca es de un producto de clínicas.
+    product: value.app ?? value.product ?? "dental",
     description: value.description?.trim() ? value.description.trim().slice(0, 2000) : null,
     currency: currency(value.currency),
     priceCents: assertCents(value.priceCents, "El precio", false),
@@ -629,7 +642,7 @@ export async function createSaasPlan(
 ): Promise<SaasPlanRow> {
   const values = { ...planInput(input), ...actionTerms(input) }
   assertPlanTerms({ ...PLAN_TERM_DEFAULTS, ...values, currency: values.currency })
-  if (input.isDefault) await clearOtherDefaults(tx, null, values.product as ClinicalProduct)
+  if (input.isDefault) await clearOtherDefaults(tx, null, values.product ?? "dental")
   const [row] = await tx
     .insert(saasPlan)
     .values(values)
@@ -671,11 +684,11 @@ export async function updateSaasPlan(
   const [current] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
   if (!current) throw notFound("Plan")
   // El producto se elige al crearlo: sus clínicas y su web son de ese producto (ADR 0093).
-  if (input.product !== undefined && input.product !== current.product) {
+  if ((input.product !== undefined && input.product !== current.product) || (input.app !== undefined && input.app !== current.product)) {
     throw validation("El producto de un plan no se cambia: crea un plan nuevo con sus precios")
   }
   assertPlanTerms({ ...current, ...patch })
-  if (input.isDefault) await clearOtherDefaults(tx, planId, current.product as ClinicalProduct)
+  if (input.isDefault) await clearOtherDefaults(tx, planId, current.product)
   // Cambiar un precio rige lo que se cuenta desde ahora: lo ya contado y los cargos emitidos lo congelaron.
   const [row] = await tx
     .update(saasPlan)
@@ -895,7 +908,7 @@ export async function startSaasTrial(
     })
     // Una clínica entra con un plan de su producto (ADR 0093).
     if (plan.product !== product) {
-      const message = `${plan.name} es de ${productWords(plan.product).name}: esta clínica es de ${productWords(product).name}`
+      const message = `${plan.name} es de ${plan.product ? productWords(plan.product).name : "otra app"}: esta clínica es de ${productWords(product).name}`
       throw validation(message, { planCode: message })
     }
   }
@@ -2424,9 +2437,11 @@ export async function listPendingSaasPayments(
   limit = 100,
 ): Promise<SaasPendingPaymentRow[]> {
   const rows = await tx
-    .select({ payment: saasPayment, orgName: organization.name })
+    // Una cuenta de otra app (gestorIA) no tiene clínica: su nombre es el que dijo la app.
+    .select({ payment: saasPayment, orgName: sql<string | null>`coalesce(${organization.name}, ${saasAccount.name})` })
     .from(saasPayment)
     .leftJoin(organization, eq(organization.id, saasPayment.organizationId))
+    .leftJoin(saasAccount, eq(saasAccount.id, saasPayment.organizationId))
     .where(eq(saasPayment.status, "pendiente"))
     .orderBy(asc(saasPayment.createdAt), asc(saasPayment.id))
     .limit(Math.min(Math.max(limit, 1), 200))
@@ -3456,6 +3471,8 @@ export async function tickSaasBilling(
 export interface SaasAdminOverview {
   organizationId: string
   organizationName: string | null
+  /** La app de una cuenta que no es una clínica (gestorIA, ADR 0211); nula en una clínica. */
+  app: SaasAccountExternalApp | null
   status: SaasSubscriptionStatus
   isDemo: boolean
   planCode: string | null
@@ -3485,12 +3502,15 @@ export async function listSaasOverview(
     .select({
       sub: saasSubscription,
       orgName: organization.name,
+      accountName: saasAccount.name,
+      accountApp: saasAccount.app,
       planCode: saasPlan.code,
       planName: saasPlan.name,
       currency: saasPlan.currency,
     })
     .from(saasSubscription)
     .leftJoin(organization, eq(organization.id, saasSubscription.organizationId))
+    .leftJoin(saasAccount, eq(saasAccount.id, saasSubscription.organizationId))
     .leftJoin(saasPlan, eq(saasPlan.id, saasSubscription.planId))
     .where(filters.length > 0 ? and(...filters) : undefined)
     .orderBy(desc(saasSubscription.updatedAt))
@@ -3500,7 +3520,9 @@ export async function listSaasOverview(
     const byCurrency = await outstandingByCurrency(tx, row.sub.organizationId)
     result.push({
       organizationId: row.sub.organizationId,
-      organizationName: row.orgName,
+      // Una cuenta de otra app no tiene clínica: su nombre es el que dijo la app.
+      organizationName: row.orgName ?? row.accountName,
+      app: isExternalApp(row.accountApp) ? row.accountApp : null,
       status: row.sub.status as SaasSubscriptionStatus,
       isDemo: row.sub.isDemo,
       planCode: row.planCode,
