@@ -257,7 +257,8 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
     factAmounts.push(...amountsIn(agent?.knowledge ?? "", currency))
     return {
       conv,
-      stop: await agentStopIn(tx, storeId),
+      // Solo importa en lo que se cobra: Sofi encendida en una conversación de verdad.
+      stop: agent?.enabled && conv.channel !== "prueba" ? await agentStopIn(tx, storeId) : null,
       storeName: shop!.name,
       currency,
       agent: agent ?? null,

@@ -15,8 +15,9 @@ import {
   appEvent,
   CONTRACT_PATHS,
   SUPPORT_KINDS,
+  USAGE_CHANNELS,
 } from "@odentia/contract"
-import { and, asc, count, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { signMessage } from "./firma.js"
@@ -136,11 +137,11 @@ export async function noteStoreAccount(
   await enqueue(tx, storeId, { type: "cuenta.abierta", timestamp: now.toISOString(), data })
 }
 
-/** Los canales que nombra el acuerdo; «prueba» nunca se cuenta y lo demás va sin canal. */
-const CONTRACT_CHANNELS: Record<string, "whatsapp" | "instagram" | "messenger"> = {
-  whatsapp: "whatsapp",
-  instagram: "instagram",
-  messenger: "messenger",
+/** El canal como lo nombra el acuerdo; uno que no nombra va sin canal. */
+function usageChannel(channel: string): (typeof USAGE_CHANNELS)[number] | null {
+  return (USAGE_CHANNELS as readonly string[]).includes(channel)
+    ? (channel as (typeof USAGE_CHANNELS)[number])
+    : null
 }
 
 /**
@@ -186,7 +187,7 @@ export async function countConversation(
         outcome,
         conversation: `${conversation.id}:${start}`,
         occurredAt: now.toISOString(),
-        channel: CONTRACT_CHANNELS[conversation.channel] ?? null,
+        channel: usageChannel(conversation.channel),
       },
     },
     { dedupe: `uso:${conversation.id}:${start}:${outcome}`, conversationId: conversation.id },
@@ -199,6 +200,25 @@ export const supportInput = z.object({
   detail: z.string().trim().max(4000, "Máximo 4000 caracteres").optional(),
 })
 
+/** Las preguntas de ayuda de la tienda que todavía no salen, de la más nueva a la más vieja. */
+async function pendingSupport(tx: Db, storeId: string) {
+  const rows = await tx
+    .select({ payload: contractOutbox.payload, createdAt: contractOutbox.createdAt })
+    .from(contractOutbox)
+    .where(
+      and(
+        eq(contractOutbox.storeId, storeId),
+        eq(contractOutbox.type, "soporte.pedido"),
+        isNull(contractOutbox.sentAt),
+      ),
+    )
+    .orderBy(desc(contractOutbox.createdAt))
+  return rows.map((row) => ({
+    question: String((row.payload.data as { question?: unknown }).question ?? ""),
+    createdAt: row.createdAt,
+  }))
+}
+
 /** Pide ayuda a la administración, a nombre de quien pregunta. Solo el Dueño (el plan). */
 export async function askSupport(
   appDb: Db,
@@ -208,17 +228,7 @@ export async function askSupport(
   now = new Date(),
 ): Promise<void> {
   await inStore(appDb, person, storeId, "plan", async (tx) => {
-    const [{ value }] = (await tx
-      .select({ value: count() })
-      .from(contractOutbox)
-      .where(
-        and(
-          eq(contractOutbox.storeId, storeId),
-          eq(contractOutbox.type, "soporte.pedido"),
-          isNull(contractOutbox.sentAt),
-        ),
-      )) as [{ value: number }]
-    if (value >= MAX_PENDING_SUPPORT)
+    if ((await pendingSupport(tx, storeId)).length >= MAX_PENDING_SUPPORT)
       throw new StoreError(
         429,
         "TOO_MANY",
@@ -249,12 +259,33 @@ function retryDelay(attempts: number): number {
   return Math.min(RETRY_BASE_MS * 2 ** Math.max(attempts - 1, 0), RETRY_MAX_MS)
 }
 
+/** Un mensaje firmado a la administración, con la clave que se le da. */
+function postSigned(
+  config: ContractConfig,
+  path: string,
+  id: string,
+  body: string,
+  timeoutMs = TIMEOUT_MS,
+): Promise<Response> {
+  return (config.fetch ?? fetch)(new URL(path, config.url), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...signMessage({ secret: config.secret, id, body }),
+    },
+    body,
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: "manual",
+  })
+}
+
 /**
  * Envía lo que espera en la bandeja de salida, del más viejo al más nuevo, firmado con la clave
  * de cada aviso. Lo que no llegó (la administración no respondió o lo rechazó) queda para más
  * tarde con la misma clave; nunca se descarta. Si no llegó el aviso de que se abrió una tienda,
- * lo demás de esa tienda espera a la vuelta siguiente: la administración aún no la conoce.
- * Corre en un solo proceso a la vez (quien llama toma el candado).
+ * lo demás de esa tienda espera a la vuelta siguiente: la administración aún no la conoce. Si la
+ * administración no responde o está caída (5xx, 429), la vuelta termina ahí: no se espera aviso
+ * por aviso. Corre en un solo proceso a la vez (quien llama toma el candado).
  */
 export async function deliverOutbox(
   ownerDb: Db,
@@ -270,26 +301,22 @@ export async function deliverOutbox(
     .orderBy(asc(contractOutbox.createdAt))
     .limit(100)
   const waiting = new Set<string>()
-  // Si la administración no responde, se deja para la vuelta siguiente: no se espera aviso por aviso.
-  let down = false
   for (const row of due) {
-    if (down) break
     if (waiting.has(row.storeId)) continue
-    const body = JSON.stringify(row.payload)
     let problem: string | null = null
+    let down = false
     try {
       // eslint-disable-next-line no-await-in-loop
-      const response = await (config.fetch ?? fetch)(new URL(CONTRACT_PATHS.events, config.url), {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...signMessage({ secret: config.secret, id: row.id, body }),
-        },
-        body,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        redirect: "manual",
-      })
-      if (!response.ok) problem = `La administración respondió ${response.status}`
+      const response = await postSigned(
+        config,
+        CONTRACT_PATHS.events,
+        row.id,
+        JSON.stringify(row.payload),
+      )
+      if (!response.ok) {
+        problem = `La administración respondió ${response.status}`
+        down = response.status >= 500 || response.status === 429
+      }
     } catch {
       problem = "La administración no respondió"
       down = true
@@ -313,12 +340,27 @@ export async function deliverOutbox(
       continue
     }
     run.failed++
+    if (down) break
     if (row.type === "cuenta.abierta") waiting.add(row.storeId)
   }
   return run
 }
 
 /* ---------- Lo que se pregunta ---------- */
+
+/** Guarda lo que respondió la administración de una tienda (también la demo). */
+export async function saveState(
+  tx: Db,
+  storeId: string,
+  state: AccountState,
+  now: Date,
+): Promise<void> {
+  const values = { state, receivedAt: now, triedAt: now, lastError: null }
+  await tx
+    .insert(contractState)
+    .values({ storeId, ...values })
+    .onConflictDoUpdate({ target: contractState.storeId, set: values })
+}
 
 /** Pregunta a la administración el estado de una tienda y guarda lo que responda. */
 async function askState(
@@ -331,16 +373,13 @@ async function askState(
   let state: AccountState
   try {
     const body = JSON.stringify({ account: storeId })
-    const response = await (config.fetch ?? fetch)(new URL(CONTRACT_PATHS.state, config.url), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...signMessage({ secret: config.secret, id: `st_${randomUUID()}`, body }),
-      },
+    const response = await postSigned(
+      config,
+      CONTRACT_PATHS.state,
+      `st_${randomUUID()}`,
       body,
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: "manual",
-    })
+      timeoutMs,
+    )
     if (!response.ok) throw new Error(`La administración respondió ${response.status}`)
     state = accountState.parse(await response.json())
     if (state.account !== storeId) throw new Error("La administración respondió por otra cuenta")
@@ -357,11 +396,7 @@ async function askState(
     return false
   }
   await ownerDb.transaction(async (tx) => {
-    const values = { state, receivedAt: now, triedAt: now, lastError: null }
-    await tx
-      .insert(contractState)
-      .values({ storeId, ...values })
-      .onConflictDoUpdate({ target: contractState.storeId, set: values })
+    await saveState(tx, storeId, state, now)
     // No la conoce (una tienda de antes del acuerdo, o se perdió su aviso): se le avisa otra vez,
     // salvo que ya haya uno esperando a salir.
     if (!state.found) {
@@ -431,18 +466,14 @@ export function agentStopOf(state: AccountState | null): AgentStop | null {
   return null
 }
 
-function readState(raw: unknown): AccountState | null {
-  const parsed = accountState.safeParse(raw)
-  return parsed.success ? parsed.data : null
-}
-
 /** Lo último que se sabe de la tienda, dentro de su transacción (la persona o el agente). */
-export async function knownStateIn(tx: Db, storeId: string) {
+async function knownStateIn(tx: Db, storeId: string) {
   const [row] = await tx.select().from(contractState).where(eq(contractState.storeId, storeId))
-  return { row: row ?? null, state: readState(row?.state) }
+  const parsed = accountState.safeParse(row?.state)
+  return { row: row ?? null, state: parsed.success ? parsed.data : null }
 }
 
-/** Si Sofi debe detenerse en esta tienda, con lo último que dijo la administración. */
+/** Si Sofi (y Argos, que escribe como ella) debe detenerse en esta tienda. */
 export async function agentStopIn(tx: Db, storeId: string): Promise<AgentStop | null> {
   return agentStopOf((await knownStateIn(tx, storeId)).state)
 }
@@ -460,40 +491,25 @@ export async function planView(
   storeId: string,
   now = new Date(),
 ) {
-  // Primero el permiso: quien no es Dueño no hace preguntar a la administración.
-  await inStore(appDb, person, storeId, "plan", async () => {})
-  if (config.secret) {
-    const [row] = await ownerDb
-      .select({ triedAt: contractState.triedAt })
-      .from(contractState)
-      .where(eq(contractState.storeId, storeId))
-    if (!row || now.getTime() - row.triedAt.getTime() > STATE_FRESH_MS)
-      await askState(ownerDb, config, storeId, now, VIEW_TIMEOUT_MS)
-  }
-  return inStore(appDb, person, storeId, "plan", async (tx) => {
-    const { row, state } = await knownStateIn(tx, storeId)
-    const pending = await tx
-      .select({ payload: contractOutbox.payload, createdAt: contractOutbox.createdAt })
-      .from(contractOutbox)
-      .where(
-        and(
-          eq(contractOutbox.storeId, storeId),
-          eq(contractOutbox.type, "soporte.pedido"),
-          isNull(contractOutbox.sentAt),
-        ),
-      )
-      .orderBy(desc(contractOutbox.createdAt))
-    return {
-      connected: Boolean(config.secret),
-      state,
-      receivedAt: row?.receivedAt ?? null,
-      /** La última pregunta no tuvo respuesta: lo que se ve es lo último que se supo. */
-      stale: Boolean(row?.lastError),
-      agentStop: agentStopOf(state),
-      pendingSupport: pending.map((p) => ({
-        question: String((p.payload.data as { question?: unknown }).question ?? ""),
-        createdAt: p.createdAt,
-      })),
-    }
-  })
+  const read = () =>
+    inStore(appDb, person, storeId, "plan", async (tx) => {
+      const { row, state } = await knownStateIn(tx, storeId)
+      return {
+        connected: Boolean(config.secret),
+        state,
+        receivedAt: row?.receivedAt ?? null,
+        /** La última pregunta no tuvo respuesta: lo que se ve es lo último que se supo. */
+        stale: Boolean(row?.lastError),
+        agentStop: agentStopOf(state),
+        pendingSupport: await pendingSupport(tx, storeId),
+        triedAt: row?.triedAt ?? null,
+      }
+    })
+  // Primero el permiso (`inStore`): quien no es Dueño no hace preguntar a la administración.
+  const { triedAt, ...view } = await read()
+  if (!config.secret || (triedAt && now.getTime() - triedAt.getTime() <= STATE_FRESH_MS))
+    return view
+  await askState(ownerDb, config, storeId, now, VIEW_TIMEOUT_MS)
+  const { triedAt: _, ...fresh } = await read()
+  return fresh
 }

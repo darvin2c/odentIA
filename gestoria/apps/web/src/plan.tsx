@@ -24,7 +24,7 @@ import {
   PAYMENT_WORDS,
   type PlanView,
   STATUS_WORDS,
-  SUPPORT_KINDS,
+  SUPPORT_KIND_LABELS,
   SUPPORT_STATUS_WORDS,
   type SupportKind,
 } from "./lib/plan"
@@ -82,15 +82,14 @@ function PlanBody({ view }: { view: PlanView }) {
           {AGENT_STOP_WORDS[view.agentStop]}
         </PageNotice>
       ) : null}
-      {state?.notices.map((notice) => (
-        <PageNotice
-          key={notice.key}
-          tone={noticeTone(notice.level)}
-          label={NOTICE_LABELS[noticeTone(notice.level)]}
-        >
-          {noticeText(notice)}
-        </PageNotice>
-      ))}
+      {state?.notices.map((notice) => {
+        const tone = noticeTone(notice.level)
+        return (
+          <PageNotice key={notice.key} tone={tone} label={NOTICE_LABELS[tone]}>
+            {noticeText(notice)}
+          </PageNotice>
+        )
+      })}
       {state ? (
         <>
           <Summary state={state} />
@@ -304,9 +303,9 @@ function Support({ view }: { view: PlanView }) {
               onChange={(e) => setKind(e.target.value as SupportKind)}
               className={SELECT_CLASSES}
             >
-              {SUPPORT_KINDS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              {Object.entries(SUPPORT_KIND_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
                 </option>
               ))}
             </select>

@@ -5,6 +5,16 @@ import { isSigningSecret } from "./firma.js"
  * Lo que necesita el servidor de gestorIA. Sus nombres llevan `GESTORIA_` para que nunca tome
  * por error la base o la configuración de las clínicas (comparten el `.env` de desarrollo).
  */
+/** Un secreto de Standard Webhooks (`whsec_` y al menos 24 bytes en base64), o vacío: apagado. */
+const signingSecret = z
+  .string()
+  .trim()
+  .default("")
+  .refine(
+    (value) => value === "" || isSigningSecret(value),
+    "Es whsec_ y al menos 24 bytes en base64",
+  )
+
 const schema = z.object({
   /** El dueño de la base `gestoria`: migraciones, la copia de las cuentas y los avisos. */
   GESTORIA_DATABASE_URL: z.string().min(1),
@@ -13,26 +23,12 @@ const schema = z.object({
   /** La entrada a la cuenta en el dominio de gestorIA (`https://api.gestoria24.com`): emite el token. */
   GESTORIA_ACCOUNT_URL: z.string().url(),
   /** El secreto de los avisos, el mismo que tiene la cuenta. Vacío: sin avisos ni revisión diaria. */
-  GESTORIA_ACCOUNT_EVENTS_SECRET: z
-    .string()
-    .trim()
-    .default("")
-    .refine(
-      (value) => value === "" || isSigningSecret(value),
-      "Es whsec_ y al menos 24 bytes en base64",
-    ),
+  GESTORIA_ACCOUNT_EVENTS_SECRET: signingSecret,
   /**
    * El secreto del acuerdo con la administración (B7, ADR 0211), el mismo `GESTORIA_CONTRACT_SECRET`
    * que tiene la API de las clínicas. Vacío: no le avisa ni le pregunta nada (los avisos esperan).
    */
-  GESTORIA_CONTRACT_SECRET: z
-    .string()
-    .trim()
-    .default("")
-    .refine(
-      (value) => value === "" || isSigningSecret(value),
-      "Es whsec_ y al menos 24 bytes en base64",
-    ),
+  GESTORIA_CONTRACT_SECRET: signingSecret,
   /** La app (`https://app.gestoria24.com`): el único origen que llama y la base de los enlaces. */
   GESTORIA_WEB_URL: z.string().url(),
   GESTORIA_PORT: z.coerce.number().int().positive().default(3201),

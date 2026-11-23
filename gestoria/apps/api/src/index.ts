@@ -82,23 +82,21 @@ setInterval(() => void argos(), 15 * 60_000).unref()
 // El acuerdo con la administración (B7): cada 30 segundos envía lo que espera en la bandeja de
 // salida (con la misma clave al reintentar) y pregunta el estado de las tiendas a las que les
 // toca. Un solo servidor a la vez. Sin el secreto, los avisos se guardan y esperan.
-if (!contract.secret)
-  console.warn(
-    "gestoria-api: sin GESTORIA_CONTRACT_SECRET no se avisa ni se pregunta nada a la administración.",
-  )
 async function agreement() {
   try {
-    const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => ({
-      ...(await deliverOutbox(ownerDb, contract)),
-      asked: await refreshStates(ownerDb, contract),
-    }))
+    const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => {
+      const delivered = await deliverOutbox(ownerDb, contract)
+      await refreshStates(ownerDb, contract)
+      return delivered
+    })
     if (run?.failed)
       console.warn(`gestoria-api: ${run.failed} aviso(s) a la administración quedan por reintentar`)
   } catch (error) {
     console.error("gestoria-api: el acuerdo con la administración falló", error)
   }
 }
-if (contract.secret) {
-  setTimeout(() => void agreement(), 30_000).unref()
-  setInterval(() => void agreement(), 30_000).unref()
-}
+if (contract.secret) setInterval(() => void agreement(), 30_000).unref()
+else
+  console.warn(
+    "gestoria-api: sin GESTORIA_CONTRACT_SECRET no se avisa ni se pregunta nada a la administración.",
+  )

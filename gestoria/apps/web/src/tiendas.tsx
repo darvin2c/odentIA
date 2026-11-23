@@ -18,9 +18,12 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  type CountryCode,
+  CountrySelect,
   EmptyState,
   ErrorState,
   PersonAvatar,
+  regionCountry,
   SectionNav,
   SubmitButton,
 } from "@odentia/ui-patterns"
@@ -63,7 +66,6 @@ import {
   type TeamMember,
 } from "./lib/api"
 import { authClient, forgetToken } from "./lib/cuenta"
-import { browserCountry, countryOptions } from "./lib/tienda"
 import { GroupSignature, Logo } from "./marca"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
@@ -291,14 +293,14 @@ export function NewStorePage() {
   const currencies = useCurrencies()
   const [name, setName] = useState("")
   const [currency, setCurrency] = useState("PEN")
-  const countries = useMemo(countryOptions, [])
-  const [country, setCountry] = useState(browserCountry)
+  // El de la región del navegador, como en el teléfono: se cambia buscando en la lista.
+  const [country, setCountry] = useState<CountryCode>(regionCountry)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const create = useMutation({
     mutationFn: () =>
       api<{ store: MyStore }>("/api/tiendas", {
         method: "POST",
-        body: { name, currency, country: country || null },
+        body: { name, currency, country },
       }),
     onSuccess: async ({ store }) => {
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
@@ -372,20 +374,13 @@ export function NewStorePage() {
           </Field>
           <Field data-invalid={errors.country ? true : undefined}>
             <FieldLabel htmlFor="country">País de tu tienda</FieldLabel>
-            <select
+            <CountrySelect
               id="country"
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              className="h-9 w-full rounded-md border border-input-border bg-input/30 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+              onChange={setCountry}
+              invalid={Boolean(errors.country)}
               aria-describedby="country-help"
-            >
-              <option value="">Sin elegir</option>
-              {countries.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
             {errors.country ? (
               <FieldError>{errors.country}</FieldError>
             ) : (

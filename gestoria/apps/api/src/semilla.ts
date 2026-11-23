@@ -1,6 +1,5 @@
 import {
   accountCopy,
-  contractState,
   createOwnerDb,
   type Db,
   store,
@@ -10,6 +9,7 @@ import {
 } from "@gestoria/db"
 import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
+import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoOrders } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
@@ -223,11 +223,7 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
       },
     ],
   }
-  const values = { state, receivedAt: new Date(now), triedAt: new Date(now), lastError: null }
-  await tx
-    .insert(contractState)
-    .values({ storeId, ...values })
-    .onConflictDoUpdate({ target: contractState.storeId, set: values })
+  await saveState(tx, storeId, state, new Date(now))
 }
 
 const isMain = process.argv[1]?.endsWith("semilla.ts")

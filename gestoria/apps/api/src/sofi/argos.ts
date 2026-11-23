@@ -26,6 +26,7 @@ import {
   ne,
   sql,
 } from "drizzle-orm"
+import { agentStopIn } from "../acuerdo.js"
 import { ARGOS_ACTOR, withAgent } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { pad, todayUTC, variantPrices } from "../pedidos.js"
@@ -70,7 +71,8 @@ interface Due {
 
 async function dueIn(tx: Db, storeId: string, now: Date) {
   const [agent] = await tx.select().from(storeAgent).where(eq(storeAgent.storeId, storeId))
-  if (!agent?.enabled) return []
+  // Apagada, o detenida por la administración (no puede seguir, sin saldo o en su tope): nada.
+  if (!agent?.enabled || (await agentStopIn(tx, storeId))) return []
   const [shop] = await tx
     .select({ name: store.name, currency: store.currency })
     .from(store)

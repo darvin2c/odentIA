@@ -1,4 +1,4 @@
-import type { AccountState } from "@odentia/contract"
+import type { AccountState, SUPPORT_KINDS } from "@odentia/contract"
 
 /**
  * Lo que la pantalla sabe de «Plan y pagos» (paso B7): lo que la administración dijo de la tienda
@@ -75,7 +75,7 @@ const NOTICE_ACTIONS: Record<string, string> = {
 }
 
 export function noticeText(notice: AccountState["notices"][number]): string {
-  const level = (["aviso", "alarma", "limite"] as const).find((l) => l === notice.level) ?? "aviso"
+  const level = noticeTone(notice.level)
   const words = NOTICE_WORDS[notice.family]?.[level] ?? "Tienes un aviso sobre tu plan."
   const action = NOTICE_ACTIONS[notice.action]
   return action ? `${words} ${action}` : words
@@ -114,9 +114,11 @@ export const SUPPORT_STATUS_WORDS: Record<string, string> = {
   resuelto: "Resuelta",
 }
 
-export const SUPPORT_KINDS = [
-  { value: "pregunta", label: "Una pregunta" },
-  { value: "problema", label: "Algo no funciona" },
-  { value: "cobro", label: "Sobre un cobro" },
-] as const
-export type SupportKind = (typeof SUPPORT_KINDS)[number]["value"]
+export type SupportKind = (typeof SUPPORT_KINDS)[number]
+
+/** Los tipos de pregunta del acuerdo, con su nombre. */
+export const SUPPORT_KIND_LABELS: Record<SupportKind, string> = {
+  pregunta: "Una pregunta",
+  problema: "Algo no funciona",
+  cobro: "Sobre un cobro",
+}
