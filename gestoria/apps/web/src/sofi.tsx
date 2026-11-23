@@ -14,6 +14,7 @@ import type {
   ConversationView,
   SofiOverview,
 } from "./lib/sofi"
+import { AGENT_STOP_WORDS } from "./lib/plan"
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { FormAlert, fieldErrors, SwitchField, TextField } from "./piezas"
@@ -48,6 +49,21 @@ export function SofiPage() {
       ) : null}
       {overview.data ? (
         <>
+          {overview.data.agentStop ? (
+            <PageNotice
+              tone="limite"
+              label="En pausa"
+              action={
+                store.permissions.includes("plan") ? (
+                  <Link to="/tiendas/$id/plan" params={{ id: store.id }} className="underline">
+                    Ver tu plan
+                  </Link>
+                ) : undefined
+              }
+            >
+              {AGENT_STOP_WORDS[overview.data.agentStop]} La prueba de aquí sigue funcionando.
+            </PageNotice>
+          ) : null}
           <PageNotice tone="aviso" label="Sin WhatsApp">
             Sofi responderá a tus clientes cuando conectes tu número. Mientras, pruébala aquí:
             escribe como si fueras un cliente.

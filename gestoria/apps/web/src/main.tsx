@@ -23,6 +23,7 @@ import {
 import { SignedOut } from "./lib/api"
 import { authClient, authFetch, safeNext } from "./lib/cuenta"
 import { PaymentsPage } from "./pagos"
+import { PlanPage } from "./plan"
 import { OrdersPage } from "./pedidos"
 import { ProductPage } from "./producto"
 import { ReportsPage } from "./reportes"
@@ -133,6 +134,7 @@ const storeChildren = [
     component: PaymentsPage,
   }),
   createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/plan", component: PlanPage }),
 ]
 
 const routeTree = rootRoute.addChildren([

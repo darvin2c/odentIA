@@ -30,6 +30,7 @@ import {
   Bot,
   ChartColumn,
   Copy,
+  CreditCard,
   LogOut,
   MessageCircle,
   Package,
@@ -61,6 +62,7 @@ import {
   type StoreRole,
   type TeamMember,
 } from "./lib/api"
+import { browserCountry, countryOptions } from "./lib/tienda"
 import { authClient, forgetToken } from "./lib/cuenta"
 import { GroupSignature, Logo } from "./marca"
 
@@ -289,10 +291,15 @@ export function NewStorePage() {
   const currencies = useCurrencies()
   const [name, setName] = useState("")
   const [currency, setCurrency] = useState("PEN")
+  const countries = useMemo(countryOptions, [])
+  const [country, setCountry] = useState(browserCountry)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const create = useMutation({
     mutationFn: () =>
-      api<{ store: MyStore }>("/api/tiendas", { method: "POST", body: { name, currency } }),
+      api<{ store: MyStore }>("/api/tiendas", {
+        method: "POST",
+        body: { name, currency, country: country || null },
+      }),
     onSuccess: async ({ store }) => {
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       await navigate({ to: "/tiendas/$id", params: { id: store.id } })
@@ -363,6 +370,30 @@ export function NewStorePage() {
               </FieldDescription>
             )}
           </Field>
+          <Field data-invalid={errors.country ? true : undefined}>
+            <FieldLabel htmlFor="country">País de tu tienda</FieldLabel>
+            <select
+              id="country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="h-9 w-full rounded-md border border-input-border bg-input/30 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+              aria-describedby="country-help"
+            >
+              <option value="">Sin elegir</option>
+              {countries.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {errors.country ? (
+              <FieldError>{errors.country}</FieldError>
+            ) : (
+              <FieldDescription id="country-help">
+                Con él te cobramos el plan con el impuesto que corresponde.
+              </FieldDescription>
+            )}
+          </Field>
           {create.isError &&
           !(create.error instanceof ApiError && Object.keys(create.error.fields).length > 0) ? (
             <p role="alert" className="text-sm text-danger">
@@ -405,6 +436,10 @@ function storeSections(store: MyStore) {
       ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
       : []),
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
+    // El plan, lo cobrado y los pagos: solo el Dueño.
+    ...(store.permissions.includes("plan")
+      ? [{ label: "Plan y pagos", to: `/tiendas/${id}/plan`, icon: CreditCard }]
+      : []),
   ]
 }
 

@@ -1,4 +1,5 @@
 import type { OrderChannel, OrderState } from "./pedidos"
+import type { AgentStop } from "./plan"
 
 /** Lo que la pantalla sabe de Sofi, Argos y Reportes (paso B5), como lo dice el servidor. */
 
@@ -17,6 +18,8 @@ export interface SofiOverview {
   /** Hay modelo configurado: Sofi puede responder. */
   modelReady: boolean
   tests: { id: string; createdAt: string; updatedAt: string; customerName: string | null }[]
+  /** La administración detuvo a Sofi en las conversaciones de verdad (la de prueba sigue). */
+  agentStop: AgentStop | null
 }
 
 export interface ConversationMessage {
@@ -42,7 +45,14 @@ export interface ConversationView {
   orders: { id: string; number: string; state: OrderState; totalCents: number; test: boolean }[]
 }
 
-export type AnswerStatus = "respondio" | "persona" | "apagada" | "nada" | "ocupada" | "sin_modelo"
+export type AnswerStatus =
+  | "respondio"
+  | "persona"
+  | "apagada"
+  | "nada"
+  | "ocupada"
+  | "sin_modelo"
+  | "detenida"
 
 export interface StoreReport {
   period: "hoy" | "semana" | "mes"
