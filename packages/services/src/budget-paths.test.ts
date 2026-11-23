@@ -92,6 +92,18 @@ it("en la atención, la exodoncia es otro camino para la 46: el borrador nace co
   ).rejects.toMatchObject({ code: "PATH_OTHER_SITE" })
 })
 
+// QA del 23 nov (verificador 2): el diálogo de firma decía «2 por ejecutar» con dos caminos que se
+// excluyen: la atención no decía qué compite, y la pantalla no podía contarlo como una elección.
+it("la atención dice el camino de cada tratamiento, como el plan", async () => {
+  const { f, resina, endodoncia, exodoncia } = await ana()
+  await f.run((tx) => placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }))
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))
+  const pathOf = (id: string) => detail.indicatedItems.find((item) => item.id === id)?.path
+  expect(pathOf(resina.id)).toBeNull()
+  expect(pathOf(endodoncia.id)).toMatchObject({ positions: [1], pathCount: 2, chosen: false })
+  expect(pathOf(exodoncia.id)).toMatchObject({ positions: [2], pathCount: 2, chosen: false })
+})
+
 it("sin elegir camino se acepta lo común y lo de la 46 queda pensándolo; la oportunidad sigue abierta hasta que elige", async () => {
   const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
   const draft = await f.run((tx) =>

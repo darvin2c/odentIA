@@ -231,14 +231,14 @@ describe("pendingTreatmentCounts", () => {
   const item = (id: string, over: Record<string, unknown> = {}) => ({ id, status: "pendiente", decisionStatus: "pendiente", path: null, ...over })
   it("los caminos por elegir de un presupuesto cuentan como una elección, no como dos por ejecutar", () => {
     const items = [item("a", { path: path(false) }), item("b", { path: { ...path(false), positions: [2] } }), item("c")]
-    expect(pendingTreatmentCounts(3, items)).toEqual({ toExecute: 1, choices: [2] })
+    expect(pendingTreatmentCounts(3, items)).toEqual({ toExecute: 1, choices: [2], competing: new Set(["a", "b"]) })
   })
   it("elegido el camino, lo que queda se ejecuta", () => {
-    expect(pendingTreatmentCounts(1, [item("a", { path: path(true) })])).toEqual({ toExecute: 1, choices: [] })
+    expect(pendingTreatmentCounts(1, [item("a", { path: path(true) })])).toEqual({ toExecute: 1, choices: [], competing: new Set() })
   })
   it("lo mismo en lo planificado y lo indicado cuenta una vez", () => {
     const shared = item("a", { path: path(false) })
-    expect(pendingTreatmentCounts(2, [shared, shared, item("b", { path: { ...path(false), positions: [2] } })])).toEqual({ toExecute: 0, choices: [2] })
+    expect(pendingTreatmentCounts(2, [shared, shared, item("b", { path: { ...path(false), positions: [2] } })])).toEqual({ toExecute: 0, choices: [2], competing: new Set(["a", "b"]) })
   })
 })
 

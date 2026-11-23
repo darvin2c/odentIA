@@ -643,7 +643,7 @@ async function agreedPricesOf(
 }
 
 /** El camino de cada tratamiento según las opciones de su presupuesto vigente. */
-async function pathsOf(
+export async function pathsOf(
   tx: Db,
   orgId: string,
   items: ReadonlyArray<{ id: string; budgetId: string | null }>,

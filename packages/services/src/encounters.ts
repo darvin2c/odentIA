@@ -140,6 +140,8 @@ import {
   revisionsOf,
   setPlanItemStatus,
   surfaceLimits,
+  pathsOf,
+  type PlanItemPath,
   undoRevisionsOf,
   updatePlanItemPlanning,
 } from "./plan.js"
@@ -196,7 +198,12 @@ export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & Si
  * `sessionsDoneSql`) y si quien lleva el borrador puede quitarlo
  * (`removableFromEncounter`: indicado aquí, sin respuesta y sin entregar).
  */
-export type EncounterItem = EncounterPlannedItemRow & { sessionsDone: number; removable: boolean }
+export type EncounterItem = EncounterPlannedItemRow & {
+  sessionsDone: number
+  removable: boolean
+  /** Su camino, si su presupuesto tiene opciones que se excluyen (como en el plan): lo que compite se elige. */
+  path: PlanItemPath | null
+}
 
 export interface CreateEncounterInput {
   /**
@@ -1327,10 +1334,14 @@ export async function getEncounterDetail(
       : new Set<string>()
   // El consentimiento va con el tratamiento: el Plan de la atención también lo dice.
   const consents = await treatmentConsentStates(tx, orgId, [...attention.keys()])
+  // Los caminos que se excluyen, como los dice el plan: la firma los cuenta como una elección, no como
+  // dos por ejecutar (QA del 23 nov, verificador 2: «2 por ejecutar» con dos caminos).
+  const paths = await pathsOf(tx, orgId, [...attention.values()])
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
+    path: paths.get(item.id) ?? null,
     consent: consents.get(item.id)?.state ?? null,
     consentMissing: consents.get(item.id)?.missing ?? [],
   })

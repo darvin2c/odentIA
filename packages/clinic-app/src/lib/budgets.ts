@@ -853,24 +853,25 @@ const TO_EXECUTE = new Set(["pendiente", "programado", "en_curso"])
  * Lo que una atención deja por ejecutar, sin contar como dos los caminos que se excluyen (QA del 22 nov,
  * H12: «2 por ejecutar» con dos caminos de los que solo uno se hará). `pending` es lo que cuenta el
  * servidor; los tratamientos de un presupuesto con caminos por elegir salen de ahí y quedan como una
- * elección por presupuesto, con cuántos caminos tiene (`choices`).
+ * elección por presupuesto, con cuántos caminos tiene (`choices`). `competing`: esos tratamientos, que
+ * tampoco se cuentan como «indicados hoy» uno por uno (QA del 23 nov, verificador 2).
  */
 export function pendingTreatmentCounts(
   pending: number,
   items: ReadonlyArray<Pick<PlanItem, "id" | "status" | "path"> & { decisionStatus?: string | null }>,
-): { toExecute: number; choices: number[] } {
+): { toExecute: number; choices: number[]; competing: Set<string> } {
   const seen = new Set<string>()
   const paths = new Map<string, number>()
-  let competing = 0
+  const competing = new Set<string>()
   for (const item of items) {
     if (seen.has(item.id)) continue
     seen.add(item.id)
     const path = item.path
     if (!path || path.chosen || path.pathCount < 2 || !TO_EXECUTE.has(item.status) || isLeftOut(item.decisionStatus)) continue
-    competing += 1
+    competing.add(item.id)
     paths.set(path.budgetId, path.pathCount)
   }
-  return { toExecute: Math.max(0, pending - competing), choices: [...paths.values()] }
+  return { toExecute: Math.max(0, pending - competing.size), choices: [...paths.values()], competing }
 }
 
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */

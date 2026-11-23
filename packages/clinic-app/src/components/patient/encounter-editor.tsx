@@ -1718,6 +1718,7 @@ export function EncounterEditor({
     liveIndicated,
     new Set(detail.procedures.flatMap((procedure) => (!procedure.voidedAt && procedure.planItemId ? [procedure.planItemId] : []))),
   )
+  const indicatedAlone = openIndicated.filter((item) => !pendingCounts.competing.has(item.id))
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1778,7 +1779,8 @@ export function EncounterEditor({
       summary:
         [
           // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
-          openIndicated.length > 0 ? `${counted(openIndicated.length, "indicado", "indicados")} hoy` : "",
+          // Los caminos que se excluyen ya van como «1 por elegir entre 2 caminos»: no se cuentan otra vez.
+          indicatedAlone.length > 0 ? `${counted(indicatedAlone.length, "indicado", "indicados")} hoy` : "",
           pendingWords,
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
