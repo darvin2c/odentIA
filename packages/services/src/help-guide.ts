@@ -472,6 +472,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Sí. Toca lo gris en el día, o elige esa hora en «Nueva cita»: te avisa y puedes reservar igual. La cita queda marcada y al profesional le llega un aviso. También puedes dar dos citas a la misma hora con un profesional, cada una en su sala o unidad; lo único que no se puede es poner a dos personas en la misma. Estas excepciones las hace siempre alguien del equipo: Sofi y el enlace de la persona solo reservan lo libre.",
       },
       {
+        id: "nueva-cita-ya-tiene-cita",
+        q: "¿Cómo sé si el paciente ya tiene una cita antes de darle otra?",
+        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita:» con su próxima cita (día, hora, servicio y profesional) y cuántas más tiene. No frena nada: tú eliges si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y si la cambia o es otra aparte.",
+      },
+      {
         id: "elijo-tratamientos-trae-cita",
         q: "¿Cómo elijo qué tratamientos trae la cita?",
         a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita, y lo que tiene sesiones por reservar, con la que sería esta («sesión 2 de 2»). Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita o al que le faltan sesiones por reservar.",
