@@ -999,7 +999,7 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await expect(suggested("Signos vitales")).toContainText("corregido por voz, antes T 38.5 °C")
 
   // Confirmar las listas: los signos y el examen entran a la atención; el descanso espera su firma.
-  await review.getByRole("button", { name: /^Confirmar las \d+ de la consulta$/ }).click()
+  await review.getByRole("button", { name: /^Confirmar (?:las \d+|1)$/ }).click()
   await expect
     .poll(async () => {
       const detail = await request<{ data: { encounter: { examination: unknown; vitals: unknown } } }>(
