@@ -320,6 +320,16 @@ function nameHeard(name: string, said: string): boolean {
 const VAGUE_MEDICINE =
   /^(?:algo|alguna cosa|(?:(?:una?|unas|unos) )?(?:pastillas?|medicinas?|medicamentos?|remedios?|tabletas?|capsulas?|jarabes?|gotas|inyecciones?)|no (?:se|sabe|recuerda|recuerdo|me acuerdo)\b.*)(?: (?:para|contra|por|de la|de las|del|de los) .*)?$/u
 
+/**
+ * Una enfermedad que no dice cuál es (QA del 23 nov, verificador 3: «algo en los huesos», «le
+ * hicieron unos exámenes y salió algo»): no se propone como enfermedad; va a «No lo usé» con su frase.
+ */
+const VAGUE_CONDITION =
+  /^(?:algo|alguna cosa|una cosa|un problema|unos problemas)(?: (?:en|de|del|de la|de los|con|raro|malo)\b.*)?$|\b(?:salio|le salio|me salio|salieron) algo\b|^no (?:se|sabe|recuerda|recuerdo|me acuerdo) (?:que|cual|como)\b/u
+
+/** ¿Esa «enfermedad» no dice cuál es? (`VAGUE_CONDITION`) */
+export const vagueCondition = (name: string) => VAGUE_CONDITION.test(plain(name).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim())
+
 /** ¿Ese «nombre» solo dice para qué la toma? (`VAGUE_MEDICINE`) */
 export const vagueMedicine = (name: string) => VAGUE_MEDICINE.test(plain(name).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim())
 
@@ -333,16 +343,21 @@ export const vagueMedicine = (name: string) => VAGUE_MEDICINE.test(plain(name).r
 export function groundHealthNames(
   payload: Record<string, unknown>,
   said: string,
-): { payload: Record<string, unknown> | null; notHeard: string[]; unnamed: string[] } {
+): { payload: Record<string, unknown> | null; notHeard: string[]; unnamed: string[]; vague: string[] } {
   const out = { ...payload }
   const notHeard: string[] = []
   const unnamed: string[] = []
+  const vague: string[] = []
   for (const group of LISTS) {
     const value = out[group]
     if (!isRecord(value) || value["state"] !== "recorded" || !Array.isArray(value["items"]) || !value["items"].length) continue
     const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => {
       if (group === "medications" && vagueMedicine(text(item["name"]))) {
         unnamed.push(text(item["name"]))
+        return false
+      }
+      if (group === "conditions" && vagueCondition(text(item["name"]))) {
+        vague.push(text(item["name"]))
         return false
       }
       const heard = nameHeard(text(item["name"]), said)
@@ -359,8 +374,12 @@ export function groundHealthNames(
     const { detail: _invented, ...rest } = value
     out[group] = rest
   }
-  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed }
+  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
 }
+
+/** Lo que «No lo usé» dice de una enfermedad que no dice cuál es (`groundHealthNames`, `vague`). */
+export const vagueConditionWhy = (names: readonly string[]) =>
+  `«${names.join("», «")}» no dice qué enfermedad es: no lo propuse. Pregunta cuál es o anótalo a mano.`
 
 /** Lo que «No lo usé» dice de una medicina sin nombre (`groundHealthNames`, `unnamed`). */
 export const unnamedMedicineWhy = (names: readonly string[]) =>

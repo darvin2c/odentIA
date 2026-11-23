@@ -70,6 +70,7 @@ import {
   healthSummary,
   mergeHealth,
   unnamedMedicineWhy,
+  vagueConditionWhy,
   prepareHealth,
   saidInDoubt,
   selfCorrectedHealth,
@@ -2093,6 +2094,7 @@ export async function saveDictationSegment(
       // Lo que solo dice para qué la toma («algo para la tiroides») no es una medicina: va a «No lo usé».
       const heard = groundHealthNames(changes, said ?? "")
       if (heard.unnamed.length && said?.trim()) droppedForms.push({ said: said.trim(), why: unnamedMedicineWhy(heard.unnamed), targets: [] })
+      if (heard.vague.length && said?.trim()) droppedForms.push({ said: said.trim(), why: vagueConditionWhy(heard.vague), targets: [] })
       if (!heard.payload) return false
       // Sin palabras de corrección no es una corrección: lo nuevo se suma, como lo de una pausa. Una
       // medicina más no reemplaza a la que ya dijo (QA del 23 nov, verificador 2: «toma algo para la
@@ -2268,6 +2270,7 @@ export async function saveDictationSegment(
       if (heard.notHeard.length)
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
       if (inPhrase.unnamed.length) droppedForms.push({ said: phrase, why: unnamedMedicineWhy(inPhrase.unnamed), targets: [] })
+      if (inPhrase.vague.length) droppedForms.push({ said: phrase, why: vagueConditionWhy(inPhrase.vague), targets: [] })
       if (!heard.payload) continue
       draft = { ...said, payload: heard.payload }
       // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).

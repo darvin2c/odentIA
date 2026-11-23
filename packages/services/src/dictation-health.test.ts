@@ -165,6 +165,14 @@ describe("una medicina más se suma; solo la que se corrige cambia", () => {
     expect(groundHealthNames({ medications: { state: "recorded", items: [{ name: "tabletas de losartán" }] } }, "tabletas de losartan").unnamed).toEqual([])
   })
 
+  it("una enfermedad que no dice cuál es no se propone (QA del 23 nov, verificador 3)", () => {
+    const said = "tiene asma algo en los huesos le hicieron unos examenes y salio algo a veces se le hinchan las piernas"
+    const names = ["Asma", "algo en los huesos", "le hicieron unos examenes y salio algo", "a veces se le hinchan las piernas"]
+    const heard = groundHealthNames({ conditions: { state: "recorded", items: names.map((name) => ({ name })) } }, said)
+    expect(heard.vague).toEqual(["algo en los huesos", "le hicieron unos examenes y salio algo"])
+    expect((heard.payload?.["conditions"] as { items: Array<{ name: string }> }).items.map((item) => item.name)).toEqual(["Asma", "a veces se le hinchan las piernas"])
+  })
+
   it("una corrección cuya frase no nombra la medicina de antes la suma, sin «antes dijo»", () => {
     const merged = mergeHealth(salbutamol, { medications: { state: "recorded", items: [{ name: "levotiroxina" }] } }, "y toma levotiroxina para la tiroides")
     expect(merged.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "salbutamol" }, { name: "levotiroxina" }] })
