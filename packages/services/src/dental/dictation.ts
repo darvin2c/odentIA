@@ -150,8 +150,12 @@ function findingSummary(payload: Record<string, unknown>): string {
     .join("\n")
 }
 
-/** La clave de un hallazgo de toda la pieza en `DentalDictationContext.current`. */
-const toothFindingKey = (tooth: number, condition: string) => `${tooth}:${condition}`
+/**
+ * La clave de un hallazgo de toda la pieza en `DentalDictationContext.current`, con su estado y su
+ * tipo: «36:implant:good:». Así lo que cambió (la corona que ahora está en mal estado) sí se propone.
+ */
+const toothFindingKey = (tooth: number, condition: string, quality?: string | null, variant?: string | null) =>
+  `${tooth}:${condition}:${quality ?? ""}:${variant ?? ""}`
 
 /**
  * Lo de toda la pieza (sin caras) que el paciente ya tiene vigente: ni anulado, ni resuelto, ni
@@ -160,7 +164,12 @@ const toothFindingKey = (tooth: number, condition: string) => `${tooth}:${condit
  */
 async function currentToothFindings(tx: Db, orgId: string, patientId: string): Promise<Set<string>> {
   const rows = await tx
-    .select({ toothNumber: odontogramEntry.toothNumber, condition: odontogramEntry.condition, surface: odontogramEntry.surface })
+    .select({
+      toothNumber: odontogramEntry.toothNumber,
+      condition: odontogramEntry.condition,
+      surface: odontogramEntry.surface,
+      details: odontogramEntry.details,
+    })
     .from(odontogramEntry)
     .where(
       and(
@@ -172,7 +181,17 @@ async function currentToothFindings(tx: Db, orgId: string, patientId: string): P
         eq(odontogramEntry.needsReview, false),
       ),
     )
-  return new Set(rows.filter((row) => !row.surface).map((row) => toothFindingKey(row.toothNumber, row.condition)))
+  const keys = new Set<string>()
+  for (const row of rows) {
+    if (row.surface) continue
+    const details = (row.details ?? {}) as FindingDetails
+    // Dicho sin estado ni tipo, también es el mismo hallazgo: se guarda la clave sin ellos.
+    keys.add(toothFindingKey(row.toothNumber, row.condition))
+    keys.add(toothFindingKey(row.toothNumber, row.condition, details.quality, details.variant))
+    if (details.quality) keys.add(toothFindingKey(row.toothNumber, row.condition, details.quality))
+    if (details.variant) keys.add(toothFindingKey(row.toothNumber, row.condition, undefined, details.variant))
+  }
+  return keys
 }
 
 const findingDefinitionOf = (code: string) =>
@@ -231,14 +250,15 @@ async function prepareFinding(
       note: noTooth(tooth ?? ""),
     }
   }
-  // Lo de toda la pieza que ya tiene vigente no se propone otra vez (null: no es una sugerencia).
-  if (finding.scope === "tooth" && current.has(toothFindingKey(tooth, finding.code))) return null
   const { variant: _variant, quality: _quality, surfaces: _surfaces, ...rest } = payload
   const variant = dictatedVariant(finding, payload["variant"])
   const quality =
     finding.color === "quality" && (payload["quality"] === "good" || payload["quality"] === "poor")
       ? payload["quality"]
       : undefined
+  // Lo de toda la pieza que ya tiene vigente, con el mismo estado y tipo (o dicho sin ellos), no se
+  // propone otra vez (null: no es una sugerencia). Si cambió, sí: la corona ahora en mal estado.
+  if (finding.scope === "tooth" && current.has(toothFindingKey(tooth, finding.code, quality, variant))) return null
   const surfaces = finding.scope === "surface" ? normalizeSurfaces(tooth, payload["surfaces"]) : []
   // Un hallazgo por cara dicho sin cara (una caries en la 36): la cara se elige con un
   // toque. Lo que además admite el dibujo de su forma se dibuja tocando la pieza.

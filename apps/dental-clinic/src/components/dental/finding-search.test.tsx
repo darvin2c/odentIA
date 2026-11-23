@@ -1,7 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { FindingElsewhere, offeredServices, toothExtractionFinding, toothPulp } from "./finding-elsewhere"
+import {
+  FindingElsewhere,
+  offeredServices,
+  toothExtractionFinding,
+  toothPulp,
+} from "./finding-elsewhere"
 import { FindingReasonNotice, findingPickerBlocks } from "./finding-picker"
 import { searchFindings, treatmentSearchTerm } from "./finding-search"
 
@@ -50,8 +55,8 @@ describe("el buscador de hallazgos de la pieza", () => {
       ["tratamiento de raíz", "root_canal_treatment"],
       ["raíz fracturada", "fracture"],
       ["fracturado", "fracture"],
-      ["roto", "fracture"],
-      ["rota", "fracture"],
+      ["fracturada", "fracture"],
+      ["raíces", "root_remnant"],
       ["desgaste", "tooth_wear"],
       ["desgastado", "tooth_wear"],
       ["abrasión", "tooth_wear"],
@@ -65,7 +70,6 @@ describe("el buscador de hallazgos de la pieza", () => {
       ["extraído", "missing_tooth"],
       ["falta", "missing_tooth"],
       ["ausente", "missing_tooth"],
-      ["pérdida", "missing_tooth"],
       ["supernumerario", "supernumerary_tooth"],
       ["mesiodens", "supernumerary_tooth"],
       ["conoide", "peg_tooth"],
@@ -81,13 +85,30 @@ describe("el buscador de hallazgos de la pieza", () => {
 
   it("una palabra de varios hallazgos los ofrece a todos, cada uno con su tarjeta", () => {
     expect(codes("placa")).toEqual(
-      expect.arrayContaining(["removable_partial_denture", "removable_orthodontic_appliance"]),
+      expect.arrayContaining([
+        "removable_partial_denture",
+        "complete_denture",
+        "removable_orthodontic_appliance",
+      ]),
     )
     expect(codes("raíz")).toEqual(expect.arrayContaining(["root_remnant", "root_canal_treatment"]))
     expect(codes("ortodoncia")).toEqual(
       expect.arrayContaining(["fixed_orthodontic_appliance", "removable_orthodontic_appliance"]),
     )
     expect(new Set(codes("placa")).size).toBe(codes("placa").length)
+  })
+
+  // Revisión del 23 nov: lo que se dice igual y no es el hallazgo.
+  it("la placa bacteriana, la pérdida ósea y «rota» camino a «rotada» no llevan a otra cosa", () => {
+    for (const code of [
+      "removable_partial_denture",
+      "complete_denture",
+      "removable_orthodontic_appliance",
+    ])
+      expect(codes("placa bacteriana")).not.toContain(code)
+    expect(codes("pérdida ósea")).not.toContain("missing_tooth")
+    expect(codes("rota")).toContain("rotation")
+    expect(codes("rota")).not.toContain("fracture")
   })
 
   // Mesa del 23 nov: por pedazo, «caries posterior» traía el espigo-muñón por «poste».
@@ -282,11 +303,14 @@ describe("las exodoncias que encajan en la pieza", () => {
     const remnant = exodoncia("s-5", "Exodoncia simple de resto radicular", null)
     const remnantSurgical = exodoncia("s-6", "Exodoncia quirúrgica de restos radiculares", null)
     const all = [impacted, simple, surgical, remnantSurgical, remnant]
-    expect(offeredServices(all, 48, null, "root_remnant").map((row) => row.name).slice(0, 2)).toEqual([
-      "Exodoncia simple de resto radicular",
-      "Exodoncia quirúrgica de restos radiculares",
-    ])
-    expect(offeredServices(all, 48, null, "impaction")[0]?.name).toBe("Exodoncia de pieza impactada en hueso")
+    expect(
+      offeredServices(all, 48, null, "root_remnant")
+        .map((row) => row.name)
+        .slice(0, 2),
+    ).toEqual(["Exodoncia simple de resto radicular", "Exodoncia quirúrgica de restos radiculares"])
+    expect(offeredServices(all, 48, null, "impaction")[0]?.name).toBe(
+      "Exodoncia de pieza impactada en hueso",
+    )
   })
 
   it("lo que tiene la pieza sale de sus hallazgos o de su diagnóstico (K08.3, raíz retenida)", () => {

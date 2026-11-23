@@ -92,7 +92,10 @@ const REPLACES = new Set([
   "removable_partial_denture",
 ])
 
-/** Lo que se dibuja de frente en `tooth` con sus hallazgos vigentes. */
+/**
+ * Lo que se dibuja de frente en `tooth` con sus hallazgos vigentes, del más nuevo al más viejo: si
+ * la misma cosa se anotó dos veces (el perno, primero bien y después roto), manda la más nueva.
+ */
 export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): FrontMarks {
   const marks: FrontMarks = {
     body: "tooth",
@@ -116,7 +119,9 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
     marks.body = "implant"
     marks.bodyPaint = implant.paint
     const crown = find("crown") ?? find("temporary_crown")
-    if (crown) marks.implantCrown = crown.paint
+    // El implante que es pilar de un puente lleva la corona del puente.
+    const cover = crown?.paint ?? (bridge && abutment ? bridge.paint : undefined)
+    if (cover) marks.implantCrown = cover
   } else if (bridge && !abutment) {
     marks.body = "pontic"
     marks.bodyPaint = bridge.paint
@@ -141,20 +146,20 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
     switch (entry.condition) {
       case "crown":
       case "temporary_crown":
-        if (hasCrown || (bridge && abutment)) marks.crown = paint
+        if (hasCrown || (bridge && abutment)) marks.crown ??= paint
         break
       case "fixed_partial_denture":
         // Los pilares llevan su corona, del color del puente.
         if (abutment) marks.crown = marks.crown ?? paint
         break
       case "root_canal_treatment":
-        if (marks.body === "tooth" || marks.body === "remnant") marks.canals = paint
+        if (marks.body === "tooth" || marks.body === "remnant") marks.canals ??= paint
         break
       case "post_and_core":
-        if (marks.body === "tooth" || marks.body === "remnant") marks.post = paint
+        if (marks.body === "tooth" || marks.body === "remnant") marks.post ??= paint
         break
       case "pulpotomy":
-        if (hasCrown) marks.pulpotomy = paint
+        if (hasCrown) marks.pulpotomy ??= paint
         break
       case "caries":
       case "definitive_restoration":
@@ -175,33 +180,33 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
         break
       }
       case "fracture":
-        if (hasCrown || marks.body === "remnant") marks.fracture = paint
+        if (hasCrown || marks.body === "remnant") marks.fracture ??= paint
         break
       case "pathological_mobility":
-        marks.mobility = {
+        marks.mobility ??= {
           paint,
           grade: Number.isInteger(details.grade) ? (details.grade as number) : undefined,
         }
         break
       case "rotation":
         if (hasCrown)
-          marks.rotation = { paint, clockwise: details.direction !== "counterclockwise" }
+          marks.rotation ??= { paint, clockwise: details.direction !== "counterclockwise" }
         break
       case "erupting_tooth":
         if (hasCrown) {
-          marks.arrow = { kind: "erupting", paint }
+          marks.arrow ??= { kind: "erupting", paint }
           marks.shift = Math.max(marks.shift, 0.45)
         }
         break
       case "extruded_tooth":
         if (hasCrown) {
-          marks.arrow = { kind: "extruded", paint }
+          marks.arrow ??= { kind: "extruded", paint }
           marks.shift = -0.22
         }
         break
       case "intruded_tooth":
         if (hasCrown) {
-          marks.arrow = { kind: "intruded", paint }
+          marks.arrow ??= { kind: "intruded", paint }
           marks.shift = Math.max(marks.shift, 0.28)
         }
         break
@@ -230,7 +235,7 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
         if (hasCrown) marks.size = 0.78
         break
       case "peg_tooth":
-        if (hasCrown) marks.peg = paint
+        if (hasCrown) marks.peg ??= paint
         break
       case "gemination":
         if (hasCrown) {
@@ -242,7 +247,7 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
         marks.ringNumber = paint
         break
       case "fixed_orthodontic_appliance":
-        if (hasCrown || marks.body === "pontic") marks.bracket = paint
+        if (hasCrown || marks.body === "pontic") marks.bracket ??= paint
         break
       default:
         break
@@ -268,6 +273,11 @@ export interface FrontRowMark {
   paint: Paint
   /** Las piezas del tramo o del par que están en la fila, en el orden en que se ven. */
   teeth: number[]
+  /**
+   * Parte del par o del tramo está en otra fila (una arcada en dos filas de 8: el diastema entre la
+   * 11 y la 21 queda partido en la línea media). Se dibuja la mitad del lado de esa línea.
+   */
+  split: boolean
 }
 
 const ROW_KINDS: Record<string, FrontRowMark["kind"]> = {
@@ -305,7 +315,7 @@ export function frontRowMarksOf(
         : [entry.toothNumber]
       const teeth = row.filter((item) => related.includes(item))
       if (teeth.length === 0) continue
-      marks.push({ kind, paint, teeth })
+      marks.push({ kind, paint, teeth, split: related.some((item) => !row.includes(item)) })
     }
   }
   return marks

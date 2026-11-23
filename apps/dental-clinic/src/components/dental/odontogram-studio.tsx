@@ -99,7 +99,8 @@ function useContainerWide(): {
 type MouthLayout = "whole" | "beside" | "stacked"
 function useMouthLayout(): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
   const ref = useRef<HTMLDivElement | null>(null)
-  const [layout, setLayout] = useState<MouthLayout>("stacked")
+  // Antes de medir, la boca entera: es lo que se ve en el escritorio, donde más se atiende.
+  const [layout, setLayout] = useState<MouthLayout>("whole")
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -275,6 +276,13 @@ function StudioBody({
   useEffect(() => {
     onSelectionChange?.(selection)
   }, [selection, onSelectionChange])
+  // Con una arcada a la vez, la que se ve es la de la pieza elegida: al abrirla al lado (o desde la
+  // lista de hallazgos) no desaparece de la vista (revisión del 23 nov).
+  const firstChosen = selection[0]
+  useEffect(() => {
+    if (firstChosen === undefined) return
+    setArch([1, 2, 5, 6].includes(Math.trunc(firstChosen / 10)) ? "upper" : "lower")
+  }, [firstChosen, layout])
   const dates = useMemo(
     () =>
       [
@@ -526,6 +534,10 @@ function StudioBody({
   )
   // En el celular, «Ver como la norma» y «Ver estado al» van al pie: arriba, lo que hace falta para
   // elegir una pieza (mesa del 23 nov, diseño UX).
+  // Lo que hace falta para leer la mixta, dicho como se ve en cada acomodo (estándar E2).
+  const mixedHint = oneArch
+    ? "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van del lado de las coronas."
+    : "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van en las filas del medio."
   const normButton = official ? (
     <Button size="sm" variant="outline" onClick={() => setOfficialOpen(true)}>
       Ver como la norma
@@ -601,10 +613,7 @@ function StudioBody({
               («Toca una pieza…»). Lo que hace falta para leer la mixta se dice siempre (estándar E2). */}
           {compact ? (
             dentition === "mixed" ? (
-              <p className="text-xs text-muted-foreground">
-                Arco exterior y filas de afuera: permanentes. Arco interior y filas del medio:
-                temporales.
-              </p>
+              <p className="text-xs text-muted-foreground">{mixedHint}</p>
             ) : null
           ) : (
             <p className="text-xs text-muted-foreground">
@@ -613,9 +622,7 @@ function StudioBody({
                   ? "Dentición sugerida por la edad del paciente."
                   : "Dentición por defecto: no hay fecha de nacimiento registrada."
                 : "Vista cambiada a mano."}
-              {dentition === "mixed"
-                ? " Arco exterior y filas de afuera: permanentes. Arco interior y filas del medio: temporales."
-                : ""}
+              {dentition === "mixed" ? ` ${mixedHint}` : ""}
             </p>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">

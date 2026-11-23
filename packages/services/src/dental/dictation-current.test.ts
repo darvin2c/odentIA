@@ -43,12 +43,18 @@ describe("lo que Clío dicta del odontograma", () => {
 
   it("no propone lo de toda la pieza que ya está vigente en esa pieza", async () => {
     expect(
-      await prepare({ condition: "implant", toothNumber: 36, quality: "good" }, ["36:implant"]),
+      await prepare({ condition: "implant", toothNumber: 36, quality: "good" }, [
+        "36:implant::",
+        "36:implant:good:",
+      ]),
     ).toBeNull()
-    expect(await prepare({ condition: "impaction", toothNumber: 48 }, ["48:impaction"])).toBeNull()
+    expect(
+      await prepare({ condition: "impaction", toothNumber: 48 }, ["48:impaction::"]),
+    ).toBeNull()
     expect(
       await prepare({ condition: "Espigo-muñón", toothNumber: 15, quality: "good" }, [
-        "15:post_and_core",
+        "15:post_and_core::",
+        "15:post_and_core:good:",
       ]),
     ).toBeNull()
   })
@@ -58,18 +64,34 @@ describe("lo que Clío dicta del odontograma", () => {
     const proposed = (payload: Record<string, unknown>, current: string[]) =>
       prepare(payload, current).catch(() => "sigue")
     expect(
-      await proposed({ condition: "impaction", toothNumber: 38 }, ["48:impaction"]),
+      await proposed({ condition: "impaction", toothNumber: 38 }, ["48:impaction::"]),
     ).not.toBeNull()
     expect(
       await proposed({ condition: "implant", toothNumber: 36, quality: "good" }, [
-        "46:implant",
-        "36:crown",
+        "46:implant::",
+        "36:crown::",
       ]),
     ).not.toBeNull()
     expect(
       await proposed({ condition: "caries", toothNumber: 26, surfaces: ["oclusal"] }, [
-        "26:caries",
+        "26:caries::",
       ]),
     ).not.toBeNull()
+  })
+
+  it("sí propone lo que cambió de estado: la corona de la 11, antes bien y ahora en mal estado", async () => {
+    const proposed = (payload: Record<string, unknown>, current: string[]) =>
+      prepare(payload, current).catch(() => "sigue")
+    const crown = [
+      "11:crown::",
+      "11:crown:good:",
+      "11:crown:good:metal_ceramic",
+      "11:crown::metal_ceramic",
+    ]
+    expect(
+      await proposed({ condition: "crown", toothNumber: 11, quality: "poor" }, crown),
+    ).not.toBeNull()
+    // Dicha sin estado, es la misma corona: no se repite.
+    expect(await prepare({ condition: "crown", toothNumber: 11 }, crown)).toBeNull()
   })
 })

@@ -1,6 +1,7 @@
 import { archNeighbor } from "@odentia/dental/odontogram-arch"
 import {
   canalPaths,
+  mesialIsRight,
   crownPath,
   type FrontRow,
   type FrontTooth,
@@ -83,7 +84,17 @@ const at = (t: FrontTooth, yOcc: number, lx: number, ly: number) => ({
 })
 
 /** La pieza con lo que tiene, en su sitio. Todo se dibuja en coordenadas de la pieza (corona arriba). */
-function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: FrontMarks }) {
+function ToothFront({
+  t,
+  yOcc,
+  reach,
+  marks,
+}: {
+  t: FrontTooth
+  yOcc: number
+  reach: number
+  marks: FrontMarks
+}) {
   const spec = frontSpecOf(t.tooth)
   const { w, ch, rl } = t
   const crown = marks.peg ? pegCrownPath(w, ch) : crownPath(spec.kind, w, ch)
@@ -116,6 +127,42 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
         : { className: "fill-white stroke-zinc-400", strokeWidth: 1.2 })}
     />
   )
+  // Lo que va dentro de la raíz: un conducto por raíz y el perno en la raíz mayor, unido al muñón
+  // dentro de la corona (NTS 6.1.8 y 6.1.37). En el resto radicular, sin muñón: no hay corona.
+  const insideRoot = (withCore: boolean): React.ReactNode[] => {
+    const inside: React.ReactNode[] = []
+    if (marks.canals)
+      for (const d of canalPaths(spec, w, ch, rl))
+        inside.push(<path key={`canal-${d}`} d={d} {...stroke(marks.canals, 2)} />)
+    if (marks.post) {
+      const cx = postRootCenter(t.tooth, spec) * w
+      const pw = Math.max(3.5, 0.11 * w)
+      const top = withCore ? ch * 0.5 : ch
+      inside.push(
+        <g key="post">
+          <rect
+            x={cx - pw / 2}
+            y={top}
+            width={pw}
+            height={ch + rl * 0.55 - top}
+            rx={pw / 2}
+            fill={INK[marks.post]}
+          />
+          {withCore ? (
+            <path
+              d={`M${n(w * 0.34)},${n(ch)} L${n(w * 0.37)},${n(ch * 0.4)} Q${n(w * 0.5)},${n(ch * 0.28)} ${n(w * 0.63)},${n(ch * 0.4)} L${n(w * 0.66)},${n(ch)} Z`}
+              fill={INK[marks.post]}
+              fillOpacity={0.3}
+              stroke={INK[marks.post]}
+              strokeWidth={1.2}
+              strokeLinejoin="round"
+            />
+          ) : null}
+        </g>,
+      )
+    }
+    return inside
+  }
   switch (marks.body) {
     case "none":
       break
@@ -139,6 +186,13 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
             y2={ch + rl * 0.9}
             {...stroke(paint, 1.6)}
           />
+          {insideRoot(false)}
+          {marks.fracture ? (
+            <path
+              d={`M${n(w * 0.25)},${n(ch + rl * 0.35)} L${n(w * 0.75)},${n(ch + rl * 0.45)}`}
+              {...stroke(marks.fracture, 2)}
+            />
+          ) : null}
         </g>,
       )
       break
@@ -244,7 +298,7 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
       for (const surface of marks.surfaces)
         crownParts.push(
           <SurfaceMark
-            key={`${surface.zone}-${surface.style}`}
+            key={`${surface.zone}-${surface.style}-${surface.paint}`}
             mark={surface}
             w={w}
             ch={ch}
@@ -302,34 +356,7 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
           {crownParts}
         </g>,
       )
-      if (marks.canals)
-        for (const d of canalPaths(spec, w, ch, rl))
-          parts.push(<path key={`canal-${d}`} d={d} {...stroke(marks.canals, 2)} />)
-      if (marks.post) {
-        // El perno: una barra en la raíz mayor, unida al muñón dentro de la corona (NTS 6.1.8).
-        const cx = postRootCenter(t.tooth, spec) * w
-        const pw = Math.max(3.5, 0.11 * w)
-        parts.push(
-          <g key="post">
-            <rect
-              x={cx - pw / 2}
-              y={ch * 0.5}
-              width={pw}
-              height={ch * 0.5 + rl * 0.55}
-              rx={pw / 2}
-              fill={INK[marks.post]}
-            />
-            <path
-              d={`M${n(w * 0.34)},${n(ch)} L${n(w * 0.37)},${n(ch * 0.4)} Q${n(w * 0.5)},${n(ch * 0.28)} ${n(w * 0.63)},${n(ch * 0.4)} L${n(w * 0.66)},${n(ch)} Z`}
-              fill={INK[marks.post]}
-              fillOpacity={0.3}
-              stroke={INK[marks.post]}
-              strokeWidth={1.2}
-              strokeLinejoin="round"
-            />
-          </g>,
-        )
-      }
+      parts.push(...insideRoot(true))
       if (marks.arrow) {
         // Dentro de la corona, para no tapar el número: la intruida apunta a la raíz; la extruida y
         // la que está erupcionando, al plano oclusal (NTS 6.1.23 a 6.1.25).
@@ -364,11 +391,13 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
       if (marks.rotation) {
         const paint = INK[marks.rotation.paint]
         const y = ch * 0.18
-        const d = marks.rotation.clockwise
+        // La fila de arriba se dibuja reflejada: el sentido del giro se invierte para que se vea el dicho.
+        const clockwise = t.up ? !marks.rotation.clockwise : marks.rotation.clockwise
+        const d = clockwise
           ? `M${n(w * 0.2)},${n(y + 3)} Q${n(w * 0.5)},${n(y - 7)} ${n(w * 0.8)},${n(y + 3)}`
           : `M${n(w * 0.8)},${n(y + 3)} Q${n(w * 0.5)},${n(y - 7)} ${n(w * 0.2)},${n(y + 3)}`
-        const end = marks.rotation.clockwise ? w * 0.8 : w * 0.2
-        const back = marks.rotation.clockwise ? -4 : 4
+        const end = clockwise ? w * 0.8 : w * 0.2
+        const back = clockwise ? -4 : 4
         parts.push(
           <g key="rotation" stroke={paint} fill="none" strokeWidth={1.5} strokeLinecap="round">
             <path d={d} />
@@ -403,7 +432,11 @@ function ToothFront({ t, yOcc, marks }: { t: FrontTooth; yOcc: number; marks: Fr
       </g>,
     )
   }
-  const shift = marks.shift * ch
+  // Hacia la raíz, la pieza se corre solo hasta donde llega la encía: la retenida queda adentro.
+  const shift =
+    marks.shift > 0
+      ? Math.min(marks.shift * ch, Math.max(0, reach - ch - rl - 4))
+      : marks.shift * ch
   const transform = `translate(${n(t.x)} ${n(yOcc)})${t.up ? " scale(1 -1)" : ""}${shift ? ` translate(0 ${n(shift)})` : ""}`
   return (
     <g transform={transform} opacity={marks.buried ? 0.62 : undefined}>
@@ -503,20 +536,38 @@ function RowMark({ mark, placed }: { mark: FrontRowMark; placed: Placed }) {
         </g>
       )
     case "diastema": {
-      if (pairs.length === 0) return null
-      const [a, b] = pairs[0]!
-      const mid = (a.x + a.w + b.x) / 2
-      const y0 = y(a, 0.2)
-      const y1 = y(a, 0.8)
-      const ym = (y0 + y1) / 2
+      // El paréntesis invertido «)(» entre las coronas (NTS 6.1.6). Con la arcada en dos filas, el de
+      // la línea media queda partido: cada pieza lleva su mitad, del lado del espacio.
+      const curve = (x: number, toward: 1 | -1, t: FrontTooth) => {
+        const y0 = y(t, 0.2)
+        const y1 = y(t, 0.8)
+        return `M${n(x)},${n(y0)} Q${n(x + toward * 4.5)},${n((y0 + y1) / 2)} ${n(x)},${n(y1)}`
+      }
+      if (pairs.length > 0) {
+        const [a, b] = pairs[0]!
+        const mid = (a.x + a.w + b.x) / 2
+        return (
+          <g stroke={ink} fill="none" strokeWidth={1.6} strokeLinecap="round">
+            <path d={curve(mid - 4, 1, a)} />
+            <path d={curve(mid + 4, -1, a)} />
+          </g>
+        )
+      }
+      if (!mark.split) return null
+      const lone = first
+      const right = mesialIsRight(lone.tooth)
       return (
-        <g stroke={ink} fill="none" strokeWidth={1.6} strokeLinecap="round">
-          <path d={`M${n(mid - 1.5)},${n(y0)} Q${n(mid - 6)},${n(ym)} ${n(mid - 1.5)},${n(y1)}`} />
-          <path d={`M${n(mid + 1.5)},${n(y0)} Q${n(mid + 6)},${n(ym)} ${n(mid + 1.5)},${n(y1)}`} />
-        </g>
+        <path
+          d={right ? curve(lone.x + lone.w + 1, 1, lone) : curve(lone.x - 1, -1, lone)}
+          stroke={ink}
+          fill="none"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+        />
       )
     }
     case "transposition": {
+      if (teeth.length < 2) return null
       const a = first
       const b = last
       const yN = placed.numberY + (row.up ? 12 : -12)
@@ -535,7 +586,10 @@ function RowMark({ mark, placed }: { mark: FrontRowMark; placed: Placed }) {
       // Una pieza chica y cónica entre las raíces de las vecinas, con su círculo y la S (NTS 6.1.26).
       const a = first
       const b = teeth.length > 1 ? last : first
-      const cx = teeth.length > 1 ? (a.x + a.w + b.x) / 2 : a.x + a.w
+      // Partida en la línea media: se dibuja una vez, junto a la pieza del lado derecho del paciente.
+      if (mark.split && teeth.length === 1 && !mesialIsRight(a.tooth)) return null
+      const cx =
+        teeth.length > 1 ? (a.x + a.w + b.x) / 2 : mesialIsRight(a.tooth) ? a.x + a.w + 2 : a.x - 2
       const cy = at(a, row.yOcc, 0, a.ch + a.rl * 0.75).y
       return (
         <g>
@@ -627,11 +681,11 @@ export function OdontogramFront({
   const hintId = useId()
   const ref = useRef<HTMLDivElement | null>(null)
   const shown = rows.filter((row) => row.length > 0)
-  // Las de leche, un poco más chicas que las permanentes cuando van en la misma fila larga (la
-  // mixta de la boca entera); en filas de 5 (una arcada), del tamaño que se toca con el dedo.
-  const mixed = shown.some(isPrimaryRow) && shown.some((row) => !isPrimaryRow(row))
+  // Las de leche, más grandes que su medida real: así ninguna baja de 24 px para tocarla (la mixta
+  // de la boca entera a 900 px dejaba las incisivas inferiores en 18). En filas de 5 (una
+  // arcada), un poco más.
   const halfRows = shown.some((row) => isPrimaryRow(row) && row.length <= 5)
-  const { width: W, height: H, placed } = layoutRows(shown, halfRows ? 1.35 : mixed ? 0.92 : 1.25)
+  const { width: W, height: H, placed } = layoutRows(shown, halfRows ? 1.35 : 1.3)
   const [visited, setVisited] = useState<number | null>(null)
   const visible = shown.flat()
   const tabStop =
@@ -714,11 +768,16 @@ export function OdontogramFront({
                   key={t.tooth}
                   t={t}
                   yOcc={p.row.yOcc}
+                  reach={Math.abs((p.row.up ? p.row.top : p.row.bottom) - p.row.yOcc)}
                   marks={frontMarksOf(t.tooth, entriesOf(t.tooth))}
                 />
               ))}
               {rowMarks.map((mark) => (
-                <RowMark key={`${mark.kind}-${mark.teeth.join("-")}`} mark={mark} placed={p} />
+                <RowMark
+                  key={`${mark.kind}-${mark.paint}-${mark.teeth.join("-")}`}
+                  mark={mark}
+                  placed={p}
+                />
               ))}
               {p.row.teeth.map((t) => {
                 const cx = t.x + t.w / 2

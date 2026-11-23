@@ -168,7 +168,9 @@ export function canalPaths(spec: FrontSpec, w: number, ch: number, rl: number): 
 export function postRootCenter(tooth: number, spec: FrontSpec): number {
   if (spec.roots === 1 || spec.roots === 3) return 0.5
   const { centers } = rootPaths(spec, 1, 1, 1)
-  if (spec.kind === "premolar") return 0.5
+  // El primer premolar superior: en una de sus dos raíces, no entre ellas (más allá de la
+  // bifurcación el perno quedaría fuera de la pieza).
+  if (spec.kind === "premolar") return centers[0] ?? 0.5
   // Molar inferior: la raíz distal, del lado contrario a la mesial.
   return mesialIsRight(tooth) ? Math.min(...centers) : Math.max(...centers)
 }

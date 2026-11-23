@@ -136,7 +136,7 @@ export function OdontogramArch({
       className={`relative mx-auto w-full min-w-0 max-w-[520px] ${aspect ? "" : single ? "aspect-[10/11]" : "aspect-[10/9]"}`}
       style={aspect ? { aspectRatio: `1 / ${aspect}` } : undefined}
       role="group"
-      aria-label="Odontograma"
+      aria-label={title ? `Arcada ${title.toLowerCase()}, de arriba` : "Odontograma"}
       aria-describedby={hintId}
       onKeyDown={onKeyDown}
       onFocus={(event) => {

@@ -108,7 +108,7 @@ describe("lo que se dibuja de frente", () => {
     const marks = frontRowMarksOf([...FDI_ADULT_ROWS[1]!], (tooth) =>
       [44, 45, 46].includes(tooth) ? [bridge] : [],
     )
-    expect(marks).toEqual([{ kind: "bridge", paint: "blue", teeth: [46, 45, 44] }])
+    expect(marks).toEqual([{ kind: "bridge", paint: "blue", teeth: [46, 45, 44], split: false }])
   })
 
   it("el resto radicular es solo la raíz, en rojo, y la retenida queda dentro de la encía", () => {

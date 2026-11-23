@@ -20,21 +20,21 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
     "curacion provisional",
     "obturacion provisional",
   ],
-  root_remnant: ["resto radicular", "raiz", "solo raiz"],
+  root_remnant: ["resto radicular", "raiz", "raices", "solo raiz"],
   crown: ["funda"],
   temporary_crown: ["funda temporal", "funda provisional", "corona provisional"],
-  root_canal_treatment: ["endodoncia", "conducto", "tratamiento de raiz", "raiz"],
+  root_canal_treatment: ["endodoncia", "conducto", "tratamiento de raiz", "raiz", "raices"],
   post_and_core: ["perno", "poste", "perno munon", "espigo"],
   fixed_partial_denture: ["puente"],
   removable_partial_denture: ["placa", "protesis removible", "dentadura postiza parcial"],
-  complete_denture: ["dentadura", "dentadura postiza", "placa total"],
+  complete_denture: ["dentadura", "dentadura postiza", "placa", "placa total"],
   removable_orthodontic_appliance: ["placa", "aparato removible", "ortodoncia"],
   fixed_orthodontic_appliance: ["brackets", "braquets", "frenillos", "ortodoncia"],
   impaction: ["retenida", "retenido", "incluida", "incluido"],
-  fracture: ["raiz fracturada", "fracturado", "roto", "rota"],
+  fracture: ["raiz fracturada", "fracturado", "fracturada"],
   tooth_wear: ["desgaste", "desgastado", "abrasion", "abfraccion", "erosion"],
   rotation: ["girado", "girada", "rotado", "rotada"],
-  missing_tooth: ["extraida", "extraido", "falta", "perdida"],
+  missing_tooth: ["extraida", "extraido", "falta"],
   supernumerary_tooth: ["supernumerario", "mesiodens"],
   peg_tooth: ["conoide"],
   enamel_development_defect: ["hipoplasia", "fluorosis"],
@@ -45,7 +45,19 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
  * no: «caries posterior» traía el espigo-muñón por «poste».
  */
 const saysWhole = (query: string, word: string) =>
-  ` ${query} `.includes(` ${word} `) || ` ${query} `.includes(` ${word}s `) || ` ${query} `.includes(` ${word}es `)
+  !NOT_SAID.some(([said, phrase]) => said === word && query.includes(phrase)) &&
+  (` ${query} `.includes(` ${word} `) ||
+    ` ${query} `.includes(` ${word}s `) ||
+    ` ${query} `.includes(` ${word}es `))
+
+/**
+ * Lo que se dice con la misma palabra y no es el hallazgo (revisión del 23 nov): la placa
+ * bacteriana no es una prótesis. «Pérdida», «roto» y «rota» no entran por lo mismo: la pérdida ósea
+ * no es una pieza ausente, y «rota» es el comienzo de «rotada».
+ */
+const NOT_SAID: ReadonlyArray<readonly [word: string, phrase: string]> = [
+  ["placa", "placa bacteriana"],
+]
 
 /** Si lo que se está escribiendo es el inicio de una palabra del sinónimo («pern» es «perno»). */
 const startsWordOf = (word: string, query: string) => ` ${word}`.includes(` ${query}`)
@@ -69,7 +81,9 @@ function findingsSaidAs(query: string): Set<string> {
   if (longest > 0)
     return new Set(contained.filter(([, length]) => length === longest).map(([code]) => code))
   return new Set(
-    entries.filter(([, words]) => words.some((word) => startsWordOf(word, query))).map(([code]) => code),
+    entries
+      .filter(([, words]) => words.some((word) => startsWordOf(word, query)))
+      .map(([code]) => code),
   )
 }
 
@@ -144,7 +158,8 @@ export function searchFindings(text: string): FindingSearch {
   // Cada palabra que no es del motivo se busca sola, en el orden escrito.
   if (findings.length === 0 && query.includes(" ")) {
     const seen = new Set<string>()
-    findings = query
+    // Sin lo que se dice igual y no es el hallazgo: «placa bacteriana» no se parte en «placa».
+    findings = NOT_SAID.reduce((rest, [, phrase]) => rest.replace(phrase, " "), query)
       .split(" ")
       .filter((word) => word.length >= ELSEWHERE_MIN && reasonOf(word) === null)
       .flatMap((word) => matchFindings(word).findings)

@@ -496,7 +496,9 @@ function ToothCanvas({
     ({ entry }) =>
       entry.condition === "implant" ||
       entry.condition === "complete_denture" ||
-      entry.condition === "removable_partial_denture" ||
+      // La removible repone solo las que faltan; las del gancho siguen siendo la pieza.
+      (entry.condition === "removable_partial_denture" &&
+        graphic.some((other) => other.entry.condition === "missing_tooth")) ||
       (entry.condition === "fixed_partial_denture" &&
         detailsOf(entry).abutmentTeeth?.includes(toothNumber) !== true),
   )

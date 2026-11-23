@@ -179,11 +179,14 @@ export function FindingPicker({
         block === "reason" && found.reason ? (
           <FindingReasonNotice key="reason" reason={found.reason} onReason={onReason} />
         ) : block === "other" ? (
-          <div key="other" className="flex flex-col gap-3">
+          // Sin tratamiento que ofrecer («girado», «retenida»), el bloque no queda con su rótulo solo.
+          <div key="other" className="flex flex-col gap-3 has-[>[data-other]:empty]:hidden">
             {visible.length > 0 ? (
               <p className="text-xs text-muted-foreground">Si falta hacerlo:</p>
             ) : null}
-            {other}
+            <div data-other="" className="contents">
+              {other}
+            </div>
           </div>
         ) : block === "empty" ? (
           <EmptyState
