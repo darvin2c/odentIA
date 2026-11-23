@@ -3,15 +3,24 @@ import { tool } from "@langchain/core/tools"
 import {
   DICTATION_MAX_SUGGESTIONS,
   DICTATION_OPERATION,
+  DICTATION_SPEAKERS,
   DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
+  dictationHealthSchema,
+  dictationSentences,
+  type DictationTurnStart,
   type DictationDraft,
   type DictationFormQuestion,
+  type DictationTurn,
   formAnswerWords,
   groundHeard,
+  groundWords,
   heardVocabularyOf,
+  kinSaid,
   operationAgentSchema,
   pauseBridge,
+  turnsFromStarts,
+  turnsSayTranscript,
   withPauseBridge,
 } from "@odentia/services"
 import { z } from "zod"
@@ -90,7 +99,7 @@ export function dictationEdits(example: string) {
       .max(VOICE_EDITS_HINT)
       .default([])
       .describe(
-        "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+        "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna. Lo que suma («también en la 37», «además…», «igual en…») no corrige: es una sugerencia nueva y la pendiente queda como estaba.",
       ),
     quitar: z
       .array(
@@ -110,6 +119,43 @@ export function dictationEdits(example: string) {
 }
 
 export const DICTATION_TOOL = "registrar_dictado"
+
+/**
+ * Lo de salud dicho en la conversación (mesa del 20 nov 2026), con lo que pregunta el producto
+ * (`ProductDictation.health`): una entrada por cada persona que lo dijo en la pausa, con quién lo
+ * dijo y su frase (revisión del 21 nov, A4: con una sola entrada, la metformina que dijo la hija
+ * quedaba a nombre del paciente). La forma es la de su registro; el servicio la valida y guarda solo
+ * eso. Sin `dicho`, lo que lee `readDictation`; una entrada cuya frase no está en lo dicho no se usa.
+ */
+export function dictationHealthPart(own: Parameters<typeof dictationHealthSchema>[0]) {
+  const schema = dictationHealthSchema(own)
+  return {
+    schema,
+    part: z
+      .array(schema.extend({ dicho: dictationSaid }))
+      .max(3)
+      .default([])
+      .describe("Lo que se dijo de la salud del paciente en la conversación: una entrada por cada persona que lo dijo. Vacío si no se habló de su salud."),
+  }
+}
+
+/**
+ * Qué va en `salud` y qué no, igual en los dos productos (mesa del 20 nov 2026, voz clínica): solo
+ * lo dicho, «no que yo sepa» es no sabe, el silencio no es «No», lo de un familiar no es del
+ * paciente y un peso que alguien calcula no es una medida. `topics`: lo que pregunta el producto;
+ * `notInRelato`: lo que no va al relato; `measured`: dónde no va un peso dicho (latidIA: los signos).
+ */
+export function healthPrompt(input: { topics: string; notInRelato: string; measured: string }): string[] {
+  return [
+    `En \`salud\` va lo que se dice de la salud del paciente en la conversación, lo cuente él o quien lo acompaña: ${input.topics}. Solo lo que se dijo: no lo deduzcas de un medicamento, de un diagnóstico ni de lo habitual. Si se corrige («tomo warfarina… perdón, apixabán»), vale lo último. \`salud\` nunca reemplaza a \`nota\`: si además se dice para qué viene o qué le pasa, va también la consulta. Un tratamiento que sigue en curso («va en el primer año de tratamiento») no es su última visita.`,
+    "Un «No» va solo si respondió que no a una pregunta de ese tema («¿toma alguna medicina?» — «no, ninguna»). «No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`. Lo que no se preguntó ni se dijo no va: el silencio no es «No».",
+    "En `declarante` va quién lo dijo: `paciente`, `acompanante` (con `vinculo` si se dijo: «madre»; «señora» o «don» es cómo se le habla, no su parentesco) o `no_se_sabe` si no queda claro. Una entrada por persona: si el paciente dice «tomo losartán» y su hija agrega «también toma metformina», son dos entradas, cada una con lo que dijo esa persona y su frase. Quien acompaña a un niño habla de él: «tiene asma, usa salbutamol» es del niño.",
+    "Lo que alguien cuenta de sí mismo cuando no es el paciente, o de un familiar («yo soy diabética», dicho por la madre; «mi papá es diabético»; «su papá es alérgico a la penicilina»), no es del paciente: no va en `salud` ni en `alergias`. Los antecedentes de la familia no se registran aquí: van en `sin_lugar`, con su frase y `familiar`.",
+    `El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida: no va en ${input.measured}ninguna parte de la historia; va solo en \`sin_lugar\`, con su frase y \`peso_dicho\`.`,
+    `${input.notInRelato} van en \`salud\`, no en el relato; en el relato queda lo que tomó para la molestia de hoy («tomó ibuprofeno y le calmó»).`,
+    "La salud pendiente llega con lo que ya dice: lo nuevo va en `salud`, solo lo nuevo, y el sistema lo suma. Si alguien corrige en voz alta lo ya dicho, es una corrección de esa pendiente, con su frase en `dicho` y solo el grupo que cambia.",
+  ]
+}
 
 /**
  * Las respuestas a las fichas empezadas, igual en todo producto que dicta
@@ -132,7 +178,7 @@ export function appointmentAndBudgetPrompt(booking: string): string[] {
   return [
     // Prueba con voz del 15 nov (c3, v10): «hoy solo hacemos adaptación y profilaxis y los citamos en una semana»
     // dejaba la cita «para» lo de hoy y un presupuesto que nadie pidió.
-    `En \`citas\` va la próxima cita solo si pide reservarla («cítalo en quince días», «que vuelva el jueves a las cuatro», ${booking}): el día en \`date\`, contado desde la fecha de hoy, la hora en \`time\` solo si la dijo, y en \`service\` para qué vuelve, solo si lo dijo: lo que se hace hoy no es para qué vuelve. Decir cuándo hay que volver a verlo sin pedir reservar («control en seis meses») es un control, no una cita. Si dudas, es un control.`,
+    `En \`citas\` va la próxima cita solo si pide reservarla («cítalo en quince días», «que vuelva el jueves a las cuatro», ${booking}): el día en \`date\`, contado desde la fecha de hoy, la hora en \`time\` solo si la dijo, y en \`service\` para qué vuelve, solo si lo dijo: lo que se hace hoy no es para qué vuelve. Decir cuándo hay que volver a verlo sin pedir reservar («control en seis meses», «la veo la próxima semana para la otra resina», «nos vemos en quince días para ver cómo cicatriza») es un control en \`controles\`, no una cita: con la fecha contada desde hoy y, en el título, para qué vuelve si se dijo («Control: la otra resina»). «Lo citamos», «los citamos», «cítalo» o «agéndalo» sí piden reservarla, aunque solo digan cuándo («los citamos en una semana»): es una cita. Si dudas, es un control.`,
     "En `presupuesto` va un pedido de armar el presupuesto ahora («arma el presupuesto», «prepárale el presupuesto para enseñárselo»), con `show` si pidió mostrárselo. Pedir enviarlo no lo envía: es el mismo pedido de armarlo. Sin ese pedido no va nada: reservar una cita, indicar un tratamiento o contar lo que se hizo no lo piden.",
   ]
 }
@@ -145,11 +191,15 @@ export function appointmentAndBudgetPrompt(booking: string): string[] {
  */
 export function consultaPrompt(examples: string): string[] {
   return [
-    `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado.`,
+    `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado. Es lo que cuenta el paciente o quien lo acompaña, no lo que examina o encuentra quien atiende: eso va a la evolución.`,
     "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años», «desde la caída del sábado»), se cuenta desde ahí («hace dos años»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
-    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
+    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias) va en el relato; lo que toma, en `salud`. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
     // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
     "El relato es lo que cuentan el paciente o quien lo acompaña sobre lo que le pasa. No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente o al asistente mientras se lo atiende («tranquila, ya casi terminamos», «abre grande», «¿te duele cuando comes?», «pásame…») ni lo que el paciente dice o llora mientras lo examinan o lo tratan («¡me duele!», «no quiero», «mamá»): una queja suelta entre eso no es de la historia. Lo que responde sobre lo que le pasa sí es del relato, y lo que el profesional encuentra al examinarlo va donde siempre.",
+    // QA del 21 nov: la explicación del sistema a la paciente («al decir dolor en la 16 lo anota…») quedó firmada como evolución.
+    "La evolución (`evolution`) es solo lo que se examinó, lo que se hizo en esta atención y cómo respondió el paciente. Lo que se le explica al paciente o a quien lo acompaña (cómo funciona el sistema o la consulta, cómo se paga, qué se haría y por qué) no es evolución ni otra parte de la historia: no va.",
+    // Mesa del 20 nov 2026: con la consulta pendiente sin su texto, cada pausa la «corregía» y reemplazaba el relato.
+    "La consulta pendiente llega con lo que ya dice. Lo nuevo que se cuenta de la consulta (lo que le pasa, desde cuándo, lo que se hizo) va en `nota`, solo lo nuevo y sin repetir lo que ya dice: el sistema lo suma a esa misma consulta. El motivo y el tiempo ya dichos solo cambian si alguien se corrige: entonces va en `nota` el último. `correcciones` a la consulta es solo para cuando alguien corrige en voz alta lo ya dicho («no, fue hace un mes», «perdón, es del lado izquierdo»), con esa frase en `dicho` y solo los campos que cambian: una pregunta, o lo que no habla de la consulta, no la corrige.",
   ]
 }
 
@@ -170,7 +220,7 @@ export function homeCarePrompt(examples: string): string {
  */
 export function allergyAndDonePrompt(clinician: string, done: string): string[] {
   return [
-    "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si dice que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. Un medicamento que toma o que se receta no es una alergia.",
+    "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si responde que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. «No que yo sepa», «creo que no» o «no sé» no son `none`: van en \`salud\` como que no sabe. Un medicamento que toma o que se receta no es una alergia.",
     // «Hoy hacemos…» también es de hoy (prueba con voz del 15 nov, c3, v10: la profilaxis de «hoy solo hacemos
     // adaptación y profilaxis» quedaba en el plan, en la cita o en ninguna parte).
     `En \`procedimientos\` va lo que el ${clinician} hizo o hace hoy en esta atención, contado como hecho (${done}) o como lo de hoy («hoy hacemos…», «hoy solo…»), uno por prestación y con \`service\` en sus palabras: el sistema lo busca en el plan del paciente y en los servicios. Lo que queda para otro día es una indicación, aunque lo diga en la misma frase. Si no queda claro si es de hoy, es una indicación. Contarlo en la evolución está bien: además va en \`procedimientos\`.`,
@@ -214,7 +264,7 @@ export interface DictationProfile {
    * guardan. Una parte es una lista; con `single`, una sola entrada (latidIA:
    * los signos vitales, el descanso).
    */
-  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"]; single?: true }>
+  parts: ReadonlyArray<{ key: string; kind: DictationDraft["kind"]; single?: true; schema?: z.ZodObject }>
   /** Lo que dice la herramienta al modelo. */
   toolDescription: string
   /** Las instrucciones fijas, con lo de la clínica que no cambia en la atención. */
@@ -499,9 +549,12 @@ export function readDictation(
   const quote = (item: Record<string, unknown>, kind?: DictationDraft["kind"]) => {
     const said = typeof item["dicho"] === "string" ? item["dicho"] : undefined
     const grounded = groundSource(said, transcript)
+    if (grounded || !said) return grounded
     const question = kind === "ficha" ? forms.find((one) => one.number === item["question"]) : undefined
-    if (grounded || !question || !said) return grounded
-    return groundHeard(said.replace(QUOTES, ""), transcript, heardVocabularyOf(question))
+    // La voz de Chrome escribe sin tildes ni puntuación y Clío cita con ellas: la frase se busca también
+    // palabra por palabra y por cómo suena (`groundWords`), como la comprueba el servidor (QA del 21 nov:
+    // el losartán y el asma dichos se perdían por una tilde o una coma).
+    return (question ? groundHeard(said.replace(QUOTES, ""), transcript, heardVocabularyOf(question)) : "") || groundWords(said, transcript)
   }
   /** Algo que no se pudo usar: se cuenta y, si se sabe qué frase lo pidió, se guarda para mostrarla. */
   const skip = (item: unknown) => {
@@ -509,12 +562,16 @@ export function readDictation(
     const said = isRecord(item) ? quote(item) : ""
     if (said && !unused.includes(said)) unused.push(said)
   }
-  /** Solo los campos de su operación: la cita y lo que el modelo agregue de más no llegan al servicio. */
+  /**
+   * Solo los campos de su operación (o de su parte, si tiene su propia forma: lo de salud): la cita y
+   * lo que el modelo agregue de más no llegan al servicio.
+   */
   const fields = (
     kind: DictationDraft["kind"],
     item: Record<string, unknown>,
+    own?: z.ZodObject,
   ): Record<string, unknown> => {
-    const schema = operationAgentSchema(DICTATION_OPERATION[kind])
+    const schema = own ?? operationAgentSchema(DICTATION_OPERATION[kind])
     const parsed = schema.safeParse(item)
     if (parsed.success) return parsed.data as Record<string, unknown>
     return Object.fromEntries(
@@ -543,12 +600,15 @@ export function readDictation(
   for (const part of parts) {
     const value = args[part.key]
     for (const item of part.single && isRecord(value) ? [value] : items(value)) {
-      const payload = isRecord(item) ? fields(part.kind, item) : {}
+      const payload = isRecord(item) ? fields(part.kind, item, part.schema) : {}
       // Una respuesta de ficha a una pregunta que no se le dio: no se adivina a cuál se refería.
       const question = payload["question"]
       const unknownQuestion =
         part.kind === "ficha" && !(typeof question === "number" && Number.isInteger(question) && question >= 1 && question <= forms.length)
-      if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion) skip(item)
+      // Lo de su salud sin su frase dicha tal cual no se propone (revisión del 21 nov, A5): sin ella,
+      // nada dice que se dijo, y la regla de la duda («que yo sepa, no») no tiene qué leer.
+      const unheardHealth = part.kind === "salud" && isRecord(item) && !quote(item)
+      if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion || unheardHealth) skip(item)
       else {
         // Una respuesta citada en pedazos los lleva aparte: el servidor decide con cuáles se comprueba.
         const pieces = part.kind === "ficha" && typeof item["dicho"] === "string" ? groundPieces(item["dicho"], transcript) : null
@@ -583,13 +643,28 @@ export function readDictation(
   }
   const kept = drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
   for (const item of drafts.slice(DICTATION_MAX_SUGGESTIONS)) skip({ dicho: item.sourceText })
+  // Lo clínico sin lugar (lo de un familiar, un peso dicho), con su frase tal cual: «No lo usé» lo dice.
+  const outOfPlace: DictationOutOfPlaceItem[] = []
+  for (const item of Array.isArray(args["sin_lugar"]) ? args["sin_lugar"] : []) {
+    if (!isRecord(item)) continue
+    const said = quote(item)
+    const why = item["motivo"] === "familiar" || item["motivo"] === "peso_dicho" ? item["motivo"] : "otro"
+    if (said && !outOfPlace.some((one) => one.said === said)) outOfPlace.push({ said, why })
+  }
   return {
     drafts: kept,
     corrections: voice(corrections),
     removals: voice(removals),
     omitted,
     unused,
+    ...(outOfPlace.length ? { outOfPlace } : {}),
   }
+}
+
+/** Lo clínico que se dijo y no tiene dónde ir, con su frase tal cual y su motivo. */
+export interface DictationOutOfPlaceItem {
+  said: string
+  why: "familiar" | "peso_dicho" | "otro"
 }
 
 /** Una sugerencia que sigue sin decidir, como se le nombra al asistente; su posición es su número. */
@@ -607,6 +682,8 @@ export interface DictationExtraction {
   omitted: number
   /** Lo que dijo para pedir lo que no se pudo usar, tal cual está en lo dictado: la pantalla lo muestra. */
   unused: string[]
+  /** Lo clínico que dejó fuera con su motivo (lo de un familiar, un peso dicho), con su frase. */
+  outOfPlace?: DictationOutOfPlaceItem[]
   model: string
   /** Lo dictado con que se comprobó la pausa (`askDictationModel`): con eso la comprueba también el servidor. */
   heard: string
@@ -854,4 +931,220 @@ export async function askDictationModel(
     raw,
     heard,
   }
+}
+
+/* ---------- El repaso al terminar (mesa del 20 nov 2026, «Clío en una consulta conversada», P4) ---------- */
+
+/** Turnos que se piden en un repaso, como mucho: 30 000 caracteres de conversación no tienen más. */
+const REVIEW_TURNS = 600
+
+/**
+ * Lo que el repaso suma al esquema de la pausa: los turnos de cada tramo y lo clínico que no tiene
+ * dónde ir, con su motivo. Lo demás es la misma herramienta, con el mismo nombre: las instrucciones
+ * fijas dicen que se responde llamándola.
+ */
+const REVIEW_PARTS = {
+  turnos: z
+    .array(
+      z.object({
+        desde: z.number().int().min(1).describe("El número de la frase donde empieza a hablar, como llega entre corchetes."),
+        quien: z.enum(DICTATION_SPEAKERS).describe("Quién habló: `dra` (quien atiende), `paciente`, `acompanante` o `no_se_sabe`."),
+        vinculo: z.string().max(80).optional().describe("De quien acompaña, el parentesco si se dijo o se nota («madre»). «Señora» o «don» es cómo se le habla, no un parentesco. Si no se sabe, no va."),
+        empieza: z
+          .string()
+          .max(80)
+          .optional()
+          .describe("Si empieza a hablar a media frase: sus primeras palabras, tal cual están en la frase («si tomo losartán»). Si empieza con la frase, no va."),
+      }),
+    )
+    .max(REVIEW_TURNS)
+    .default([])
+    .describe("Cada vez que empieza a hablar otra persona en los tramos marcados «partir en turnos»: la frase donde empieza y quién es. Sigue hasta donde empieza el siguiente."),
+  sin_lugar: dictationOutOfPlacePart(),
+}
+
+/**
+ * Lo clínico que se dijo y no tiene dónde ir, con su frase y su motivo: lo de la salud de un familiar
+ * y un peso dicho. Va en la pausa y en el repaso, para que «No lo usé» lo diga ya en la pausa (QA
+ * del 21 nov: el peso y los antecedentes de la familia se perdían en silencio hasta el repaso).
+ */
+export function dictationOutOfPlacePart() {
+  return z
+    .array(
+      z.object({
+        dicho: dictationSaid,
+        motivo: z
+          .enum(["familiar", "peso_dicho", "otro"])
+          .describe("`familiar`: de la salud de un familiar; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."),
+      }),
+    )
+    .max(DICTATION_MAX_SUGGESTIONS)
+    .default([])
+    .describe("Lo clínico que se dijo y no tiene dónde ir, con su frase y su motivo. Vacío si no hay.")
+}
+
+/** La herramienta del repaso: la de la pausa del producto, con los turnos y lo que no tiene dónde ir. */
+export function dictationReviewExtraction(profile: DictationProfile): z.ZodObject {
+  return profile.extraction.extend(REVIEW_PARTS)
+}
+
+/**
+ * Cómo se repasa, igual en todo producto: va al final de las instrucciones fijas, en el mensaje de
+ * sistema y antes de su corte, como las reglas de las fichas. La herramienta del repaso no es la de
+ * la pausa (lleva los turnos), así que el proveedor no le sirve la caché que dejaron las pausas: la
+ * escribe el primer repaso y la leen los siguientes de la clínica mientras dure (ADR 0012).
+ */
+export const DICTATION_REVIEW_RULES = [
+  "Repaso al terminar. Esta vez no llega una pausa: llega toda la conversación de la atención, tramo por tramo, una sola vez, con lo que ya quedó de ella. Las pausas ya ordenaron cada tramo; tú registras solo lo que se les pasó y partes en turnos los tramos que lo piden.",
+  "- Lo que ya quedó (pendiente, ya confirmado o descartado) no lo registres otra vez, aunque se diga de nuevo en la conversación. Lo descartado lo decidió una persona: no lo vuelvas a proponer.",
+  "- No corrijas ni quites nada: `correcciones` y `quitar` van vacíos. Las órdenes de la conversación («quita…», «no, es la…») ya se aplicaron en su pausa.",
+  "- La consulta y la salud pendientes llegan con lo que ya dicen: en `nota` y en `salud` va solo lo que les falta, y el sistema lo suma.",
+  "- Cuándo vuelve: «te veo la próxima semana para la otra resina» o «nos vemos en quince días para ver cómo cicatriza» dicen cuándo vuelve y para qué sin pedir reservar: es un control en `controles`, con la fecha contada desde hoy y, en el título, para qué vuelve («Control: la otra resina»). Si pide reservar la cita, es una cita.",
+  "- Con fichas abiertas, responde las preguntas que la conversación responde y siguen sin respuesta, cada una con su frase.",
+  "- La conversación llega en frases numeradas («[12] ¿Desde cuándo?»). En `turnos` va, en los tramos marcados «partir en turnos», cada vez que empieza a hablar otra persona: `desde`, el número de la frase donde empieza, y quién es. El turno sigue hasta donde empieza el siguiente, también en el tramo que viene; no copies el texto. La primera frase de esos tramos lleva siempre su turno.",
+  "- La voz no pone puntos: una pregunta y su respuesta pueden llegar en una sola frase («[7] toma alguna medicina si tomo losartán para la presión»). Ahí son dos turnos con el mismo `desde`: el de quien pregunta y el de quien responde, que lleva en `empieza` sus primeras palabras tal cual están en la frase («si tomo losartán»).",
+  "- `quien`: `dra` (quien atiende), `paciente`, `acompanante` (con `vinculo` solo si se dijo o se nota el parentesco: «madre») o `no_se_sabe`. Quien pregunta, examina, explica o indica es quien atiende, aunque haya un acompañante («la 75 tiene caries», «le voy a hacer una resina»); quien cuenta lo que siente, el paciente; quien habla del paciente («le duele», «mi hija no duerme»), quien lo acompaña. Si no queda claro, `no_se_sabe`: no adivines.",
+  "- En `sin_lugar` va lo clínico que se dijo y no tiene dónde ir, con su frase en `dicho` y su motivo: lo de la salud de un familiar («mi papá es diabético») con `familiar`; un peso o una talla que alguien calcula o recuerda («debe pesar 24») con `peso_dicho`; lo demás, con `otro`. La charla, lo administrativo y lo que ya quedó no van.",
+].join("\n")
+
+/** Un tramo de la conversación, como lo lee el repaso. */
+export interface DictationReviewSegment {
+  number: number
+  saidAt: Date
+  transcript: string
+  /** Aún no tiene turnos: se piden. */
+  needsTurns: boolean
+}
+
+/** Lo que se le pregunta al modelo en el repaso, con lo de la clínica ya leído. */
+export interface DictationReviewAsk extends Omit<DictationAsk, "transcript" | "context" | "pending"> {
+  segments: readonly DictationReviewSegment[]
+  /** Lo dicho antes de estos tramos no entra: la conversación pasa de lo que se lee de una vez. */
+  earlierLeftOut: boolean
+  pending: readonly string[]
+  confirmed: readonly string[]
+  discarded: readonly string[]
+}
+
+/** Lo dictado con que se comprueba lo que devuelve el repaso: los tramos, uno por línea. */
+export const reviewHeard = (segments: ReadonlyArray<Pick<DictationReviewSegment, "transcript">>) => segments.map((segment) => segment.transcript).join("\n")
+
+/**
+ * Las frases de cada tramo (`dictationSentences`, del servidor), numeradas seguidas desde 1 en toda
+ * la conversación: el mensaje las muestra así y `turnsFromStarts` arma los turnos con la misma cuenta.
+ */
+export function reviewSentences(segments: readonly DictationReviewSegment[]) {
+  let number = 0
+  return segments.map((segment) => ({
+    segment,
+    sentences: dictationSentences(segment.transcript).map((text) => {
+      number += 1
+      return { number, text }
+    }),
+  }))
+}
+
+/** Los mensajes del repaso: las instrucciones de la pausa con las del repaso, y la conversación. */
+export function dictationReviewMessages(ask: DictationReviewAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
+  const fixed = profile.systemPrompt({ services: ask.services, diagnosisList: ask.diagnosisList, catalog: ask.catalog })
+  const forms = ask.forms ?? []
+  const instructions = [fixed, ...(forms.length ? [DICTATION_FORMS_RULES] : []), DICTATION_REVIEW_RULES].join("\n\n")
+  const today = new Intl.DateTimeFormat(ask.zone.locale, { timeZone: ask.zone.timezone, dateStyle: "full" }).format(ask.now)
+  const hour = (at: Date) => new Intl.DateTimeFormat(ask.zone.locale, { timeZone: ask.zone.timezone, timeStyle: "short" }).format(at)
+  const known = [
+    ...ask.pending.map((label) => `- ${label} · pendiente`),
+    ...ask.confirmed.map((label) => `- ${label} · ya confirmada`),
+    ...ask.discarded.map((label) => `- ${label} · descartada: no la vuelvas a proponer`),
+  ]
+  const human = [
+    `Hoy es ${today}, ${ask.now.toISOString()} (zona ${ask.zone.timezone}).`,
+    known.length ? `Lo que ya quedó de esta conversación (no lo registres otra vez):\n${known.join("\n")}` : "",
+    dictationFormsText(forms),
+    ask.earlierLeftOut ? "Lo dicho antes del tramo 1 no se incluye: la conversación es más larga de lo que se lee de una vez, y sus pausas ya lo ordenaron." : "",
+    `La conversación, tramo por tramo y en frases numeradas:\n${reviewSentences(ask.segments)
+      .map(({ segment, sentences }) =>
+        [`Tramo ${segment.number} (${hour(segment.saidAt)})${segment.needsTurns ? " · partir en turnos" : ""}:`, ...sentences.map((sentence) => `[${sentence.number}] ${sentence.text}`)].join("\n"),
+      )
+      .join("\n\n")}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+  return [new SystemMessage({ content: cachedPrompt(ask.provider, instructions, responses) }), new HumanMessage({ content: human })]
+}
+
+const SPEAKERS = new Set<string>(DICTATION_SPEAKERS)
+
+/** Lo que devuelve el repaso, ya leído. */
+export interface DictationReviewExtraction {
+  drafts: DictationDraft[]
+  omitted: number
+  unused: string[]
+  /** Lo clínico que dejó fuera con su motivo, con la frase tal cual se dijo. */
+  outOfPlace: DictationOutOfPlaceItem[]
+  /** Los turnos de cada tramo (por su número), armados con sus frases (`turnsFromStarts`). */
+  turns: Array<{ number: number; turns: DictationTurn[] }>
+  /** Los tramos cuyos turnos no eran el tramo tal cual: no se usan. */
+  turnsRejected: number[]
+  model: string
+  heard: string
+}
+
+/**
+ * Lee la respuesta del repaso. Lo que propone se lee como una pausa (`readDictation`), con toda la
+ * conversación para comprobar cada frase, pero sin correcciones ni «quita»: las órdenes de la
+ * conversación ya se aplicaron en su pausa y aplicarlas otra vez quitaría lo nuevo o lo cambiaría.
+ * De los turnos solo llega dónde empieza cada uno y quién habló, de la lista: el texto sale de las
+ * frases del tramo, así que nunca es un texto que nadie dijo (ni se paga copiarlo).
+ */
+export function readDictationReview(
+  args: unknown,
+  segments: readonly DictationReviewSegment[],
+  parts: DictationProfile["parts"],
+  forms: readonly DictationFormQuestion[] = [],
+): Omit<DictationReviewExtraction, "model" | "heard"> | null {
+  if (!isRecord(args)) return null
+  const heard = reviewHeard(segments)
+  const { correcciones: _corrections, quitar: _removals, turnos, ...rest } = args
+  const read = readDictation(rest, heard, 0, parts, forms)
+  if (!read) return null
+  // Solo dónde empieza cada turno y quién: el texto lo ponen las frases del tramo (`turnsFromStarts`).
+  const starts = (Array.isArray(turnos) ? turnos : []).flatMap((entry): DictationTurnStart[] => {
+    if (!isRecord(entry) || typeof entry["desde"] !== "number" || !SPEAKERS.has(String(entry["quien"]))) return []
+    // Una clave de quién habló («no_se_sabe») o cómo se le habla («señora») no es un parentesco: no
+    // va («Acompañante (no_se_sabe)», «su señora» por la madre de un niño; QA del 21 nov).
+    const kin = kinSaid(entry["vinculo"])
+    const words = typeof entry["empieza"] === "string" ? entry["empieza"].trim() : ""
+    return [{ desde: entry["desde"], quien: entry["quien"] as DictationTurnStart["quien"], ...(kin ? { vinculo: kin } : {}), ...(words ? { empieza: words } : {}) }]
+  })
+  const built = turnsFromStarts(segments, starts)
+  const assembled = segments.flatMap((segment, index) => {
+    const list = built[index]
+    return list ? [{ number: segment.number, turns: list }] : []
+  })
+  // Armados con las frases del tramo, son el tramo tal cual; si alguno no lo fuera, no se usa.
+  const turnsRejected = assembled
+    .filter((item) => !turnsSayTranscript(item.turns, segments.find((segment) => segment.number === item.number)?.transcript ?? ""))
+    .map((item) => item.number)
+  const turns = assembled.filter((item) => !turnsRejected.includes(item.number))
+  return { drafts: read.drafts, omitted: read.omitted, unused: read.unused, outOfPlace: read.outOfPlace ?? [], turns, turnsRejected }
+}
+
+/**
+ * Una llamada al modelo con el repaso de la conversación, y su lectura. La usan el repaso de la
+ * atención y su medición, para que se mida lo mismo que corre. Sin segunda lectura de las fichas:
+ * con toda la conversación, la red avisaría otra vez lo que ya avisaron las pausas.
+ */
+export async function askDictationReview(
+  model: unknown,
+  spec: Pick<LlmSpec, "provider" | "modelName">,
+  ask: DictationReviewAsk,
+  profile: DictationProfile,
+): Promise<{ read: Omit<DictationReviewExtraction, "model" | "heard"> | null; reply: AIMessage; raw: string | null; heard: string }> {
+  const record = tool(async () => "registrado", {
+    name: DICTATION_TOOL,
+    description: "Registra lo que faltó de la conversación, ordenado por bloques de la atención, y quién habló en cada tramo.",
+    schema: dictationReviewExtraction(profile),
+  })
+  const { reply, args, raw } = await callRecorder(model, spec, record, dictationReviewMessages(ask, profile, viaResponses(model)))
+  return { read: args === undefined ? null : readDictationReview(args, ask.segments, profile.parts, ask.forms ?? []), reply, raw, heard: reviewHeard(ask.segments) }
 }

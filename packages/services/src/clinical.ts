@@ -93,6 +93,7 @@ import { type PatientFull, requirePatient } from "./patients.js"
 import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { saidHealthRisks } from "./said-health-risks.js"
 
 /** El «dónde» del producto de la clínica (odentIA: piezas y caras). */
 const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
@@ -1514,16 +1515,26 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
     .orderBy(desc(patientAnamnesis.version))
     .limit(1)
   const answers = latest?.answers
+  const registered = anesthesiaRiskLines(atPath(answers, ["antecedentesOdontologicos", "corazon"]), atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]))
+  // Lo que dijo en la consulta del corazón o de la anestesia y nadie confirmó también se dice, como lo
+  // que es (QA del 21 nov, H2); lo mismo ya registrado no se repite.
+  const said = (await saidHealthRisks(tx, orgId, patientId)).dental
+  const heard = said ? anesthesiaRiskLines(said.corazon, said.problemaAnestesia).filter((line) => !registered.includes(line)) : []
+  return [...registered, ...heard.map((line) => `dijo que ${line}, ${said?.open ? "sin confirmar" : "en otra consulta, sin revisar"}`)]
+}
+
+/** Lo que cambia una anestesia, de las respuestas del corazón y de la anestesia del dentista. */
+function anesthesiaRiskLines(corazon: unknown, problemaAnestesia: unknown): string[] {
   const say = (value: unknown, yes: string, unknown: string) => (value === "si" ? [yes] : value === "no_sabe" ? [unknown] : [])
-  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]))
+  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(problemaAnestesia)
   return [
     ...say(
-      atPath(answers, ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"]),
+      atPath(corazon, ["riesgoEndocarditis"]),
       "tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis",
       "no sabe si tiene una válvula o tuvo endocarditis",
     ),
     ...say(
-      atPath(answers, ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"]),
+      atPath(corazon, ["antibioticoPrevio"]),
       "su médico le indicó antibiótico antes del dentista",
       "no sabe si debe tomar antibiótico antes",
     ),
@@ -1571,12 +1582,14 @@ const isVitaminKAntagonistName = (name: string) =>
  * su INR del día». Es un aviso: no frena indicar ni hacer nada.
  */
 export async function extractionRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
+  // Lo que dijo en la consulta y nadie confirmó también avisa (QA del 21 nov, H2), con esas palabras.
+  const saidNow = (await saidHealthRisks(tx, orgId, patientId)).medications.filter((medicine) => medicine.anticoagulant || medicine.boneMedicine)
   // Primero, si toma alguna de esas clases: la salud entera (quién lo dijo) se lee solo entonces.
   const coded = await tx
     .select({ atcCode: patientMedication.atcCode })
     .from(patientMedication)
     .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
-  if (!coded.some((row) => medicationClassOf(row.atcCode) !== null)) return []
+  if (!coded.some((row) => medicationClassOf(row.atcCode) !== null)) return saidExtractionLines(saidNow, new Set())
   const health = await getPatientHealth(tx, orgId, patientId)
   const today = await clinicToday(tx, orgId)
   const { locale, timezone } = await findOrgLocale(tx, orgId)
@@ -1611,7 +1624,25 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
             : "riesgo de sangrado"
     lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: ${advice}.`)
   }
-  return lines
+  const registered = new Set(health.medications.map((row) => row.name.toLocaleLowerCase("es")))
+  return [...lines, ...saidExtractionLines(saidNow, registered)]
+}
+
+/** Lo que dijo que toma y nadie confirmó, en el aviso de la exodoncia: «Dijo que toma apixabán, sin confirmar: …». */
+function saidExtractionLines(
+  said: ReadonlyArray<{ name: string | null; atcCode: string | null; anticoagulant: boolean; boneMedicine: boolean; open: boolean }>,
+  registered: ReadonlySet<string>,
+): string[] {
+  return said
+    .filter((medicine) => !(medicine.name && registered.has(medicine.name.toLocaleLowerCase("es"))))
+    .map((medicine) => {
+      const what = medicine.name
+        ? drugMidSentence(medicine.name)
+        : `${medicine.anticoagulant ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
+      const vitaminK = medicine.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || (!!medicine.name && isVitaminKAntagonistName(medicine.name))
+      const advice = medicine.boneMedicine && !medicine.anticoagulant ? "riesgo de osteonecrosis de los maxilares" : vitaminK ? "pide su INR del día" : "riesgo de sangrado"
+      return `Dijo que toma ${what}, ${medicine.open ? "sin confirmar" : "en otra consulta, sin revisar"}: ${advice}.`
+    })
 }
 
 /**

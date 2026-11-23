@@ -214,3 +214,24 @@ describe("Clío médica: una clave que llega dos veces", () => {
     expect(read?.drafts.map((draft) => draft.kind)).toEqual(["nota", "examen", "diagnostico"])
   })
 })
+
+/** Lo de salud dicho en la consulta, también en latidIA (mesa del 20 nov 2026, P3, C11). */
+describe("Clío médica: lo de salud dicho en la consulta", () => {
+  const fixed = MEDICAL_DICTATION_PROFILE.systemPrompt({ services: ["Consulta de medicina general"], diagnosisList: "CIE-10 (OMS)", catalog: examSystemsText() })
+  it("tiene `salud` con su entrevista (embarazo, lactancia, tabaco y alcohol) y sin nada de la boca", () => {
+    const schema = z.toJSONSchema(MEDICAL_DICTATION_PROFILE.extraction) as {
+      properties: Record<string, { items?: { properties?: Record<string, { properties?: Record<string, unknown> }> } }>
+    }
+    // Una entrada por cada persona que lo dijo (revisión del 21 nov, A4).
+    const salud = schema.properties["salud"]?.items?.properties ?? {}
+    expect(Object.keys(salud)).toEqual(expect.arrayContaining(["declarante", "vinculo", "allergies", "conditions", "medications", "anticoagulants", "personal", "medical", "dicho"]))
+    expect(Object.keys(salud)).not.toContain("dental")
+    expect(Object.keys(salud["medical"]?.properties ?? {})).toEqual(expect.arrayContaining(["lactancia", "tabaco", "alcohol"]))
+  })
+  it("las mismas reglas: no sabe no es «No», lo de un familiar no es del paciente y el peso dicho no es una medida", () => {
+    expect(fixed).toContain("«No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`")
+    expect(fixed).toContain("Lo que no se preguntó ni se dijo no va: el silencio no es «No».")
+    expect(fixed).toContain("no es del paciente: no va en `salud` ni en `alergias`")
+    expect(fixed).toContain("no es una medida: no va en `signos` ni en ninguna parte")
+  })
+})

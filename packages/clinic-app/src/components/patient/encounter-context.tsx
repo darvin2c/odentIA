@@ -29,7 +29,8 @@ import { clinicToday } from "../../lib/inventory"
 import { asaLabel, type Encounter, fetchPatientHealth, isCurrentMedication, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { DeclaredResponse } from "./declared-response"
-import { HealthReviewNotice } from "./health-review-notice"
+import type { DictationSession } from "./dictation-session"
+import { ConsultHealthReviewed, HealthReviewNotice } from "./health-review-notice"
 
 /**
  * Lo que respondió antes de venir sale arriba al abrir la atención: el
@@ -96,10 +97,16 @@ export function EncounterHealthReview({
   patientId,
   patient,
   disabled,
+  dictation = null,
+  anchorId,
 }: {
   patientId: string
   patient: PatientFull
   disabled: boolean
+  /** El id del aviso: la firma lleva a él («Lo que dijo de su salud, sin revisar»). */
+  anchorId?: string
+  /** Lo que Clío oyó de su salud en esta consulta se revisa en el mismo aviso. */
+  dictation?: DictationSession | null
 }): React.JSX.Element | null {
   const health = useQuery({
     queryKey: ["patient-health", patientId],
@@ -107,15 +114,20 @@ export function EncounterHealthReview({
   })
   if (!health.data) return null
   return (
-    <HealthReviewNotice
-      patientId={patientId}
-      patientName={patient.patient.displayName}
-      health={health.data.data}
-      disabled={disabled}
-      askTo={askWhom(patient.contacts)}
-      sex={patient.patient.sex}
-      child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
-    />
+    <>
+      <HealthReviewNotice
+        patientId={patientId}
+        patientName={patient.patient.displayName}
+        health={health.data.data}
+        disabled={disabled}
+        askTo={askWhom(patient.contacts)}
+        sex={patient.patient.sex}
+        child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
+        dictation={dictation}
+        {...(anchorId ? { anchorId } : {})}
+      />
+      <ConsultHealthReviewed health={health.data.data} patientName={patient.patient.displayName} today={clinicToday()} />
+    </>
   )
 }
 

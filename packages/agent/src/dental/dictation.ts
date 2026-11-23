@@ -5,6 +5,7 @@ import {
   findingDiagnosisCode,
   operationAgentSchema,
 } from "@odentia/services"
+import { DENTAL_DICTATION_HEALTH } from "@odentia/services/dental"
 import { z } from "zod"
 import {
   allergyAndDonePrompt,
@@ -17,8 +18,11 @@ import {
   demoMaterial,
   dictationEdits,
   dictationFormAnswers,
+  dictationHealthPart,
+  dictationOutOfPlacePart,
   dictationList,
   dictationSaid,
+  healthPrompt,
   homeCarePrompt,
   materialsPrompt,
 } from "../dictation.js"
@@ -29,6 +33,8 @@ import {
  * odontograma, los diagnósticos, el plan, la receta y los controles. Lo común
  * (los mensajes, la lectura y la llamada) está en `../dictation.ts`.
  */
+const HEALTH = dictationHealthPart(DENTAL_DICTATION_HEALTH)
+
 export const extraction = z.object({
   nota: operationAgentSchema("atencion.nota")
     .extend({ dicho: dictationSaid })
@@ -48,6 +54,8 @@ export const extraction = z.object({
     .describe("Solo si pidió armar el presupuesto ahora."),
   materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   fichas: dictationFormAnswers(),
+  salud: HEALTH.part,
+  sin_lugar: dictationOutOfPlacePart(),
   ...dictationEdits("toothNumber"),
 })
 
@@ -64,6 +72,7 @@ const DRAFT_PARTS = [
   { key: "presupuesto", kind: "presupuesto", single: true },
   { key: "materiales", kind: "material" },
   { key: "fichas", kind: "ficha" },
+  { key: "salud", kind: "salud", single: true, schema: HEALTH.schema },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -82,7 +91,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
     "Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.",
     "Pon la variante o el estado de un hallazgo solo si el odontólogo los dijo («caries en dentina», «corona metalcerámica en buen estado»); si no, déjalos vacíos: el sistema se los pregunta.",
-    "Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, implante, endodoncia, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.",
+    "Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.",
     `Lista de hallazgos (código, nombre, variantes):\n${input.catalog}`,
     `En \`diagnosticos\` van los diagnósticos que no son un hallazgo de la lista (por ejemplo, gingivitis o pulpitis), con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el odontólogo lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.`,
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
@@ -94,6 +103,12 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
       : "La clínica aún no tiene servicios.",
     ...consultaPrompt("«dolor de muela», «control»"),
     ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
+    ...healthPrompt({
+      topics:
+        "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, si fuma y, de su boca, si tuvo problemas con la anestesia o sangró mucho tras una extracción, lo del corazón que pide antibiótico antes, el miedo al dentista, si rechina o aprieta los dientes, sus hábitos, su última visita y, de un niño, el biberón, el chupón, los dulces y quién le cepilla",
+      notInRelato: "Sus medicinas de siempre, sus enfermedades y lo de la anestesia",
+      measured: "",
+    }),
     ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
     materialsPrompt("odontólogo", "«se fueron cuatro carpules»", "una resina, una profilaxis"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",

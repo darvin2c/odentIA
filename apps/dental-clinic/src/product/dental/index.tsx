@@ -132,12 +132,16 @@ export const dentalUi: ProductUi = {
         <PlanSiteChoices {...props} />
       ) : null,
     examples: [
+      // Se conversa con el paciente: la pregunta y su respuesta, cada cosa en su lugar (QA del 22 nov).
+      { block: "Conversando", say: "«¿Desde cuándo le duele?» — «Hace como dos semanas, con el frío»" },
       { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
       { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
       { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
       { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
       { block: "Control", say: "«Control en un mes»" },
       { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      // Lo de su salud que cuenta en la consulta: se revisa con la persona en «Pregúntale a…».
+      { block: "Salud", say: "«Tomo enalapril para la presión» · «Que yo sepa, no»" },
       { block: "Procedimientos", say: "«Le hice la profilaxis» · «Terminé la resina de la 36»" },
       // Solo con la ficha ya empezada: Clío propone en sus preguntas y se acepta en la ficha.
       { block: "Ficha", say: "«Overjet de seis milímetros» · «Clase uno molar izquierda»" },

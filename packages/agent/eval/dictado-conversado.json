@@ -1,0 +1,425 @@
+{
+  "_nota": "Consultas conversadas en varias pausas (mesa del 20 nov 2026, «Clío en una consulta conversada», P7), como las oye el micrófono: sin decir quién habla, a veces sin puntuación como la voz de Chrome y a veces como se escriben, con la pregunta y su respuesta en pausas distintas, charla (saludo, pago, explicar el sistema), correcciones del paciente, quien lo acompaña, una recarga a media consulta («recargaAntesDe»: la pestaña pierde lo dicho antes de esa pausa) y una ficha abierta («fichas»). Guiones inventados; ningún paciente real. «espera»: «consulta» (motivo, tiempo y relato con sus palabras y las que no deben estar; «tiempo»: null si no se dijo), «salud» (lo de su salud que se propone, por su lugar en el registro: «ruta», con «valor», «con» o «antes» = lo que quedó como «antes dijo»), «saludQuien» (quién lo dijo), «saludNo» (lo que no debe proponerse: lo de un familiar, la duda como «no»), «propone» y «noPropone» (por clase de sugerencia, con «campos» y «con»), «vuelve» (un control o una cita con esas palabras), «fichas» («ficha.pregunta»: valor, lista para aceptar), «noLoUse» (lo que tiene que quedar en «No lo usé»), «quien» (quién habló en la frase, tras el repaso) y «nada» (pura charla: no queda nada). Cada palabra admite variantes con «|» y se busca desde el inicio de una palabra, sin tildes. Ver packages/agent/src/eval-dictado-conversado-cuenta.ts.",
+  "servicios": {
+    "dental": ["Obturación con resina", "Resina fotocurable, 1 superficie, posterior", "Endodoncia unirradicular", "Endodoncia multirradicular", "Exodoncia simple", "Exodoncia de tercera molar", "Corona de zirconio", "Profilaxis", "Destartraje supragingival", "Aplicación de flúor barniz", "Sellante de fosas y fisuras", "Pulpotomía", "Radiografía periapical", "Consulta de evaluación"],
+    "medico": ["Consulta de medicina general", "Consulta pediátrica", "Control prenatal", "Nebulización", "Inyectable intramuscular", "Electrocardiograma", "Perfil tiroideo", "Hemograma completo"]
+  },
+  "casos": [
+    {
+      "id": "od-rosa-frio",
+      "producto": "odentia",
+      "descripcion": "C1: Rosa, dolor al frío hace dos semanas, losartán, miedo y bruxismo; saludo, estacionamiento y el sistema explicado; la pregunta y su respuesta en pausas distintas. Voz de Chrome, sin puntuación.",
+      "pausas": [
+        "buenos días señora Rosa pase siéntese aquí nomás encontró estacionamiento",
+        "sí doctora a la vuelta había sitio",
+        "qué bueno cuénteme qué la trae por aquí",
+        "me duele una muela de abajo del lado izquierdo cuando tomo algo frío",
+        "y desde cuándo le pasa eso",
+        "hace como dos semanas y anoche me dolió solita no me dejó dormir",
+        "ya mientras tanto le explico lo que vamos conversando lo va ordenando el sistema y le llega un recordatorio por WhatsApp un día antes de su cita toma alguna medicina todos los días",
+        "sí tomo losartán de cincuenta para la presión",
+        "y es alérgica a algo",
+        "no doctora alergias no tengo",
+        "le tiene miedo al dentista",
+        "un poquito sí y mi esposo dice que rechino los dientes de noche",
+        "a ver abra grande la treinta y seis tiene una caries profunda por oclusal"
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["duele|dolor", "muela"],
+          "motivoSin": ["semanas", "estacionamiento", "losartan"],
+          "tiempo": "dos semanas|2 semanas",
+          "relato": ["frio", "noche|dormir"],
+          "relatoSin": ["losartan", "whatsapp", "estacionamiento", "recordatorio"]
+        },
+        "salud": [
+          { "ruta": "medications", "valor": { "state": "recorded" }, "con": ["losartan"] },
+          { "ruta": "dental.ansiedadDental" },
+          { "ruta": "dental.bruxismo", "valor": true }
+        ],
+        "saludQuien": { "declarante": "paciente" },
+        "propone": [
+          { "tipo": "alergia", "campos": { "none": true } },
+          { "tipo": "odontograma", "campos": { "toothNumber": 36 }, "con": ["caries"] }
+        ],
+        "quien": [
+          { "frase": "me duele una muela de abajo", "quien": "paciente" },
+          { "frase": "y desde cuándo le pasa eso", "quien": "dra" },
+          { "frase": "hace como dos semanas", "quien": "paciente" },
+          { "frase": "sí tomo losartán", "quien": "paciente" },
+          { "frase": "a ver abra grande", "quien": "dra" }
+        ]
+      }
+    },
+    {
+      "id": "od-warfarina-apixaban",
+      "producto": "odentia",
+      "descripcion": "C2: el paciente se corrige en otra pausa («warfarina… perdón, apixabán»); fibrilación auricular. Escrito con puntuación.",
+      "pausas": [
+        "Buenas tardes, don Julio. ¿Qué lo trae hoy?",
+        "Vengo para que me saquen la muela de atrás de abajo, la que está rota. Se me partió hace un mes comiendo.",
+        "¿Le duele?",
+        "No, no me duele, pero me incomoda con la lengua.",
+        "Antes de sacarla necesito saber: ¿toma algún medicamento para la sangre, algún anticoagulante?",
+        "Sí, tomo warfarina todos los días.",
+        "Ay, perdón, me confundí. Ya no es warfarina, el cardiólogo me la cambió por apixabán hace tres meses.",
+        "Bien, entonces lo coordinamos con su cardiólogo antes de la extracción. ¿Y del corazón qué tiene?",
+        "Tengo fibrilación auricular, por eso me lo dan."
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["muela"],
+          "motivoSin": ["warfarina", "apixaban", "mes"],
+          "tiempo": "mes",
+          "relato": ["rota|partio", "incomoda|lengua"],
+          "relatoSin": ["warfarina", "apixaban", "fibrilacion"]
+        },
+        "salud": [
+          { "ruta": "anticoagulants", "valor": { "state": "recorded" }, "con": ["apixab"], "antes": ["warfarina"] },
+          { "ruta": "conditions", "con": ["fibrilacion"] }
+        ],
+        "saludQuien": { "declarante": "paciente" },
+        "saludNo": [{ "ruta": "anticoagulants", "con": ["warfarina"] }],
+        "quien": [
+          { "frase": "¿Le duele?", "quien": "dra" },
+          { "frase": "Sí, tomo warfarina", "quien": "paciente" },
+          { "frase": "Tengo fibrilación", "quien": "paciente" }
+        ]
+      }
+    },
+    {
+      "id": "od-no-que-yo-sepa",
+      "producto": "odentia",
+      "descripcion": "C3: «no que yo sepa» a las alergias es no sabe; «no, ninguna» a las medicinas sí es no. Voz de Chrome.",
+      "pausas": [
+        "hola Lucía siéntate ya te reviso hoy toca tu limpieza",
+        "sí doctora ya me tocaba",
+        "antes de empezar eres alérgica a algún medicamento",
+        "no que yo sepa",
+        "y tomas alguna medicina todos los días",
+        "no ninguna",
+        "listo hoy te hago la profilaxis y te aplico flúor barniz"
+      ],
+      "espera": {
+        "salud": [
+          { "ruta": "allergies", "valor": { "state": "unknown" } },
+          { "ruta": "medications", "valor": { "state": "none" } }
+        ],
+        "noPropone": [{ "tipo": "alergia", "campos": { "none": true } }],
+        "propone": [{ "tipo": "procedimiento", "con": ["profilaxis"] }],
+        "quien": [
+          { "frase": "eres alérgica", "quien": "dra" },
+          { "frase": "no que yo sepa", "quien": "paciente" }
+        ]
+      }
+    },
+    {
+      "id": "od-mateo-mama",
+      "producto": "odentia",
+      "descripcion": "C4: la mamá de Mateo (7 años) responde por él: asma y salbutamol son de Mateo; «debe pesar veinticuatro» no es un peso medido; «mi papá es diabético» y «yo soy diabética» no son de Mateo.",
+      "pausas": [
+        "Hola, Mateo. ¿Cuántos años tienes ya?",
+        "Tiene siete, doctora. Le duele una muelita de abajo desde el domingo, cuando come dulces.",
+        "¿Mateo tiene alguna enfermedad, toma algo?",
+        "Tiene asma, usa salbutamol cuando se agita. Yo soy diabética, pero eso es mío.",
+        "¿Cuánto pesa más o menos?",
+        "Debe pesar veinticuatro, hace tiempo que no lo peso.",
+        "¿Y en la familia alguien con diabetes?",
+        "Mi papá es diabético, el abuelo de Mateo.",
+        "A ver, Mateo, abre grande como un león. La setenta y cinco tiene una caries grande."
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["duele|dolor", "muel"],
+          "tiempo": "domingo",
+          "relato": ["dulce"],
+          "relatoSin": ["asma", "salbutamol", "diabet", "pesar|pesa"]
+        },
+        "salud": [
+          { "ruta": "conditions", "con": ["asma"] },
+          { "ruta": "medications", "con": ["salbutamol"] }
+        ],
+        "saludQuien": { "declarante": "acompanante", "vinculo": "madre|mama" },
+        "saludNo": [{ "ruta": "conditions", "con": ["diabet"] }],
+        "propone": [{ "tipo": "odontograma", "campos": { "toothNumber": 75 }, "con": ["caries"] }],
+        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "mi papá es diabético|mi papa es diabetico"],
+        "quien": [
+          { "frase": "¿Cuántos años tienes ya?", "quien": "dra" },
+          { "frase": "Tiene siete, doctora", "quien": "acompanante", "vinculo": "madre|mama" },
+          { "frase": "Tiene asma", "quien": "acompanante" },
+          { "frase": "¿Cuánto pesa más o menos?", "quien": "dra" },
+          { "frase": "Mi papá es diabético", "quien": "acompanante" }
+        ]
+      }
+    },
+    {
+      "id": "od-monologo-sistema",
+      "producto": "odentia",
+      "descripcion": "C5: la doctora explica el sistema con un ejemplo («dolor en la pieza dieciséis… una caries»): nada se propone. Voz de Chrome.",
+      "pausas": [
+        "le explico cómo funciona esto mientras yo converso con usted el sistema va anotando por ejemplo si yo digo dolor en la pieza dieciséis",
+        "y le encuentro una caries el sistema lo ordena solito y yo después lo reviso y lo confirmo nada entra sin que yo lo vea",
+        "y a usted le llega un mensaje por WhatsApp con su próxima cita y el presupuesto si lo pide ya vamos a empezar"
+      ],
+      "espera": { "nada": true }
+    },
+    {
+      "id": "od-recarga-37",
+      "producto": "odentia",
+      "descripcion": "C6: se recarga la página a media consulta y sigue «sí, también en la treinta y siete»: la 36 se queda y se suma la 37.",
+      "recargaAntesDe": 3,
+      "pausas": [
+        "la treinta y seis tiene caries por oclusal hasta dentina",
+        "vamos a tomarle una radiografía para ver qué tan profunda está",
+        "sí también en la treinta y siete",
+        "las dos las restauramos con resina en la siguiente cita"
+      ],
+      "espera": {
+        "propone": [
+          { "tipo": "odontograma", "campos": { "toothNumber": 36 }, "con": ["caries"] },
+          { "tipo": "odontograma", "campos": { "toothNumber": 37 }, "con": ["caries"] }
+        ]
+      }
+    },
+    {
+      "id": "od-vuelve-resina",
+      "producto": "odentia",
+      "descripcion": "C8: «te veo la próxima semana para la otra resina» es cuándo vuelve y para qué; el pago es charla.",
+      "pausas": [
+        "listo ya terminamos la resina de la cuarenta y seis por oclusal",
+        "cómo se siente muerda suavecito",
+        "bien doctora no me molesta",
+        "perfecto te veo la próxima semana para la otra resina la de la cuarenta y siete",
+        "gracias doctora y cuánto le debo",
+        "eso lo ves en recepción con la señorita puedes pagar con tarjeta o con yape"
+      ],
+      "espera": {
+        "consulta": { "relatoSin": ["yape", "tarjeta", "debo"] },
+        "propone": [{ "tipo": "procedimiento", "campos": { "toothNumber": 46 }, "con": ["resina"] }],
+        "noPropone": [{ "tipo": "presupuesto" }],
+        "vuelve": { "con": ["resina"] },
+        "quien": [
+          { "frase": "bien doctora no me molesta", "quien": "paciente" },
+          { "frase": "perfecto te veo la próxima semana", "quien": "dra" }
+        ]
+      }
+    },
+    {
+      "id": "od-ficha-endodoncia",
+      "producto": "odentia",
+      "descripcion": "C9: con la evaluación de endodoncia abierta, lo conversado responde sus preguntas (el caso conversada-c9 de dictado-fichas, en pausas).",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "pausas": [
+        "¿Le duele si golpeo aquí?",
+        "Sí, ahí, ahí.",
+        "Percusión positiva. Ahora el frío, ¿todavía lo siente?",
+        "Sí, me sigue doliendo.",
+        "El frío le dura bastante, más de un minuto. En la radiografía hay una zona radiolúcida apical. Pulpitis irreversible sintomática."
+      ],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.percusion": "Positiva",
+          "evaluacion-de-endodoncia.frio": "Aumentada, persiste",
+          "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"],
+          "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática"
+        },
+        "propone": [{ "tipo": "diagnostico", "con": ["k04.0"] }],
+        "quien": [
+          { "frase": "¿Le duele si golpeo aquí?", "quien": "dra" },
+          { "frase": "Sí, me sigue doliendo.", "quien": "paciente" }
+        ]
+      }
+    },
+    {
+      "id": "od-charla-pago-profilaxis",
+      "producto": "odentia",
+      "descripcion": "Control de seis meses con charla del viaje y del pago mezclada: solo lo hecho hoy. Voz de Chrome.",
+      "pausas": [
+        "buenas Carlos cómo te fue en el viaje",
+        "bien doctora fuimos a Cusco con la familia",
+        "qué rico bueno hoy te toca tu limpieza de seis meses alguna molestia",
+        "ninguna doctora todo bien",
+        "ya entonces hoy hacemos la profilaxis y el destartraje supragingival",
+        "y cuánto sale eso porque la vez pasada pagué con tarjeta y me cobraron comisión",
+        "en recepción te dicen ahora puedes pagar con yape sin comisión"
+      ],
+      "espera": {
+        "consulta": { "tiempo": null, "relatoSin": ["cusco", "tarjeta", "comision", "yape", "viaje"] },
+        "propone": [
+          { "tipo": "procedimiento", "con": ["profilaxis"] },
+          { "tipo": "procedimiento", "con": ["destartraje"] }
+        ],
+        "noPropone": [{ "tipo": "presupuesto" }, { "tipo": "cita" }],
+        "quien": [{ "frase": "ninguna doctora todo bien", "quien": "paciente" }]
+      }
+    },
+    {
+      "id": "od-tiempo-corregido",
+      "producto": "odentia",
+      "descripcion": "La paciente corrige el tiempo en la pausa siguiente («dos semanas… no, ya es un mes»): queda un solo tiempo, el último.",
+      "pausas": [
+        "Cuénteme, ¿qué le pasa?",
+        "Se me hincha la encía de arriba, al lado del colmillo, y me sale como un granito.",
+        "¿Desde cuándo?",
+        "Hace dos semanas.",
+        "No, perdón, me estoy confundiendo: ya es un mes, empezó antes de mi cumpleaños.",
+        "¿Le duele?",
+        "Solo cuando aprieto, y a veces sale un líquido salado."
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["hincha|inflama|encia"],
+          "tiempo": "mes",
+          "tiempoSin": ["semanas"],
+          "relato": ["granito|liquido|salado"]
+        },
+        "quien": [
+          { "frase": "¿Desde cuándo?", "quien": "dra" },
+          { "frase": "Hace dos semanas.", "quien": "paciente" },
+          { "frase": "Solo cuando aprieto", "quien": "paciente" }
+        ]
+      }
+    },
+    {
+      "id": "lat-embarazo-garganta",
+      "producto": "latidia",
+      "descripcion": "C11: dolor de garganta en una embarazada de doce semanas; ácido fólico; «no que yo sepa» a las alergias. Voz de Chrome.",
+      "pausas": [
+        "buenas tardes Andrea qué te trae por acá",
+        "me duele mucho la garganta desde hace tres días y en la noche me da fiebre",
+        "estás embarazada o podrías estarlo",
+        "sí estoy de doce semanas",
+        "tomas alguna medicina",
+        "solo ácido fólico todos los días",
+        "y eres alérgica a algún medicamento",
+        "no que yo sepa",
+        "a ver abre la boca amígdalas con placas blanquecinas"
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["garganta"],
+          "motivoSin": ["tres", "embaraz"],
+          "tiempo": "tres|3",
+          "relato": ["fiebre"],
+          "relatoSin": ["acido folico", "embaraz"]
+        },
+        "salud": [
+          { "ruta": "personal.embarazo", "valor": true },
+          { "ruta": "personal.semanasEmbarazo", "valor": 12 },
+          { "ruta": "medications", "con": ["folico"] },
+          { "ruta": "allergies", "valor": { "state": "unknown" } }
+        ],
+        "saludQuien": { "declarante": "paciente" },
+        "noPropone": [{ "tipo": "alergia", "campos": { "none": true } }],
+        "propone": [{ "tipo": "examen", "con": ["amigdala|placa"] }],
+        "quien": [
+          { "frase": "estás embarazada", "quien": "dra" },
+          { "frase": "sí estoy de doce semanas", "quien": "paciente" }
+        ]
+      }
+    },
+    {
+      "id": "lat-mateo-asma-mama",
+      "producto": "latidia",
+      "descripcion": "C4 y C11 en latidIA: la mamá cuenta la tos de Mateo; asma y salbutamol son de él; «debe pesar veinticuatro» no entra como signo vital; lo del abuelo y la rinitis de la mamá no son de Mateo.",
+      "pausas": [
+        "Hola, Mateo. Hola, señora. ¿Qué le pasa?",
+        "Tiene tos desde hace cinco días, doctor, y en la noche se le escucha un silbido en el pecho.",
+        "¿Tiene alguna enfermedad?",
+        "Tiene asma, usa salbutamol cuando se agita. Anoche le di dos puffs.",
+        "¿Cuánto pesa?",
+        "Debe pesar veinticuatro, más o menos.",
+        "¿Alguien en la familia con asma o alergias?",
+        "Mi papá es diabético nomás, y yo tengo rinitis.",
+        "Pulmones con sibilancias espiratorias en ambos campos."
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["tos"],
+          "tiempo": "cinco|5",
+          "relato": ["silbido"],
+          "relatoSin": ["pesar", "diabet", "rinitis"]
+        },
+        "salud": [
+          { "ruta": "conditions", "con": ["asma"] },
+          { "ruta": "medications", "con": ["salbutamol"] }
+        ],
+        "saludQuien": { "declarante": "acompanante", "vinculo": "madre|mama" },
+        "saludNo": [
+          { "ruta": "conditions", "con": ["diabet"] },
+          { "ruta": "conditions", "con": ["rinitis"] }
+        ],
+        "propone": [{ "tipo": "examen", "con": ["sibilancia"] }],
+        "noPropone": [{ "tipo": "signos", "con": ["peso"] }],
+        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "mi papá es diabético|mi papa es diabetico"],
+        "quien": [
+          { "frase": "Tiene tos desde hace cinco días", "quien": "acompanante", "vinculo": "madre|mama" },
+          { "frase": "Tiene asma", "quien": "acompanante" },
+          { "frase": "¿Cuánto pesa?", "quien": "dra" },
+          { "frase": "Pulmones con sibilancias", "quien": "dra" }
+        ]
+      }
+    },
+    {
+      "id": "lat-apixaban-hija",
+      "producto": "latidia",
+      "descripcion": "Don Ernesto con su hija: ella corrige la medicación («la warfarina te la cambiaron, ahora es apixabán»).",
+      "pausas": [
+        "Buenos días, don Ernesto. ¿Cómo sigue de la presión?",
+        "Más o menos, doctora. Se me hinchan los pies en la tarde desde hace una semana.",
+        "¿Qué medicinas está tomando ahora?",
+        "Losartán de cincuenta y warfarina, doctora.",
+        "No, papá, la warfarina te la cambiaron. Ahora es apixabán, desde agosto.",
+        "Ah, sí, es verdad, el apixabán.",
+        "Presión ciento cuarenta y ocho con noventa, frecuencia cardiaca ochenta y dos."
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["hinch|pies|edema"],
+          "tiempo": "semana",
+          "relatoSin": ["losartan", "warfarina", "apixaban"]
+        },
+        "salud": [
+          { "ruta": "anticoagulants", "con": ["apixab"], "antes": ["warfarina"] },
+          { "ruta": "medications", "con": ["losartan"] }
+        ],
+        "saludNo": [{ "ruta": "anticoagulants", "con": ["warfarina"] }],
+        "propone": [{ "tipo": "signos", "campos": { "presionSistolica": 148, "presionDiastolica": 90 } }],
+        "quien": [
+          { "frase": "Se me hinchan los pies", "quien": "paciente" },
+          { "frase": "No, papá, la warfarina", "quien": "acompanante", "vinculo": "hija" },
+          { "frase": "Presión ciento cuarenta y ocho", "quien": "dra" }
+        ]
+      }
+    },
+    {
+      "id": "lat-charla-sistema-pago",
+      "producto": "latidia",
+      "descripcion": "Solo charla mientras espera: el pago, la receta por WhatsApp y el enlace de la cita. Nada se propone. Voz de Chrome.",
+      "pausas": [
+        "mientras espera le cuento que la consulta de hoy la puede pagar con tarjeta o con yape en caja",
+        "y el sistema le manda por WhatsApp su receta y los resultados cuando lleguen así no tiene que venir",
+        "también puede sacar su próxima cita desde el enlace que le llega no hace falta llamar"
+      ],
+      "espera": { "nada": true }
+    },
+    {
+      "id": "lat-vuelve-analisis",
+      "producto": "latidia",
+      "descripcion": "«Te veo en dos semanas con los resultados» es cuándo vuelve y para qué, sin pedir reservar. Voz de Chrome.",
+      "pausas": [
+        "bueno señora Marta los análisis de la tiroides salieron un poquito alterados",
+        "ay doctor y eso es grave",
+        "no se preocupe vamos a repetirlos en ayunas y te veo en dos semanas con los resultados para ver si empezamos tratamiento",
+        "ya doctor gracias"
+      ],
+      "espera": {
+        "vuelve": { "con": ["resultado|analisis|tiroides"] },
+        "quien": [
+          { "frase": "ay doctor y eso es grave", "quien": "paciente" },
+          { "frase": "no se preocupe vamos a repetirlos", "quien": "dra" }
+        ]
+      }
+    }
+  ]
+}

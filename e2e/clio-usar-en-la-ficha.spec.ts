@@ -7,12 +7,12 @@ const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
 /**
- * Prueba con voz del 15 nov: lo que Clío no propuso para la ficha queda en «No pude usar esto»
+ * Prueba con voz del 15 nov: lo que Clío no propuso para la ficha queda en «No lo usé»
  * con «Parece de «Percusión»», y «Usar en Percusión» lleva la frase a su pregunta en un toque. Con
  * el modelo de demostración Clío no responde fichas: el aviso sale de la red del servidor. No
  * acredita cómo oye un navegador ni lo que respondería un proveedor real.
  */
-test("«No pude usar esto»: «Usar en Percusión» abre la pregunta con lo dictado al lado y no llena nada", async ({ owner }, info) => {
+test("«No lo usé»: «Usar en Percusión» abre la pregunta con lo dictado al lado y no llena nada", async ({ owner }, info) => {
   const { page, org, user } = owner
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
@@ -37,7 +37,7 @@ test("«No pude usar esto»: «Usar en Percusión» abre la pregunta con lo dict
   await bar.getByLabel("Escribe lo dictado").fill("Ya, dolor a la percusión.")
   await bar.getByRole("button", { name: "Ordenar lo dictado" }).click()
 
-  const notice = page.getByRole("status").filter({ hasText: "No pude usar esto de lo que dictaste" })
+  const notice = page.getByRole("status").filter({ hasText: "No lo usé" })
   await expect(notice).toContainText("Parece de «Percusión»: revísala en la ficha.")
   const use = notice.getByRole("button", { name: "Usar «Ya, dolor a la percusión.» en «Percusión»" })
   await expect(use).toHaveText("Usar en Percusión")

@@ -55,8 +55,9 @@ import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
+import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation, totalsOf } from "../../lib/budgets"
 import {
   type ConsentDocument,
   canFillFormInAttention,
@@ -123,7 +124,6 @@ import {
   DictationHeaderButton,
   DictationMobileBar,
   DictationPanel,
-  DictationTranscript,
   dictationMobileBarVisible,
 } from "./dictation-panel"
 import {
@@ -133,6 +133,7 @@ import {
 } from "./dictation-session"
 import { DictationSignList, markedAtSign, setFromDefault, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
+import { DictationSaid, EncounterSaidLink } from "./dictation-said"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
@@ -645,6 +646,8 @@ export function EncounterEditor({
   const [budgetSent, setBudgetSent] = useState(false)
   // Lo dictado en el cierre se decide al abrirlo: firmar descarta las sugerencias y la lista no cambia a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
+  // «Finalizar y firmar» ya está ordenando lo último que se dijo: otro clic no lo repite.
+  const signRequestRef = useRef(false)
   // Lo dictado que quien firma cambió de como venía: desmarcado no entra; lo que cambia lo escrito
   // viene desmarcado y entra solo si lo marca. Lo demás que se puede confirmar entra con la firma.
   const [signToggled, setSignToggled] = useState<string[]>([])
@@ -781,7 +784,15 @@ export function EncounterEditor({
       ? dictation.suggestions.find((candidate) => candidate.kind === "control" && marked.includes(candidate.id))
       : undefined
     const dueAt = item?.payload["dueAt"]
-    return item && typeof dueAt === "string" ? { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) } : null
+    if (item && typeof dueAt === "string") return { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) }
+    // La cita que dictó y entra con la firma también dice cuándo vuelve (QA del 21 nov, C8: el cierre
+    // decía «No indicaste cuándo vuelve» con la cita marcada).
+    const visit = marked ? dictation.suggestions.find((candidate) => candidate.kind === "cita" && marked.includes(candidate.id)) : undefined
+    const startsAt = visit?.payload["startsAt"]
+    const day = typeof startsAt === "string" ? clinicDateTimeValue(startsAt).slice(0, 10) : typeof visit?.payload["date"] === "string" ? String(visit.payload["date"]) : ""
+    if (!visit || !day) return null
+    const what = typeof visit.payload["service"] === "string" && visit.payload["service"].trim() ? visit.payload["service"].trim() : null
+    return { id: visit.id, day, appointment: true, what }
   }
   const closingForm = useClosingForm({
     // Lo dictado va en el mismo cierre: el motivo para seguir sin el consentimiento se pide igual.
@@ -1224,18 +1235,15 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
     }
-    // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
-    if (item.kind === "alergia") {
+    // La alergia confirmada y lo de su salud revisado se ven al momento en la franja de alertas, como al agregarlos a mano.
+    if (item.kind === "alergia" || item.kind === "salud") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
     }
-    // La cita reservada y el presupuesto armado se ven al momento: en «Qué sigue» y en «Presupuesto por enviar».
-    if (item.kind === "cita" || item.kind === "presupuesto") {
-      for (const key of PLAN_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
-      void queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] })
-    }
-    void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+    // Lo indicado, los caminos, la cita reservada y el presupuesto armado se ven al momento: en el bloque
+    // Plan, en «Qué sigue» y en «Presupuesto por enviar».
+    for (const key of planKeysAfterDictation(item.kind)) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
     void refreshClosing()
@@ -1272,6 +1280,14 @@ export function EncounterEditor({
     onOpenForm: (formId: string) => {
       setConfirmOpen(false)
       setFinishingForm(formId)
+    },
+    // Lo que dijo de su salud se revisa en su aviso, con la persona: el cierre lleva ahí sin frenar la firma.
+    onReviewHealth: () => {
+      setConfirmOpen(false)
+      requestAnimationFrame(() => {
+        goTo(`${uid}-salud`)
+        document.getElementById(`${uid}-salud`)?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true })
+      })
     },
   }
   /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
@@ -1544,6 +1560,20 @@ export function EncounterEditor({
    * bloque abierto; si no falta nada, se abre el cierre.
    */
   const requestSign = async () => {
+    if (signRequestRef.current) return
+    signRequestRef.current = true
+    try {
+      await requestSignNow()
+    } finally {
+      signRequestRef.current = false
+    }
+  }
+  const requestSignNow = async () => {
+    // El dictado no frena la firma (QA del 21 nov): lo último que se dijo se ordena y lo que ningún
+    // repaso leyó se repasa ahora, antes de ver qué falta; el cierre decide con las pendientes que
+    // dejó el repaso, no con las del render de antes (mesa del 20 nov 2026, P4).
+    let pendingNow = dictationPending
+    if (dictation.enabled && (dictation.busy || dictation.unreviewed)) pendingNow = (await dictation.settle()) ?? pendingNow
     const values = draftForm.state.values
     const first: ClosingRequirement | "vitals" | null = !values.reason.trim()
       ? "reason"
@@ -1569,7 +1599,7 @@ export function EncounterEditor({
       }
       await refreshClosing()
     }
-    openSign()
+    openSign(pendingNow)
   }
 
   const handlePendingChange = (pending: boolean) => {
@@ -1649,6 +1679,14 @@ export function EncounterEditor({
   // Tratamientos que esta atención deja por ejecutar: los cuenta el servidor, sin
   // lo que la persona no aceptó ni el camino que no eligió.
   const pendingTreatments = detail.pendingTreatments
+  // Los caminos que se excluyen no cuentan como dos por ejecutar: son una elección (QA del 22 nov, H12).
+  const pendingCounts = pendingTreatmentCounts(pendingTreatments, [...detail.plannedItems, ...detail.indicatedItems])
+  const pendingWords = [
+    pendingCounts.toExecute > 0 ? `${pendingCounts.toExecute} por ejecutar` : "",
+    ...pendingCounts.choices.map((paths) => `1 por elegir entre ${paths} caminos`),
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
   /**
    * Bloques disponibles con su resumen real. `empty` significa «no hay nada
@@ -1680,6 +1718,7 @@ export function EncounterEditor({
     liveIndicated,
     new Set(detail.procedures.flatMap((procedure) => (!procedure.voidedAt && procedure.planItemId ? [procedure.planItemId] : []))),
   )
+  const indicatedAlone = openIndicated.filter((item) => !pendingCounts.competing.has(item.id))
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1740,8 +1779,9 @@ export function EncounterEditor({
       summary:
         [
           // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
-          openIndicated.length > 0 ? `${counted(openIndicated.length, "indicado", "indicados")} hoy` : "",
-          pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
+          // Los caminos que se excluyen ya van como «1 por elegir entre 2 caminos»: no se cuentan otra vez.
+          indicatedAlone.length > 0 ? `${counted(indicatedAlone.length, "indicado", "indicados")} hoy` : "",
+          pendingWords,
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
           .filter(Boolean)
@@ -1918,25 +1958,21 @@ export function EncounterEditor({
     ) : null,
   }
   const transcriptSurface = {
-    title: "Lo dictado",
-    description: "Tu respaldo: lo resaltado generó una sugerencia.",
+    title: "Lo que se dijo",
+    description: "Guardado con la atención. Lo resaltado está en una sugerencia.",
     onClose: () => setTranscriptOpen(false),
-    children: <DictationTranscript session={dictation} />,
+    children: <DictationSaid session={dictation} />,
   }
   const closingId = `${uid}-cierre`
   // No se firma lo que no se guardó: sin conexión o con cambios por guardar, espera.
   const unsaved = saveState !== "saved"
   // Lo que falta registrar no apaga «Finalizar y firmar»: lleva a su bloque y lo marca (`requestSign`).
-  const canSign = !(locked || !closingQuery.isSuccess || dictation.busy || unsaved)
+  // El dictado en curso tampoco: «Finalizar y firmar» lo termina y lo repasa antes (`requestSign`).
+  const canSign = !(locked || !closingQuery.isSuccess || unsaved)
   // El botón del pie no espera al guardado: `requestSign` guarda lo último y vuelve a comprobar
   // antes de abrir el cierre. Si se apagara mientras se guarda, el primer clic justo después de
   // escribir la evolución no haría nada. Sin conexión sí espera: no se podría guardar.
-  const canRequestSign = !(
-    locked ||
-    !closingQuery.isSuccess ||
-    dictation.busy ||
-    saveState === "offline"
-  )
+  const canRequestSign = !(locked || !closingQuery.isSuccess || saveState === "offline")
   const signBlockedReason =
     saveState === "offline"
       ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
@@ -1947,7 +1983,7 @@ export function EncounterEditor({
           : childCount > 0
             ? "Guardando lo último que registraste…"
             : null
-  const openSign = () => {
+  const openSign = (pending: number = dictationPending) => {
     setSignToggled([])
     setFormsToggled([])
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
@@ -1963,7 +1999,7 @@ export function EncounterEditor({
         registrationNumber: profile?.registrationNumber ?? "",
       })
     }
-    setConfirmWithDictation(dictationPending > 0)
+    setConfirmWithDictation(pending > 0)
     setConfirmOpen(true)
   }
   const signer = useConsentSignerWord(patientId, firstNameOf(patient))
@@ -2656,7 +2692,7 @@ export function EncounterEditor({
         ]
       : []
   const footerText = dictation.busy
-    ? "Termina el dictado para poder firmar"
+    ? `Al firmar, ${CLINICAL_NAME} termina de ordenar lo que se dijo`
     : footerWait
       ? footerWait
       : !closingQuery.isSuccess
@@ -2713,6 +2749,7 @@ export function EncounterEditor({
                 session={dictation}
                 onStart={startDictation}
                 onType={() => setDictationTyping(true)}
+                onShowSaid={showTranscript}
               />
             ) : null}
             {/* Dónde termina la cabecera: al pasar por arriba, aparece la línea fija del paciente. */}
@@ -2767,9 +2804,20 @@ export function EncounterEditor({
         }}
       />
 
-      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} /> : null}
-      {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
-      {attending ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null}
+      {/* La barra de Clío, encima de lo que crece mientras se habla (lo de su salud): el cuadro para
+          escribir no se corre con cada pausa (QA del 22 nov, UX-7). */}
+      <DictationPanel
+        session={dictation}
+        onStart={startDictation}
+        onFinish={finishDictation}
+        onShowTranscript={showTranscript}
+        typing={dictationTyping}
+        onTypingChange={setDictationTyping}
+      />
+
+      {/* Lo que dijo de su salud, también lo que oyó Clío y la alergia dictada (o «niega alergias»), en la
+          fila de su tema del aviso: no en una caja aparte (issue 109; mesa del 20 nov 2026). */}
+      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} dictation={dictation} anchorId={`${uid}-salud`} /> : null}
 
       {canWrite && !attending ? (
         <div
@@ -2785,6 +2833,9 @@ export function EncounterEditor({
           </Button>
         </div>
       ) : null}
+
+      {/* Quien la lee sin llevarla ve lo que se dijo, sin cambiar nada. */}
+      {!attending ? <EncounterSaidLink patientId={patientId} encounterId={encounterId} /> : null}
 
       {childCount > 0 && (
         <p role="status" className="text-sm text-muted-foreground">
@@ -2806,15 +2857,6 @@ export function EncounterEditor({
           Solo lectura: no tienes permiso para editar este borrador.
         </p>
       )}
-
-      <DictationPanel
-        session={dictation}
-        onStart={startDictation}
-        onFinish={finishDictation}
-        onShowTranscript={showTranscript}
-        typing={dictationTyping}
-        onTypingChange={setDictationTyping}
-      />
 
       <MasterDetail
         panelSize="xl"
@@ -2846,6 +2888,9 @@ export function EncounterEditor({
             "consulta",
             "Consulta",
             <>
+              {/* Lo que propone Clío va arriba, donde se busca, y no debajo de los campos vacíos (QA del 22
+                  nov, UX-2): a 390 px queda a la vista al llegar al bloque. */}
+              {suggestionsOf("consulta")}
               {/* Por qué viene, en el motivo (la atención agrupada, 17 nov): su cita, lo que contó y la
                   cita que ya tiene. «Usar» llena el motivo solo si está vacío. */}
               {canWrite && attending ? (
@@ -2874,7 +2919,6 @@ export function EncounterEditor({
                 </div>
               ) : null}
               {consultaBody}
-              {suggestionsOf("consulta")}
             </>,
             // «Es una urgencia» va en el título de Consulta, con o sin su cita (P10).
             canWrite && attending && reason.trim() === "" ? (
@@ -3108,7 +3152,7 @@ export function EncounterEditor({
             </div>
             {dictation.busy ? (
               <p className="text-xs text-muted-foreground">
-                Termina el dictado y revisa las sugerencias para poder firmar.
+                Al finalizar, {CLINICAL_NAME} termina de ordenar lo que se dijo y te muestra lo que propone antes de firmar.
               </p>
             ) : dictationPending > 0 ? (
               <p className="text-xs text-muted-foreground">

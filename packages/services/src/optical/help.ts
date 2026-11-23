@@ -97,6 +97,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
   // Sin odontograma ni pieza, sin dictado y sin visor de tomografías en cortes.
   "¿Dónde registro un hallazgo del odontograma?": () => [],
   "¿Por qué la pieza quedó dibujada después del tratamiento?": () => [],
+  "¿Cómo anoto que tiene un perno, un implante o un puente?": () => [],
   "¿Cómo se firma el odontograma?": () => [],
   "¿Cómo dicto una atención?": () => [],
   // Una óptica no tiene atajos «Sin enfermedad» ni consulta propuesta al firmar (19 nov).
@@ -688,6 +689,14 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-dictado-firmar-sin-decidir": () => [],
   "pacientes-dictado-tercera-ficha": () => [],
   "pacientes-dictado-corregir-confirmada": () => [],
+  // Ni conversación con Clío, ni lo que se dijo, ni lo que dijo de su salud (mesa del 20 nov 2026).
+  "pacientes-dictado-conversar": () => [],
+  "pacientes-dictado-lo-que-se-dijo": () => [],
+  "pacientes-dictado-terminar-escribiendo": () => [],
+  "pacientes-dictado-salud": () => [],
+  "pacientes-dictado-no-lo-registro": () => [],
+  "pacientes-dictado-llevar-a-su-salud": () => [],
+  "pacientes-dictado-quien-hablo": () => [],
   "agente-clio-probar-dictado": () => [],
   "elijo-tratamientos-trae-cita": (faq) => [
     {

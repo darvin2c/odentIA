@@ -206,7 +206,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     // Solo lo que ya está construido. Las recetas llegan después: mientras no existan, no figuran como funciones.
     functions: [
       { id: "nota", label: "Consulta y evolución", description: "Motivo de consulta, tiempo y relato de la enfermedad, evolución, indicaciones y pronóstico.", fixed: true, tools: [] },
-      { id: "odontograma", label: "Odontograma", description: "Hallazgos por pieza y cara («la 46 ausente», «caries oclusal en la 36»), con el diagnóstico que les corresponde. Lo que la norma del país pide y no se dijo, se pide con un toque.", fixed: true, tools: [] },
+      { id: "odontograma", label: "Odontograma", description: "Hallazgos por pieza y cara («la 46 ausente», «caries oclusal en la 36», «implante en la 36»), con el diagnóstico que les corresponde. Lo que la norma del país pide y no se dijo, se pide con un toque.", fixed: true, tools: [] },
       { id: "diagnostico", label: "Diagnóstico", description: "Registra el código CIE-10 que nombró el odontólogo, con su pieza.", fixed: true, tools: [] },
       { id: "plan", label: "Plan de tratamiento", description: "Busca cada prestación dictada en los servicios de la clínica; si no hay una sola, la elige el odontólogo. «Resina, o si no una corona» llega al presupuesto como dos opciones para que el paciente elija.", fixed: true, tools: [] },
       { id: "receta", label: "Receta", description: "Prepara la receta con lo dictado (medicamento, dosis, frecuencia y duración), calcula la cantidad y avisa si choca con una alergia. El odontólogo la emite con su colegiatura.", fixed: true, tools: [] },
@@ -219,7 +219,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     // dictado que siguen sin decidir (sin tarifas) y las preguntas de las fichas que ya empezó en
     // esa atención (entrega 11), con lo que ya dicen: una corrección dicha queda por revisar. No lee
     // el odontograma ni el plan.
-    sees: "Lo que el odontólogo dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
+    sees: "Lo que el odontólogo dicta en esa atención. Las sugerencias de ese dictado que aún no decide, con lo que ya dice la consulta, para sumarle lo nuevo y entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Al terminar de dictar, una vez, todo lo que se dijo en esa atención, con lo ya confirmado y lo descartado, para completar lo que faltó y decir quién habló. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
     notSees: "El resto de la historia clínica, las fichas de otras atenciones, el odontograma ni el plan del paciente. Conversaciones ni caja.",
     never:
       "Guardar sin que el odontólogo confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el odontólogo pulse «Dictar». Tocar atenciones de otros profesionales.",

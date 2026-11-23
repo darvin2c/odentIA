@@ -61,9 +61,11 @@ export function FindingReasonNotice({
 }
 
 /**
- * El orden de lo que se ofrece para lo escrito: primero lo que le responde (el diagnóstico o el
- * tratamiento, `other`), después las tarjetas de hallazgo, y el motivo de consulta al final si hay
- * hallazgos (solo, si no). Sin nada, «Sin resultados».
+ * El orden de lo que se ofrece para lo escrito: primero las tarjetas de hallazgo, después lo que
+ * responde de otro lado (el tratamiento para el plan o el diagnóstico, `other`) tras «Si falta
+ * hacerlo:», y el motivo de consulta al final. Sin tarjetas, como antes: el motivo solo, lo de otro
+ * lado solo y, sin nada, «Sin resultados». En la mesa del 23 nov, con el tratamiento primero
+ * («perno», «endodoncia»), dos voces casi agregaron al plan lo que la pieza ya tenía hecho.
  */
 export function findingPickerBlocks(input: {
   reason: boolean
@@ -72,8 +74,8 @@ export function findingPickerBlocks(input: {
 }): ("reason" | "other" | "cards" | "empty")[] {
   if (!input.cards) return input.reason ? ["reason"] : input.other ? ["other"] : ["empty"]
   return [
-    ...(input.other ? (["other"] as const) : []),
     "cards",
+    ...(input.other ? (["other"] as const) : []),
     ...(input.reason ? (["reason"] as const) : []),
   ]
 }
@@ -166,9 +168,9 @@ export function FindingPicker({
           Quitar «{chosen.label}»
         </Button>
       ) : null}
-      {/* Primero lo que responde a lo escrito (QA de diseño del 18 nov, H4): con «endodoncia», agregarla
-          al plan y después la tarjeta del tratamiento hecho; con «caries dolorosa», la caries y después
-          el motivo. */}
+      {/* Primero las tarjetas (mesa del 23 nov): con «endodoncia», la del tratamiento de conducto que
+          ya tiene y después, tras «Si falta hacerlo:», agregarla al plan; con «caries dolorosa», la
+          caries y después el motivo. */}
       {findingPickerBlocks({
         reason: !!found.reason,
         cards: visible.length > 0,
@@ -178,12 +180,10 @@ export function FindingPicker({
           <FindingReasonNotice key="reason" reason={found.reason} onReason={onReason} />
         ) : block === "other" ? (
           <div key="other" className="flex flex-col gap-3">
-            {other}
             {visible.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Si ya lo tiene hecho, anótalo como hallazgo:
-              </p>
+              <p className="text-xs text-muted-foreground">Si falta hacerlo:</p>
             ) : null}
+            {other}
           </div>
         ) : block === "empty" ? (
           <EmptyState

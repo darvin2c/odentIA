@@ -261,7 +261,8 @@ export interface HealthDeclarationView {
   at: string
   /** Cuándo entró a su ficha: el instante de su registro, si vino con él. */
   enteredAt: string
-  via: "enlace" | "registro" | "formulario"
+  /** `consulta`: lo que dijo en la consulta y se revisó con «Lo revisé con…» (mesa del 20 nov 2026). */
+  via: "enlace" | "registro" | "formulario" | "consulta"
   by: HealthDeclarant
   health: Record<string, unknown>
   /**
@@ -319,6 +320,42 @@ export interface PatientHealth {
     createdAt: string
     createdBy: string | null
   } | null
+  /**
+   * Lo que dijo de su salud en una consulta en curso y nadie confirmó todavía (lo oyó Clío): la
+   * franja lo avisa como «dijo, sin confirmar». No está en Antecedentes. Opcional: un servidor de
+   * antes no lo manda.
+   */
+  said?: SaidHealth[]
+  /** Lo que dijo que toma y nadie confirmó: la receta lo avisa como al emitirla. Opcional. */
+  saidTaking?: Array<{ name: string | null; atcCode: string | null; anticoagulant: boolean; boneMedicine: boolean; at: string; open: boolean }>
+}
+
+/** Lo que dijo de su salud en una atención en borrador, dato por dato, sin confirmar (`listSaidHealth`). */
+export interface SaidHealth {
+  suggestionId: string
+  encounterId: string
+  by: HealthDeclarant
+  /**
+   * `key`: el grupo («anticoagulants») o el campo de la entrevista («dental.problemaAnestesia»);
+   * `by`: quién lo dijo; `before`: lo que dijo antes, si lo dijo distinto.
+   */
+  rows: Array<{
+    key: string
+    label: string
+    value: string
+    group?: string
+    by?: { declarante: "paciente" | "acompanante" | "no_se_sabe"; vinculo?: string }
+    before?: string | null
+    denied?: boolean
+    /** Lo volvió a decir después, en otra consulta (ISO 8601): esta fila ya no es lo vigente. */
+    newer?: string | null
+  }>
+  at: string
+  /**
+   * Su atención sigue en borrador y se revisa ahí; si no, ya se firmó y lo dicho sigue esperando
+   * (revisión del 21 nov, A3). Un servidor de antes no lo manda: solo avisaba lo de un borrador.
+   */
+  open?: boolean
 }
 
 export { ALLERGY_SEVERITIES } from "@odentia/clinical"

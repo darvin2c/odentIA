@@ -3,8 +3,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClioFormProposals, ClioFormProposalsContext, proposesValue, reread } from "./clio-form-proposals"
-import { UnusedNotice } from "./dictation-panel"
-import { type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
+import { proposalCounts, proposesLine, readiness, UnusedNotice } from "./dictation-panel"
+import { confirmable, confirmableAtSign, type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
 
 afterEach(cleanup)
 
@@ -100,6 +100,52 @@ describe("lo de la segunda lectura", () => {
     expect(markedByDefault(read)).toBe(false)
     expect(proposesValue(item("por_revisar", { value: null }))).toBe(false)
     expect(markedByDefault(item("lista", { value: "Positiva" }))).toBe(true)
+  })
+})
+
+// Mesa del 20 nov 2026 (P3): «Confirmar las N» confirmaba de un toque «No tiene alergias», salido de
+// un «no que yo sepa». Lo de su salud y las negaciones se revisan con la persona, de a una.
+describe("«Confirmar las N» no lleva lo de su salud ni una negación", () => {
+  const item = (kind: DictationSuggestion["kind"], payload: Record<string, unknown>): DictationSuggestion => ({
+    id: "s1",
+    kind,
+    payload,
+    sourceText: "",
+    status: "lista",
+    note: null,
+    summary: "",
+    voice: null,
+    removal: null,
+  })
+  it("ni la salud ni «No tiene alergias» van con las demás; al firmar, la negación viene desmarcada y la salud no está", () => {
+    const health = item("salud", { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } })
+    const none = item("alergia", { none: true })
+    expect(confirmable(health)).toBe(false)
+    expect(confirmableAtSign(health)).toBe(false)
+    expect(confirmable(none)).toBe(false)
+    expect(confirmableAtSign(none)).toBe(true)
+    expect(markedByDefault(none)).toBe(false)
+    expect(confirmable(item("alergia", { substance: "Penicilina" }))).toBe(true)
+  })
+
+  it("«Clío propone N» y «Confirmar las M» cuadran: cada propuesta en un solo grupo y los grupos suman N (QA del 21 y 22 nov)", () => {
+    // Antes: «Clío propone 6: 5 en la consulta y 1 receta» con «Confirmar las 3 de la consulta», y
+    // después tres números distintos para lo mismo (UX-8).
+    const list = [
+      { ...item("nota", { reason: "Dolor" }), id: "a" },
+      { ...item("diagnostico", { code: "K04.0" }), id: "b" },
+      { ...item("plan", { service: "endodoncia" }), id: "c", status: "por_revisar" as const },
+      { ...item("alergia", { none: true }), id: "d" },
+      { ...item("salud", { declarante: "paciente" }), id: "e" },
+      { ...item("receta", { drug: "ibuprofeno" }), id: "f" },
+    ]
+    expect(list.filter(confirmable)).toHaveLength(2)
+    expect(proposesLine(list)).toBe("Clío propone 6")
+    const counts = proposalCounts(list)
+    expect(counts).toEqual({ ready: 2, incomplete: 1, denials: 1, health: 1, forms: 0, prescriptions: 1, leaves: 0 })
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(list.length)
+    expect(counts.ready).toBe(list.filter(confirmable).length)
+    expect(readiness(list, 0).startsWith("2 para confirmar")).toBe(true)
   })
 })
 

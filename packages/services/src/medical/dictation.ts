@@ -6,6 +6,7 @@ import {
   type Vitals,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import type { z } from "zod"
 import { encounter } from "@odentia/db/schema/clinical"
 import {
   EXAM_STATE_LABELS,
@@ -18,6 +19,7 @@ import {
 } from "@odentia/medical"
 import { and, eq } from "drizzle-orm"
 import { updateEncounterDraft } from "../encounters.js"
+import { DECLARED_HEALTH_SHAPE } from "../dictation-health.js"
 import { ServiceError } from "../errors.js"
 import { normalizeForSearch } from "../knowledge.js"
 import type { DictationPrepared, ProductDictation } from "../product-hooks.js"
@@ -147,8 +149,17 @@ async function draftOf(tx: Db, orgId: string, patientId: string, encounterId: st
   return row
 }
 
+/**
+ * Lo de su salud dicho en la consulta que pregunta latidIA, además de lo común (mesa del 20 nov
+ * 2026): la lactancia, el tabaco y el alcohol de su entrevista, con la forma de su registro.
+ */
+export const MEDICAL_DICTATION_HEALTH = {
+  medical: DECLARED_HEALTH_SHAPE.medical.describe("Si da de lactar, si fuma (`cigarrillos`, cuántos al día, solo de quien fuma) y si toma alcohol."),
+} satisfies z.ZodRawShape
+
 export const MEDICAL_DICTATION: ProductDictation = {
   kinds: ["signos", "examen", "descanso"],
+  health: MEDICAL_DICTATION_HEALTH,
   // Sin «dónde» (decisión 4): todo lo dicho de una prestación dice cuál es.
   placeWords: [],
   catalogText: examSystemsText,

@@ -372,6 +372,31 @@ const SAID_AS: Record<string, RegExp> = {
   bruxismo: /\b(rechina|aprieta)n? los dientes\b/,
   "respiracion bucal": /\b(duerme|respira|respirando)n? (con la boca abierta|por la boca)\b/,
 }
+/**
+ * Cómo se dice en una consulta conversada lo que una opción de una prueba nombra con su término
+ * (mesa del 20 nov 2026, P6: «con el frío le dura el dolor más de un minuto» es la respuesta que
+ * persiste; «me duele solo, sin tocar nada», el dolor espontáneo). Sobre lo dicho sin tildes. No
+ * limpia el relato como `SAID_AS`: el dolor que cuenta el paciente se queda en la consulta.
+ */
+const LASTS =
+  /\b(?:persiste|persistio|persistente|prolongad[oa]|se (?:le )?queda(?:ba)?|no se (?:le )?(?:pasa|quita|va)|(?:dura|duraba|duro)\b(?! (?:poco|nada|un (?:segundo|momento|ratito))\b))/
+const FADES = /(?:\b(?<!\bno )se (?:le )?(?:pasa|paso|quita|quito|va|fue)\b|\b(?:cede|cedio|desaparece|pasa rapido)\b|\b(?:dura|duraba|duro) poco\b)/
+const SPONTANEOUS = /\bduelen? solo\b(?! (?:cuando|al|con|si|a)\b)|\bsin tocar(?:la|lo|le)? nada\b|\bsin que (?:la |lo |le )?toquen?\b|\bde la nada\b/
+const SAID_AS_OPTION: Record<string, (said: string) => boolean> = {
+  "aumentada, persiste": (said) => LASTS.test(said) && !FADES.test(said),
+  "aumentada, cede al retirar el estimulo": (said) => FADES.test(said) && !LASTS.test(said),
+  espontaneo: (said) => SPONTANEOUS.test(said),
+}
+/** ¿Lo dicho (sin tildes) dice esta opción con las palabras de la consulta (`SAID_AS_OPTION`)? */
+const saidAsOption = (option: string, said: string) => SAID_AS_OPTION[plain(option)]?.(plain(said)) ?? false
+/**
+ * Lo que hace pensar en una opción sin decirla: la red avisa la oración en su pregunta, pero no se
+ * propone («una lesión en el ápice» en la radiografía no dice si es radiolúcida). Solo para avisar.
+ */
+const OPTION_HINTS: Record<string, RegExp> = {
+  "radiolucidez periapical": /\b(?:lesion|lesiones|zona|imagen|area)\b[^.;]*\b(?:periapical|apical|apice|apices)\b/,
+}
+
 /** La opción de una prueba que dio positiva: «Positiva», «Positivo». */
 const isPositiveOption = (option: string) => /^positiv[oa]\b/.test(plain(option))
 
@@ -386,8 +411,12 @@ function painOnTest(question: DictationFormQuestion, said: string): boolean {
   return [...plain(said).matchAll(PAIN_ON)].some((match) => isTestOf(question, match[1]))
 }
 
-/** El dolor a algo, sobre lo dicho sin tildes: «(sin) dolor a la percusión», «duele al palpar». */
-const PAIN_ON = /\b(?:sin\s+)?(?:dolor|duele)\s+al?\s+(?:la\s+)?([a-z]+)/g
+/**
+ * El dolor a algo, sobre lo dicho sin tildes: «(sin) dolor a la percusión», «duele al palpar», también
+ * con cuánto en medio («le duele bastante a la percusión», QA del 20 nov: se perdía en silencio).
+ */
+const PAIN_ON =
+  /\b(?:sin\s+)?(?:dolor|duele)(?:\s+(?:muy|mucho|bastante|harto|un\s+poco|poco|algo|fuerte|leve|levemente|intenso|intensamente|tanto))?\s+al?\s+(?:la\s+)?([a-z]+)/g
 /** ¿Esa palabra es la de la pregunta? («percusión» de «Percusión», «palpar» de «Palpación».) */
 const isTestOf = (question: DictationFormQuestion, word: string | undefined) => {
   const stem = stemsOf(word ?? "")[0]
@@ -408,6 +437,16 @@ const stemsOf = (text: string) => [
 
 /** Las raíces de una etiqueta sin lo que va entre paréntesis («(Angle)», «(tracto sinusal)», «(mm)»). */
 const labelStems = (label: string) => stemsOf(label.replace(/\([^)]*\)/g, " "))
+
+/**
+ * ¿Son la misma palabra, en otra forma? Con sus siete primeras letras, o las que tenga la más corta
+ * (desde cinco): «pulpa» y «pulpar», «radiolúcida» y «radiolucidez», pero no «radiográfico» y
+ * «radiolucidez», que con cinco eran la misma («radio»; QA del 20 nov).
+ */
+const sameWord = (a: string, b: string) => {
+  const length = Math.min(7, a.length, b.length)
+  return length >= 5 ? a.slice(0, length) === b.slice(0, length) : a === b
+}
 
 /**
  * ¿La frase habla de esta pregunta? Lo que la distingue de una hermana del
@@ -785,8 +824,16 @@ function ownWordsOf(question: DictationFormQuestion): string[] {
   let own = ownWords.get(question)
   if (!own) {
     const others = new Set((question.siblings ?? []).flatMap((item) => meaningful(item.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
-    const options = new Set((question.options ?? []).flatMap(stemsOf))
-    own = meaningful(question.label.replace(/\([^)]*\)/g, " ")).filter((word) => !others.has(word.slice(0, 5)) && !options.has(word.slice(0, 5)))
+    // De sus opciones, la misma palabra (`sameWord`): «radiográfico» no es «Radiolucidez» y nombra el
+    // hallazgo radiográfico (QA del 20 nov: «en la radiografía…» no lo nombraba).
+    const options = (question.options ?? []).flatMap((option) => meaningful(option))
+    // Lo que va tras «más» o «menos» dice cuál de la medida, no qué se mide: «una caries profunda» no
+    // nombra el «Sondaje periodontal más profundo» (QA del 20 nov).
+    const label = plain(question.label.replace(/\([^)]*\)/g, " ")).split(/[^a-z0-9]+/)
+    const comparative = new Set(label.filter((_, index) => index > 0 && (label[index - 1] === "mas" || label[index - 1] === "menos")))
+    own = meaningful(question.label.replace(/\([^)]*\)/g, " ")).filter(
+      (word) => !others.has(word.slice(0, 5)) && !options.some((item) => sameWord(item, word)) && !comparative.has(word),
+    )
     ownWords.set(question, own)
   }
   return own
@@ -817,18 +864,52 @@ function namesQuestion(question: DictationFormQuestion, heard: string, site: Pro
 function saysValue(question: DictationFormQuestion, sentence: string): boolean {
   if (question.type === "booleano") return true
   if (question.type === "pieza") return toothNumbersIn(sentence).length > 0
-  if (question.type === "numero" || question.type === "escala") return saidNumbers(sentence).length > 0
+  // «Una lesión» no es el número 1 («una caries profunda… y una lesión» avisaba el sondaje, QA del 20
+  // nov); «un milímetro» sí.
+  if (question.type === "numero" || question.type === "escala") return saidNumbers(sentence, { articles: false }).length > 0 || articleWithUnit(sentence)
   const options = question.options ?? []
-  const label = new Set(labelStems(question.label))
-  const spoken = new Set(stemsOf(sentence))
+  // Las palabras de la opción que no son del rótulo, como palabras: «radiolúcida» es de «Radiolucidez
+  // periapical» aunque el rótulo diga «radiográfico» (con sus cinco letras eran la misma).
+  const label = meaningful(question.label.replace(/\([^)]*\)/g, " "))
+  const spoken = meaningful(sentence)
   const heard = saidNumbers(sentence, { roman: "largos", articles: false })
   return options.some(
     (option) =>
-      stemsOf(option).some((stem) => !label.has(stem) && spoken.has(stem)) ||
+      meaningful(option).some((word) => !label.some((own) => sameWord(own, word)) && spoken.some((item) => sameWord(item, word))) ||
       optionNumbers(option).some((number) => heard.includes(number)) ||
       (isNegativeOption(option) && denies(sentence)) ||
-      (isPositiveOption(option) && painOnTest(question, sentence)),
+      (isPositiveOption(option) && painOnTest(question, sentence)) ||
+      saidAsOption(option, sentence) ||
+      !!OPTION_HINTS[plain(option)]?.test(plain(sentence)),
   )
+}
+
+/** «Un milímetro», «una semana»: el artículo es el número 1 solo con su unidad detrás. */
+function articleWithUnit(text: string): boolean {
+  const words = plain(text).split(/[^a-z0-9]+/)
+  return words.some((word, index) => (word === "un" || word === "una") && UNIT_WORDS.has(words[index + 1] ?? ""))
+}
+
+/**
+ * ¿La oración nombra la pregunta por una de sus opciones? Las dos primeras palabras de una opción que
+ * no son del rótulo, dichas, y que ninguna otra pregunta de la ficha tiene juntas: «pulpitis
+ * irreversible» es del diagnóstico pulpar aunque no se diga «pulpar» (QA del 20 nov: se avisaba solo
+ * el apical); «maloclusión clase dos división uno» no nombra la clase molar («clase» es de su rótulo).
+ * Solo para la red: lo que se propone se comprueba como siempre.
+ */
+function optionNamed(question: DictationFormQuestion, heard: string): boolean {
+  if (question.type !== "opcion_unica" && question.type !== "opcion_multiple") return false
+  const spoken = meaningful(heard)
+  const label = meaningful(question.label.replace(/\([^)]*\)/g, " "))
+  const others = (question.siblings ?? []).flatMap((item) => [item.label, ...(item.options ?? [])]).map((text) => meaningful(text))
+  const has = (words: readonly string[], word: string) => words.some((item) => sameWord(item, word))
+  return (question.options ?? []).some((option) => {
+    const words = meaningful(option)
+      .filter((word) => !has(label, word))
+      .slice(0, 2)
+    if (words.length < 2 || !words.every((word) => has(spoken, word))) return false
+    return !others.some((text) => words.every((word) => has(text, word)))
+  })
 }
 
 /**
@@ -930,7 +1011,7 @@ export function formSentencesWithoutAnswer(
     const named = open.filter((question) => {
       const heard = heardBy(question, said)
       if (!saysValue(question, heard)) return false
-      if (!namesQuestion(question, heard, site) && !unitNamed(question, questions, heard)) {
+      if (!namesQuestion(question, heard, site) && !unitNamed(question, questions, heard) && !optionNamed(question, heard)) {
         if (!saidBetweenTwins(question, questions, said, handled)) return false
         between.add(question)
       }
@@ -1817,7 +1898,7 @@ function checkFormAnswer(
   const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string; between: string[] } | null => {
     if (isNegativeOption(value)) return denies(said) && labelSaid ? { ok: true } : null
     if (isPositiveOption(value) && painOnTest(question, said)) return { ok: true }
-    if (SAID_AS[plain(value)]?.test(plain(said))) return { ok: true }
+    if (SAID_AS[plain(value)]?.test(plain(said)) || saidAsOption(value, said)) return { ok: true }
     const numbers = optionNumbers(value)
     if (numbers.length) {
       if (containsAll(heardForOptions, numbers)) return { ok: true }

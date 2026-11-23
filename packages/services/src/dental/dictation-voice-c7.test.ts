@@ -122,6 +122,12 @@ describe("la pregunta de número nombrada sin un número no se pierde en silenci
     // Lo que no es de número no avisa por nombrarse solo: «percusión igual que la vez pasada».
     expect(noticesOf([], endo, "percusión igual que la vez pasada")).toEqual([])
     // «periodontitis» es de una opción del diagnóstico apical, no el «Sondaje periodontal» (banco, endo-6).
-    expect(noticesOf([], endo, "con periodontitis apical sintomática.")).toEqual([])
+    // Sin nada propuesto, el diagnóstico apical se perdería en silencio: se avisa ahí (`optionNamed`).
+    const apical = "con periodontitis apical sintomática."
+    expect(noticesOf([], endo, apical)).toEqual([expect.objectContaining({ said: apical, questions: [numberOf(endo, "diagnostico_apical")] })])
+    // Con su respuesta, o con el diagnóstico que la responde, ya no.
+    expect(noticesOf([answer(endo, "diagnostico_apical", "Periodontitis apical sintomática", apical)], endo, apical)).toEqual([])
+    expect(formNetMisses([{ kind: "diagnostico", payload: {}, sourceText: apical }], endo, FDI, apical)).toEqual([])
+    expect(formNetMisses([], endo, FDI, apical)).toEqual([{ said: apical, questions: [numberOf(endo, "diagnostico_apical")] }])
   })
 })

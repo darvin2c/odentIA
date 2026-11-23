@@ -145,6 +145,14 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 **Podado:** «nada cruza un anticoagulante o un bifosfonato con exodoncia»: ya existe en el renglón del Plan («Toma Eliquis: riesgo de sangrado. Toma Fosamax: riesgo de osteonecrosis…»).
 
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] Lo dicho sin confirmar se dice igual en la franja, la línea fija de la atención, el Resumen de la ficha y el panel «Antecedentes y última atención». Ninguno dice «no se le preguntó» de algo que se dijo.
+- [ ] Lo dicho otro día y corregido hoy («ya no tomo apixabán») reemplaza a lo de antes en la franja, y el bloque viejo no ofrece confirmar lo que se corrigió. Caso: Rosa, día 2.
+- [ ] «Ya no lo toma» se muestra como «lo dejó (fecha)», no como «dijo que sí», en ámbar.
+
+**Ya falló:** (21 nov 2026) lo dicho sin confirmar salía distinto en la franja, la línea fija, el Resumen y el panel, y alguno decía «no se le preguntó»; lo corregido otro día seguía ofreciéndose para confirmar. Se corrigió en la rama `fix/clio-lee-la-conversacion`.
+Fuentes que se suman: SDCEP, *Management of Dental Patients Taking Anticoagulants or Antiplatelet Drugs* (verificar la edición); NTS 139-MINSA/2018/DGAIN, 5.3.3; HL7 FHIR `Provenance` y `QuestionnaireResponse.source` (quién lo dijo).
+
 ## P-ODO-03 Abrir la atención: «Hoy viene a…», motivo y relato
 
 **Dónde:** «Atender» (`CA/new-encounter-button.tsx`), la atención (`CA/encounter-editor.tsx`) y «Hoy viene a…» (`CA/encounter-visit.tsx`, `S/encounter-visit.ts`).
@@ -283,6 +291,11 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 - [ ] En una pieza que ya tiene opciones, lo indicado después pregunta a qué opción va; en otra pieza, entra común a todas. Caso: perno-muñón en la 36 con A (endodoncia y corona) y B (exodoncia).
 - [ ] La línea de la atención dice lo aceptado (con su monto) cuando aceptó por partes, y la respuesta se dice con una sola palabra («Lo piensa») en el diálogo, el Plan y la ficha.
 
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] Un tratamiento dictado («le planteo endodoncia») y después la alternativa («la otra opción es la exodoncia») dan un presupuesto de dos opciones, no la endodoncia como común a las dos. Caso: Rosa, S/ 1 300 y S/ 800.
+
+**Ya falló:** (21 nov 2026) la endodoncia dictada quedó como común a las dos opciones; se corrigió en la rama `fix/clio-lee-la-conversacion`.
+
 ## P-ODO-09 Consentimiento informado
 
 **Dónde:** el bloque Documentos de la atención (`CA/encounter-documents.tsx`), la firma (`CA/consent-signing.tsx`) y las plantillas en `/settings/forms` (`C/consent.ts`).
@@ -325,6 +338,12 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 - [ ] La línea (ASA, alergias, medicación y máximo) aparece en la atención apenas hoy hay algo con anestesia, no solo en el diálogo de firmar.
 - [ ] El máximo se calcula con el anestésico elegido y el peso de los signos vitales: lidocaína al 2 % con epinefrina, 4,4 mg/kg (hasta 300 mg); mepivacaína al 3 %, 4,4 mg/kg (300 mg); articaína al 4 %, 7 mg/kg (500 mg; no en menores de 4 años), y prilocaína al 4 %, 6 mg/kg (400 mg); cartucho de 1,8 mL. Los cartuchos nunca se dicen sin nombrar el anestésico. Caso: Mateo, 22 kg, con mepivacaína al 3 %: 1,8 cartuchos, no 2,7. Fuente: tabla de la AAPD, verificar.
 - [ ] En un cardiópata (o ASA III o IV), la epinefrina hasta 0,04 mg, unos 2 cartuchos con 1:100 000. Fuente: Malamed, *Handbook of Local Anesthesia*, verificar.
+
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] La exodoncia, también como opción «por decidir» entre dos caminos, avisa el anticoagulante, registrado o dicho.
+- [ ] La anestesia dictada que completa el repaso se ve en el cierre y se decide antes de firmar; la línea de anestesia avisa también lo dicho sin confirmar (anticoagulante, alergia).
+
+**Ya falló:** (21 nov 2026) el repaso propuso «anestesia infiltrativa con lidocaína en la 36» y el cierre firmó sin mostrarla; se corrigió en la rama `fix/clio-lee-la-conversacion`. La exodoncia «por decidir» sin aviso del anticoagulante confirmado ya estaba antes y sigue pendiente.
 
 ## P-ODO-11 Procedimientos de hoy
 
@@ -386,6 +405,11 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 **Sumado por el estudio de la atención (16 nov 2026):**
 - [ ] «Cambiar medicamento» limpia la concentración, la forma y la dosis del anterior. Caso: de amoxicilina 500 mg a ibuprofeno, la concentración queda vacía para escribirla.
 - [ ] La cantidad total se propone desde dosis × frecuencia × duración, también en la receta escrita.
+
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] Un AINE con un anticoagulante **dicho y sin confirmar** avisa en la receta: «dijo apixabán hoy, sin confirmar». Caso: Rosa, ibuprofeno 400.
+
+**Ya falló:** (21 nov 2026) se recetó ibuprofeno sin aviso con «dijo apixabán, sin confirmar»; se corrigió en la rama `fix/clio-lee-la-conversacion`.
 
 ## P-ODO-14 Imágenes, radiografías y tomografía
 
@@ -523,6 +547,19 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 **Sumado por el estudio de la atención (16 nov 2026):**
 - [ ] «Resina» dictada para un molar temporal ofrece las resinas de posterior, no carillas.
 
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] Lo de salud dicho en una pausa, escrito como lo escribe la voz de Chrome (sin tildes ni puntuación: «tomo losartan para la presion»), llega a «Revisa con… lo que dijo». Si no, queda en «No lo usé» con su frase, nunca «Una parte que no supe citar». Caso: Rosa, pausa 4; Mateo, pausas 2 y 6.
+- [ ] La respuesta a una pregunta de la pausa anterior no se marca «corregido por voz». Caso: «¿desde cuándo?» / «como dos semanas».
+- [ ] Lo que se le explica al paciente del sistema no entra como evolución. Caso: C5 de la mesa del 20 nov.
+- [ ] El repaso parte la pregunta de quien atiende y la respuesta del paciente en turnos distintos, y no le atribuye a la acompañante lo que dicta la doctora.
+- [ ] El repaso no vuelve a proponer lo ya confirmado de la consulta.
+- [ ] La cita que propone Clío cuenta como «cuándo vuelve» en el cierre.
+- [ ] Una atención con lo que se dijo o con propuestas de Clío no es «vacía»: «Descartar» no la borra sin decir qué se pierde.
+- [ ] «Intentar otra vez» que no usa la frase la deja en «No lo usé»; nunca desaparece sin quedar en ninguna parte.
+
+**Ya falló:** (21 nov 2026) la salud dicha sin tildes caía en «Una parte que no supe citar»; «hace como dos semanas» salió «corregido por voz»; la charla con el paciente entró como evolución; la pregunta y la respuesta iban en un solo turno; el repaso repetía lo ya confirmado; la cita propuesta no contaba como «cuándo vuelve»; «Descartar esta atención» borró sin preguntar una consulta con lo que se dijo; «Intentar otra vez» podía perder la frase. Todo se corrigió en la rama `fix/clio-lee-la-conversacion`.
+Fuentes que se suman: NTS 139-MINSA/2018/DGAIN, 5.3.3; HL7 FHIR `Provenance` y `QuestionnaireResponse.source` (para quién habló); ADR 0163 (avisa, nunca frena).
+
 ## P-ODO-20 Quién ve lo clínico
 
 **Dónde:** `packages/auth/src/permissions.ts` y `S/clinical-access.ts`.
@@ -641,6 +678,8 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C18 | Gestante de 30 semanas, alérgica al látex, que se registra sola en el enlace público y viene por dolor. | 01, 02, 10, 13 | El embarazo y sus semanas en la franja y al abrir la atención; el látex a la vista. |
 | C19 | Adulta con alergia severa a penicilinas, HTA con losartán, ASA II, endodoncia de la 46 aceptada y por empezar, corona «lo piensa» y una receta de amoxicilina anulada por la alergia; pide su copia para seguir en otra clínica. | 02, 07, 08, 09, 13, 16, 17, 18 y P-COM-06, P-COM-26 | La copia dice lo mismo que la ficha: alergias con su estado, ASA, la decisión de cada tratamiento, el control que toca, la orden sin resultado, la receta anulada con su motivo y el odontograma de la norma. |
 | C20 | Adulto con periodontitis estadio III grado B, dos periodontogramas, a quien nunca se le preguntaron alergias; pide su copia. | 02, 12, 17 | La copia trae los dos sondajes para comparar y dice «Alergias: no se le preguntó». |
+| C21 | Rosa en dos días: día 1 con apixabán dicho y sin confirmar, receta de ibuprofeno y exodoncia como alternativa a la endodoncia; día 2, ella corrige que lo dejó. | 02, 07, 08, 10, 13, 19 | La receta avisa «dijo apixabán, sin confirmar»; la exodoncia avisa el anticoagulante; presupuesto de dos opciones (S/ 1 300 y S/ 800); el día 2 reemplaza lo dicho y muestra «lo dejó (fecha)». |
+| C22 | Mateo con su madre: el asma lo dice la acompañante, el peso se calcula y los antecedentes son de los padres. | 01, 02, 10, 19 | La salud dicha llega a «Revisa con… lo que dijo» con su frase; cada frase se atribuye a quien la dijo; el peso dicho tiene dónde ir (hoy no). |
 
 ### El recorrido largo
 

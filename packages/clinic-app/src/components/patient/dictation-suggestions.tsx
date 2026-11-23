@@ -1,10 +1,10 @@
 import { formatMoney, VITAL_SIGNS } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Input, toast } from "@odentia/ui"
-import { AgentMark, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { AgentMark, DetailField, DetailList, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
@@ -52,7 +52,94 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  * quedar. Mientras se dicta solo se pueden quitar o abrir; al terminar se
  * confirman, se editan o se descartan.
  */
+/** El orden de la consulta propuesta: lo que cuenta el paciente primero; la evolución, al final, en su renglón. */
+const NOTE_ORDER = ["reason", "illnessDuration", "presentIllness", "evolution", "indications", "prognosis"] as const
+
+/**
+ * La consulta que propone Clío, un renglón por campo (QA del 22 nov, UX-2: era un párrafo con «·», en
+ * otro orden y con la evolución en medio). Cada renglón trae lo que arma el servidor, con su «antes
+ * dijo…» si lo dijo distinto.
+ */
+export function noteRows(item: Pick<DictationSuggestion, "summary">): Array<{ label: string; value: string }> {
+  const lines = new Map(
+    item.summary
+      .split("\n")
+      .map((line) => {
+        const at = line.indexOf(": ")
+        return at > 0 ? ([line.slice(0, at), line.slice(at + 2)] as const) : null
+      })
+      .filter((pair): pair is readonly [string, string] => pair !== null),
+  )
+  return NOTE_ORDER.flatMap((key) => {
+    const value = lines.get(NOTE_FIELD_LABEL[key])
+    return value ? [{ label: NOTE_FIELD_LABEL[key], value }] : []
+  })
+}
+
+/**
+ * Lo que sigue en una sugerencia después de elegir algo en ella (la prestación, uno de los caminos): su
+ * «Confirmar» o, si aún le falta algo, su primer botón. Lo que se eligió desaparece al guardarse y el
+ * foco caía en la página entera (QA del 22 nov, UX-6).
+ */
+function focusNextIn(id: string): boolean {
+  const card = document.querySelector<HTMLElement>(`[data-suggestion="${CSS.escape(id)}"]`)
+  if (!card) return false
+  const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 640px)").matches
+  const confirm = card.querySelector<HTMLElement>(wide ? "[data-confirm-wide] button:not([disabled])" : "[data-confirm-narrow]:not([disabled])")
+  const next = confirm ?? card.querySelector<HTMLElement>("button:not([disabled])")
+  next?.focus()
+  return !!next
+}
+
+/** Recuerda en qué sugerencia se eligió algo y, cuando lo elegido ya no tiene el foco, lo lleva a lo que sigue. */
+function useFocusAfterChoice(): (id: string) => void {
+  const [pending, setPending] = useState<string | null>(null)
+  // Sin dependencias: espera al render en que lo elegido se fue o quedó apagado.
+  useEffect(() => {
+    if (!pending) return
+    const active = document.activeElement as HTMLElement | null
+    const lost = !active || active === document.body || !active.isConnected || (active instanceof HTMLButtonElement && active.disabled)
+    if (!lost) {
+      // Ya está en otra parte (otra sugerencia, otro bloque): no se le quita.
+      if (!active.closest(`[data-suggestion="${CSS.escape(pending)}"]`)) setPending(null)
+      return
+    }
+    if (focusNextIn(pending)) setPending(null)
+  })
+  return setPending
+}
+
+/**
+ * Recuerda la sugerencia que se confirmó o descartó y, cuando ya no está, lleva el foco a la siguiente
+ * del bloque (su «Confirmar») o, sin otra, al título del bloque: la tarjeta desaparecía y el foco caía
+ * en la página entera (QA del 23 nov, verificador 2: tras «Confirmar» de los dos caminos).
+ */
+function useFocusAfterLeaving(): (id: string) => void {
+  const [leaving, setLeaving] = useState<{ id: string; next: string | null; block: HTMLElement | null } | null>(null)
+  // Sin dependencias: espera al render en que la tarjeta ya no está.
+  useEffect(() => {
+    if (!leaving) return
+    // Sigue ahí (guardando, o no se pudo): se espera; el foco solo se mueve si se perdió.
+    if (document.querySelector(`[data-suggestion="${CSS.escape(leaving.id)}"]`)) return
+    setLeaving(null)
+    const active = document.activeElement as HTMLElement | null
+    if (active && active !== document.body && active.isConnected) return
+    if (leaving.next && focusNextIn(leaving.next)) return
+    const title = leaving.block?.isConnected ? leaving.block.querySelector<HTMLElement>("h2, h3") : null
+    if (!title) return
+    if (!title.hasAttribute("tabindex")) title.setAttribute("tabindex", "-1")
+    title.focus()
+  })
+  return (id) => {
+    const card = document.querySelector<HTMLElement>(`[data-suggestion="${CSS.escape(id)}"]`)
+    const sibling = (card?.nextElementSibling ?? card?.previousElementSibling) as HTMLElement | null
+    setLeaving({ id, next: sibling?.getAttribute("data-suggestion") ?? null, block: card?.closest<HTMLElement>("section") ?? null })
+  }
+}
+
 export function DictationBlockSuggestions({ session, kind, patientName }: { session: DictationSession; kind: DictationKind; patientName?: string }) {
+  const focusAfterChoice = useFocusAfterChoice()
+  const focusAfterLeaving = useFocusAfterLeaving()
   const items = session.suggestions.filter((item) => item.kind === kind)
   const removed = session.removedByVoice.filter((item) => item.kind === kind)
   const undo = session.undoRequests.filter((item) => item.kind === kind)
@@ -68,7 +155,9 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
     <div className="flex basis-full flex-col gap-2">
       <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: ${DICTATION_KIND_LABEL[kind]}`} className="flex flex-col gap-2">
         {items.map((item) => {
-          const { title, detail: summaryDetail } = suggestionText(item)
+          // La consulta va en renglones, debajo: arriba basta con decir que es lo que propone Clío.
+          const note = item.kind === "nota" ? noteRows(item) : []
+          const { title, detail: summaryDetail } = note.length ? { title: `Lo que propone ${CLINICAL_NAME}`, detail: "" } : suggestionText(item)
           const ready = item.status === "lista"
           const busy = acting(item) || session.confirmReady.isPending
           const candidates = candidatesOf(item)
@@ -77,7 +166,7 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
           const detail = choice ? (item.sourceText ? `Dijiste «${item.sourceText}»` : "") : summaryDetail
           const addsTo = session.noteAddsTo(item)
           return (
-            <li key={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
+            <li key={item.id} data-suggestion={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 {ready ? (
                   <AgentMark size="sm" />
@@ -115,10 +204,33 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                 ) : null}
                 {ready && !session.dictating ? (
                   <>
-                    <SubmitButton type="button" size="sm" className="max-sm:hidden" pending={acting(item) && session.act.variables?.action === "confirm"} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
-                      {confirmWord(item)}
-                    </SubmitButton>
-                    <Button type="button" size="icon" className="size-11 sm:hidden" aria-label={`${confirmWord(item)}: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                    <span data-confirm-wide className="contents">
+                      <SubmitButton
+                        type="button"
+                        size="sm"
+                        className="max-sm:hidden"
+                        pending={acting(item) && session.act.variables?.action === "confirm"}
+                        disabled={busy}
+                        onClick={() => {
+                          focusAfterLeaving(item.id)
+                          session.act.mutate({ item, action: "confirm" })
+                        }}
+                      >
+                        {confirmWord(item)}
+                      </SubmitButton>
+                    </span>
+                    <Button
+                      data-confirm-narrow
+                      type="button"
+                      size="icon"
+                      className="size-11 sm:hidden"
+                      aria-label={`${confirmWord(item)}: ${title}`}
+                      disabled={busy}
+                      onClick={() => {
+                        focusAfterLeaving(item.id)
+                        session.act.mutate({ item, action: "confirm" })
+                      }}
+                    >
                       <Check className="size-4" aria-hidden />
                     </Button>
                   </>
@@ -129,11 +241,31 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                     {ready ? "Editar" : "Completar"}
                   </Button>
                 ) : null}
-                <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-8" aria-label={`Descartar: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "discard" })}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 sm:size-8"
+                  aria-label={`Descartar: ${title}`}
+                  disabled={busy}
+                  onClick={() => {
+                    focusAfterLeaving(item.id)
+                    session.act.mutate({ item, action: "discard" })
+                  }}
+                >
                   <X className="size-4" aria-hidden />
                 </Button>
               </div>
-              {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
+              {note.length ? (
+                <DetailList columns={1} className="gap-y-2 sm:pl-8">
+                  {note.map((row) => (
+                    <DetailField key={row.label} label={row.label}>
+                      {row.value}
+                    </DetailField>
+                  ))}
+                </DetailList>
+              ) : null}
+              {choice ? <PlanChoices session={session} item={item} busy={busy} onChosen={() => focusAfterChoice(item.id)} /> : null}
               {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} patientName={patientName} /> : null}
               {item.kind === "presupuesto" ? <BudgetLines item={item} /> : null}
               {item.kind === "alergia" && pendingOf(item).includes("severity") ? (
@@ -168,7 +300,10 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                       size="sm"
                       className="h-auto min-h-11 whitespace-normal sm:min-h-8"
                       disabled={busy || session.save.isPending}
-                      onClick={() => session.save.mutate({ item, patch: { serviceId: candidate.id }, confirm: false })}
+                      onClick={() => {
+                        focusAfterChoice(item.id)
+                        session.save.mutate({ item, patch: { serviceId: candidate.id }, confirm: false })
+                      }}
                     >
                       {candidate.name} · {price(candidate.priceCents, candidate.currency)}
                     </Button>
@@ -388,14 +523,17 @@ const LETTER = ["A", "B", "C"]
  * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones:
  * lo dice el aviso flotante, no la tarjeta.
  */
-function PlanChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
+function PlanChoices({ session, item, busy, onChosen }: { session: DictationSession; item: DictationSuggestion; busy: boolean; onChosen: () => void }) {
   const main: PlanOption = {
     service: String(item.payload["service"] ?? ""),
     ...(typeof item.payload["serviceId"] === "string" ? { serviceId: item.payload["serviceId"], serviceName: String(item.payload["serviceName"] ?? ""), priceCents: Number(item.payload["priceCents"] ?? 0), currency: String(item.payload["currency"] ?? "") } : {}),
     candidates: candidatesOf(item),
   }
   const options = [main, ...optionsOf(item)]
-  const save = (patch: Record<string, unknown>) => session.save.mutate({ item, patch, confirm: false })
+  const save = (patch: Record<string, unknown>) => {
+    onChosen()
+    session.save.mutate({ item, patch, confirm: false })
+  }
   const disabled = busy || session.save.isPending
   // Otra elección ya ocupa el presupuesto: se ve lo dicho, sin nada que elegir (la nota dice qué hacer).
   const blocked = item.payload["choiceBlocked"] === true
@@ -751,6 +889,8 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
   ],
   // La respuesta de una ficha no se corrige aquí: se escribe en la propia pregunta de la ficha.
   ficha: [],
+  // Lo de su salud se corrige en Antecedentes, con lo de Clío puesto: no aquí.
+  salud: [],
 }
 
 /** Lo que no pasa el esquema de la operación, dicho en el campo (los mismos límites que `OPERATIONS`). */

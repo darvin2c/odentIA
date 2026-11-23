@@ -472,6 +472,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Sí. Toca lo gris en el día, o elige esa hora en «Nueva cita»: te avisa y puedes reservar igual. La cita queda marcada y al profesional le llega un aviso. También puedes dar dos citas a la misma hora con un profesional, cada una en su sala o unidad; lo único que no se puede es poner a dos personas en la misma. Estas excepciones las hace siempre alguien del equipo: Sofi y el enlace de la persona solo reservan lo libre.",
       },
       {
+        id: "nueva-cita-ya-tiene-cita",
+        q: "¿Cómo sé si el paciente ya tiene una cita antes de darle otra?",
+        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita:» con su próxima cita (día, hora, servicio y profesional) y cuántas más tiene. No frena nada: tú eliges si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y si la cambia o es otra aparte.",
+      },
+      {
         id: "elijo-tratamientos-trae-cita",
         q: "¿Cómo elijo qué tratamientos trae la cita?",
         a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita, y lo que tiene sesiones por reservar, con la que sería esta («sesión 2 de 2»). Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita o al que le faltan sesiones por reservar.",
@@ -829,7 +834,20 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "registro-hallazgo-odontograma",
         q: "¿Dónde registro un hallazgo del odontograma?",
-        a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza): eliges la pieza y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. El buscador de «¿Qué observas?» entiende cómo se dice en la clínica («resina» o «curación» es una restauración, «funda» una corona, «resto radicular» un remanente) y, si buscas algo que no se dibuja, te lo dice ahí mismo: un diagnóstico como la pulpitis se anota en la pieza con su botón (queda presuntivo en la atención), un tratamiento como la endodoncia se agrega al plan, y el dolor o la sensibilidad son el motivo de consulta, con «Ir al motivo». Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
+        a: "Dentro de la atención, en el Odontograma, que siempre está a la vista con lo registrado hoy debajo (una caries de varias caras es un solo hallazgo; en la ficha, bajo el dibujo, está la lista de todo lo que tiene la boca, y tocar un renglón abre esa pieza). El odontograma tiene dos vistas: el arco de arriba, para las caras, y los dientes de frente, para la raíz (la corona, el perno, el conducto, el implante y el puente). Eliges la pieza en cualquiera de las dos y, en un solo panel, registras lo que observas, su diagnóstico con el tipo (el hallazgo te propone el código; cuenta como diagnóstico de la atención: no lo escribes dos veces) y, si quieres, el tratamiento, que va a su plan abierto. «Registrar y agregar al plan» lo deja todo junto. El buscador de «¿Qué observas?» entiende cómo se dice en la clínica («resina» o «curación» es una restauración, «funda» una corona, «perno» un espigo-muñón, «resto radicular» un remanente) y, si buscas algo que no se dibuja, te lo dice ahí mismo: un diagnóstico como la pulpitis se anota en la pieza con su botón (queda presuntivo en la atención), un tratamiento como la endodoncia se agrega al plan, y el dolor o la sensibilidad son el motivo de consulta, con «Ir al motivo». Desde Clínica › Odontograma el gráfico se consulta, con un solo historial («Evolución» y «Ver estado al»), y «Atender» está a un clic.",
+        area: "clinica",
+      },
+      {
+        id: "anotar-perno-implante-puente",
+        q: "¿Cómo anoto que tiene un perno, un implante o un puente?",
+        forms: [
+          "tiene un perno",
+          "anotar perno muñon",
+          "como pongo un implante",
+          "puente fijo en el odontograma",
+          "no me deja poner perno",
+        ],
+        a: "Dentro de la atención, en el Odontograma, tocas la pieza (en el arco de arriba o en la vista de frente), escribes «perno» (es el espigo-muñón de la norma), «implante», «puente» o «endodoncia» en «¿Qué observas?», eliges el estado (buen o mal estado) y registras. El puente se registra eligiendo todas sus piezas con «Seleccionar varias» y marcando los pilares. De frente se ven la barra del perno en la raíz, la línea de cada conducto, el tornillo del implante y las coronas unidas del puente.",
         area: "clinica",
       },
       {

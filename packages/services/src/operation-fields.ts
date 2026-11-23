@@ -411,6 +411,16 @@ export const OPERATIONS = {
       none: { kind: "flag", label: "No tiene alergias", description: "true si dijo que no tiene alergias o ninguna nueva («niega alergias», «de alergias sigue igual»), sin sustancia.", body: "optional", agent: "fills" },
     },
   },
+  // Lo que se dijo de la salud del paciente en la conversación (mesa del 20 nov 2026): quién lo
+  // dijo. Lo que dijo tiene la forma de su registro (`registrationAnswersSchema.shape.health`,
+  // `dictation-health.ts`) y entra con «Lo revisé con…» (`confirmDictationHealth`).
+  "salud.dicha": {
+    label: "Lo que dijo de su salud",
+    fields: {
+      declarante: { kind: "enum", values: ["paciente", "acompanante", "no_se_sabe"], label: "Quién lo dijo", description: "Quién contó esto de la salud del paciente: él mismo (`paciente`), quien lo acompaña y habla por él (`acompanante`) o `no_se_sabe` si no queda claro.", body: "optional", agent: "requires" },
+      vinculo: { kind: "text", max: 80, label: "Su vínculo", description: "Si lo dijo quien lo acompaña, su vínculo con el paciente como se dijo («madre», «esposo»). Vacío si no se dijo.", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
   // Lo que se hizo hoy (issue 109): entra con `addEncounterProcedure`, del plan, de los
   // servicios o como acto libre, como «Registrar procedimiento».
   "atencion.procedimiento": {

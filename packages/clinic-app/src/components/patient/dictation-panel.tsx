@@ -1,4 +1,3 @@
-import { upperFirst } from "../../lib/product-words"
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@odentia/ui"
 import {
   AgentMark,
@@ -10,10 +9,11 @@ import {
   useListeningStatus,
   useMicLevel,
 } from "@odentia/ui-patterns"
-import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
+import { CircleAlert, CircleStop, Mic, Pause, Play, TriangleAlert } from "lucide-react"
 import { seesBilling } from "@odentia/auth/permissions"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useStore } from "@tanstack/react-form"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
 import { listWords } from "../../lib/materials"
@@ -22,7 +22,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { answersWords, formsToStartWords, useClioFormProposals, useFormsToStart } from "./clio-form-proposals"
-import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
+import { confirmable, DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
@@ -45,8 +45,11 @@ function confirmReadyErrorText(session: DictationSession): string | null {
   return `No pude confirmar «${suggestionText(failed).title}» (${DICTATION_KIND_LABEL[failed.kind]}): ${message}`
 }
 
-/** El botón dice lo que hace: confirma lo de la consulta; lo de una ficha se confirma en la ficha. */
-const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 de la consulta" : `Confirmar las ${ready} de la consulta`)
+/**
+ * El botón dice cuántas lleva, el mismo número que «N para confirmar» de la barra: lo de una ficha se
+ * confirma en la ficha y lo de su salud, con la persona (QA del 22 nov, UX-8: tres números para lo mismo).
+ */
+const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1" : `Confirmar las ${ready}`)
 
 /**
  * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109): los
@@ -69,13 +72,47 @@ function DictationExamples() {
 const DICTATION_TITLE_ID = "dictado-titulo"
 const focusDictationTitle = () => requestAnimationFrame(() => document.getElementById(DICTATION_TITLE_ID)?.focus())
 
-/** Lleva a la lista de sugerencias de un bloque y la deja con el foco. */
+/**
+ * La lista de sugerencias de un bloque, por su nombre («Consulta»). Lo de su salud no tiene lista: se
+ * revisa en su aviso, «Revisa con … lo que dijo de su salud» (`data-clio-health`).
+ */
+const suggestionsList = (label: string) =>
+  label === DICTATION_KIND_LABEL.salud
+    ? document.querySelector<HTMLElement>("[data-clio-health]")
+    : document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
+
+/** Lleva a la lista de sugerencias de un bloque (o al aviso de su salud, a su título) y la deja con el foco. */
 function goToSuggestions(label: string): void {
-  const list = document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
+  const list = suggestionsList(label)
   if (!list) return
-  list.querySelector<HTMLElement>("button")?.focus()
+  list.querySelector<HTMLElement>(label === DICTATION_KIND_LABEL.salud ? "h2" : "button")?.focus()
   list.scrollIntoView({ block: "center" })
 }
+
+/**
+ * Un enlace que lleva a un bloque de la atención, con la flecha hacia donde está: lo de su salud va
+ * arriba de la barra («Salud ↑»), la consulta y el plan, abajo (QA del 22 nov). En el teléfono mide
+ * 44 px de alto, como los demás toques.
+ */
+function JumpLink({ target, onClick, children }: { target: () => HTMLElement | null; onClick: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [up, setUp] = useState(false)
+  // Sin dependencias: el bloque puede moverse en cualquier render; con el mismo valor React no vuelve a pintar.
+  useLayoutEffect(() => {
+    const self = ref.current
+    const block = target()
+    setUp(!!self && !!block && (self.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_PRECEDING) !== 0)
+  })
+  return (
+    <Button ref={ref} type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-0" onClick={onClick}>
+      {children} <span aria-hidden>{up ? "↑" : "↓"}</span>
+    </Button>
+  )
+}
+
+/** Dónde queda la línea del repaso y, sin barra, «Lo que se dijo»: ahí vuelve el foco tras «Terminar». */
+const REVIEW_LINE_ID = "dictado-repaso"
+export const SAID_BUTTON_ID = "dictado-lo-que-se-dijo"
 
 /** Abre la ficha desde su aviso en la atención: ahí se confirma cada respuesta. */
 function openFormSuggestions(responseId: string): void {
@@ -86,30 +123,48 @@ function openFormSuggestions(responseId: string): void {
 }
 
 /**
- * Lo que propone Clío, con una sola palabra (revisión final del 15 nov, propuesta 2): «Clío propone
- * 5: 2 en la consulta y 3 en la ficha». La receta va aparte: se emite. Sin «listas» ni «por revisar».
+ * Lo que propone Clío, repartido sin que sobre ni falte: cada propuesta cuenta en un solo grupo y los
+ * grupos suman el total (QA del 22 nov, UX-8: «propone 5», «a 1 le falta un dato» y «Confirmar las 3»
+ * obligaban a hacer la cuenta).
  */
-export function proposesLine(suggestions: readonly Pick<DictationSuggestion, "kind">[]): string {
-  const consult = suggestions.filter((item) => item.kind !== "ficha" && item.kind !== "receta").length
-  const forms = suggestions.filter((item) => item.kind === "ficha").length
-  const prescription = suggestions.some((item) => item.kind === "receta")
-  const parts = [consult > 0 ? `${consult} en la consulta` : "", forms > 0 ? `${forms} en la ficha` : "", prescription ? "1 receta" : ""].filter(Boolean)
-  const total = consult + forms + (prescription ? 1 : 0)
-  return `${CLINICAL_NAME} propone ${parts.length <= 1 ? (parts[0] ?? total) : `${total}: ${listWords(parts)}`}`
+export function proposalCounts(suggestions: readonly DictationSuggestion[]) {
+  const counts = { ready: 0, incomplete: 0, denials: 0, health: 0, forms: 0, prescriptions: 0, leaves: 0 }
+  for (const item of suggestions) {
+    if (item.kind === "salud") counts.health += 1
+    else if (item.kind === "ficha") counts.forms += 1
+    else if (item.kind === "receta") counts.prescriptions += 1
+    else if (item.kind === "descanso") counts.leaves += 1
+    else if (confirmable(item)) counts.ready += 1
+    else if (item.kind === "alergia" && item.status === "lista" && item.payload["none"] === true) counts.denials += 1
+    else counts.incomplete += 1
+  }
+  return counts
 }
 
-/** «A 1 le falta un dato: complétala en su bloque. Nada entra…»; sin nada más, solo el aviso. */
-function readiness(session: DictationSession): string {
-  // Lo de la consulta a lo que le falta un dato se completa en su bloque; la receta tiene su «Emitir receta».
-  const incomplete = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
-  const removed = session.removedByVoice.length
-  const counts = [
-    incomplete > 0 ? `${incomplete === 1 ? "A 1 le falta un dato" : `A ${incomplete} les falta un dato`}: complétala${incomplete === 1 ? "" : "s"} en su bloque` : "",
+/** «Clío propone 5»: el total, una sola vez; cómo se reparte lo dice `readiness`. */
+export function proposesLine(suggestions: readonly DictationSuggestion[]): string {
+  return `${CLINICAL_NAME} propone ${suggestions.length}`
+}
+
+/**
+ * «3 para confirmar · 1 por completar en su bloque · 1 de su salud, se revisa con la persona. Nada
+ * entra…»: los grupos suman lo que propone, y el primero es el número de «Confirmar las N».
+ */
+export function readiness(suggestions: readonly DictationSuggestion[], removed: number): string {
+  const counts = proposalCounts(suggestions)
+  const parts = [
+    counts.ready > 0 ? `${counts.ready} para confirmar` : "",
+    counts.incomplete > 0 ? `${counts.incomplete} por completar en su bloque` : "",
+    counts.denials > 0 ? `${counts.denials === 1 ? "1 «No» se confirma" : `${counts.denials} «No» se confirman`} en su fila` : "",
+    counts.health > 0 ? `${counts.health} de su salud, se revisa con la persona` : "",
+    counts.forms > 0 ? `${counts.forms} en la ficha` : "",
+    counts.prescriptions > 0 ? plural(counts.prescriptions, "receta, se emite en su bloque", "recetas, se emiten en su bloque") : "",
+    counts.leaves > 0 ? "1 descanso, se emite en su bloque" : "",
     removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : "",
   ]
     .filter(Boolean)
     .join(" · ")
-  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
+  return `${parts ? `${parts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
 }
 
 /**
@@ -138,9 +193,54 @@ export function dictationIdle(session: DictationSession): boolean {
     session.failed.length === 0 &&
     !session.confirmReady.isError &&
     session.unused.phrases.length === 0 &&
-    !session.unused.unnamed
+    !session.unused.unnamed &&
+    // El repaso al terminar se dice en la barra mientras corre y si falla.
+    session.review.status !== "reviewing" &&
+    session.review.status !== "failed"
   )
 }
+
+/** El cuadro para escribir lo que se dijo. */
+const TYPED_BOX_ID = "dictado-escrito"
+
+/** El foco al cuadro sin que el navegador lo centre: si ya se ve, la página no se mueve. */
+function focusTypedBox(): void {
+  const box = document.getElementById(TYPED_BOX_ID)
+  if (!box) return
+  box.focus({ preventScroll: true })
+  box.scrollIntoView?.({ block: "nearest" })
+}
+
+/**
+ * Mientras se escribe, el cuadro queda donde está en la pantalla aunque crezca lo de encima (las
+ * propuestas, lo de su salud): se corría 126 px en cuatro pausas y la siguiente se escribía en otro
+ * lado (QA del 22 nov, UX-7). Si el cuadro tiene el foco y se movió, la página se desplaza lo mismo.
+ */
+function useStayPut(id: string, active: boolean): void {
+  useEffect(() => {
+    if (!active || typeof ResizeObserver !== "function") return
+    const topOf = () => document.getElementById(id)?.getBoundingClientRect().top ?? null
+    let top = topOf()
+    const remember = () => {
+      top = topOf()
+    }
+    const observer = new ResizeObserver(() => {
+      const box = document.getElementById(id)
+      const now = topOf()
+      if (box && document.activeElement === box && top !== null && now !== null && Math.abs(now - top) > 1) window.scrollBy(0, now - top)
+      remember()
+    })
+    observer.observe(document.body)
+    window.addEventListener("scroll", remember, { passive: true })
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("scroll", remember)
+    }
+  }, [id, active])
+}
+
+/** La frase de cómo hablarle a Clío: se conversa con el paciente o se le dicta como a un colega. */
+const HOW_TO_TALK = "Conversa con el paciente o díctalo como a un colega."
 
 /** La primera vez que alguien dicta, la barra muestra los ejemplos; después, con «¿Qué puedo decir?». */
 const EXAMPLES_SEEN = "odentia:dictado:ejemplos-vistos"
@@ -162,14 +262,20 @@ export function DictationHeaderButton({
   session,
   onStart,
   onType,
+  onShowSaid,
 }: {
   session: DictationSession
   onStart: () => void
   /** «Escribir en vez de dictar»: abre la barra con el cuadro para escribir. */
   onType: () => void
+  /** «Lo que se dijo»: al volver a la atención (o tras recargar) sigue a un toque. */
+  onShowSaid?: () => void
 }): React.JSX.Element | null {
   const role = useMyRole()
   const [open, setOpen] = useState(false)
+  // Al abrir «¿Qué puedo decir?», el foco va a «Escribir en vez de dictar», no al enlace de precios,
+  // que saca de la atención con un Enter de más (mesa del 20 nov 2026, gira del teclado).
+  const typeRef = useRef<HTMLButtonElement>(null)
   if (!dictationIdle(session)) return null
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
@@ -191,12 +297,26 @@ export function DictationHeaderButton({
         <PopoverTrigger render={<Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" />}>
           ¿Qué puedo decir?
         </PopoverTrigger>
-        <PopoverContent align="end" className="flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3">
+        <PopoverContent align="end" initialFocus={typeRef} className="flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3">
           <p className="text-sm">
-            Habla como le contarías a un colega: {CLINICAL_NAME} lo deja como sugerencias en cada
-            parte de la atención. Nada entra a la historia hasta que confirmes.
+            {HOW_TO_TALK} {CLINICAL_NAME} deja cada cosa en su lugar y deja fuera la charla. Nada entra a la historia hasta que
+            confirmes.
           </p>
           <DictationExamples />
+          <Button
+            ref={typeRef}
+            type="button"
+            size="sm"
+            variant="outline"
+            className="min-h-11 self-start sm:min-h-8"
+            onClick={() => {
+              setOpen(false)
+              onType()
+            }}
+          >
+            Escribir en vez de dictar
+          </Button>
+          {/* El precio al final: lo que saca de la atención no es lo primero que toca el teclado. */}
           <p className="text-xs text-muted-foreground">
             Si confirmas algo, al cerrar la atención se cuenta como una consulta de {CLINICAL_NAME}{" "}
             de tu plan.
@@ -209,20 +329,13 @@ export function DictationHeaderButton({
               </>
             ) : null}
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => {
-              setOpen(false)
-              onType()
-            }}
-          >
-            Escribir en vez de dictar
-          </Button>
         </PopoverContent>
       </Popover>
+      {onShowSaid && session.said.length > 0 ? (
+        <Button id={SAID_BUTTON_ID} type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={onShowSaid}>
+          Lo que se dijo
+        </Button>
+      ) : null}
     </span>
   )
 }
@@ -252,10 +365,22 @@ export function DictationPanel({
     const lost = !document.activeElement || document.activeElement === document.body
     if (session.dictating && lost) pauseRef.current?.focus()
   }, [session.dictating])
-  // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta.
+  // Tras «Terminar» el cuadro o la barra de escucha se van: el foco no cae en la página entera, queda en
+  // lo que dice el repaso o, si la barra ya no tiene nada que decir, en «Lo que se dijo» (QA del 22 nov, UX-6).
   useEffect(() => {
-    if (typing) requestAnimationFrame(() => document.getElementById("dictado-escrito")?.focus())
+    if (session.review.status === "idle") return
+    const frame = requestAnimationFrame(() => {
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (lost) (document.getElementById(REVIEW_LINE_ID) ?? document.getElementById(SAID_BUTTON_ID))?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [session.review.status])
+  // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta, sin que la página salte;
+  // solo se desplaza si el cuadro quedó fuera de la vista, y lo justo (QA del 22 nov, UX-7: bajaba 493 px).
+  useEffect(() => {
+    if (typing) requestAnimationFrame(() => focusTypedBox())
   }, [typing])
+  useStayPut(TYPED_BOX_ID, typing)
   const confirmReadyNow = () =>
     session.confirmReady.mutate(undefined, {
       onSuccess: (done) => {
@@ -274,15 +399,34 @@ export function DictationPanel({
     }
   }, [session.dictating, firstTime])
   const typedRootRef = useRef<HTMLDivElement>(null)
+  // El cuadro queda abierto mientras se atiende escribiendo, con el foco en él: la pausa siguiente
+  // se escribe sin volver a buscarlo (mesa del 20 nov 2026: se cerraba y el foco caía en la página).
   const typedForm = useAppForm({
-    defaultValues: { text: "" },
+    defaultValues: { text: session.typedDraft },
     validators: { onSubmit: typedSchema },
     onSubmit: ({ value }) => {
       session.submitTyped(value.text)
+      session.setTypedDraft("")
       typedForm.reset({ text: "" })
-      setTyping(false)
+      requestAnimationFrame(() => focusTypedBox())
     },
   })
+  const sendTyped = () => void submitForm(typedForm, { root: typedRootRef.current })
+  const typedText = useStore(typedForm.store, (state) => state.values.text)
+  // Lo que se escribió y no se mandó sigue en el cuadro, y se dice (QA del 21 nov: una pausa se perdió
+  // sin aviso cuando la barra se movió al llegar las propuestas).
+  const [restoredDraft] = useState(() => session.typedDraft.trim().length > 0)
+  /** «Terminar» escribiendo: lo que quedó en el cuadro va como la última pausa y después, el repaso. */
+  const finishTyped = () => {
+    const last = typedText.trim()
+    if (last) {
+      session.submitTyped(last)
+      session.setTypedDraft("")
+      typedForm.reset({ text: "" })
+    }
+    setTyping(false)
+    onFinish()
+  }
   const role = useMyRole()
   const { mode, pending, ready } = session
   // Sin ficha empezada, Clío no propone en ella: se dice dónde se decide dictar.
@@ -390,7 +534,7 @@ export function DictationPanel({
             <span className="max-sm:hidden">{listening ? "Pausar" : "Reanudar"}</span>
           </Button>
           <Button type="button" variant={listening ? "default" : "outline"} className="min-h-11 max-sm:hidden sm:min-h-9" onClick={onFinish}>
-            <Square className="size-4" aria-hidden /> Terminar dictado
+            <CircleStop className="size-4" aria-hidden /> Terminar dictado
           </Button>
         </div>
         <p role="status" className="text-sm">
@@ -435,7 +579,7 @@ export function DictationPanel({
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readiness(session)}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readiness(session.suggestions, session.removedByVoice.length)}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>
@@ -452,8 +596,8 @@ export function DictationPanel({
               </>
             ) : (
               <>
-                Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la
-                historia hasta que confirmes.{" "}
+                {HOW_TO_TALK} Lo que se dice aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que
+                confirmes.{" "}
                 {/* El costo, donde se decide dictar (ADR 0141): Clío nace encendida. */}
                 Si confirmas algo, al cerrar la atención se cuenta como una consulta de {CLINICAL_NAME} de tu plan.
                 {seesBilling(role) ? (
@@ -472,20 +616,18 @@ export function DictationPanel({
           {pending > 0 && suggestionKinds.length + formLinks.length > 0 ? (
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {suggestionKinds.map((label) => (
-                <Button
-                  key={label}
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0"
-                  onClick={() => goToSuggestions(label)}
-                >
-                  {label} ↓
-                </Button>
+                <JumpLink key={label} target={() => suggestionsList(label)} onClick={() => goToSuggestions(label)}>
+                  {label}
+                </JumpLink>
               ))}
               {formLinks.map((form) => (
-                <Button key={form.id} type="button" variant="link" className="h-auto p-0" onClick={() => openFormSuggestions(form.id)}>
-                  {form.title}: {answersWords(form.count)} ↓
-                </Button>
+                <JumpLink
+                  key={form.id}
+                  target={() => document.querySelector<HTMLElement>(`[data-clio-form="${CSS.escape(form.id)}"]`)}
+                  onClick={() => openFormSuggestions(form.id)}
+                >
+                  {form.title}: {answersWords(form.count)}
+                </JumpLink>
               ))}
             </p>
           ) : null}
@@ -510,9 +652,9 @@ export function DictationPanel({
               Escribir en vez de dictar
             </Button>
           ) : null}
-          {session.transcript ? (
+          {session.transcript || session.said.length > 0 ? (
             <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={onShowTranscript}>
-              Ver lo dictado
+              Lo que se dijo
             </Button>
           ) : null}
           {ready > 0 ? (
@@ -523,40 +665,48 @@ export function DictationPanel({
         </div>
       </div>
 
-      {/* Antes de la primera sugerencia, qué se puede decir; después está en «Lo dictado». */}
-      {pending === 0 && session.removedByVoice.length === 0 && !session.transcript && !blocked ? (
-        <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
-          <p className="text-sm font-semibold">Por ejemplo</p>
-          <DictationExamples />
-        </div>
-      ) : null}
+      <ReviewLine session={session} onShowTranscript={onShowTranscript} />
       {typing ? (
         <div ref={typedRootRef} className="flex flex-col gap-2">
-          <typedForm.AppField name="text">
+          <typedForm.AppField name="text" listeners={{ onChange: ({ value }) => session.setTypedDraft(value) }}>
             {(field) => (
               <field.TextareaField
-                id="dictado-escrito"
+                id={TYPED_BOX_ID}
                 label="Escribe lo dictado"
                 rows={4}
                 maxLength={12_000}
                 placeholder={productUi().dictation?.placeholder}
+                aria-keyshortcuts="Control+Enter"
+                // Ctrl+Enter (⌘+Enter) manda la pausa; Enter solo sigue en otra línea.
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.nativeEvent.isComposing) return
+                  event.preventDefault()
+                  sendTyped()
+                }}
                 description={
                   session.canListen
-                    ? "Si prefieres no usar el micrófono, escribe o pega aquí lo que dictarías."
-                    : "Este navegador no reconoce la voz: escribe o pega aquí lo dictado."
+                    ? "Si prefieres no usar el micrófono, escribe o pega aquí lo que se dijo. Ctrl+Enter lo ordena."
+                    : "Este navegador no reconoce la voz: escribe o pega aquí lo que se dijo. Ctrl+Enter lo ordena."
                 }
               />
             )}
           </typedForm.AppField>
+          {restoredDraft && typedText.trim() ? (
+            <p role="status" className="text-sm text-warning">
+              Esto aún no se mandó a {CLINICAL_NAME}: «Ordenar lo dictado» o Ctrl+Enter lo manda.
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-2">
-            <SubmitButton
-              type="button"
-              className="min-h-11 sm:min-h-9"
-              pending={session.organizing}
-              onClick={() => void submitForm(typedForm, { root: typedRootRef.current })}
-            >
+            <SubmitButton type="button" className="min-h-11 sm:min-h-9" pending={session.organizing} onClick={sendTyped}>
               Ordenar lo dictado
             </SubmitButton>
+            {/* Escribiendo también se termina (QA del 21 nov: solo aparecía con el micrófono): manda lo
+                que quede en el cuadro y pide el repaso de toda la conversación. */}
+            {session.said.length > 0 || typedText.trim() ? (
+              <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={finishTyped}>
+                <CircleStop className="size-4" aria-hidden /> Terminar dictado
+              </Button>
+            ) : null}
             <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => setTyping(false)}>
               Cerrar
             </Button>
@@ -573,17 +723,72 @@ export function DictationPanel({
   )
 }
 
-/** Cuántas frases no usadas se muestran en el aviso; el resto sigue marcado en «Lo dictado». */
+/**
+ * El repaso al terminar, en la barra (mesa del 20 nov 2026, P4): mientras lee toda la conversación,
+ * lo que dejó y, si falló, «Intentar otra vez». Lo ya ordenado sigue igual pase lo que pase. Dice
+ * cuáles son las cosas nuevas y lleva a ellas, y si no pudo separar quién habló en alguna parte, lo
+ * dice en vez de «nada nuevo» (QA del 22 nov, UX-1). El foco vuelve aquí tras «Terminar».
+ */
+function ReviewLine({ session, onShowTranscript }: { session: Pick<DictationSession, "review" | "requestReview">; onShowTranscript: () => void }) {
+  const { review } = session
+  if (review.status === "reviewing")
+    return (
+      <p id={REVIEW_LINE_ID} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
+        {CLINICAL_NAME} está repasando toda la conversación…
+      </p>
+    )
+  if (review.status === "failed")
+    return (
+      <div id={REVIEW_LINE_ID} tabIndex={-1} role="alert" className="flex flex-wrap items-center gap-2 text-sm outline-none">
+        <p className="text-destructive">{review.message}</p>
+        <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => void session.requestReview()}>
+          Intentar otra vez
+        </Button>
+      </div>
+    )
+  if (review.status === "done" && review.reviewed) {
+    const where = review.where.filter((kind) => kind !== "ficha").map((kind) => DICTATION_KIND_LABEL[kind])
+    return (
+      <div id={REVIEW_LINE_ID} tabIndex={-1} role="status" className="flex flex-col gap-1 text-sm outline-none">
+        <p className="flex flex-wrap items-center gap-x-2">
+          <span>
+            {CLINICAL_NAME} repasó toda la conversación: {review.added === 0 ? "nada nuevo" : plural(review.added, "cosa nueva", "cosas nuevas")}
+            {review.added > 0 && where.length > 0 ? ", en" : "."}
+          </span>
+          {review.added > 0
+            ? where.map((label) => (
+                <JumpLink key={label} target={() => suggestionsList(label)} onClick={() => goToSuggestions(label)}>
+                  {label}
+                </JumpLink>
+              ))
+            : null}
+        </p>
+        {review.unsplit > 0 ? (
+          <p className="flex flex-wrap items-center gap-x-2">
+            <span>No pude separar quién habló en {plural(review.unsplit, "parte", "partes")}: toca el nombre para cambiarlo.</span>
+            <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-0" onClick={onShowTranscript}>
+              Ver la conversación
+            </Button>
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+  return null
+}
+
+/** Cuántas frases no usadas se muestran en el aviso; el resto sigue en «Lo que se dijo». */
 const UNUSED_SHOWN = 3
 
 /** El rótulo de una pregunta sin lo de entre paréntesis, para el botón: «Usar en Clase molar derecha». */
 const shortLabel = (label: string) => label.replace(/\s*\([^)]*\)/g, "").trim() || label
 
 /**
- * «No pude usar esto»: lo que el asistente no pudo ordenar de lo dictado, con
- * la frase tal cual (issue 135). Se queda hasta «Entendido»; lo de las pausas
- * siguientes se suma. La frase que parece de una pregunta de la ficha lleva
- * «Usar en…»: abre esa pregunta con la frase al lado, sin llenar nada.
+ * «No lo usé»: lo que el asistente no pudo ordenar de lo que se dijo, con la
+ * frase tal cual (issue 135). Se queda hasta «Entendido»; lo de las pausas
+ * siguientes se suma, y sigue guardado en «Lo que se dijo». La frase que parece
+ * de una pregunta de la ficha lleva «Usar en…»: abre esa pregunta con la frase
+ * al lado, sin llenar nada.
  */
 export function UnusedNotice({ session }: { session: Pick<DictationSession, "unused" | "dismissUnused"> }) {
   const clio = useClioFormProposals()
@@ -596,7 +801,7 @@ export function UnusedNotice({ session }: { session: Pick<DictationSession, "unu
         <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
         <div className="flex min-w-0 flex-col gap-1">
           <p className="font-semibold text-warning">
-            {phrases.length ? "No pude usar esto de lo que dictaste" : "No pude usar una parte de lo que dictaste"}
+            {phrases.length ? "No lo usé" : "No usé una parte de lo que se dijo"}
           </p>
           {phrases.slice(0, UNUSED_SHOWN).map((phrase) => {
             const targets = clio ? (session.unused.targets[phrase] ?? []) : []
@@ -626,7 +831,10 @@ export function UnusedNotice({ session }: { session: Pick<DictationSession, "unu
             )
           })}
           {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
-          <p className="text-warning">Dilo de nuevo o regístralo a mano. {phrases.length ? "Sigue marcado en «Lo dictado»." : "Sigue en «Lo dictado»."}</p>
+          {/* El motivo de cada frase ya dice qué hacer (un familiar, un peso dicho): sin motivo, se dice aquí. */}
+          <p className="text-warning">
+            {unnamed || phrases.some((phrase) => !session.unused.why[phrase] || session.unused.open?.includes(phrase)) ? "Dilo de nuevo o anótalo a mano. " : ""}Sigue en «Lo que se dijo».
+          </p>
         </div>
       </div>
       <Button type="button" variant="secondary" size="sm" className="min-h-11 self-start sm:ml-6 sm:min-h-8" onClick={session.dismissUnused}>
@@ -647,7 +855,7 @@ function FailedSegmentCard({ session, segment }: { session: DictationSession; se
         <div className="flex min-w-0 flex-col gap-1">
           <p className="font-semibold text-warning">No pude ordenar una parte ({hour})</p>
           <p className="[overflow-wrap:anywhere]">«{words}»</p>
-          <p className="text-muted-foreground">{segment.message} Lo que dictes después se sigue ordenando. Esta parte sigue en «Lo dictado».</p>
+          <p className="text-muted-foreground">{segment.message} Lo que dictes después se sigue ordenando. Esta parte sigue en «Lo que se dijo».</p>
         </div>
       </div>
       <div className="flex flex-wrap gap-2 sm:ml-6">
@@ -657,72 +865,6 @@ function FailedSegmentCard({ session, segment }: { session: DictationSession; se
         <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={() => session.discardFailed(segment.id)}>
           Descartar esta parte
         </Button>
-      </div>
-    </div>
-  )
-}
-
-/**
- * «Lo dictado»: el respaldo del odontólogo mientras dicta. Vive solo en esta
- * pantalla (el servidor no guarda el dictado); lo resaltado dio lugar a una
- * sugerencia y lo subrayado no se pudo usar.
- */
-export function DictationTranscript({ session }: { session: DictationSession }) {
-  const startForms = formsToStartWords(useFormsToStart(session.patientId, session.encounterId, session.enabled))
-  const parts = highlightTranscript(session.transcript, session.highlights, session.unused.phrases)
-  const marked = parts.some((part) => part.mark === "used")
-  const unusedShown = parts.some((part) => part.mark === "unused")
-  return (
-    <div className="flex flex-col gap-4 text-sm">
-      {session.transcript ? (
-        <p className="whitespace-pre-wrap leading-relaxed">
-          {parts.map((part, index) =>
-            part.mark === "used" ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
-              <mark key={index} className="rounded bg-primary-soft px-0.5 text-primary-soft-foreground">
-                {part.text}
-              </mark>
-            ) : part.mark === "unused" ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
-              <span key={index}>
-                <span className="underline decoration-warning decoration-wavy underline-offset-4">{part.text}</span>{" "}
-                <span className="whitespace-nowrap rounded-full bg-warning-soft px-2 text-xs font-semibold text-warning">No lo usé</span>
-              </span>
-            ) : (
-              // biome-ignore lint/suspicious/noArrayIndexKey: los trozos no se reordenan
-              <span key={index}>{part.text}</span>
-            ),
-          )}
-        </p>
-      ) : (
-        <p className="text-muted-foreground">Todavía no hay nada dictado.</p>
-      )}
-      {unusedShown ? (
-        <p className="text-xs text-muted-foreground">
-          Lo resaltado dio una sugerencia; lo subrayado con «No lo usé» no se pudo usar: dilo de nuevo o regístralo a mano.
-        </p>
-      ) : null}
-      {session.transcript && !marked && session.pending > 0 ? (
-        <p className="text-xs text-muted-foreground">No pude ubicar en el texto qué frase originó cada sugerencia; ábrela para ver lo que dijiste.</p>
-      ) : null}
-      {session.mode === "listening" ? (
-        <p role="status" className="text-muted-foreground">
-          Escuchando…{session.interim ? ` «${session.interim}»` : ""}
-        </p>
-      ) : null}
-      <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
-        <p className="font-semibold">Qué puedo decir</p>
-        <DictationExamples />
-        <p className="text-muted-foreground">
-          «{upperFirst(productUi().dictation?.corrections.change ?? "")}» cambia la última sugerencia y «
-          {upperFirst(productUi().dictation?.corrections.remove ?? "")}» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
-          editarla a mano.
-        </p>
-        <p className="text-muted-foreground">
-          Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo confirmas ahí. Lee las dos fichas que
-          tocaste último y la que tengas abierta.{startForms ? ` ${startForms}` : ""}
-        </p>
-        <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>
       </div>
     </div>
   )
@@ -754,7 +896,7 @@ export function DictationMobileBar({
       {session.dictating ? (
         <>
           <Button type="button" variant="outline" className="h-12 min-w-0 flex-1" onClick={onShowTranscript}>
-            Ver lo dictado
+            Lo que se dijo
           </Button>
           <Button type="button" className="h-12 min-w-0 flex-1" onClick={onFinish}>
             Terminar dictado
@@ -762,7 +904,7 @@ export function DictationMobileBar({
         </>
       ) : (
         <>
-          <Button type="button" variant="outline" className="h-12 min-w-0 flex-1" disabled={session.busy} onClick={onSign}>
+          <Button type="button" variant="outline" className="h-12 min-w-0 flex-1" onClick={onSign}>
             Firmar
           </Button>
           {session.ready > 0 ? (

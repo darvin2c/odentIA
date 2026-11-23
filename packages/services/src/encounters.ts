@@ -73,6 +73,7 @@ import { zonedTimeToUtc } from "./availability.js"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
+  findDraftBudget,
   readBillingModes,
   removeBudgetItems,
 } from "./budgets.js"
@@ -139,6 +140,8 @@ import {
   revisionsOf,
   setPlanItemStatus,
   surfaceLimits,
+  pathsOf,
+  type PlanItemPath,
   undoRevisionsOf,
   updatePlanItemPlanning,
 } from "./plan.js"
@@ -195,7 +198,12 @@ export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & Si
  * `sessionsDoneSql`) y si quien lleva el borrador puede quitarlo
  * (`removableFromEncounter`: indicado aquí, sin respuesta y sin entregar).
  */
-export type EncounterItem = EncounterPlannedItemRow & { sessionsDone: number; removable: boolean }
+export type EncounterItem = EncounterPlannedItemRow & {
+  sessionsDone: number
+  removable: boolean
+  /** Su camino, si su presupuesto tiene opciones que se excluyen (como en el plan): lo que compite se elige. */
+  path: PlanItemPath | null
+}
 
 export interface CreateEncounterInput {
   /**
@@ -728,6 +736,11 @@ export async function encounterRecordWords(tx: Db, orgId: string, row: Encounter
       when exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id}) then 'odontograma'
       when exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id}) then 'periodontograma'
       when exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id}) then 'lentes'
+      -- Lo que se dijo en la consulta y lo que Clío propone sin decidir (lo de su salud, entre ello) no
+      -- es una atención vacía: no se borra de un toque (QA del 21 nov). Solo se mira si existe.
+      when exists (select 1 from encounter_dictation_suggestion where organization_id = ${orgId} and encounter_id = ${row.id}
+        and status in ('lista', 'por_revisar')) then 'propuesta'
+      when exists (select 1 from encounter_dictation_segment where organization_id = ${orgId} and encounter_id = ${row.id}) then 'dicho'
     end as first`)
   // Lo que la consulta encuentra y no tiene palabras propias igual cuenta: nunca se da por vacía.
   return found?.first ? (RECORD_WORDS[found.first] ?? "algo registrado") : null
@@ -750,6 +763,8 @@ const RECORD_WORDS: Record<string, string> = {
   odontograma: "el odontograma",
   periodontograma: "el periodontograma",
   lentes: "una medida de lentes",
+  propuesta: "lo que propone Clío, sin decidir",
+  dicho: "lo que se dijo en la consulta",
 }
 
 /**
@@ -1319,10 +1334,14 @@ export async function getEncounterDetail(
       : new Set<string>()
   // El consentimiento va con el tratamiento: el Plan de la atención también lo dice.
   const consents = await treatmentConsentStates(tx, orgId, [...attention.keys()])
+  // Los caminos que se excluyen, como los dice el plan: la firma los cuenta como una elección, no como
+  // dos por ejecutar (QA del 23 nov, verificador 2: «2 por ejecutar» con dos caminos).
+  const paths = await pathsOf(tx, orgId, [...attention.values()])
   const withProgress = <T extends { id: string }>(item: T) => ({
     ...item,
     sessionsDone: counts.get(item.id)?.done ?? 0,
     removable: removable.has(item.id),
+    path: paths.get(item.id) ?? null,
     consent: consents.get(item.id)?.state ?? null,
     consentMissing: consents.get(item.id)?.missing ?? [],
   })
@@ -3452,6 +3471,57 @@ async function applySessionAnswers(
 }
 
 /**
+ * Saca del borrador de la persona (el que nadie recibió: nunca de uno enviado, aceptado ni de una
+ * revisión) los tratamientos que se cargaron a su cuenta al firmar. Solo los que ese cargo cubre
+ * enteros: los terminados o los que se cobran por tratamiento; uno que se cobra por sesión y sigue
+ * en curso se queda, porque lo que falta todavía es presupuesto.
+ */
+async function removeChargedFromDraft(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  charges: ReadonlyArray<{ encounterProcedureId: string | null }>,
+  procedures: ReadonlyArray<typeof encounterProcedure.$inferSelect>,
+): Promise<void> {
+  const charged = procedures.filter((proc) => proc.planItemId && charges.some((charge) => charge.encounterProcedureId === proc.id))
+  if (!charged.length) return
+  const draft = await findDraftBudget(tx, orgId, patientId)
+  if (!draft) return
+  const planItemIds = [...new Set(charged.map((proc) => proc.planItemId!))]
+  const inDraft = new Set(
+    (
+      await tx
+        .select({ planItemId: treatmentBudgetItem.planItemId })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            eq(treatmentBudgetItem.budgetId, draft.id),
+            inArray(treatmentBudgetItem.planItemId, planItemIds),
+          ),
+        )
+    ).map((row) => row.planItemId),
+  )
+  if (!inDraft.size) return
+  const status = new Map(
+    (
+      await tx
+        .select({ id: treatmentPlanItem.id, status: treatmentPlanItem.status })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, [...inDraft])))
+    ).map((row) => [row.id, row.status]),
+  )
+  const covered: string[] = []
+  for (const proc of charged) {
+    const id = proc.planItemId!
+    if (!inDraft.has(id) || covered.includes(id)) continue
+    if (status.get(id) === "realizado" || (await billingModeOfProcedure(tx, orgId, patientId, proc)) === "treatment") covered.push(id)
+  }
+  if (covered.length) await removeBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: covered })
+}
+
+/**
  * Cómo se cobra un acto: «session» (un cargo por visita) o «treatment» (uno por tratamiento). Lo
  * acordado en su presupuesto manda; sin presupuesto, su servicio (la misma regla de la firma).
  */
@@ -3850,6 +3920,20 @@ export async function finalizeEncounter(
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
+  // Lo que Clío proponía y nadie confirmó al firmar ya no tiene dónde entrar: se descarta, para que
+  // ninguna propuesta quede «lista» en una atención firmada (QA del 21 nov). Lo de su salud no: lo
+  // dicho sigue a la vista, sin revisar, hasta que alguien lo revise con la persona.
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", note: "La atención se firmó sin confirmarla.", decidedBy: actorUserId, decidedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        ne(encounterDictationSuggestion.kind, "salud"),
+      ),
+    )
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
   // firma el odontograma con el mismo perfil si llega a un momento de la norma; NTS 188, 5.3 y 5.10).
   const product = await hooks.encounterFinalized(tx, {
@@ -3906,6 +3990,10 @@ export async function finalizeEncounter(
       ...(decision.advanceCents ? { agreedCents: decision.agreedCents, advanceCents: decision.advanceCents } : {}),
     })
   }
+  // Lo hecho y cargado hoy sale del presupuesto que la persona todavía no recibió (V-DIN-04): ya está
+  // en su cuenta. Sin esto, la evaluación cobrada al firmar seguía en el borrador como común a las
+  // opciones: «Opción A S/ 700 · B S/ 200» con «debe S/ 50» (QA del 22 nov, H3).
+  await removeChargedFromDraft(tx, orgId, actorUserId, patientId, charges, procedures)
   // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
   await addSessions()
   // Lo que sigue en curso, ya con lo respondido: con la sesión que se sumó y sin lo que se terminó.
