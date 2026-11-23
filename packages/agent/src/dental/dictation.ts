@@ -5,6 +5,7 @@ import {
   findingDiagnosisCode,
   operationAgentSchema,
 } from "@odentia/services"
+import { DENTAL_DICTATION_HEALTH } from "@odentia/services/dental"
 import { z } from "zod"
 import {
   allergyAndDonePrompt,
@@ -17,8 +18,11 @@ import {
   demoMaterial,
   dictationEdits,
   dictationFormAnswers,
+  dictationHealthPart,
+  dictationOutOfPlacePart,
   dictationList,
   dictationSaid,
+  healthPrompt,
   homeCarePrompt,
   materialsPrompt,
 } from "../dictation.js"
@@ -29,6 +33,8 @@ import {
  * odontograma, los diagnósticos, el plan, la receta y los controles. Lo común
  * (los mensajes, la lectura y la llamada) está en `../dictation.ts`.
  */
+const HEALTH = dictationHealthPart(DENTAL_DICTATION_HEALTH)
+
 export const extraction = z.object({
   nota: operationAgentSchema("atencion.nota")
     .extend({ dicho: dictationSaid })
@@ -48,6 +54,8 @@ export const extraction = z.object({
     .describe("Solo si pidió armar el presupuesto ahora."),
   materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   fichas: dictationFormAnswers(),
+  salud: HEALTH.part,
+  sin_lugar: dictationOutOfPlacePart(),
   ...dictationEdits("toothNumber"),
 })
 
@@ -64,6 +72,7 @@ const DRAFT_PARTS = [
   { key: "presupuesto", kind: "presupuesto", single: true },
   { key: "materiales", kind: "material" },
   { key: "fichas", kind: "ficha" },
+  { key: "salud", kind: "salud", single: true, schema: HEALTH.schema },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -94,6 +103,12 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
       : "La clínica aún no tiene servicios.",
     ...consultaPrompt("«dolor de muela», «control»"),
     ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
+    ...healthPrompt({
+      topics:
+        "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, si fuma y, de su boca, si tuvo problemas con la anestesia o sangró mucho tras una extracción, lo del corazón que pide antibiótico antes, el miedo al dentista, si rechina o aprieta los dientes, sus hábitos, su última visita y, de un niño, el biberón, el chupón, los dulces y quién le cepilla",
+      notInRelato: "Sus medicinas de siempre, sus enfermedades y lo de la anestesia",
+      measured: "",
+    }),
     ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
     materialsPrompt("odontólogo", "«se fueron cuatro carpules»", "una resina, una profilaxis"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",

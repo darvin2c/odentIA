@@ -16,8 +16,26 @@ type Sex = string | null | undefined
  * entonces el registro guarda «Madre», «Padre» o «Tutor legal» (K15).
  */
 const GENERIC_KIN = new Set(["madre, padre o tutor", "madre, padre o tutora", "representante"])
+
+/**
+ * Cómo se le habla a alguien, no su parentesco: Clío oía «señora, ¿tiene alguna enfermedad?» y
+ * anotaba a la madre de un niño como «su señora» (QA del 21 nov). Tampoco las claves de quién habló.
+ */
+const NOT_KIN = new Set(["señora", "señor", "señorita", "seño", "doña", "don", "joven", "caballero", "dama", "usted", "dra", "paciente", "acompanante", "acompañante"])
+
+/**
+ * El parentesco que dijo Clío, si lo es: sin espacios de más, o vacío si es una forma de hablarle
+ * («señora») o una clave («no_se_sabe»). Lo usan la propuesta de salud, los turnos y la pantalla.
+ */
+export function kinSaid(text: unknown): string {
+  if (typeof text !== "string") return ""
+  const kin = text.trim()
+  const key = kin.toLocaleLowerCase("es").replace(/[.,;:]+$/u, "")
+  if (!key || NOT_KIN.has(key) || /^no[\s_]*se[\s_]*sabe$/u.test(key)) return ""
+  return kin
+}
 export function specificKin(relation: string | null | undefined): string | null {
-  const kin = relation?.trim().toLocaleLowerCase("es")
+  const kin = kinSaid(relation).toLocaleLowerCase("es")
   return kin && !GENERIC_KIN.has(kin) ? kin : null
 }
 
@@ -42,7 +60,7 @@ export function whoWords(by: HealthDeclarant, sex: Sex): string {
   if (kin && first) return `su ${kin}, ${first}`
   if (kin) return `su ${kin}`
   // Eligió «Madre, padre o tutor» en el registro de antes: quien la cuida, sin decir cuál de los tres.
-  if (by.relation) return first ? `${caregiver(sex)}, ${first}` : caregiver(sex)
+  if (by.relation && GENERIC_KIN.has(by.relation.trim().toLocaleLowerCase("es"))) return first ? `${caregiver(sex)}, ${first}` : caregiver(sex)
   if (first) return first
   return sex === "F" ? "quien habla por ella" : sex === "M" ? "quien habla por él" : "quien habla en su nombre"
 }

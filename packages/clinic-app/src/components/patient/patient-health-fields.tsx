@@ -58,6 +58,96 @@ function nextRowKey(prefix: string): string {
   return `${prefix}-${rowSeq}`
 }
 
+/**
+ * Los grupos de lo que dijo en la consulta que «Corregir algo» deja puestos en el formulario: todo
+ * menos las alergias, que tienen su propia lista (su «No sabe» se revisa en el aviso).
+ */
+export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines", "personal", "medical", "dental"] as const
+
+/**
+ * Lo que oyó Clío, para el formulario: `health` con la forma de su registro y `interview` ya con
+ * las claves de la entrevista de su producto (lo arma el servidor, la misma regla que al confirmarla).
+ */
+export interface SaidForForm {
+  health: Record<string, unknown>
+  interview?: Record<string, unknown>
+}
+
+/**
+ * «Corregir algo» desde lo que Clío oyó en la consulta (mesa del 20 nov 2026): el formulario de
+ * Antecedentes se abre con sus enfermedades y sus medicinas ya puestas (también el anticoagulante y
+ * la medicina para los huesos, que son medicinas) y con lo de su entrevista (la anestesia, el
+ * corazón, el miedo, el embarazo; lo de cada producto), para corregir y no escribir de cero. Lo que
+ * ya estaba con el mismo nombre no se repite; en la entrevista, lo dicho va encima, campo por campo.
+ */
+export function withSaidHealth(values: HealthFormValues, { health: said, interview: saidInterview = {} }: SaidForForm): HealthFormValues {
+  const loose = (text: string) =>
+    text
+      .toLocaleLowerCase("es")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim()
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
+  const group = (key: string) => {
+    const value = said[key]
+    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+  }
+  const items = (key: string) => {
+    const value = group(key)
+    return value?.state === "recorded" && Array.isArray(value.items) ? (value.items as Array<Record<string, unknown>>) : []
+  }
+  const conditions = [...values.conditions]
+  for (const item of items("conditions")) {
+    const name = text(item.name)
+    if (!name || conditions.some((row) => loose(row.name) === loose(name))) continue
+    conditions.push({ key: nextRowKey("con"), name, diagnosisCode: "", diagnosisSystem: null, status: "activa", startDate: "", endDate: "", notes: text(item.notes), persisted: false })
+  }
+  const medications = [...values.medications]
+  const named = [
+    ...items("medications").map((item) => ({ name: text(item.name), dose: text(item.dose), frequency: text(item.frequency), notes: text(item.notes) })),
+    ...(["anticoagulants", "boneMedicines"] as const).flatMap((key) => {
+      const value = group(key)
+      return value?.state === "recorded" && text(value.detail) ? [{ name: text(value.detail), dose: "", frequency: "", notes: "" }] : []
+    }),
+  ]
+  for (const item of named) {
+    if (!item.name || medications.some((row) => loose(row.name) === loose(item.name))) continue
+    medications.push({
+      key: nextRowKey("med"),
+      name: item.name,
+      genericName: "",
+      dose: item.dose,
+      doseValue: "",
+      doseUnit: "",
+      frequency: item.frequency,
+      frequencyCode: item.frequency ? "otra" : "",
+      startDate: "",
+      endDate: "",
+      notes: item.notes,
+      persisted: false,
+    })
+  }
+  // Lo que dijo que no (y nada anotado) queda «No»; lo que nombró, «Sí».
+  const state = (key: "conditions" | "medications", rows: readonly unknown[]): HealthReviewState => {
+    if (rows.length > 0) return "recorded"
+    return group(key)?.state === "none" ? "none" : values.reviewStatus[key]
+  }
+  // Lo de la entrevista, grupo por grupo y campo por campo: lo anotado que no se dijo se queda.
+  const interview: Record<string, unknown> = { ...values.interview }
+  for (const [key, value] of Object.entries(saidInterview)) {
+    const before = interview[key]
+    const isGroup = (item: unknown): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)
+    interview[key] = isGroup(value) && isGroup(before) ? { ...before, ...value } : value
+  }
+  return {
+    ...values,
+    conditions,
+    medications,
+    reviewStatus: { conditions: state("conditions", conditions), medications: state("medications", medications) },
+    interview,
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Valores del formulario                                              */
 /* ------------------------------------------------------------------ */

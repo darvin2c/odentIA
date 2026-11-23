@@ -52,8 +52,11 @@ export {
 export { runShadowTriage } from "./decision/shadow.js"
 export {
   askDictationModel,
+  askDictationReview,
   type DictationAsk,
   type DictationExtraction,
+  type DictationReviewExtraction,
+  type DictationReviewSegment,
   type DictationPending,
   type DictationProfile,
   groundSource,
@@ -65,7 +68,7 @@ export {
   fakeEmbedder,
   openAiEmbedder,
 } from "./embeddings.js"
-export { extractDictation } from "./extract-dictation.js"
+export { extractDictation, reviewDictation } from "./extract-dictation.js"
 export { FAKE_REPLY_TEXT, FakeChatModel } from "./fake-model.js"
 export { compileAgentGraph } from "./graph.js"
 export { createHelpWriter, fakeHelpWriter } from "./help-writer.js"

@@ -688,6 +688,14 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-dictado-firmar-sin-decidir": () => [],
   "pacientes-dictado-tercera-ficha": () => [],
   "pacientes-dictado-corregir-confirmada": () => [],
+  // Ni conversación con Clío, ni lo que se dijo, ni lo que dijo de su salud (mesa del 20 nov 2026).
+  "pacientes-dictado-conversar": () => [],
+  "pacientes-dictado-lo-que-se-dijo": () => [],
+  "pacientes-dictado-terminar-escribiendo": () => [],
+  "pacientes-dictado-salud": () => [],
+  "pacientes-dictado-no-lo-registro": () => [],
+  "pacientes-dictado-llevar-a-su-salud": () => [],
+  "pacientes-dictado-quien-hablo": () => [],
   "agente-clio-probar-dictado": () => [],
   "elijo-tratamientos-trae-cita": (faq) => [
     {

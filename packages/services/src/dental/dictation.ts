@@ -1,5 +1,6 @@
-import { type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
+import { anesthesiaAnswersSchema, type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { z } from "zod"
 import {
   anatomyFits,
   conditionLabel,
@@ -18,6 +19,7 @@ import {
   variantLabel,
 } from "@odentia/dental"
 import { findDiagnosisCode } from "../diagnosis-codes.js"
+import { DECLARED_HEALTH_SHAPE } from "../dictation-health.js"
 import { normalizeForSearch } from "../knowledge.js"
 import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationService, DictationServiceFit, ProductDictation } from "../product-hooks.js"
 import { orgStrictVariants } from "./odontogram.js"
@@ -438,8 +440,42 @@ interface DentalDictationContext {
   pulp: ReadonlyMap<string, PulpState | null>
 }
 
+const DECLARED_MOUTH = DECLARED_HEALTH_SHAPE.dental.unwrap()
+const DECLARED_HABITS = DECLARED_HEALTH_SHAPE.medical.unwrap().shape
+
+/**
+ * Lo de su salud dicho en la consulta que pregunta odentIA (mesa del 20 nov 2026), con la forma de
+ * su registro: la anestesia y el sangrado tras una extracción, el corazón, el miedo, el bruxismo,
+ * sus hábitos, su última visita y lo de un niño en casa; la lactancia y el tabaco. La anestesia va
+ * con su respuesta por separado (`anesthesiaAnswersSchema`), no con la pregunta doble de antes.
+ */
+export const DENTAL_DICTATION_HEALTH = {
+  dental: DECLARED_MOUTH.pick({
+    corazon: true,
+    ansiedadDental: true,
+    bruxismo: true,
+    habitos: true,
+    ultimaVisita: true,
+    biberon: true,
+    chupon: true,
+    dulcesEntreComidas: true,
+    pastaConFluor: true,
+    quienCepilla: true,
+  })
+    .extend({ problemaAnestesia: anesthesiaAnswersSchema.optional() })
+    .optional()
+    .describe(
+      "Lo de su boca que contó: si tuvo problemas con la anestesia del dentista o sangró mucho tras una extracción (`problemaAnestesia`, cada uno con `si`, `no` o `no_sabe`), lo del corazón que pide antibiótico antes (`corazon`), el miedo al dentista, si rechina o aprieta los dientes, sus hábitos (morderse las uñas, morder lapiceros), cuándo fue su última visita y, de un niño, el biberón, el chupón, los dulces entre comidas, la pasta con flúor y quién le cepilla.",
+    ),
+  medical: z
+    .strictObject({ lactancia: DECLARED_HABITS.lactancia, tabaco: DECLARED_HABITS.tabaco, cigarrillos: DECLARED_HABITS.cigarrillos })
+    .optional()
+    .describe("Si da de lactar y si fuma (`cigarrillos`, cuántos al día, solo de quien fuma)."),
+} satisfies z.ZodRawShape
+
 export const DENTAL_DICTATION: ProductDictation = {
   kinds: ["odontograma"],
+  health: DENTAL_DICTATION_HEALTH,
   // «la resina de la pieza 36 por oclusal», «la endodoncia de la molar»: la pieza, su tipo, el lado y
   // la cara dicen dónde, no cuál prestación. «Superior» y «anterior» no: también distinguen servicios.
   placeWords: [

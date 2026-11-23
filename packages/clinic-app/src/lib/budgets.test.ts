@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -223,4 +223,32 @@ it("la fila de un presupuesto respondido dice lo que aceptó; sin responder, el 
   expect(budgetRowAmount({ ...budget, status: "presentado" }).totals).toMatchObject([
     { currency: "PEN", totalCents: 155000 },
   ])
+})
+
+// QA del 22 nov (H12): con dos caminos que se excluyen, la firma decía «2 por ejecutar»; solo uno se hará.
+describe("pendingTreatmentCounts", () => {
+  const path = (chosen: boolean) => ({ budgetId: "b-1", positions: [1], name: null, pathCount: 2, chosen })
+  const item = (id: string, over: Record<string, unknown> = {}) => ({ id, status: "pendiente", decisionStatus: "pendiente", path: null, ...over })
+  it("los caminos por elegir de un presupuesto cuentan como una elección, no como dos por ejecutar", () => {
+    const items = [item("a", { path: path(false) }), item("b", { path: { ...path(false), positions: [2] } }), item("c")]
+    expect(pendingTreatmentCounts(3, items)).toEqual({ toExecute: 1, choices: [2], competing: new Set(["a", "b"]) })
+  })
+  it("elegido el camino, lo que queda se ejecuta", () => {
+    expect(pendingTreatmentCounts(1, [item("a", { path: path(true) })])).toEqual({ toExecute: 1, choices: [], competing: new Set() })
+  })
+  it("lo mismo en lo planificado y lo indicado cuenta una vez", () => {
+    const shared = item("a", { path: path(false) })
+    expect(pendingTreatmentCounts(2, [shared, shared, item("b", { path: { ...path(false), positions: [2] } })])).toEqual({ toExecute: 0, choices: [2], competing: new Set(["a", "b"]) })
+  })
+})
+
+// QA del 22 nov (H8, H9 del auditor): confirmados los dos caminos, el bloque Plan seguía diciendo «Todavía no
+// hay tratamientos por hacer» hasta recargar: el plan nuevo no se volvía a leer.
+describe("planKeysAfterDictation", () => {
+  it("lo dictado que toca el plan vuelve a leer los planes, el presupuesto y lo que sigue", () => {
+    for (const kind of ["plan", "procedimiento", "cita", "presupuesto"]) {
+      expect(planKeysAfterDictation(kind)).toEqual(expect.arrayContaining(["treatment-plans", "plan-items", "budgets", "plan-next"]))
+    }
+    expect(planKeysAfterDictation("nota")).toEqual(["plan-items"])
+  })
 })

@@ -146,3 +146,27 @@ it("la franja de arriba y la línea fija dicen sus alertas en el mismo orden y c
   // Una sigla queda como está.
   expect(drugWords("Antiagregante: AAS 100 mg")).toBe("Antiagregante: AAS 100 mg")
 })
+
+// QA del 22 nov (H11, UX-12): con lo que oyó Clío sin confirmar, la franja decía «Alergias: no sabe,
+// sin confirmar» y la línea fija, «Alergias: no se le preguntó»; lo dicho de su medicación no salía.
+describe("la línea fija dice lo dicho sin confirmar, como la franja", () => {
+  it("lo dicho gana a «no se le preguntó», y «no sabe» avisa como lo que no se sabe", () => {
+    const said = [
+      {
+        suggestionId: "salud-1",
+        encounterId: "e-1",
+        by: { kind: "patient" as const, name: null, relation: null },
+        at: "2026-11-22T15:00:00.000Z",
+        rows: [
+          { key: "allergies", label: "Alergias", value: "no sabe" },
+          { key: "medications", label: "Medicación", value: "algo para la tiroides" },
+        ],
+      },
+    ]
+    const alerts = alertsByRisk({ ...base, allergyReview: "unknown" }, { pregnancy: null, said })
+    expect(alerts.map((alert) => [alert.id, alert.tone])).toEqual([
+      ["dicho-allergies", "warning"],
+      ["dicho-medications", "warning"],
+    ])
+  })
+})

@@ -20,7 +20,7 @@
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents,
  * `stateText`).
  */
-import { budgetAnswerText, type PatientGuide } from "@odentia/clinical"
+import { budgetAnswerText, isLeftOut, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { PlanItem, TreatmentPlan, TreatmentPlanWithStatus } from "./patients"
 
@@ -846,6 +846,34 @@ export function fetchEncounterNextSteps(patientId: string, encounterId: string):
   return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/encounters/${encounterId}/next-steps`)
 }
 
+/** Lo que cuenta el servidor como por ejecutar (`TO_EXECUTE_STATUSES`) y no quedó fuera por la persona. */
+const TO_EXECUTE = new Set(["pendiente", "programado", "en_curso"])
+
+/**
+ * Lo que una atención deja por ejecutar, sin contar como dos los caminos que se excluyen (QA del 22 nov,
+ * H12: «2 por ejecutar» con dos caminos de los que solo uno se hará). `pending` es lo que cuenta el
+ * servidor; los tratamientos de un presupuesto con caminos por elegir salen de ahí y quedan como una
+ * elección por presupuesto, con cuántos caminos tiene (`choices`). `competing`: esos tratamientos, que
+ * tampoco se cuentan como «indicados hoy» uno por uno (QA del 23 nov, verificador 2).
+ */
+export function pendingTreatmentCounts(
+  pending: number,
+  items: ReadonlyArray<Pick<PlanItem, "id" | "status" | "path"> & { decisionStatus?: string | null }>,
+): { toExecute: number; choices: number[]; competing: Set<string> } {
+  const seen = new Set<string>()
+  const paths = new Map<string, number>()
+  const competing = new Set<string>()
+  for (const item of items) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    const path = item.path
+    if (!path || path.chosen || path.pathCount < 2 || !TO_EXECUTE.has(item.status) || isLeftOut(item.decisionStatus)) continue
+    competing.add(item.id)
+    paths.set(path.budgetId, path.pathCount)
+  }
+  return { toExecute: Math.max(0, pending - competing.size), choices: [...paths.values()], competing }
+}
+
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */
 export const PLAN_QUERY_KEYS = [
   "budgets",
@@ -858,6 +886,19 @@ export const PLAN_QUERY_KEYS = [
   "treatment-coordination",
   "treatment-journey",
 ] as const
+
+/** Lo dictado que cambia el plan o su presupuesto al confirmarse: el plan, los caminos, lo hecho hoy, la cita. */
+const DICTATION_PLAN_KINDS = new Set(["plan", "procedimiento", "cita", "presupuesto"])
+
+/**
+ * Lo que se vuelve a leer al confirmar algo dictado. Lo que toca el plan vuelve a leer todo lo del plan:
+ * confirmar los dos caminos abre un plan nuevo y el bloque Plan, que lee los planes vigentes, seguía
+ * diciendo «Todavía no hay tratamientos por hacer» hasta recargar (QA del 22 nov, H8). Lo demás, solo
+ * lo que se indicó.
+ */
+export function planKeysAfterDictation(kind: string): readonly string[] {
+  return DICTATION_PLAN_KINDS.has(kind) ? PLAN_QUERY_KEYS : ["plan-items"]
+}
 
 /**
  * Lo que cambia en la atención abierta cuando la persona responde: lo que no

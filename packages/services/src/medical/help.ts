@@ -545,6 +545,11 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       ),
     },
   ],
+  // Lo de su salud que oye Clío en un consultorio: sin la anestesia del dentista, con el embarazo y lo
+  // gineco-obstétrico de su entrevista.
+  "pacientes-dictado-salud": (faq) => [
+    { ...faq, a: swap(faq.a, "(sus medicinas, sus enfermedades, el anticoagulante, la anestesia)", "(sus medicinas, sus enfermedades, el anticoagulante, un embarazo, sus hábitos)") },
+  ],
   // Lo que Clío propone en la ficha (entrega 11): sin piezas ni la clase de Angle; el ejemplo es de consultorio.
   "pacientes-dictado-ficha": (faq) => [
     {

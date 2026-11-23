@@ -888,7 +888,10 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
         formQuestions,
       }),
     )
-    expect(wide.suggestions.find((item) => item.kind === "nota")?.payload["evolution"]).toBe("Se cementan brackets en la arcada superior.")
+    // Se suma a la consulta pendiente (mesa del 20 nov 2026), sin la frase de la ficha.
+    expect(wide.added).toEqual([note!.id])
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(pending.find((item) => item.id === note!.id)?.payload["evolution"]).toBe("Paciente refiere dolor al masticar. Se cementan brackets en la arcada superior.")
   })
 
   it("la ficha abierta en pantalla se lee siempre, además de las dos últimas tocadas", async () => {

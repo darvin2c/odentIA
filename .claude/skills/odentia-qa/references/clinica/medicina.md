@@ -291,6 +291,12 @@ Nebulización, inyectable, sutura o curación, con sus insumos (ADR 0106).
 
 **Fuentes:** ADR 0012, 0099 y 0100.
 
+**Sumado por la mesa de Clío y la conversación (21 nov 2026):**
+- [ ] `salud` lleva también los gineco-obstétricos y las vacunas que pide su entrevista, o los deja en «No lo usé» con su frase.
+- [ ] El peso dicho no entra como signo vital: hoy lo pide solo el prompt; medirlo con `eval:dictado-medico`.
+
+**Ya falló:** (21 nov 2026) la salud dicha sin tildes ni puntuación se perdía en «Una parte que no supe citar»; se corrigió en la rama `fix/clio-lee-la-conversacion`. El peso dicho sin lugar sigue pendiente.
+
 ## P-MED-20 Señales de alarma en los mensajes
 
 **Dónde:** `SM agent-texts.ts` y `CL emergency.ts`.

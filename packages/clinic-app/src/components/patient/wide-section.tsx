@@ -5,6 +5,7 @@ import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, u
 import { apiFetch } from "../../lib/api"
 import { type DocumentFilter, isPatientSectionId, sectionOf } from "../../lib/patient-areas"
 import type { PatientFull } from "../../lib/patients"
+import type { SaidForForm } from "./patient-health-fields"
 import { productUi } from "../../product/product-ui"
 
 const AntecedentesTab = lazy(() => import("./antecedentes-tab").then((m) => ({ default: m.AntecedentesTab })))
@@ -35,6 +36,17 @@ export interface WideTarget {
   documentId?: string
   /** «Registrar responsable»: Responsables con su formulario ya abierto. */
   grant?: boolean
+  /**
+   * «Corregir algo» de lo que Clío oyó de su salud: Antecedentes abre con eso puesto (la forma de
+   * su registro) y, al guardar, avisa para que la propuesta no lo vuelva a sumar.
+   */
+  said?: SaidForForm
+  /**
+   * «Llevar a su salud» de lo que Clío no usó: la frase tal cual se oyó, a la vista arriba del
+   * formulario mientras se anota donde va (Clío no supo ordenarla, así que no llena nada).
+   */
+  heard?: string
+  onSaved?: () => void
 }
 
 const OpenWide = createContext<((target: WideTarget) => void) | null>(null)
@@ -117,7 +129,8 @@ export function WideSectionProvider({
   })
   const content = (): ReactNode => {
     if (!target || !patientId) return null
-    if (target.id === "antecedentes") return <AntecedentesTab patientId={patientId} startEditing={target.review} />
+    if (target.id === "antecedentes")
+      return <AntecedentesTab patientId={patientId} startEditing={target.review} said={target.said} heard={target.heard} onSaved={target.onSaved} />
     if (target.id === "historia") return <HistoriaTab patientId={patientId} initialTooth={target.place} />
     if (target.id === "documentos") return <DocumentosOver key={`${target.documentFilter}-${target.place}-${target.documentId}`} patientId={patientId} target={target} />
     if (target.id === "plan")

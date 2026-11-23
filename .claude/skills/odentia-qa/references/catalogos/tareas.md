@@ -218,6 +218,19 @@ Las tareas de un día de consulta. Hasta el estudio de la atención (16 nov 2026
 
 **Ya falló:** solo había «Agregar corrección», de texto (19 nov).
 
+### T-ODO-07 Atender hablando con Clío (escribiendo en vez de dictar), terminarlo y firmar
+
+**Dónde:** la atención (`encounter-editor`), «Dictar», «Lo que se dijo».
+- [ ] Encuentro cómo terminar el dictado sin micrófono.
+- [ ] La franja «Clío propone N» y el botón «Confirmar las N» dicen el mismo número.
+- [ ] Mi frase en futuro («le hago una resina») no se firma como hecho hoy.
+- [ ] El peso que dice la mamá de un niño se guarda y aparece en la receta.
+- [ ] «Lo que se dijo» atribuye cada frase a quien la dijo.
+- [ ] En un menor, escribo al responsable que no está registrado sin salir del formulario.
+- [ ] La Ayuda, con mis palabras, contesta cómo terminar el dictado y cómo registrar al niño con su mamá.
+
+**Ya falló:** (21 nov) los dos números de la franja no coincidían, la frase en futuro se firmaba como hecha y «Lo que se dijo» no atribuía bien; se corrigieron en la rama `fix/clio-lee-la-conversacion`. Siguen pendientes: el registro del menor sin campo para el responsable y el peso de la mamá sin lugar.
+
 ## Caja
 
 ### T-CAJ-01 Cobrar lo que debe y entregar el ticket

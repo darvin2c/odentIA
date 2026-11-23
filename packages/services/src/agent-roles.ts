@@ -219,7 +219,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     // dictado que siguen sin decidir (sin tarifas) y las preguntas de las fichas que ya empezó en
     // esa atención (entrega 11), con lo que ya dicen: una corrección dicha queda por revisar. No lee
     // el odontograma ni el plan.
-    sees: "Lo que el odontólogo dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
+    sees: "Lo que el odontólogo dicta en esa atención. Las sugerencias de ese dictado que aún no decide, con lo que ya dice la consulta, para sumarle lo nuevo y entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Al terminar de dictar, una vez, todo lo que se dijo en esa atención, con lo ya confirmado y lo descartado, para completar lo que faltó y decir quién habló. Los servicios de la clínica y el catálogo CIE-10, para reconocer lo dictado.",
     notSees: "El resto de la historia clínica, las fichas de otras atenciones, el odontograma ni el plan del paciente. Conversaciones ni caja.",
     never:
       "Guardar sin que el odontólogo confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el odontólogo pulse «Dictar». Tocar atenciones de otros profesionales.",

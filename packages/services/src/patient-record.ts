@@ -1510,6 +1510,7 @@ const DECLARATION_VIA_WORDS: Record<RecordDeclaration["via"], string> = {
   registro: "En su registro",
   enlace: "Desde su enlace",
   formulario: "En un formulario",
+  consulta: "En la consulta",
 }
 
 /** «Se quitó la alergia a Ibuprofeno: era otra cosa (…) · lo quitó Ana Torres el 14 de noviembre de 2026». */

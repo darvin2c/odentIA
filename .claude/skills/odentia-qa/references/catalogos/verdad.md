@@ -58,6 +58,12 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Con algo común a las opciones, cada tarjeta muestra de dónde sale su total (lo de la opción + lo común), y todas las filas comunes se marcan igual.
 - [ ] La línea de lo elegido sigue igual al recargar la atención.
 
+**Sumado por la QA de Clío conversando (22 nov 2026):**
+- [ ] Confirmar los dos caminos de Clío y firmar con la consulta: cada opción sigue con su total sin la consulta ya cargada; el bloque Plan, «Atención finalizada», «Qué sigue» y el presupuesto dan la misma cifra.
+
+**Ya falló (corregido en la rama `fix/clio-lee-la-conversacion`):** el presupuesto sumaba la evaluación cobrada a cada opción («A S/ 700» en vez de 650); el foco se perdía y el cuadro saltaba al aparecer los tres números.
+**Caso:** endodoncia de la 36 S/ 650 o exodoncia S/ 150, evaluación S/ 50 al firmar: «A S/ 650 · B S/ 150», debe S/ 50. Nunca «A S/ 700».
+
 ## V-DIN-05 Lo que carga la atención
 **Aparece en:** el diálogo «Finalizar y firmar» y «Atención finalizada» (`CA/patient/encounter-editor.tsx`, `encounter-closing.tsx`), ficha › Cobros, lo que caja ve por cobrar y el ticket.
 **A mano:** el cargo nace al firmar, no antes. Un tratamiento de varias sesiones se carga una sola vez. Aceptar no genera deuda.
@@ -316,6 +322,21 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** el tablero prometía para una paciente «1 odontograma, 1 orden, 12 fotos y radiografías» y tenía 2, 2 y 6; la corona de la 46 «lo piensa» no estaba en el PDF y los caminos salían dos veces (mesa y QA del 18 nov, corregidos).
 **Caso:** una paciente con 2 odontogramas firmados, la panorámica pedida sin resultado y una derivación, la receta N.º 2 anulada «por su alergia», la CBCT y 5 radiografías JPG. El bloque dice 2, 2 órdenes, 6 imágenes y su tomografía; el ZIP trae exactamente eso.
 
+## V-DAT-10 Lo que se dijo en la consulta y lo que propone Clío
+**Aparece en:** la tarjeta de la consulta y «Revisa con … lo que dijo de su salud» (`CA/patient/health-review-notice.tsx`), la franja y la cabecera fija (`CA/patient/patient-header.tsx`), el aviso «No lo usé» y el panel «Lo que se dijo» (`CA/patient/dictation-said.tsx`), «Ver declaración original», la Historia y la Ayuda.
+**A mano:** cada frase de «Tal cual se oyó» está en una sola sugerencia, o en «No lo usé» con un solo motivo, o es charla. Nunca en dos.
+- [ ] Nada de lo que está en una sugerencia aparece en «No lo usé» como «no lo propuse».
+- [ ] El aviso y el panel dan el mismo motivo para la misma frase; ninguna frase sale dos veces; las preguntas del profesional no se listan.
+- [ ] El motivo de consulta es lo que dijo el paciente o quien lo acompaña; «antes dijo» aparece solo si alguien se corrigió.
+- [ ] «también en la 37» suma una sugerencia; la de la 36 sigue igual.
+- [ ] El resaltado tiene los colores que dice la leyenda (el ámbar no se confunde con otro estado).
+- [ ] La franja grande y la cabecera fija dicen lo mismo de las alergias.
+- [ ] «Ver declaración original» da la hora en que se dijo (la de la pausa), no la de la revisión.
+- [ ] «Llevar a su salud» abre con la frase al lado y el dato en su grupo.
+
+**Ya falló (QA del 22 nov 2026, corregido en la rama `fix/clio-lee-la-conversacion`):** «dolor al frío que se queda (antes dijo «dolor de una muela…»)» con la frase de la doctora, que pisó el motivo del paciente; la caries de la 36 pasó a la 37 con «sí, también en la 37»; «No lo usé» con motivos distintos para la misma frase, frases repetidas y preguntas del profesional listadas; «No encontré «losartán»… no lo propuse» con el losartán propuesto; «Llevar a su salud» abría Antecedentes vacío; «Ver declaración original» daba la hora de la revisión; el ámbar no tenía los colores de la leyenda; la franja y la cabecera fija decían distinto de las alergias.
+**Caso:** Rosa, 13 pausas: motivo del paciente, «hace dos semanas», losartán, «warfarina… perdón, apixabán», «no que yo sepa», examen de la 36 con «dolor al frío que se queda», dos caminos, «te veo la próxima semana», recargar y «sí, también en la 37».
+
 ## V-VAL-01 Cuántas veces dice lo mismo la atención
 **Aparece en:** la atención en borrador (`CA/patient/encounter-editor.tsx` y sus bloques), en tres estados: nueva vacía, primera consulta cargada y sesión siguiente.
 **A mano:** se cuenta cuántas veces aparece en la página el nombre de un mismo tratamiento, su consentimiento pendiente y cada requisito para firmar, y cuántas frases grises explican una regla.
@@ -382,6 +403,10 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Recepción: «¿Cómo le reservo lo que aceptó?» responde «Qué sigue › Reservar lo aceptado».
 - [ ] Una pregunta que nombra un botón visible de la pantalla («Completar», «Hacerla hoy») no recibe «¿Qué es Inicio?».
 - [ ] Una respuesta de «cómo se hace» se lee en menos de 120 palabras; lo demás va en otras preguntas.
+
+**Sumado por la QA de Clío conversando (22 nov 2026):**
+- [ ] Cada botón nuevo de una entrega («No lo registro», «Llevar a su salud») tiene su pregunta en la Ayuda.
+- [ ] «¿Cómo cambio quién habló?» lleva a «Conversación», no a corregir sugerencias.
 
 ## V-RAS-01 Rastro del dinero
 **Aparece en:** Caja › «Movimientos de hoy», ficha › Cobros, el detalle de un gasto, Comisiones y la actividad del equipo (`R/_org/settings.audit.tsx`, `S/audit-words.ts`).

@@ -749,6 +749,41 @@
       "texto": "paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro sin dolor",
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
       "espera": { "fichas": { "evaluacion-de-endodoncia.dolor": "Sin dolor" } }
+    },
+    {
+      "id": "conversada-c9",
+      "texto": "¿Le duele si golpeo? Sí, ahí. Percusión positiva. El frío le dura bastante, más de un minuto. En la radiografía hay una zona radiolúcida apical. Pulpitis irreversible sintomática.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.percusion": "Positiva",
+          "evaluacion-de-endodoncia.frio": "Aumentada, persiste",
+          "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"],
+          "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática"
+        },
+        "diagnosticos": ["K04.0"],
+        "noEnNota": ["le duele si golpeo"]
+      }
+    },
+    {
+      "id": "conversada-qa-c3",
+      "texto": "Hola Lucía, cuénteme qué le pasa. Doctora, me duele mucho la muela de arriba a la izquierda, la 26, ya hace dos semanas, y anoche no pude dormir del dolor, me duele solo, sin tocar nada. Vamos a ver. Le golpeo suave la muela y le duele bastante a la percusión. Con el frío le dura el dolor más de un minuto. En la radiografía veo una caries profunda que llega a la pulpa y una lesión pequeña en el ápice de la raíz. Diagnóstico: pulpitis irreversible con periodontitis apical. Necesita endodoncia de la 26.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.pieza": 26,
+          "evaluacion-de-endodoncia.dolor": "Espontáneo",
+          "evaluacion-de-endodoncia.percusion": "Positiva",
+          "evaluacion-de-endodoncia.frio": "Aumentada, persiste"
+        },
+        "revisar": ["evaluacion-de-endodoncia.diagnostico_pulpar", "evaluacion-de-endodoncia.diagnostico_apical", "evaluacion-de-endodoncia.hallazgo_radiografico"],
+        "cual": {
+          "evaluacion-de-endodoncia.diagnostico_pulpar": ["Pulpitis irreversible sintomática", "Pulpitis irreversible asintomática"],
+          "evaluacion-de-endodoncia.diagnostico_apical": ["Periodontitis apical sintomática", "Periodontitis apical asintomática"]
+        },
+        "avisar": ["evaluacion-de-endodoncia.hallazgo_radiografico"],
+        "diagnosticos": ["K04.0", "K04.4|K04.5"]
+      }
     }
   ]
 }

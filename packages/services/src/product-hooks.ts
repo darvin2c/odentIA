@@ -19,6 +19,7 @@ import {
 import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
+import type { z } from "zod"
 import type { FormSchemaDef } from "./clinical-forms.js"
 import type { DocumentCheckFacts } from "./document-check.js"
 import type { PaperStorage } from "./issued-papers.js"
@@ -446,6 +447,13 @@ export interface DictationPatient {
 export interface ProductDictation {
   /** Las clases de sugerencia propias del producto, además de las comunes. */
   kinds: readonly DictationKind[]
+  /**
+   * Lo de su salud dicho en la conversación que el producto pregunta, además de lo común
+   * (`dictationHealthSchema`), con la forma de su registro (mesa del 20 nov 2026; odentIA: su boca,
+   * la lactancia y el tabaco; latidIA: también el alcohol). Clío lo ve en su esquema y el servicio
+   * guarda solo esto.
+   */
+  health: z.ZodRawShape
   /**
    * Las palabras de lo dicho que dicen dónde y no cuál prestación (odentIA: la
    * pieza y sus caras): no cuentan al buscarla en el tarifario (`matchService`).

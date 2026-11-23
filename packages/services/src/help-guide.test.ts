@@ -433,3 +433,49 @@ describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atenció
     expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
   })
 })
+
+// Clío en una consulta conversada (mesa del 20 nov 2026): las tres preguntas del acta llegan a su
+// respuesta, con los nombres de la pantalla y sin nombrar decisiones internas. latidIA, en `medical/help.test.ts`.
+describe("Clío en una consulta conversada", () => {
+  it.each([
+    ["¿Clío entiende si converso con el paciente?", "pacientes-dictado-conversar"],
+    ["¿Dónde veo lo que se dijo en la consulta?", "pacientes-dictado-lo-que-se-dijo"],
+    ["¿Cómo confirmo lo que el paciente dijo de su salud?", "pacientes-dictado-salud"],
+    ["¿Cómo termino el dictado si escribo en vez de dictar?", "pacientes-dictado-terminar-escribiendo"],
+    // Como lo preguntó la novata en la QA del 21 nov: antes, «No estoy segura de qué preguntas».
+    ["como hago para que Clio escuche la consulta y me proponga lo que se registra", "pacientes-dictado-conversar"],
+    ["como termino el dictado si escribo en vez de hablar", "pacientes-dictado-terminar-escribiendo"],
+    ["el paciente dijo un medicamento y luego se corrigio, como dejo registrado lo que dijo de su salud", "pacientes-dictado-salud"],
+    ["atiendo a un nino de 7 anos y responde su mama, como lo registro", "pacientes-dictado-conversar"],
+    ["deje una atencion a medias y quiero volver a ella y ver que se dijo", "pacientes-dictado-lo-que-se-dijo"],
+  ])("«%s» tiene su respuesta", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+    const faq = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === id)
+    expect(faq?.a).not.toMatch(/ADR|decisión \d/)
+  })
+
+  it("la guía ya no nombra los textos de antes del dictado", () => {
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    expect(faqs.filter((faq) => /«Ver lo dictado»|«No pude usar esto»|Tu respaldo/.test(faq.a)).map((faq) => faq.id)).toEqual([])
+  })
+})
+
+// QA del 22 nov (H9 de esta entrega, H10 del auditor): la Ayuda no conocía «No lo registro» ni «Llevar a
+// su salud», y a «¿cómo cambio quién habló?» le daba la de corregir sugerencias.
+describe("lo nuevo de la consulta conversada, con los nombres de la pantalla", () => {
+  const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null
+  it.each([
+    ["que hace el boton no lo registro en lo que dijo de su salud", "pacientes-dictado-no-lo-registro"],
+    ["que hace llevar a su salud", "pacientes-dictado-llevar-a-su-salud"],
+    ["clio puso que hablo la paciente pero era la mama como lo cambio", "pacientes-dictado-quien-hablo"],
+  ])("«%s»", (question, faq) => {
+    expect(firstFaq(question)).toBe(faq)
+  })
+  // Solo donde Clío dicta: vistIA no dicta y quita estas preguntas de su guía.
+  it.each(CLINICAL_PRODUCTS.filter((product) => product !== "optical"))("en %s, cada respuesta en pocas palabras", (product) => {
+    const ids = ["pacientes-dictado-no-lo-registro", "pacientes-dictado-llevar-a-su-salud", "pacientes-dictado-quien-hablo"]
+    const faqs = helpTopicsFor(product).flatMap((topic) => topic.faqs ?? []).filter((faq) => ids.includes(faq.id))
+    expect(faqs.map((faq) => faq.id).sort()).toEqual([...ids].sort())
+    for (const faq of faqs) expect(faq.a.split(/\s+/).length, faq.id).toBeLessThanOrEqual(120)
+  })
+})
