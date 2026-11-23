@@ -1,6 +1,18 @@
 import { sql } from "drizzle-orm"
-import { char, check, foreignKey, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
-import { organization } from "./auth.js"
+import {
+  char,
+  check,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
+import { organization, user } from "./auth.js"
 import { adminSchema } from "./schemas.js"
 
 /**
@@ -93,6 +105,64 @@ export const appContractMessage = adminSchema.table(
   (table) => [
     primaryKey({ name: "app_contract_message_pkey", columns: [table.app, table.id] }),
     check("app_contract_message_id_check", sql`length(${table.id}) BETWEEN 1 AND 200`),
+  ],
+)
+
+/** Lo que la administración le pide a una app (los `type` de `adminRequest` de `@odentia/contract`). */
+export const APP_CONTRACT_REQUEST_TYPES = ["cuenta.abrir", "soporte.entrar", "equipo.quitar"] as const
+export type AppContractRequestType = (typeof APP_CONTRACT_REQUEST_TYPES)[number]
+/** Pendiente hasta que la app responde; hecho o falló es lo que respondió (no cambia después). */
+export const APP_CONTRACT_REQUEST_STATUSES = ["pendiente", "hecho", "fallo"] as const
+export type AppContractRequestStatus = (typeof APP_CONTRACT_REQUEST_STATUSES)[number]
+
+/**
+ * Lo que la administración le pide a una app que es otro sistema (ADR 0213): la bandeja de
+ * salida de esos pedidos. Se escribe en la transacción de quien lo pide y lo envía la API en el
+ * momento o el trabajador después, como los avisos de la cuenta: su `id` es su clave
+ * (`webhook-id`) y no cambia al reintentar, así que la app reconoce un repetido. Los de una misma
+ * cuenta salen en orden. Sin `GRANT`: solo la conexión propietaria.
+ */
+export const appContractRequest = adminSchema.table(
+  "app_contract_request",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    app: text("app").notNull(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => saasAccount.id, { onDelete: "cascade" }),
+    type: text("type").$type<AppContractRequestType>().notNull(),
+    /** El pedido tal cual sale (su cuerpo firmado). */
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    /** Quién del equipo lo pidió. */
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => user.id),
+    status: text("status").$type<AppContractRequestStatus>().notNull().default("pendiente"),
+    /** Lo que dijo la app al responder (por qué falló, o qué hizo). */
+    resultMessage: text("result_message"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "app_contract_request_app_check",
+      sql`${table.app} IN (${sql.raw(SAAS_ACCOUNT_EXTERNAL_APPS.map((app) => `'${app}'`).join(","))})`,
+    ),
+    check(
+      "app_contract_request_type_check",
+      sql`${table.type} IN (${sql.raw(APP_CONTRACT_REQUEST_TYPES.map((type) => `'${type}'`).join(","))})`,
+    ),
+    check(
+      "app_contract_request_status_check",
+      sql`${table.status} IN ('pendiente','hecho','fallo') AND (${table.status} = 'pendiente') = (${table.doneAt} IS NULL)`,
+    ),
+    index("app_contract_request_pending_idx")
+      .on(table.app, table.nextAttemptAt)
+      .where(sql`status = 'pendiente'`),
+    index("app_contract_request_account_idx").on(table.accountId, table.createdAt),
   ],
 )
 

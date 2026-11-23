@@ -13,9 +13,15 @@ import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
   activateSaasSubscription,
+  type AppContractSender,
   assignAppAccountPlan,
+  deliverAppContractRequests,
   getAppAccountDetail,
   listAppAccounts,
+  listAppContractRequests,
+  openAppAccountForClient,
+  requestAppPersonRemoval,
+  requestAppSupportAccess,
   getClinicNotices,
   archiveSaasPlan,
   assertSaasAllowed,
@@ -109,6 +115,8 @@ export interface SaasBillingAdminDeps {
   ownerDb: Db
   storage: Storage
   mailer: Mailer
+  /** Adónde se le pide algo a una app que es otro sistema (ADR 0213); sin él, sus botones lo dicen. */
+  appContractSenders?: AppContractSender[]
 }
 
 export interface SaasBillingAccountDeps {
@@ -198,6 +206,7 @@ const planInput = z
 
 export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
   const app = new Hono()
+  const senders = deps.appContractSenders ?? []
 
   async function runStaffWrite<T>(
     c: Context,
@@ -354,7 +363,100 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
   app.get("/accounts/:accountId", async (c) => {
     if (!requireAdmin(c)) return forbid(c)
     const accountId = c.req.param("accountId")
-    return runService(c, 200, () => getAppAccountDetail(deps.ownerDb, accountId))
+    return runService(c, 200, async () => {
+      const detail = await getAppAccountDetail(deps.ownerDb, accountId)
+      return {
+        ...detail,
+        requests: await listAppContractRequests(deps.ownerDb, accountId),
+        // ¿Se le puede pedir algo a su app? Sin su dirección y su secreto, los botones lo dicen.
+        canRequest: senders.some((sender) => sender.app === detail.account.app),
+      }
+    })
+  })
+
+  // --- Lo que la administración le pide a la app (ADR 0213) ------------------------------
+  // Sale en el momento, sin esperar la respuesta; si no llega, lo reintenta el trabajador.
+  const sendNow = () => {
+    if (!senders.length) return
+    void deliverAppContractRequests(deps.ownerDb, senders).catch((error: unknown) =>
+      console.error("api: pedido a una app", error),
+    )
+  }
+  const reason = z
+    .string()
+    .trim()
+    .min(3, "Escribe el motivo (al menos 3 caracteres)")
+    .max(500, "Escribe como mucho 500 caracteres")
+  const requestInput = z.discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("soporte.entrar"),
+        minutes: z.number().int().min(5, "De 5 a 60 minutos").max(60, "De 5 a 60 minutos"),
+        reason,
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("equipo.quitar"),
+        email: z.string().trim().toLowerCase().email("Escribe el correo de su cuenta").max(254),
+        reason,
+      })
+      .strict(),
+  ])
+
+  app.post("/accounts/:accountId/requests", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración le pide algo a una app")
+    const parsed = requestInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const accountId = c.req.param("accountId")
+    const input = parsed.data
+    const response = await runStaffWrite(
+      c,
+      201,
+      actor,
+      { action: `saas.account_request.${input.type}`, organizationId: accountId },
+      async (tx) => ({
+        id:
+          input.type === "soporte.entrar"
+            ? await requestAppSupportAccess(tx, senders, actor, accountId, input)
+            : await requestAppPersonRemoval(tx, senders, actor, accountId, input),
+      }),
+    )
+    if (response.status === 201) sendNow()
+    return response
+  })
+
+  app.post("/accounts", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración abre cuentas")
+    const parsed = z
+      .object({
+        app: z.enum(SAAS_ACCOUNT_EXTERNAL_APPS),
+        name: z.string().trim().min(1, "Escribe el nombre").max(80, "Escribe como mucho 80 caracteres"),
+        ownerEmail: z.string().trim().toLowerCase().email("Escribe el correo de su cuenta").max(254),
+        currency,
+        country: z
+          .string()
+          .trim()
+          .toUpperCase()
+          .regex(/^[A-Z]{2}$/, "Elige el país (dos letras, como PE)")
+          .nullish(),
+        planCode: z.string().trim().min(1, "Elige el plan").max(80, "Elige un plan de la lista"),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const input = { ...parsed.data, country: parsed.data.country ?? null }
+    const response = await runStaffWrite(
+      c,
+      201,
+      actor,
+      { action: "saas.account_open", metadata: { app: input.app, planCode: input.planCode } },
+      (tx) => openAppAccountForClient(tx, senders, actor, input),
+    )
+    if (response.status === 201) sendNow()
+    return response
   })
 
   app.post("/accounts/:accountId/plan", async (c) => {

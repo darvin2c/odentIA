@@ -11,7 +11,12 @@ import {
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
-import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import {
+  saasAction,
+  saasPaymentMethod,
+  saasPlan,
+  saasSubscription,
+} from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { openSupportCaseFromHelp } from "./admin-support.js"
 import { type ExternalAccount, externalAccountOf, toExternalAccount } from "./app-accounts.js"
@@ -34,7 +39,9 @@ import {
   readOnlyAtOf,
   type SaasSubscriptionRow,
   setNewClinicSpendCap,
+  submitSaasReceipt,
 } from "./saas-billing.js"
+import type { Storage } from "./storage.js"
 import { addMonth, listSaasChargeLines } from "./saas-invoicing.js"
 import { getSaasAlerts } from "./saas-terms.js"
 
@@ -315,6 +322,54 @@ async function applySupport(
   return account.id
 }
 
+/** Lo que el aviso de un comprobante necesita para guardarlo: el almacenamiento de los comprobantes. */
+export interface AppEventDeps {
+  storage?: Pick<Storage, "putAttachment">
+}
+
+/**
+ * Subió un comprobante de un cargo: queda por confirmar, como el que sube una clínica (las mismas
+ * reglas de `submitSaasReceipt`: el cargo de la cuenta, el saldo, un solo pendiente por cargo y
+ * el contenido del archivo mirado por sus bytes, nunca por lo que dice). La clave del pago es la
+ * del aviso: repetido, devuelve el mismo.
+ */
+async function applyReceipt(
+  tx: Db,
+  app: SaasAccountExternalApp,
+  messageId: string,
+  event: Extract<AppEvent, { type: "pago.comprobante" }>,
+  deps: AppEventDeps,
+  now: Date,
+): Promise<string> {
+  const { data } = event
+  if (!deps.storage)
+    throw new ServiceError("UNAVAILABLE", 503, "Los comprobantes no se pueden guardar ahora")
+  const account = await requireAccount(tx, app, data.account)
+  const [person] = await tx
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.id, data.userId))
+    .limit(1)
+  if (!person) throw invalidField("userId", "Esa persona no tiene cuenta")
+  const bytes = Buffer.from(data.file.base64, "base64")
+  await submitSaasReceipt(
+    tx,
+    { storage: deps.storage },
+    account.id,
+    data.userId,
+    {
+      chargeId: data.chargeId,
+      methodCode: data.methodCode,
+      amountCents: data.amountCents,
+      receipt: { bytes, contentType: data.file.contentType, filename: "comprobante" },
+      idempotencyKey: `${app}:${messageId}`.slice(0, 200),
+      ...(data.note ? { notes: data.note } : {}),
+    },
+    now,
+  )
+  return account.id
+}
+
 /**
  * Recibe un aviso de una app. La clave (`messageId`, el `webhook-id` firmado) y su efecto van
  * juntos: si la clave ya estaba, no hace nada y lo dice. Si el efecto falla (una cuenta que no
@@ -326,6 +381,7 @@ export async function receiveAppEvent(
   messageId: string,
   event: AppEvent,
   now = new Date(),
+  deps: AppEventDeps = {},
 ): Promise<{ repeated: boolean }> {
   return ownerDb.transaction(async (tx) => {
     const [fresh] = await tx
@@ -339,7 +395,9 @@ export async function receiveAppEvent(
         ? await applyAccountOpened(tx, app, event, now)
         : event.type === "uso.contado"
           ? await applyUsage(tx, app, event)
-          : await applySupport(tx, app, event)
+          : event.type === "pago.comprobante"
+            ? await applyReceipt(tx, app, messageId, event, deps, now)
+            : await applySupport(tx, app, event)
     await tx
       .update(appContractMessage)
       .set({ accountId })
@@ -371,6 +429,7 @@ export async function answerAppState(
     charges: [],
     payments: [],
     notices: [],
+    paymentMethods: [],
     support: [],
   }
   const account = await findAccount(ownerDb, app, ref)
@@ -390,6 +449,15 @@ export async function answerAppState(
     charges.map((charge) => charge.id),
   )
   const payments = await listSaasPayments(ownerDb, id, 50)
+  const methods = await ownerDb
+    .select({
+      code: saasPaymentMethod.code,
+      name: saasPaymentMethod.name,
+      instructions: saasPaymentMethod.instructions,
+    })
+    .from(saasPaymentMethod)
+    .where(eq(saasPaymentMethod.isActive, true))
+    .orderBy(asc(saasPaymentMethod.sortOrder), asc(saasPaymentMethod.name))
   const cases = await ownerDb
     .select({
       id: supportCase.id,
@@ -484,6 +552,7 @@ export async function answerAppState(
       status: payment.status,
       at: payment.createdAt.toISOString(),
     })),
+    paymentMethods: methods,
     notices: alerts.map((alert) => ({
       key: `${alert.family}:${alert.level}:${alert.periodKey}`,
       family: alert.family,

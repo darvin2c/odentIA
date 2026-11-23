@@ -1079,6 +1079,13 @@
       "when": 1795383275405,
       "tag": "0153_el_acuerdo_de_las_apps",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1795451138835,
+      "tag": "0154_la_administracion_pide_a_las_apps",
+      "breakpoints": true
     }
   ]
 }

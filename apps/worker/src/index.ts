@@ -27,6 +27,7 @@ import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   accountEventSendersFromEnv,
+  appContractSendersFromEnv,
   adminChannelsFromEnv,
   askGuideForSale,
   clinicHostsFromEnv,
@@ -35,6 +36,7 @@ import {
   configurePublicLinks,
   createStorage,
   deliverAccountEvents,
+  deliverAppContractRequests,
   ensureSuggestedConsentsEverywhere,
   ensureSuggestedFormsEverywhere,
   type HelpDecider,
@@ -461,6 +463,17 @@ if (accountEvents.senders.length > 0)
   queues.push({
     name: "account_events",
     poll: async () => (await deliverAccountEvents(ownerDb, accountEvents.senders)).delivered > 0,
+  })
+
+// Lo que la administración le pide a una app que es otro sistema (ADR 0213): lo reintenta si la
+// API no pudo mandarlo en el momento. Sin la dirección y el secreto de una app, no se le pide nada.
+const appRequests = appContractSendersFromEnv(env)
+for (const problem of appRequests.problems) console.warn(`worker: ${problem}`)
+if (appRequests.senders.length > 0)
+  queues.push({
+    name: "app_contract_requests",
+    poll: async () =>
+      (await deliverAppContractRequests(ownerDb, appRequests.senders)).delivered > 0,
   })
 
 // La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y cada hora.

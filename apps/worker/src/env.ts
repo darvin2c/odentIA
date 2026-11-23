@@ -26,6 +26,12 @@ const envSchema = z.object({
    */
   GESTORIA_ACCOUNT_EVENTS_URL: z.string().trim().default(""),
   GESTORIA_ACCOUNT_EVENTS_SECRET: z.string().trim().default(""),
+  /**
+   * Lo que la administración le pide a gestorIA (ADR 0213): su servidor y el secreto del acuerdo,
+   * los mismos de la API. Vacíos: no se le pide nada.
+   */
+  GESTORIA_CONTRACT_URL: z.string().trim().default(""),
+  GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
   /** El dominio de vistIA, como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()
