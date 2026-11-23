@@ -3193,6 +3193,34 @@ export interface DictationHealthReview {
  * la sugerencia sigue esperando con solo esos «No» (lo revisado no se vuelve a proponer); si solo
  * trae «No», no hay nada que guardar con «Lo revisé con…».
  */
+/**
+ * Cuándo se dijo lo de su salud: la hora del primero de sus tramos guardados («Lo que se dijo»)
+ * y, si no tiene, cuándo nació la sugerencia.
+ */
+async function healthSaidAt(
+  tx: Db,
+  orgId: string,
+  row: typeof encounterDictationSuggestion.$inferSelect,
+  segments: readonly string[] | undefined,
+): Promise<Date> {
+  if (segments?.length) {
+    const [first] = await tx
+      .select({ saidAt: encounterDictationSegment.saidAt })
+      .from(encounterDictationSegment)
+      .where(
+        and(
+          eq(encounterDictationSegment.organizationId, orgId),
+          eq(encounterDictationSegment.encounterId, row.encounterId),
+          inArray(encounterDictationSegment.segmentId, [...segments]),
+        ),
+      )
+      .orderBy(asc(encounterDictationSegment.saidAt))
+      .limit(1)
+    if (first) return first.saidAt
+  }
+  return row.createdAt
+}
+
 async function confirmHealthRow(
   tx: Db,
   orgId: string,
@@ -3229,8 +3257,10 @@ async function confirmHealthRow(
   const health = healthOfPayload(kept)
   const before = await getPatientHealth(tx, orgId, patientId)
   const clean = !before.reviewPending && before.declared.length === 0
+  // La declaración lleva la hora en que se dijo, no la de la revisión (QA del 22 nov, H8).
+  const saidAt = await healthSaidAt(tx, orgId, row, meta.segments)
   for (const person of healthByDeclarant(kept))
-    await recordHealthDeclaration(tx, orgId, patientId, { via: "consulta", by: healthDeclarantOf(person.payload), health: healthOfPayload(person.payload) })
+    await recordHealthDeclaration(tx, orgId, patientId, { via: "consulta", by: healthDeclarantOf(person.payload), health: healthOfPayload(person.payload), saidAt })
   // La primera declaración (`initializeDeclaredPatientHealth`) es la de su registro; quien llega sin
   // registro en línea (lo más común en la consulta) la tiene igual por aquí, sumada a lo que haya.
   if (before.revision === 0 && (await hasRegistration(tx, orgId, patientId)))

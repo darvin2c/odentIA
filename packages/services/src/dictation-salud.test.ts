@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto"
 import { prescribingAlerts } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { encounter, encounterDictationSuggestion, patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
+import { encounter, encounterDictationSegment, encounterDictationSuggestion, patientAllergy, patientCondition, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -131,6 +132,35 @@ describe("C1 y C2 · la medicación dicha en la conversación", () => {
     const catalog = DENTAL_PRESCRIBING
     const situation = await fx.run((tx) => prescribingSituationOf(tx, ORG, fx.patient.id, catalog))
     expect(prescribingAlerts(situation, [{ genericName: "naproxeno" }], catalog.medications).warnings.join(" ")).toContain("toma apixabán")
+    await enable(false)
+  })
+
+  it("la declaración de la consulta lleva la hora en que se dijo, no la de la revisión (QA del 22 nov, H8)", async () => {
+    await enable(true)
+    const { fx, segment, confirm, declarations } = await session()
+    const segmentId = randomUUID()
+    const transcript = "Tomo apixabán."
+    // Lo dijo a las 4:13 (su tramo guardado); se revisa a las 4:20.
+    const spoken = new Date(Date.now() - 7 * 60_000)
+    await ownerDb
+      .insert(encounterDictationSegment)
+      .values({ organizationId: ORG, patientId: fx.patient.id, encounterId: fx.encounter.id, segmentId, transcript, createdBy: fx.actor, saidAt: spoken })
+    const [said] = (
+      await segment({ drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixabán" }], transcript, segmentId })
+    ).suggestions
+    await confirm(said!.id)
+    const [declaration] = await declarations()
+    expect(declaration?.saidAt.toISOString()).toBe(spoken.toISOString())
+
+    // Sin su tramo guardado, la hora en que Clío lo propuso.
+    const other = await session()
+    const [loose] = (
+      await other.segment({ drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "warfarina" } }, sourceText: "tomo warfarina" }], transcript: "Tomo warfarina." })
+    ).suggestions
+    const proposed = new Date(Date.now() - 5 * 60_000)
+    await ownerDb.update(encounterDictationSuggestion).set({ createdAt: proposed }).where(eq(encounterDictationSuggestion.id, loose!.id))
+    await other.confirm(loose!.id)
+    expect((await other.declarations())[0]?.saidAt.toISOString()).toBe(proposed.toISOString())
     await enable(false)
   })
 
