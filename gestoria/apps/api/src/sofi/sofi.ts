@@ -13,6 +13,7 @@ import {
   withSessionLock,
 } from "@gestoria/db"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
+import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { type LinkDeps, pad, todayUTC } from "../pedidos.js"
@@ -132,9 +133,16 @@ export type AnswerResult =
   /** Una persona atiende la conversación, o Sofi está apagada (en una de verdad). */
   | { status: "persona" | "apagada" | "nada" | "ocupada" }
   | { status: "sin_modelo" }
+  /**
+   * La administración dijo que la tienda no puede seguir o que llegó a su tope (en una de
+   * verdad): la conversación espera a una persona, como con Sofi apagada.
+   */
+  | { status: "detenida"; reason: AgentStop }
 
 interface Loaded {
   conv: typeof conversation.$inferSelect
+  /** Por qué Sofi no atiende, según lo último que dijo la administración; null si atiende. */
+  stop: AgentStop | null
   storeName: string
   currency: string
   agent: typeof storeAgent.$inferSelect | null
@@ -249,6 +257,7 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
     factAmounts.push(...amountsIn(agent?.knowledge ?? "", currency))
     return {
       conv,
+      stop: await agentStopIn(tx, storeId),
       storeName: shop!.name,
       currency,
       agent: agent ?? null,
@@ -307,6 +316,9 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
   const test = conv.channel === "prueba"
   // Apagada, las conversaciones esperan a una persona; la de prueba sirve para probarla antes.
   if (!test && !loaded.agent?.enabled) return { status: "apagada" }
+  // Lo que se cobra (una conversación de verdad) se detiene si la administración lo dijo; la de
+  // prueba no se cobra y sigue. Si la administración nunca respondió, Sofi atiende.
+  if (!test && loaded.stop) return { status: "detenida", reason: loaded.stop }
   const started = Date.now()
   const trace = newTrace()
   let usage: Usage = NO_USAGE
@@ -448,6 +460,10 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
         ...(handoff ? { handler: "persona" as const, waitingReason: handoff.slice(0, 200) } : {}),
       })
       .where(and(eq(conversation.id, conv.id), eq(conversation.storeId, storeId)))
+    // Atendió con el modelo: se le cuenta a la administración, en la misma transacción que la
+    // respuesta (la de prueba nunca). Si falló, no se cobra.
+    if (failure === null)
+      await countConversation(tx, storeId, conv, "atendida", deps.now?.() ?? new Date())
     return saved!.id
   })
   return { status: "respondio", messageId, handoff: Boolean(handoff) }

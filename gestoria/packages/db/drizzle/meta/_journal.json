@@ -57,6 +57,20 @@
       "when": 1795122864823,
       "tag": "0007_reglas_sofi",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795444519950,
+      "tag": "0008_el_acuerdo",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795444523230,
+      "tag": "0009_reglas_acuerdo",
+      "breakpoints": true
     }
   ]
 }

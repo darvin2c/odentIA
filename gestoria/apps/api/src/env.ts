@@ -21,6 +21,18 @@ const schema = z.object({
       (value) => value === "" || isSigningSecret(value),
       "Es whsec_ y al menos 24 bytes en base64",
     ),
+  /**
+   * El secreto del acuerdo con la administración (B7, ADR 0211), el mismo `GESTORIA_CONTRACT_SECRET`
+   * que tiene la API de las clínicas. Vacío: no le avisa ni le pregunta nada (los avisos esperan).
+   */
+  GESTORIA_CONTRACT_SECRET: z
+    .string()
+    .trim()
+    .default("")
+    .refine(
+      (value) => value === "" || isSigningSecret(value),
+      "Es whsec_ y al menos 24 bytes en base64",
+    ),
   /** La app (`https://app.gestoria24.com`): el único origen que llama y la base de los enlaces. */
   GESTORIA_WEB_URL: z.string().url(),
   GESTORIA_PORT: z.coerce.number().int().positive().default(3201),

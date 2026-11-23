@@ -13,6 +13,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
+import { noteStoreAccount } from "./acuerdo.js"
 import type { Person } from "./cuenta.js"
 import { can, canAssign, ROLE_PERMISSIONS, type StorePermission } from "./permisos.js"
 
@@ -79,6 +80,13 @@ export function isCurrency(code: string): boolean {
 export const newStoreInput = z.object({
   name: z.string().trim().min(1, "Escribe el nombre de tu tienda").max(80, "Máximo 80 caracteres"),
   currency: z.string().trim().toUpperCase().refine(isCurrency, "Elige una moneda de la lista"),
+  /** ISO 3166-1 alfa-2; opcional (la administración cobra con su impuesto). */
+  country: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{2}$/, "Elige un país de la lista")
+    .nullish(),
 })
 
 export const invitationInput = z.object({
@@ -137,13 +145,19 @@ export async function createStore(appDb: Db, person: Person, input: z.infer<type
   const id = randomUUID()
   await withPerson(appDb, person, async (tx) => {
     await enterStore(tx, id)
-    await tx
-      .insert(store)
-      .values({ id, name: input.name, currency: input.currency, createdBy: person.userId })
+    await tx.insert(store).values({
+      id,
+      name: input.name,
+      currency: input.currency,
+      country: input.country ?? null,
+      createdBy: person.userId,
+    })
     await tx.insert(storeMember).values({ storeId: id, userId: person.userId, role: "owner" })
     await tx
       .insert(storeEvent)
       .values({ storeId: id, actorUserId: person.userId, action: "tienda.creada", detail: input })
+    // La administración le abre su cuenta (el acuerdo, B7).
+    await noteStoreAccount(tx, id)
   })
   return {
     id,
@@ -492,6 +506,8 @@ export async function changeRole(
       subject: userId,
       detail: { from: target.role, to: role },
     })
+    // Si cambió quién es el Dueño, la administración lo sabe.
+    if (target.role === "owner" || role === "owner") await noteStoreAccount(tx, storeId)
   })
 }
 
@@ -516,5 +532,6 @@ export async function removeMember(appDb: Db, person: Person, storeId: string, u
       subject: userId,
       detail: { role: target.role },
     })
+    if (target.role === "owner") await noteStoreAccount(tx, storeId)
   })
 }

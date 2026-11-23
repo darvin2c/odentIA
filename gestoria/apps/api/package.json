@@ -15,6 +15,7 @@
   "dependencies": {
     "@gestoria/db": "workspace:*",
     "@hono/node-server": "2.1.1",
+    "@odentia/contract": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
     "jose": "6.2.12",

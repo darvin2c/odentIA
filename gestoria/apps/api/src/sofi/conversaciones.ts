@@ -8,6 +8,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { agentStopIn } from "../acuerdo.js"
 import { agentName } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { pad } from "../pedidos.js"
@@ -81,7 +82,8 @@ export async function agentSettings(
       .where(and(eq(conversation.storeId, storeId), eq(conversation.channel, "prueba")))
       .orderBy(desc(conversation.updatedAt))
       .limit(10)
-    return { settings, modelReady, tests }
+    // Si la administración detuvo a Sofi (la cuenta no puede seguir o llegó a su tope).
+    return { settings, modelReady, tests, agentStop: await agentStopIn(tx, storeId) }
   })
 }
 
