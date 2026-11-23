@@ -34,7 +34,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
@@ -48,6 +48,7 @@ import {
 } from "../../components/billing-payments"
 import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
+import { AppAccountsSection, AppMark } from "../../components/app-accounts"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import {
@@ -75,6 +76,8 @@ type Plan = AdminPlan
 interface OverviewRow {
   organizationId: string
   organizationName: string | null
+  /** La app de una cuenta que no es una clínica (gestorIA); nula en una clínica. */
+  app: string | null
   status: string
   isDemo: boolean
   planCode: string | null
@@ -156,6 +159,8 @@ function BillingPage() {
     queryKey: ["admin", "billing", "plans"],
     queryFn: () => api<Plan[]>("/api/admin/billing/plans?includeInactive=1"),
   })
+  // Los planes de una app que es otro sistema van aparte (ADR 0211): ninguna clínica los usa.
+  const clinicPlans = (plans.data ?? []).filter((plan) => !plan.app)
   const methods = usePaymentMethods()
   const unassigned = useQuery({
     queryKey: ["admin", "billing", "unassigned"],
@@ -318,7 +323,14 @@ function BillingPage() {
               >
                 <div className="min-w-0 flex-1 basis-56">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    {row.organizationName ?? row.organizationId}
+                    {row.app ? (
+                      <Link to="/accounts/$accountId" params={{ accountId: row.organizationId }} className="underline-offset-4 hover:underline">
+                        {row.organizationName ?? row.organizationId}
+                      </Link>
+                    ) : (
+                      (row.organizationName ?? row.organizationId)
+                    )}
+                    {row.app ? <AppMark app={row.app} /> : null}
                     {products[row.organizationId] ? <ProductMark product={products[row.organizationId]} /> : null}
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -352,7 +364,7 @@ function BillingPage() {
       <UnassignedSection
         orgs={unassigned.data ? ofProduct(unassigned.data) : undefined}
         isPending={unassigned.isPending}
-        plans={plans.data ?? []}
+        plans={clinicPlans}
         onDone={refresh}
       />
 
@@ -432,6 +444,8 @@ function BillingPage() {
         )}
       </section>
 
+      <AppAccountsSection plans={plans.data ?? []} onChanged={refresh} />
+
       <CommercialTermsSection />
 
       <NegotiationsSection
@@ -477,7 +491,7 @@ function BillingPage() {
       {planDrawer ? (
         <PlanDrawer
           plan={planDrawer.plan}
-          plans={plans.data ?? []}
+          plans={clinicPlans}
           product={planDrawer.product}
           onClose={() => setPlanDrawer(null)}
           onSaved={refresh}

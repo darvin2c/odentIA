@@ -35,6 +35,8 @@ export interface AdminPlan {
   name: string
   /** De qué producto es (ADR 0093): lo usan sus clínicas y su web. */
   product: ClinicalProduct
+  /** La app que es otro sistema cuyas cuentas lo usan (gestorIA, ADR 0211); nula en un plan de clínicas. */
+  app?: string | null
   description: string | null
   currency: string
   priceCents: number
