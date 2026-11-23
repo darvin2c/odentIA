@@ -214,9 +214,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(page.getByRole("dialog").filter({ hasText: "Escribir en vez de dictar" })).toContainText("Nada entra a la historia hasta que confirmes.")
   await page.keyboard.press("Escape")
   await write(DICTATION)
-  await expect(review).toContainText("Clío propone 4 en la consulta")
+  await expect(review).toContainText("Clío propone 4")
   await expect(review).toContainText("Nada entra a la historia hasta que lo confirmes.")
-  await expect(review.getByRole("button", { name: "Confirmar las 4 de la consulta" })).toBeVisible()
+  await expect(review.getByRole("button", { name: "Confirmar las 4", exact: true })).toBeVisible()
   // Cada sugerencia vive en su parte de la atención, debajo de lo registrado (sugerido no es registrado).
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico (0)")).toContainText("Sin diagnósticos registrados.")
@@ -263,11 +263,11 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await info.attach("dictado-editar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByLabel("Control", { exact: true }).fill("Control de endodoncia")
   await page.getByRole("button", { name: "Guardar y confirmar" }).click()
-  await expect(review).toContainText("Clío propone 3 en la consulta")
+  await expect(review).toContainText("Clío propone 3")
   const controls = () => call<Array<{ title: string; status: string }>>(page, "GET", `${apiPath}/follow-ups`, org.slug)
   expect(await controls()).toEqual([expect.objectContaining({ title: "Control de endodoncia", status: "pendiente" })])
 
-  await review.getByRole("button", { name: "Confirmar las 3 de la consulta" }).click()
+  await review.getByRole("button", { name: "Confirmar las 3", exact: true }).click()
   await expect(idle).toBeVisible()
   const saved = await detail()
   // La atención ya tenía motivo: lo dictado se agrega, no lo borra.
@@ -310,7 +310,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Plan de tratamiento")).toContainText("corregido por voz, antes pieza 25", { timeout: 15_000 })
   await expect(suggested("Plan de tratamiento")).toContainText("Pieza 26")
   await live.getByRole("button", { name: "Terminar dictado" }).click()
-  await expect(review).toContainText("Clío propone 1 en la consulta")
+  await expect(review).toContainText("Clío propone 1")
   await expect(backup).toHaveCount(0)
   // Deshacer la corrección por voz vuelve a la pieza dictada primero.
   await suggested("Plan de tratamiento").getByRole("button", { name: "Deshacer" }).click()
@@ -382,14 +382,14 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(backupDrawer).toContainText("En la veintiséis hay caries.")
   await backupDrawer.getByRole("button", { name: "Cerrar" }).click()
   await page.getByRole("button", { name: "Terminar dictado" }).click()
-  await expect(review).toContainText("Confirmar 1 de la consulta")
-  // Revisión: confirmar y descartar son iconos con nombre; «Firmar» y «Confirmar las N de la consulta» quedan al pie.
+  await expect(review).toContainText("Confirmar 1")
+  // Revisión: confirmar y descartar son iconos con nombre; «Firmar» y «Confirmar las N» quedan al pie.
   const phoneRow = suggested("Diagnóstico").getByRole("listitem")
   const confirmIcon = phoneRow.getByRole("button", { name: /^Confirmar: K02\.9/ })
   expect((await confirmIcon.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await expect(phoneRow.getByRole("button", { name: /^Descartar: K02\.9/ })).toBeVisible()
   await expect(page.getByRole("button", { name: "Firmar", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Confirmar 1 de la consulta" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Confirmar 1", exact: true })).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("revision-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // Tocar la sugerencia la abre para editarla.

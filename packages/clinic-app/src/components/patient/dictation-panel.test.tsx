@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClioFormProposals, ClioFormProposalsContext, proposesValue, reread } from "./clio-form-proposals"
-import { proposesLine, readiness, UnusedNotice } from "./dictation-panel"
+import { proposalCounts, proposesLine, readiness, UnusedNotice } from "./dictation-panel"
 import { confirmable, confirmableAtSign, type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
 
 afterEach(cleanup)
@@ -128,8 +128,9 @@ describe("«Confirmar las N» no lleva lo de su salud ni una negación", () => {
     expect(confirmable(item("alergia", { substance: "Penicilina" }))).toBe(true)
   })
 
-  it("«Clío propone N» y «Confirmar las M» cuadran, o dicen por qué no (QA del 21 nov)", () => {
-    // Antes: «Clío propone 6: 5 en la consulta y 1 receta» con «Confirmar las 3 de la consulta».
+  it("«Clío propone N» y «Confirmar las M» cuadran: cada propuesta en un solo grupo y los grupos suman N (QA del 21 y 22 nov)", () => {
+    // Antes: «Clío propone 6: 5 en la consulta y 1 receta» con «Confirmar las 3 de la consulta», y
+    // después tres números distintos para lo mismo (UX-8).
     const list = [
       { ...item("nota", { reason: "Dolor" }), id: "a" },
       { ...item("diagnostico", { code: "K04.0" }), id: "b" },
@@ -139,10 +140,12 @@ describe("«Confirmar las N» no lleva lo de su salud ni una negación", () => {
       { ...item("receta", { drug: "ibuprofeno" }), id: "f" },
     ]
     expect(list.filter(confirmable)).toHaveLength(2)
-    expect(proposesLine(list)).toBe("Clío propone 6: 4 en la consulta, 1 receta y 1 de su salud")
-    expect(readiness(list, 0)).toBe(
-      "A 1 le falta un dato: complétala en su bloque · Un «No» se confirma en su fila · Lo de su salud se revisa con la persona, aparte. Nada entra a la historia hasta que lo confirmes.",
-    )
+    expect(proposesLine(list)).toBe("Clío propone 6")
+    const counts = proposalCounts(list)
+    expect(counts).toEqual({ ready: 2, incomplete: 1, denials: 1, health: 1, forms: 0, prescriptions: 1, leaves: 0 })
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(list.length)
+    expect(counts.ready).toBe(list.filter(confirmable).length)
+    expect(readiness(list, 0).startsWith("2 para confirmar")).toBe(true)
   })
 })
 

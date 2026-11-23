@@ -2797,6 +2797,17 @@ export function EncounterEditor({
         }}
       />
 
+      {/* La barra de Clío, encima de lo que crece mientras se habla (lo de su salud): el cuadro para
+          escribir no se corre con cada pausa (QA del 22 nov, UX-7). */}
+      <DictationPanel
+        session={dictation}
+        onStart={startDictation}
+        onFinish={finishDictation}
+        onShowTranscript={showTranscript}
+        typing={dictationTyping}
+        onTypingChange={setDictationTyping}
+      />
+
       {/* Lo que dijo de su salud, también lo que oyó Clío y la alergia dictada (o «niega alergias»), en la
           fila de su tema del aviso: no en una caja aparte (issue 109; mesa del 20 nov 2026). */}
       {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} dictation={dictation} anchorId={`${uid}-salud`} /> : null}
@@ -2839,15 +2850,6 @@ export function EncounterEditor({
           Solo lectura: no tienes permiso para editar este borrador.
         </p>
       )}
-
-      <DictationPanel
-        session={dictation}
-        onStart={startDictation}
-        onFinish={finishDictation}
-        onShowTranscript={showTranscript}
-        typing={dictationTyping}
-        onTypingChange={setDictationTyping}
-      />
 
       <MasterDetail
         panelSize="xl"

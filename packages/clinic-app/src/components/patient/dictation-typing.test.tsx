@@ -74,7 +74,7 @@ describe("escribiendo en vez de dictar", () => {
     )
     const box = await screen.findByLabelText("Escribe lo dictado")
     fireEvent.change(box, { target: { value: "la veo la proxima semana para la otra resina" } })
-    fireEvent.click(screen.getByRole("button", { name: "Terminar" }))
+    fireEvent.click(screen.getByRole("button", { name: "Terminar dictado" }))
     await waitFor(() => expect(posts()).toEqual([BASE, `${BASE}/review`]))
     const body = JSON.parse(String(route.mock.calls.find(([url, init]) => url === BASE && init?.method === "POST")?.[1]?.body))
     expect(body.transcript).toBe("la veo la proxima semana para la otra resina")
@@ -99,7 +99,7 @@ describe("escribiendo en vez de dictar", () => {
     )
     const box = await screen.findByLabelText("Escribe lo dictado")
     box.focus()
-    fireEvent.click(await screen.findByRole("button", { name: "Terminar" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Terminar dictado" }))
     await waitFor(() => expect(document.activeElement?.id).toBe("dictado-repaso"))
     const line = document.activeElement as HTMLElement
     fireEvent.click(within(line).getByRole("button", { name: "Ver la conversación" }))

@@ -9,7 +9,7 @@ import {
   useListeningStatus,
   useMicLevel,
 } from "@odentia/ui-patterns"
-import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
+import { CircleAlert, CircleStop, Mic, Pause, Play, TriangleAlert } from "lucide-react"
 import { seesBilling } from "@odentia/auth/permissions"
 import { Link } from "@tanstack/react-router"
 import { useStore } from "@tanstack/react-form"
@@ -22,7 +22,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { answersWords, formsToStartWords, useClioFormProposals, useFormsToStart } from "./clio-form-proposals"
-import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, suggestionText } from "./dictation-session"
+import { confirmable, DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
@@ -45,8 +45,11 @@ function confirmReadyErrorText(session: DictationSession): string | null {
   return `No pude confirmar «${suggestionText(failed).title}» (${DICTATION_KIND_LABEL[failed.kind]}): ${message}`
 }
 
-/** El botón dice lo que hace: confirma lo de la consulta; lo de una ficha se confirma en la ficha. */
-const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 de la consulta" : `Confirmar las ${ready} de la consulta`)
+/**
+ * El botón dice cuántas lleva, el mismo número que «N para confirmar» de la barra: lo de una ficha se
+ * confirma en la ficha y lo de su salud, con la persona (QA del 22 nov, UX-8: tres números para lo mismo).
+ */
+const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1" : `Confirmar las ${ready}`)
 
 /**
  * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109): los
@@ -120,46 +123,48 @@ function openFormSuggestions(responseId: string): void {
 }
 
 /**
- * Lo que propone Clío, con una sola palabra (revisión final del 15 nov, propuesta 2): «Clío propone
- * 5: 2 en la consulta y 3 en la ficha». La receta va aparte: se emite. Sin «listas» ni «por revisar».
+ * Lo que propone Clío, repartido sin que sobre ni falte: cada propuesta cuenta en un solo grupo y los
+ * grupos suman el total (QA del 22 nov, UX-8: «propone 5», «a 1 le falta un dato» y «Confirmar las 3»
+ * obligaban a hacer la cuenta).
  */
-export function proposesLine(suggestions: readonly Pick<DictationSuggestion, "kind">[]): string {
-  // Lo de su salud se revisa con la persona, aparte: no se cuenta «en la consulta», que es lo que
-  // confirma «Confirmar las N de la consulta» (QA del 21 nov: «propone 6: 5 en la consulta» y
-  // «Confirmar las 3» no cuadraban).
-  const consult = suggestions.filter((item) => item.kind !== "ficha" && item.kind !== "receta" && item.kind !== "salud").length
-  const forms = suggestions.filter((item) => item.kind === "ficha").length
-  const prescription = suggestions.some((item) => item.kind === "receta")
-  const health = suggestions.filter((item) => item.kind === "salud").length
-  const parts = [
-    consult > 0 ? `${consult} en la consulta` : "",
-    forms > 0 ? `${forms} en la ficha` : "",
-    prescription ? "1 receta" : "",
-    health > 0 ? `${health} de su salud` : "",
-  ].filter(Boolean)
-  const total = consult + forms + (prescription ? 1 : 0) + health
-  return `${CLINICAL_NAME} propone ${parts.length <= 1 ? (parts[0] ?? total) : `${total}: ${listWords(parts)}`}`
+export function proposalCounts(suggestions: readonly DictationSuggestion[]) {
+  const counts = { ready: 0, incomplete: 0, denials: 0, health: 0, forms: 0, prescriptions: 0, leaves: 0 }
+  for (const item of suggestions) {
+    if (item.kind === "salud") counts.health += 1
+    else if (item.kind === "ficha") counts.forms += 1
+    else if (item.kind === "receta") counts.prescriptions += 1
+    else if (item.kind === "descanso") counts.leaves += 1
+    else if (confirmable(item)) counts.ready += 1
+    else if (item.kind === "alergia" && item.status === "lista" && item.payload["none"] === true) counts.denials += 1
+    else counts.incomplete += 1
+  }
+  return counts
+}
+
+/** «Clío propone 5»: el total, una sola vez; cómo se reparte lo dice `readiness`. */
+export function proposesLine(suggestions: readonly DictationSuggestion[]): string {
+  return `${CLINICAL_NAME} propone ${suggestions.length}`
 }
 
 /**
- * «A 1 le falta un dato: complétala en su bloque. Nada entra…»; sin nada más, solo el aviso. Dice por
- * qué «Confirmar las N de la consulta» no lleva todo lo que propone en la consulta: lo que le falta un
- * dato, un «No» que se confirma en su fila y lo de su salud, que se revisa con la persona.
+ * «3 para confirmar · 1 por completar en su bloque · 1 de su salud, se revisa con la persona. Nada
+ * entra…»: los grupos suman lo que propone, y el primero es el número de «Confirmar las N».
  */
 export function readiness(suggestions: readonly DictationSuggestion[], removed: number): string {
-  // Lo de la consulta a lo que le falta un dato se completa en su bloque; la receta tiene su «Emitir receta».
-  const incomplete = suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.kind !== "salud" && item.status !== "lista").length
-  const denials = suggestions.filter((item) => item.kind === "alergia" && item.status === "lista" && item.payload["none"] === true).length
-  const health = suggestions.some((item) => item.kind === "salud")
-  const counts = [
-    incomplete > 0 ? `${incomplete === 1 ? "A 1 le falta un dato" : `A ${incomplete} les falta un dato`}: complétala${incomplete === 1 ? "" : "s"} en su bloque` : "",
-    denials > 0 ? `${denials === 1 ? "Un «No» se confirma" : `${denials} «No» se confirman`} en su fila` : "",
-    health ? "Lo de su salud se revisa con la persona, aparte" : "",
+  const counts = proposalCounts(suggestions)
+  const parts = [
+    counts.ready > 0 ? `${counts.ready} para confirmar` : "",
+    counts.incomplete > 0 ? `${counts.incomplete} por completar en su bloque` : "",
+    counts.denials > 0 ? `${counts.denials === 1 ? "1 «No» se confirma" : `${counts.denials} «No» se confirman`} en su fila` : "",
+    counts.health > 0 ? `${counts.health} de su salud, se revisa con la persona` : "",
+    counts.forms > 0 ? `${counts.forms} en la ficha` : "",
+    counts.prescriptions > 0 ? plural(counts.prescriptions, "receta, se emite en su bloque", "recetas, se emiten en su bloque") : "",
+    counts.leaves > 0 ? "1 descanso, se emite en su bloque" : "",
     removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : "",
   ]
     .filter(Boolean)
     .join(" · ")
-  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
+  return `${parts ? `${parts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
 }
 
 /**
@@ -193,6 +198,45 @@ export function dictationIdle(session: DictationSession): boolean {
     session.review.status !== "reviewing" &&
     session.review.status !== "failed"
   )
+}
+
+/** El cuadro para escribir lo que se dijo. */
+const TYPED_BOX_ID = "dictado-escrito"
+
+/** El foco al cuadro sin que el navegador lo centre: si ya se ve, la página no se mueve. */
+function focusTypedBox(): void {
+  const box = document.getElementById(TYPED_BOX_ID)
+  if (!box) return
+  box.focus({ preventScroll: true })
+  box.scrollIntoView?.({ block: "nearest" })
+}
+
+/**
+ * Mientras se escribe, el cuadro queda donde está en la pantalla aunque crezca lo de encima (las
+ * propuestas, lo de su salud): se corría 126 px en cuatro pausas y la siguiente se escribía en otro
+ * lado (QA del 22 nov, UX-7). Si el cuadro tiene el foco y se movió, la página se desplaza lo mismo.
+ */
+function useStayPut(id: string, active: boolean): void {
+  useEffect(() => {
+    if (!active || typeof ResizeObserver !== "function") return
+    const topOf = () => document.getElementById(id)?.getBoundingClientRect().top ?? null
+    let top = topOf()
+    const remember = () => {
+      top = topOf()
+    }
+    const observer = new ResizeObserver(() => {
+      const box = document.getElementById(id)
+      const now = topOf()
+      if (box && document.activeElement === box && top !== null && now !== null && Math.abs(now - top) > 1) window.scrollBy(0, now - top)
+      remember()
+    })
+    observer.observe(document.body)
+    window.addEventListener("scroll", remember, { passive: true })
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("scroll", remember)
+    }
+  }, [id, active])
 }
 
 /** La frase de cómo hablarle a Clío: se conversa con el paciente o se le dicta como a un colega. */
@@ -331,10 +375,12 @@ export function DictationPanel({
     })
     return () => cancelAnimationFrame(frame)
   }, [session.review.status])
-  // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta.
+  // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta, sin que la página salte;
+  // solo se desplaza si el cuadro quedó fuera de la vista, y lo justo (QA del 22 nov, UX-7: bajaba 493 px).
   useEffect(() => {
-    if (typing) requestAnimationFrame(() => document.getElementById("dictado-escrito")?.focus())
+    if (typing) requestAnimationFrame(() => focusTypedBox())
   }, [typing])
+  useStayPut(TYPED_BOX_ID, typing)
   const confirmReadyNow = () =>
     session.confirmReady.mutate(undefined, {
       onSuccess: (done) => {
@@ -362,7 +408,7 @@ export function DictationPanel({
       session.submitTyped(value.text)
       session.setTypedDraft("")
       typedForm.reset({ text: "" })
-      requestAnimationFrame(() => document.getElementById("dictado-escrito")?.focus())
+      requestAnimationFrame(() => focusTypedBox())
     },
   })
   const sendTyped = () => void submitForm(typedForm, { root: typedRootRef.current })
@@ -488,7 +534,7 @@ export function DictationPanel({
             <span className="max-sm:hidden">{listening ? "Pausar" : "Reanudar"}</span>
           </Button>
           <Button type="button" variant={listening ? "default" : "outline"} className="min-h-11 max-sm:hidden sm:min-h-9" onClick={onFinish}>
-            <Square className="size-4" aria-hidden /> Terminar dictado
+            <CircleStop className="size-4" aria-hidden /> Terminar dictado
           </Button>
         </div>
         <p role="status" className="text-sm">
@@ -620,19 +666,12 @@ export function DictationPanel({
       </div>
 
       <ReviewLine session={session} onShowTranscript={onShowTranscript} />
-      {/* Antes de la primera sugerencia, qué se puede decir; después está en «Lo que se dijo». */}
-      {pending === 0 && session.removedByVoice.length === 0 && !session.transcript && session.said.length === 0 && !blocked ? (
-        <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
-          <p className="text-sm font-semibold">Por ejemplo</p>
-          <DictationExamples />
-        </div>
-      ) : null}
       {typing ? (
         <div ref={typedRootRef} className="flex flex-col gap-2">
           <typedForm.AppField name="text" listeners={{ onChange: ({ value }) => session.setTypedDraft(value) }}>
             {(field) => (
               <field.TextareaField
-                id="dictado-escrito"
+                id={TYPED_BOX_ID}
                 label="Escribe lo dictado"
                 rows={4}
                 maxLength={12_000}
@@ -665,7 +704,7 @@ export function DictationPanel({
                 que quede en el cuadro y pide el repaso de toda la conversación. */}
             {session.said.length > 0 || typedText.trim() ? (
               <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={finishTyped}>
-                <Square className="size-4" aria-hidden /> Terminar
+                <CircleStop className="size-4" aria-hidden /> Terminar dictado
               </Button>
             ) : null}
             <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => setTyping(false)}>
