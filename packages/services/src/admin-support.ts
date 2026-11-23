@@ -3,6 +3,7 @@ import { ORG_ROLES, type OrgRole, PRODUCT_ROLES, roleLabel } from "@odentia/auth
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
+import { saasAccount } from "@odentia/db/schema/admin-accounts"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import {
   supportAccessAudit,
@@ -1203,7 +1204,8 @@ export async function supportHomeRows(db: Db, actor: AdminActor, now: Date = new
     .select({
       id: supportCase.id,
       organizationId: supportCase.organizationId,
-      orgName: organization.name,
+      // Una cuenta de otra app (gestorIA) no tiene clínica: su nombre es el que dijo la app.
+      orgName: sql<string | null>`coalesce(${organization.name}, ${saasAccount.name})`,
       product: orgProfile.product,
       kind: supportCase.kind,
       status: supportCase.status,
@@ -1216,6 +1218,7 @@ export async function supportHomeRows(db: Db, actor: AdminActor, now: Date = new
     })
     .from(supportCase)
     .leftJoin(organization, eq(organization.id, supportCase.organizationId))
+    .leftJoin(saasAccount, eq(saasAccount.id, supportCase.organizationId))
     .leftJoin(orgProfile, eq(orgProfile.organizationId, supportCase.organizationId))
     .leftJoin(assignee, eq(assignee.id, supportCase.assigneeStaffId))
     .where(and(waitingOnUsSql, visibleKindsFor(actor)))
@@ -1299,13 +1302,14 @@ export async function listSupportCasesForStaff(
   const rows = await db
     .select({
       kase: supportCase,
-      orgName: organization.name,
+      orgName: sql<string | null>`coalesce(${organization.name}, ${saasAccount.name})`,
       waitingOnUs: waitingOnUsSql,
       waitingSince: waitingSinceSql,
       accessUntil: accessUntilSql(now),
     })
     .from(supportCase)
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
+    .leftJoin(saasAccount, eq(saasAccount.id, supportCase.organizationId))
     .where(and(...conditions))
     .orderBy(...queueOrderSql)
     .limit(limit)
@@ -1371,9 +1375,10 @@ export async function getSupportCaseForStaff(
   caseId: string,
 ): Promise<StaffSupportCaseDetail> {
   const [row] = await db
-    .select({ kase: supportCase, orgName: organization.name })
+    .select({ kase: supportCase, orgName: sql<string | null>`coalesce(${organization.name}, ${saasAccount.name})` })
     .from(supportCase)
     .leftJoin(organization, eq(supportCase.organizationId, organization.id))
+    .leftJoin(saasAccount, eq(saasAccount.id, supportCase.organizationId))
     .where(eq(supportCase.id, caseId))
     .limit(1)
   if (!row || !staffSees(actor, row.kase)) throw notFound("Caso")

@@ -182,6 +182,9 @@ importers:
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
+      '@odentia/contract':
+        specifier: workspace:*
+        version: link:../../shared/packages/contract
       '@odentia/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1075,6 +1078,9 @@ importers:
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../clinical
+      '@odentia/contract':
+        specifier: workspace:*
+        version: link:../../shared/packages/contract
       '@odentia/db':
         specifier: workspace:*
         version: link:../db
@@ -1331,6 +1337,9 @@ importers:
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../clinical
+      '@odentia/contract':
+        specifier: workspace:*
+        version: link:../../shared/packages/contract
       '@odentia/db':
         specifier: workspace:*
         version: link:../db
@@ -1418,6 +1427,22 @@ importers:
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
   shared/packages/channels:
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
+  shared/packages/contract:
+    dependencies:
+      zod:
+        specifier: 4.6.2
+        version: 4.6.2
     devDependencies:
       '@types/node':
         specifier: 22.20.2

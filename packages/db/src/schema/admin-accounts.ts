@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { check, foreignKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { char, check, foreignKey, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 import { organization } from "./auth.js"
 import { adminSchema } from "./schemas.js"
 
@@ -26,6 +26,11 @@ import { adminSchema } from "./schemas.js"
  * Una cuenta de odentIA, latidIA o vistIA siempre es una clínica.
  */
 export const SAAS_ACCOUNT_EXTERNAL_APPS = ["gestoria"] as const
+export type SaasAccountExternalApp = (typeof SAAS_ACCOUNT_EXTERNAL_APPS)[number]
+
+export function isSaasAccountExternalApp(value: unknown): value is SaasAccountExternalApp {
+  return typeof value === "string" && (SAAS_ACCOUNT_EXTERNAL_APPS as readonly string[]).includes(value)
+}
 
 export const saasAccount = adminSchema.table(
   "saas_account",
@@ -34,6 +39,17 @@ export const saasAccount = adminSchema.table(
     organizationId: text("organization_id"),
     app: text("app"),
     externalRef: text("external_ref"),
+    /**
+     * Lo que la app dice de una cuenta suya (`cuenta.abierta`, ADR 0211): su nombre, su país
+     * (ISO 3166-1 alfa-2) y su dueño (el id de la persona en la cuenta única, sin clave foránea:
+     * es lo que dijo la app, y la cuenta de la persona vive aparte). Nulos en una clínica, que
+     * los tiene en su organización. `synced_at` es la hora del último aviso aplicado: uno más
+     * viejo que llega tarde no la pisa.
+     */
+    name: text("name"),
+    country: char("country", { length: 2 }),
+    ownerUserId: text("owner_user_id"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -50,6 +66,33 @@ export const saasAccount = adminSchema.table(
         OR (organization_id IS NULL AND app IN (${sql.raw(SAAS_ACCOUNT_EXTERNAL_APPS.map((app) => `'${app}'`).join(","))})
           AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)`,
     ),
+    check(
+      "saas_account_app_data_check",
+      sql`CASE WHEN organization_id IS NOT NULL THEN name IS NULL AND country IS NULL AND owner_user_id IS NULL AND synced_at IS NULL
+        ELSE (name IS NULL OR length(trim(name)) BETWEEN 1 AND 200) AND (country IS NULL OR country ~ '^[A-Z]{2}$') END`,
+    ),
+  ],
+)
+
+/**
+ * Los avisos que una app ya le dio a la administración (ADR 0211): la clave de cada uno
+ * (`webhook-id`) por app. El efecto y esta fila se escriben en la misma transacción, así que un
+ * aviso repetido con la misma clave se reconoce y no se cuenta dos veces. Solo se agrega; sin
+ * `GRANT`: lo escribe la conexión propietaria al recibir el aviso.
+ */
+export const appContractMessage = adminSchema.table(
+  "app_contract_message",
+  {
+    app: text("app").notNull(),
+    id: text("id").notNull(),
+    type: text("type").notNull(),
+    /** La cuenta a la que se aplicó. */
+    accountId: text("account_id").references(() => saasAccount.id, { onDelete: "cascade" }),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: "app_contract_message_pkey", columns: [table.app, table.id] }),
+    check("app_contract_message_id_check", sql`length(${table.id}) BETWEEN 1 AND 200`),
   ],
 )
 

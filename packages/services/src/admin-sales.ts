@@ -1906,7 +1906,7 @@ export async function createSaasProposal(
   if (plan.product !== product)
     throw invalidField(
       "planId",
-      `${plan.name} es de ${productWords(productOf(plan.product)).name}: este cliente es de ${productWords(product).name}`,
+      `${plan.name} es de ${isClinicalProduct(plan.product) ? productWords(plan.product).name : "otra app"}: este cliente es de ${productWords(product).name}`,
     )
   const errors: Record<string, string> = {}
   if (!Number.isInteger(input.discountBps) || input.discountBps < 0 || input.discountBps > 9000)

@@ -27,6 +27,7 @@ import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppWaitlistRouteImport } from './routes/_app/waitlist'
+import { Route as AppAccountsAccountIdRouteImport } from './routes/_app/accounts.$accountId'
 import { Route as AppClientsClientIdRouteImport } from './routes/_app/clients_.$clientId'
 import { Route as AppOrganizationsOrganizationIdRouteImport } from './routes/_app/organizations_.$organizationId'
 
@@ -119,6 +120,11 @@ const AppWaitlistRoute = AppWaitlistRouteImport.update({
   path: '/waitlist',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAccountsAccountIdRoute = AppAccountsAccountIdRouteImport.update({
+  id: '/accounts/$accountId',
+  path: '/accounts/$accountId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppClientsClientIdRoute = AppClientsClientIdRouteImport.update({
   id: '/clients_/$clientId',
   path: '/clients/$clientId',
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
+  '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/clients/$clientId': typeof AppClientsClientIdRoute
   '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
@@ -170,6 +177,7 @@ export interface FileRoutesByTo {
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
   '/': typeof AppIndexRoute
+  '/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/clients/$clientId': typeof AppClientsClientIdRoute
   '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/_app/users': typeof AppUsersRoute
   '/_app/waitlist': typeof AppWaitlistRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/accounts/$accountId': typeof AppAccountsAccountIdRoute
   '/_app/clients_/$clientId': typeof AppClientsClientIdRoute
   '/_app/organizations_/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/users'
     | '/waitlist'
+    | '/accounts/$accountId'
     | '/clients/$clientId'
     | '/organizations/$organizationId'
   fileRoutesByTo: FileRoutesByTo
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/waitlist'
     | '/'
+    | '/accounts/$accountId'
     | '/clients/$clientId'
     | '/organizations/$organizationId'
   id:
@@ -259,6 +270,7 @@ export interface FileRouteTypes {
     | '/_app/users'
     | '/_app/waitlist'
     | '/_app/'
+    | '/_app/accounts/$accountId'
     | '/_app/clients_/$clientId'
     | '/_app/organizations_/$organizationId'
   fileRoutesById: FileRoutesById
@@ -397,6 +409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWaitlistRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/accounts/$accountId': {
+      id: '/_app/accounts/$accountId'
+      path: '/accounts/$accountId'
+      fullPath: '/accounts/$accountId'
+      preLoaderRoute: typeof AppAccountsAccountIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/clients_/$clientId': {
       id: '/_app/clients_/$clientId'
       path: '/clients/$clientId'
@@ -430,6 +449,7 @@ interface AppRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppWaitlistRoute: typeof AppWaitlistRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppAccountsAccountIdRoute: typeof AppAccountsAccountIdRoute
   AppClientsClientIdRoute: typeof AppClientsClientIdRoute
   AppOrganizationsOrganizationIdRoute: typeof AppOrganizationsOrganizationIdRoute
 }
@@ -450,6 +470,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppWaitlistRoute: AppWaitlistRoute,
   AppIndexRoute: AppIndexRoute,
+  AppAccountsAccountIdRoute: AppAccountsAccountIdRoute,
   AppClientsClientIdRoute: AppClientsClientIdRoute,
   AppOrganizationsOrganizationIdRoute: AppOrganizationsOrganizationIdRoute,
 }

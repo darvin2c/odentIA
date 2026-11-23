@@ -7,11 +7,15 @@ import type { Auth } from "@odentia/auth"
 import { seesBilling } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { invitation, member } from "@odentia/db/schema/auth"
+import { SAAS_ACCOUNT_EXTERNAL_APPS } from "@odentia/db/schema/admin-accounts"
 import { SAAS_ACTION_KINDS } from "@odentia/db/schema/saas-billing"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
   activateSaasSubscription,
+  assignAppAccountPlan,
+  getAppAccountDetail,
+  listAppAccounts,
   getClinicNotices,
   archiveSaasPlan,
   assertSaasAllowed,
@@ -160,6 +164,8 @@ const planInput = z
     name: z.string().trim().min(1, "Escribe el nombre del plan").max(120, "Escribe como mucho 120 caracteres"),
     // El producto del plan (ADR 0093): se elige al crearlo; al editar, solo puede repetirse.
     product: z.enum(CLINICAL_PRODUCTS).optional(),
+    // O la app que es otro sistema cuyas cuentas lo usan (gestorIA, ADR 0211); se elige al crearlo.
+    app: z.enum(SAAS_ACCOUNT_EXTERNAL_APPS).optional(),
     description: z.string().max(2000).nullish(),
     currency,
     priceCents: cents,
@@ -334,6 +340,39 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => listSaasUnassigned(deps.ownerDb, parsed.data.limit))
+  })
+
+  // --- Cuentas de las apps que son otro sistema (gestorIA, ADR 0211) ----------------------
+  // Sin clínica: las abre la app por el acuerdo; aquí se les asigna el plan, se ven sus cargos,
+  // sus pagos y su soporte. Lo demás del cobro (pausar, cargos, pagos) usa las rutas de siempre
+  // con el id de la cuenta.
+  app.get("/accounts", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => listAppAccounts(deps.ownerDb))
+  })
+
+  app.get("/accounts/:accountId", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    const accountId = c.req.param("accountId")
+    return runService(c, 200, () => getAppAccountDetail(deps.ownerDb, accountId))
+  })
+
+  app.post("/accounts/:accountId/plan", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración asigna planes")
+    const parsed = z
+      .object({ planCode: z.string().trim().min(1, "Elige el plan").max(80, "Elige un plan de la lista") })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const accountId = c.req.param("accountId")
+    return runStaffWrite(
+      c,
+      200,
+      actor,
+      { action: "saas.account_plan", organizationId: accountId, metadata: { planCode: parsed.data.planCode } },
+      (tx) => assignAppAccountPlan(tx, accountId, actor.userId, parsed.data.planCode),
+    )
   })
 
   // --- Planes y métodos ------------------------------------------------------------

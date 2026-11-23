@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { isSigningSecret, SIGNATURE_TOLERANCE_SECONDS, signMessage, verifySignedMessage } from "@odentia/contract/signing"
 import { ACCOUNT_EVENT_TYPES } from "@odentia/db/schema/auth"
 
 /**
@@ -28,78 +28,16 @@ export interface AccountEventPayload {
 }
 
 /** Cuánto puede diferir la hora de un aviso de la del que lo recibe (lo que sugiere el estándar). */
-export const ACCOUNT_EVENT_TOLERANCE_SECONDS = 5 * 60
-
-const SECRET_PREFIX = "whsec_"
-
-function secretBytes(secret: string): Buffer {
-  const raw = secret.startsWith(SECRET_PREFIX) ? secret.slice(SECRET_PREFIX.length) : ""
-  const bytes = Buffer.from(raw, "base64")
-  // 24 bytes como mínimo (192 bits), lo que pide el estándar.
-  if (bytes.length < 24)
-    throw new Error("El secreto de los avisos es whsec_ y al menos 24 bytes en base64")
-  return bytes
-}
-
-export function isAccountEventSecret(secret: string): boolean {
-  try {
-    secretBytes(secret)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function signature(secret: string, id: string, timestamp: number, body: string): string {
-  return createHmac("sha256", secretBytes(secret))
-    .update(`${id}.${timestamp}.${body}`)
-    .digest("base64")
-}
-
-/** Las cabeceras de un aviso firmado. */
-export function signAccountEvent(input: {
-  secret: string
-  id: string
-  body: string
-  /** Segundos desde 1970; por omisión, ahora. */
-  timestamp?: number
-}): Record<"webhook-id" | "webhook-timestamp" | "webhook-signature", string> {
-  const timestamp = input.timestamp ?? Math.floor(Date.now() / 1000)
-  return {
-    "webhook-id": input.id,
-    "webhook-timestamp": String(timestamp),
-    "webhook-signature": `v1,${signature(input.secret, input.id, timestamp, input.body)}`,
-  }
-}
+export const ACCOUNT_EVENT_TOLERANCE_SECONDS = SIGNATURE_TOLERANCE_SECONDS
 
 /**
- * La firma de un mensaje según Standard Webhooks: el id del mensaje si la firma coincide y
- * su hora está dentro de la tolerancia (uno viejo repetido no vale); null si no. Sirve en los
- * dos sentidos: la app comprueba un aviso de la cuenta, y la cuenta comprueba lo que la app le
- * pregunta con el mismo secreto (la revisión diaria de su copia, `reviewAccounts`).
+ * La firma es la del acuerdo (`@odentia/contract/signing`): una sola para los avisos de la
+ * cuenta, la revisión de su copia y lo que una app le dice a la administración (ADR 0211).
+ * Aquí conservan los nombres con que la cuenta los usa.
  */
-export function verifySignedMessage(input: {
-  secret: string
-  headers: Headers
-  body: string
-  now?: Date
-}): string | null {
-  const id = input.headers.get("webhook-id") ?? ""
-  const timestamp = Number(input.headers.get("webhook-timestamp") ?? "")
-  const sent = input.headers.get("webhook-signature") ?? ""
-  if (!id || !Number.isInteger(timestamp)) return null
-  const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000)
-  if (Math.abs(nowSeconds - timestamp) > ACCOUNT_EVENT_TOLERANCE_SECONDS) return null
-  const expected = Buffer.from(signature(input.secret, id, timestamp, input.body))
-  // Varias firmas separadas por espacio (rotar el secreto): basta una.
-  const matches = sent.split(" ").some((one) => {
-    const [version, value] = one.split(",", 2)
-    if (version !== "v1" || !value) return false
-    const got = Buffer.from(value)
-    return got.length === expected.length && timingSafeEqual(got, expected)
-  })
-  return matches ? id : null
-}
+export const isAccountEventSecret = isSigningSecret
+export const signAccountEvent = signMessage
+export { verifySignedMessage }
 
 /**
  * Lo que hace la app que recibe: el aviso es de la cuenta si la firma coincide y su hora
