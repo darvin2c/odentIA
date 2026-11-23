@@ -95,7 +95,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       "descanso médico",
     ],
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
-      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
+      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma|tiene un perno, un implante/.test(faq.q))
         return []
       // «Sin enfermedad» de un consultorio: el examen del adulto o del niño, sin odontograma.
       if (faq.q === "¿Qué diagnóstico pongo si el paciente está sano o no tiene nada?")
