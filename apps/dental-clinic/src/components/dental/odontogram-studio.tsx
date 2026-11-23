@@ -98,7 +98,11 @@ function useContainerWide(): {
  * cada pieza se toca con el dedo (24 px o más) sin desplazarse de lado.
  */
 type MouthLayout = "whole" | "beside" | "stacked"
-function useMouthLayout(mixed: boolean): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
+function useMouthLayout(
+  mixed: boolean,
+  /** La pieza puede abrirse al lado: el acomodo es el de una arcada, con o sin ella abierta. */
+  besideAlways: boolean,
+): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
   const ref = useRef<HTMLDivElement | null>(null)
   // Antes de medir, la boca entera: es lo que se ve en el escritorio, donde más se atiende.
   const [layout, setLayout] = useState<MouthLayout>("whole")
@@ -110,13 +114,16 @@ function useMouthLayout(mixed: boolean): { ref: RefObject<HTMLDivElement | null>
       if (width === 0) return
       // En la mixta el arco necesita más ancho (sus temporales no bajan de 24 px): la boca entera
       // desde 1040 px y, más angosta, el arco arriba a todo el ancho (QA del 23 nov).
-      setLayout(width >= (mixed ? 1040 : 900) ? "whole" : !mixed && width >= 600 ? "beside" : "stacked")
+      // En la atención, si la pieza cabe al lado, siempre una arcada: así abrirla no reacomoda la boca
+      // ni corre lo que estaba bajo el dedo (QA del 23 nov, diseño UX).
+      if (!mixed && besideAlways && width >= 600) setLayout("beside")
+      else setLayout(width >= (mixed ? 1040 : 900) ? "whole" : !mixed && width >= 600 ? "beside" : "stacked")
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [mixed])
+  }, [mixed, besideAlways])
   return { ref, layout }
 }
 
@@ -251,7 +258,7 @@ function StudioBody({
     return suggested === "mixed" ? "mixed" : primary ? "primary" : "adult"
   }
   const [dentition, setDentition] = useState<Dentition>(() => dentitionFor(validInitial, suggested))
-  const { ref: viewsRef, layout } = useMouthLayout(dentition === "mixed")
+  const { ref: viewsRef, layout } = useMouthLayout(dentition === "mixed", compact && wide && detailMode === "panel")
   const oneArch = layout !== "whole"
   /** Desde qué vista se abrió la pieza: al cerrarla, el foco vuelve ahí. */
   const openedFrom = useRef<"top" | "front">("top")
@@ -586,7 +593,7 @@ function StudioBody({
           aria-label="Boca dental"
           // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
           // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -721,10 +728,15 @@ function StudioBody({
                   ? "flex min-w-0 flex-col gap-4"
                   : // El arco, más angosto con una arcada (así la de frente deja las incisivas en 24 px o
                     // más) y más ancho en la mixta (sus temporales también).
-                    `grid min-w-0 items-start gap-6 ${layout === "beside" ? "grid-cols-[minmax(0,15rem)_minmax(0,1fr)]" : dentition === "mixed" ? "grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"}`
+                    `grid min-w-0 items-start gap-6 ${layout === "beside" ? "grid-cols-[minmax(0,15rem)_minmax(0,32rem)]" : dentition === "mixed" ? "grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"}`
               }
             >
-              <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
+              <section
+                aria-label="De arriba"
+                // Apilada en una pantalla ancha (la mixta en la tableta), el arco con tope: la vista de
+                // frente entra en la pantalla.
+                className={`flex min-w-0 flex-col gap-2 ${layout === "stacked" ? "mx-auto w-full max-w-[26rem]" : ""}`}
+              >
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   De arriba · las caras
                 </h4>
