@@ -22,6 +22,83 @@ describe("el buscador de hallazgos de la pieza", () => {
     expect(searchFindings("caries")).toMatchObject({ elsewhere: false, reason: null })
   })
 
+  // Mesa del 23 nov: el perno, el puente, la placa… como se dicen en la clínica.
+  it("cada palabra de la clínica lleva a su hallazgo", () => {
+    const said: ReadonlyArray<readonly [string, string]> = [
+      ["perno", "post_and_core"],
+      ["poste", "post_and_core"],
+      ["perno muñón", "post_and_core"],
+      ["espigo", "post_and_core"],
+      ["pernos", "post_and_core"],
+      ["puente", "fixed_partial_denture"],
+      ["prótesis removible", "removable_partial_denture"],
+      ["dentadura postiza parcial", "removable_partial_denture"],
+      ["dentadura", "complete_denture"],
+      ["dentadura postiza", "complete_denture"],
+      ["placa total", "complete_denture"],
+      ["aparato removible", "removable_orthodontic_appliance"],
+      ["brackets", "fixed_orthodontic_appliance"],
+      ["braquets", "fixed_orthodontic_appliance"],
+      ["frenillos", "fixed_orthodontic_appliance"],
+      ["retenida", "impaction"],
+      ["retenido", "impaction"],
+      ["incluida", "impaction"],
+      ["incluido", "impaction"],
+      ["raíz", "root_remnant"],
+      ["solo raíz", "root_remnant"],
+      ["resto radicular", "root_remnant"],
+      ["tratamiento de raíz", "root_canal_treatment"],
+      ["raíz fracturada", "fracture"],
+      ["fracturado", "fracture"],
+      ["roto", "fracture"],
+      ["rota", "fracture"],
+      ["desgaste", "tooth_wear"],
+      ["desgastado", "tooth_wear"],
+      ["abrasión", "tooth_wear"],
+      ["abfracción", "tooth_wear"],
+      ["erosión", "tooth_wear"],
+      ["girado", "rotation"],
+      ["girada", "rotation"],
+      ["rotado", "rotation"],
+      ["rotada", "rotation"],
+      ["extraída", "missing_tooth"],
+      ["extraído", "missing_tooth"],
+      ["falta", "missing_tooth"],
+      ["ausente", "missing_tooth"],
+      ["pérdida", "missing_tooth"],
+      ["supernumerario", "supernumerary_tooth"],
+      ["mesiodens", "supernumerary_tooth"],
+      ["conoide", "peg_tooth"],
+      ["hipoplasia", "enamel_development_defect"],
+      ["fluorosis", "enamel_development_defect"],
+      ["pulpotomía", "pulpotomy"],
+    ]
+    for (const [word, code] of said) expect(codes(word), word).toContain(code)
+    // Lo dicho entero se queda con lo suyo: «solo raíz» no es el tratamiento de conducto.
+    expect(codes("solo raíz")).not.toContain("root_canal_treatment")
+    expect(codes("raíz fracturada")).toEqual(["fracture"])
+  })
+
+  it("una palabra de varios hallazgos los ofrece a todos, cada uno con su tarjeta", () => {
+    expect(codes("placa")).toEqual(
+      expect.arrayContaining(["removable_partial_denture", "removable_orthodontic_appliance"]),
+    )
+    expect(codes("raíz")).toEqual(expect.arrayContaining(["root_remnant", "root_canal_treatment"]))
+    expect(codes("ortodoncia")).toEqual(
+      expect.arrayContaining(["fixed_orthodontic_appliance", "removable_orthodontic_appliance"]),
+    )
+    expect(new Set(codes("placa")).size).toBe(codes("placa").length)
+  })
+
+  // Mesa del 23 nov: por pedazo, «caries posterior» traía el espigo-muñón por «poste».
+  it("la palabra va entera o desde su inicio, no por pedazo", () => {
+    expect(codes("caries posterior")).toContain("caries")
+    expect(codes("caries posterior")).not.toContain("post_and_core")
+    // A medio escribir, desde el inicio de la palabra: «pern» ya es el perno.
+    expect(codes("pern")).toContain("post_and_core")
+    expect(codes("brack")).toContain("fixed_orthodontic_appliance")
+  })
+
   // Revisión de las reglas clínicas del 18 nov: «curación temporal» traía la restauración definitiva.
   it("lo temporal se encuentra como temporal, no como la variante definitiva", () => {
     expect(codes("curación temporal")).toEqual(["temporary_restoration"])
@@ -227,13 +304,18 @@ describe("las exodoncias que encajan en la pieza", () => {
   })
 })
 
-// QA de diseño del 18 nov (H4): lo primero era la tarjeta de un hallazgo ya hecho, y con «caries
-// dolorosa» el aviso del motivo iba antes que la caries.
-it("el orden de «¿Qué observas?»: primero lo que responde a lo escrito", () => {
-  // «endodoncia»: agregarla al plan y después la tarjeta del tratamiento de conducto hecho.
+// Mesa del 23 nov: con el tratamiento primero, dos voces casi agregaron al plan lo que la pieza ya
+// tenía hecho. Con «caries dolorosa» el aviso del motivo va después de la caries (QA del 18 nov, H4).
+it("el orden de «¿Qué observas?»: primero las tarjetas, después «Si falta hacerlo:»", () => {
+  // «endodoncia»: la tarjeta del tratamiento de conducto hecho y después agregarla al plan.
   expect(findingPickerBlocks({ reason: false, cards: true, other: true })).toEqual([
-    "other",
     "cards",
+    "other",
+  ])
+  expect(findingPickerBlocks({ reason: true, cards: true, other: true })).toEqual([
+    "cards",
+    "other",
+    "reason",
   ])
   // «caries dolorosa»: la caries y después el motivo.
   expect(findingPickerBlocks({ reason: true, cards: true, other: false })).toEqual([
