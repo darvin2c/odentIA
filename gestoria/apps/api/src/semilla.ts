@@ -6,6 +6,7 @@ import {
   storeEvent,
   storeInvitation,
   storeMember,
+  storeSupportAccess,
 } from "@gestoria/db"
 import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
@@ -13,6 +14,7 @@ import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoOrders } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
+import { receiveSupportRequest } from "./soporte.js"
 
 /**
  * La tienda de ejemplo de gestorIA, Calzados Rosa (lienzo B, tablero 2), para desarrollo y
@@ -89,6 +91,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
     const email = invite?.trim().toLowerCase()
     if (email) {
       const [pending] = await tx
@@ -236,6 +239,24 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
     ],
   }
   await saveState(tx, storeId, state, new Date(now))
+}
+
+/**
+ * Soporte de gestorIA pide mirar la tienda (ADR 0213), como lo pediría la administración: la
+ * Dueña lo ve arriba en cada sección y decide. Uno solo, mientras no haya otro por responder.
+ */
+async function seedDemoSupport(tx: Db, storeId: string): Promise<void> {
+  const [pending] = await tx
+    .select({ id: storeSupportAccess.id })
+    .from(storeSupportAccess)
+    .where(and(eq(storeSupportAccess.storeId, storeId), eq(storeSupportAccess.state, "pedido")))
+  if (pending) return
+  await receiveSupportRequest(tx, {
+    account: storeId,
+    staff: { userId: "semilla-soporte", name: "Ana de Soporte (ficticia)", email: "soporte@example.test" },
+    minutes: 30,
+    reason: "Revisar contigo por qué no se ven las fotos del catálogo",
+  })
 }
 
 const isMain = process.argv[1]?.endsWith("semilla.ts")
