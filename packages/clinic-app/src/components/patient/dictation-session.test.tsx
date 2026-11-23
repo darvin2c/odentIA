@@ -47,7 +47,7 @@ describe("«Terminar dictado» pide el repaso", () => {
     act(() => result.current.submitTyped("Me duele una muela cuando tomo algo frío."))
     act(() => result.current.finish())
     // `unsplit`: los tramos que quedaron sin separar, para que la pantalla lo diga (QA del 22 nov, UX-1).
-    await waitFor(() => expect(result.current.review).toEqual({ status: "done", reviewed: true, added: 1, turns: 2, unsplit: 1 }))
+    await waitFor(() => expect(result.current.review).toEqual({ status: "done", reviewed: true, added: 1, turns: 2, unsplit: 1, where: [] }))
     expect(posts()).toEqual([BASE, `${BASE}/review`])
   })
 

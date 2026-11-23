@@ -601,3 +601,71 @@ describe("al firmar, lo que dijo de su salud (A3)", () => {
     expect(onComplete).not.toHaveBeenCalled()
   })
 })
+
+// QA del 22 nov (UX-6): tras elegir la prestación, cambiar quién habló o «Intentar otra vez», el foco
+// caía en la página entera y quien usa el teclado volvía a recorrer desde arriba.
+describe("el foco queda donde sigue", () => {
+  it("elegida la prestación, va a su «Confirmar»", async () => {
+    const { DictationBlockSuggestions } = await import("./dictation-suggestions")
+    const choosing = suggestion({
+      id: "p-1",
+      kind: "plan",
+      status: "por_revisar",
+      summary: "Endodoncia · 46",
+      payload: { service: "endodoncia", candidates: [{ id: "srv-1", name: "Endodoncia posterior vital", priceCents: 65000, currency: "PEN" }] },
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (item: Suggestion) => (
+      <QueryClientProvider client={client}>
+        <DictationBlockSuggestions session={sessionWith({ suggestions: [item] })} kind="plan" />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(choosing))
+    const option = screen.getByRole("button", { name: /Endodoncia posterior vital/ })
+    option.focus()
+    fireEvent.click(option)
+    // Guardada, la sugerencia ya no tiene que elegir: lo elegido desaparece.
+    rerender(view({ ...choosing, status: "lista", payload: { service: "endodoncia", serviceId: "srv-1" } }))
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Confirmar: Endodoncia · 46"))
+  })
+
+  it("cambiado quién habló, vuelve a ese turno", async () => {
+    renderSaid([
+      segment({
+        transcript: "buenos días rosa me duele la muela",
+        turns: [
+          { quien: "dra", texto: "buenos días rosa" },
+          { quien: "no_se_sabe", texto: "me duele la muela" },
+        ],
+      }),
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Habló: No se sabe. Cambiar quién habló" }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Paciente" }))
+    await waitFor(() => expect(route).toHaveBeenCalledWith(expect.stringContaining("/turns/1"), expect.objectContaining({ method: "PATCH" })))
+    await waitFor(() => expect(document.activeElement?.getAttribute("data-turn")).toBe("t-1:1"))
+  })
+
+  it("«Intentar otra vez» deja el foco en lo que pasó con la frase", async () => {
+    const said = [segment({ segmentId: "t-2", transcript: "peso como ochenta kilos", unused: [{ said: "peso como ochenta kilos", why: "sin_lugar" }] })]
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const base = { said, saidUsed: [], unsent: "", saidLoading: false, saidError: false, refreshSaid: vi.fn(), highlights: [], mode: "off", interim: "", base: "/x", blocked: null, organizing: false }
+    let retried: { phrase: string; where: string[] | null } | null = null
+    const retryUnused = vi.fn(() => {
+      retried = { phrase: "peso como ochenta kilos", where: null }
+      rerender(view())
+    })
+    const view = () => (
+      <QueryClientProvider client={client}>
+        <DictationSaid session={sessionWith({ ...base, retryUnused, retried })} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view())
+    fireEvent.click(screen.getByRole("button", { name: "Intentar otra vez: «peso como ochenta kilos»" }))
+    await waitFor(() => expect(document.activeElement?.getAttribute("role")).toBe("status"))
+    // Leída otra vez y sin lugar: lo dice en el mismo sitio, que sigue con el foco.
+    retried = { phrase: "peso como ochenta kilos", where: [] }
+    rerender(view())
+    expect(document.activeElement?.getAttribute("role")).toBe("status")
+    expect(document.activeElement?.textContent).toContain("sigue sin lugar")
+  })
+})

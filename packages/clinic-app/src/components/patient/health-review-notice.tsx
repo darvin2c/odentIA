@@ -531,6 +531,8 @@ export function HealthReviewNotice({
     <section
       id={anchorId}
       aria-labelledby={titleId}
+      // La barra de Clío lleva aquí con «Salud ↑»: lo de su salud no tiene lista de sugerencias.
+      data-clio-health={heardItem ? "" : undefined}
       className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning-soft p-4"
     >
       <div className="flex flex-col gap-0.5">

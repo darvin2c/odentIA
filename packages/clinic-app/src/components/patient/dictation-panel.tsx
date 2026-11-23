@@ -13,7 +13,7 @@ import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-rea
 import { seesBilling } from "@odentia/auth/permissions"
 import { Link } from "@tanstack/react-router"
 import { useStore } from "@tanstack/react-form"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
 import { listWords } from "../../lib/materials"
@@ -69,13 +69,47 @@ function DictationExamples() {
 const DICTATION_TITLE_ID = "dictado-titulo"
 const focusDictationTitle = () => requestAnimationFrame(() => document.getElementById(DICTATION_TITLE_ID)?.focus())
 
-/** Lleva a la lista de sugerencias de un bloque y la deja con el foco. */
+/**
+ * La lista de sugerencias de un bloque, por su nombre («Consulta»). Lo de su salud no tiene lista: se
+ * revisa en su aviso, «Revisa con … lo que dijo de su salud» (`data-clio-health`).
+ */
+const suggestionsList = (label: string) =>
+  label === DICTATION_KIND_LABEL.salud
+    ? document.querySelector<HTMLElement>("[data-clio-health]")
+    : document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
+
+/** Lleva a la lista de sugerencias de un bloque (o al aviso de su salud, a su título) y la deja con el foco. */
 function goToSuggestions(label: string): void {
-  const list = document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
+  const list = suggestionsList(label)
   if (!list) return
-  list.querySelector<HTMLElement>("button")?.focus()
+  list.querySelector<HTMLElement>(label === DICTATION_KIND_LABEL.salud ? "h2" : "button")?.focus()
   list.scrollIntoView({ block: "center" })
 }
+
+/**
+ * Un enlace que lleva a un bloque de la atención, con la flecha hacia donde está: lo de su salud va
+ * arriba de la barra («Salud ↑»), la consulta y el plan, abajo (QA del 22 nov). En el teléfono mide
+ * 44 px de alto, como los demás toques.
+ */
+function JumpLink({ target, onClick, children }: { target: () => HTMLElement | null; onClick: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [up, setUp] = useState(false)
+  // Sin dependencias: el bloque puede moverse en cualquier render; con el mismo valor React no vuelve a pintar.
+  useLayoutEffect(() => {
+    const self = ref.current
+    const block = target()
+    setUp(!!self && !!block && (self.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_PRECEDING) !== 0)
+  })
+  return (
+    <Button ref={ref} type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-0" onClick={onClick}>
+      {children} <span aria-hidden>{up ? "↑" : "↓"}</span>
+    </Button>
+  )
+}
+
+/** Dónde queda la línea del repaso y, sin barra, «Lo que se dijo»: ahí vuelve el foco tras «Terminar». */
+const REVIEW_LINE_ID = "dictado-repaso"
+export const SAID_BUTTON_ID = "dictado-lo-que-se-dijo"
 
 /** Abre la ficha desde su aviso en la atención: ahí se confirma cada respuesta. */
 function openFormSuggestions(responseId: string): void {
@@ -254,7 +288,7 @@ export function DictationHeaderButton({
         </PopoverContent>
       </Popover>
       {onShowSaid && session.said.length > 0 ? (
-        <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={onShowSaid}>
+        <Button id={SAID_BUTTON_ID} type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={onShowSaid}>
           Lo que se dijo
         </Button>
       ) : null}
@@ -287,6 +321,16 @@ export function DictationPanel({
     const lost = !document.activeElement || document.activeElement === document.body
     if (session.dictating && lost) pauseRef.current?.focus()
   }, [session.dictating])
+  // Tras «Terminar» el cuadro o la barra de escucha se van: el foco no cae en la página entera, queda en
+  // lo que dice el repaso o, si la barra ya no tiene nada que decir, en «Lo que se dijo» (QA del 22 nov, UX-6).
+  useEffect(() => {
+    if (session.review.status === "idle") return
+    const frame = requestAnimationFrame(() => {
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (lost) (document.getElementById(REVIEW_LINE_ID) ?? document.getElementById(SAID_BUTTON_ID))?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [session.review.status])
   // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta.
   useEffect(() => {
     if (typing) requestAnimationFrame(() => document.getElementById("dictado-escrito")?.focus())
@@ -526,20 +570,18 @@ export function DictationPanel({
           {pending > 0 && suggestionKinds.length + formLinks.length > 0 ? (
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {suggestionKinds.map((label) => (
-                <Button
-                  key={label}
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0"
-                  onClick={() => goToSuggestions(label)}
-                >
-                  {label} ↓
-                </Button>
+                <JumpLink key={label} target={() => suggestionsList(label)} onClick={() => goToSuggestions(label)}>
+                  {label}
+                </JumpLink>
               ))}
               {formLinks.map((form) => (
-                <Button key={form.id} type="button" variant="link" className="h-auto p-0" onClick={() => openFormSuggestions(form.id)}>
-                  {form.title}: {answersWords(form.count)} ↓
-                </Button>
+                <JumpLink
+                  key={form.id}
+                  target={() => document.querySelector<HTMLElement>(`[data-clio-form="${CSS.escape(form.id)}"]`)}
+                  onClick={() => openFormSuggestions(form.id)}
+                >
+                  {form.title}: {answersWords(form.count)}
+                </JumpLink>
               ))}
             </p>
           ) : null}
@@ -577,7 +619,7 @@ export function DictationPanel({
         </div>
       </div>
 
-      <ReviewLine session={session} />
+      <ReviewLine session={session} onShowTranscript={onShowTranscript} />
       {/* Antes de la primera sugerencia, qué se puede decir; después está en «Lo que se dijo». */}
       {pending === 0 && session.removedByVoice.length === 0 && !session.transcript && session.said.length === 0 && !blocked ? (
         <div className="flex flex-col gap-2 rounded-xl bg-background p-3">
@@ -644,31 +686,55 @@ export function DictationPanel({
 
 /**
  * El repaso al terminar, en la barra (mesa del 20 nov 2026, P4): mientras lee toda la conversación,
- * lo que dejó y, si falló, «Intentar otra vez». Lo ya ordenado sigue igual pase lo que pase.
+ * lo que dejó y, si falló, «Intentar otra vez». Lo ya ordenado sigue igual pase lo que pase. Dice
+ * cuáles son las cosas nuevas y lleva a ellas, y si no pudo separar quién habló en alguna parte, lo
+ * dice en vez de «nada nuevo» (QA del 22 nov, UX-1). El foco vuelve aquí tras «Terminar».
  */
-function ReviewLine({ session }: { session: Pick<DictationSession, "review" | "requestReview"> }) {
+function ReviewLine({ session, onShowTranscript }: { session: Pick<DictationSession, "review" | "requestReview">; onShowTranscript: () => void }) {
   const { review } = session
   if (review.status === "reviewing")
     return (
-      <p role="status" className="text-sm text-muted-foreground">
+      <p id={REVIEW_LINE_ID} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
         {CLINICAL_NAME} está repasando toda la conversación…
       </p>
     )
   if (review.status === "failed")
     return (
-      <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+      <div id={REVIEW_LINE_ID} tabIndex={-1} role="alert" className="flex flex-wrap items-center gap-2 text-sm outline-none">
         <p className="text-destructive">{review.message}</p>
         <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => void session.requestReview()}>
           Intentar otra vez
         </Button>
       </div>
     )
-  if (review.status === "done" && review.reviewed)
+  if (review.status === "done" && review.reviewed) {
+    const where = review.where.filter((kind) => kind !== "ficha").map((kind) => DICTATION_KIND_LABEL[kind])
     return (
-      <p role="status" className="text-sm">
-        {CLINICAL_NAME} repasó toda la conversación: {review.added === 0 ? "nada nuevo" : plural(review.added, "cosa nueva", "cosas nuevas")}.
-      </p>
+      <div id={REVIEW_LINE_ID} tabIndex={-1} role="status" className="flex flex-col gap-1 text-sm outline-none">
+        <p className="flex flex-wrap items-center gap-x-2">
+          <span>
+            {CLINICAL_NAME} repasó toda la conversación: {review.added === 0 ? "nada nuevo" : plural(review.added, "cosa nueva", "cosas nuevas")}
+            {review.added > 0 && where.length > 0 ? ", en" : "."}
+          </span>
+          {review.added > 0
+            ? where.map((label) => (
+                <JumpLink key={label} target={() => suggestionsList(label)} onClick={() => goToSuggestions(label)}>
+                  {label}
+                </JumpLink>
+              ))
+            : null}
+        </p>
+        {review.unsplit > 0 ? (
+          <p className="flex flex-wrap items-center gap-x-2">
+            <span>No pude separar quién habló en {plural(review.unsplit, "parte", "partes")}: toca el nombre para cambiarlo.</span>
+            <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-0" onClick={onShowTranscript}>
+              Ver la conversación
+            </Button>
+          </p>
+        ) : null}
+      </div>
     )
+  }
   return null
 }
 

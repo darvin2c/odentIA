@@ -6,7 +6,7 @@ import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
@@ -15,6 +15,7 @@ import { upperFirst } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
 import { useClioFormProposals } from "./clio-form-proposals"
 import {
+  DICTATION_KIND_LABEL,
   DICTATION_SPEAKERS,
   type DictationSaidSegment,
   type DictationSession,
@@ -45,6 +46,7 @@ export type SaidSession = Pick<
   | "interim"
   | "base"
   | "retryUnused"
+  | "retried"
   | "blocked"
   | "organizing"
 >
@@ -153,7 +155,14 @@ export function DictationSaid({
         method: "PATCH",
         body: JSON.stringify({ quien: input.quien, ...(input.quien === "acompanante" && input.vinculo ? { vinculo: input.vinculo } : {}) }),
       }),
-    onSettled: () => void session.refreshSaid(),
+    onSettled: async (_data, _error, input) => {
+      await session.refreshSaid()
+      // El foco vuelve al turno cambiado, no a la página entera (QA del 22 nov, UX-6).
+      requestAnimationFrame(() => {
+        const lost = !document.activeElement || document.activeElement === document.body
+        if (lost) document.querySelector<HTMLElement>(`[data-turn="${CSS.escape(`${input.segmentId}:${input.index}`)}"]`)?.focus()
+      })
+    },
   })
   const professional = (segment: DictationSaidSegment) => memberName(segment.createdBy).split(" ").slice(0, 2).join(" ")
 
@@ -193,6 +202,7 @@ export function DictationSaid({
                     <p key={index} className="leading-relaxed [overflow-wrap:anywhere]">
                       <SpeakerChoice
                         readOnly={readOnly}
+                        turnKey={`${segment.segmentId}:${index}`}
                         turn={item}
                         professional={professional(segment)}
                         busy={turn.isPending}
@@ -280,12 +290,15 @@ export function DictationSaid({
 /** Quién habló, con un toque: un menú con las cuatro opciones. */
 function SpeakerChoice({
   turn,
+  turnKey,
   professional,
   busy,
   onChoose,
   readOnly,
 }: {
   turn: DictationTurn
+  /** «tramo:turno»: ahí vuelve el foco al guardar. */
+  turnKey: string
   professional: string
   busy: boolean
   onChoose: (quien: DictationSpeaker) => void
@@ -303,7 +316,9 @@ function SpeakerChoice({
             size="sm"
             className="h-auto min-h-11 gap-1 px-1.5 py-0.5 align-baseline font-semibold sm:min-h-7"
             aria-label={`Habló: ${name}. Cambiar quién habló`}
-            disabled={busy}
+            data-turn={turnKey}
+            // Mientras se guarda no se apaga (el foco caería en la página): solo no cambia nada.
+            aria-busy={busy || undefined}
           />
         }
       >
@@ -311,7 +326,7 @@ function SpeakerChoice({
         <ChevronDown className="size-3.5" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuRadioGroup value={turn.quien} onValueChange={(value) => value !== turn.quien && onChoose(value as DictationSpeaker)}>
+        <DropdownMenuRadioGroup value={turn.quien} onValueChange={(value) => !busy && value !== turn.quien && onChoose(value as DictationSpeaker)}>
           {DICTATION_SPEAKERS.map((speaker) => (
             <DropdownMenuRadioItem key={speaker} value={speaker} closeOnClick>
               {speaker === "dra" ? professional : SPEAKER_CHOICE[speaker]}
@@ -332,11 +347,33 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
   const clio = useClioFormProposals()
   const openWide = useOpenWide()
   const titleId = useId()
+  // «Intentar otra vez» dice qué pasó, y el foco queda en eso: el botón se apaga mientras lee y, si
+  // lo usó, la frase se va de la lista (QA del 22 nov, UX-6).
+  const retryRef = useRef<HTMLParagraphElement>(null)
   const items = unusedOfSaid(session.said)
-  if (items.length === 0) return null
+  const retried = readOnly ? null : session.retried
+  const retryWords = !retried
+    ? ""
+    : retried.where === null
+      ? `Volviendo a leer «${retried.phrase}»…`
+      : retried.where.length > 0
+        ? `Lo volví a leer: «${retried.phrase}» ya está en ${new Intl.ListFormat("es").format(retried.where.map((kind) => DICTATION_KIND_LABEL[kind]))}.`
+        : `Lo volví a leer y sigue sin lugar: «${retried.phrase}» queda en «No lo usé».`
+  const retryLine = retried ? (
+    <p ref={retryRef} tabIndex={-1} role="status" className="outline-none [overflow-wrap:anywhere]">
+      {retryWords}
+    </p>
+  ) : null
+  if (items.length === 0) return retryLine
   // Otra pausa solo si Clío escucha en esta atención.
   const canRetry = !session.blocked
+  const retry = (segmentId: string, phrase: string) => {
+    session.retryUnused(segmentId, phrase)
+    requestAnimationFrame(() => retryRef.current?.focus())
+  }
   return (
+    <>
+    {retryLine}
     <section aria-labelledby={titleId} className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning-soft p-3">
       <h3 id={titleId} className="font-semibold text-warning">
         No lo usé ({items.length})
@@ -390,7 +427,7 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
                       className="min-h-11 sm:min-h-8"
                       aria-label={`Intentar otra vez: «${phrase}»`}
                       disabled={session.organizing}
-                      onClick={() => session.retryUnused(item.segmentId, phrase)}
+                      onClick={() => retry(item.segmentId, phrase)}
                     >
                       Intentar otra vez
                     </Button>
@@ -405,6 +442,7 @@ function UnusedSaidList({ session, readOnly }: { session: SaidSession; readOnly:
         {readOnly ? "" : "O anótalo a mano. "}La charla no se lista: queda sin resaltar en lo que se dijo.
       </p>
     </section>
+    </>
   )
 }
 
@@ -452,6 +490,7 @@ export function EncounterSaidLink({ patientId, encounterId }: { patientId: strin
     interim: "",
     base,
     retryUnused: () => {},
+    retried: null,
     blocked: null,
     organizing: false,
   }

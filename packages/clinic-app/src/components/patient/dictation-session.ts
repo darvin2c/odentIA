@@ -256,12 +256,25 @@ export type DictationMode = "off" | "listening" | "paused"
 export type DictationReview =
   | { status: "idle" }
   | { status: "reviewing" }
-  /** `unsplit`: los tramos que quedaron en un turno de «No se sabe» porque no se pudieron separar (UX-1). */
-  | { status: "done"; reviewed: boolean; added: number; turns: number; unsplit: number }
+  /**
+   * `unsplit`: los tramos que quedaron en un turno de «No se sabe» porque no se pudieron separar (UX-1).
+   * `where`: el bloque de cada cosa nueva («Consulta», «Próxima cita»), una vez cada uno: la barra dice
+   * cuáles son y lleva a ellas (QA del 22 nov: «2 cosas nuevas» sin decir cuáles).
+   */
+  | { status: "done"; reviewed: boolean; added: number; turns: number; unsplit: number; where: DictationKind[] }
   | { status: "failed"; message: string }
 
 interface ReviewResponse {
   data: { reviewed: boolean; inProgress?: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[]; turnsUnsplit?: string[] }
+}
+
+/**
+ * «Intentar otra vez» una frase de «No lo usé»: `where` nulo mientras Clío la vuelve a leer; después,
+ * los bloques donde la usó, o vacío si sigue sin lugar.
+ */
+export interface RetriedUnused {
+  phrase: string
+  where: DictationKind[] | null
 }
 
 /** La clave de «Lo que se dijo» de la atención: el repaso la deja vieja (los turnos, lo que no usó). */
@@ -426,6 +439,8 @@ export function useDictationSession({
   // La marcada en la que se detuvo «Firmar con N marcadas»: el aviso de la firma dice cuál.
   const [confirmManyFailed, setConfirmManyFailed] = useState<DictationSuggestion | null>(null)
   const [review, setReview] = useState<DictationReview>({ status: "idle" })
+  // Lo que pasó con el último «Intentar otra vez»: dónde lo usó, o nada (`where` vacío) y sigue en «No lo usé».
+  const [retried, setRetried] = useState<RetriedUnused | null>(null)
   // Lo escrito en el cuadro y aún no mandado: vive aquí, no en el cuadro, para que no se pierda si la
   // barra se vuelve a dibujar al llegar las propuestas (QA del 21 nov, novato T3 pausa 3).
   const [typedDraft, setTypedDraft] = useState("")
@@ -454,6 +469,16 @@ export function useDictationSession({
     const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000)
     return () => window.clearInterval(timer)
   }, [mode])
+
+  /** El bloque de lo nuevo y de las pendientes a las que se sumó algo (por su id), una vez cada uno. */
+  const kindsOf = useCallback(
+    (fresh: readonly DictationSuggestion[], addedIds: readonly string[]): DictationKind[] => {
+      const known = queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions ?? []
+      const kindOf = new Map([...known, ...fresh].map((item) => [item.id, item.kind] as const))
+      return [...new Set([...fresh.map((item) => item.kind), ...addedIds.flatMap((id) => kindOf.get(id) ?? [])])]
+    },
+    [queryClient, key],
+  )
 
   /** Ordena un tramo y refleja lo que volvió: lo resaltado, lo que no se pudo usar y las sugerencias. */
   const send = useCallback(
@@ -501,11 +526,17 @@ export function useDictationSession({
           targets: { ...current.targets, ...(data.unusedFor ?? {}) },
         }
       })
+      // «Intentar otra vez»: qué pasó con la frase, para decirlo donde se pidió (QA del 22 nov, UX-6).
+      const retried = segment.retryOf ? segment.text : null
+      if (retried !== null) {
+        const where = kindsOf(data.suggestions, [...(data.added ?? []), ...data.corrected])
+        setRetried({ phrase: retried, where })
+      }
       await refresh()
       void refreshSaid()
       if (touchedHealth) void refreshHealth()
     },
-    [base, refresh, refreshSaid, refreshHealth, queryClient, key],
+    [base, refresh, refreshSaid, refreshHealth, queryClient, key, kindsOf],
   )
 
   /**
@@ -532,7 +563,14 @@ export function useDictationSession({
       }
       if (!mounted.current) return null
       const data = response.data
-      setReview({ status: "done", reviewed: data.reviewed || waited, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length, unsplit: data.turnsUnsplit?.length ?? 0 })
+      setReview({
+        status: "done",
+        reviewed: data.reviewed || waited,
+        added: data.suggestions.length + data.added.length,
+        turns: data.turnsSaved.length,
+        unsplit: data.turnsUnsplit?.length ?? 0,
+        where: kindsOf(data.suggestions, data.added),
+      })
       if (data.reviewed || waited) {
         await refresh()
         void refreshSaid()
@@ -546,7 +584,7 @@ export function useDictationSession({
     // Las pendientes de ahora, con lo que dejó el repaso: el cierre que se abre justo después decide con
     // estas, no con las del render anterior (QA del 21 nov: firmaba sin lo que trajo el repaso).
     return queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions.length ?? null
-  }, [base, openForms, refresh, refreshSaid, refreshHealth, queryClient, key])
+  }, [base, openForms, refresh, refreshSaid, refreshHealth, queryClient, key, kindsOf])
 
   /**
    * Envía, uno por uno y en orden, los tramos pendientes. Uno que falla se
@@ -578,6 +616,8 @@ export function useDictationSession({
           if (last && mounted.current) {
             const message = transient ? "Lo intenté dos veces." : (dictationErrorText(last, "") ?? "")
             setFailed((current) => [...current, { ...segment, at: new Date(), message }])
+            // Un «Intentar otra vez» que no se pudo leer ya no dice «volviendo a leer»: lo dice su aviso.
+            if (segment.retryOf) setRetried(null)
             // Se llegó al presupuesto mientras tanto: la atención lo dice arriba (ADR 0085).
             if (last instanceof ApiError && (last.shape.code === "CLIO_BUDGET_REACHED" || last.shape.code === "AGENTS_PAUSED")) void refresh()
           }
@@ -780,6 +820,7 @@ export function useDictationSession({
    */
   const retryUnused = useCallback(
     (segmentId: string, phrase: string) => {
+      setRetried({ phrase, where: null })
       queue.current.push({ id: crypto.randomUUID(), text: phrase.slice(0, 12_000), retryOf: segmentId })
       void drain()
     },
@@ -1076,6 +1117,8 @@ export function useDictationSession({
     setTypedDraft,
     submitTyped,
     retryUnused,
+    /** Lo que pasó con el último «Intentar otra vez»: mientras se lee, `where` es nulo. */
+    retried,
     act,
     save,
     confirmReady,

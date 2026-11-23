@@ -6,7 +6,7 @@
  * dibujar al llegar las propuestas.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import type * as React from "react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -55,11 +55,11 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-function Bar({ shown = true }: { shown?: boolean }) {
+function Bar({ shown = true, onShowTranscript = () => {} }: { shown?: boolean; onShowTranscript?: () => void }) {
   const session = useDictationSession({ patientId: "p-1", encounterId: "e-1", active: true, onApplied: () => {}, noteText: () => "" })
   const [typing, setTyping] = useState(true)
   return shown ? (
-    <DictationPanel session={session} onStart={() => {}} onFinish={() => session.finish()} onShowTranscript={() => {}} typing={typing} onTypingChange={setTyping} />
+    <DictationPanel session={session} onStart={() => {}} onFinish={() => session.finish()} onShowTranscript={onShowTranscript} typing={typing} onTypingChange={setTyping} />
   ) : null
 }
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -78,6 +78,32 @@ describe("escribiendo en vez de dictar", () => {
     await waitFor(() => expect(posts()).toEqual([BASE, `${BASE}/review`]))
     const body = JSON.parse(String(route.mock.calls.find(([url, init]) => url === BASE && init?.method === "POST")?.[1]?.body))
     expect(body.transcript).toBe("la veo la proxima semana para la otra resina")
+  })
+
+  // QA del 22 nov (UX-1, UX-6): tras «Terminar» el foco caía en la página entera y, con tramos que el
+  // repaso no pudo separar, la barra decía «nada nuevo».
+  it("tras «Terminar» el foco queda en lo que dijo el repaso, que lleva a la conversación si no pudo separar quién habló", async () => {
+    const note = { id: "n-1", kind: "nota", payload: { reason: "Dolor" }, sourceText: "me duele", status: "lista", note: null, summary: "Motivo de consulta: Dolor", voice: null, removal: null }
+    route.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [note], removedByVoice: [], confirmed: 0 } }
+      if (url === `${BASE}/said`) return { data: { segments: [said], used: [] } }
+      if (url === `${BASE}/review`) return { data: { reviewed: true, suggestions: [], added: ["n-1"], turnsSaved: [], turnsUnsplit: ["t-1"] } }
+      if (url === BASE) return segmentReply
+      return { data: [] }
+    })
+    const showTranscript = vi.fn()
+    render(
+      <QueryClientProvider client={client()}>
+        <Bar onShowTranscript={showTranscript} />
+      </QueryClientProvider>,
+    )
+    const box = await screen.findByLabelText("Escribe lo dictado")
+    box.focus()
+    fireEvent.click(await screen.findByRole("button", { name: "Terminar" }))
+    await waitFor(() => expect(document.activeElement?.id).toBe("dictado-repaso"))
+    const line = document.activeElement as HTMLElement
+    fireEvent.click(within(line).getByRole("button", { name: "Ver la conversación" }))
+    expect(showTranscript).toHaveBeenCalled()
   })
 
   it("lo escrito sin mandar sigue en el cuadro si la barra se vuelve a dibujar, y se dice", async () => {

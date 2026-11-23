@@ -4,7 +4,7 @@ import { AgentMark, FormDrawer, SubmitButton, useAppForm, useFormSurface } from 
 import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
@@ -52,7 +52,41 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  * quedar. Mientras se dicta solo se pueden quitar o abrir; al terminar se
  * confirman, se editan o se descartan.
  */
+/**
+ * Lo que sigue en una sugerencia después de elegir algo en ella (la prestación, uno de los caminos): su
+ * «Confirmar» o, si aún le falta algo, su primer botón. Lo que se eligió desaparece al guardarse y el
+ * foco caía en la página entera (QA del 22 nov, UX-6).
+ */
+function focusNextIn(id: string): boolean {
+  const card = document.querySelector<HTMLElement>(`[data-suggestion="${CSS.escape(id)}"]`)
+  if (!card) return false
+  const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 640px)").matches
+  const confirm = card.querySelector<HTMLElement>(wide ? "[data-confirm-wide] button:not([disabled])" : "[data-confirm-narrow]:not([disabled])")
+  const next = confirm ?? card.querySelector<HTMLElement>("button:not([disabled])")
+  next?.focus()
+  return !!next
+}
+
+/** Recuerda en qué sugerencia se eligió algo y, cuando lo elegido ya no tiene el foco, lo lleva a lo que sigue. */
+function useFocusAfterChoice(): (id: string) => void {
+  const [pending, setPending] = useState<string | null>(null)
+  // Sin dependencias: espera al render en que lo elegido se fue o quedó apagado.
+  useEffect(() => {
+    if (!pending) return
+    const active = document.activeElement as HTMLElement | null
+    const lost = !active || active === document.body || !active.isConnected || (active instanceof HTMLButtonElement && active.disabled)
+    if (!lost) {
+      // Ya está en otra parte (otra sugerencia, otro bloque): no se le quita.
+      if (!active.closest(`[data-suggestion="${CSS.escape(pending)}"]`)) setPending(null)
+      return
+    }
+    if (focusNextIn(pending)) setPending(null)
+  })
+  return setPending
+}
+
 export function DictationBlockSuggestions({ session, kind, patientName }: { session: DictationSession; kind: DictationKind; patientName?: string }) {
+  const focusAfterChoice = useFocusAfterChoice()
   const items = session.suggestions.filter((item) => item.kind === kind)
   const removed = session.removedByVoice.filter((item) => item.kind === kind)
   const undo = session.undoRequests.filter((item) => item.kind === kind)
@@ -77,7 +111,7 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
           const detail = choice ? (item.sourceText ? `Dijiste «${item.sourceText}»` : "") : summaryDetail
           const addsTo = session.noteAddsTo(item)
           return (
-            <li key={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
+            <li key={item.id} data-suggestion={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 {ready ? (
                   <AgentMark size="sm" />
@@ -115,10 +149,12 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                 ) : null}
                 {ready && !session.dictating ? (
                   <>
-                    <SubmitButton type="button" size="sm" className="max-sm:hidden" pending={acting(item) && session.act.variables?.action === "confirm"} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
-                      {confirmWord(item)}
-                    </SubmitButton>
-                    <Button type="button" size="icon" className="size-11 sm:hidden" aria-label={`${confirmWord(item)}: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                    <span data-confirm-wide className="contents">
+                      <SubmitButton type="button" size="sm" className="max-sm:hidden" pending={acting(item) && session.act.variables?.action === "confirm"} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                        {confirmWord(item)}
+                      </SubmitButton>
+                    </span>
+                    <Button data-confirm-narrow type="button" size="icon" className="size-11 sm:hidden" aria-label={`${confirmWord(item)}: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
                       <Check className="size-4" aria-hidden />
                     </Button>
                   </>
@@ -133,7 +169,7 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                   <X className="size-4" aria-hidden />
                 </Button>
               </div>
-              {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
+              {choice ? <PlanChoices session={session} item={item} busy={busy} onChosen={() => focusAfterChoice(item.id)} /> : null}
               {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} patientName={patientName} /> : null}
               {item.kind === "presupuesto" ? <BudgetLines item={item} /> : null}
               {item.kind === "alergia" && pendingOf(item).includes("severity") ? (
@@ -168,7 +204,10 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                       size="sm"
                       className="h-auto min-h-11 whitespace-normal sm:min-h-8"
                       disabled={busy || session.save.isPending}
-                      onClick={() => session.save.mutate({ item, patch: { serviceId: candidate.id }, confirm: false })}
+                      onClick={() => {
+                        focusAfterChoice(item.id)
+                        session.save.mutate({ item, patch: { serviceId: candidate.id }, confirm: false })
+                      }}
                     >
                       {candidate.name} · {price(candidate.priceCents, candidate.currency)}
                     </Button>
@@ -388,14 +427,17 @@ const LETTER = ["A", "B", "C"]
  * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones:
  * lo dice el aviso flotante, no la tarjeta.
  */
-function PlanChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
+function PlanChoices({ session, item, busy, onChosen }: { session: DictationSession; item: DictationSuggestion; busy: boolean; onChosen: () => void }) {
   const main: PlanOption = {
     service: String(item.payload["service"] ?? ""),
     ...(typeof item.payload["serviceId"] === "string" ? { serviceId: item.payload["serviceId"], serviceName: String(item.payload["serviceName"] ?? ""), priceCents: Number(item.payload["priceCents"] ?? 0), currency: String(item.payload["currency"] ?? "") } : {}),
     candidates: candidatesOf(item),
   }
   const options = [main, ...optionsOf(item)]
-  const save = (patch: Record<string, unknown>) => session.save.mutate({ item, patch, confirm: false })
+  const save = (patch: Record<string, unknown>) => {
+    onChosen()
+    session.save.mutate({ item, patch, confirm: false })
+  }
   const disabled = busy || session.save.isPending
   // Otra elección ya ocupa el presupuesto: se ve lo dicho, sin nada que elegir (la nota dice qué hacer).
   const blocked = item.payload["choiceBlocked"] === true
