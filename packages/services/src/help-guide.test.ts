@@ -471,7 +471,8 @@ describe("lo nuevo de la consulta conversada, con los nombres de la pantalla", (
   ])("«%s»", (question, faq) => {
     expect(firstFaq(question)).toBe(faq)
   })
-  it.each(CLINICAL_PRODUCTS)("en %s, cada respuesta en pocas palabras", (product) => {
+  // Solo donde Clío dicta: vistIA no dicta y quita estas preguntas de su guía.
+  it.each(CLINICAL_PRODUCTS.filter((product) => product !== "optical"))("en %s, cada respuesta en pocas palabras", (product) => {
     const ids = ["pacientes-dictado-no-lo-registro", "pacientes-dictado-llevar-a-su-salud", "pacientes-dictado-quien-hablo"]
     const faqs = helpTopicsFor(product).flatMap((topic) => topic.faqs ?? []).filter((faq) => ids.includes(faq.id))
     expect(faqs.map((faq) => faq.id).sort()).toEqual([...ids].sort())

@@ -1,7 +1,5 @@
 import { formQuestionsOf, productHooksFor } from "@odentia/services"
-import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
-import { DENTAL_DICTATION_PROFILE, systemPrompt } from "./dental/dictation.js"
 import {
   askDictationReview,
   DICTATION_REVIEW_RULES,
@@ -13,8 +11,13 @@ import {
   readDictationReview,
 } from "./dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
-import { MEDICAL_DICTATION_PROFILE } from "./medical/dictation.js"
+import { dictationProfileFor } from "./products.js"
 import { cacheMarked, fakeProvider, messageContent, systemBlock, toolCallReply } from "./test-provider.js"
+
+// Cada producto por `products.ts`, el único lugar que los conecta con lo común (ADR 0079).
+const DENTAL_DICTATION_PROFILE = dictationProfileFor("dental")!
+const MEDICAL_DICTATION_PROFILE = dictationProfileFor("medical")!
+const systemPrompt = (input: { services: string[]; diagnosisList: string; catalog: string }) => DENTAL_DICTATION_PROFILE.systemPrompt(input)
 
 /**
  * El repaso al terminar (mesa del 20 nov 2026, «Clío en una consulta conversada», P4): lo que lee
@@ -104,7 +107,7 @@ const ASK: DictationReviewAsk = {
   provider: "openai",
   services: ["Resina compuesta", "Endodoncia"],
   diagnosisList: "CIE-10",
-  catalog: dictationFindingsText(),
+  catalog: "Caries, fractura, ausente…",
   zone: { locale: "es-PE", timezone: "America/Lima" },
   now: new Date("2026-11-20T15:10:00Z"),
   segments: SEGMENTS,
