@@ -109,8 +109,37 @@ function useFocusAfterChoice(): (id: string) => void {
   return setPending
 }
 
+/**
+ * Recuerda la sugerencia que se confirmó o descartó y, cuando ya no está, lleva el foco a la siguiente
+ * del bloque (su «Confirmar») o, sin otra, al título del bloque: la tarjeta desaparecía y el foco caía
+ * en la página entera (QA del 23 nov, verificador 2: tras «Confirmar» de los dos caminos).
+ */
+function useFocusAfterLeaving(): (id: string) => void {
+  const [leaving, setLeaving] = useState<{ id: string; next: string | null; block: HTMLElement | null } | null>(null)
+  // Sin dependencias: espera al render en que la tarjeta ya no está.
+  useEffect(() => {
+    if (!leaving) return
+    // Sigue ahí (guardando, o no se pudo): se espera; el foco solo se mueve si se perdió.
+    if (document.querySelector(`[data-suggestion="${CSS.escape(leaving.id)}"]`)) return
+    setLeaving(null)
+    const active = document.activeElement as HTMLElement | null
+    if (active && active !== document.body && active.isConnected) return
+    if (leaving.next && focusNextIn(leaving.next)) return
+    const title = leaving.block?.isConnected ? leaving.block.querySelector<HTMLElement>("h2, h3") : null
+    if (!title) return
+    if (!title.hasAttribute("tabindex")) title.setAttribute("tabindex", "-1")
+    title.focus()
+  })
+  return (id) => {
+    const card = document.querySelector<HTMLElement>(`[data-suggestion="${CSS.escape(id)}"]`)
+    const sibling = (card?.nextElementSibling ?? card?.previousElementSibling) as HTMLElement | null
+    setLeaving({ id, next: sibling?.getAttribute("data-suggestion") ?? null, block: card?.closest<HTMLElement>("section") ?? null })
+  }
+}
+
 export function DictationBlockSuggestions({ session, kind, patientName }: { session: DictationSession; kind: DictationKind; patientName?: string }) {
   const focusAfterChoice = useFocusAfterChoice()
+  const focusAfterLeaving = useFocusAfterLeaving()
   const items = session.suggestions.filter((item) => item.kind === kind)
   const removed = session.removedByVoice.filter((item) => item.kind === kind)
   const undo = session.undoRequests.filter((item) => item.kind === kind)
@@ -176,11 +205,32 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                 {ready && !session.dictating ? (
                   <>
                     <span data-confirm-wide className="contents">
-                      <SubmitButton type="button" size="sm" className="max-sm:hidden" pending={acting(item) && session.act.variables?.action === "confirm"} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                      <SubmitButton
+                        type="button"
+                        size="sm"
+                        className="max-sm:hidden"
+                        pending={acting(item) && session.act.variables?.action === "confirm"}
+                        disabled={busy}
+                        onClick={() => {
+                          focusAfterLeaving(item.id)
+                          session.act.mutate({ item, action: "confirm" })
+                        }}
+                      >
                         {confirmWord(item)}
                       </SubmitButton>
                     </span>
-                    <Button data-confirm-narrow type="button" size="icon" className="size-11 sm:hidden" aria-label={`${confirmWord(item)}: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                    <Button
+                      data-confirm-narrow
+                      type="button"
+                      size="icon"
+                      className="size-11 sm:hidden"
+                      aria-label={`${confirmWord(item)}: ${title}`}
+                      disabled={busy}
+                      onClick={() => {
+                        focusAfterLeaving(item.id)
+                        session.act.mutate({ item, action: "confirm" })
+                      }}
+                    >
                       <Check className="size-4" aria-hidden />
                     </Button>
                   </>
@@ -191,7 +241,18 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                     {ready ? "Editar" : "Completar"}
                   </Button>
                 ) : null}
-                <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-8" aria-label={`Descartar: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "discard" })}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 sm:size-8"
+                  aria-label={`Descartar: ${title}`}
+                  disabled={busy}
+                  onClick={() => {
+                    focusAfterLeaving(item.id)
+                    session.act.mutate({ item, action: "discard" })
+                  }}
+                >
                   <X className="size-4" aria-hidden />
                 </Button>
               </div>

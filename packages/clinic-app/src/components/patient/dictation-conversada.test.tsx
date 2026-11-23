@@ -729,3 +729,72 @@ describe("el foco queda donde sigue", () => {
     expect(document.activeElement?.textContent).toContain("sigue sin lugar")
   })
 })
+
+// QA del 23 nov (verificador 2): lo que quedaba a medias en la pantalla.
+describe("lo que vio el verificador 2", () => {
+  it("el botón nombra a quien nombra el título: «Lo revisé con su madre», nunca con el niño", () => {
+    // Tras varios repasos, unas filas dicen «su madre (Marta Rojas)» y otras «su madre»: ya no hay uno solo.
+    const said = suggestion({
+      id: "salud-lucas",
+      payload: { declarante: "acompanante" },
+      healthRows: [
+        { key: "conditions", group: "conditions", label: "Enfermedades", value: "asma", by: { declarante: "acompanante" }, before: null, denied: false },
+        { key: "medications", group: "medications", label: "Medicación", value: "salbutamol", by: { declarante: "acompanante", vinculo: "madre" }, before: null, denied: false },
+      ],
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <HealthReviewNotice patientId="p-1" patientName="Lucas Rojas" health={health} sex="M" askTo="su madre (Marta Rojas)" child dictation={sessionWith({ suggestions: [said] })} />
+      </QueryClientProvider>,
+    )
+    const notice = screen.getByRole("region", { name: /^Revisa con su madre \(Marta Rojas\)/ })
+    expect(within(notice).getByRole("button", { name: "Lo revisé con su madre (Marta Rojas)" })).toBeTruthy()
+    expect(within(notice).queryByRole("button", { name: "Lo revisé con Lucas" })).toBeNull()
+  })
+
+  it("lo que pasó al leer otra vez se va solo a los pocos segundos, y el foco pasa a «No lo usé»", async () => {
+    const { RETRIED_SHOWN_MS } = await import("./dictation-said")
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      const clearRetried = vi.fn()
+      renderSaid([segment({ segmentId: "t-2", transcript: "y algo de la tiroides", unused: [{ said: "y algo de la tiroides", why: "sin_lugar" }] })], {
+        retried: { phrase: "y algo de la tiroides", where: [] },
+        clearRetried,
+      })
+      const line = screen.getByText(/Lo volví a leer y sigue sin lugar/)
+      line.focus()
+      vi.advanceTimersByTime(RETRIED_SHOWN_MS - 1)
+      expect(clearRetried).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(clearRetried).toHaveBeenCalled()
+      expect(document.activeElement?.textContent).toBe("No lo usé (1)")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("confirmada una tarjeta, el foco va a la siguiente; sin otra, al título del bloque", async () => {
+    const { DictationBlockSuggestions } = await import("./dictation-suggestions")
+    const choice = suggestion({ id: "p-1", kind: "plan", summary: "Endodoncia o exodoncia · 36", payload: { service: "endodoncia", serviceId: "srv-1" } })
+    const control = suggestion({ id: "p-2", kind: "plan", summary: "Profilaxis", payload: { service: "profilaxis", serviceId: "srv-2" } })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (items: Suggestion[]) => (
+      <QueryClientProvider client={client}>
+        <section>
+          <h2>Plan y controles</h2>
+          <DictationBlockSuggestions session={sessionWith({ suggestions: items })} kind="plan" />
+        </section>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view([choice, control]))
+    const first = screen.getByRole("button", { name: "Confirmar: Endodoncia o exodoncia · 36" })
+    first.focus()
+    fireEvent.click(first)
+    rerender(view([control]))
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Confirmar: Profilaxis"))
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar: Profilaxis" }))
+    rerender(view([]))
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Plan y controles"))
+  })
+})

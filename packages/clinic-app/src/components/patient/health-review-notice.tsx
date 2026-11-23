@@ -406,9 +406,11 @@ export function HealthReviewNotice({
     unasked.includes("conditions") ? "sus enfermedades" : null,
     unasked.includes("medications") ? "su medicación" : null,
   ].filter((topic): topic is string => topic !== null)
-  // Lo dijo quien lo acompaña («su madre»): se revisa con esa persona; si no, con el paciente.
+  // Lo dijo quien lo acompaña («su madre»): se revisa con esa persona; si no, con quien dice el título
+  // (su representante, si lo tiene). El botón y el título nombran a la misma persona: «Lo revisé con
+  // Lucas» bajo «Revisa con su madre (Marta…)» no se entendía (QA del 23 nov, verificador 2).
   const heardWho = heard.by && heard.by !== "el paciente" ? heard.by : null
-  const heardWith = heardWho ?? patientFirst
+  const heardWith = heardWho ?? first
   const title = heardAny || (earlierSaid.length > 0 && topics.length === 0 && !declaredHere)
     ? `Revisa con ${heardWho ?? first}${(heardWho ?? first).includes(",") ? "," : ""} lo que dijo de ${heardWho || talksFor ? `la salud de ${patientFirst}` : "su salud"}`
     : topics.length === 0
