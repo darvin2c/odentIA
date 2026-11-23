@@ -2879,6 +2879,9 @@ export function EncounterEditor({
             "consulta",
             "Consulta",
             <>
+              {/* Lo que propone Clío va arriba, donde se busca, y no debajo de los campos vacíos (QA del 22
+                  nov, UX-2): a 390 px queda a la vista al llegar al bloque. */}
+              {suggestionsOf("consulta")}
               {/* Por qué viene, en el motivo (la atención agrupada, 17 nov): su cita, lo que contó y la
                   cita que ya tiene. «Usar» llena el motivo solo si está vacío. */}
               {canWrite && attending ? (
@@ -2907,7 +2910,6 @@ export function EncounterEditor({
                 </div>
               ) : null}
               {consultaBody}
-              {suggestionsOf("consulta")}
             </>,
             // «Es una urgencia» va en el título de Consulta, con o sin su cita (P10).
             canWrite && attending && reason.trim() === "" ? (

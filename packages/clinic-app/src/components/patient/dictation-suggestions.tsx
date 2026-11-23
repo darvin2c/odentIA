@@ -1,6 +1,6 @@
 import { formatMoney, VITAL_SIGNS } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Input, toast } from "@odentia/ui"
-import { AgentMark, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { AgentMark, DetailField, DetailList, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -52,6 +52,30 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  * quedar. Mientras se dicta solo se pueden quitar o abrir; al terminar se
  * confirman, se editan o se descartan.
  */
+/** El orden de la consulta propuesta: lo que cuenta el paciente primero; la evolución, al final, en su renglón. */
+const NOTE_ORDER = ["reason", "illnessDuration", "presentIllness", "evolution", "indications", "prognosis"] as const
+
+/**
+ * La consulta que propone Clío, un renglón por campo (QA del 22 nov, UX-2: era un párrafo con «·», en
+ * otro orden y con la evolución en medio). Cada renglón trae lo que arma el servidor, con su «antes
+ * dijo…» si lo dijo distinto.
+ */
+export function noteRows(item: Pick<DictationSuggestion, "summary">): Array<{ label: string; value: string }> {
+  const lines = new Map(
+    item.summary
+      .split("\n")
+      .map((line) => {
+        const at = line.indexOf(": ")
+        return at > 0 ? ([line.slice(0, at), line.slice(at + 2)] as const) : null
+      })
+      .filter((pair): pair is readonly [string, string] => pair !== null),
+  )
+  return NOTE_ORDER.flatMap((key) => {
+    const value = lines.get(NOTE_FIELD_LABEL[key])
+    return value ? [{ label: NOTE_FIELD_LABEL[key], value }] : []
+  })
+}
+
 /**
  * Lo que sigue en una sugerencia después de elegir algo en ella (la prestación, uno de los caminos): su
  * «Confirmar» o, si aún le falta algo, su primer botón. Lo que se eligió desaparece al guardarse y el
@@ -102,7 +126,9 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
     <div className="flex basis-full flex-col gap-2">
       <ul aria-label={`Sugerencias de ${CLINICAL_NAME}: ${DICTATION_KIND_LABEL[kind]}`} className="flex flex-col gap-2">
         {items.map((item) => {
-          const { title, detail: summaryDetail } = suggestionText(item)
+          // La consulta va en renglones, debajo: arriba basta con decir que es lo que propone Clío.
+          const note = item.kind === "nota" ? noteRows(item) : []
+          const { title, detail: summaryDetail } = note.length ? { title: `Lo que propone ${CLINICAL_NAME}`, detail: "" } : suggestionText(item)
           const ready = item.status === "lista"
           const busy = acting(item) || session.confirmReady.isPending
           const candidates = candidatesOf(item)
@@ -169,6 +195,15 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                   <X className="size-4" aria-hidden />
                 </Button>
               </div>
+              {note.length ? (
+                <DetailList columns={1} className="gap-y-2 sm:pl-8">
+                  {note.map((row) => (
+                    <DetailField key={row.label} label={row.label}>
+                      {row.value}
+                    </DetailField>
+                  ))}
+                </DetailList>
+              ) : null}
               {choice ? <PlanChoices session={session} item={item} busy={busy} onChosen={() => focusAfterChoice(item.id)} /> : null}
               {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} patientName={patientName} /> : null}
               {item.kind === "presupuesto" ? <BudgetLines item={item} /> : null}
