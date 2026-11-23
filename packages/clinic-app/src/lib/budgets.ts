@@ -20,7 +20,7 @@
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents,
  * `stateText`).
  */
-import { budgetAnswerText, type PatientGuide } from "@odentia/clinical"
+import { budgetAnswerText, isLeftOut, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { PlanItem, TreatmentPlan, TreatmentPlanWithStatus } from "./patients"
 
@@ -844,6 +844,33 @@ export function fetchPlanNextSteps(patientId: string): Promise<{ data: PlanNextS
 /** La misma lista, con lo de una atención primero: «Lo que sigue» de la atención firmada. */
 export function fetchEncounterNextSteps(patientId: string, encounterId: string): Promise<{ data: PlanNextStep[] }> {
   return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/encounters/${encounterId}/next-steps`)
+}
+
+/** Lo que cuenta el servidor como por ejecutar (`TO_EXECUTE_STATUSES`) y no quedó fuera por la persona. */
+const TO_EXECUTE = new Set(["pendiente", "programado", "en_curso"])
+
+/**
+ * Lo que una atención deja por ejecutar, sin contar como dos los caminos que se excluyen (QA del 22 nov,
+ * H12: «2 por ejecutar» con dos caminos de los que solo uno se hará). `pending` es lo que cuenta el
+ * servidor; los tratamientos de un presupuesto con caminos por elegir salen de ahí y quedan como una
+ * elección por presupuesto, con cuántos caminos tiene (`choices`).
+ */
+export function pendingTreatmentCounts(
+  pending: number,
+  items: ReadonlyArray<Pick<PlanItem, "id" | "status" | "path"> & { decisionStatus?: string | null }>,
+): { toExecute: number; choices: number[] } {
+  const seen = new Set<string>()
+  const paths = new Map<string, number>()
+  let competing = 0
+  for (const item of items) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    const path = item.path
+    if (!path || path.chosen || path.pathCount < 2 || !TO_EXECUTE.has(item.status) || isLeftOut(item.decisionStatus)) continue
+    competing += 1
+    paths.set(path.budgetId, path.pathCount)
+  }
+  return { toExecute: Math.max(0, pending - competing), choices: [...paths.values()] }
 }
 
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */

@@ -286,10 +286,11 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(live).toContainText("Escuchando")
   await expect(signButton).toBeDisabled()
   await expect(closing).toContainText("Termina el dictado y revisa las sugerencias para poder firmar.")
-  // El respaldo queda al lado, con qué se puede decir y cómo corregir hablando (issue 109).
+  // El respaldo queda al lado, con cómo corregir hablando (issue 109); los ejemplos de qué decir están
+  // una vez, en «¿Qué puedo decir?» (QA del 22 nov).
   const backup = page.getByRole("region", { name: "Lo que se dijo" })
-  await expect(backup).toContainText("Qué puedo decir")
-  await expect(backup).toContainText("«La 36 con caries oclusal en dentina, la 46 ausente»")
+  await expect(backup).toContainText("Para corregir")
+  await expect(backup).toContainText("«No, es la veintiséis» cambia la última sugerencia")
   await say("y hacemos endodoncia", false)
   await expect(live).toContainText("Lo último que oí«…y hacemos endodoncia»")
   await info.attach("dictado-oyendo", { body: await live.screenshot(), contentType: "image/png" })

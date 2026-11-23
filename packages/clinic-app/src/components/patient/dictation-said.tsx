@@ -272,16 +272,9 @@ export function DictationSaid({
         </p>
       ) : null}
       {readOnly ? null : (
+      // Los ejemplos de qué decir están una vez, en «¿Qué puedo decir?» (QA del 22 nov: salían tres veces).
       <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
-        <p className="font-semibold">Qué puedo decir</p>
-        <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
-          {(productUi().dictation?.examples ?? []).map((example) => (
-            <div key={example.block} className="contents">
-              <dt className="font-semibold text-muted-foreground">{example.block}</dt>
-              <dd className="m-0 [overflow-wrap:anywhere]">{example.say}</dd>
-            </div>
-          ))}
-        </dl>
+        <p className="font-semibold">Para corregir</p>
         <p className="text-muted-foreground">
           «{upperFirst(productUi().dictation?.corrections.change ?? "")}» cambia la última sugerencia y «
           {upperFirst(productUi().dictation?.corrections.remove ?? "")}» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y

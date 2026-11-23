@@ -615,6 +615,11 @@ export function AntecedentesTab({
   const reviewStatus = useStore(form.store, (state) => state.values.reviewStatus)
   const submitted = useStore(form.store, (state) => state.submissionAttempts > 0)
   const isDirty = useStore(form.store, (state) => state.isDirty)
+  // Lo que puso Clío al abrir con «Corregir algo» no es un cambio de quien edita: salir sin tocar nada no
+  // pregunta «¿Salir sin guardar?», porque no se pierde nada (lo de Clío sigue en su aviso; QA del 22 nov, H12).
+  const values = useStore(form.store, (state) => state.values)
+  const [prefilledShot, setPrefilledShot] = useState<string | null>(null)
+  const changedHere = isDirty && (prefilledShot === null || JSON.stringify(values) !== prefilledShot)
   const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const interviewErrors = useMemo<SubFieldErrors>(
     () => ({ ...(submitted ? productHealth.validate(interview, today) : {}), ...serverInterviewErrors }),
@@ -650,7 +655,7 @@ export function AntecedentesTab({
     startedEditing.current = true
     openDrawer()
     if (said) {
-      // Como escrito a mano: cuenta como un cambio, se guarda con «Guardar» y avisa al salir sin guardar.
+      // Se guarda con «Guardar» como si se hubiera escrito; salir sin cambiar nada no pregunta (`changedHere`).
       const next = withSaidHealth(buildDrafts(health), said)
       form.setFieldValue("conditions", next.conditions)
       form.setFieldValue("medications", next.medications)
@@ -659,6 +664,7 @@ export function AntecedentesTab({
       const weeks = pregnancyRecordOf(next.interview)?.semanas
       if (typeof weeks === "number") form.setFieldValue("pregnancyWeeks", String(weeks))
       prefilled.current = true
+      setPrefilledShot(JSON.stringify(form.state.values))
     }
   }, [startEditing, canWrite, health])
 
@@ -822,6 +828,7 @@ export function AntecedentesTab({
 
       <FormDrawer
         {...surface}
+        isDirty={changedHere}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title={editingVerb}

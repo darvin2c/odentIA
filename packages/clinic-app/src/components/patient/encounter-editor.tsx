@@ -57,7 +57,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
+import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, totalsOf } from "../../lib/budgets"
 import {
   type ConsentDocument,
   canFillFormInAttention,
@@ -1682,6 +1682,14 @@ export function EncounterEditor({
   // Tratamientos que esta atención deja por ejecutar: los cuenta el servidor, sin
   // lo que la persona no aceptó ni el camino que no eligió.
   const pendingTreatments = detail.pendingTreatments
+  // Los caminos que se excluyen no cuentan como dos por ejecutar: son una elección (QA del 22 nov, H12).
+  const pendingCounts = pendingTreatmentCounts(pendingTreatments, [...detail.plannedItems, ...detail.indicatedItems])
+  const pendingWords = [
+    pendingCounts.toExecute > 0 ? `${pendingCounts.toExecute} por ejecutar` : "",
+    ...pendingCounts.choices.map((paths) => `1 por elegir entre ${paths} caminos`),
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
   /**
    * Bloques disponibles con su resumen real. `empty` significa «no hay nada
@@ -1774,7 +1782,7 @@ export function EncounterEditor({
         [
           // Sin lo quitado: el contador dice lo que sigue indicado (QA del 9 nov).
           openIndicated.length > 0 ? `${counted(openIndicated.length, "indicado", "indicados")} hoy` : "",
-          pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
+          pendingWords,
           followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
           .filter(Boolean)

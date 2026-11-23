@@ -132,6 +132,8 @@ export const dentalUi: ProductUi = {
         <PlanSiteChoices {...props} />
       ) : null,
     examples: [
+      // Se conversa con el paciente: la pregunta y su respuesta, cada cosa en su lugar (QA del 22 nov).
+      { block: "Conversando", say: "«¿Desde cuándo le duele?» — «Hace como dos semanas, con el frío»" },
       { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
       { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
       { block: "Plan", say: "«Resina en la 36, o si no una corona»" },

@@ -54,6 +54,8 @@ export const medicalUi: ProductUi = {
   // Lo que se puede dictar a Clío en un consultorio (entrega 10, decisión 20).
   dictation: {
     examples: [
+      // Se conversa con el paciente: la pregunta y su respuesta, cada cosa en su lugar (QA del 22 nov).
+      { block: "Conversando", say: "«¿Toma alguna medicina?» — «Losartán para la presión»" },
       { block: "Consulta", say: "«Viene por fiebre y dolor de garganta hace tres días»" },
       { block: "Examen", say: "«Presión 118 con 76, temperatura 38 y medio, amígdalas con placas, pulmones limpios»" },
       { block: "Diagnóstico", say: "«Parece una amigdalitis»" },

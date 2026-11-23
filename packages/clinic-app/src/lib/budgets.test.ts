@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -223,4 +223,21 @@ it("la fila de un presupuesto respondido dice lo que aceptó; sin responder, el 
   expect(budgetRowAmount({ ...budget, status: "presentado" }).totals).toMatchObject([
     { currency: "PEN", totalCents: 155000 },
   ])
+})
+
+// QA del 22 nov (H12): con dos caminos que se excluyen, la firma decía «2 por ejecutar»; solo uno se hará.
+describe("pendingTreatmentCounts", () => {
+  const path = (chosen: boolean) => ({ budgetId: "b-1", positions: [1], name: null, pathCount: 2, chosen })
+  const item = (id: string, over: Record<string, unknown> = {}) => ({ id, status: "pendiente", decisionStatus: "pendiente", path: null, ...over })
+  it("los caminos por elegir de un presupuesto cuentan como una elección, no como dos por ejecutar", () => {
+    const items = [item("a", { path: path(false) }), item("b", { path: { ...path(false), positions: [2] } }), item("c")]
+    expect(pendingTreatmentCounts(3, items)).toEqual({ toExecute: 1, choices: [2] })
+  })
+  it("elegido el camino, lo que queda se ejecuta", () => {
+    expect(pendingTreatmentCounts(1, [item("a", { path: path(true) })])).toEqual({ toExecute: 1, choices: [] })
+  })
+  it("lo mismo en lo planificado y lo indicado cuenta una vez", () => {
+    const shared = item("a", { path: path(false) })
+    expect(pendingTreatmentCounts(2, [shared, shared, item("b", { path: { ...path(false), positions: [2] } })])).toEqual({ toExecute: 0, choices: [2] })
+  })
 })
