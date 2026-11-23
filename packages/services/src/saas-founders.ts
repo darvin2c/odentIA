@@ -956,7 +956,7 @@ export async function inviteFromWaitlist(
   if (!plan || !plan.isActive) throw notFound("Plan")
   // La clínica entra con un plan de su producto (ADR 0093).
   if (plan.product !== requestProduct) {
-    throw validation(`${plan.name} es de ${productWords(plan.product as ClinicalProduct).name}: esta solicitud es de ${productWords(requestProduct).name}`)
+    throw validation(`${plan.name} es de ${isClinicalProduct(plan.product) ? productWords(plan.product).name : "otra app"}: esta solicitud es de ${productWords(requestProduct).name}`)
   }
   // Reenviar una invitación vigente del mismo plan no ocupa otro lugar.
   const holdsSeat = row.status === "invitada" && row.planId === planId && row.inviteExpiresAt !== null && row.inviteExpiresAt > now

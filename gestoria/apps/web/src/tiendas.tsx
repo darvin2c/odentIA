@@ -18,16 +18,22 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  type CountryCode,
+  CountrySelect,
   EmptyState,
   ErrorState,
   PersonAvatar,
+  regionCountry,
   SectionNav,
   SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
+  Bot,
+  ChartColumn,
   Copy,
+  CreditCard,
   LogOut,
   MessageCircle,
   Package,
@@ -287,10 +293,15 @@ export function NewStorePage() {
   const currencies = useCurrencies()
   const [name, setName] = useState("")
   const [currency, setCurrency] = useState("PEN")
+  // El de la región del navegador, como en el teléfono: se cambia buscando en la lista.
+  const [country, setCountry] = useState<CountryCode>(regionCountry)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const create = useMutation({
     mutationFn: () =>
-      api<{ store: MyStore }>("/api/tiendas", { method: "POST", body: { name, currency } }),
+      api<{ store: MyStore }>("/api/tiendas", {
+        method: "POST",
+        body: { name, currency, country },
+      }),
     onSuccess: async ({ store }) => {
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       await navigate({ to: "/tiendas/$id", params: { id: store.id } })
@@ -361,6 +372,23 @@ export function NewStorePage() {
               </FieldDescription>
             )}
           </Field>
+          <Field data-invalid={errors.country ? true : undefined}>
+            <FieldLabel htmlFor="country">País de tu tienda</FieldLabel>
+            <CountrySelect
+              id="country"
+              value={country}
+              onChange={setCountry}
+              invalid={Boolean(errors.country)}
+              aria-describedby="country-help"
+            />
+            {errors.country ? (
+              <FieldError>{errors.country}</FieldError>
+            ) : (
+              <FieldDescription id="country-help">
+                Con él te cobramos el plan con el impuesto que corresponde.
+              </FieldDescription>
+            )}
+          </Field>
           {create.isError &&
           !(create.error instanceof ApiError && Object.keys(create.error.fields).length > 0) ? (
             <p role="alert" className="text-sm text-danger">
@@ -391,12 +419,22 @@ export function useStoreContext() {
 }
 
 /** Cada destino de la tienda: sus pedidos, lo que vende, cómo cobra y entrega, y su equipo. */
-function storeSections(id: string) {
+function storeSections(store: MyStore) {
+  const id = store.id
   return [
     { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
+    { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
     { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
     { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
+    // Reportes y Argos: solo Dueño y Administrador.
+    ...(store.permissions.includes("reportes.ver")
+      ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
+      : []),
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
+    // El plan, lo cobrado y los pagos: solo el Dueño.
+    ...(store.permissions.includes("plan")
+      ? [{ label: "Plan y pagos", to: `/tiendas/${id}/plan`, icon: CreditCard }]
+      : []),
   ]
 }
 
@@ -468,7 +506,7 @@ export function StoreLayout() {
       <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
         <SectionNav
           label={`Secciones de ${store.name}`}
-          items={storeSections(store.id)}
+          items={storeSections(store)}
           pathname={pathname}
           LinkComponent={SectionLink}
           mobilePosition="header"

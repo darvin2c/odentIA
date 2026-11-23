@@ -24,7 +24,10 @@ import { SignedOut } from "./lib/api"
 import { authClient, authFetch, safeNext } from "./lib/cuenta"
 import { PaymentsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
+import { PlanPage } from "./plan"
 import { ProductPage } from "./producto"
+import { ReportsPage } from "./reportes"
+import { SofiPage } from "./sofi"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
 
 // El tema sigue al del equipo de la persona.
@@ -94,7 +97,8 @@ const signedIn = createRoute({
   ),
 })
 
-// La tienda y sus secciones: los pedidos, el catálogo (su producto), pagos y entregas, y el equipo.
+// La tienda y sus secciones: los pedidos, Sofi, el catálogo (su producto), pagos y entregas,
+// Reportes y el equipo.
 const storeRoute = createRoute({
   getParentRoute: () => signedIn,
   path: "/tiendas/$id",
@@ -108,7 +112,16 @@ const storeChildren = [
       throw redirect({ to: "/tiendas/$id/pedidos", params, replace: true })
     },
   }),
-  createRoute({ getParentRoute: () => storeRoute, path: "/pedidos", component: OrdersPage }),
+  createRoute({
+    getParentRoute: () => storeRoute,
+    path: "/pedidos",
+    // «?pedido=…» abre ese pedido (desde Argos o desde la conversación de prueba).
+    validateSearch: (s: Record<string, unknown>): { pedido?: string } =>
+      typeof s.pedido === "string" ? { pedido: s.pedido } : {},
+    component: OrdersPage,
+  }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/sofi", component: SofiPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/reportes", component: ReportsPage }),
   createRoute({ getParentRoute: () => storeRoute, path: "/catalogo", component: CatalogPage }),
   createRoute({
     getParentRoute: () => storeRoute,
@@ -121,6 +134,7 @@ const storeChildren = [
     component: PaymentsPage,
   }),
   createRoute({ getParentRoute: () => storeRoute, path: "/equipo", component: TeamPage }),
+  createRoute({ getParentRoute: () => storeRoute, path: "/plan", component: PlanPage }),
 ]
 
 const routeTree = rootRoute.addChildren([

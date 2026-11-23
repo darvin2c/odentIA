@@ -1,4 +1,4 @@
-# 0209 · Lo que se dijo en la atención se guarda con ella
+# 0213 · Lo que se dijo en la atención se guarda con ella
 
 Fecha: 2026-11-20 · Estado: aceptada · Sustituye en parte a [0012](0012-asistente-clinico-sugiere-y-el-odontologo-confirma.md) (lo que se guarda del dictado)
 
@@ -36,6 +36,6 @@ La 0012 decidió no guardar el dictado completo: de cada sugerencia quedaba solo
 
 ## Referencias
 
-- `packages/db/src/schema/clinical.ts` (`encounterDictationSegment`), migraciones `0152_lo_que_se_dijo.sql` y `0154_el_repaso_al_terminar.sql`; el repaso en `packages/services/src/dictation-review.ts` y `packages/agent/src/dictation.ts` (`askDictationReview`), `POST …/dictation/review`.
+- `packages/db/src/schema/clinical.ts` (`encounterDictationSegment`), migración `0154_lo_que_se_dijo.sql`; el repaso en `packages/services/src/dictation-review.ts` y `packages/agent/src/dictation.ts` (`askDictationReview`), `POST …/dictation/review`.
 - `packages/services/src/dictation-said.ts`, `dictationSegmentSeen` en `encounter-dictation.ts`, `apps/api/src/routes/encounter-dictation.ts` (`GET …/dictation/said`).
 - Pruebas: `apps/api/src/routes/encounter-dictation.test.ts`, `packages/services/src/dictation-said.test.ts`.

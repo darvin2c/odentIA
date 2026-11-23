@@ -15,7 +15,7 @@ import { insertTestPatients } from "./test-patient.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * «Lo que se dijo» guardado con la atención (mesa del 20 nov 2026, P2; ADR 0209): cada tramo,
+ * «Lo que se dijo» guardado con la atención (mesa del 20 nov 2026, P2; ADR 0213): cada tramo,
  * tal cual llegó, antes de que Clío lo ordene. Lo que hace la pausa de punta a punta (el modelo,
  * el permiso) lo prueba la ruta (`apps/api/src/routes/encounter-dictation.test.ts`).
  */

@@ -42,6 +42,13 @@ const envSchema = z.object({
    */
   GESTORIA_ACCOUNT_EVENTS_URL: z.string().trim().default(""),
   GESTORIA_ACCOUNT_EVENTS_SECRET: z.string().trim().default(""),
+  /**
+   * El secreto con que gestorIA firma lo que le dice a la administración (el acuerdo, ADR 0211:
+   * abrió una cuenta, esto usó, pide soporte y el estado de una cuenta), `whsec_…`. Otro que el
+   * de los avisos de la cuenta: la administración y la cuenta se separan después. Vacío: el
+   * acuerdo no existe y nada se acepta.
+   */
+  GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
   /** El dominio de vistIA (`vistia20.com`), como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()

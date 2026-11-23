@@ -2441,7 +2441,7 @@ export type DictationKind = (typeof DICTATION_KINDS)[number]
  * operación y las mismas validaciones que si lo escribiera. `por_revisar`:
  * falta algo que solo una persona puede elegir (una prestación, un código).
  * Guarda el fragmento dictado que la originó; lo dicho entero, tramo por tramo, está en
- * `encounter_dictation_segment` (ADR 0209).
+ * `encounter_dictation_segment` (ADR 0213).
  */
 export const encounterDictationSuggestion = pgTable(
   "encounter_dictation_suggestion",
@@ -2520,7 +2520,7 @@ export interface DictationTurn {
 }
 
 /**
- * Lo que se dijo en una atención (ADR 0209): cada tramo del dictado o de la conversación, tal
+ * Lo que se dijo en una atención (ADR 0213): cada tramo del dictado o de la conversación, tal
  * cual llegó y con su hora, guardado antes de que Clío lo ordene. No es historia clínica: no se
  * firma, no va en la copia de la historia ni en FHIR y lo ven solo los roles clínicos. Da el
  * contexto de la pausa siguiente aunque se recargue la página y la identidad del tramo

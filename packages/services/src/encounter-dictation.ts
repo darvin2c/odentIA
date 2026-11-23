@@ -1900,7 +1900,7 @@ export interface FormTarget {
 
 /**
  * ¿Ese tramo del dictado ya se ordenó en esta atención? Lo dice lo guardado de lo que se dijo
- * (`encounter_dictation_segment`, ADR 0209), aunque no haya dejado ninguna sugerencia, y, para
+ * (`encounter_dictation_segment`, ADR 0213), aunque no haya dejado ninguna sugerencia, y, para
  * un tramo de antes de guardarlo, las sugerencias que dejó.
  */
 export async function dictationSegmentSeen(tx: Db, orgId: string, patientId: string, encounterId: string, segmentId: string): Promise<boolean> {

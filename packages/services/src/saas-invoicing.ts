@@ -1,9 +1,10 @@
 import type { Db } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
 import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import { markReviewsCredited, pendingReviewCredits } from "./saas-action-review.js"
-import { listPeriodActions, microsToCents, netMicros, SAAS_BILLED_KINDS, SAAS_TIERS_OF, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
+import { externalAccountOf } from "./app-accounts.js"
+import { listPeriodActions, microsToCents, netMicros, SAAS_BILLED_KINDS, SAAS_TAX_BY_COUNTRY, SAAS_TIERS_OF, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
 import { countStorageAction } from "./saas-included.js"
 import { AGENT_NAMES } from "./agent-names.js"
 import { saasTermsAt } from "./saas-commercial-terms.js"
@@ -37,19 +38,28 @@ const TIER_WORDS: Record<string, [string, string]> = {
   completa: ["completa", "completas"],
 }
 
+/**
+ * En la cuenta de una app que es otro sistema (gestorIA, ADR 0211), la conversación «Gestiona» es
+ * la que tomó un pedido: la que se cobra igual, con otras palabras.
+ */
+const APP_TIER_WORDS: Record<string, [string, string]> = {
+  informa: ["atendida", "atendidas"],
+  gestiona: ["que tomó un pedido", "que tomaron un pedido"],
+}
+
 /** «150 que informaron, 60 que gestionaron una cita»: el detalle por tipo de una línea (ADR 0085). */
-function tiersText(kind: SaasActionKind, rows: SaasActionRow[]): string {
+function tiersText(kind: SaasActionKind, rows: SaasActionRow[], words: Record<string, [string, string]> = TIER_WORDS): string {
   const parts = (SAAS_TIERS_OF[kind] ?? []).flatMap((tier) => {
     const n = rows.filter((row) => row.tier === tier).length
-    const words = TIER_WORDS[tier]
-    return n && words ? [`${n} ${n === 1 ? words[0] : words[1]}`] : []
+    const said = words[tier]
+    return n && said ? [`${n} ${n === 1 ? said[0] : said[1]}`] : []
   })
   return parts.length ? ` (${parts.join(", ")})` : ""
 }
 
-const KIND_LINE: Record<SaasActionKind, (rows: SaasActionRow[]) => string> = {
-  conversacion: (rows) =>
-    `${AGENT_NAMES.recepcion}: ${rows.length} ${rows.length === 1 ? "conversación" : "conversaciones"}${tiersText("conversacion", rows)} por encima del crédito`,
+const KIND_LINE: Record<SaasActionKind, (rows: SaasActionRow[], words?: Record<string, [string, string]>) => string> = {
+  conversacion: (rows, words) =>
+    `${AGENT_NAMES.recepcion}: ${rows.length} ${rows.length === 1 ? "conversación" : "conversaciones"}${tiersText("conversacion", rows, words)} por encima del crédito`,
   consulta: (rows) =>
     `${AGENT_NAMES.asistente_clinico}: ${rows.length} ${rows.length === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}${tiersText("consulta", rows)} por encima del crédito`,
   cita: (rows) => `${AGENT_NAMES.administrador}: ${rows.length} ${rows.length === 1 ? "cita recuperada" : "citas recuperadas"} por encima del crédito`,
@@ -61,6 +71,11 @@ const KIND_LINE: Record<SaasActionKind, (rows: SaasActionRow[]) => string> = {
     const n = rows.reduce((sum, row) => sum + (row.units ?? 0), 0)
     return `Almacenamiento: ${n} GB por encima de lo incluido`
   },
+}
+
+async function hasOrgProfile(tx: Db, orgId: string): Promise<boolean> {
+  const rows = (await tx.execute(sql`select 1 from org_profile where organization_id = ${orgId} limit 1`)) as unknown as unknown[]
+  return rows.length > 0
 }
 
 /** ¿Cobra esta suscripción por acción? Activa o en gracia, con plan, no demo y con su mes empezado. */
@@ -84,6 +99,9 @@ async function issueCycleCharge(
   input: { periodStart: Date; periodEnd: Date; until: Date; final: boolean; now: Date },
 ): Promise<string | null> {
   const orgId = sub.organizationId
+  // La cuenta de una app que es otro sistema: sin clínica, con su país y sus palabras (ADR 0211).
+  // Una clínica tiene su perfil: solo sin él se mira la cuenta.
+  const external = (await hasOrgProfile(tx, orgId)) ? null : await externalAccountOf(tx, orgId)
   const dedupeKey = `ciclo:${input.periodStart.toISOString()}:${input.final ? "final" : "mitad"}`
   const [existing] = await tx
     .select({ id: saasCharge.id })
@@ -119,7 +137,7 @@ async function issueCycleCharge(
     const bases = new Set(rows.map((row) => row.basePriceMicros))
     lines.push({
       kind,
-      description: KIND_LINE[kind](rows),
+      description: KIND_LINE[kind](rows, external ? APP_TIER_WORDS : undefined),
       quantity: kind === "almacenamiento" ? rows.reduce((sum, row) => sum + (row.units ?? 0), 0) : rows.length,
       // Un precio por línea solo si todas las acciones lo comparten (un cambio de precio a mitad de mes deja varios)
       // y la cuenta da: con parte de una acción cubierta por el crédito, va solo el total.
@@ -179,7 +197,8 @@ async function issueCycleCharge(
   }
   const subtotal = lines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   if (!input.final && subtotal === 0) return null
-  const tax = await saasTaxOf(tx, orgId)
+  // El impuesto es el del país del cliente: el de la clínica, o el que la app dijo de su cuenta.
+  const tax = external ? (external.country ? (SAAS_TAX_BY_COUNTRY[external.country] ?? null) : null) : await saasTaxOf(tx, orgId)
   const taxAmount = taxCents(subtotal, tax)
   if (tax && taxAmount > 0) {
     lines.push({

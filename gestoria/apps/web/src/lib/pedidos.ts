@@ -38,6 +38,9 @@ export interface OrderRow {
   createdAt: string
   lines: { productName: string; variantName: string; quantity: number; gift: boolean }[]
   confirmedBy: string | null
+  /** De «Probar a Sofi»: no mueve stock ni cuenta en Reportes. */
+  test: boolean
+  bySofi: boolean
 }
 
 export interface OrderList {
@@ -128,6 +131,8 @@ export interface OrderDetail {
   createdAt: string
   paid: boolean
   stockPending: boolean
+  test: boolean
+  bySofi: boolean
   lines: OrderLine[]
   payments: OrderPayment[]
   events: OrderEvent[]

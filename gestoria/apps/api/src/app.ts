@@ -5,6 +5,7 @@ import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
+import { askSupport, type ContractConfig, planView, supportInput } from "./acuerdo.js"
 import {
   addPhoto,
   catalog,
@@ -62,8 +63,8 @@ import {
   type OrderFilter,
   orderDetail,
   orderInput,
-  quoteInput,
   paymentLinkStatus,
+  quoteInput,
   quoteOrder,
   receiptInput,
   receiptPhoto,
@@ -74,6 +75,19 @@ import {
   shipInput,
   todayUTC,
 } from "./pedidos.js"
+import { argosBoard } from "./sofi/argos.js"
+import {
+  agentSettings,
+  agentSettingsInput,
+  conversationView,
+  customerMessageInput,
+  newTestConversation,
+  returnToSofi,
+  saveAgentSettings,
+  writeAsCustomer,
+} from "./sofi/conversaciones.js"
+import type { ChatModel } from "./sofi/modelo.js"
+import { reportPeriod, storeReport } from "./sofi/reportes.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
@@ -103,6 +117,10 @@ export interface AppDeps {
   webURL: string
   /** El link de pago: sus proveedores, la llave de las credenciales y la dirección de este servidor. */
   link?: LinkDeps
+  /** El modelo de Sofi (B5); null o sin él, Sofi no responde y la pantalla lo dice. */
+  model?: ChatModel | null
+  /** El acuerdo con la administración (B7); sin secreto, no se envía ni se pregunta. */
+  contract?: ContractConfig
 }
 
 type Env = { Variables: { person: Person } }
@@ -117,6 +135,12 @@ const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 const MAX_LINK_NOTICES = 120
 const LINK_NOTICE_WINDOW_MS = 60_000
 const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
+/**
+ * Lo que se escribe a Sofi en una prueba, por tienda, cada diez minutos: cada mensaje llama al
+ * modelo y cuesta. Una conversación de prueba larga cabe de sobra.
+ */
+const MAX_TEST_MESSAGES = 60
+const TEST_WINDOW_MS = 10 * 60_000
 
 /**
  * La fecha de hoy de la persona («2026-11-19»): con ella se arma «Para entregar hoy» y se elige
@@ -547,6 +571,75 @@ export function createApp(deps: AppDeps) {
   })
   app.delete("/api/tiendas/:id/link-de-pago", async (c) => {
     await disconnectPaymentLink(deps.appDb, c.get("person"), c.req.param("id"))
+    return c.body(null, 204)
+  })
+
+  // Sofi (B5): lo que pone el dueño y la conversación de prueba.
+  const sofi = { appDb: deps.appDb, lockDb: deps.ownerDb, model: deps.model ?? null, link }
+  app.get("/api/tiendas/:id/sofi", async (c) =>
+    c.json(
+      await agentSettings(deps.appDb, c.get("person"), c.req.param("id"), Boolean(sofi.model)),
+    ),
+  )
+  app.patch("/api/tiendas/:id/sofi", async (c) => {
+    const input = await bodyOf(c, agentSettingsInput)
+    return c.json({
+      settings: await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input),
+    })
+  })
+  app.post("/api/tiendas/:id/sofi/pruebas", async (c) =>
+    c.json(await newTestConversation(deps.appDb, c.get("person"), c.req.param("id")), 201),
+  )
+  app.get("/api/tiendas/:id/conversaciones/:conversationId", async (c) => {
+    const { id, conversationId } = c.req.param()
+    return c.json({
+      conversation: await conversationView(deps.appDb, c.get("person"), id, conversationId),
+    })
+  })
+  const testsBy = new Map<string, { since: number; count: number }>()
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/cliente", async (c) => {
+    const input = await bodyOf(c, customerMessageInput)
+    const { id, conversationId } = c.req.param()
+    // Primero el permiso: quien no es del equipo no gasta el cupo de la tienda.
+    await inStore(deps.appDb, c.get("person"), id, "ventas.atender", async () => {})
+    const now = Date.now()
+    const seen = testsBy.get(id)
+    if (!seen || now - seen.since > TEST_WINDOW_MS) testsBy.set(id, { since: now, count: 1 })
+    else if (++seen.count > MAX_TEST_MESSAGES)
+      throw new StoreError(
+        429,
+        "TOO_MANY",
+        "Muchos mensajes de prueba seguidos. Espera unos minutos y sigue.",
+      )
+    if (testsBy.size > 10_000) testsBy.clear()
+    return c.json(await writeAsCustomer(sofi, c.get("person"), id, conversationId, input))
+  })
+  app.post("/api/tiendas/:id/conversaciones/:conversationId/devolver", async (c) => {
+    const { id, conversationId } = c.req.param()
+    return c.json({
+      conversation: await returnToSofi(deps.appDb, c.get("person"), id, conversationId),
+    })
+  })
+
+  // Reportes y Argos (B5): solo Dueño y Administrador.
+  app.get("/api/tiendas/:id/reportes", async (c) => {
+    const period = reportPeriod.parse(c.req.query("periodo") ?? undefined)
+    return c.json(
+      await storeReport(deps.appDb, c.get("person"), c.req.param("id"), period, todayOf(c)),
+    )
+  })
+  app.get("/api/tiendas/:id/argos", async (c) =>
+    c.json(await argosBoard(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+
+  // «Plan y pagos» (B7): lo que dice la administración de la tienda, y pedirle ayuda. Solo el Dueño.
+  const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  app.get("/api/tiendas/:id/plan", async (c) =>
+    c.json(await planView(deps.appDb, deps.ownerDb, contract, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/plan/ayuda", async (c) => {
+    const input = await bodyOf(c, supportInput)
+    await askSupport(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
     return c.body(null, 204)
   })
 

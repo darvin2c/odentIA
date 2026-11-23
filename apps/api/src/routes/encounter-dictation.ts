@@ -68,7 +68,7 @@ const suggestionParams = params.extend({ suggestionId: z.uuid() })
 /** Descartar: en una respuesta de ficha en la que Clío dudaba, la opción que eligió la persona. */
 const discardInput = z.object({ chosen: z.string().min(1).max(200).optional() })
 // Un tramo del dictado: lo nuevo y su identidad, para que reenviar el mismo tramo no lo ordene
-// otra vez. Lo dicho antes ya está guardado con la atención (ADR 0209): la pantalla ya no manda
+// otra vez. Lo dicho antes ya está guardado con la atención (ADR 0213): la pantalla ya no manda
 // contexto, y el de una pestaña abierta desde antes se acepta y no se usa.
 const dictateInput = z
   .object({
@@ -175,7 +175,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
   })
 
   /**
-   * Lo que se dijo en la atención, tramo por tramo, con lo que Clío no usó (ADR 0209). Lo ve
+   * Lo que se dijo en la atención, tramo por tramo, con lo que Clío no usó (ADR 0213). Lo ve
    * quien ve la atención (`clinical.read`, el guardián de la ruta de pacientes), también firmada.
    */
   app.get(`${base}/said`, async (c) => {

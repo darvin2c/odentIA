@@ -12,6 +12,7 @@ import {
 import { and, asc, eq, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose"
 import { z } from "zod"
+import { noteStoreAccount } from "./acuerdo.js"
 import { signMessage, verifyMessage } from "./firma.js"
 
 /**
@@ -253,7 +254,12 @@ async function closeCopy(tx: Db, userId: string, now: Date): Promise<void> {
       .from(storeMember)
       .where(and(eq(storeMember.storeId, m.storeId), eq(storeMember.role, "owner")))
       .limit(1)
-    if (owner) continue
+    if (owner) {
+      // Otro Dueño sigue: la administración sabe quién es ahora (el acuerdo, B7).
+      // eslint-disable-next-line no-await-in-loop
+      await noteStoreAccount(tx, m.storeId, now)
+      continue
+    }
     // eslint-disable-next-line no-await-in-loop
     const [admin] = await tx
       .select({ userId: storeMember.userId })
@@ -280,6 +286,8 @@ async function closeCopy(tx: Db, userId: string, now: Date): Promise<void> {
       subject: admin.userId,
       detail: { from: "admin", to: "owner", motivo: "El único Dueño cerró su cuenta" },
     })
+    // eslint-disable-next-line no-await-in-loop
+    await noteStoreAccount(tx, m.storeId, now)
   }
 }
 

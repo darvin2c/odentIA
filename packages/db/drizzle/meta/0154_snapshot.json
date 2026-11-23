@@ -1,9 +1,209 @@
 {
-  "id": "3195bd25-8767-4b7f-9e1c-5090c15c3960",
-  "prevId": "02a97e6b-0651-4ad3-8f4a-d2ac5bac8460",
+  "id": "73304753-a80f-4c75-b09c-e931afc8f768",
+  "prevId": "d044ac59-0d37-4c2f-a440-52df46fe3ab0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "admin.app_contract_message": {
+      "name": "app_contract_message",
+      "schema": "admin",
+      "columns": {
+        "app": {
+          "name": "app",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "app_contract_message_account_id_saas_account_id_fk": {
+          "name": "app_contract_message_account_id_saas_account_id_fk",
+          "tableFrom": "app_contract_message",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "app_contract_message_pkey": {
+          "name": "app_contract_message_pkey",
+          "columns": [
+            "app",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "app_contract_message_id_check": {
+          "name": "app_contract_message_id_check",
+          "value": "length(\"admin\".\"app_contract_message\".\"id\") BETWEEN 1 AND 200"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "admin.saas_account": {
+      "name": "saas_account",
+      "schema": "admin",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "app": {
+          "name": "app",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_ref": {
+          "name": "external_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "name": "country",
+          "type": "char(2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "saas_account_organization_uidx": {
+          "name": "saas_account_organization_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "saas_account_external_uidx": {
+          "name": "saas_account_external_uidx",
+          "columns": [
+            {
+              "expression": "app",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "saas_account_organization_id_fkey": {
+          "name": "saas_account_organization_id_fkey",
+          "tableFrom": "saas_account",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "saas_account_kind_check": {
+          "name": "saas_account_kind_check",
+          "value": "(organization_id IS NOT NULL AND id = organization_id AND app IS NULL AND external_ref IS NULL)\n        OR (organization_id IS NULL AND app IN ('gestoria')\n          AND external_ref IS NOT NULL AND length(trim(external_ref)) BETWEEN 1 AND 200)"
+        },
+        "saas_account_app_data_check": {
+          "name": "saas_account_app_data_check",
+          "value": "CASE WHEN organization_id IS NOT NULL THEN name IS NULL AND country IS NULL AND owner_user_id IS NULL AND synced_at IS NULL\n        ELSE (name IS NULL OR length(trim(name)) BETWEEN 1 AND 200) AND (country IS NULL OR country ~ '^[A-Z]{2}$') END"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "admin.kairos_ai_usage": {
       "name": "kairos_ai_usage",
       "schema": "admin",
@@ -6554,10 +6754,11 @@
         }
       },
       "foreignKeys": {
-        "support_attachment_organization_id_organization_id_fk": {
-          "name": "support_attachment_organization_id_organization_id_fk",
+        "support_attachment_organization_id_saas_account_id_fk": {
+          "name": "support_attachment_organization_id_saas_account_id_fk",
           "tableFrom": "support_attachment",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -6932,10 +7133,11 @@
         }
       },
       "foreignKeys": {
-        "support_case_organization_id_organization_id_fk": {
-          "name": "support_case_organization_id_organization_id_fk",
+        "support_case_organization_id_saas_account_id_fk": {
+          "name": "support_case_organization_id_saas_account_id_fk",
           "tableFrom": "support_case",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -7185,10 +7387,11 @@
         }
       },
       "foreignKeys": {
-        "support_message_organization_id_organization_id_fk": {
-          "name": "support_message_organization_id_organization_id_fk",
+        "support_message_organization_id_saas_account_id_fk": {
+          "name": "support_message_organization_id_saas_account_id_fk",
           "tableFrom": "support_message",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -7385,10 +7588,11 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "support_notice_organization_id_organization_id_fk": {
-          "name": "support_notice_organization_id_organization_id_fk",
+        "support_notice_organization_id_saas_account_id_fk": {
+          "name": "support_notice_organization_id_saas_account_id_fk",
           "tableFrom": "support_notice",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -19076,6 +19280,18 @@
         },
         "reviewed_at": {
           "name": "reviewed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "organizing_at": {
+          "name": "organizing_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewing_at": {
+          "name": "reviewing_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -45647,10 +45863,11 @@
         }
       },
       "foreignKeys": {
-        "saas_action_organization_id_organization_id_fk": {
-          "name": "saas_action_organization_id_organization_id_fk",
+        "saas_action_organization_id_saas_account_id_fk": {
+          "name": "saas_action_organization_id_saas_account_id_fk",
           "tableFrom": "saas_action",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -45838,10 +46055,11 @@
         }
       },
       "foreignKeys": {
-        "saas_action_review_organization_id_organization_id_fk": {
-          "name": "saas_action_review_organization_id_organization_id_fk",
+        "saas_action_review_organization_id_saas_account_id_fk": {
+          "name": "saas_action_review_organization_id_saas_account_id_fk",
           "tableFrom": "saas_action_review",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -46164,7 +46382,8 @@
         "saas_charge_org_cascade_fk": {
           "name": "saas_charge_org_cascade_fk",
           "tableFrom": "saas_charge",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -46354,10 +46573,11 @@
         }
       },
       "foreignKeys": {
-        "saas_charge_line_organization_id_organization_id_fk": {
-          "name": "saas_charge_line_organization_id_organization_id_fk",
+        "saas_charge_line_organization_id_saas_account_id_fk": {
+          "name": "saas_charge_line_organization_id_saas_account_id_fk",
           "tableFrom": "saas_charge_line",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -46663,7 +46883,8 @@
         "saas_commission_adjustment_org_cascade_fk": {
           "name": "saas_commission_adjustment_org_cascade_fk",
           "tableFrom": "saas_commission_adjustment",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -47087,7 +47308,8 @@
         "saas_settlement_line_org_cascade_fk": {
           "name": "saas_settlement_line_org_cascade_fk",
           "tableFrom": "saas_commission_settlement_line",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -47579,10 +47801,11 @@
         }
       },
       "foreignKeys": {
-        "saas_negotiation_organization_id_organization_id_fk": {
-          "name": "saas_negotiation_organization_id_organization_id_fk",
+        "saas_negotiation_organization_id_saas_account_id_fk": {
+          "name": "saas_negotiation_organization_id_saas_account_id_fk",
           "tableFrom": "saas_negotiation",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -47716,7 +47939,8 @@
         "saas_notice_org_cascade_fk": {
           "name": "saas_notice_org_cascade_fk",
           "tableFrom": "saas_notice",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -47943,7 +48167,8 @@
         "saas_payment_org_cascade_fk": {
           "name": "saas_payment_org_cascade_fk",
           "tableFrom": "saas_payment",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -48445,7 +48670,7 @@
       "checkConstraints": {
         "saas_plan_product_check": {
           "name": "saas_plan_product_check",
-          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical','optical')"
+          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical','optical','gestoria')"
         },
         "saas_plan_founders_check": {
           "name": "saas_plan_founders_check",
@@ -48708,7 +48933,8 @@
         "saas_seller_commission_org_cascade_fk": {
           "name": "saas_seller_commission_org_cascade_fk",
           "tableFrom": "saas_seller_commission",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -49087,7 +49313,8 @@
         "saas_subscription_organization_id_fkey": {
           "name": "saas_subscription_organization_id_fkey",
           "tableFrom": "saas_subscription",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],
@@ -49563,10 +49790,11 @@
         }
       },
       "foreignKeys": {
-        "storage_usage_day_organization_id_organization_id_fk": {
-          "name": "storage_usage_day_organization_id_organization_id_fk",
+        "storage_usage_day_organization_id_saas_account_id_fk": {
+          "name": "storage_usage_day_organization_id_saas_account_id_fk",
           "tableFrom": "storage_usage_day",
-          "tableTo": "organization",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
           "columnsFrom": [
             "organization_id"
           ],

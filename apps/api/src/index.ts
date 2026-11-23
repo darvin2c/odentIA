@@ -6,7 +6,7 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { accountEventSendersFromEnv, adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { accountEventSendersFromEnv, adminChannelsFromEnv, appContractPeersFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp, type ExternalAppEntry } from "./app.js"
 import { env } from "./env.js"
 import { instagramLoginFromEnv, metaPagesFromEnv } from "./routes/meta-pages.js"
@@ -125,6 +125,9 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
 // Lo que pasa con la cuenta, a esas apps (ADR 0201): sale al momento y el trabajador lo reintenta.
 const accountEvents = accountEventSendersFromEnv(env)
 for (const problem of accountEvents.problems) console.warn(`api: ${problem}`)
+// El acuerdo de esas apps con la administración (ADR 0211): sin su secreto, apagado.
+const appContract = appContractPeersFromEnv(env)
+for (const problem of appContract.problems) console.warn(`api: ${problem}`)
 
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
@@ -174,6 +177,7 @@ const app = createApp({
   productAuth,
   externalApps,
   accountEventSenders: accountEvents.senders,
+  appContractPeers: appContract.peers,
   webURL: env.WEB_URL,
   adminURL: env.ADMIN_URL,
   mailer,

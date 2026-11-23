@@ -1,5 +1,6 @@
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import { createAppDb } from "@odentia/db"
+import { SAAS_ACCOUNT_EXTERNAL_APPS } from "@odentia/db/schema/admin-accounts"
 import { describe, expect, it } from "vitest"
 import {
   ACCOUNT_APP_INFO,
@@ -34,6 +35,8 @@ describe("las apps de la cuenta (ADR 0201)", () => {
       expect(info.mailBrand).toBe(appOfProduct(product))
     }
     expect(ACCOUNT_APPS).toContain("gestoria")
+    // Solo una app que es otro sistema tiene cuentas de cliente sin clínica (ADR 0210).
+    expect(EXTERNAL_ACCOUNT_APPS).toEqual([...SAAS_ACCOUNT_EXTERNAL_APPS])
     expect(isAccountApp("gestoria")).toBe(true)
     expect(isAccountApp("dental")).toBe(false)
   })

@@ -5482,7 +5482,7 @@ for (const seed of [
       decidedAt: dictatedAt,
     },
   ])
-  // Lo que se dijo en esa pausa, guardado con la atención (ADR 0209).
+  // Lo que se dijo en esa pausa, guardado con la atención (ADR 0213).
   await db.insert(encounterDictationSegment).values({
     organizationId: ORG_A,
     patientId: mateo.id,

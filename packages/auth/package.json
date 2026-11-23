@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@odentia/clinical": "workspace:*",
+    "@odentia/contract": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/mail": "workspace:*",
     "better-auth": "1.7.4",

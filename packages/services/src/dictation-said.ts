@@ -8,7 +8,7 @@ import { notFound } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
 
 /*
- * ---------- «Lo que se dijo»: cada tramo del dictado, guardado con la atención (ADR 0209) ----------
+ * ---------- «Lo que se dijo»: cada tramo del dictado, guardado con la atención (ADR 0213) ----------
  *
  * Antes lo dicho vivía solo en la pestaña: al recargar se perdía y la pausa siguiente iba sin
  * contexto, y un tramo que no dejó sugerencias se volvía a mandar al modelo al reintentarlo

@@ -1,10 +1,13 @@
-import { createAppDb, createOwnerDb } from "@gestoria/db"
+import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
+import { deliverOutbox, refreshStates } from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import { readSecretsKey } from "./secretos.js"
+import { runArgos } from "./sofi/argos.js"
+import { modelFromEnv } from "./sofi/modelo.js"
 
 const env = readEnv()
 const ownerDb = createOwnerDb(env.GESTORIA_DATABASE_URL)
@@ -22,7 +25,21 @@ const link = {
   secretsKey,
   apiURL: env.GESTORIA_API_URL ?? env.GESTORIA_WEB_URL,
 }
-const app = createApp({ appDb, ownerDb, account, webURL: env.GESTORIA_WEB_URL, link })
+// El modelo de Sofi (B5). Sin clave, Sofi no responde y la pantalla lo dice.
+const model = modelFromEnv({ ...env, NODE_ENV: process.env.NODE_ENV })
+if (!model)
+  console.warn("gestoria-api: sin GESTORIA_OPENAI_API_KEY Sofi no responde (ni en la prueba).")
+// El acuerdo con la administración (B7): en la misma entrada de la cuenta, con su propio secreto.
+const contract = { url: env.GESTORIA_ACCOUNT_URL, secret: env.GESTORIA_CONTRACT_SECRET }
+const app = createApp({
+  appDb,
+  ownerDb,
+  account,
+  webURL: env.GESTORIA_WEB_URL,
+  link,
+  model,
+  contract,
+})
 serve({ fetch: app.fetch, port: env.GESTORIA_PORT }, (info) => {
   console.log(`gestoria-api: escuchando en el puerto ${info.port}`)
 })
@@ -47,3 +64,39 @@ async function review() {
 }
 setTimeout(() => void review(), 60_000).unref()
 setInterval(() => void review(), HOUR).unref()
+
+// Argos (B5): cada 15 minutos mira las tiendas con Sofi encendida y le encarga los seguimientos.
+// Si hay dos servidores, corre en uno solo (candado de la base).
+async function argos() {
+  try {
+    const run = await withSessionLock(ownerDb, "argos", () => runArgos(ownerDb, appDb))
+    if (run?.written)
+      console.log(`gestoria-api: Argos le encargó ${run.written} seguimiento(s) a Sofi`)
+  } catch (error) {
+    console.error("gestoria-api: Argos falló", error)
+  }
+}
+setTimeout(() => void argos(), 90_000).unref()
+setInterval(() => void argos(), 15 * 60_000).unref()
+
+// El acuerdo con la administración (B7): cada 30 segundos envía lo que espera en la bandeja de
+// salida (con la misma clave al reintentar) y pregunta el estado de las tiendas a las que les
+// toca. Un solo servidor a la vez. Sin el secreto, los avisos se guardan y esperan.
+async function agreement() {
+  try {
+    const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => {
+      const delivered = await deliverOutbox(ownerDb, contract)
+      await refreshStates(ownerDb, contract)
+      return delivered
+    })
+    if (run?.failed)
+      console.warn(`gestoria-api: ${run.failed} aviso(s) a la administración quedan por reintentar`)
+  } catch (error) {
+    console.error("gestoria-api: el acuerdo con la administración falló", error)
+  }
+}
+if (contract.secret) setInterval(() => void agreement(), 30_000).unref()
+else
+  console.warn(
+    "gestoria-api: sin GESTORIA_CONTRACT_SECRET no se avisa ni se pregunta nada a la administración.",
+  )
