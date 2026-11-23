@@ -18,7 +18,7 @@ import {
   requireClinicalAssistant,
   saveDictationSegment,
 } from "./encounter-dictation.js"
-import { DICTATION_IN_PROGRESS_MS, unusedOnce } from "./dictation-said.js"
+import { DICTATION_IN_PROGRESS_MS, sameUnusedSaid, unusedOnce } from "./dictation-said.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
 import { notFound } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
@@ -343,6 +343,12 @@ export interface DictationReviewResult extends DictationSegmentResult {
   turnsSaved: string[]
   /** Los tramos cuyos turnos no eran el tramo tal cual: no se guardaron. */
   turnsRejected: string[]
+  /**
+   * Los tramos que el repaso leyó y no pudo separar en turnos (Clío no dijo dónde empezaba ninguno,
+   * o no eran el tramo tal cual): quedan en un turno de «No se sabe», para que la conversación se
+   * vea y una persona cambie quién habló (QA del 22 nov, UX-1).
+   */
+  turnsUnsplit: string[]
   /** Lo que quedó en «No lo usé» de los tramos, nuevo. */
   unused: DictationUnusedItem[]
 }
@@ -400,6 +406,17 @@ export async function saveDictationReview(
     await tx.update(encounterDictationSegment).set({ turns, updatedAt: new Date() }).where(eq(encounterDictationSegment.id, row.id))
     turnsSaved.push(segmentId)
   }
+  // Lo que pedía turnos y quedó sin ninguno no espera otro repaso, que no llega si no se dice nada
+  // más: «Conversación» quedaba apagada para siempre y no se podía decir quién habló (UX-1). Queda
+  // en un turno de «No se sabe», con el tramo tal cual.
+  const turnsUnsplit: string[] = []
+  for (const segment of input.segments) {
+    const row = rows.find((item) => item.segmentId === segment.segmentId)
+    if (!row || row.turns !== null || turnsSaved.includes(row.segmentId) || !row.transcript.trim()) continue
+    const turns: DictationTurn[] = [{ quien: "no_se_sabe", texto: row.transcript.trim() }]
+    await tx.update(encounterDictationSegment).set({ turns, updatedAt: new Date() }).where(eq(encounterDictationSegment.id, row.id))
+    turnsUnsplit.push(row.segmentId)
+  }
   // Lo que no se usó va al tramo donde se dijo, como lo de una pausa; sin tramo claro, al último.
   const items: DictationUnusedItem[] = [
     ...input.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
@@ -422,11 +439,10 @@ export async function saveDictationReview(
     const row = rows.find((item) => item.segmentId === segmentId)
     if (!row) continue
     // Lo que la pausa ya avisó de esa frase no se avisa dos veces; si el repaso trae su motivo y la
-    // pausa no, queda el motivo (`unusedOnce`, QA del 22 nov, H6).
+    // pausa no, la frase queda con el motivo (`unusedOnce`, QA del 22 nov, H6).
     const merged = unusedOnce([...row.unused, ...fresh])
-    const more = merged.filter((item) => !row.unused.includes(item))
-    if (!more.length) continue
-    added.push(...more)
+    if (JSON.stringify(merged) === JSON.stringify(row.unused)) continue
+    added.push(...merged.filter((item) => !row.unused.some((old) => sameUnusedSaid(old, item))))
     await tx
       .update(encounterDictationSegment)
       .set({ unused: merged, updatedAt: new Date() })
@@ -446,7 +462,7 @@ export async function saveDictationReview(
         ),
       )
   }
-  return { ...result, turnsSaved, turnsRejected, unused: added }
+  return { ...result, turnsSaved, turnsRejected, turnsUnsplit, unused: added }
 }
 
 /** El repaso falló (el proveedor, la red): lo que iba a leer deja de estar «en curso» y se puede pedir ya. */

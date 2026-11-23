@@ -337,7 +337,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = reviewInput.safeParse((await c.req.json().catch(() => null)) ?? {})
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const idle = { reviewed: false, suggestions: [], added: [], corrected: [], alreadyOnFile: [], alreadyDone: [], turnsSaved: [], turnsRejected: [], unused: [], model: null }
+    const idle = { reviewed: false, suggestions: [], added: [], corrected: [], alreadyOnFile: [], alreadyDone: [], turnsSaved: [], turnsRejected: [], turnsUnsplit: [], unused: [], model: null }
     try {
       return await runService(c, 200, async () => {
         const ready = await withOrgContext(deps.db, orgId, (tx) => startDictationReview(tx, orgId, userId, at.data.id, at.data.encounterId, { openForms: parsed.data.openForms ?? [] }))
@@ -396,6 +396,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           turnsSaved: saved.turnsSaved,
           // Los que Clío no devolvió tal cual, al leerlos o al guardarlos.
           turnsRejected: [...new Set([...reviewed.turnsRejected.flatMap((number) => segmentOf(number) ?? []), ...saved.turnsRejected])],
+          // Los que quedaron en un turno de «No se sabe» porque no se pudieron separar (UX-1).
+          turnsUnsplit: saved.turnsUnsplit,
           unused: saved.unused,
           model: reviewed.model,
         }

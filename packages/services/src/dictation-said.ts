@@ -189,8 +189,11 @@ export async function settleDictationSegment(
 /** Una pregunta dicha («¿cuánto pesa?», «y desde cuándo?») no es algo que Clío dejó sin usar. */
 const isQuestion = (said: string) => /^\s*¿|\?\s*$/u.test(said)
 
-/** ¿Dice lo mismo, o una de las dos contiene a la otra palabra por palabra? */
-const sameSaid = (a: string, b: string) => !!a && !!b && (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `))
+/** ¿Dice lo mismo, o una de las dos contiene a la otra palabra por palabra? Ya sin tildes ni signos. */
+const sameSaid = (a: string, b: string) => a === b || (!!a && !!b && (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `)))
+
+/** ¿Las dos hablan de la misma frase de lo que no se usó? Dos sin frase, también. */
+export const sameUnusedSaid = (a: DictationUnusedItem, b: DictationUnusedItem) => sameSaid(normalizeForSearch(a.said ?? ""), normalizeForSearch(b.said ?? ""))
 
 /**
  * Lo que no se usó, cada frase una sola vez (QA del 22 nov, H6): si se repite, o una contiene a la
@@ -202,11 +205,7 @@ export function unusedOnce(items: readonly DictationUnusedItem[]): DictationUnus
   const kept: DictationUnusedItem[] = []
   for (const item of items) {
     if (item.said !== null && isQuestion(item.said)) continue
-    const key = normalizeForSearch(item.said ?? "")
-    const at = kept.findIndex((other) => {
-      const was = normalizeForSearch(other.said ?? "")
-      return key === was || sameSaid(key, was)
-    })
+    const at = kept.findIndex((other) => sameUnusedSaid(other, item))
     if (at < 0) kept.push(item)
     else if (item.detail && !kept[at]!.detail) kept[at] = item
   }

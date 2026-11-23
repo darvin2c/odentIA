@@ -256,11 +256,12 @@ export type DictationMode = "off" | "listening" | "paused"
 export type DictationReview =
   | { status: "idle" }
   | { status: "reviewing" }
-  | { status: "done"; reviewed: boolean; added: number; turns: number }
+  /** `unsplit`: los tramos que quedaron en un turno de «No se sabe» porque no se pudieron separar (UX-1). */
+  | { status: "done"; reviewed: boolean; added: number; turns: number; unsplit: number }
   | { status: "failed"; message: string }
 
 interface ReviewResponse {
-  data: { reviewed: boolean; inProgress?: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[] }
+  data: { reviewed: boolean; inProgress?: boolean; suggestions: DictationSuggestion[]; added: string[]; turnsSaved: string[]; turnsUnsplit?: string[] }
 }
 
 /** La clave de «Lo que se dijo» de la atención: el repaso la deja vieja (los turnos, lo que no usó). */
@@ -531,7 +532,7 @@ export function useDictationSession({
       }
       if (!mounted.current) return null
       const data = response.data
-      setReview({ status: "done", reviewed: data.reviewed || waited, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length })
+      setReview({ status: "done", reviewed: data.reviewed || waited, added: data.suggestions.length + data.added.length, turns: data.turnsSaved.length, unsplit: data.turnsUnsplit?.length ?? 0 })
       if (data.reviewed || waited) {
         await refresh()
         void refreshSaid()

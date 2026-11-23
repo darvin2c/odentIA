@@ -418,7 +418,7 @@ describe("lo resaltado de lo que se dijo", () => {
  * con lo que ya quedó de ella. Aquí importa cuándo se llama al modelo, qué lee y qué queda.
  */
 describe("el repaso al terminar", () => {
-  type Reviewed = { reviewed: boolean; suggestions: Array<{ id: string; kind: string; payload: Record<string, unknown> }>; turnsSaved: string[]; turnsRejected: string[]; unused: Array<{ said: string | null; detail?: string }> }
+  type Reviewed = { reviewed: boolean; suggestions: Array<{ id: string; kind: string; payload: Record<string, unknown> }>; turnsSaved: string[]; turnsRejected: string[]; turnsUnsplit: string[]; unused: Array<{ said: string | null; detail?: string }> }
   const ask = (n: number) =>
     review.mock.calls[n]?.[2] as { segments: Array<{ number: number; transcript: string; needsTurns: boolean }>; pending: string[]; discarded: string[]; earlierLeftOut: boolean }
 
@@ -445,6 +445,8 @@ describe("el repaso al terminar", () => {
     expect(data.reviewed).toBe(true)
     expect(data.suggestions.map((item) => [item.kind, item.payload["title"]])).toEqual([["control", "Control: la otra resina"]])
     expect(data.turnsSaved).toEqual([first])
+    // El tramo del que Clío no dijo quién habló queda en un turno de «No se sabe», y la respuesta lo dice (UX-1).
+    expect(data.turnsUnsplit).toEqual([second])
     expect(review).toHaveBeenCalledTimes(1)
     expect(ask(0).segments.map((item) => [item.number, item.transcript, item.needsTurns])).toEqual([
       [1, "Doctora, me duele una muela.", true],
@@ -454,7 +456,10 @@ describe("el repaso al terminar", () => {
 
     // «Lo que se dijo» trae los turnos del tramo.
     const said = (await (await app.request(`${base}/said`)).json()) as { data: { segments: Array<{ turns: unknown[] | null }> } }
-    expect(said.data.segments.map((item) => item.turns)).toEqual([[{ quien: "paciente", texto: "Doctora, me duele una muela." }], null])
+    expect(said.data.segments.map((item) => item.turns)).toEqual([
+      [{ quien: "paciente", texto: "Doctora, me duele una muela." }],
+      [{ quien: "no_se_sabe", texto: "Bueno, te veo la próxima semana para la otra resina." }],
+    ])
 
     // Terminar otra vez sin haber dicho nada: no llama al modelo.
     const again = await app.request(`${base}/review`, json({}))
@@ -465,7 +470,7 @@ describe("el repaso al terminar", () => {
     await app.request(base, json({ transcript: "Gracias, doctora.", segmentId: crypto.randomUUID() }))
     await app.request(`${base}/review`, json({}))
     expect(review).toHaveBeenCalledTimes(2)
-    expect(ask(1).segments.map((item) => item.needsTurns)).toEqual([false, true, true])
+    expect(ask(1).segments.map((item) => item.needsTurns)).toEqual([false, false, true])
   })
 
   it("cambiar quién habló en un turno: quien lleva la atención, con un toque; recepción no puede", async () => {

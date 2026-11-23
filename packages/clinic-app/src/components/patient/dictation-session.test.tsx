@@ -31,7 +31,7 @@ beforeEach(() => {
   route.mockReset()
   route.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url === BASE && init?.method !== "POST") return { data: { enabled: true, suggestions: [], removedByVoice: [], confirmed: 0 } }
-    if (url === `${BASE}/review`) return { data: { reviewed: true, suggestions: [], added: ["n-1"], turnsSaved: ["s-1", "s-2"] } }
+    if (url === `${BASE}/review`) return { data: { reviewed: true, suggestions: [], added: ["n-1"], turnsSaved: ["s-1", "s-2"], turnsUnsplit: ["s-3"] } }
     return segmentReply
   })
 })
@@ -46,7 +46,8 @@ describe("«Terminar dictado» pide el repaso", () => {
     const { result } = render()
     act(() => result.current.submitTyped("Me duele una muela cuando tomo algo frío."))
     act(() => result.current.finish())
-    await waitFor(() => expect(result.current.review).toEqual({ status: "done", reviewed: true, added: 1, turns: 2 }))
+    // `unsplit`: los tramos que quedaron sin separar, para que la pantalla lo diga (QA del 22 nov, UX-1).
+    await waitFor(() => expect(result.current.review).toEqual({ status: "done", reviewed: true, added: 1, turns: 2, unsplit: 1 }))
     expect(posts()).toEqual([BASE, `${BASE}/review`])
   })
 

@@ -288,12 +288,14 @@ describe("los turnos de lo que se dijo", () => {
     })
     expect(result.turnsSaved).toEqual([asked])
     expect(result.turnsRejected).toEqual([rewritten])
+    // El que no era el tramo queda tal cual se oyó, en un turno de «No se sabe» (QA del 22 nov, UX-1).
+    expect(result.turnsUnsplit).toEqual([rewritten])
     const [first, second] = await said()
     expect(first?.turns).toEqual([
       { quien: "dra", texto: "¿Tiene alguna enfermedad?" },
       { quien: "no_se_sabe", texto: "Tiene asma, usa salbutamol." },
     ])
-    expect(second?.turns).toBeNull()
+    expect(second?.turns).toEqual([{ quien: "no_se_sabe", texto: "Debe pesar veinticuatro kilos más o menos." }])
 
     // La mamá de Mateo: un toque.
     const turns = await fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 1, { quien: "acompanante", vinculo: "madre" }))
@@ -310,6 +312,43 @@ describe("los turnos de lo que se dijo", () => {
     // Con la atención anulada, ya no se cambia.
     await ownerDb.update(encounter).set({ status: "anulada", voidedAt: new Date(), voidedBy: fx.actor, voidReason: "Prueba" }).where(eq(encounter.id, fx.encounter.id))
     await expect(fx.run((tx) => setDictationTurnSpeaker(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, asked, 0, { quien: "paciente" }))).rejects.toMatchObject({ code: "VOIDED" })
+    await enable(false)
+  })
+
+  it("UX-1: si Clío no separó ningún tramo, cada uno queda en un turno de «No se sabe» y el repaso dice cuántos", async () => {
+    await enable(true)
+    const { pause, review, start, said } = await conversation()
+    // Seis pausas escritas sin puntuación, como en la QA: Clío no dijo dónde empezaba ningún turno.
+    const pauses = [
+      "buenas tardes rosa que la trae por aca",
+      "me duele una muela de abajo a la izquierda cuando tomo algo frio",
+      "desde cuando le pasa eso",
+      "hace como dos semanas y en la noche tambien me late",
+      "toma alguna medicina si tomo losartan para la presion",
+      "la 36 tiene caries profunda dolor al frio que se queda",
+    ]
+    // Con lo que dice dónde empieza cada turno, las frases del servidor los arman tal cual: no es que
+    // no calcen; lo que pasó es que no llegó ningún comienzo (o ninguno dentro de lo numerado).
+    const segments = pauses.map((transcript) => ({ transcript, needsTurns: true }))
+    const built = turnsFromStarts(segments, [
+      { desde: 1, quien: "dra" },
+      { desde: 2, quien: "paciente" },
+      { desde: 3, quien: "dra" },
+      { desde: 4, quien: "paciente" },
+      { desde: 5, quien: "dra" },
+      { desde: 5, quien: "paciente", empieza: "si tomo losartan" },
+      { desde: 6, quien: "dra" },
+    ])
+    expect(built.every((turns, index) => turns !== null && turnsSayTranscript(turns, pauses[index]!))).toBe(true)
+    expect(turnsFromStarts(segments, [{ desde: 40, quien: "dra" }])).toEqual(pauses.map(() => null))
+    const ids: string[] = []
+    for (const transcript of pauses) ids.push(await pause(transcript))
+    const result = await review({ turns: [] })
+    expect(result.turnsSaved).toEqual([])
+    expect(result.turnsUnsplit).toEqual(ids)
+    expect((await said()).map((item) => item.turns)).toEqual(pauses.map((texto) => [{ quien: "no_se_sabe", texto }]))
+    // Otro «Terminar» sin decir nada no vuelve a llamar al modelo: la conversación ya se ve.
+    expect(await start()).toEqual({ due: false })
     await enable(false)
   })
 })
@@ -335,8 +374,9 @@ describe("lo que el repaso no usó", () => {
     expect(result.unused.map((item) => item.said)).toEqual(["le gusta el fútbol", "Mi papá es diabético"])
     const [family, kid] = await said()
     expect(family?.unused).toEqual([{ said: "Mi papá es diabético", why: "sin_lugar", detail: expect.stringContaining("familiar") }])
+    // La frase que la pausa ya avisó sin motivo queda una vez, con el motivo del repaso (QA del 22 nov, H6).
     expect(kid?.unused).toEqual([
-      { said: "Debe pesar veinticuatro", why: "sin_lugar" },
+      { said: "Debe pesar veinticuatro", why: "sin_lugar", detail: expect.stringContaining("no medidos") },
       { said: "le gusta el fútbol", why: "sin_lugar" },
     ])
     await enable(false)
