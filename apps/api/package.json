@@ -18,6 +18,7 @@
     "@odentia/auth": "workspace:*",
     "@odentia/channels": "workspace:*",
     "@odentia/clinical": "workspace:*",
+    "@odentia/contract": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/dental": "workspace:*",
     "@odentia/mail": "workspace:*",
