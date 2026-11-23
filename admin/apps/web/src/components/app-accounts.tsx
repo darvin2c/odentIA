@@ -4,7 +4,7 @@
  * cargos, sus pagos y su soporte. Sus planes son de su app: una clínica nunca los ve, ni una
  * cuenta de gestorIA los de una clínica. Solo la administración (ADR 0094).
  */
-import { Button, FieldGroup } from "@odentia/ui"
+import { Button, FieldGroup, toast } from "@odentia/ui"
 import {
   EmptyState,
   ErrorState,
@@ -22,6 +22,7 @@ import { z } from "zod"
 import { api } from "../lib/api"
 import { CurrencySelect, centsToMajor, majorToCents } from "./billing-fields"
 import { money } from "./billing-payments"
+import { OpenAppAccountDrawer } from "./app-requests"
 import type { AdminPlan } from "./plan-drawer"
 
 /** El nombre de cada app que es otro sistema, como lo ve el equipo. */
@@ -313,6 +314,7 @@ export function AppAccountsSection({
   onChanged: () => void
 }) {
   const [drawer, setDrawer] = useState<null | { app: string; plan?: AdminPlan }>(null)
+  const [opening, setOpening] = useState<string | null>(null)
   const accounts = useQuery({
     queryKey: ["admin", "billing", "accounts"],
     queryFn: async () =>
@@ -330,15 +332,25 @@ export function AppAccountsSection({
           <div key={app} className="flex flex-col gap-2">
             <h3 className="flex flex-wrap items-center gap-2 text-sm">
               <AppMark app={app} className="text-sm" />
-              <span className="text-muted-foreground">· sus cuentas las abre la app</span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                onClick={() => setDrawer({ app })}
-              >
-                Nuevo plan
-              </Button>
+              <span className="text-muted-foreground">
+                · las abre la app, o la administración para un cliente
+              </span>
+              <span className="ml-auto flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!own.some((plan) => plan.isActive)}
+                  title={
+                    own.some((plan) => plan.isActive) ? undefined : "Primero crea un plan de la app"
+                  }
+                  onClick={() => setOpening(app)}
+                >
+                  Abrir una cuenta
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDrawer({ app })}>
+                  Nuevo plan
+                </Button>
+              </span>
             </h3>
             {own.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -395,7 +407,7 @@ export function AppAccountsSection({
             ) : ofApp.length === 0 ? (
               <EmptyState
                 title={`Sin cuentas de ${APP_NAMES[app]}`}
-                description="Aparecen cuando la app avisa que abrió una."
+                description="Aparecen cuando la app avisa que abrió una, o al abrirla aquí para un cliente."
               />
             ) : (
               <ul className="flex flex-col gap-2">
@@ -426,6 +438,18 @@ export function AppAccountsSection({
           </div>
         )
       })}
+      {opening ? (
+        <OpenAppAccountDrawer
+          app={opening}
+          plans={plans}
+          onClose={() => setOpening(null)}
+          onSaved={() => {
+            toast.success("Cuenta abierta: su app la abre ahora para su dueño.")
+            void accounts.refetch()
+            onChanged()
+          }}
+        />
+      ) : null}
       {drawer ? (
         <AppPlanDrawer
           app={drawer.app}

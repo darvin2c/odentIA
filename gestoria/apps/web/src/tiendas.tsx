@@ -28,7 +28,7 @@ import {
   SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
+import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
 import {
   Bot,
   ChartColumn,
@@ -63,8 +63,10 @@ import {
   type PendingInvitation,
   ROLES,
   type StoreRole,
+  type SupportAccess,
   type TeamMember,
 } from "./lib/api"
+import { when } from "./lib/pedidos"
 import { authClient, forgetToken } from "./lib/cuenta"
 import { GroupSignature, Logo } from "./marca"
 
@@ -421,9 +423,15 @@ export function useStoreContext() {
 /** Cada destino de la tienda: sus pedidos, lo que vende, cómo cobra y entrega, y su equipo. */
 function storeSections(store: MyStore) {
   const id = store.id
+  // Soporte de gestorIA solo mira: sin pedidos ni conversaciones (`ventas.atender`).
+  const attends = store.permissions.includes("ventas.atender")
   return [
-    { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
-    { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
+    ...(attends
+      ? [
+          { label: "Pedidos", to: `/tiendas/${id}/pedidos`, icon: ReceiptText },
+          { label: "Sofi", to: `/tiendas/${id}/sofi`, icon: Bot },
+        ]
+      : []),
     { label: "Catálogo", to: `/tiendas/${id}/catalogo`, icon: Package },
     { label: "Pagos y entregas", to: `/tiendas/${id}/pagos-y-entregas`, icon: Truck },
     // Reportes y Argos: solo Dueño y Administrador.
@@ -488,13 +496,18 @@ export function StoreLayout() {
         </Button>
       </Shell>
     )
+  // Quien solo mira (soporte) entra por el catálogo: los pedidos no son suyos.
+  if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
+    return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   return (
     <Shell store={store} wide>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em]">{store.name}</h1>
           <p className="text-sm text-muted-foreground">
-            Eres {ROLES[store.role].name}. Vende en {store.currency}.
+            {store.supportUntil
+              ? `Entraste como soporte de gestorIA, solo a mirar, hasta el ${when(store.supportUntil)}.`
+              : `Eres ${ROLES[store.role].name}. Vende en ${store.currency}.`}
           </p>
         </div>
         {me.data.stores.length > 1 || me.data.invitations.length > 0 ? (
@@ -512,6 +525,10 @@ export function StoreLayout() {
           mobilePosition="header"
         >
           <div className="flex min-w-0 flex-col gap-6">
+            {store.permissions.includes("equipo.gestionar") &&
+            !pathname.endsWith("/equipo") ? (
+              <SupportAccessPanel store={store} only="actual" />
+            ) : null}
             <Outlet />
           </div>
         </SectionNav>
@@ -530,10 +547,7 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
   const canManage = store.permissions.includes("equipo.gestionar")
   const team = useQuery({
     queryKey: ["equipo", store.id],
-    queryFn: () =>
-      api<{ members: TeamMember[]; invitations: PendingInvitation[] }>(
-        `/api/tiendas/${store.id}/equipo`,
-      ),
+    queryFn: () => api<Team>(`/api/tiendas/${store.id}/equipo`),
   })
   const [inviting, setInviting] = useState(false)
 
@@ -587,7 +601,118 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
           ) : null}
         </>
       ) : null}
+      {team.data && team.data.support.length > 0 ? (
+        <SupportAccessPanel store={store} only="todo" />
+      ) : null}
       {inviting ? <InviteDialog store={store} onClose={() => setInviting(false)} /> : null}
+    </section>
+  )
+}
+
+interface Team {
+  members: TeamMember[]
+  invitations: PendingInvitation[]
+  support: SupportAccess[]
+}
+
+const SUPPORT_STATUS: Record<SupportAccess["status"], string> = {
+  por_aceptar: "Pide entrar",
+  vigente: "Puede mirar",
+  terminado: "Terminó",
+  rechazado: "No lo dejaste",
+}
+
+/**
+ * Soporte de gestorIA (ADR 0213): lo que pide la administración para mirar la tienda y lo que
+ * pasó. Dejarlo entrar, no hacerlo o sacarlo es del Dueño o un Administrador. En cada sección de
+ * la tienda se ve lo que está pendiente o vigente («actual»); en Equipo, también lo último.
+ */
+function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | "todo" }) {
+  const queryClient = useQueryClient()
+  const canManage = store.permissions.includes("equipo.gestionar")
+  const team = useQuery({
+    queryKey: ["equipo", store.id],
+    queryFn: () => api<Team>(`/api/tiendas/${store.id}/equipo`),
+    enabled: store.permissions.includes("equipo.ver"),
+  })
+  const act = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "aceptar" | "rechazar" | "quitar" }) =>
+      api(`/api/tiendas/${store.id}/soporte/${id}/${action}`, { method: "POST" }),
+    onSuccess: async (_, { action }) => {
+      await queryClient.invalidateQueries({ queryKey: ["equipo", store.id] })
+      toast.success(
+        action === "aceptar"
+          ? "Listo: soporte ya puede mirar tu tienda."
+          : action === "quitar"
+            ? "Soporte ya no puede mirar tu tienda."
+            : "Listo: soporte no entra.",
+      )
+    },
+    onError: (error) => toast.error(error.message),
+  })
+  const rows = (team.data?.support ?? []).filter(
+    (row) => only === "todo" || row.status === "por_aceptar" || row.status === "vigente",
+  )
+  if (rows.length === 0) return null
+  return (
+    <section
+      aria-labelledby={`soporte-${only}`}
+      className={only === "todo" ? "flex flex-col gap-2" : "rounded-xl border bg-card p-4"}
+    >
+      <h3 id={`soporte-${only}`} className="text-sm font-semibold">
+        Soporte de gestorIA
+      </h3>
+      <ul className="flex flex-col divide-y">
+        {rows.map((row) => (
+          <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
+            <div className="flex min-w-0 flex-1 basis-60 flex-col gap-0.5">
+              <span className="font-medium">
+                {row.status === "por_aceptar"
+                  ? `${row.staffName} pide mirar tu tienda ${row.minutes} minutos`
+                  : row.status === "vigente" && row.expiresAt
+                    ? `${row.staffName} puede mirar tu tienda hasta el ${when(row.expiresAt)}`
+                    : row.staffName}
+              </span>
+              <span className="text-muted-foreground">
+                Para: {row.reason}. Solo mira la tienda, su equipo y su catálogo; no ve tus pedidos
+                ni tus conversaciones, y no cambia nada.
+              </span>
+            </div>
+            {only === "todo" ? (
+              <Badge variant="outline">{SUPPORT_STATUS[row.status]}</Badge>
+            ) : null}
+            {canManage && row.status === "por_aceptar" ? (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={act.isPending}
+                  onClick={() => act.mutate({ id: row.id, action: "aceptar" })}
+                >
+                  Dejar entrar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={act.isPending}
+                  onClick={() => act.mutate({ id: row.id, action: "rechazar" })}
+                >
+                  No
+                </Button>
+              </div>
+            ) : null}
+            {canManage && row.status === "vigente" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={act.isPending}
+                onClick={() => act.mutate({ id: row.id, action: "quitar" })}
+              >
+                Sacar ahora
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
