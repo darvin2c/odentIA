@@ -78,6 +78,7 @@ import {
 } from "./lib/support-session.js"
 import { createAccountRoute } from "./routes/account.js"
 import { ACCOUNT_REVIEW_PATH, type AccountReviewDeps, answerAccountReview } from "./routes/account-review.js"
+import { type AppContractDeps, answerAppContract, isContractPath } from "./routes/app-contract.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
 import { createAdminChatsRoute } from "./routes/admin-chats.js"
@@ -206,6 +207,8 @@ export interface AppDeps {
   accountEventSenders?: AccountEventSender[]
   /** La revisión diaria de su copia de las cuentas; por omisión, la de esta base (pruebas sin base). */
   reviewAccounts?: AccountReviewDeps["reviewAccounts"]
+  /** Con qué secreto firma cada una lo que le dice a la administración (el acuerdo, ADR 0211). */
+  appContractPeers?: AppContractDeps["appContractPeers"]
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -497,6 +500,9 @@ export function createApp(deps: AppDeps) {
       // La revisión diaria de su copia de las cuentas: de servidor a servidor, firmada con el
       // secreto de sus avisos. Existe aunque gestorIA no esté configurada del todo.
       if (path === ACCOUNT_REVIEW_PATH) return answerAccountReview(c, entry.app, deps)
+      // El acuerdo con la administración (ADR 0211): también de servidor a servidor y firmado,
+      // con su propio secreto. Sin él, no existe.
+      if (isContractPath(path)) return answerAppContract(c, entry.app, deps)
       if (!path.startsWith("/api/auth/") || path.startsWith("/api/auth/organization/"))
         return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
       return entryCors(c, async () => {

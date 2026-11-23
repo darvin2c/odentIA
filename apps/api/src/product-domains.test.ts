@@ -92,7 +92,6 @@ it("el enlace y la llave del portal van en el dominio del producto de la clínic
 describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () => {
   const appWith = (entry: Auth, more: Partial<Parameters<typeof createApp>[0]> = {}) =>
     createApp({
-      ...more,
       auth: sessionOf("odentIA"),
       externalApps: [
         { app: "gestoria", domain: "gestoria.test", auth: entry, trustedOrigins: ["https://app.gestoria.test"] },
@@ -109,6 +108,7 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       adminURL: "https://admin.odentia.test",
       mailer: { send: async () => {} } as unknown as Mailer,
       listenUrl: "postgres://localhost:5432/dentalagent",
+      ...more,
     })
 
   it("en su dominio no responde nada de las clínicas, y las clínicas siguen igual", async () => {
@@ -194,6 +194,63 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       expect((await ask(appWith(sessionOf("gestorIA")), body)).status).toBe(404)
       expect((await ask(withReview, body, SECRET, "api.odentia.test")).status).not.toBe(200)
       expect((await withReview.request("https://api.gestoria.test/api/account-apps/review")).status).toBe(404)
+    })
+  })
+  describe("el acuerdo con la administración (ADR 0211)", () => {
+    const SECRET = `whsec_${Buffer.alloc(32, 8).toString("base64")}`
+    const EVENTS_SECRET = `whsec_${Buffer.alloc(32, 5).toString("base64")}`
+    const received: string[] = []
+    // La base de prueba solo registra la transacción del aviso: la regla del acuerdo se prueba en services.
+    const ownerDb = {
+      transaction: async () => {
+        received.push("aviso")
+        return { repeated: true }
+      },
+    } as unknown as Db
+    const contract = () =>
+      appWith(sessionOf("gestorIA"), {
+        ownerDb,
+        appContractPeers: [{ app: "gestoria", secret: SECRET }],
+        accountEventSenders: [{ app: "gestoria", url: "https://servidor.gestoria.test/avisos/cuenta", secret: EVENTS_SECRET }],
+      })
+    const usage = JSON.stringify({
+      type: "uso.contado",
+      timestamp: "2026-11-22T12:00:00.000Z",
+      data: { account: "tienda-1", kind: "conversacion", outcome: "atendida", conversation: "c-1", occurredAt: "2026-11-22T12:00:00.000Z" },
+    })
+    const send = (target: ReturnType<typeof createApp>, body: string, secret = SECRET, host = "api.gestoria.test", path = "/api/contract/events") =>
+      target.request(`https://${host}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...signAccountEvent({ secret, id: "aviso-1", body }) },
+        body,
+      })
+
+    it("acepta solo lo firmado con el secreto del acuerdo y lo que cumple el acuerdo", async () => {
+      const app = contract()
+      const ok = await send(app, usage)
+      expect(ok.status).toBe(200)
+      expect(await ok.json()).toEqual({ data: { received: true, repeated: true } })
+      expect(received).toEqual(["aviso"])
+      // El secreto de los avisos de la cuenta no sirve para hablarle a la administración.
+      expect((await send(app, usage, EVENTS_SECRET)).status).toBe(401)
+      const tampered = await app.request("https://api.gestoria.test/api/contract/events", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...signAccountEvent({ secret: SECRET, id: "aviso-2", body: usage }) },
+        body: usage.replace("atendida", "pedido"),
+      })
+      expect(tampered.status).toBe(401)
+      // Un precio o un tipo que no es del acuerdo no pasa.
+      expect((await send(app, usage.replace("atendida", "cita"))).status).toBe(400)
+      expect((await send(app, "no es json")).status).toBe(400)
+      expect((await send(app, JSON.stringify({ account: "x".repeat(70_000) }))).status).toBe(413)
+      expect(received).toEqual(["aviso"])
+    })
+
+    it("no existe sin su secreto, ni en el dominio de las clínicas", async () => {
+      expect((await send(appWith(sessionOf("gestorIA")), usage)).status).toBe(404)
+      expect((await send(contract(), usage, SECRET, "api.odentia.test")).status).not.toBe(200)
+      expect((await contract().request("https://api.gestoria.test/api/contract/state")).status).toBe(404)
+      expect(received).toEqual(["aviso"])
     })
   })
 })

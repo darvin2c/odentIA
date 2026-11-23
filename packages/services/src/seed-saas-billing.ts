@@ -32,10 +32,12 @@ import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { clientForWaitlistRequest, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { decide } from "./admin-sales.js"
+import { receiveAppEvent } from "./app-contract.js"
 import { addDays as addCivilDays, dayStart, reportDayOf } from "./report-periods.js"
 import {
   confirmSaasPayment,
   createSaasCharge,
+  createSaasPlan,
   monthEndUTC,
   monthKeyUTC,
   monthStartUTC,
@@ -511,7 +513,59 @@ export async function seedSaasBillingDemo(
     })
   }
   await seedFoundersDemo(db, now)
+  await seedAppAccountDemo(db, now)
   return { orgs: ["seed-saas-prueba", "seed-saas-deuda", "seed-saas-cobrada"] }
+}
+
+/**
+ * Una tienda de gestorIA abierta por el acuerdo (ADR 0211), con un plan de prueba ficticio: lo
+ * que ve la administración en Cobros y planes › Cuentas de otras apps. Los precios son de
+ * ejemplo; los planes reales de gestorIA los carga la administración. Solo desarrollo.
+ */
+async function seedAppAccountDemo(db: Db, now: Date): Promise<void> {
+  const [plan] = await db.select({ id: saasPlan.id }).from(saasPlan).where(eq(saasPlan.code, "gestoria-demo")).limit(1)
+  if (!plan)
+    await createSaasPlan(db, DEMO_ACTOR, {
+      app: "gestoria",
+      code: "gestoria-demo",
+      name: "gestorIA de ejemplo (ficticio)",
+      currency: "USD",
+      priceCents: 1500,
+      creditCents: 1500,
+      conversationInformMicros: 100_000,
+      conversationMicros: 300_000,
+      maxDiscountBps: 0,
+      sellerDiscountBps: 0,
+      trialCreditCents: 1000,
+      trialMaxCreditCents: 1000,
+      trialDays: 14,
+      trialMaxDays: 14,
+      isDefault: true,
+    })
+  const at = now.toISOString()
+  await receiveAppEvent(db, "gestoria", "demo-tienda-abre", {
+    type: "cuenta.abierta",
+    timestamp: at,
+    data: { account: "tienda-demo", name: "Calzados Rosa (ficticia)", country: "PE", ownerUserId: DEMO_ACTOR },
+  })
+  for (let index = 0; index < 6; index++)
+    await receiveAppEvent(db, "gestoria", `demo-tienda-uso-${index}`, {
+      type: "uso.contado",
+      timestamp: at,
+      data: {
+        account: "tienda-demo",
+        kind: "conversacion",
+        outcome: index % 2 === 0 ? "pedido" : "atendida",
+        conversation: `demo-${index}`,
+        occurredAt: new Date(now.getTime() - (index + 1) * 3_600_000).toISOString(),
+        channel: "whatsapp",
+      },
+    })
+  await receiveAppEvent(db, "gestoria", "demo-tienda-soporte", {
+    type: "soporte.pedido",
+    timestamp: at,
+    data: { account: "tienda-demo", userId: DEMO_ACTOR, kind: "cobro", question: "¿Cómo pago mi plan? (ficticio)" },
+  })
 }
 
 /**

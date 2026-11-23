@@ -64,7 +64,7 @@ export async function answerAccountReview(
 }
 
 /** El cuerpo como texto, leído mientras llega y cortado al pasar el tope (también sin `content-length`). */
-async function readLimited(request: Request, max: number): Promise<string | null> {
+export async function readLimited(request: Request, max: number): Promise<string | null> {
   if (!request.body) return ""
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []

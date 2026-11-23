@@ -1,0 +1,486 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`el ciclo del cobro de las clínicas > da igual que antes, con una cuenta de gestorIA cobrando al lado 1`] = `
+{
+  "clinics": {
+    "dorada-cobro": {
+      "charges": [
+        {
+          "amountCents": 4248,
+          "currency": "USD",
+          "dedupeKey": "ciclo:2026-10-20T15:00:00.000Z:final",
+          "dueAt": "2026-11-27T15:00:00.000Z",
+          "lines": [
+            {
+              "amountCents": 2900,
+              "description": "Plan odentIA: cuota del mes, que vuelve en crédito para los agentes",
+              "kind": "cuota",
+              "quantity": 1,
+              "unitBaseMicros": null,
+              "unitPriceMicros": null,
+            },
+            {
+              "amountCents": 700,
+              "description": "Sofi: 24 conversaciones (16 que informaron, 8 que gestionaron una cita) por encima del crédito",
+              "kind": "conversacion",
+              "quantity": 24,
+              "unitBaseMicros": null,
+              "unitPriceMicros": null,
+            },
+            {
+              "amountCents": 0,
+              "description": "96 acciones cubiertas y parte de otra por el crédito del mes (29.00 USD): sin cargo",
+              "kind": "credito",
+              "quantity": 96,
+              "unitBaseMicros": null,
+              "unitPriceMicros": null,
+            },
+            {
+              "amountCents": 648,
+              "description": "IGV (18 %)",
+              "kind": "impuesto",
+              "quantity": 1,
+              "unitBaseMicros": null,
+              "unitPriceMicros": null,
+            },
+          ],
+          "paidCents": 0,
+          "periodEnd": "2026-11-19T15:00:00.000Z",
+          "periodStart": "2026-10-20T15:00:00.000Z",
+          "planCode": "lista",
+          "status": "pendiente",
+          "subtotalCents": 3600,
+          "taxCents": 648,
+          "taxLabel": "IGV",
+        },
+      ],
+      "notices": [],
+      "subscription": {
+        "activatedAt": 2026-10-20T15:00:00.000Z,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-12-19T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-19T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": null,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-cobro",
+        "pauseReason": null,
+        "planId": "plan",
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": null,
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "activa",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": null,
+        "trialStartedAt": null,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-demo": {
+      "charges": [],
+      "notices": [],
+      "subscription": {
+        "activatedAt": null,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-11-10T15:00:00.000Z,
+        "currentPeriodStart": 2026-10-11T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": null,
+        "guaranteedUntil": null,
+        "isDemo": true,
+        "organizationId": "dorada-demo",
+        "pauseReason": null,
+        "planId": null,
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": null,
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "prueba",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": 2026-11-10T15:00:00.000Z,
+        "trialStartedAt": 2026-10-11T15:00:00.000Z,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-gracia-vencida": {
+      "charges": [
+        {
+          "amountCents": 10000,
+          "currency": "PEN",
+          "dedupeKey": null,
+          "dueAt": "2026-10-31T15:00:00.000Z",
+          "lines": [],
+          "paidCents": 0,
+          "periodEnd": "2026-10-11T15:00:00.000Z",
+          "periodStart": "2026-09-11T15:00:00.000Z",
+          "planCode": "soles",
+          "status": "pendiente",
+          "subtotalCents": null,
+          "taxCents": 0,
+          "taxLabel": null,
+        },
+      ],
+      "notices": [
+        {
+          "dedupeKey": "restriccion:2026-11-20",
+          "emailTo": "dorada-gracia-vencida-owner@contrato.test",
+          "kind": "restriccion_inicio",
+          "subject": "Tu acceso quedó restringido",
+          "text": "Tu acceso quedó restringido
+
+Acceso restringido desde hoy
+
+Tu acceso se restringió por falta de pago: la clínica queda en solo lectura. Dentro de la clínica, en Configuración › Plan y pagos, puedes ver tu plan y registrar tu comprobante.
+
+Registrar mi comprobante: https://app.contrato.test/billing/dorada-gracia-vencida
+
+--
+Te escribimos porque administras el plan de Clínica dorada-gracia-vencida en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+      ],
+      "subscription": {
+        "activatedAt": 2026-09-21T15:00:00.000Z,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-12-10T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-10T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": 2026-11-19T15:00:00.000Z,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-gracia-vencida",
+        "pauseReason": null,
+        "planId": "plan",
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": "gracia_vencida",
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "restringida",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": null,
+        "trialStartedAt": null,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-por-terminar": {
+      "charges": [],
+      "notices": [
+        {
+          "dedupeKey": "dias_prueba:alarma:2026-11-08",
+          "emailTo": "dorada-por-terminar-owner@contrato.test",
+          "kind": "dias_prueba_alarma",
+          "subject": "Alarma: tu prueba termina pronto",
+          "text": "Tu prueba termina pronto
+
+Alarma
+
+Tu prueba termina en 2 días, el domingo, 22 de noviembre. Después, el sistema queda en solo lectura hasta que elijas un plan. No se pierde ningún dato.
+
+Elegir un plan: https://app.contrato.test/billing/dorada-por-terminar
+
+Lo que hicieron tus agentes está en Plan y pagos.
+
+--
+Te escribimos porque administras el plan de Clínica dorada-por-terminar en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+      ],
+      "subscription": {
+        "activatedAt": null,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-11-22T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-08T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": null,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-por-terminar",
+        "pauseReason": null,
+        "planId": null,
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": null,
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "prueba",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": 2026-11-22T15:00:00.000Z,
+        "trialStartedAt": 2026-11-08T15:00:00.000Z,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-prueba-con-plan": {
+      "charges": [],
+      "notices": [
+        {
+          "dedupeKey": "plan-activo:2026-11-20",
+          "emailTo": "dorada-prueba-con-plan-owner@contrato.test",
+          "kind": "plan_activo",
+          "subject": "Tu plan empezó hoy",
+          "text": "Tu plan empezó hoy
+
+Tu prueba terminó y tu plan empezó hoy: tu mes va de este día al mismo día del mes que viene.
+
+La cuota vuelve en crédito para tus agentes y lo que pase del crédito se cobra por acción.
+
+Ver Plan y pagos: https://app.contrato.test/billing/dorada-prueba-con-plan
+
+--
+Te escribimos porque administras el plan de Clínica dorada-prueba-con-plan en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+      ],
+      "subscription": {
+        "activatedAt": 2026-11-20T15:00:00.000Z,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-12-20T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-20T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": null,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-prueba-con-plan",
+        "pauseReason": null,
+        "planId": "plan",
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": null,
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "activa",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": 2026-11-19T15:00:00.000Z,
+        "trialStartedAt": 2026-11-05T15:00:00.000Z,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-prueba-sin-plan": {
+      "charges": [],
+      "notices": [
+        {
+          "dedupeKey": "dias_prueba:alarma:2026-11-05",
+          "emailTo": "dorada-prueba-sin-plan-owner@contrato.test",
+          "kind": "dias_prueba_alarma",
+          "subject": "Alarma: tu prueba termina pronto",
+          "text": "Tu prueba termina pronto
+
+Alarma
+
+Tu prueba termina en 0 días, el jueves, 19 de noviembre. Después, el sistema queda en solo lectura hasta que elijas un plan. No se pierde ningún dato.
+
+Elegir un plan: https://app.contrato.test/billing/dorada-prueba-sin-plan
+
+Lo que hicieron tus agentes está en Plan y pagos.
+
+--
+Te escribimos porque administras el plan de Clínica dorada-prueba-sin-plan en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+        {
+          "dedupeKey": "prueba-vencida-sin-plan:2026-11-20",
+          "emailTo": "dorada-prueba-sin-plan-owner@contrato.test",
+          "kind": "prueba_vencida_sin_plan",
+          "subject": "Tu prueba terminó",
+          "text": "Tu prueba terminó
+
+Solo lectura desde hoy
+
+Tu prueba terminó sin un plan elegido: el sistema queda en solo lectura hasta que lo elijas en Plan y pagos. No se pierde ningún dato.
+
+Elegir un plan: https://app.contrato.test/billing/dorada-prueba-sin-plan
+
+--
+Te escribimos porque administras el plan de Clínica dorada-prueba-sin-plan en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+      ],
+      "subscription": {
+        "activatedAt": null,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-11-19T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-05T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": null,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-prueba-sin-plan",
+        "pauseReason": null,
+        "planId": null,
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": "sin_plan",
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "restringida",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": 2026-11-19T15:00:00.000Z,
+        "trialStartedAt": 2026-11-05T15:00:00.000Z,
+        "updatedAt": undefined,
+      },
+    },
+    "dorada-vencido": {
+      "charges": [
+        {
+          "amountCents": 10000,
+          "currency": "PEN",
+          "dedupeKey": null,
+          "dueAt": "2026-11-17T15:00:00.000Z",
+          "lines": [],
+          "paidCents": 0,
+          "periodEnd": "2026-11-10T15:00:00.000Z",
+          "periodStart": "2026-10-11T15:00:00.000Z",
+          "planCode": "soles",
+          "status": "pendiente",
+          "subtotalCents": null,
+          "taxCents": 0,
+          "taxLabel": null,
+        },
+      ],
+      "notices": [
+        {
+          "dedupeKey": "gracia-inicio:2026-11-20",
+          "emailTo": "dorada-vencido-owner@contrato.test",
+          "kind": "gracia_inicio",
+          "subject": "Tienes un cargo vencido",
+          "text": "Tienes un cargo vencido
+
+Plazo: hasta el viernes, 27 de noviembre de 2026
+
+El cargo de Clínica dorada-vencido no está pagado. Registra tu comprobante en Plan y pagos antes del plazo para que el equipo siga trabajando sin cortes.
+
+Monto pendiente: S/ 100.00
+Último día: Viernes, 27 de noviembre de 2026
+
+Registrar mi comprobante: https://app.contrato.test/billing/dorada-vencido
+
+Si no se registra a tiempo, el acceso se restringe. No se pierde ningún dato.
+
+--
+Te escribimos porque administras el plan de Clínica dorada-vencido en odentIA. Este correo no recibe respuestas: si necesitas ayuda, escríbenos desde Ayuda, dentro de odentIA.
+odentIA
+",
+        },
+      ],
+      "subscription": {
+        "activatedAt": 2026-11-10T15:00:00.000Z,
+        "billingCycle": "mensual",
+        "createdAt": undefined,
+        "currentPeriodEnd": 2026-12-10T15:00:00.000Z,
+        "currentPeriodStart": 2026-11-10T15:00:00.000Z,
+        "discountBps": 0,
+        "graceEndsAt": 2026-11-27T15:00:00.000Z,
+        "guaranteedUntil": null,
+        "isDemo": false,
+        "organizationId": "dorada-vencido",
+        "pauseReason": null,
+        "planId": "plan",
+        "proofExtensionCount": 0,
+        "proofExtensionUntil": null,
+        "restrictReason": null,
+        "sellerEndedAt": null,
+        "sellerId": null,
+        "sellerRateBps": null,
+        "sellerStartedAt": null,
+        "sellerWindowDays": null,
+        "spendCapCents": null,
+        "status": "gracia",
+        "trialCreditCents": null,
+        "trialDays": null,
+        "trialEndsAt": null,
+        "trialStartedAt": null,
+        "updatedAt": undefined,
+      },
+    },
+  },
+  "mails": [
+    {
+      "dedupeKey": "dias_prueba:alarma:2026-11-05:dorada-prueba-sin-plan",
+      "kind": "dias_prueba_alarma",
+      "organizationId": "dorada-prueba-sin-plan",
+      "subject": "Alarma: tu prueba termina pronto",
+      "to": "dorada-prueba-sin-plan-owner@contrato.test",
+    },
+    {
+      "dedupeKey": "dias_prueba:alarma:2026-11-08:dorada-por-terminar",
+      "kind": "dias_prueba_alarma",
+      "organizationId": "dorada-por-terminar",
+      "subject": "Alarma: tu prueba termina pronto",
+      "to": "dorada-por-terminar-owner@contrato.test",
+    },
+    {
+      "dedupeKey": "gracia-inicio:dorada-vencido:2026-11-20",
+      "kind": "gracia_inicio",
+      "organizationId": "dorada-vencido",
+      "subject": "Tienes un cargo vencido",
+      "to": "dorada-vencido-owner@contrato.test",
+    },
+    {
+      "dedupeKey": "plan-activo:dorada-prueba-con-plan:2026-11-20",
+      "kind": "plan_activo",
+      "organizationId": "dorada-prueba-con-plan",
+      "subject": "Tu plan empezó hoy",
+      "to": "dorada-prueba-con-plan-owner@contrato.test",
+    },
+    {
+      "dedupeKey": "prueba-vencida-sin-plan:dorada-prueba-sin-plan:2026-11-20",
+      "kind": "prueba_vencida_sin_plan",
+      "organizationId": "dorada-prueba-sin-plan",
+      "subject": "Tu prueba terminó",
+      "to": "dorada-prueba-sin-plan-owner@contrato.test",
+    },
+    {
+      "dedupeKey": "restriccion:dorada-gracia-vencida:2026-11-20",
+      "kind": "restriccion_inicio",
+      "organizationId": "dorada-gracia-vencida",
+      "subject": "Tu acceso quedó restringido",
+      "to": "dorada-gracia-vencida-owner@contrato.test",
+    },
+  ],
+}
+`;
