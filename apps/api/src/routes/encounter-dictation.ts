@@ -295,10 +295,16 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         // Lo de una ficha solo si quedó como propuesta, y por dato (`formSources`): lo que el servidor
         // no dejó pasar no dio nada (QA del 14 nov, D20; revisión final del 15 nov, U5).
         const dropped = new Set(saved.droppedForms.map((item) => item.said))
-        const sources = [...extracted.drafts.filter((item) => item.kind !== "ficha"), ...extracted.corrections, ...extracted.removals]
+        // Lo de su salud (y una alergia) aparte: la pantalla lo resalta en ámbar, no como de la consulta (QA del 22 nov, H7).
+        const fromHealth = (kind: string) => kind === "salud" || kind === "alergia"
+        const sources = [...extracted.drafts.filter((item) => item.kind !== "ficha" && !fromHealth(item.kind)), ...extracted.corrections, ...extracted.removals]
           .map((item) => item.sourceText ?? "")
           .filter(Boolean)
           .concat(saved.formSources)
+        const healthSources = extracted.drafts
+          .filter((item) => fromHealth(item.kind))
+          .map((item) => item.sourceText ?? "")
+          .filter(Boolean)
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
         const outside = extracted.outOfPlace ?? []
         const unused = [
@@ -316,7 +322,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         ])
         // La pregunta de la ficha que nombra cada frase: «Usar en Percusión» la abre con la frase al lado.
         const unusedFor = Object.fromEntries(saved.droppedForms.filter((item) => item.targets.length).map((item) => [item.said, item.targets]))
-        return { ...saved, sources, omitted: extracted.omitted + outside.length + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
+        return { ...saved, sources, healthSources, omitted: extracted.omitted + outside.length + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")

@@ -187,6 +187,8 @@ interface SegmentResponse {
     added?: string[]
     removed: string[]
     sources: string[]
+    /** Los fragmentos de este tramo que dieron lo de su salud (o una alergia): van en ámbar. */
+    healthSources?: string[]
     /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
     omitted: number
     unused: string[]
@@ -428,6 +430,7 @@ export function useDictationSession({
   const [transcript, setTranscript] = useState("")
   const [interim, setInterim] = useState("")
   const [highlights, setHighlights] = useState<string[]>([])
+  const [healthHighlights, setHealthHighlights] = useState<string[]>([])
   const [micError, setMicError] = useState<string | null>(null)
   const [organizing, setOrganizing] = useState(false)
   const [failed, setFailed] = useState<FailedSegment[]>([])
@@ -504,6 +507,7 @@ export function useDictationSession({
       const data = response.data
       if (data.model) setDemo(data.model === "fake")
       if (data.sources.length) setHighlights((current) => [...current, ...data.sources])
+      if (data.healthSources?.length) setHealthHighlights((current) => [...current, ...(data.healthSources ?? [])])
       // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
       for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       for (const name of data.alreadyDone ?? []) toast(`Ya está registrado en esta atención: «${name}». No se vuelve a sumar.`)
@@ -1078,6 +1082,8 @@ export function useDictationSession({
     transcript,
     interim,
     highlights,
+    /** Lo de esta pestaña que dio lo de su salud: en «Lo que se dijo» va en ámbar. */
+    healthHighlights,
     canListen,
     micError,
     organizing,
@@ -1229,8 +1235,28 @@ export function markSaid(text: string, sources: { consulta: readonly string[]; s
     for (let index = at; index < at + needle.length; index += 1) if (marks[index] !== "salud") marks[index] = mark
     return true
   }
+  /**
+   * Lo que una propuesta juntó de varias pausas («si tomo losartán para la presión» y «no que yo sepa»
+   * en una sola frase, sin puntos) no está entero en ninguna: se pintan los pedazos de tres o más
+   * palabras seguidas que sí están (QA del 22 nov, H7: lo de su salud nunca salía en ámbar).
+   */
+  const paintRuns = (source: string, mark: SaidMark) => {
+    const words = [...source.matchAll(/\S+/g)]
+    const span = (from: number, to: number) => source.slice(words[from]?.index ?? 0, (words[to]?.index ?? 0) + (words[to]?.[0].length ?? 0))
+    for (let from = 0; from < words.length; ) {
+      let last = -1
+      for (let to = from; to < words.length && lower.includes(span(from, to).toLowerCase()); to += 1) last = to
+      if (last - from + 1 >= 3) {
+        paint(span(from, last), mark)
+        from = last + 1
+      } else from += 1
+    }
+  }
   for (const mark of ["consulta", "salud"] as const) {
-    for (const source of sources[mark]) if (!paint(source, mark)) for (const sentence of source.split(/(?<=[.;!?])\s+/)) paint(sentence, mark)
+    for (const source of sources[mark]) {
+      if (paint(source, mark)) continue
+      for (const sentence of source.split(/(?<=[.;!?])\s+/)) if (!paint(sentence, mark)) paintRuns(sentence, mark)
+    }
   }
   const parts: Array<{ text: string; mark: SaidMark | null }> = []
   for (let index = 0; index < text.length; index += 1) {

@@ -42,6 +42,7 @@ export type SaidSession = Pick<
   | "refreshSaid"
   | "suggestions"
   | "highlights"
+  | "healthHighlights"
   | "mode"
   | "interim"
   | "base"
@@ -153,7 +154,7 @@ export function DictationSaid({
   // Del servidor (pendientes y confirmadas, sigue al recargar y ya firmada) y lo de esta pestaña.
   const used = [...session.saidUsed, ...session.suggestions.map((item) => ({ kind: item.kind, said: item.sourceText }))]
   const sources = {
-    salud: used.filter((item) => healthKinds.has(item.kind)).map((item) => item.said),
+    salud: [...used.filter((item) => healthKinds.has(item.kind)).map((item) => item.said), ...(session.healthHighlights ?? [])],
     consulta: [...used.filter((item) => !healthKinds.has(item.kind)).map((item) => item.said), ...session.highlights],
   }
   const turn = useMutation({
@@ -495,6 +496,7 @@ export function EncounterSaidLink({ patientId, encounterId }: { patientId: strin
     },
     suggestions: [],
     highlights: [],
+    healthHighlights: [],
     mode: "off",
     interim: "",
     base,

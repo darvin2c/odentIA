@@ -504,6 +504,29 @@ describe("«Lo que se dijo», del servidor", () => {
   })
 })
 
+// QA del 22 nov (H7, H10): lo de su salud que se dijo en dos pausas queda en su propuesta como una sola
+// frase, y la pausa lo devolvía como de la consulta: todo salía en azul.
+describe("lo de su salud dicho en varias pausas sale en ámbar", () => {
+  it("cada pedazo, en su pausa, aunque la pausa lo haya devuelto como resaltado", () => {
+    renderSaid(
+      [
+        segment({ segmentId: "t-1", transcript: "toma alguna medicina rosa si tomo losartan para la presion" }),
+        segment({ segmentId: "t-2", saidAt: "2026-11-20T15:41:00.000Z", transcript: "y alergias no que yo sepa doctora" }),
+      ],
+      {
+        highlights: ["si tomo losartan para la presion"],
+        healthHighlights: ["no que yo sepa"],
+        suggestions: [suggestion({ id: "s-1", kind: "salud", sourceText: "si tomo losartan para la presion no que yo sepa" })],
+      },
+    )
+    const marks = [...screen.getByRole("tabpanel").querySelectorAll("mark")].map((mark) => [mark.textContent, mark.className.includes("warning") ? "salud" : "consulta"])
+    expect(marks).toEqual([
+      ["si tomo losartan para la presion", "salud"],
+      ["no que yo sepa", "salud"],
+    ])
+  })
+})
+
 describe("«Corregir algo» deja puesto lo de la entrevista", () => {
   it("sus medicinas, sus enfermedades y lo de su entrevista, campo por campo, sin pisar lo que no se dijo", () => {
     const values = {
