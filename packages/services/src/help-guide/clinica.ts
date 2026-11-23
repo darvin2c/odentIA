@@ -251,7 +251,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-conversar",
         q: "¿Clío entiende si converso con el paciente?",
-        a: "Sí. Conversa con el paciente o díctalo como a un colega: Clío deja cada cosa en su lugar (el motivo, el relato, lo de su salud, el examen) y deja fuera la charla, como el saludo o el precio. Una pregunta y su respuesta dichas en pausas distintas se juntan. Si alguien corrige lo que dijo («tomo warfarina… no, apixabán»), queda lo último y la sugerencia dice «antes dijo». Si responde quien lo acompaña (la mamá de un niño), Clío anota que lo dijo ella y lo de su salud queda como del niño. Al tocar «Terminar dictado» (o «Terminar», si escribes), Clío repasa toda la conversación una vez: pone quién habló en cada turno y completa lo que las pausas dejaron, como cuándo vuelve. Nada entra a la historia hasta que lo confirmas.",
+        a: "Sí. Conversa con el paciente o díctalo como a un colega: Clío deja cada cosa en su lugar (el motivo, el relato, lo de su salud, el examen) y deja fuera la charla, como el saludo o el precio. Una pregunta y su respuesta dichas en pausas distintas se juntan. Si alguien corrige lo que dijo («tomo warfarina… no, apixabán»), queda lo último y la sugerencia dice «antes dijo». Si responde quien lo acompaña (la mamá de un niño), Clío anota que lo dijo ella y lo de su salud queda como del niño. Al tocar «Terminar dictado» (también si escribes), Clío repasa toda la conversación una vez: pone quién habló en cada turno y completa lo que las pausas dejaron, como cuándo vuelve. Nada entra a la historia hasta que lo confirmas.",
         forms: [
           "clio entiende una conversacion",
           "puedo conversar con el paciente mientras clio escucha",
@@ -293,7 +293,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-terminar-escribiendo",
         q: "¿Cómo termino el dictado si escribo en vez de dictar?",
-        a: "Con «Terminar», junto a «Ordenar lo dictado» en el cuadro para escribir: manda lo que quede escrito y Clío repasa toda la conversación, sin encender el micrófono. Cada pausa se manda con «Ordenar lo dictado» o Ctrl+Enter. Si no lo tocas, «Finalizar y firmar» lo hace por ti: ordena lo último que se dijo y lo repasa antes de mostrarte lo que propone Clío, que decides ahí mismo. El dictado nunca deja la firma apagada.",
+        a: "Con «Terminar dictado», junto a «Ordenar lo dictado» en el cuadro para escribir: manda lo que quede escrito y Clío repasa toda la conversación, sin encender el micrófono. Cada pausa se manda con «Ordenar lo dictado» o Ctrl+Enter. Si no lo tocas, «Finalizar y firmar» lo hace por ti: ordena lo último que se dijo y lo repasa antes de mostrarte lo que propone Clío, que decides ahí mismo. El dictado nunca deja la firma apagada.",
         forms: [
           "como termino el dictado si escribo en vez de hablar",
           "como termino el dictado si escribo",
@@ -309,7 +309,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-salud",
         q: "¿Cómo confirmo lo que el paciente dijo de su salud?",
-        a: "En el aviso de arriba de la atención, «Revisa con … lo que dijo de su salud»: cada dato que oyó Clío (sus medicinas, sus enfermedades, el anticoagulante, la anestesia) sale en la fila de su tema, con quién lo dijo y «dijo, sin confirmar», o «antes dijo…» si lo cambió. Mientras tanto la franja de alertas ya lo avisa. Revísalo con la persona y toca «Lo revisé con…»: queda en sus antecedentes como lo dijo en la consulta. Si algo está mal, «Corregir algo» abre sus antecedentes con lo de Clío ya puesto. Un «No» se confirma en su fila («Niega enfermedades», «No toma medicación»), y «que yo sepa, no» queda como «No sabe», nunca como «No». «Confirmar las N de la consulta» no lleva nada de su salud.",
+        a: "En el aviso de arriba de la atención, «Revisa con … lo que dijo de su salud»: cada dato que oyó Clío (sus medicinas, sus enfermedades, el anticoagulante, la anestesia) sale en la fila de su tema, con quién lo dijo y «dijo, sin confirmar», o «antes dijo…» si lo cambió. Mientras tanto la franja de alertas ya lo avisa. Revísalo con la persona y toca «Lo revisé con…»: queda en sus antecedentes como lo dijo en la consulta. Si algo está mal, «Corregir algo» abre sus antecedentes con lo de Clío ya puesto. Un «No» se confirma en su fila («Niega enfermedades», «No toma medicación»), y «que yo sepa, no» queda como «No sabe», nunca como «No». Si lo oído no es de la persona, «No lo registro» lo deja de avisar. «Confirmar las N» no lleva nada de su salud.",
         forms: [
           "como confirmo lo que dijo de su salud",
           "clio oyo que toma una medicina",
@@ -322,6 +322,49 @@ export const CLINICA: readonly HelpMore[] = [
           "el paciente se corrigio de medicamento",
           "el paciente se equivoco de medicamento",
           "como registro lo que el paciente dijo de su salud",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      // Lo nuevo de la consulta conversada, con los nombres de hoy (QA del 22 nov, H10 del auditor).
+      {
+        id: "pacientes-dictado-no-lo-registro",
+        q: "¿Qué hace «No lo registro» en lo que dijo de su salud?",
+        a: "Lo que Clío oyó de su salud deja de avisarse y no entra a sus antecedentes. Úsalo cuando lo oído no es de la persona o no es cierto, por ejemplo si hablaba de su mamá. Está en «Revisa con … lo que dijo de su salud», junto a «Corregir algo» y «Lo revisé con…», y también en lo que dijo en una atención ya firmada. La frase no se borra: sigue en «Lo que se dijo».",
+        forms: [
+          "que hace no lo registro",
+          "que hace el boton no lo registro en lo que dijo de su salud",
+          "clio oyo algo de su salud que no es cierto",
+          "como descarto lo que clio oyo de su salud",
+          "no quiero registrar lo que dijo de su salud",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-llevar-a-su-salud",
+        q: "¿Qué hace «Llevar a su salud»?",
+        a: "Está en «Lo que se dijo» › «No lo usé», junto a una frase de su salud que Clío no supo ordenar, como «tomo algo para la tiroides y no me acuerdo el nombre». Abre sus antecedentes con esa frase a la vista arriba del formulario, para que la anotes donde va: Clío no llena nada. No sale en lo que es de un familiar ni en un peso dicho: su motivo ya dice qué hacer.",
+        forms: [
+          "que hace llevar a su salud",
+          "llevar a su salud",
+          "clio no uso lo que dijo de su medicina",
+          "como paso a antecedentes algo que clio no uso",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-quien-hablo",
+        q: "¿Cómo cambio quién habló en lo que se dijo?",
+        a: "En «Lo que se dijo» › «Conversación», toca el nombre del turno y elige en la lista quién fue. Se guarda al momento, con la atención. «Conversación» se arma al tocar «Terminar dictado»; lo que Clío no supo separar queda como «No se sabe» y la barra lo avisa.",
+        forms: [
+          "como cambio quien hablo",
+          "clio puso que hablo la paciente pero era la mama como lo cambio",
+          "clio se equivoco en quien hablo",
+          "quien hablo esta mal",
+          "cambiar quien hablo en la conversacion",
+          "dice no se sabe quien hablo",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -360,7 +403,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-barra-ficha",
         q: "¿La barra del dictado también llena la ficha?",
-        a: "No. La barra dice cuántas respuestas propone Clío en cada ficha y su enlace abre la ficha: ahí se confirma cada una, con «Confirmar» o «Confirmar las N». «Confirmar las N de la consulta» de la barra confirma lo de la consulta, no lo de las fichas.",
+        a: "No. La barra dice cuántas respuestas propone Clío en cada ficha y su enlace abre la ficha: ahí se confirma cada una, con «Confirmar» o «Confirmar las N». «Confirmar las N» de la barra confirma lo de la atención, no lo de las fichas.",
         forms: ["la barra del dictado confirma lo de la ficha", "confirmar las listas tambien llena la ficha"],
         area: "clinica",
         needs: "clinical.write",
