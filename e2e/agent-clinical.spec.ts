@@ -284,8 +284,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await idle.getByRole("button", { name: "Dictar", exact: true }).click()
   const live = page.getByRole("region", { name: "Dictado en curso" })
   await expect(live).toContainText("Escuchando")
-  await expect(signButton).toBeDisabled()
-  await expect(closing).toContainText("Termina el dictado y revisa las sugerencias para poder firmar.")
+  // El dictado no frena la firma (QA del 21 nov): «Finalizar y firmar» lo termina y lo repasa antes.
+  await expect(signButton).toBeEnabled()
   // El respaldo queda al lado, con cómo corregir hablando (issue 109); los ejemplos de qué decir están
   // una vez, en «¿Qué puedo decir?» (QA del 22 nov).
   const backup = page.getByRole("region", { name: "Lo que se dijo" })

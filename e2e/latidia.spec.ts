@@ -967,12 +967,14 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
     await bar.getByRole("button", { name: "Ordenar lo dictado" }).click()
   }
   await write(DICTATION)
-  await expect(review).toContainText("Clío propone 6 en la consulta")
+  // Un solo número de lo que propone Clío, y debajo cuántas se confirman aquí (QA del 22 nov).
+  await expect(review).toContainText("Clío propone 6")
+  await expect(review).toContainText("5 para confirmar · 1 descanso, se emite en su bloque")
   await expect(suggested("Signos vitales")).toContainText("PA 118/76 mmHg · FC 96 lpm · T 38.5 °C")
   await expect(suggested("Examen físico")).toContainText("Boca y garganta · con hallazgos")
   await expect(suggested("Examen físico")).toContainText("Tórax y pulmones · sin alteraciones")
   await expect(suggested("Diagnóstico")).toContainText("J03.9 · Amigdalitis aguda, no especificada")
-  await expect(review.getByRole("button", { name: "Confirmar las 5 de la consulta" })).toBeVisible()
+  await expect(review.getByRole("button", { name: "Confirmar las 5", exact: true })).toBeVisible()
   await expect(suggested("Descanso médico")).toContainText("Descanso médico · 3 días desde hoy")
   await shot("clio-sugerencias")
   await page.setViewportSize({ width: 390, height: 844 })
