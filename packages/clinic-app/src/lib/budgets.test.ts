@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -239,5 +239,16 @@ describe("pendingTreatmentCounts", () => {
   it("lo mismo en lo planificado y lo indicado cuenta una vez", () => {
     const shared = item("a", { path: path(false) })
     expect(pendingTreatmentCounts(2, [shared, shared, item("b", { path: { ...path(false), positions: [2] } })])).toEqual({ toExecute: 0, choices: [2] })
+  })
+})
+
+// QA del 22 nov (H8, H9 del auditor): confirmados los dos caminos, el bloque Plan seguía diciendo «Todavía no
+// hay tratamientos por hacer» hasta recargar: el plan nuevo no se volvía a leer.
+describe("planKeysAfterDictation", () => {
+  it("lo dictado que toca el plan vuelve a leer los planes, el presupuesto y lo que sigue", () => {
+    for (const kind of ["plan", "procedimiento", "cita", "presupuesto"]) {
+      expect(planKeysAfterDictation(kind)).toEqual(expect.arrayContaining(["treatment-plans", "plan-items", "budgets", "plan-next"]))
+    }
+    expect(planKeysAfterDictation("nota")).toEqual(["plan-items"])
   })
 })

@@ -57,7 +57,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, totalsOf } from "../../lib/budgets"
+import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation, totalsOf } from "../../lib/budgets"
 import {
   type ConsentDocument,
   canFillFormInAttention,
@@ -1241,12 +1241,9 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
     }
-    // La cita reservada y el presupuesto armado se ven al momento: en «Qué sigue» y en «Presupuesto por enviar».
-    if (item.kind === "cita" || item.kind === "presupuesto") {
-      for (const key of PLAN_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
-      void queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] })
-    }
-    void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+    // Lo indicado, los caminos, la cita reservada y el presupuesto armado se ven al momento: en el bloque
+    // Plan, en «Qué sigue» y en «Presupuesto por enviar».
+    for (const key of planKeysAfterDictation(item.kind)) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
     void refreshClosing()

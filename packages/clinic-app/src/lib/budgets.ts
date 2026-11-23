@@ -886,6 +886,19 @@ export const PLAN_QUERY_KEYS = [
   "treatment-journey",
 ] as const
 
+/** Lo dictado que cambia el plan o su presupuesto al confirmarse: el plan, los caminos, lo hecho hoy, la cita. */
+const DICTATION_PLAN_KINDS = new Set(["plan", "procedimiento", "cita", "presupuesto"])
+
+/**
+ * Lo que se vuelve a leer al confirmar algo dictado. Lo que toca el plan vuelve a leer todo lo del plan:
+ * confirmar los dos caminos abre un plan nuevo y el bloque Plan, que lee los planes vigentes, seguía
+ * diciendo «Todavía no hay tratamientos por hacer» hasta recargar (QA del 22 nov, H8). Lo demás, solo
+ * lo que se indicó.
+ */
+export function planKeysAfterDictation(kind: string): readonly string[] {
+  return DICTATION_PLAN_KINDS.has(kind) ? PLAN_QUERY_KEYS : ["plan-items"]
+}
+
 /**
  * Lo que cambia en la atención abierta cuando la persona responde: lo que no
  * aceptó o no eligió deja de pedir consentimiento y de contar por ejecutar.
