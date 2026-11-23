@@ -73,8 +73,8 @@ function PlanBody({ view }: { view: PlanView }) {
     <>
       {view.stale && view.receivedAt ? (
         <PageNotice tone="aviso" label="Sin conexión">
-          No pudimos consultar tu plan ahora. Esto es lo último que supimos, del{" "}
-          {when(view.receivedAt)}. Tu tienda y Sofi siguen funcionando.
+          No pudimos consultar tu plan ahora. Esto es lo último que supimos ({when(view.receivedAt)}
+          ). Tu tienda y Sofi siguen funcionando.
         </PageNotice>
       ) : null}
       {view.agentStop ? (
@@ -82,14 +82,17 @@ function PlanBody({ view }: { view: PlanView }) {
           {AGENT_STOP_WORDS[view.agentStop]}
         </PageNotice>
       ) : null}
-      {state?.notices.map((notice) => {
-        const tone = noticeTone(notice.level)
-        return (
-          <PageNotice key={notice.key} tone={tone} label={NOTICE_LABELS[tone]}>
-            {noticeText(notice)}
-          </PageNotice>
-        )
-      })}
+      {state?.notices
+        // El límite que ya detuvo a Sofi lo dice el aviso de arriba: no se repite.
+        .filter((notice) => !(view.agentStop && notice.level === "limite"))
+        .map((notice) => {
+          const tone = noticeTone(notice.level)
+          return (
+            <PageNotice key={notice.key} tone={tone} label={NOTICE_LABELS[tone]}>
+              {noticeText(notice)}
+            </PageNotice>
+          )
+        })}
       {state ? (
         <>
           <Summary state={state} />
