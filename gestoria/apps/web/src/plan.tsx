@@ -290,57 +290,61 @@ function Support({ view }: { view: PlanView }) {
           Pedir ayuda
         </h3>
         <p className="text-sm text-muted-foreground">
-          Escríbenos sobre tu plan, un cobro o algo que no funciona. Te respondemos aquí.
+          {view.connected
+            ? "Escríbenos sobre tu plan, un cobro o algo que no funciona. Te respondemos aquí."
+            : "Todavía no podemos recibir preguntas desde aquí."}
         </p>
       </div>
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor={kindId}>Sobre qué</FieldLabel>
-            <select
-              id={kindId}
-              value={kind}
-              onChange={(e) => setKind(e.target.value as SupportKind)}
-              className={SELECT_CLASSES}
-            >
-              {Object.entries(SUPPORT_KIND_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <TextField
-            label="Tu pregunta"
-            value={question}
-            onChange={setQuestion}
-            maxLength={500}
-            error={errors.question}
-            placeholder="Por ejemplo, ¿cómo subo el tope de gasto?"
-          />
-          <Field>
-            <FieldLabel htmlFor={detailId}>Detalle (opcional)</FieldLabel>
-            <Textarea
-              id={detailId}
-              value={detail}
-              maxLength={4000}
-              rows={3}
-              onChange={(e) => setDetail(e.target.value)}
+      {view.connected ? (
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={kindId}>Sobre qué</FieldLabel>
+              <select
+                id={kindId}
+                value={kind}
+                onChange={(e) => setKind(e.target.value as SupportKind)}
+                className={SELECT_CLASSES}
+              >
+                {Object.entries(SUPPORT_KIND_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <TextField
+              label="Tu pregunta"
+              value={question}
+              onChange={setQuestion}
+              maxLength={500}
+              error={errors.question}
+              placeholder="Por ejemplo, ¿cómo subo el tope de gasto?"
             />
-          </Field>
-        </FieldGroup>
-        <FormAlert error={ask.error} />
-        <SubmitButton type="submit" pending={ask.isPending} className="self-start">
-          Enviar
-        </SubmitButton>
-      </form>
+            <Field>
+              <FieldLabel htmlFor={detailId}>Detalle (opcional)</FieldLabel>
+              <Textarea
+                id={detailId}
+                value={detail}
+                maxLength={4000}
+                rows={3}
+                onChange={(e) => setDetail(e.target.value)}
+              />
+            </Field>
+          </FieldGroup>
+          <FormAlert error={ask.error} />
+          <SubmitButton type="submit" pending={ask.isPending} className="self-start">
+            Enviar
+          </SubmitButton>
+        </form>
+      ) : null}
       {view.pendingSupport.length > 0 || cases.length > 0 ? (
         <ul className="flex flex-col gap-2">
           {view.pendingSupport.map((pending) => (
             <li key={pending.createdAt} className="rounded-lg border p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="min-w-0 font-medium">{pending.question}</span>
-                <Badge variant="outline">Por enviar</Badge>
+                <Badge variant="outline">{pending.sent ? "Enviada" : "Por enviar"}</Badge>
               </div>
             </li>
           ))}

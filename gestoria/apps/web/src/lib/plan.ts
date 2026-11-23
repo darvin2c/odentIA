@@ -17,7 +17,8 @@ export interface PlanView {
   /** La última pregunta no tuvo respuesta: lo que se ve es lo último que se supo. */
   stale: boolean
   agentStop: AgentStop | null
-  pendingSupport: { question: string; createdAt: string }[]
+  /** Las preguntas que aún no están entre los casos: por enviar, o enviadas y sin respuesta todavía. */
+  pendingSupport: { question: string; createdAt: string; sent: boolean }[]
 }
 
 type Status = NonNullable<AccountState["access"]>["status"]

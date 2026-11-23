@@ -29,6 +29,7 @@ import { and, eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
+  askSupport,
   CONVERSATION_WINDOW_MS,
   type ContractConfig,
   countConversation,
@@ -63,6 +64,8 @@ const admin = {
   received: new Map<string, AppEvent>(),
   deliveries: 0,
   states: new Map<string, Partial<AccountState>>(),
+  /** Las cuentas cuyos avisos rechaza (422), sin estar caída. */
+  reject: new Set<string>(),
 }
 
 const adminFetch: typeof fetch = async (input, init) => {
@@ -74,6 +77,7 @@ const adminFetch: typeof fetch = async (input, init) => {
   if (url.pathname === CONTRACT_PATHS.events) {
     admin.deliveries++
     const event = appEvent.parse(JSON.parse(body))
+    if (admin.reject.has(event.data.account)) return Response.json({}, { status: 422 })
     const repeated = admin.received.has(id)
     if (!repeated) admin.received.set(id, event)
     if (admin.loseNextReply) {
@@ -358,8 +362,12 @@ describe("gestorIA avisa a la administración", () => {
     expect(counted("uso.contado")).toHaveLength(3)
   })
 
-  it("sin secreto no envía ni pregunta, y lo que pasa se guarda para después", async () => {
+  it("sin secreto no envía ni pregunta, guarda lo que pasa y no acepta preguntas de ayuda", async () => {
     const off: ContractConfig = { url: ACCOUNT, secret: "", fetch: adminFetch }
+    const rosa = { userId: "u-rosa", email: people.rosa.email, name: people.rosa.name }
+    await expect(
+      askSupport(db.appDb, off, rosa, storeId, { kind: "pregunta", question: "Hola" }),
+    ).rejects.toMatchObject({ status: 409 })
     const deliveries = admin.deliveries
     const ask = await call("rosa", "POST", `/api/tiendas/${storeId}/plan/ayuda`, {
       kind: "cobro",
@@ -383,6 +391,15 @@ describe("gestorIA pregunta y nunca se detiene por la administración", () => {
     expect(await refreshStates(db.ownerDb, contract)).toBe(1)
     const [row] = await db.ownerDb.select().from(contractState)
     expect(row?.state).toMatchObject({ found: false })
+    // Se le avisó hace poco: no se repite en cada vuelta.
+    expect(await outbox("cuenta.abierta")).toHaveLength(opened)
+    // Pasado un día sin que la conozca, se le avisa otra vez.
+    await db.ownerDb
+      .update(contractOutbox)
+      .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
+      .where(and(eq(contractOutbox.storeId, storeId), eq(contractOutbox.type, "cuenta.abierta")))
+    await db.ownerDb.delete(contractState).where(eq(contractState.storeId, storeId))
+    expect(await refreshStates(db.ownerDb, contract)).toBe(1)
     expect(await outbox("cuenta.abierta")).toHaveLength(opened + 1)
     const convId = await whatsappConversation()
     expect((await answer(sofiDeps(), storeId, convId)).status).toBe("respondio")
@@ -436,7 +453,8 @@ describe("gestorIA pregunta y nunca se detiene por la administración", () => {
       agentStop: "tope",
       state: { found: true },
     })
-    expect(view.json.pendingSupport).toEqual([])
+    // La pregunta ya salió pero la administración aún no la devolvió entre sus casos: se ve «Enviada».
+    expect(view.json.pendingSupport).toMatchObject([{ question: "¿Cuándo me cobran?", sent: true }])
     admin.up = true
   })
 
@@ -548,5 +566,41 @@ describe("Argos se detiene con Sofi", () => {
     await db.ownerDb.delete(contractState).where(eq(contractState.storeId, shopId))
     await runArgos(db.ownerDb, db.appDb)
     expect(await followUps()).toBe(1)
+  })
+})
+
+describe("el orden de cada tienda", () => {
+  it("lo demás de una tienda espera a que salga el aviso de que se abrió, también entre vueltas", async () => {
+    const created = await call("rosa", "POST", "/api/tiendas", {
+      name: "Tienda nueva",
+      currency: "PEN",
+    })
+    const shopId = created.json.store.id as string
+    expect(
+      (
+        await call("rosa", "POST", `/api/tiendas/${shopId}/plan/ayuda`, {
+          kind: "pregunta",
+          question: "¿Cómo empiezo?",
+        })
+      ).status,
+    ).toBe(204)
+    const ofShop = () => [...admin.received.values()].filter((e) => e.data.account === shopId)
+    admin.reject.add(shopId)
+    const t0 = new Date(Date.now() + 30 * 3_600_000)
+    // Primera vuelta: el aviso de que se abrió falla y su pregunta no sale detrás.
+    await deliverOutbox(db.ownerDb, contract, t0)
+    // Segunda vuelta, antes del reintento del aviso: la pregunta sigue esperando.
+    await deliverOutbox(db.ownerDb, contract, new Date(t0.getTime() + 5_000))
+    expect(ofShop()).toEqual([])
+    // No se intentó: no gastó reintentos en una cuenta que la administración aún no conoce.
+    const [question] = await db.ownerDb
+      .select()
+      .from(contractOutbox)
+      .where(and(eq(contractOutbox.storeId, shopId), eq(contractOutbox.type, "soporte.pedido")))
+    expect(question?.attempts).toBe(0)
+    // La administración la acepta: sale primero el aviso y después la pregunta.
+    admin.reject.delete(shopId)
+    await deliverOutbox(db.ownerDb, contract, new Date(t0.getTime() + 3_600_000))
+    expect(ofShop().map((e) => e.type)).toEqual(["cuenta.abierta", "soporte.pedido"])
   })
 })

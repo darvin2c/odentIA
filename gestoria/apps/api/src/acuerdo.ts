@@ -66,6 +66,8 @@ const RETRY_MAX_MS = 3_600_000
 const TIMEOUT_MS = 15_000
 /** Lo más que se pregunta mientras alguien mira «Plan y pagos»: lo demás, lo último que se supo. */
 const VIEW_TIMEOUT_MS = 5_000
+/** Cada cuánto se le vuelve a avisar que se abrió una tienda que la administración no conoce. */
+const REOPEN_EVERY_MS = 24 * 3_600_000
 /** Las preguntas de ayuda que pueden esperar a salir a la vez en una tienda. */
 const MAX_PENDING_SUPPORT = 5
 
@@ -200,34 +202,51 @@ export const supportInput = z.object({
   detail: z.string().trim().max(4000, "Máximo 4000 caracteres").optional(),
 })
 
-/** Las preguntas de ayuda de la tienda que todavía no salen, de la más nueva a la más vieja. */
-async function pendingSupport(tx: Db, storeId: string) {
+/**
+ * Las preguntas de ayuda de la tienda que la administración todavía no devolvió en su estado: las
+ * que no salieron y las que salieron después de su última respuesta (aún no están entre sus casos).
+ * De la más nueva a la más vieja.
+ */
+async function pendingSupport(tx: Db, storeId: string, stateAt: Date | null = null) {
   const rows = await tx
-    .select({ payload: contractOutbox.payload, createdAt: contractOutbox.createdAt })
+    .select({
+      payload: contractOutbox.payload,
+      createdAt: contractOutbox.createdAt,
+      sentAt: contractOutbox.sentAt,
+    })
     .from(contractOutbox)
     .where(
       and(
         eq(contractOutbox.storeId, storeId),
         eq(contractOutbox.type, "soporte.pedido"),
-        isNull(contractOutbox.sentAt),
+        stateAt
+          ? or(isNull(contractOutbox.sentAt), gt(contractOutbox.sentAt, stateAt))
+          : isNull(contractOutbox.sentAt),
       ),
     )
     .orderBy(desc(contractOutbox.createdAt))
   return rows.map((row) => ({
     question: String((row.payload.data as { question?: unknown }).question ?? ""),
     createdAt: row.createdAt,
+    sent: row.sentAt !== null,
   }))
 }
 
-/** Pide ayuda a la administración, a nombre de quien pregunta. Solo el Dueño (el plan). */
+/**
+ * Pide ayuda a la administración, a nombre de quien pregunta. Solo el Dueño (el plan). Sin el
+ * acuerdo configurado no se acepta: la pregunta no saldría y nadie la respondería.
+ */
 export async function askSupport(
   appDb: Db,
+  config: ContractConfig,
   person: Person,
   storeId: string,
   input: z.infer<typeof supportInput>,
   now = new Date(),
 ): Promise<void> {
   await inStore(appDb, person, storeId, "plan", async (tx) => {
+    if (!config.secret)
+      throw new StoreError(409, "NOT_CONNECTED", "Todavía no podemos recibir preguntas desde aquí.")
     if ((await pendingSupport(tx, storeId)).length >= MAX_PENDING_SUPPORT)
       throw new StoreError(
         429,
@@ -300,7 +319,18 @@ export async function deliverOutbox(
     .where(and(isNull(contractOutbox.sentAt), lte(contractOutbox.nextAttemptAt, now)))
     .orderBy(asc(contractOutbox.createdAt))
     .limit(100)
-  const waiting = new Set<string>()
+  // Una tienda cuyo aviso de que se abrió espera su reintento: lo demás suyo espera con él.
+  const opening = await ownerDb
+    .select({ storeId: contractOutbox.storeId })
+    .from(contractOutbox)
+    .where(
+      and(
+        eq(contractOutbox.type, "cuenta.abierta"),
+        isNull(contractOutbox.sentAt),
+        gt(contractOutbox.nextAttemptAt, now),
+      ),
+    )
+  const waiting = new Set(opening.map((row) => row.storeId))
   for (const row of due) {
     if (waiting.has(row.storeId)) continue
     let problem: string | null = null
@@ -362,15 +392,19 @@ export async function saveState(
     .onConflictDoUpdate({ target: contractState.storeId, set: values })
 }
 
-/** Pregunta a la administración el estado de una tienda y guarda lo que responda. */
+/**
+ * Pregunta a la administración el estado de una tienda y guarda lo que responda. «caida» si no
+ * respondió o está caída (5xx, 429); «fallo» si respondió mal solo por esta tienda.
+ */
 async function askState(
   ownerDb: Db,
   config: ContractConfig,
   storeId: string,
   now: Date,
   timeoutMs = TIMEOUT_MS,
-): Promise<boolean> {
+): Promise<"ok" | "fallo" | "caida"> {
   let state: AccountState
+  let down = true
   try {
     const body = JSON.stringify({ account: storeId })
     const response = await postSigned(
@@ -380,6 +414,7 @@ async function askState(
       body,
       timeoutMs,
     )
+    down = response.status >= 500 || response.status === 429
     if (!response.ok) throw new Error(`La administración respondió ${response.status}`)
     state = accountState.parse(await response.json())
     if (state.account !== storeId) throw new Error("La administración respondió por otra cuenta")
@@ -393,28 +428,32 @@ async function askState(
       .insert(contractState)
       .values({ storeId, triedAt: now, lastError })
       .onConflictDoUpdate({ target: contractState.storeId, set: { triedAt: now, lastError } })
-    return false
+    return down ? "caida" : "fallo"
   }
   await ownerDb.transaction(async (tx) => {
     await saveState(tx, storeId, state, now)
     // No la conoce (una tienda de antes del acuerdo, o se perdió su aviso): se le avisa otra vez,
-    // salvo que ya haya uno esperando a salir.
+    // salvo que haya uno esperando a salir o se le haya avisado en el último día (no se repite
+    // en cada vuelta si la administración sigue sin conocerla).
     if (!state.found) {
-      const [pending] = await tx
+      const [recent] = await tx
         .select({ id: contractOutbox.id })
         .from(contractOutbox)
         .where(
           and(
             eq(contractOutbox.storeId, storeId),
             eq(contractOutbox.type, "cuenta.abierta"),
-            isNull(contractOutbox.sentAt),
+            or(
+              isNull(contractOutbox.sentAt),
+              gt(contractOutbox.createdAt, new Date(now.getTime() - REOPEN_EVERY_MS)),
+            ),
           ),
         )
         .limit(1)
-      if (!pending) await noteStoreAccount(tx, storeId, now, true)
+      if (!recent) await noteStoreAccount(tx, storeId, now, true)
     }
   })
-  return true
+  return "ok"
 }
 
 /**
@@ -443,8 +482,9 @@ export async function refreshStates(
   let asked = 0
   for (const row of due) {
     // eslint-disable-next-line no-await-in-loop
-    if (!(await askState(ownerDb, config, row.id, now))) break
-    asked++
+    const result = await askState(ownerDb, config, row.id, now)
+    if (result === "caida") break
+    if (result === "ok") asked++
   }
   return asked
 }
@@ -501,7 +541,7 @@ export async function planView(
         /** La última pregunta no tuvo respuesta: lo que se ve es lo último que se supo. */
         stale: Boolean(row?.lastError),
         agentStop: agentStopOf(state),
-        pendingSupport: await pendingSupport(tx, storeId),
+        pendingSupport: await pendingSupport(tx, storeId, row?.receivedAt ?? null),
         triedAt: row?.triedAt ?? null,
       }
     })

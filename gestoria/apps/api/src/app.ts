@@ -639,7 +639,7 @@ export function createApp(deps: AppDeps) {
   )
   app.post("/api/tiendas/:id/plan/ayuda", async (c) => {
     const input = await bodyOf(c, supportInput)
-    await askSupport(deps.appDb, c.get("person"), c.req.param("id"), input)
+    await askSupport(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
     return c.body(null, 204)
   })
 
