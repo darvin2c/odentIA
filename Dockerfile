@@ -23,6 +23,7 @@ COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
 COPY shared/packages/brand-scene/package.json shared/packages/brand-scene/
 COPY shared/packages/channels/package.json shared/packages/channels/
+COPY shared/packages/contract/package.json shared/packages/contract/
 COPY packages/clinic-app/package.json packages/clinic-app/
 COPY packages/clinical/package.json packages/clinical/
 COPY packages/db/package.json packages/db/
