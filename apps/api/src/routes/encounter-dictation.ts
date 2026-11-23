@@ -38,6 +38,7 @@ import {
   startDictationSegment,
   settleDictationPrescription,
   undoConfirmedDictation,
+  unusedOnce,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "@odentia/services"
@@ -106,14 +107,15 @@ const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000),
 /**
  * Lo que Clío no usó de un tramo, con su motivo, para guardarlo con lo que se dijo: lo que no
  * supo dónde va (sin frase si no supo citarla), lo que quiso cambiar ya confirmado y lo que el
- * servidor no dejó pasar, con lo que se le dice a la persona.
+ * servidor no dejó pasar, con lo que se le dice a la persona. Cada frase una sola vez, con el
+ * motivo del aviso si lo tiene, y sin preguntas (`unusedOnce`, QA del 22 nov, H6).
  */
 function unusedOf(
   extracted: { omitted: number; unused: string[]; outOfPlace?: ReadonlyArray<{ said: string; why: keyof typeof DICTATION_OUT_OF_PLACE }> | undefined },
   onConfirmed: ReadonlyArray<{ sourceText?: string | undefined }>,
   dropped: ReadonlyArray<{ said: string; why: string; targets: Array<{ responseId: string; fieldId: string; label: string }> }>,
 ): DictationUnusedItem[] {
-  return [
+  return unusedOnce([
     ...extracted.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
     // Lo de un familiar o un peso dicho ya en la pausa, con su motivo (QA del 21 nov): no espera al repaso.
     ...(extracted.outOfPlace ?? []).map(({ said, why }): DictationUnusedItem => {
@@ -123,7 +125,7 @@ function unusedOf(
     ...(extracted.omitted > extracted.unused.length ? [{ said: null, why: "sin_lugar" } satisfies DictationUnusedItem] : []),
     ...onConfirmed.flatMap((item): DictationUnusedItem[] => (item.sourceText ? [{ said: item.sourceText, why: "ya_confirmada" }] : [])),
     ...dropped.map((item): DictationUnusedItem => ({ said: item.said, why: "no_propuesta", detail: item.why, ...(item.targets.length ? { targets: item.targets } : {}) })),
-  ]
+  ])
 }
 
 export interface EncounterDictationDeps extends CrmDeps {

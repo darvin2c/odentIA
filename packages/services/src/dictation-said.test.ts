@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { dictationContext, listDictationSaid, releaseDictationSegment, settleDictationRetry, settleDictationSegment, startDictationSegment } from "./dictation-said.js"
+import { dictationContext, listDictationSaid, releaseDictationSegment, settleDictationRetry, settleDictationSegment, startDictationSegment, unusedOnce } from "./dictation-said.js"
 import { saveDictationSegment } from "./encounter-dictation.js"
 import { discardEmptyEncounter } from "./encounters.js"
 import { nextPatientNumber } from "./patients.js"
@@ -131,6 +131,47 @@ describe("cada tramo se guarda antes de ordenarlo", () => {
     })
     expect(await ownerDb.select().from(encounterDictationSegment).where(eq(encounterDictationSegment.encounterId, draft!.id))).toHaveLength(1)
     await enable(false)
+  })
+})
+
+describe("«No lo usé» dice cada frase una vez y solo lo que no se usó (QA del 22 nov, H4 y H6)", () => {
+  it("sin preguntas ni repetidos, con el motivo del aviso, y sin lo que ya está en una sugerencia", async () => {
+    await enable(true)
+    const fx = await clinicalFixture()
+    const id = randomUUID()
+    const transcript = "cuanto pesa mateo mas o menos? debe pesar unos 24 kilos doctora. tomo losartan para la presion."
+    await fx.run((tx) => startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId: id, transcript }))
+    await fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts: [{ kind: "nota", payload: { presentIllness: "Toma losartán para la presión." }, sourceText: "tomo losartan para la presion" }], transcript }))
+    await fx.run((tx) =>
+      settleDictationSegment(tx, ORG, fx.encounter.id, id, [
+        { said: "cuanto pesa mateo mas o menos?", why: "sin_lugar" },
+        { said: "debe pesar unos 24 kilos", why: "sin_lugar" },
+        { said: "debe pesar unos 24 kilos doctora", why: "sin_lugar", detail: "Es un peso o una talla dichos, no medidos: si hace falta, mídelo." },
+        { said: "tomo losartan", why: "sin_lugar" },
+        { said: "tomo losartan para la presion", why: "no_propuesta", detail: "No encontré «enalapril» en lo que se dijo: no lo propuse." },
+      ]),
+    )
+    const [said] = await fx.run((tx) => listDictationSaid(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(said?.unused).toEqual([
+      { said: "debe pesar unos 24 kilos doctora", why: "sin_lugar", detail: "Es un peso o una talla dichos, no medidos: si hace falta, mídelo." },
+      { said: "tomo losartan para la presion", why: "no_propuesta", detail: "No encontré «enalapril» en lo que se dijo: no lo propuse." },
+    ])
+    await enable(false)
+  })
+
+  it("una frase repetida queda una vez, con su motivo si alguna lo trae", () => {
+    expect(
+      unusedOnce([
+        { said: "mi papa es diabetico", why: "sin_lugar" },
+        { said: "¿Y desde cuándo?", why: "sin_lugar" },
+        { said: "Mi papá es diabético", why: "sin_lugar", detail: "Es de la salud de un familiar." },
+        { said: null, why: "sin_lugar" },
+        { said: null, why: "sin_lugar" },
+      ]),
+    ).toEqual([
+      { said: "Mi papá es diabético", why: "sin_lugar", detail: "Es de la salud de un familiar." },
+      { said: null, why: "sin_lugar" },
+    ])
   })
 })
 

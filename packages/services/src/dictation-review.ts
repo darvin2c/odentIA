@@ -18,7 +18,7 @@ import {
   requireClinicalAssistant,
   saveDictationSegment,
 } from "./encounter-dictation.js"
-import { DICTATION_IN_PROGRESS_MS } from "./dictation-said.js"
+import { DICTATION_IN_PROGRESS_MS, unusedOnce } from "./dictation-said.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
 import { notFound } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
@@ -421,19 +421,15 @@ export async function saveDictationReview(
   for (const [segmentId, fresh] of bySegment) {
     const row = rows.find((item) => item.segmentId === segmentId)
     if (!row) continue
-    // Lo que la pausa ya avisó de esa frase no se avisa dos veces.
-    const known = new Set(row.unused.map((item) => item.said ?? ""))
-    const more = fresh.filter((item) => {
-      const key = item.said ?? ""
-      if (known.has(key)) return false
-      known.add(key)
-      return true
-    })
+    // Lo que la pausa ya avisó de esa frase no se avisa dos veces; si el repaso trae su motivo y la
+    // pausa no, queda el motivo (`unusedOnce`, QA del 22 nov, H6).
+    const merged = unusedOnce([...row.unused, ...fresh])
+    const more = merged.filter((item) => !row.unused.includes(item))
     if (!more.length) continue
     added.push(...more)
     await tx
       .update(encounterDictationSegment)
-      .set({ unused: [...row.unused, ...more], updatedAt: new Date() })
+      .set({ unused: merged, updatedAt: new Date() })
       .where(eq(encounterDictationSegment.id, row.id))
   }
   // Los tramos que leyó (o dejó fuera por largo) ya no piden otro repaso; lo dicho mientras tanto, sí.

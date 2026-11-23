@@ -440,6 +440,27 @@ describe("A5 · lo de su salud sale de su frase", () => {
     expect((await health())[0]?.payload["conditions"]).toBeUndefined()
     await enable(false)
   })
+
+  it("un nombre que no está en la frase citada pero sí en la pausa se propone sin aviso (QA del 22 nov, H4)", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const transcript = "si tomo losartan para la presion y tomo warfarina no perdon ahora es apixaban me lo cambiaron"
+    const result = await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, medications: { state: "recorded", items: [{ name: "losartán" }] } },
+          sourceText: "tomo warfarina no perdon ahora es apixaban me lo cambiaron",
+        },
+      ],
+      transcript,
+    })
+    expect(result.droppedForms).toEqual([])
+    const [one] = await health()
+    expect(one?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán" }] })
+    expect(one?.payload["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán" })
+    await enable(false)
+  })
 })
 
 describe("A3 · al firmar, lo dicho sin revisar no se pierde", () => {

@@ -2215,7 +2215,10 @@ export async function saveDictationSegment(
     if (said.kind === "salud") {
       const phrase = said.sourceText?.trim() ?? ""
       if (!phrase) continue
-      const heard = groundHealthNames(said.payload, phrase)
+      // El nombre se busca en su frase y, si no está, en lo dicho en la pausa: Clío a veces cita solo
+      // un pedazo («tomo warfarina…») y el losartán dicho al lado salía como no propuesto (QA del 22 nov, H4).
+      const inPhrase = groundHealthNames(said.payload, phrase)
+      const heard = inPhrase.notHeard.length && scope.transcript?.trim() ? groundHealthNames(said.payload, `${phrase} ${scope.transcript}`) : inPhrase
       if (heard.notHeard.length)
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
       if (!heard.payload) continue

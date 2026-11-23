@@ -5,6 +5,7 @@ import { DICTATION_CHARS, dictationSegmentSeen, requireClinicalAssistant } from 
 import type { ProductDictation } from "./product-hooks.js"
 import { assertOpenDraft, lockEncounter } from "./encounters.js"
 import { notFound } from "./errors.js"
+import { normalizeForSearch } from "./knowledge.js"
 
 /*
  * ---------- «Lo que se dijo»: cada tramo del dictado, guardado con la atención (ADR 0209) ----------
@@ -185,6 +186,47 @@ export async function settleDictationSegment(
     .where(and(segmentWhere(orgId, encounterId, segmentId), isNull(encounterDictationSegment.organizedAt)))
 }
 
+/** Una pregunta dicha («¿cuánto pesa?», «y desde cuándo?») no es algo que Clío dejó sin usar. */
+const isQuestion = (said: string) => /^\s*¿|\?\s*$/u.test(said)
+
+/** ¿Dice lo mismo, o una de las dos contiene a la otra palabra por palabra? */
+const sameSaid = (a: string, b: string) => !!a && !!b && (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `))
+
+/**
+ * Lo que no se usó, cada frase una sola vez (QA del 22 nov, H6): si se repite, o una contiene a la
+ * otra («debe pesar unos 24 kilos» y «… doctora»), queda la que trae su motivo (`detail`), el mismo
+ * que dio el aviso; sin motivo en ninguna, la primera. Las preguntas no entran. Las que no tienen
+ * frase quedan una.
+ */
+export function unusedOnce(items: readonly DictationUnusedItem[]): DictationUnusedItem[] {
+  const kept: DictationUnusedItem[] = []
+  for (const item of items) {
+    if (item.said !== null && isQuestion(item.said)) continue
+    const key = normalizeForSearch(item.said ?? "")
+    const at = kept.findIndex((other) => {
+      const was = normalizeForSearch(other.said ?? "")
+      return key === was || sameSaid(key, was)
+    })
+    if (at < 0) kept.push(item)
+    else if (item.detail && !kept[at]!.detail) kept[at] = item
+  }
+  return kept
+}
+
+/**
+ * Lo que «No lo usé» ya no debe decir de una atención: una frase que está (o cabe entera) en lo que
+ * se dijo de una sugerencia viva, porque sí se usó (QA del 22 nov, H4). Lo que Clío dejó fuera de
+ * una frase usada (`no_propuesta`, «No encontré «apixabán»…») sí sigue: habla de una parte.
+ */
+export function unusedNotInSources(items: readonly DictationUnusedItem[], sources: readonly string[]): DictationUnusedItem[] {
+  const used = sources.map((said) => normalizeForSearch(said)).filter(Boolean)
+  return items.filter((item) => {
+    if (item.said === null || item.why === "no_propuesta") return true
+    const key = normalizeForSearch(item.said)
+    return !key || !used.some((source) => ` ${source} `.includes(` ${key} `))
+  })
+}
+
 /** Un tramo de lo que se dijo, como lo lee la pantalla. */
 export interface DictationSaidSegment {
   segmentId: string
@@ -219,13 +261,15 @@ export async function listDictationSaid(tx: Db, orgId: string, patientId: string
     .from(encounterDictationSegment)
     .where(and(eq(encounterDictationSegment.organizationId, orgId), eq(encounterDictationSegment.encounterId, encounterId)))
     .orderBy(asc(encounterDictationSegment.saidAt), asc(encounterDictationSegment.id))
+  // Lo que ya está en una sugerencia que no se descartó no se lista como no usado.
+  const sources = rows.some((row) => row.unused.length) ? (await listDictationSaidSources(tx, orgId, encounterId)).map((item) => item.said) : []
   return rows.map((row) => ({
     segmentId: row.segmentId,
     transcript: row.transcript,
     saidAt: row.saidAt.toISOString(),
     createdBy: row.createdBy,
     organized: row.organizedAt !== null,
-    unused: row.unused,
+    unused: unusedNotInSources(unusedOnce(row.unused), sources),
     turns: row.turns ?? null,
     reviewed: row.reviewedAt !== null,
   }))

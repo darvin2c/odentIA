@@ -72,8 +72,10 @@ const hourOf = (iso: string) =>
 
 /** Por qué no se usó, en palabras de la pantalla. */
 function unusedWhy(item: UnusedSaid): string {
+  // El motivo guardado con la frase es el mismo que dio el aviso de la pausa (QA del 22 nov, H6/UX-5).
+  if (item.detail) return item.detail
   if (item.why === "ya_confirmada") return "ya estaba confirmado: cámbialo a mano"
-  if (item.why === "no_propuesta") return item.detail ?? "no se pudo proponer"
+  if (item.why === "no_propuesta") return "no se pudo proponer"
   return "no supe dónde va"
 }
 
