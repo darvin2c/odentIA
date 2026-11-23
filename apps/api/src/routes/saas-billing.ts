@@ -9,6 +9,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { invitation, member } from "@odentia/db/schema/auth"
 import { SAAS_ACCOUNT_EXTERNAL_APPS } from "@odentia/db/schema/admin-accounts"
 import { SAAS_ACTION_KINDS } from "@odentia/db/schema/saas-billing"
+import { SUPPORT_ACCESS_MAX_MINUTES } from "@odentia/contract"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
@@ -364,10 +365,13 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     if (!requireAdmin(c)) return forbid(c)
     const accountId = c.req.param("accountId")
     return runService(c, 200, async () => {
-      const detail = await getAppAccountDetail(deps.ownerDb, accountId)
+      const [detail, requests] = await Promise.all([
+        getAppAccountDetail(deps.ownerDb, accountId),
+        listAppContractRequests(deps.ownerDb, accountId),
+      ])
       return {
         ...detail,
-        requests: await listAppContractRequests(deps.ownerDb, accountId),
+        requests,
         // ¿Se le puede pedir algo a su app? Sin su dirección y su secreto, los botones lo dicen.
         canRequest: senders.some((sender) => sender.app === detail.account.app),
       }
@@ -391,7 +395,11 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     z
       .object({
         type: z.literal("soporte.entrar"),
-        minutes: z.number().int().min(5, "De 5 a 60 minutos").max(60, "De 5 a 60 minutos"),
+        minutes: z
+          .number()
+          .int()
+          .min(5, `De 5 a ${SUPPORT_ACCESS_MAX_MINUTES} minutos`)
+          .max(SUPPORT_ACCESS_MAX_MINUTES, `De 5 a ${SUPPORT_ACCESS_MAX_MINUTES} minutos`),
         reason,
       })
       .strict(),

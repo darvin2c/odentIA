@@ -18,7 +18,7 @@ import { z } from "zod"
 import { api } from "../lib/api"
 import { APP_NAMES } from "./app-accounts"
 import { CurrencySelect } from "./billing-fields"
-import { money } from "./billing-payments"
+import { dayTime, money } from "./billing-payments"
 import type { AdminPlan } from "./plan-drawer"
 
 export const appRequestSchema = z.object({
@@ -44,10 +44,6 @@ const STATUS_NAMES: Record<AppRequest["status"], string> = {
   fallo: "Falló",
 }
 
-const when = (iso: string) =>
-  new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(iso),
-  )
 
 /** Lo pedido a la app de esta cuenta, del más nuevo al más viejo. */
 export function AppRequestList({ requests }: { requests: AppRequest[] }) {
@@ -71,7 +67,7 @@ export function AppRequestList({ requests }: { requests: AppRequest[] }) {
               {STATUS_NAMES[request.status]}
             </Badge>
             <span className="ml-auto text-xs text-muted-foreground">
-              {request.requestedBy ?? "Alguien del equipo"} · {when(request.createdAt)}
+              {request.requestedBy ?? "Alguien del equipo"} · {dayTime(request.createdAt)}
             </span>
           </p>
           {request.detail ? <p className="text-muted-foreground">{request.detail}</p> : null}

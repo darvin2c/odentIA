@@ -400,6 +400,8 @@ describe("el comprobante del plan", () => {
       .where(and(eq(contractOutbox.storeId, storeId), eq(contractOutbox.type, "pago.comprobante")))
     expect(row?.rejectedAt).not.toBeNull()
     expect(row?.sentAt).toBeNull()
+    // El archivo no se queda en la bandeja.
+    expect((row?.payload.data as Record<string, unknown>).file).toBeUndefined()
     const view = await call("rosa", "GET", `/api/tiendas/${storeId}/plan`)
     expect(view.json.pendingReceipts).toMatchObject([
       { status: "rechazado", reason: "Ese cargo ya está pagado" },

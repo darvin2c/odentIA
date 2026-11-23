@@ -299,7 +299,9 @@ async function pendingReceipts(tx: Db, storeId: string, stateAt: Date | null = n
   const rows = await tx
     .select({
       id: contractOutbox.id,
-      payload: contractOutbox.payload,
+      // Solo lo que se muestra: el archivo en base64 no se lee.
+      chargeId: sql<string>`${contractOutbox.payload} -> 'data' ->> 'chargeId'`,
+      amountCents: sql<string>`${contractOutbox.payload} -> 'data' ->> 'amountCents'`,
       createdAt: contractOutbox.createdAt,
       sentAt: contractOutbox.sentAt,
       rejectedAt: contractOutbox.rejectedAt,
@@ -318,11 +320,10 @@ async function pendingReceipts(tx: Db, storeId: string, stateAt: Date | null = n
     .orderBy(desc(contractOutbox.createdAt))
     .limit(20)
   return rows.map((row) => {
-    const data = row.payload.data as { chargeId?: unknown; amountCents?: unknown }
     return {
       id: row.id,
-      chargeId: String(data.chargeId ?? ""),
-      amountCents: Number(data.amountCents ?? 0),
+      chargeId: String(row.chargeId ?? ""),
+      amountCents: Number(row.amountCents ?? 0),
       createdAt: row.createdAt,
       status: row.rejectedAt
         ? ("rechazado" as const)
@@ -537,19 +538,21 @@ export async function deliverOutbox(
       down = true
     }
     const attempts = row.attempts + 1
+    // Lo que ya salió (o no se aceptó) no guarda el archivo: la administración ya lo tiene.
+    const withoutFile = sql`${contractOutbox.payload} #- '{data,file}'`
     // eslint-disable-next-line no-await-in-loop
     await ownerDb
       .update(contractOutbox)
       .set(
         rejected
-          ? { attempts, lastError: problem, rejectedAt: now }
+          ? { attempts, lastError: problem, rejectedAt: now, payload: withoutFile }
           : problem
             ? {
                 attempts,
                 lastError: problem,
                 nextAttemptAt: new Date(now.getTime() + retryDelay(attempts)),
               }
-            : { attempts, lastError: null, sentAt: now },
+            : { attempts, lastError: null, sentAt: now, payload: withoutFile },
       )
       .where(eq(contractOutbox.id, row.id))
     if (!problem) {

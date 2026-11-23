@@ -46,8 +46,10 @@ export const CONTRACT_RECEIPT_TYPES = [
   "application/pdf",
 ] as const
 export const CONTRACT_MAX_RECEIPT_BYTES = 1_500_000
+/** Lo que ocupa ese archivo en base64. */
+export const CONTRACT_MAX_RECEIPT_BASE64 = Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 4
 /** Lo más que pesa un aviso a `CONTRACT_PATHS.events`: el comprobante en base64 y sus datos. */
-export const CONTRACT_MAX_EVENT_BYTES = Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 16 * 1024
+export const CONTRACT_MAX_EVENT_BYTES = CONTRACT_MAX_RECEIPT_BASE64 + 16 * 1024
 
 /** La referencia de la cuenta en la app (en gestorIA, su tienda): la app la elige y no cambia. */
 const accountRef = z.string().trim().min(1).max(200)
@@ -128,7 +130,7 @@ export const receiptEvent = z.object({
       base64: z
         .string()
         .min(4)
-        .max(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 4)
+        .max(CONTRACT_MAX_RECEIPT_BASE64)
         .regex(/^[A-Za-z0-9+/]+={0,2}$/, "El archivo va en base64"),
     }),
     note: z.string().trim().max(500).nullable().optional(),
@@ -314,7 +316,6 @@ export const adminRequest = z.discriminatedUnion("type", [
 ])
 export type AdminRequest = z.infer<typeof adminRequest>
 export type AdminRequestType = AdminRequest["type"]
-export const ADMIN_REQUEST_TYPES = ["cuenta.abrir", "soporte.entrar", "equipo.quitar"] as const
 
 /**
  * Lo que responde la app a un pedido (siempre 200 si lo leyó): «hecho» o «fallo» con su motivo

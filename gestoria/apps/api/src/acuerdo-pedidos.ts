@@ -1,17 +1,11 @@
-import {
-  accountCopy,
-  contractRequestReceipt,
-  type Db,
-  store,
-  storeEvent,
-  storeMember,
-} from "@gestoria/db"
+import { accountCopy, contractRequestReceipt, type Db, store, storeMember } from "@gestoria/db"
 import { type AdminRequest, type AdminRequestResult, adminRequest } from "@odentia/contract"
-import { and, count, eq, sql } from "drizzle-orm"
-import { type ContractConfig, noteStoreAccount } from "./acuerdo.js"
+import { and, eq, sql } from "drizzle-orm"
+import { z } from "zod"
+import type { ContractConfig } from "./acuerdo.js"
 import { verifyMessage } from "./firma.js"
 import { receiveSupportRequest } from "./soporte.js"
-import { isCurrency } from "./tiendas.js"
+import { isCurrency, openStoreIn, removeMemberIn, StoreError } from "./tiendas.js"
 
 /**
  * Lo que la administración le pide a gestorIA por el acuerdo (ADR 0213, tablero 3 del lienzo A):
@@ -35,7 +29,6 @@ type Result = { status: "hecho" | "fallo"; message: string }
 async function openStore(
   tx: Db,
   data: Extract<AdminRequest, { type: "cuenta.abrir" }>["data"],
-  now: Date,
 ): Promise<Result> {
   const [existing] = await tx.select({ id: store.id }).from(store).where(eq(store.id, data.account))
   if (existing) return { status: "hecho", message: "La tienda ya estaba abierta." }
@@ -52,21 +45,13 @@ async function openStore(
     .where(eq(accountCopy.userId, data.owner.userId))
   if (copy?.state !== "activa")
     return { status: "fallo", message: "La cuenta de esa persona está cerrada o bloqueada." }
-  await tx.insert(store).values({
+  await openStoreIn(tx, {
     id: data.account,
     name: data.name,
     currency: data.currency,
     country: data.country,
-    createdBy: data.owner.userId,
-  })
-  await tx
-    .insert(storeMember)
-    .values({ storeId: data.account, userId: data.owner.userId, role: "owner" })
-  await tx.insert(storeEvent).values({
-    storeId: data.account,
+    ownerId: data.owner.userId,
     actorUserId: null,
-    action: "tienda.creada",
-    subject: data.owner.userId,
     detail: {
       por: "administracion",
       name: data.name,
@@ -74,8 +59,6 @@ async function openStore(
       country: data.country,
     },
   })
-  // La administración ya la tiene: este aviso solo la pone al día con lo que quedó.
-  await noteStoreAccount(tx, data.account, now)
   return { status: "hecho", message: "Tienda abierta: su dueño ya puede entrar." }
 }
 
@@ -83,46 +66,31 @@ async function openStore(
 async function removePerson(
   tx: Db,
   data: Extract<AdminRequest, { type: "equipo.quitar" }>["data"],
-  now: Date,
 ): Promise<Result> {
   const storeId = data.account
   const [shop] = await tx.select({ id: store.id }).from(store).where(eq(store.id, storeId))
   if (!shop) return { status: "fallo", message: "Esa tienda no existe en gestorIA." }
-  // Se toma la fila de cada dueño antes de contar, como al quitar desde la tienda.
-  await tx
-    .select()
-    .from(storeMember)
-    .where(and(eq(storeMember.storeId, storeId), eq(storeMember.role, "owner")))
-    .for("update")
   const [target] = await tx
     .select({ role: storeMember.role })
     .from(storeMember)
     .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, data.userId)))
   if (!target) return { status: "hecho", message: "Esa persona ya no estaba en la tienda." }
-  if (target.role === "owner") {
-    const [{ value }] = (await tx
-      .select({ value: count() })
-      .from(storeMember)
-      .where(and(eq(storeMember.storeId, storeId), eq(storeMember.role, "owner")))) as [
-      { value: number },
-    ]
-    if (value <= 1)
+  try {
+    // Con su propio punto de vuelta: si dejaría la tienda sin Dueño, no queda nada hecho.
+    await tx.transaction((inner) =>
+      removeMemberIn(inner as unknown as Db, storeId, data.userId, null, {
+        por: "administracion",
+        motivo: data.reason,
+      }),
+    )
+  } catch (error) {
+    if (error instanceof StoreError && error.code === "LAST_OWNER")
       return {
         status: "fallo",
         message: "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.",
       }
+    throw error
   }
-  await tx
-    .delete(storeMember)
-    .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, data.userId)))
-  await tx.insert(storeEvent).values({
-    storeId,
-    actorUserId: null,
-    action: "equipo.quitado",
-    subject: data.userId,
-    detail: { role: target.role, por: "administracion", motivo: data.reason },
-  })
-  if (target.role === "owner") await noteStoreAccount(tx, storeId, now)
   return { status: "hecho", message: "Quitada de la tienda." }
 }
 
@@ -157,14 +125,14 @@ export async function receiveAdminRequest(
     if (seen) return { status: seen.status, message: seen.message }
     const result =
       parsed.type === "cuenta.abrir"
-        ? await openStore(tx, parsed.data, now)
+        ? await openStore(tx, parsed.data)
         : parsed.type === "equipo.quitar"
-          ? await removePerson(tx, parsed.data, now)
+          ? await removePerson(tx, parsed.data)
           : await receiveSupportRequest(tx, parsed.data, now)
     await tx.insert(contractRequestReceipt).values({
       webhookId: id,
       type: parsed.type,
-      storeId: /^[0-9a-f-]{36}$/i.test(parsed.data.account) ? parsed.data.account : null,
+      storeId: z.uuid().safeParse(parsed.data.account).success ? parsed.data.account : null,
       status: result.status,
       message: result.message,
       receivedAt: now,

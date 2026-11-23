@@ -169,23 +169,54 @@ export async function myStores(appDb: Db, person: Person) {
 }
 
 /** Crea una tienda: quien la crea es su Dueño. */
+/**
+ * Abre una tienda con su Dueño, lo anota y se lo avisa a la administración (el acuerdo, B7). La
+ * usan quien la crea y la administración cuando la abre para un cliente (ADR 0213).
+ */
+export async function openStoreIn(
+  tx: Db,
+  input: {
+    id: string
+    name: string
+    currency: string
+    country: string | null
+    ownerId: string
+    /** Quién lo hizo: nulo si fue la administración. */
+    actorUserId: string | null
+    detail: Record<string, unknown>
+  },
+): Promise<void> {
+  await tx.insert(store).values({
+    id: input.id,
+    name: input.name,
+    currency: input.currency,
+    country: input.country,
+    createdBy: input.ownerId,
+  })
+  await tx.insert(storeMember).values({ storeId: input.id, userId: input.ownerId, role: "owner" })
+  await tx.insert(storeEvent).values({
+    storeId: input.id,
+    actorUserId: input.actorUserId,
+    action: "tienda.creada",
+    ...(input.actorUserId ? {} : { subject: input.ownerId }),
+    detail: input.detail,
+  })
+  await noteStoreAccount(tx, input.id)
+}
+
 export async function createStore(appDb: Db, person: Person, input: z.infer<typeof newStoreInput>) {
   const id = randomUUID()
   await withPerson(appDb, person, async (tx) => {
     await enterStore(tx, id)
-    await tx.insert(store).values({
+    await openStoreIn(tx, {
       id,
       name: input.name,
       currency: input.currency,
       country: input.country ?? null,
-      createdBy: person.userId,
+      ownerId: person.userId,
+      actorUserId: person.userId,
+      detail: input,
     })
-    await tx.insert(storeMember).values({ storeId: id, userId: person.userId, role: "owner" })
-    await tx
-      .insert(storeEvent)
-      .values({ storeId: id, actorUserId: person.userId, action: "tienda.creada", detail: input })
-    // La administración le abre su cuenta (el acuerdo, B7).
-    await noteStoreAccount(tx, id)
   })
   return {
     id,
@@ -567,27 +598,43 @@ export async function changeRole(
   })
 }
 
+/**
+ * Quita a alguien del equipo sin dejar la tienda sin Dueño (`LAST_OWNER`), lo anota y, si era
+ * Dueño, se lo avisa a la administración. La usan el equipo y la administración (ADR 0213).
+ */
+export async function removeMemberIn(
+  tx: Db,
+  storeId: string,
+  userId: string,
+  actorUserId: string | null,
+  detail: Record<string, unknown> = {},
+): Promise<void> {
+  // Se toma la fila de cada dueño antes de contar: dos cambios a la vez no dejan la tienda sin dueño.
+  await tx
+    .select()
+    .from(storeMember)
+    .where(and(eq(storeMember.storeId, storeId), eq(storeMember.role, "owner")))
+    .for("update")
+  const target = await targetMember(tx, storeId, userId)
+  await tx
+    .delete(storeMember)
+    .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, userId)))
+  await keepsAnOwner(tx, storeId)
+  await tx.insert(storeEvent).values({
+    storeId,
+    actorUserId,
+    action: "equipo.quitado",
+    subject: userId,
+    detail: { role: target.role, ...detail },
+  })
+  if (target.role === "owner") await noteStoreAccount(tx, storeId)
+}
+
 export async function removeMember(appDb: Db, person: Person, storeId: string, userId: string) {
   return inStore(appDb, person, storeId, "equipo.gestionar", async (tx, actor) => {
     const target = await targetMember(tx, storeId, userId)
     if (!canAssign(actor, target.role))
       throw new StoreError(403, "FORBIDDEN", "Solo el dueño puede quitar a otro dueño")
-    await tx
-      .select()
-      .from(storeMember)
-      .where(and(eq(storeMember.storeId, storeId), eq(storeMember.role, "owner")))
-      .for("update")
-    await tx
-      .delete(storeMember)
-      .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, userId)))
-    await keepsAnOwner(tx, storeId)
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "equipo.quitado",
-      subject: userId,
-      detail: { role: target.role },
-    })
-    if (target.role === "owner") await noteStoreAccount(tx, storeId)
+    await removeMemberIn(tx, storeId, userId, person.userId)
   })
 }

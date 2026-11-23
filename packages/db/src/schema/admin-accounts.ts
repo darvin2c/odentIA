@@ -157,7 +157,7 @@ export const appContractRequest = adminSchema.table(
     ),
     check(
       "app_contract_request_status_check",
-      sql`${table.status} IN ('pendiente','hecho','fallo') AND (${table.status} = 'pendiente') = (${table.doneAt} IS NULL)`,
+      sql`${table.status} IN (${sql.raw(APP_CONTRACT_REQUEST_STATUSES.map((status) => `'${status}'`).join(","))}) AND (${table.status} = 'pendiente') = (${table.doneAt} IS NULL)`,
     ),
     index("app_contract_request_pending_idx")
       .on(table.app, table.nextAttemptAt)

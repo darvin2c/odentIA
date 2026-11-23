@@ -11,12 +11,7 @@ import {
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
-import {
-  saasAction,
-  saasPaymentMethod,
-  saasPlan,
-  saasSubscription,
-} from "@odentia/db/schema/saas-billing"
+import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { openSupportCaseFromHelp } from "./admin-support.js"
 import { type ExternalAccount, externalAccountOf, toExternalAccount } from "./app-accounts.js"
@@ -35,6 +30,7 @@ import {
   decideSaasAccess,
   getSaasSubscription,
   listSaasCharges,
+  listSaasPaymentMethods,
   listSaasPayments,
   readOnlyAtOf,
   type SaasSubscriptionRow,
@@ -455,15 +451,7 @@ export async function answerAppState(
     charges.map((charge) => charge.id),
   )
   const payments = await listSaasPayments(ownerDb, id, 50)
-  const methods = await ownerDb
-    .select({
-      code: saasPaymentMethod.code,
-      name: saasPaymentMethod.name,
-      instructions: saasPaymentMethod.instructions,
-    })
-    .from(saasPaymentMethod)
-    .where(eq(saasPaymentMethod.isActive, true))
-    .orderBy(asc(saasPaymentMethod.sortOrder), asc(saasPaymentMethod.name))
+  const methods = await listSaasPaymentMethods(ownerDb)
   const cases = await ownerDb
     .select({
       id: supportCase.id,
@@ -558,7 +546,7 @@ export async function answerAppState(
       status: payment.status,
       at: payment.createdAt.toISOString(),
     })),
-    paymentMethods: methods,
+    paymentMethods: methods.map(({ code, name, instructions }) => ({ code, name, instructions })),
     notices: alerts.map((alert) => ({
       key: `${alert.family}:${alert.level}:${alert.periodKey}`,
       family: alert.family,
