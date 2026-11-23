@@ -314,7 +314,7 @@ describe("quién habló, sin claves internas (QA del 21 nov, C10)", () => {
 })
 
 describe("la franja avisa lo dicho sin confirmar", () => {
-  it("«Anticoagulante: dijo apixabán, sin confirmar»; su «No» y su «No sé» sin alarma; lo de su boca no va", () => {
+  it("«Anticoagulante: dijo apixabán, sin confirmar»; su «No sé» avisa como lo que no se sabe; lo de su boca no va", () => {
     const alerts = saidHealthAlerts([
       {
         suggestionId: "salud-1",
@@ -330,7 +330,8 @@ describe("la franja avisa lo dicho sin confirmar", () => {
     ])
     expect(alerts.map((alert) => [alert.label, alert.tone])).toEqual([
       ["Anticoagulante: dijo apixabán, sin confirmar", "warning"],
-      ["Alergias: no sabe, sin confirmar", "secondary"],
+      // Antes en gris, como si fuera nada, junto a «no se le preguntó» en ámbar (QA del 22 nov, H11).
+      ["Alergias: no sabe, sin confirmar", "warning"],
     ])
   })
 

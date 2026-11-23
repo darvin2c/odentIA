@@ -151,7 +151,7 @@ export function alertsByRisk(
     PatientFull,
     "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidUnknown"
   >,
-  health: Pick<PatientHealth, "pregnancy"> | null | undefined,
+  health: (Pick<PatientHealth, "pregnancy"> & Partial<Pick<PatientHealth, "said">>) | null | undefined,
   sex?: string | null,
 ): Array<{ id: string; label: string; short: string; tone: "destructive" | "warning" | "secondary" }> {
   const allergyOf = new Map(detail.activeAllergies.map((row) => [row.id, row]))
@@ -173,8 +173,12 @@ export function alertsByRisk(
   )
   const medicationIds = new Set(detail.currentMedications.map((row) => row.id))
   const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
+  // Lo que oyó Clío y nadie confirmó, como en la franja: gana a «no se le preguntó» y a «Niega
+  // alergias», que dirían otra cosa de lo mismo (QA del 22 nov, H11).
+  const said = saidHealthAlerts(health?.said ?? []).map(({ key: _key, ...alert }) => ({ ...alert, short: alert.label }))
+  const saidAllergies = said.some((alert) => alert.id === "dicho-allergies")
   const unasked =
-    noAllergies && detail.allergyReview === "unknown"
+    noAllergies && detail.allergyReview === "unknown" && !saidAllergies
       ? [
           {
             id: "alergias",
@@ -185,7 +189,7 @@ export function alertsByRisk(
         ].map((alert) => ({ ...alert, short: alert.label }))
       : []
   const denies =
-    noAllergies && detail.allergyReview === "none"
+    noAllergies && detail.allergyReview === "none" && !saidAllergies
       ? [{ id: "alergias", label: "Niega alergias", short: "Niega alergias", tone: "secondary" as const }]
       : []
   const pregnancy = health?.pregnancy
@@ -202,12 +206,14 @@ export function alertsByRisk(
   return [
     ...alerts.filter((alert) => alert.tone === "destructive"),
     ...unasked,
+    ...said.filter((alert) => alert.tone === "warning"),
     ...alerts.filter((alert) => mildAllergy(alert) && !intoleranceIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone === "warning"),
     ...alerts.filter((alert) => mildAllergy(alert) && intoleranceIds.has(alert.id)),
     ...pregnancy,
     ...alerts.filter((alert) => !allergyIds.has(alert.id) && !medicationIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone !== "warning"),
+    ...said.filter((alert) => alert.tone !== "warning"),
     ...denies,
   ]
 }
@@ -575,11 +581,12 @@ export function saidHealthAlerts(said: readonly SaidHealth[]): Array<{ id: strin
       const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
       // «Ya no la toma» no es «dijo que sí»: lo dejó, sin alarma (QA del 21 nov, H3).
       const stopped = row.value.endsWith("ya no la toma")
-      const quiet = row.value === "dijo que no" || row.value === "no sabe" || stopped
+      // Su «No sé» no es un «No»: se sabe tan poco como de lo que no se preguntó, y avisa igual (QA del 22 nov, H11).
+      const quiet = row.value === "dijo que no" || stopped
       const named = row.value.replace(/,? ?ya no la toma$/u, "")
       const words = stopped
         ? `dijo que dejó ${named.startsWith("sí, no dijo cuál") ? "de tomarlo" : named}`
-        : quiet
+        : quiet || row.value === "no sabe"
           ? row.value
           : row.value.startsWith("sí, no dijo cuál")
             ? "dijo que sí"
