@@ -352,6 +352,8 @@ async function applyReceipt(
     .limit(1)
   if (!person) throw invalidField("userId", "Esa persona no tiene cuenta")
   const bytes = Buffer.from(data.file.base64, "base64")
+  // Un cargo o un medio de pago que ya no está es un rechazo de lo que dice el aviso (409): la app
+  // no lo reintenta. El 404 queda para la cuenta que no existe, que sí se reintenta.
   await submitSaasReceipt(
     tx,
     { storage: deps.storage },
@@ -366,7 +368,11 @@ async function applyReceipt(
       ...(data.note ? { notes: data.note } : {}),
     },
     now,
-  )
+  ).catch((error: unknown) => {
+    if (error instanceof ServiceError && error.status === 404)
+      throw new ServiceError("CONFLICT", 409, error.message, error.fields)
+    throw error
+  })
   return account.id
 }
 

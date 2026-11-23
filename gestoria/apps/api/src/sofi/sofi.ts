@@ -311,15 +311,52 @@ export async function answer(
   return result ?? { status: "ocupada" }
 }
 
+/** Por qué espera a una persona una conversación que Sofi no atiende porque la administración lo dijo. */
+const STOP_REASONS: Record<AgentStop, string> = {
+  sin_acceso: "Sofi en pausa: el plan está detenido",
+  saldo_prueba: "Sofi en pausa: se acabó el saldo de la prueba",
+  tope: "Sofi en pausa: llegó al tope de gasto del mes",
+}
+
+/**
+ * Sofi no atiende (apagada o en pausa): la conversación pasa a «Espera a una persona», con el
+ * motivo, para que el equipo la vea y la tome. No se escribe nada al cliente.
+ */
+async function waitForPerson(
+  deps: SofiDeps,
+  storeId: string,
+  conversationId: string,
+  reason: string,
+): Promise<void> {
+  await withAgent(deps.appDb, SOFI_ACTOR, storeId, (tx) =>
+    tx
+      .update(conversation)
+      .set({ handler: "persona", waitingReason: reason, updatedAt: new Date() })
+      .where(
+        and(
+          eq(conversation.id, conversationId),
+          eq(conversation.storeId, storeId),
+          eq(conversation.handler, "sofi"),
+        ),
+      ),
+  )
+}
+
 async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<AnswerResult> {
   const { conv } = loaded
   if (conv.handler === "persona") return { status: "persona" }
   const test = conv.channel === "prueba"
   // Apagada, las conversaciones esperan a una persona; la de prueba sirve para probarla antes.
-  if (!test && !loaded.agent?.enabled) return { status: "apagada" }
+  if (!test && !loaded.agent?.enabled) {
+    await waitForPerson(deps, storeId, conv.id, "Sofi está apagada")
+    return { status: "apagada" }
+  }
   // Lo que se cobra (una conversación de verdad) se detiene si la administración lo dijo; la de
   // prueba no se cobra y sigue. Si la administración nunca respondió, Sofi atiende.
-  if (!test && loaded.stop) return { status: "detenida", reason: loaded.stop }
+  if (!test && loaded.stop) {
+    await waitForPerson(deps, storeId, conv.id, STOP_REASONS[loaded.stop])
+    return { status: "detenida", reason: loaded.stop }
+  }
   const started = Date.now()
   const trace = newTrace()
   let usage: Usage = NO_USAGE

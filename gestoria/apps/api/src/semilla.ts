@@ -208,6 +208,18 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
       },
     ],
     notices: [{ key: "tope:aviso:demo", family: "tope", level: "aviso", action: "cambiar_tope" }],
+    paymentMethods: [
+      {
+        code: "yape",
+        name: "Yape",
+        instructions: "Yapea a Sallca Group al 999 888 777 y sube la captura.",
+      },
+      {
+        code: "transferencia",
+        name: "Transferencia BCP",
+        instructions: "Cuenta en dólares 193-0000000-1-00 a nombre de Sallca Group E.I.R.L.",
+      },
+    ],
     support: [
       {
         id: "semilla-soporte-1",

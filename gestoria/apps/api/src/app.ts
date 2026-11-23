@@ -1,11 +1,20 @@
 import { type Db, MAX_PHOTO_BYTES } from "@gestoria/db"
+import { APP_CONTRACT_PATHS, CONTRACT_MAX_RECEIPT_BYTES } from "@odentia/contract"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
-import { askSupport, type ContractConfig, planView, supportInput } from "./acuerdo.js"
+import {
+  askSupport,
+  type ContractConfig,
+  planView,
+  planReceiptInput,
+  sendReceipt,
+  supportInput,
+} from "./acuerdo.js"
+import { receiveAdminRequest } from "./acuerdo-pedidos.js"
 import {
   addPhoto,
   catalog,
@@ -91,9 +100,11 @@ import { reportPeriod, storeReport } from "./sofi/reportes.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
   acceptInvitation,
+  answerSupport,
   changeRole,
   constraintError,
   createStore,
+  endSupport,
   inStore,
   invitationInput,
   inviteToStore,
@@ -135,6 +146,8 @@ const SHEET_UPLOAD = /^\/api\/tiendas\/[^/]+\/catalogo\/hoja$/
 const MAX_LINK_NOTICES = 120
 const LINK_NOTICE_WINDOW_MS = 60_000
 const RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/pedidos\/[^/]+\/comprobante$/
+/** El comprobante del plan (una foto o un PDF) va a la administración: su propio tope. */
+const PLAN_RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/plan\/comprobante$/
 /**
  * Lo que se escribe a Sofi en una prueba, por tienda, cada diez minutos: cada mensaje llama al
  * modelo y cuesta. Una conversación de prueba larga cabe de sobra.
@@ -185,6 +198,7 @@ export function createApp(deps: AppDeps) {
     apiURL: deps.webURL,
   }
   const app = new Hono<Env>()
+  const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
 
   app.use("*", requestId())
   app.use(
@@ -242,10 +256,16 @@ export function createApp(deps: AppDeps) {
     MAX_PHOTO_BYTES + 16 * 1024,
     "La captura pesa demasiado. Prueba con otra más chica.",
   )
+  const planReceipt = limit(
+    CONTRACT_MAX_RECEIPT_BYTES + 16 * 1024,
+    "El archivo pesa demasiado: hasta 1,5 MB.",
+  )
   app.use("*", (c, next) => {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
     if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
+    if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path))
+      return planReceipt(c, next)
     return small(c, next)
   })
 
@@ -263,6 +283,17 @@ export function createApp(deps: AppDeps) {
       body,
     })
     return c.json({ message: result.message }, result.status)
+  })
+
+  // Lo que pide la administración (ADR 0213): firmado con el secreto del acuerdo, de servidor a
+  // servidor. Sin el secreto no existe.
+  app.post(APP_CONTRACT_PATHS.requests, async (c) => {
+    const body = await c.req.text()
+    const result = await receiveAdminRequest(deps.ownerDb, contract, {
+      headers: c.req.raw.headers,
+      body,
+    })
+    return c.json(result.body, result.status)
   })
 
   // Los avisos del proveedor del link de pago (B4): de servidor a servidor. El pago se lee del
@@ -632,14 +663,50 @@ export function createApp(deps: AppDeps) {
     c.json(await argosBoard(deps.appDb, c.get("person"), c.req.param("id"))),
   )
 
-  // «Plan y pagos» (B7): lo que dice la administración de la tienda, y pedirle ayuda. Solo el Dueño.
-  const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  // «Plan y pagos» (B7): lo que dice la administración de la tienda, pedirle ayuda y subirle un
+  // comprobante. Solo el Dueño.
   app.get("/api/tiendas/:id/plan", async (c) =>
     c.json(await planView(deps.appDb, deps.ownerDb, contract, c.get("person"), c.req.param("id"))),
   )
   app.post("/api/tiendas/:id/plan/ayuda", async (c) => {
     const input = await bodyOf(c, supportInput)
     await askSupport(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/plan/comprobante", async (c) => {
+    let form: FormData
+    try {
+      form = await c.req.formData()
+    } catch {
+      throw new StoreError(400, "VALIDATION_ERROR", "El comprobante no se pudo leer")
+    }
+    const file = form.get("archivo")
+    const input = planReceiptInput.parse({
+      chargeId: String(form.get("chargeId") ?? ""),
+      amountCents: Number(form.get("amountCents")),
+      methodCode: String(form.get("methodCode") ?? ""),
+      note: String(form.get("note") ?? "") || undefined,
+    })
+    const bytes =
+      file instanceof File && file.size > 0 ? new Uint8Array(await file.arrayBuffer()) : null
+    await sendReceipt(deps.appDb, contract, c.get("person"), c.req.param("id"), input, bytes)
+    return c.body(null, 204)
+  })
+
+  // Soporte de gestorIA (ADR 0213): el Dueño o un Administrador lo deja entrar, o no, y lo saca.
+  app.post("/api/tiendas/:id/soporte/:accessId/aceptar", async (c) => {
+    const { id, accessId } = c.req.param()
+    await answerSupport(deps.appDb, c.get("person"), id, accessId, true)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/soporte/:accessId/rechazar", async (c) => {
+    const { id, accessId } = c.req.param()
+    await answerSupport(deps.appDb, c.get("person"), id, accessId, false)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/soporte/:accessId/quitar", async (c) => {
+    const { id, accessId } = c.req.param()
+    await endSupport(deps.appDb, c.get("person"), id, accessId)
     return c.body(null, 204)
   })
 

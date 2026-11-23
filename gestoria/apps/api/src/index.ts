@@ -1,6 +1,6 @@
 import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
-import { deliverOutbox, refreshStates } from "./acuerdo.js"
+import { deliverOutbox, purgeOutbox, refreshStates } from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
@@ -87,6 +87,8 @@ async function agreement() {
     const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => {
       const delivered = await deliverOutbox(ownerDb, contract)
       await refreshStates(ownerDb, contract)
+      // Lo que ya salió hace más de una semana se borra: la administración ya lo tiene.
+      await purgeOutbox(ownerDb)
       return delivered
     })
     if (run?.failed)
