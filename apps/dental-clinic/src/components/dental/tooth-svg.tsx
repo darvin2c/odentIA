@@ -58,10 +58,6 @@ function paintOf(entry: OdontogramEntry): string | null {
 }
 
 /**
- * Línea de cabecera accesible por hallazgo: la etiqueta y su variante, con la
- * sigla oficial solo en clínicas de un país con odontograma oficial (Perú).
- */
-/**
  * Lo que dice cada pieza al lector de pantalla y al pasar el cursor, igual en el arco y en la
  * vista de frente: «Pieza 15 — Espigo-muñón; Corona» y «Pieza 15: …. Seleccionar pieza.».
  */
@@ -78,6 +74,10 @@ export function toothWords(
   }
 }
 
+/**
+ * Línea de cabecera accesible por hallazgo: la etiqueta y su variante, con la
+ * sigla oficial solo en clínicas de un país con odontograma oficial (Perú).
+ */
 function entryLine(
   entry: OdontogramEntry,
   _toothNumber: number,

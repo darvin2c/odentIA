@@ -78,7 +78,8 @@ function useContainerWide(): {
     const update = (): void => {
       // Dentro de un panel plegado mide 0: no cambia nada.
       if (el.clientWidth === 0) return
-      setWide(el.clientWidth >= 960)
+      // La pieza al lado y a la boca le quedan 600 px por dentro de su borde (40,5rem con el relleno).
+      setWide(el.clientWidth >= 984)
     }
     update()
     const observer = new ResizeObserver(update)
@@ -97,7 +98,7 @@ function useContainerWide(): {
  * cada pieza se toca con el dedo (24 px o más) sin desplazarse de lado.
  */
 type MouthLayout = "whole" | "beside" | "stacked"
-function useMouthLayout(): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
+function useMouthLayout(mixed: boolean): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
   const ref = useRef<HTMLDivElement | null>(null)
   // Antes de medir, la boca entera: es lo que se ve en el escritorio, donde más se atiende.
   const [layout, setLayout] = useState<MouthLayout>("whole")
@@ -107,13 +108,15 @@ function useMouthLayout(): { ref: RefObject<HTMLDivElement | null>; layout: Mout
     const update = (): void => {
       const width = el.clientWidth
       if (width === 0) return
-      setLayout(width >= 900 ? "whole" : width >= 600 ? "beside" : "stacked")
+      // En la mixta el arco necesita más ancho (sus temporales no bajan de 24 px): la boca entera
+      // desde 1040 px y, más angosta, el arco arriba a todo el ancho (QA del 23 nov).
+      setLayout(width >= (mixed ? 1040 : 900) ? "whole" : !mixed && width >= 600 ? "beside" : "stacked")
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [mixed])
   return { ref, layout }
 }
 
@@ -214,10 +217,6 @@ function StudioBody({
   const queryClient = useQueryClient()
   const id = useId()
   const { ref: containerRef, wide } = useContainerWide()
-  const { ref: viewsRef, layout } = useMouthLayout()
-  const oneArch = layout !== "whole"
-  /** Desde qué vista se abrió la pieza: al cerrarla, el foco vuelve ahí. */
-  const openedFrom = useRef<"top" | "front">("top")
   const mouthRef = useRef<HTMLElement>(null)
   /** En el celular, qué arcada se ve. */
   const [arch, setArch] = useState<"upper" | "lower">("upper")
@@ -252,6 +251,10 @@ function StudioBody({
     return suggested === "mixed" ? "mixed" : primary ? "primary" : "adult"
   }
   const [dentition, setDentition] = useState<Dentition>(() => dentitionFor(validInitial, suggested))
+  const { ref: viewsRef, layout } = useMouthLayout(dentition === "mixed")
+  const oneArch = layout !== "whole"
+  /** Desde qué vista se abrió la pieza: al cerrarla, el foco vuelve ahí. */
+  const openedFrom = useRef<"top" | "front">("top")
   const [selection, setSelection] = useState<number[]>(validInitial ? [validInitial] : [])
   const [drawerOpen, setDrawerOpen] = useState(Boolean(validInitial))
   const [multiple, setMultiple] = useState(false)
@@ -576,7 +579,7 @@ function StudioBody({
       <div
         // Con la pieza al lado, la boca no baja de 600 px: así caben una arcada de arriba y su vista de
         // frente (mesa del 23 nov, diseño UX). Sin `overflow` aquí: la boca y el panel se pegan a la ventana.
-        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(37.5rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
+        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(40.5rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
       >
         <section
           ref={mouthRef}
@@ -716,7 +719,9 @@ function StudioBody({
               className={
                 layout === "stacked"
                   ? "flex min-w-0 flex-col gap-4"
-                  : "grid min-w-0 items-start gap-6 grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"
+                  : // El arco, más angosto con una arcada (así la de frente deja las incisivas en 24 px o
+                    // más) y más ancho en la mixta (sus temporales también).
+                    `grid min-w-0 items-start gap-6 ${layout === "beside" ? "grid-cols-[minmax(0,15rem)_minmax(0,1fr)]" : dentition === "mixed" ? "grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"}`
               }
             >
               <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">

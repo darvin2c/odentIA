@@ -170,7 +170,8 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
       case "enamel_development_defect": {
         if (!hasCrown) break
         const zone = entry.surface ? FACE[entry.surface] : null
-        if (!zone) break
+        // Una cara, un dibujo: el más nuevo, como en el arco (la resina hecha sobre la caries de antes).
+        if (!zone || marks.surfaces.some((mark) => mark.zone === zone)) break
         const style =
           entry.condition === "tooth_wear"
             ? "wear"
