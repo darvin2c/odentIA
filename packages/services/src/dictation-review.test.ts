@@ -173,6 +173,20 @@ describe("lo que propone el repaso", () => {
     await enable(false)
   })
 
+  it("la frase ya corregida en su pausa no vuelve con lo de antes: «en la veinticinco…» corregida a la 26 (CI del 23 nov)", async () => {
+    await enable(true)
+    const { fx, pause, review, pending } = await conversation()
+    const dueAt = new Date(Date.now() + 180 * 86_400_000).toISOString()
+    await pause("Control en seis meses.", [{ kind: "control", payload: { title: "Control en 6 meses", dueAt }, sourceText: "Control en seis meses" }])
+    const [control] = await pending()
+    await fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, control!.id))
+    // Otra fecha y otro título, con la misma frase: no es nuevo.
+    const later = new Date(Date.now() + 200 * 86_400_000).toISOString()
+    const result = await review({ drafts: [{ kind: "control", payload: { title: "Control semestral", dueAt: later }, sourceText: "control en seis meses" }] })
+    expect(result.suggestions).toEqual([])
+    await enable(false)
+  })
+
   it("lo descartado no vuelve aunque Clío lo proponga otra vez: lo filtra el servicio, no solo el prompt", async () => {
     await enable(true)
     const { fx, pause, review, pending } = await conversation()

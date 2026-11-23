@@ -2348,6 +2348,16 @@ export async function saveDictationSegment(
     if (kind === "presupuesto") return "presupuesto"
     return null
   }
+  /** ¿Esa frase ya dio una sugerencia de esa clase, pendiente o decidida? Sin tildes ni signos, palabra por palabra. */
+  const saidBefore = (kind: DictationKind, said: string | null | undefined): boolean => {
+    const now = ` ${normalizeForSearch(said ?? "")} `
+    if (!now.trim()) return false
+    return settled.some((item) => {
+      if (item.kind !== kind) return false
+      const before = ` ${normalizeForSearch(item.sourceText ?? "")} `
+      return !!before.trim() && before.includes(now)
+    })
+  }
   const unsettled = (kind: DictationKind, payload: Record<string, unknown>): Record<string, unknown> | null => {
     const same = settled.filter((item) => item.kind === kind)
     if (!same.length || kind === "nota") return payload
@@ -2381,6 +2391,9 @@ export async function saveDictationSegment(
   for (const [index, { draft, prepared }] of preparedDrafts.entries()) {
     if (draft.kind === "ficha" && lastForm.get(formKey(prepared.payload)) !== index) continue
     const checked = await withPatient(tx, orgId, patientId, encounterId, draft.kind, prepared, checks, scope)
+    // En el repaso, la frase que ya dio una sugerencia de esta clase no da otra, aunque diga otra pieza:
+    // «en la veinticinco hacemos endodoncia», ya corregida a la 26 en su pausa, no vuelve como la 25.
+    if (segment.review && draft.kind !== "nota" && draft.kind !== "salud" && saidBefore(draft.kind, draft.sourceText)) continue
     const kept = settled.length ? unsettled(draft.kind, checked.payload) : checked.payload
     if (!kept) continue
     const ready = kept === checked.payload ? checked : { ...checked, payload: kept }
