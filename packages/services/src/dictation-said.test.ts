@@ -179,6 +179,11 @@ describe("«No lo usé» dice cada frase una vez y solo lo que no se usó (QA de
 // en «No lo usé» con «no supe dónde va».
 describe("una pregunta no es algo que Clío no usó", () => {
   const item = (said: string) => ({ said, why: "sin_lugar" as const })
+  it("sin saber quién lo dijo, lo que puede ser una respuesta se lista: «cuando tomo algo frio me duele»", () => {
+    const answers = ["cuando tomo algo frio me duele", "que me duele de noche", "como a las tres de la manana"]
+    expect(unusedOnce(answers.map((said) => ({ said, why: "sin_lugar" as const }))).map((one) => one.said)).toEqual(answers)
+  })
+
   it("empieza con una palabra de pregunta, con tilde o sin ella: no se lista", () => {
     const kept = unusedOnce(["cuanto pesa lucas mas o menos", "Qué le duele", "y desde cuando le pasa", "donde le duele", "cual muela es", "como dos semanas", "no que yo sepa", "que yo sepa no", "tiene asma"].map(item))
     expect(kept.map((one) => one.said)).toEqual(["como dos semanas", "no que yo sepa", "que yo sepa no", "tiene asma"])

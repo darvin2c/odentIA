@@ -209,9 +209,18 @@ const ATTENDING_ASKS =
  */
 export function isQuestion(said: string, speaker: DictationSpeaker | null = null): boolean {
   if (/^\s*¿|\?\s*$/u.test(said)) return true
+  // Lo que dijo el paciente o quien lo acompaña es una respuesta, aunque empiece como pregunta.
+  if (speaker === "paciente" || speaker === "acompanante") return false
   const flat = normalizeForSearch(said)
-  return ASKS.test(flat) || (speaker === "dra" && ATTENDING_ASKS.test(flat))
+  if (speaker === "dra") return ASKS.test(flat) || ATTENDING_ASKS.test(flat)
+  // Sin saber quién lo dijo, solo lo que no puede ser una respuesta: sin tildes, «cuando tomo algo
+  // frío me duele» o «que me duele de noche» son del paciente y no se pierden sin aviso.
+  return SURE_ASKS.test(flat)
 }
+
+/** Lo que solo puede ser una pregunta, aun sin tildes ni signos: «cuanto pesa», «desde cuando le pasa». */
+const SURE_ASKS =
+  /^(?:y |e )?(?:(?:desde|hace) (?:cuando|cuanto)|cuanto|cuanta|cuantos|cuantas|donde|cual|cuales|quien|quienes|que (?:tiene|toma|siente|(?:le|te) (?:duele|molesta|pasa|paso)))\b/u
 
 /** Quién dijo esa frase, según los turnos del repaso: el turno que la contiene. Nulo si no se sabe. */
 export function speakerOfSaid(said: string, turns: readonly DictationTurn[] | null | undefined): DictationSpeaker | null {
