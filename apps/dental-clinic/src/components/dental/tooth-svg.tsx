@@ -505,6 +505,14 @@ function ToothCanvas({
   const hasCrownSymbol = graphic.some(
     ({ entry }) => entry.condition === "crown" || entry.condition === "temporary_crown",
   )
+  // Los pilares del puente llevan corona, del color del puente, igual que de frente.
+  const abutmentOf = graphic.find(
+    ({ entry }) =>
+      entry.condition === "fixed_partial_denture" &&
+      detailsOf(entry).abutmentTeeth?.includes(toothNumber) === true,
+  )
+  // El resto radicular no es una pieza sana: la corona se apaga y queda la raíz, en rojo (QA del 23 nov).
+  const remnant = graphic.find(({ entry }) => entry.condition === "root_remnant")
 
   const supernumeraryPaint =
     graphic.find((g) => g.entry.condition === "supernumerary_tooth")?.paint ?? BLUE
@@ -716,11 +724,17 @@ function ToothCanvas({
               !!FILL_CONDITIONS[draftGraphic.entry.condition],
             )
           : null}
-        {replacement && !hasCrownSymbol ? (
+        {remnant ? (
+          <g pointerEvents="none" aria-hidden="true">
+            <path d={silhouette.crown} className="fill-background" fillOpacity={0.75} stroke="none" />
+            <circle cx={12} cy={7.6} r={3.2} fill={remnant.paint} fillOpacity={0.15} stroke={remnant.paint} strokeWidth={1} />
+          </g>
+        ) : null}
+        {(replacement || abutmentOf) && !hasCrownSymbol ? (
           <rect
             {...CROWN_SQUARE}
             fill="none"
-            stroke={replacement.paint}
+            stroke={(replacement ?? abutmentOf)?.paint}
             strokeWidth={1}
             pointerEvents="none"
             aria-hidden="true"

@@ -20,7 +20,7 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
     "curacion provisional",
     "obturacion provisional",
   ],
-  root_remnant: ["resto radicular", "raiz", "raices", "solo raiz"],
+  root_remnant: ["resto radicular", "raiz", "raices", "solo raiz", "retenida", "raiz retenida"],
   crown: ["funda"],
   temporary_crown: ["funda temporal", "funda provisional", "corona provisional"],
   root_canal_treatment: ["endodoncia", "conducto", "tratamiento de raiz", "raiz", "raices"],
@@ -175,18 +175,21 @@ export function searchFindings(text: string): FindingSearch {
 
 /**
  * Cómo se dice en la clínica el tratamiento que se busca para el plan: «sacar la muela», «extraer»
- * o «extracción» es la exodoncia, que es como se llama el servicio.
+ * o «extracción» es la exodoncia, que es como se llama el servicio. El perno, el poste o el espigo es
+ * el muñón («Perno muñón», «Poste y muñón»): dicho entero, no por pedazo, para que «posterior» no
+ * traiga los tratamientos de los dientes de atrás (QA del 23 nov).
  */
-const TREATMENT_SAID_AS: ReadonlyArray<readonly [name: string, words: readonly string[]]> = [
-  ["exodoncia", ["sacar", "extraer", "extraccion", "extrae"]],
+const TREATMENT_SAID_AS: ReadonlyArray<readonly [name: string, words: readonly string[], whole: boolean]> = [
+  ["exodoncia", ["sacar", "extraer", "extraccion", "extrae"], false],
+  ["muñón", ["poste", "postes", "perno", "pernos", "espigo"], true],
 ]
 
 /** Lo que se busca en los tratamientos para lo escrito: el nombre del servicio si se dijo de otro modo. */
 export function treatmentSearchTerm(text: string): string {
   const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
   const words = query.split(" ")
-  const said = TREATMENT_SAID_AS.find(([, synonyms]) =>
-    synonyms.some((synonym) => words.some((word) => word.startsWith(synonym))),
+  const said = TREATMENT_SAID_AS.find(([, synonyms, whole]) =>
+    synonyms.some((synonym) => words.some((word) => (whole ? word === synonym : word.startsWith(synonym)))),
   )
   return said ? said[0] : text.trim()
 }

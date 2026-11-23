@@ -214,8 +214,9 @@ export function frontMarksOf(tooth: number, entries: readonly FrontEntry[]): Fro
         if (hasCrown) {
           marks.buried = true
           marks.shift = Math.max(marks.shift, 1.15)
-          // La tercera molar retenida suele estar inclinada hacia mesial (Winter).
-          if (tooth % 10 === 8) marks.tilt = 18
+          // La tercera molar inferior retenida suele estar inclinada hacia mesial (Winter); la superior,
+          // no tanto (QA del 23 nov, voz clínica).
+          if (tooth === 38 || tooth === 48) marks.tilt = 18
         }
         break
       case "ectopic_tooth":

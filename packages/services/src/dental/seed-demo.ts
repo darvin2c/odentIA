@@ -3574,6 +3574,9 @@ const signedVisitWith = async (patientId: string, days: number, reason: string, 
   await updateEncounterDraft(db, ORG_A, ANA_ID, patientId, visit.id, { evolution })
   // La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
   await finalizeEncounter(db, ORG_A, ANA_ID, patientId, visit.id, { followUpIds: [] })
+  // Lo anotado y la firma, del día de la visita: así «Ver estado al» muestra ese día (QA del 23 nov).
+  await db.update(odontogramEntry).set({ createdAt: daysAgo(days) }).where(eq(odontogramEntry.encounterId, visit.id))
+  await db.update(encounter).set({ finalizedAt: daysAgo(days) }).where(eq(encounter.id, visit.id))
 }
 const mario = await createPatient(db, ORG_A, ANA_ID, {
   displayName: "Mario Castillo Vargas",
