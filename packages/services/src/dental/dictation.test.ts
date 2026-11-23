@@ -1408,3 +1408,35 @@ describe("lo que encontró la quinta prueba con voz (15 nov, c5)", () => {
     await enable(false)
   })
 })
+
+describe("«también» suma, no corrige (QA del 22 nov, H1)", () => {
+  it("«sí, también en la 37» deja la caries de la 36 como estaba y propone la de la 37", async () => {
+    await enable(true)
+    const fx = await openSession("Resina de la prueba de también", "surface")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [caries] = (
+      await segment({
+        drafts: [{ kind: "odontograma", payload: { toothNumber: 36, condition: "caries", variant: "dentina", surfaces: ["oclusal"] }, sourceText: "la 36 tiene caries oclusal" }],
+        transcript: "la 36 tiene caries oclusal",
+      })
+    ).suggestions
+    // Clío lo mandó como corrección de la 36 y, además, como hallazgo nuevo de la 37.
+    const said = "si tambien en la 37"
+    const also = await segment({
+      drafts: [{ kind: "odontograma", payload: { toothNumber: 37, condition: "caries", variant: "dentina" }, sourceText: said }],
+      corrections: [{ suggestionId: caries!.id, changes: { toothNumber: 37 }, said }],
+      transcript: said,
+    })
+    expect(also.corrected).toEqual([])
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    const teeth = pending.filter((item) => item.kind === "odontograma").map((item) => [item.payload["toothNumber"], item.voice])
+    expect(teeth).toEqual([
+      [36, null],
+      [37, null],
+    ])
+    // Con palabras de corrección sí se corrige.
+    const fixed = await segment({ drafts: [], corrections: [{ suggestionId: caries!.id, changes: { toothNumber: 46 }, said: "perdón, también es la 46" }], transcript: "perdón, también es la 46" })
+    expect(fixed.corrected).toEqual([caries!.id])
+    await enable(false)
+  })
+})

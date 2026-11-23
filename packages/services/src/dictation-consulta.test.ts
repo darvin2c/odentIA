@@ -73,8 +73,8 @@ describe("lo nuevo de la consulta se suma a la misma sugerencia", () => {
     expect(added.suggestions).toEqual([])
     expect(added.corrected).toEqual([])
     expect(added.added).toEqual([first!.id])
-    // Pausa 5: «Fue para fin de agosto, serán como tres meses.»
-    await segment({ drafts: [{ kind: "nota", payload: { illnessDuration: "como tres meses" }, sourceText: "serán como tres meses" }], transcript: "Fue para fin de agosto, serán como tres meses." })
+    // Pausa 5: «No, fue para fin de agosto, serán como tres meses.» Se corrige: el tiempo cambia (QA del 22 nov, H2).
+    await segment({ drafts: [{ kind: "nota", payload: { illnessDuration: "como tres meses" }, sourceText: "serán como tres meses" }], transcript: "No, fue para fin de agosto, serán como tres meses." })
 
     const [note, ...others] = await notes()
     expect(others).toEqual([])
@@ -217,6 +217,27 @@ describe("una respuesta no es una corrección (QA del 21 nov, H7 y hallazgo 6 de
     const [after] = await notes()
     expect(after?.voice).toBeNull()
     expect(after?.payload).toEqual({ reason: "Dolor de muela", illnessDuration: "como dos semanas", presentIllness: "Le duele con el frío. Anoche no la dejó dormir." })
+    await enable(false)
+  })
+
+  it("H2: lo que dice quien examina no pisa el motivo del paciente ni deja un «antes dijo» falso (QA del 22 nov)", async () => {
+    await enable(true)
+    const { segment, notes } = await session()
+    await segment({
+      drafts: [{ kind: "nota", payload: { reason: "dolor de una muela de abajo a la izquierda", illnessDuration: "dos semanas" }, sourceText: "me duele una muela de abajo a la izquierda" }],
+      transcript: "me duele una muela de abajo a la izquierda cuando tomo algo frio hace como dos semanas",
+    })
+    // Pausa 10, el examen de la doctora: Clío la ordenó como otra consulta con otro motivo y otro tiempo.
+    const exam = "la 36 tiene caries profunda oclusal que llega a pulpa dolor al frio que se queda pulpitis irreversible de la 36"
+    await segment({ drafts: [{ kind: "nota", payload: { reason: "dolor al frío que se queda", illnessDuration: "un rato" }, sourceText: "dolor al frio que se queda" }], transcript: exam })
+    const [note] = await notes()
+    expect(note?.payload).toMatchObject({ reason: "dolor de una muela de abajo a la izquierda", illnessDuration: "dos semanas" })
+    expect(note?.summary).not.toContain("antes dijo")
+    // Quien se corrige sí lo cambia, con su «antes dijo».
+    await segment({ drafts: [{ kind: "nota", payload: { illnessDuration: "un mes" }, sourceText: "ya es un mes" }], transcript: "no, perdón, ya es un mes" })
+    const [after] = await notes()
+    expect(after?.payload).toMatchObject({ reason: "dolor de una muela de abajo a la izquierda", illnessDuration: "un mes" })
+    expect(after?.summary).toContain("(antes dijo «dos semanas»)")
     await enable(false)
   })
 

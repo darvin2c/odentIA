@@ -1005,7 +1005,7 @@
     },
     "correcciones": {
       "default": [],
-      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna. Lo que suma («también en la 37», «además…», «igual en…») no corrige: es una sugerencia nueva y la pendiente queda como estaba.",
       "maxItems": 10,
       "type": "array",
       "items": {

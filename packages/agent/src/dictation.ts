@@ -99,7 +99,7 @@ export function dictationEdits(example: string) {
       .max(VOICE_EDITS_HINT)
       .default([])
       .describe(
-        "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+        "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna. Lo que suma («también en la 37», «además…», «igual en…») no corrige: es una sugerencia nueva y la pendiente queda como estaba.",
       ),
     quitar: z
       .array(
@@ -191,7 +191,7 @@ export function appointmentAndBudgetPrompt(booking: string): string[] {
  */
 export function consultaPrompt(examples: string): string[] {
   return [
-    `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado.`,
+    `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado. Es lo que cuenta el paciente o quien lo acompaña, no lo que examina o encuentra quien atiende: eso va a la evolución.`,
     "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años», «desde la caída del sábado»), se cuenta desde ahí («hace dos años»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
     "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias) va en el relato; lo que toma, en `salud`. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
     // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
@@ -199,7 +199,7 @@ export function consultaPrompt(examples: string): string[] {
     // QA del 21 nov: la explicación del sistema a la paciente («al decir dolor en la 16 lo anota…») quedó firmada como evolución.
     "La evolución (`evolution`) es solo lo que se examinó, lo que se hizo en esta atención y cómo respondió el paciente. Lo que se le explica al paciente o a quien lo acompaña (cómo funciona el sistema o la consulta, cómo se paga, qué se haría y por qué) no es evolución ni otra parte de la historia: no va.",
     // Mesa del 20 nov 2026: con la consulta pendiente sin su texto, cada pausa la «corregía» y reemplazaba el relato.
-    "La consulta pendiente llega con lo que ya dice. Lo nuevo que se cuenta de la consulta (lo que le pasa, desde cuándo, lo que se hizo) va en `nota`, solo lo nuevo y sin repetir lo que ya dice: el sistema lo suma a esa misma consulta. Si el motivo o el tiempo se dicen distinto, va en `nota` el último. `correcciones` a la consulta es solo para cuando alguien corrige en voz alta lo ya dicho («no, fue hace un mes», «perdón, es del lado izquierdo»), con esa frase en `dicho` y solo los campos que cambian: una pregunta, o lo que no habla de la consulta, no la corrige.",
+    "La consulta pendiente llega con lo que ya dice. Lo nuevo que se cuenta de la consulta (lo que le pasa, desde cuándo, lo que se hizo) va en `nota`, solo lo nuevo y sin repetir lo que ya dice: el sistema lo suma a esa misma consulta. El motivo y el tiempo ya dichos solo cambian si alguien se corrige: entonces va en `nota` el último. `correcciones` a la consulta es solo para cuando alguien corrige en voz alta lo ya dicho («no, fue hace un mes», «perdón, es del lado izquierdo»), con esa frase en `dicho` y solo los campos que cambian: una pregunta, o lo que no habla de la consulta, no la corrige.",
   ]
 }
 

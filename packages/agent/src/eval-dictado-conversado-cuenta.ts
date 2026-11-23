@@ -21,8 +21,12 @@ type Payload = Record<string, unknown>
 
 /** Lo que el servidor de la rama sabe hacer, por función: lo que falta se mide como lo hacía `main`. */
 export interface ServerParts {
-  mergeNote?: (current: Payload, added: Payload) => { payload: Payload; earlier: Record<string, string> } | null
+  mergeNote?: (current: Payload, added: Payload, corrects?: boolean) => { payload: Payload; earlier: Record<string, string> } | null
+  /** Si en la pausa alguien se corrige: solo así cambia un campo de una línea de la consulta. */
+  saysCorrection?: (transcript: string | undefined, said?: string | undefined) => boolean
   saidToCorrectNote?: (said: string | undefined, transcript: string | undefined) => boolean
+  /** «también en la 37» suma, no corrige. */
+  addsNotCorrects?: (said: string | undefined) => boolean
   doubtfulAllergy?: (draft: DictationDraft) => DictationDraft
   mergeHealth?: (current: Payload, added: Payload, correct?: boolean) => { payload: Payload; earlier: Record<string, string> }
   prepareHealth?: (payload: Payload, said: string | undefined, own: object) => { payload: Payload; status: string; note: string | null } | null
@@ -30,7 +34,7 @@ export interface ServerParts {
   dictationContext?: (earlier: readonly string[]) => string
 }
 
-const PART_NAMES = ["mergeNote", "saidToCorrectNote", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext"] as const
+const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext"] as const
 
 /** Las funciones que tiene el módulo de servicios de la rama, por su nombre. */
 export function serverPartsOf(module: Record<string, unknown>): ServerParts {
@@ -167,6 +171,7 @@ export function applyPause(
     for (const correction of read.corrections) {
       const row = listed[correction.index]
       if (!row || row.status === "descartada") continue
+      if (parts.addsNotCorrects?.(correction.sourceText)) continue
       if (row.kind === "nota" || row.kind === "salud") {
         // La consulta y la salud solo se corrigen con la frase que lo pide (la rama nueva).
         if (parts.saidToCorrectNote && !parts.saidToCorrectNote(correction.sourceText, transcript)) continue
@@ -266,7 +271,8 @@ export function applyPause(
     if (draft.kind === "nota") {
       // La rama nueva: lo nuevo se suma a la consulta pendiente; en `main`, cada una es otra tarjeta.
       if (parts.mergeNote && note) {
-        const merged = parts.mergeNote(note.payload, ready.payload)
+        // Sin `saysCorrection` (una rama anterior al 22 nov), lo dicho distinto siempre reemplazaba.
+        const merged = parts.mergeNote(note.payload, ready.payload, parts.saysCorrection ? parts.saysCorrection(transcript, sourceText) : true)
         if (merged) {
           if (JSON.stringify(merged.payload) !== JSON.stringify(note.payload)) {
             note.payload = merged.payload

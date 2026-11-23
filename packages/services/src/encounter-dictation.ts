@@ -1657,11 +1657,18 @@ const saysAlready = (text: string, part: string) => ` ${normalizeForSearch(text)
 /**
  * Lo nuevo de la consulta, sumado a la que ya estaba pendiente (mesa del 20 nov 2026): una pausa
  * que no habla de un campo no lo toca; lo que ya dice no se repite; el relato, la evolución y lo
- * demás de varias líneas siguen con lo nuevo detrás; un campo de una línea dicho distinto queda
- * con lo último y guarda lo anterior en `earlier`, nunca los dos juntos. `null`: algo no cabría
- * en su campo, y no se corta: va en otra sugerencia.
+ * demás de varias líneas siguen con lo nuevo detrás. Un campo de una línea ya lleno y dicho
+ * distinto cambia solo si en esa pausa alguien se corrige (`corrects`, `saysCorrection`): queda
+ * lo último y lo anterior en `earlier`, nunca los dos juntos. Si nadie se corrigió, se queda lo
+ * primero y lo nuevo no se usa para ese campo (QA del 22 nov, H2: «dolor al frío que se queda»,
+ * del examen, pisaba el motivo del paciente con un «antes dijo» falso). `null`: algo no cabría en
+ * su campo, y no se corta: va en otra sugerencia.
  */
-export function mergeNote(current: Record<string, unknown>, added: Record<string, unknown>): { payload: Record<string, unknown>; earlier: Record<string, string> } | null {
+export function mergeNote(
+  current: Record<string, unknown>,
+  added: Record<string, unknown>,
+  corrects = false,
+): { payload: Record<string, unknown>; earlier: Record<string, string> } | null {
   const payload = { ...current }
   const earlier: Record<string, string> = {}
   const fields = OPERATIONS["atencion.nota"].fields
@@ -1672,6 +1679,7 @@ export function mergeNote(current: Record<string, unknown>, added: Record<string
     if (!before || saysAlready(now, before)) payload[key] = now
     else if (saysAlready(before, now)) continue
     else if (NOTE_ONE_LINE.has(key)) {
+      if (!corrects) continue
       payload[key] = now
       earlier[key] = before
     } else payload[key] = `${before}${/[.!?…]$/u.test(before) ? "" : "."} ${now}`
@@ -1686,6 +1694,28 @@ export function mergeNote(current: Record<string, unknown>, added: Record<string
  * Un «no» o un «digo» solo al empezar («no, es la izquierda»): en una respuesta un «no» es lo común.
  */
 const CORRECTION_WORDS = / (?:perdon|en realidad|mejor dicho|corrijo|me equivoque|quise decir) /u
+
+/**
+ * ¿Alguien se corrige en esta pausa? Las palabras de corrección en lo dicho de la pausa, o un «no»
+ * o un «digo» al empezar la frase que trae el dato (`said`) o la pausa. Solo así un campo de una
+ * línea de la consulta cambia lo que ya decía (`mergeNote`).
+ */
+export function saysCorrection(transcript: string | undefined, said?: string | undefined): boolean {
+  if (CORRECTION_WORDS.test(` ${normalizeForSearch(`${transcript ?? ""} ${said ?? ""}`)} `)) return true
+  return [said, transcript].some((text) => /^ (?:no|digo) /u.test(` ${normalizeForSearch(text ?? "")} `))
+}
+
+/** Cómo se suma a lo dicho, sin tildes: «también en la 37», «además», «igual en», «asimismo». */
+const ADDING_WORDS = / (?:tambien|ademas|igual en|asimismo) /u
+
+/**
+ * Lo dicho suma y no corrige (QA del 22 nov, H1): «sí, también en la 37» no mueve la caries de la 36.
+ * Con palabras de corrección sí corrige («perdón, también es la 46»). Vale para todo tipo.
+ */
+export function addsNotCorrects(said: string | undefined): boolean {
+  const heard = ` ${normalizeForSearch(said ?? "")} `
+  return ADDING_WORDS.test(heard) && !CORRECTION_WORDS.test(heard)
+}
 
 /**
  * Lo que se dijo para corregir la consulta: solo vale si está en lo dictado de la pausa y no es una
@@ -1987,6 +2017,8 @@ export async function saveDictationSegment(
   /** Aplica a una sugerencia pendiente lo que se corrigió en voz alta. `false`: no encaja o no cambia nada. */
   const correct = async (suggestionId: string, asked: Record<string, unknown>, said?: string): Promise<boolean> => {
     let changes = asked
+    // Lo que suma no corrige: lo nuevo ya llega como sugerencia propia (QA del 22 nov, H1).
+    if (addsNotCorrects(said)) return false
     const row = await pendingRow(suggestionId)
     if (!row) return false
     // La consulta solo se corrige con lo que alguien dijo para corregirla: lo nuevo se suma (`mergeNote`).
@@ -2001,19 +2033,20 @@ export async function saveDictationSegment(
       // «No, perdón, es la del lado izquierdo»: quien corrige lo dice; una respuesta no lo dice.
       const heard = ` ${normalizeForSearch(said ?? "")} `
       const corrects = CORRECTION_WORDS.test(heard) || /^ (?:no|digo|era|es) /u.test(heard)
+      // Un campo de una línea ya lleno solo cambia si quien lo dice se corrige (QA del 22 nov, H2).
       const isReal = (key: string, value: unknown) => {
         const old = textOf(stored[key])
         const now = textOf(value)
-        return !!old && !!now && !saysAlready(old, now) && (corrects || !saysAlready(now, old))
+        return !!old && !!now && !saysAlready(old, now) && (corrects || (!NOTE_ONE_LINE.has(key) && !saysAlready(now, old)))
       }
       const real = Object.fromEntries(Object.entries(changes).filter(([key, value]) => isReal(key, value)))
       const extra = Object.fromEntries(Object.entries(changes).filter(([key, value]) => !isReal(key, value)))
-      const merged = Object.keys(extra).length ? mergeNote(stored, extra) : null
+      const merged = Object.keys(extra).length ? mergeNote(stored, extra, corrects) : null
       voiceTouched.set(row.id, new Set([...(voiceTouched.get(row.id) ?? []), ...Object.keys(changes)]))
       if (!Object.keys(real).length) {
         if (!merged || JSON.stringify(merged.payload) === JSON.stringify(stored)) return false
         const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
-          step && { ...step, payload: mergeNote(step.payload, extra)?.payload ?? step.payload, previous: withAdded(step.previous) }
+          step && { ...step, payload: mergeNote(step.payload, extra, corrects)?.payload ?? step.payload, previous: withAdded(step.previous) }
         await tx
           .update(encounterDictationSuggestion)
           .set({ payload: withMeta(merged.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier } })), updatedAt: new Date() })
@@ -2300,12 +2333,13 @@ export async function saveDictationSegment(
         // Lo que una corrección de esta misma pausa ya puso en un campo no se suma otra vez con otras palabras.
         const touched = voiceTouched.get(row.id)
         const fresh = touched ? Object.fromEntries(Object.entries(ready.payload).filter(([key]) => !touched.has(key))) : ready.payload
-        const merged = mergeNote(data, fresh)
+        const corrects = saysCorrection(segment.transcript, draft.sourceText)
+        const merged = mergeNote(data, fresh, corrects)
         if (merged) {
           if (JSON.stringify(merged.payload) !== JSON.stringify(data)) {
             // Lo sumado también queda en cada paso de «Deshacer»: deshacer una corrección no lo borra.
             const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
-              step && { ...step, payload: mergeNote(step.payload, fresh)?.payload ?? step.payload, previous: withAdded(step.previous) }
+              step && { ...step, payload: mergeNote(step.payload, fresh, corrects)?.payload ?? step.payload, previous: withAdded(step.previous) }
             await tx
               .update(encounterDictationSuggestion)
               .set({
@@ -2359,7 +2393,7 @@ export async function saveDictationSegment(
     }
     if (draft.kind === "nota" && !pendingNoteId && newNote) {
       const { data, meta } = splitMeta(newNote.payload as Record<string, unknown>)
-      const merged = mergeNote(data, ready.payload)
+      const merged = mergeNote(data, ready.payload, saysCorrection(segment.transcript, draft.sourceText))
       if (merged) {
         newNote.payload = withMeta(merged.payload, { ...meta, earlier: { ...meta.earlier, ...merged.earlier } })
         newNote.sourceText = joinSource(newNote.sourceText ?? "", draft.sourceText)
