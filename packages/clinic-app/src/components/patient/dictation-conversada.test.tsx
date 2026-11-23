@@ -159,6 +159,26 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
     expect(session.confirmHealth.mutate).not.toHaveBeenCalled()
   })
 
+  // QA del 22 nov (UX-3): siete botones en el bloque, y «Lo revisé con…» al pie de seis filas.
+  it("mientras hay algo dicho por revisar, las respuestas de siempre se pliegan; la fila dice qué se oyó", () => {
+    const withPhrase = {
+      ...heard,
+      healthRows: heard.healthRows?.map((row) => (row.key === "anticoagulants" ? { ...row, said: "tomo warfarina perdón apixabán" } : row)),
+    }
+    renderNotice(sessionWith({ suggestions: [withPhrase] }))
+    const notice = screen.getByRole("region", { name: "Revisa con Rosa lo que dijo de su salud" })
+    expect((within(notice).getByRole("heading", { name: "Anticoagulante" }).closest("li") as HTMLElement).textContent).toContain("«tomo warfarina perdón apixabán»")
+    // Su «No» oído conserva su botón: es como se confirma.
+    expect(within(notice).getByRole("button", { name: "Niega enfermedades" })).toBeTruthy()
+    expect(within(notice).queryByRole("button", { name: "No toma medicación" })).toBeNull()
+    expect(within(notice).queryByRole("button", { name: "No tiene alergias" })).toBeNull()
+    const others = within(notice).getByRole("button", { name: "Otras respuestas" })
+    expect(others.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(others)
+    expect(within(notice).getByRole("button", { name: "No toma medicación" })).toBeTruthy()
+    expect(within(notice).getByRole("button", { name: "No tiene alergias" })).toBeTruthy()
+  })
+
   it("«Corregir algo» abre sus antecedentes con lo de Clío puesto", () => {
     const session = sessionWith({ suggestions: [heard] })
     renderNotice(session)
@@ -180,8 +200,8 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
   it("lee las filas que arma el servidor, sin volver a leer el texto de la tarjeta: el valor, lo de antes y quién lo dijo", () => {
     expect(heardHealth(heard)).toEqual({
       rows: [
-        { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina", by: "el paciente", denied: false },
-        { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", before: null, by: "el paciente", denied: true },
+        { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina", by: "el paciente", denied: false, said: null },
+        { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", before: null, by: "el paciente", denied: true, said: null },
       ],
       by: "el paciente",
     })

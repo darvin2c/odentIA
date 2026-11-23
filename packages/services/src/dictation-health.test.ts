@@ -4,11 +4,13 @@ import {
   healthByDeclarant,
   healthRows,
   healthSaidBy,
+  healthSaidOf,
   mergeHealth,
   prepareHealth,
   saidInDoubt,
   splitHealthDenials,
   withoutSettledHealth,
+  withSaidPhrases,
 } from "./dictation-health.js"
 import { doubtfulAllergy } from "./encounter-dictation.js"
 import { productHooksFor } from "./products.js"
@@ -128,5 +130,23 @@ describe("A6 · lo resuelto no se vuelve a proponer", () => {
   it("lo que quedó en Antecedentes se quita de una propuesta nueva", () => {
     const resolved = [{ medications: { state: "recorded", items: [{ name: "losartán" }] } }]
     expect(withoutSettledHealth({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "Losartan" }] } }, resolved)).toBeNull()
+  })
+})
+
+// QA del 22 nov (UX-3): el aviso de su salud no decía qué se oyó en cada fila; la propuesta juntaba
+// las frases de varias pausas en una sola, sin saber de qué dato era cada una.
+describe("cada dato de su salud con la frase en que se oyó", () => {
+  it("cada fila lleva la frase de la pausa que la dijo; dicha otra vez, la última", () => {
+    const first = { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] } }
+    const second = { declarante: "paciente", allergies: { state: "unknown" }, medications: { state: "recorded", items: [{ name: "losartán" }, { name: "metformina" }] } }
+    const said = healthSaidOf(second, "y metformina en el almuerzo, y alergias no que yo sepa", healthSaidOf(first, "si tomo losartan para la presion"))
+    const rows = withSaidPhrases(healthRows({ ...second, medications: second.medications }), said)
+    expect(Object.fromEntries(rows.map((row) => [row.key, row.said]))).toEqual({
+      medications: "y metformina en el almuerzo, y alergias no que yo sepa",
+      allergies: "y metformina en el almuerzo, y alergias no que yo sepa",
+    })
+    // Sin frase no se inventa una.
+    expect(healthSaidOf(first, "  ", { medications: "antes" })).toEqual({ medications: "antes" })
+    expect(withSaidPhrases(healthRows(first))[0]?.said).toBeUndefined()
   })
 })

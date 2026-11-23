@@ -65,6 +65,8 @@ import {
   healthOfPayload,
   type HealthRow,
   healthRows,
+  healthSaidOf,
+  withSaidPhrases,
   healthSummary,
   mergeHealth,
   prepareHealth,
@@ -230,6 +232,8 @@ interface SuggestionMeta {
    * distinto. Queda lo último y la tarjeta dice «antes dijo …» (mesa del 20 nov 2026).
    */
   earlier?: Record<string, string> | undefined
+  /** Lo de su salud: la frase en que se oyó cada dato, por su clave (`healthSaidOf`). */
+  said?: Record<string, string> | undefined
   removal?: { status: "lista" | "por_revisar"; said: string } | undefined
   /** «Quita la endodoncia» sobre una ya confirmada: nunca se quita sola, se propone. */
   undoRequest?: { said: string } | undefined
@@ -698,7 +702,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zon
     removal: row.status === "descartada" && meta.removal ? { said: meta.removal.said } : null,
     undoRequest: row.status === "confirmada" && meta.undoRequest ? { said: meta.undoRequest.said } : null,
     createdAt: row.createdAt.toISOString(),
-    ...(row.kind === "salud" ? { healthRows: healthRows(data, meta.earlier) } : {}),
+    ...(row.kind === "salud" ? { healthRows: withSaidPhrases(healthRows(data, meta.earlier), meta.said) } : {}),
   }
 }
 
@@ -2387,7 +2391,15 @@ export async function saveDictationSegment(
           await tx
             .update(encounterDictationSuggestion)
             .set({
-              payload: withMeta(health.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) } })),
+              payload: withMeta(
+                health.payload,
+                stamp({
+                  ...meta,
+                  voice: withAdded(meta.voice),
+                  earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
+                  said: healthSaidOf(fresh, draft.sourceText, meta.said),
+                }),
+              ),
               sourceText: joinSource(row.sourceText, draft.sourceText),
               updatedAt: new Date(),
             })
@@ -2402,7 +2414,11 @@ export async function saveDictationSegment(
       const merged = mergeHealth(data, ready.payload)
       const health = prepareHealth(merged.payload, undefined, dictation.health)
       if (health) {
-        newHealth.payload = withMeta(health.payload, { ...meta, earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) } })
+        newHealth.payload = withMeta(health.payload, {
+          ...meta,
+          earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
+          said: healthSaidOf(ready.payload, draft.sourceText, meta.said),
+        })
         newHealth.sourceText = joinSource(newHealth.sourceText ?? "", draft.sourceText)
       }
       continue
@@ -2541,7 +2557,13 @@ export async function saveDictationSegment(
       encounterId,
       professionalUserId: actorUserId,
       kind: draft.kind,
-      payload: withMeta(ready.payload, stamp(healthEarlier.has(draft) ? { earlier: healthEarlier.get(draft) } : {})),
+      payload: withMeta(
+        ready.payload,
+        stamp({
+          ...(healthEarlier.has(draft) ? { earlier: healthEarlier.get(draft) } : {}),
+          ...(draft.kind === "salud" ? { said: healthSaidOf(ready.payload, draft.sourceText) } : {}),
+        }),
+      ),
       sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),
       status: ready.status,
       note: ready.note,
@@ -3467,7 +3489,7 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
       suggestionId: row.id,
       encounterId: row.encounterId,
       by: healthDeclarantOf(data),
-      rows: healthRows(data, meta.earlier),
+      rows: withSaidPhrases(healthRows(data, meta.earlier), meta.said),
       at: row.updatedAt.toISOString(),
       open: row.encounterStatus === "borrador",
     }

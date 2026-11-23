@@ -47,6 +47,8 @@ export interface SaidHealthRow {
   before: string | null
   /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…». */
   denied?: boolean
+  /** La frase en que se oyó, tal cual: la fila la muestra entre comillas. */
+  said?: string | null
 }
 
 /** Una frase de lo que se dijo que está en una sugerencia (pendiente o confirmada), con su clase. */

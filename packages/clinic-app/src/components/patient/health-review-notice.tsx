@@ -53,6 +53,8 @@ export interface HeardHealthRow {
   by: string | null
   /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…». */
   denied: boolean
+  /** La frase en que se oyó, tal cual; nula si el servidor no la tiene (lo dicho antes de guardarla). */
+  said: string | null
 }
 
 const ROW_GROUPS = new Set(["conditions", "medications", "allergies", "anticoagulants", "boneMedicines"])
@@ -85,6 +87,7 @@ export function heardHealth(
       before: row.before ?? null,
       by: saidByWords(row.by, representative),
       denied: row.denied === true,
+      said: row.said?.trim() || null,
     }),
   )
   const people = [...new Set(rows.map((row) => row.by))]
@@ -183,6 +186,9 @@ export function HealthReviewNotice({
   const titleRef = useRef<HTMLHeadingElement>(null)
   const [adding, setAdding] = useState(false)
   const [showing, setShowing] = useState(false)
+  // Las respuestas de siempre («No tiene alergias», «Niega enfermedades»…) quedan plegadas mientras hay
+  // algo dicho por revisar: competían con «Lo revisé con…» (QA del 22 nov, UX-3: 7 botones).
+  const [showOthers, setShowOthers] = useState(false)
   const detailId = useId()
   // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto: la revisión no
   // tiene vuelta atrás en el servidor (sella quién y cuándo), así que se deshace antes de enviarla. Si
@@ -423,11 +429,12 @@ export function HealthReviewNotice({
     !!dictation?.discardHealth.isPending
   /** Quién lo dijo, en la fila: «lo dijo Rosa», «lo dijo su madre». */
   const saidByOf = (by: string | null) => (by === "el paciente" ? `lo dijo ${patientFirst}` : by ? `lo dijo ${by}` : "no se sabe quién lo dijo")
-  /** Un dato oído: lo que dijo, quién y, si lo dijo distinto, lo de antes. */
+  /** Un dato oído: lo que dijo, la frase en que se oyó, quién y, si lo dijo distinto, lo de antes. */
   const heardLine = (row: HeardHealthRow, when = "") => (
     <div className="flex min-w-0 flex-col gap-0.5">
       <p className="text-sm font-medium [overflow-wrap:anywhere]">{firstUpper(row.value)}</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+        {row.said ? `«${row.said}» · ` : ""}
         {saidByOf(row.by)}
         {when}
         {row.before ? ` · antes dijo «${row.before}»` : ""}
@@ -498,6 +505,13 @@ export function HealthReviewNotice({
   const heardConditions = unasked.includes("conditions") ? heardOf("conditions") : null
   const heardMedications = unasked.includes("medications") ? heardOf("medications") : null
   const allergyCards = dictation && dictatedAllergies ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null
+  // Lo que se pliega mientras hay algo dicho por revisar; un «No» oído conserva su botón, que es como se confirma.
+  const foldable =
+    allergyRow ||
+    (unasked.includes("conditions") && !heardConditions) ||
+    (unasked.includes("medications") && !heardMedications) ||
+    (unasked.length > 0 && !!openWide)
+  const folded = !!heardItem && heardToSave && foldable && !showOthers
   const reviewNow = () => {
     const revision = health.revision
     const send = () => {
@@ -535,19 +549,49 @@ export function HealthReviewNotice({
       data-clio-health={heardItem ? "" : undefined}
       className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning-soft p-4"
     >
-      <div className="flex flex-col gap-0.5">
-        <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-sm font-medium outline-none">
-          {title}
-        </h2>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
+          <h2 id={titleId} ref={titleRef} tabIndex={-1} className="text-sm font-medium outline-none">
+            {title}
+          </h2>
+          {heardItem ? (
+            <p className="text-sm text-muted-foreground">
+              {CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con {heardWith}.
+            </p>
+          ) : unasked.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Problemas del corazón, presión alta, diabetes, anticoagulantes o un embarazo cambian la anestesia y lo que
+              se receta.
+            </p>
+          ) : null}
+        </div>
         {heardItem ? (
-          <p className="text-sm text-muted-foreground">
-            {CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con {heardWith}.
-          </p>
-        ) : unasked.length > 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Problemas del corazón, presión alta, diabetes, anticoagulantes o un embarazo cambian la anestesia y lo que
-            se receta.
-          </p>
+          // En la línea del título, como en el lienzo (QA del 22 nov, UX-3: estaban al pie de 6 filas):
+          // «Lo revisé con…» lo deja como su declaración en la consulta y lo suma a Antecedentes, menos un
+          // «No»; «Corregir algo» abre Antecedentes con lo de Clío puesto; «No lo registro» lo deja de
+          // avisar. Ninguno entra con «Confirmar las N».
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" disabled={busy} onClick={discardHeard}>
+              No lo registro
+            </Button>
+            {openWide ? (
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={correctHeard}>
+                Corregir algo
+              </Button>
+            ) : null}
+            {heardToSave ? (
+              <SubmitButton
+                type="button"
+                size="sm"
+                className="min-h-11 sm:min-h-8"
+                pending={!!dictation?.confirmHealth.isPending}
+                disabled={busy}
+                onClick={confirmHeard}
+              >
+                {`Lo revisé con ${heardWith}`}
+              </SubmitButton>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <ul className="flex flex-col divide-y divide-warning/30">
@@ -575,15 +619,17 @@ export function HealthReviewNotice({
                 </ul>
               ) : null}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => reviewed.mutate()}>
-                {reviewed.isPending ? "Guardando…" : asked ? "Sin cambios" : "No tiene alergias"}
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setAdding(true)}>
-                <Plus aria-hidden />
-                Agregar alergia
-              </Button>
-            </div>
+            {folded ? null : (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => reviewed.mutate()}>
+                  {reviewed.isPending ? "Guardando…" : asked ? "Sin cambios" : "No tiene alergias"}
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={disabled} onClick={() => setAdding(true)}>
+                  <Plus aria-hidden />
+                  Agregar alergia
+                </Button>
+              </div>
+            )}
             {allergyCards}
           </li>
         ) : heardAllergy || allergyCards ? (
@@ -608,8 +654,8 @@ export function HealthReviewNotice({
             {/* Lo que nombró se revisa con «Lo revisé con…»; un «No» se confirma aquí, en su fila. */}
             {heardConditions && !heardConditions.denied ? (
               unconfirmed
-            ) : (
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => denyRow("conditions")}>
+            ) : folded && !heardConditions ? null : (
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => denyRow("conditions")}>
                 {denied.isPending && denied.variables === "conditions" ? "Guardando…" : "Niega enfermedades"}
               </Button>
             )}
@@ -623,8 +669,8 @@ export function HealthReviewNotice({
             </div>
             {heardMedications && !heardMedications.denied ? (
               unconfirmed
-            ) : (
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => denyRow("medications")}>
+            ) : folded && !heardMedications ? null : (
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => denyRow("medications")}>
                 {denied.isPending && denied.variables === "medications" ? "Guardando…" : "No toma medicación"}
               </Button>
             )}
@@ -639,33 +685,6 @@ export function HealthReviewNotice({
             {row.denied ? deniedHere : unconfirmed}
           </li>
         ))}
-        {heardItem ? (
-          // «Lo revisé con…» lo deja como su declaración en la consulta y lo suma a Antecedentes, menos un
-          // «No»; «Corregir algo» abre Antecedentes con lo de Clío puesto; «No lo registro» lo deja de
-          // avisar. Ninguno entra con «Confirmar las N».
-          <li className="flex flex-wrap items-center justify-end gap-2 py-2 first:pt-0 last:pb-0">
-            <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" disabled={busy} onClick={discardHeard}>
-              No lo registro
-            </Button>
-            {openWide ? (
-              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={correctHeard}>
-                Corregir algo
-              </Button>
-            ) : null}
-            {heardToSave ? (
-              <SubmitButton
-                type="button"
-                size="sm"
-                className="min-h-11 sm:min-h-8"
-                pending={!!dictation?.confirmHealth.isPending}
-                disabled={busy}
-                onClick={confirmHeard}
-              >
-                {`Lo revisé con ${heardWith}`}
-              </SubmitButton>
-            ) : null}
-          </li>
-        ) : null}
         {earlierSaid.map((item) => (
           <SaidEarlierRow key={item.suggestionId} patientId={patientId} item={item} patientFirst={patientFirst} disabled={busy} onDone={refresh} />
         ))}
@@ -684,6 +703,7 @@ export function HealthReviewNotice({
                     type="button"
                     size="sm"
                     variant="ghost"
+                    className="min-h-11 sm:min-h-8"
                     aria-expanded={showing}
                     aria-controls={detailId}
                     onClick={() => setShowing((value) => !value)}
@@ -691,11 +711,11 @@ export function HealthReviewNotice({
                     {showing ? "Ocultar lo que dijo" : "Ver lo que dijo"}
                   </Button>
                 ) : null}
-                <Button type="button" size="sm" disabled={busy} onClick={reviewNow}>
+                <Button type="button" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={reviewNow}>
                   {`Lo revisé con ${reviewWho(reviewer, sex)}`}
                 </Button>
                 {openWide ? (
-                  <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+                  <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
                     Corregir algo
                   </Button>
                 ) : null}
@@ -726,25 +746,40 @@ export function HealthReviewNotice({
               </p>
             </div>
             {openWide ? (
-              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+              <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
                 Actualizar en antecedentes
               </Button>
             ) : null}
           </li>
         ) : null}
       </ul>
-      {unasked.length > 0 && openWide ? (
+      {(unasked.length > 0 && openWide && !folded) || (!!heardItem && heardToSave && foldable) ? (
         <div className="flex flex-wrap items-center gap-2">
           {/* Lo que sí tiene se escribe en Antecedentes, encima de la atención: al cerrar se sigue aquí. */}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => openWide({ id: "antecedentes", review: true })}
-          >
-            Registrar enfermedades o medicación
-          </Button>
+          {unasked.length > 0 && openWide && !folded ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 sm:min-h-8"
+              disabled={disabled}
+              onClick={() => openWide({ id: "antecedentes", review: true })}
+            >
+              Registrar enfermedades o medicación
+            </Button>
+          ) : null}
+          {heardItem && heardToSave && foldable ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-11 sm:min-h-8"
+              aria-expanded={showOthers}
+              onClick={() => setShowOthers((value) => !value)}
+            >
+              {showOthers ? "Ocultar otras respuestas" : "Otras respuestas"}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {reviewed.error || denied.error || dictation?.confirmHealth.error || dictation?.settleHealthGroups.error || dictation?.discardHealth.error ? (

@@ -718,6 +718,24 @@ export interface HealthRow {
   denied: boolean
   /** Lo volvió a decir después, distinto o igual (ISO 8601): esta fila ya no es lo vigente. */
   newer?: string | null
+  /** La frase en que se oyó, tal cual (la de la última pausa que lo dijo): la fila la muestra. */
+  said?: string | null
+}
+
+/**
+ * La frase en que se oyó cada dato de una propuesta de su salud, por su clave (`healthKeysOf`): la de
+ * la pausa que lo dijo. Se suma a lo que ya tenía; un dato dicho otra vez queda con su última frase
+ * (QA del 22 nov, UX-3: cada fila del aviso dice qué se oyó).
+ */
+export function healthSaidOf(payload: Record<string, unknown>, phrase: string | undefined, before: Record<string, string> = {}): Record<string, string> {
+  const said = phrase?.trim() ?? ""
+  if (!said) return before
+  return { ...before, ...Object.fromEntries([...healthKeysOf(payload)].map((key) => [key, said])) }
+}
+
+/** Las filas con la frase en que se oyó cada una (`healthSaidOf`). */
+export function withSaidPhrases(rows: HealthRow[], said: Record<string, string> = {}): HealthRow[] {
+  return rows.map((row) => (said[row.key] ? { ...row, said: said[row.key] } : row))
 }
 
 /** Quién lo dijo, en pocas palabras: «el paciente», «su madre»; `null` si no se sabe. */
