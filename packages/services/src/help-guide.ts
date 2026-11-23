@@ -474,7 +474,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "nueva-cita-ya-tiene-cita",
         q: "¿Cómo sé si el paciente ya tiene una cita antes de darle otra?",
-        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita:» con su próxima cita (día, hora, servicio y profesional) y cuántas más tiene. No frena nada: decides tú si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y le pregunta si la cambia o es otra aparte.",
+        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita:» con su próxima cita (día, hora, servicio y profesional) y cuántas más tiene. No frena nada: tú eliges si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y si la cambia o es otra aparte.",
       },
       {
         id: "elijo-tratamientos-trae-cita",
