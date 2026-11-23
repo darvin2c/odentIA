@@ -7,7 +7,10 @@ import { normalizeSearchText } from "@odentia/ui-patterns"
  * tratamiento de conducto que la pieza ya tiene (en azul), y el buscador ofrece también agregarla al plan.
  * Los nombres de todos los días («curación», «funda», «resto radicular») son de uso común en el Perú.
  * Lo temporal se dice igual con «temporal» o «provisional»: «curación temporal» es la restauración
- * temporal, no la definitiva.
+ * temporal, no la definitiva. El perno es el espigo-muñón de la norma (mesa del 23 nov). Una palabra
+ * que es de varios hallazgos («placa», «raíz», «ortodoncia») los ofrece a todos. Se escriben sin
+ * tildes ni eñes, como queda lo escrito al buscar («perno munon»). No entran los diagnósticos: el
+ * bruxismo no es lo que se ve en la pieza, y la mancha blanca es una caries inicial.
  */
 const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   definitive_restoration: ["resina", "obturacion", "curacion"],
@@ -17,11 +20,35 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
     "curacion provisional",
     "obturacion provisional",
   ],
-  root_remnant: ["resto radicular"],
+  root_remnant: ["resto radicular", "raiz", "solo raiz"],
   crown: ["funda"],
   temporary_crown: ["funda temporal", "funda provisional", "corona provisional"],
-  root_canal_treatment: ["endodoncia", "conducto"],
+  root_canal_treatment: ["endodoncia", "conducto", "tratamiento de raiz", "raiz"],
+  post_and_core: ["perno", "poste", "perno munon", "espigo"],
+  fixed_partial_denture: ["puente"],
+  removable_partial_denture: ["placa", "protesis removible", "dentadura postiza parcial"],
+  complete_denture: ["dentadura", "dentadura postiza", "placa total"],
+  removable_orthodontic_appliance: ["placa", "aparato removible", "ortodoncia"],
+  fixed_orthodontic_appliance: ["brackets", "braquets", "frenillos", "ortodoncia"],
+  impaction: ["retenida", "retenido", "incluida", "incluido"],
+  fracture: ["raiz fracturada", "fracturado", "roto", "rota"],
+  tooth_wear: ["desgaste", "desgastado", "abrasion", "abfraccion", "erosion"],
+  rotation: ["girado", "girada", "rotado", "rotada"],
+  missing_tooth: ["extraida", "extraido", "falta", "perdida"],
+  supernumerary_tooth: ["supernumerario", "mesiodens"],
+  peg_tooth: ["conoide"],
+  enamel_development_defect: ["hipoplasia", "fluorosis"],
 }
+
+/**
+ * Si lo escrito trae el sinónimo como palabras enteras (también en plural: «pernos»). Por pedazo
+ * no: «caries posterior» traía el espigo-muñón por «poste».
+ */
+const saysWhole = (query: string, word: string) =>
+  ` ${query} `.includes(` ${word} `) || ` ${query} `.includes(` ${word}s `) || ` ${query} `.includes(` ${word}es `)
+
+/** Si lo que se está escribiendo es el inicio de una palabra del sinónimo («pern» es «perno»). */
+const startsWordOf = (word: string, query: string) => ` ${word}`.includes(` ${query}`)
 
 /**
  * Los hallazgos que se dicen así. Lo escrito que trae un sinónimo entero se queda con el más largo
@@ -35,14 +62,14 @@ function findingsSaidAs(query: string): Set<string> {
     ([code, words]) =>
       [
         code,
-        Math.max(0, ...words.filter((word) => query.includes(word)).map((word) => word.length)),
+        Math.max(0, ...words.filter((word) => saysWhole(query, word)).map((word) => word.length)),
       ] as const,
   )
   const longest = Math.max(0, ...contained.map(([, length]) => length))
   if (longest > 0)
     return new Set(contained.filter(([, length]) => length === longest).map(([code]) => code))
   return new Set(
-    entries.filter(([, words]) => words.some((word) => word.includes(query))).map(([code]) => code),
+    entries.filter(([, words]) => words.some((word) => startsWordOf(word, query))).map(([code]) => code),
   )
 }
 
