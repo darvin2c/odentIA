@@ -2240,8 +2240,14 @@ export async function saveDictationSegment(
   // Lo diagnosticado en la atención decide la variante de una prestación: la endodoncia vital o no vital.
   scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, [...dictated, ...fromDiagnoses], [...pendingNow, ...confirmed], pendingValues) }
   // En el repaso, lo que una persona ya decidió: confirmado o descartado (no vuelve, `unsettled`).
+  // Y lo que ya espera confirmación: el repaso lee toda la conversación y no propone otra vez lo
+  // mismo (el CI del 23 nov: «Control en 6 meses» salía dos veces). La consulta y la salud no: se suman.
   const settled = segment.review
-    ? [...(await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada")), ...(await listDecidedDictation(tx, orgId, patientId, encounterId, "descartada"))]
+    ? [
+        ...(await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada")),
+        ...(await listDecidedDictation(tx, orgId, patientId, encounterId, "descartada")),
+        ...pendingNow.filter((item) => item.kind !== "nota" && item.kind !== "salud"),
+      ]
     : []
   // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa); en
   // el repaso, tampoco lo de una consulta ya confirmada o descartada.

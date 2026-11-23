@@ -162,6 +162,17 @@ describe("lo que propone el repaso", () => {
     await enable(false)
   })
 
+  it("lo pendiente tampoco se propone dos veces: el control dicho en una pausa no sale otra vez en el repaso (CI del 23 nov)", async () => {
+    await enable(true)
+    const { pause, review, pending } = await conversation()
+    const dueAt = new Date(Date.now() + 180 * 86_400_000).toISOString()
+    await pause("Control en seis meses.", [{ kind: "control", payload: { title: "Control en 6 meses", dueAt }, sourceText: "Control en seis meses" }])
+    const result = await review({ drafts: [{ kind: "control", payload: { title: "Control en 6 meses", dueAt }, sourceText: "Control en seis meses" }] })
+    expect(result.suggestions).toEqual([])
+    expect((await pending()).filter((item) => item.kind === "control")).toHaveLength(1)
+    await enable(false)
+  })
+
   it("lo descartado no vuelve aunque Clío lo proponga otra vez: lo filtra el servicio, no solo el prompt", async () => {
     await enable(true)
     const { fx, pause, review, pending } = await conversation()
