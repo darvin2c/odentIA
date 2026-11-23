@@ -73,6 +73,7 @@ import { zonedTimeToUtc } from "./availability.js"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
+  findDraftBudget,
   readBillingModes,
   removeBudgetItems,
 } from "./budgets.js"
@@ -3459,6 +3460,57 @@ async function applySessionAnswers(
 }
 
 /**
+ * Saca del borrador de la persona (el que nadie recibió: nunca de uno enviado, aceptado ni de una
+ * revisión) los tratamientos que se cargaron a su cuenta al firmar. Solo los que ese cargo cubre
+ * enteros: los terminados o los que se cobran por tratamiento; uno que se cobra por sesión y sigue
+ * en curso se queda, porque lo que falta todavía es presupuesto.
+ */
+async function removeChargedFromDraft(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  charges: ReadonlyArray<{ encounterProcedureId: string | null }>,
+  procedures: ReadonlyArray<typeof encounterProcedure.$inferSelect>,
+): Promise<void> {
+  const charged = procedures.filter((proc) => proc.planItemId && charges.some((charge) => charge.encounterProcedureId === proc.id))
+  if (!charged.length) return
+  const draft = await findDraftBudget(tx, orgId, patientId)
+  if (!draft) return
+  const planItemIds = [...new Set(charged.map((proc) => proc.planItemId!))]
+  const inDraft = new Set(
+    (
+      await tx
+        .select({ planItemId: treatmentBudgetItem.planItemId })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            eq(treatmentBudgetItem.budgetId, draft.id),
+            inArray(treatmentBudgetItem.planItemId, planItemIds),
+          ),
+        )
+    ).map((row) => row.planItemId),
+  )
+  if (!inDraft.size) return
+  const status = new Map(
+    (
+      await tx
+        .select({ id: treatmentPlanItem.id, status: treatmentPlanItem.status })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, [...inDraft])))
+    ).map((row) => [row.id, row.status]),
+  )
+  const covered: string[] = []
+  for (const proc of charged) {
+    const id = proc.planItemId!
+    if (!inDraft.has(id) || covered.includes(id)) continue
+    if (status.get(id) === "realizado" || (await billingModeOfProcedure(tx, orgId, patientId, proc)) === "treatment") covered.push(id)
+  }
+  if (covered.length) await removeBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: covered })
+}
+
+/**
  * Cómo se cobra un acto: «session» (un cargo por visita) o «treatment» (uno por tratamiento). Lo
  * acordado en su presupuesto manda; sin presupuesto, su servicio (la misma regla de la firma).
  */
@@ -3927,6 +3979,10 @@ export async function finalizeEncounter(
       ...(decision.advanceCents ? { agreedCents: decision.agreedCents, advanceCents: decision.advanceCents } : {}),
     })
   }
+  // Lo hecho y cargado hoy sale del presupuesto que la persona todavía no recibió (V-DIN-04): ya está
+  // en su cuenta. Sin esto, la evaluación cobrada al firmar seguía en el borrador como común a las
+  // opciones: «Opción A S/ 700 · B S/ 200» con «debe S/ 50» (QA del 22 nov, H3).
+  await removeChargedFromDraft(tx, orgId, actorUserId, patientId, charges, procedures)
   // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
   await addSessions()
   // Lo que sigue en curso, ya con lo respondido: con la sesión que se sumó y sin lo que se terminó.

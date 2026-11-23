@@ -8,6 +8,7 @@ import {
   encounterProcedure,
   patient,
   patientAllergy,
+  patientCharge,
   patientMedication,
   prescriptionItem,
   serviceCatalog,
@@ -15,10 +16,10 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { assembleEncounterBudget, findDraftBudget } from "../budgets.js"
+import { assembleEncounterBudget, findDraftBudget, getBudgetDetail } from "../budgets.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
@@ -45,7 +46,7 @@ import {
 } from "../encounter-dictation.js"
 import { DENTAL_DICTATION } from "./dictation.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
-import { addEncounterProcedure, voidEncounterProcedure } from "../encounters.js"
+import { addEncounterProcedure, finalizeEncounter, voidEncounterProcedure } from "../encounters.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { nextPatientNumber } from "../patients.js"
 import { insertTestPatients, setTestPatientIdentity } from "../test-patient.js"
@@ -552,6 +553,44 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
       { titles: ["Exodoncia después de elegir"], total: 15000 },
     ])
     expect(await endodontics()).toHaveLength(1)
+    await enable(false)
+  })
+
+  // QA del 22 nov (H3, V-DIN-04): Rosa confirma los dos caminos de la 36 desde Clío antes de firmar
+  // y al firmar se le carga la evaluación (S/ 50). La evaluación entraba al borrador como común a las
+  // dos opciones y quedaba ahí ya cobrada: «Opción A S/ 700 · B S/ 200» con «debe S/ 50» (leería 750).
+  it("al firmar, lo hecho y cargado hoy sale del presupuesto en borrador: A S/ 650 · B S/ 150 y la cuenta S/ 50 (H3)", async () => {
+    await enable(true)
+    const { fx, choice, budgetOptions } = await twoPaths("con evaluación")
+    const [evaluation] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Evaluación de la prueba de dos caminos", scope: "general", source: "custom", priceCents: 5_000, currency: "PEN" })
+      .returning()
+    await ownerDb.update(serviceCatalog).set({ evaluationServiceId: evaluation!.id }).where(eq(serviceCatalog.id, fx.service.id))
+    onTestFinished(async () => {
+      await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, evaluation!.id))
+    })
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia con evaluación"], total: 65000 },
+      { titles: ["Exodoncia con evaluación"], total: 15000 },
+    ])
+    await fx.ready(fx.encounter.id)
+    const signed = await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id, { consultationServiceId: evaluation!.id }))
+    expect(signed.charges.map((charge) => [charge.description, charge.amountCents])).toEqual([["Evaluación de la prueba de dos caminos", 5_000]])
+    // «Atención finalizada» dice el presupuesto con lo que lleva la opción recomendada.
+    expect(signed.budget?.totalCents).toBe(65000)
+    // Lo cobrado ya no está en ninguna opción; cada camino sigue con su total.
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia con evaluación"], total: 65000 },
+      { titles: ["Exodoncia con evaluación"], total: 15000 },
+    ])
+    const budget = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+    const full = await fx.run((tx) => getBudgetDetail(tx, ORG, fx.patient.id, budget!.id))
+    expect(full.options.map((option) => option.totalCents)).toEqual([65000, 15000])
+    const owed = await ownerDb.select().from(patientCharge).where(and(eq(patientCharge.patientId, fx.patient.id), isNull(patientCharge.voidedAt)))
+    expect(owed.reduce((sum, charge) => sum + charge.amountCents, 0)).toBe(5_000)
     await enable(false)
   })
 
