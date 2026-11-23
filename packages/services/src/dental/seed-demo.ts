@@ -3562,6 +3562,15 @@ const signedVisitWith = async (patientId: string, days: number, reason: string, 
   await db.update(encounter).set({ startedAt: daysAgo(days) }).where(eq(encounter.id, visit.id))
   for (const finding of findings)
     await addOdontogramEntries(db, ORG_A, ANA_ID, patientId, { ...finding, encounterId: visit.id })
+  // Firmar pide al menos un diagnóstico con su tipo: el de cada hallazgo que lo trae, confirmado.
+  for (const finding of findings)
+    if (finding.diagnosisCode)
+      await addEncounterDiagnosis(db, ORG_A, ANA_ID, patientId, visit.id, {
+        diagnosisCode: finding.diagnosisCode,
+        diagnosisType: "confirmed",
+        toothNumber: finding.toothNumber,
+        ...(finding.surfaces?.length ? { surfaces: finding.surfaces } : {}),
+      })
   await updateEncounterDraft(db, ORG_A, ANA_ID, patientId, visit.id, { evolution })
   // La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
   await finalizeEncounter(db, ORG_A, ANA_ID, patientId, visit.id, { followUpIds: [] })
