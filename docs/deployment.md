@@ -182,6 +182,9 @@ mientras no se configure:
   avisos de la cuenta. Con él y `GESTORIA_DOMAIN`, en `api.<dominio de gestorIA>` existen
   `/api/contract/events` (abrió una cuenta, esto usó, pide soporte) y `/api/contract/state` (el
   estado de una cuenta: si puede seguir, su plan, cargos, pagos y avisos). Vacío, no existen.
+  El servidor de gestorIA lleva el mismo valor en su `GESTORIA_CONTRACT_SECRET`: con él envía
+  lo que espera en su bandeja de salida (cada 30 s, con la misma clave al reintentar) y pregunta
+  el estado de cada tienda; vacío, guarda los avisos y sigue trabajando.
 
 ### gestorIA: su servidor, su base y su app (apagado)
 

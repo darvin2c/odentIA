@@ -13,6 +13,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, eq, inArray, or } from "drizzle-orm"
 import { z } from "zod"
+import { countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
 import { fractionDigits, formatMoney as intlMoney } from "../dinero.js"
@@ -555,6 +556,15 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
       today: ctx.today,
       test: ctx.test,
     })
+    // Tomó un pedido: la conversación sube a «pedido» en lo que se cobra, en la misma
+    // transacción que el pedido (el de prueba nunca).
+    if (!ctx.test)
+      await countConversation(
+        tx,
+        ctx.storeId,
+        { id: ctx.conversationId, channel: ctx.channel },
+        "pedido",
+      )
     await tx
       .update(conversation)
       .set({ customerName: args.nombre.trim().slice(0, 120), updatedAt: new Date() })

@@ -80,12 +80,18 @@ export const store = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     currency: text("currency").notNull(),
+    /**
+     * El país de la tienda (ISO 3166-1 alfa-2): la administración cobra con su impuesto (ADR
+     * 0211). Nulo en las tiendas de antes o si no lo eligió.
+     */
+    country: text("country"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("store_name_check", sql`char_length(btrim(${table.name})) between 1 and 80`),
     check("store_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check("store_country_check", sql`${table.country} is null or ${table.country} ~ '^[A-Z]{2}$'`),
     foreignKey({
       name: "store_created_by_fkey",
       columns: [table.createdBy],
@@ -1151,5 +1157,81 @@ export const stockRequest = pgTable(
       .on(table.variantId, table.conversationId)
       .where(sql`notified_at is null`),
     index("stock_request_store_idx").on(table.storeId, table.variantId),
+  ],
+)
+
+/*
+ * El acuerdo con la administración (paso B7 del lienzo B; ADR 0211 y 0212): gestorIA le avisa
+ * lo que pasó y le pregunta el estado de cada tienda, firmando con su secreto.
+ */
+
+/** Lo que gestorIA le avisa a la administración (los `type` de `@odentia/contract`). */
+export const CONTRACT_EVENT_TYPES = ["cuenta.abierta", "uso.contado", "soporte.pedido"] as const
+export type ContractEventType = (typeof CONTRACT_EVENT_TYPES)[number]
+
+/**
+ * La bandeja de salida: cada aviso se guarda en la misma transacción que lo que lo causó (la
+ * tienda creada, la respuesta de Sofi, el pedido) y un trabajo lo envía. Su `id` es su clave
+ * (`webhook-id`) y no cambia al reintentar: la administración reconoce un repetido y nunca lo
+ * cuenta dos veces. Nada se borra al fallar: se reintenta más tarde con la misma clave.
+ */
+export const contractOutbox = pgTable(
+  "contract_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    type: text("type").$type<ContractEventType>().notNull(),
+    /** El aviso tal cual se envía (su cuerpo firmado), con la hora en que pasó. */
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    /** Lo que no se avisa dos veces en la tienda (una conversación en su ventana y su resultado). */
+    dedupe: text("dedupe"),
+    /** La conversación de un aviso de uso: con ella se busca su ventana. */
+    conversationId: uuid("conversation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    check("contract_outbox_type_check", inList("type", CONTRACT_EVENT_TYPES)),
+    foreignKey({
+      name: "contract_outbox_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    uniqueIndex("contract_outbox_dedupe_uidx").on(table.storeId, table.dedupe),
+    index("contract_outbox_pending_idx")
+      .on(table.nextAttemptAt, table.createdAt)
+      .where(sql`sent_at is null`),
+    index("contract_outbox_store_idx").on(table.storeId, table.type, table.createdAt),
+    index("contract_outbox_conversation_idx").on(table.conversationId, table.createdAt),
+  ],
+)
+
+/**
+ * Lo último que la administración dijo de cada tienda (`AccountState` de `@odentia/contract`):
+ * si puede seguir, su plan, cargos, pagos, avisos y soporte. Si la administración no responde,
+ * gestorIA sigue con esto; sin nada guardado, deja trabajar.
+ */
+export const contractState = pgTable(
+  "contract_state",
+  {
+    storeId: uuid("store_id").primaryKey(),
+    /** La última respuesta; nula si nunca respondió. */
+    state: jsonb("state").$type<Record<string, unknown>>(),
+    /** Cuándo llegó esa respuesta. */
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    /** La última vez que se preguntó, respondiera o no. */
+    triedAt: timestamp("tried_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Por qué falló la última pregunta; nulo si respondió. */
+    lastError: text("last_error"),
+  },
+  (table) => [
+    foreignKey({
+      name: "contract_state_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
   ],
 )

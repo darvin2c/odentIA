@@ -18,9 +18,12 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  type CountryCode,
+  CountrySelect,
   EmptyState,
   ErrorState,
   PersonAvatar,
+  regionCountry,
   SectionNav,
   SubmitButton,
 } from "@odentia/ui-patterns"
@@ -30,6 +33,7 @@ import {
   Bot,
   ChartColumn,
   Copy,
+  CreditCard,
   LogOut,
   MessageCircle,
   Package,
@@ -289,10 +293,15 @@ export function NewStorePage() {
   const currencies = useCurrencies()
   const [name, setName] = useState("")
   const [currency, setCurrency] = useState("PEN")
+  // El de la región del navegador, como en el teléfono: se cambia buscando en la lista.
+  const [country, setCountry] = useState<CountryCode>(regionCountry)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const create = useMutation({
     mutationFn: () =>
-      api<{ store: MyStore }>("/api/tiendas", { method: "POST", body: { name, currency } }),
+      api<{ store: MyStore }>("/api/tiendas", {
+        method: "POST",
+        body: { name, currency, country },
+      }),
     onSuccess: async ({ store }) => {
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
       await navigate({ to: "/tiendas/$id", params: { id: store.id } })
@@ -363,6 +372,23 @@ export function NewStorePage() {
               </FieldDescription>
             )}
           </Field>
+          <Field data-invalid={errors.country ? true : undefined}>
+            <FieldLabel htmlFor="country">País de tu tienda</FieldLabel>
+            <CountrySelect
+              id="country"
+              value={country}
+              onChange={setCountry}
+              invalid={Boolean(errors.country)}
+              aria-describedby="country-help"
+            />
+            {errors.country ? (
+              <FieldError>{errors.country}</FieldError>
+            ) : (
+              <FieldDescription id="country-help">
+                Con él te cobramos el plan con el impuesto que corresponde.
+              </FieldDescription>
+            )}
+          </Field>
           {create.isError &&
           !(create.error instanceof ApiError && Object.keys(create.error.fields).length > 0) ? (
             <p role="alert" className="text-sm text-danger">
@@ -405,6 +431,10 @@ function storeSections(store: MyStore) {
       ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
       : []),
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
+    // El plan, lo cobrado y los pagos: solo el Dueño.
+    ...(store.permissions.includes("plan")
+      ? [{ label: "Plan y pagos", to: `/tiendas/${id}/plan`, icon: CreditCard }]
+      : []),
   ]
 }
 

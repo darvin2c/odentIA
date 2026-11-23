@@ -7,6 +7,8 @@ import { sql } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   accountCopy,
+  contractOutbox,
+  contractState,
   type Db,
   enterStore,
   store,
@@ -162,6 +164,44 @@ describe("las reglas de cada tienda", () => {
     await expect(
       withPerson(db.appDb, { ...rosa, storeId: calzados }, (tx) =>
         tx.update(storeInvitation).set({ role: "owner" }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it("el acuerdo con la administración: cada tienda ve lo suyo y solo agrega avisos sin enviar", async () => {
+    const event = (storeId: string) => ({
+      storeId,
+      type: "soporte.pedido" as const,
+      payload: { type: "soporte.pedido" },
+    })
+    await db.ownerDb.insert(contractOutbox).values([event(calzados), event(otra)])
+    await db.ownerDb.insert(contractState).values([
+      { storeId: calzados, state: { found: true } },
+      { storeId: otra, state: { found: true } },
+    ])
+    const inCalzados = { ...rosa, storeId: calzados }
+    const seen = await withPerson(db.appDb, inCalzados, async (tx) => ({
+      outbox: await tx.select({ storeId: contractOutbox.storeId }).from(contractOutbox),
+      state: await tx.select({ storeId: contractState.storeId }).from(contractState),
+    }))
+    expect(seen).toEqual({ outbox: [{ storeId: calzados }], state: [{ storeId: calzados }] })
+    // No agrega a otra tienda, no da un aviso por enviado y no cambia lo que dijo la administración.
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) => tx.insert(contractOutbox).values(event(otra))),
+    ).rejects.toThrow()
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) =>
+        tx.insert(contractOutbox).values({ ...event(calzados), sentAt: new Date() }),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) =>
+        tx.update(contractOutbox).set({ sentAt: new Date() }),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      withPerson(db.appDb, inCalzados, (tx) =>
+        tx.update(contractState).set({ state: { found: false } }),
       ),
     ).rejects.toThrow()
   })

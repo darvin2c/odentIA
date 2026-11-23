@@ -5,6 +5,7 @@ import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import type { JWTVerifyGetKey } from "jose"
 import { ZodError, type z } from "zod"
+import { askSupport, type ContractConfig, planView, supportInput } from "./acuerdo.js"
 import {
   addPhoto,
   catalog,
@@ -118,6 +119,8 @@ export interface AppDeps {
   link?: LinkDeps
   /** El modelo de Sofi (B5); null o sin él, Sofi no responde y la pantalla lo dice. */
   model?: ChatModel | null
+  /** El acuerdo con la administración (B7); sin secreto, no se envía ni se pregunta. */
+  contract?: ContractConfig
 }
 
 type Env = { Variables: { person: Person } }
@@ -628,6 +631,17 @@ export function createApp(deps: AppDeps) {
   app.get("/api/tiendas/:id/argos", async (c) =>
     c.json(await argosBoard(deps.appDb, c.get("person"), c.req.param("id"))),
   )
+
+  // «Plan y pagos» (B7): lo que dice la administración de la tienda, y pedirle ayuda. Solo el Dueño.
+  const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  app.get("/api/tiendas/:id/plan", async (c) =>
+    c.json(await planView(deps.appDb, deps.ownerDb, contract, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/plan/ayuda", async (c) => {
+    const input = await bodyOf(c, supportInput)
+    await askSupport(deps.appDb, contract, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
+  })
 
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
   return app
