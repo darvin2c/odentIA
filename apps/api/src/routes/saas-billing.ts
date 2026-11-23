@@ -456,12 +456,18 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const input = { ...parsed.data, country: parsed.data.country ?? null }
-    const response = await runStaffWrite(
-      c,
-      201,
-      actor,
-      { action: "saas.account_open", metadata: { app: input.app, planCode: input.planCode } },
-      (tx) => openAppAccountForClient(tx, senders, actor, input),
+    const response = await runService(c, 201, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        const opened = await openAppAccountForClient(tx, senders, actor, input)
+        // La auditoría nombra la cuenta que abrió.
+        await writeAdminAudit(tx, actor, {
+          action: "saas.account_open",
+          organizationId: opened.accountId,
+          entityId: opened.requestId,
+          metadata: { app: input.app, planCode: input.planCode },
+        })
+        return opened
+      }),
     )
     if (response.status === 201) sendNow()
     return response

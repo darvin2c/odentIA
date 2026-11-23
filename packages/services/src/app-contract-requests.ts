@@ -17,7 +17,7 @@ import {
   saasAccount,
 } from "@odentia/db/schema/admin-accounts"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm"
 import { accountEventBackoffSeconds } from "./account-events.js"
 import type { AdminActor } from "./admin-core.js"
 import { assignAppAccountPlan, requireAppAccount } from "./app-contract.js"
@@ -184,6 +184,9 @@ export async function openAppAccountForClient(
   now = new Date(),
 ): Promise<{ accountId: string; requestId: string }> {
   requireSender(senders, input.app)
+  // Lo que la app rechazaría lo dice aquí, antes de abrir nada: una moneda que no existe.
+  if (!Intl.supportedValuesOf("currency").includes(input.currency))
+    throw invalidField("currency", "Esa moneda no existe: elige una de la lista.")
   const owner = await personByEmail(tx, input.ownerEmail, "ownerEmail")
   const ref = randomUUID()
   // Su id nunca es el de una clínica (ADR 0210): uno nuevo, distinto del de la tienda.
@@ -225,13 +228,18 @@ export interface AppContractRequestRow {
   detail: string | null
 }
 
-function detailOf(type: AppContractRequestType, payload: Record<string, unknown>): string | null {
+function detailOf(
+  type: AppContractRequestType,
+  payload: Record<string, unknown>,
+  emails: Map<string, string>,
+): string | null {
   const data = (payload.data ?? {}) as Record<string, unknown>
   if (type === "soporte.entrar") {
     const staff = (data.staff ?? {}) as { name?: string }
     return `${staff.name ?? "Soporte"} · ${String(data.minutes ?? "")} min · ${String(data.reason ?? "")}`
   }
-  if (type === "equipo.quitar") return String(data.reason ?? "")
+  if (type === "equipo.quitar")
+    return `${emails.get(String(data.userId)) ?? String(data.userId ?? "")} · ${String(data.reason ?? "")}`
   if (type === "cuenta.abrir") return String(data.name ?? "")
   return null
 }
@@ -249,6 +257,20 @@ export async function listAppContractRequests(
     .where(eq(appContractRequest.accountId, accountId))
     .orderBy(desc(appContractRequest.createdAt), desc(appContractRequest.id))
     .limit(Math.min(Math.max(limit, 1), 100))
+  // A quién se pidió quitar, por su correo de la cuenta única.
+  const removed = rows
+    .filter(({ request }) => request.type === "equipo.quitar")
+    .map(({ request }) => String((request.payload.data as { userId?: unknown })?.userId ?? ""))
+  const emails = new Map(
+    removed.length
+      ? (
+          await tx
+            .select({ id: user.id, email: user.email })
+            .from(user)
+            .where(inArray(user.id, removed))
+        ).map((one) => [one.id, one.email] as const)
+      : [],
+  )
   return rows.map(({ request, requesterName, requesterEmail }) => ({
     id: request.id,
     type: request.type,
@@ -257,12 +279,17 @@ export async function listAppContractRequests(
     requestedBy: requesterName || requesterEmail || null,
     createdAt: request.createdAt.toISOString(),
     doneAt: request.doneAt?.toISOString() ?? null,
-    detail: detailOf(request.type, request.payload),
+    detail: detailOf(request.type, request.payload, emails),
   }))
 }
 
 /** Lo más que se espera la respuesta de una app. */
 const REQUEST_TIMEOUT_MS = 10_000
+/**
+ * Tras tantos intentos sin respuesta (unos dos días, con la espera de una hora), el pedido se da
+ * por fallido: no frena para siempre lo que sigue de esa cuenta, y el equipo lo pide otra vez.
+ */
+export const APP_REQUEST_MAX_ATTEMPTS = 50
 
 export interface DeliverAppContractRequestsResult {
   delivered: number
@@ -361,7 +388,17 @@ export async function deliverAppContractRequests(
                 doneAt: new Date(),
                 lastError: null,
               }
-            : { lastError: error?.slice(0, 500) ?? null },
+            : row.attempts + 1 >= APP_REQUEST_MAX_ATTEMPTS
+              ? {
+                  status: "fallo" as const,
+                  resultMessage:
+                    `La app no respondió tras ${APP_REQUEST_MAX_ATTEMPTS} intentos: ${error ?? ""}`.slice(
+                      0,
+                      500,
+                    ),
+                  doneAt: new Date(),
+                }
+              : { lastError: error?.slice(0, 500) ?? null },
         )
         // Uno ya respondido no vuelve a cambiar.
         .where(and(eq(appContractRequest.id, row.id), eq(appContractRequest.status, "pendiente")))

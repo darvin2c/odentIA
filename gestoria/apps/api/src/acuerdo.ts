@@ -411,9 +411,9 @@ export async function sendReceipt(
 }
 
 /**
- * Borra de la bandeja lo que salió hace más del plazo (la administración ya lo tiene), menos el
- * último aviso de que se abrió cada tienda: con él se sabe si cambió algo que avisar. Lo que no
- * salió, lo rechazado y lo que mira la ventana de 24 horas de una conversación no se toca.
+ * Borra de la bandeja lo que salió o se rechazó hace más del plazo (la administración ya lo tiene;
+ * el Dueño ya vio por qué no se aceptó), menos el último aviso de que se abrió cada tienda: con él
+ * se sabe si cambió algo que avisar. Lo que no salió no se toca.
  */
 export async function purgeOutbox(ownerDb: Db, now = new Date()): Promise<number> {
   const before = new Date(now.getTime() - OUTBOX_KEEP_MS)
@@ -480,8 +480,14 @@ export async function deliverOutbox(
 ): Promise<DeliveryRun> {
   const run = { sent: 0, failed: 0 }
   if (!config.secret) return run
+  // Sin el cuerpo: un comprobante pesa; se lee uno por uno al enviarlo.
   const due = await ownerDb
-    .select()
+    .select({
+      id: contractOutbox.id,
+      storeId: contractOutbox.storeId,
+      type: contractOutbox.type,
+      attempts: contractOutbox.attempts,
+    })
     .from(contractOutbox)
     .where(
       and(
@@ -506,6 +512,12 @@ export async function deliverOutbox(
   const waiting = new Set(opening.map((row) => row.storeId))
   for (const row of due) {
     if (waiting.has(row.storeId)) continue
+    // eslint-disable-next-line no-await-in-loop
+    const [full] = await ownerDb
+      .select({ payload: contractOutbox.payload })
+      .from(contractOutbox)
+      .where(eq(contractOutbox.id, row.id))
+    if (!full) continue
     let problem: string | null = null
     let down = false
     let rejected = false
@@ -515,7 +527,7 @@ export async function deliverOutbox(
         config,
         CONTRACT_PATHS.events,
         row.id,
-        JSON.stringify(row.payload),
+        JSON.stringify(full.payload),
       )
       if (!response.ok) {
         problem = `La administración respondió ${response.status}`

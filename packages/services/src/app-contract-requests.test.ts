@@ -9,6 +9,7 @@ import type { AdminActor } from "./admin-core.js"
 import { answerAppState, receiveAppEvent } from "./app-contract.js"
 import {
   type AppContractSender,
+  APP_REQUEST_MAX_ATTEMPTS,
   appContractSendersFromEnv,
   deliverAppContractRequests,
   listAppContractRequests,
@@ -286,6 +287,28 @@ describe("el envío", () => {
         ),
       ),
     ).rejects.toBeInstanceOf(ServiceError)
+  })
+})
+
+describe("un pedido que nunca llega", () => {
+  it("tras el último intento falla con su motivo y deja salir lo que sigue de la cuenta", async () => {
+    const id = await account("nunca")
+    const first = await ownerDb.transaction((tx) =>
+      requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 15, reason: "Mirar" }, NOW),
+    )
+    await ownerDb
+      .update(appContractRequest)
+      .set({ attempts: APP_REQUEST_MAX_ATTEMPTS - 1 })
+      .where(eq(appContractRequest.id, first))
+    await ownerDb.transaction((tx) =>
+      requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 30, reason: "Mirar otra vez" }, NOW),
+    )
+    const app = fakeApp([new Response("caída", { status: 500 })])
+    await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) })
+    await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) })
+    const rows = await listAppContractRequests(ownerDb, id)
+    expect(rows.map((row) => row.status)).toEqual(["hecho", "fallo"])
+    expect(rows[1]?.message).toContain("La app no respondió")
   })
 })
 
