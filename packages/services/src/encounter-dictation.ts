@@ -835,7 +835,14 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value] as const)
       .filter(([, value]) => value !== undefined && value !== null && value !== ""),
   )
-  if (draft.kind === "nota") return Object.keys(payload).length ? { payload, status: "lista", note: null } : null
+  if (draft.kind === "nota") {
+    const note = Object.fromEntries(
+      Object.entries(payload)
+        .map(([key, value]) => [key, typeof value === "string" ? withoutLooseEnd(value) : value] as const)
+        .filter(([, value]) => value !== ""),
+    )
+    return Object.keys(note).length ? { payload: note, status: "lista", note: null } : null
+  }
   if (own) return dictation.prepare(tx, draft.kind, payload, { diagnosisSystem, product: scope.product })
   if (draft.kind === "diagnostico" || draft.kind === "plan" || draft.kind === "procedimiento") {
     const site = dictation.normalizeSite(payload)
@@ -1651,6 +1658,12 @@ const FIELD_LABEL = Object.fromEntries(
 /** Los campos de la consulta que son una sola línea: dicho distinto, queda lo último (mesa del 20 nov 2026). */
 const NOTE_ONE_LINE = new Set(["reason", "illnessDuration"])
 
+/**
+ * Un texto de la consulta sin el «;» o la «,» sueltos del final: Clío a veces corta una enumeración
+ * ahí y la evolución firmada terminaba en «…que llega a pulpa;» (QA del 22 nov, H12).
+ */
+export const withoutLooseEnd = (text: string) => text.replace(/[\s;,]+$/u, "").trim()
+
 /** ¿`text` ya dice `part`, palabra por palabra? «dos meses» no dice «s meses». */
 const saysAlready = (text: string, part: string) => ` ${normalizeForSearch(text)} `.includes(` ${normalizeForSearch(part)} `)
 
@@ -1673,9 +1686,9 @@ export function mergeNote(
   const earlier: Record<string, string> = {}
   const fields = OPERATIONS["atencion.nota"].fields
   for (const [key, value] of Object.entries(added)) {
-    if (typeof value !== "string" || !value.trim()) continue
-    const now = value.trim()
-    const before = typeof payload[key] === "string" ? String(payload[key]).trim() : ""
+    if (typeof value !== "string" || !withoutLooseEnd(value)) continue
+    const now = withoutLooseEnd(value)
+    const before = typeof payload[key] === "string" ? withoutLooseEnd(String(payload[key])) : ""
     if (!before || saysAlready(now, before)) payload[key] = now
     else if (saysAlready(before, now)) continue
     else if (NOTE_ONE_LINE.has(key)) {
@@ -3053,7 +3066,7 @@ export async function confirmDictationSuggestion(
     joined = {}
     for (const [key, value] of Object.entries(pick(payload, Object.keys(fields)))) {
       const name = key as keyof typeof fields
-      const text = appendDictated(draft[name], String(value), key)
+      const text = appendDictated(draft[name], withoutLooseEnd(String(value)), key)
       // Lo que no cabe no se corta: la sugerencia sigue ahí y el texto, intacto.
       if (text.length > fields[name].max) throw invalidField(key, `Con lo que ya hay en ${fields[name].label} no cabe: acorta uno de los dos.`)
       joined[key] = text

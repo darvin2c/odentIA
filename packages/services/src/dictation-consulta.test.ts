@@ -115,6 +115,20 @@ describe("lo nuevo de la consulta se suma a la misma sugerencia", () => {
   })
 })
 
+describe("la evolución no termina en «;» (QA del 22 nov, H12)", () => {
+  it("lo que Clío dejó con «;» al final se propone y se confirma sin él", async () => {
+    await enable(true)
+    const { fx, segment, notes } = await session()
+    const [note] = (await segment({ drafts: [{ kind: "nota", payload: { evolution: "Pieza 36 con caries profunda oclusal que llega a pulpa;" } }], transcript: "la 36 tiene caries profunda oclusal que llega a pulpa" })).suggestions
+    await segment({ drafts: [{ kind: "nota", payload: { evolution: "Dolor al frío que se queda ; " } }], transcript: "dolor al frio que se queda" })
+    expect((await notes())[0]?.payload["evolution"]).toBe("Pieza 36 con caries profunda oclusal que llega a pulpa. Dolor al frío que se queda")
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, note!.id))
+    const [saved] = await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id))
+    expect(saved?.evolution).toBe("Pieza 36 con caries profunda oclusal que llega a pulpa. Dolor al frío que se queda")
+    await enable(false)
+  })
+})
+
 describe("una pausa sin nada del relato no lo pisa", () => {
   it("una «corrección» sin frase dicha, o con una pregunta, no cambia la consulta; una de verdad cambia solo lo que dijo", async () => {
     await enable(true)
