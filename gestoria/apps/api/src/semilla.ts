@@ -1,5 +1,6 @@
 import {
   accountCopy,
+  contractState,
   createOwnerDb,
   type Db,
   store,
@@ -7,6 +8,7 @@ import {
   storeInvitation,
   storeMember,
 } from "@gestoria/db"
+import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoOrders } from "./semilla-pedidos.js"
@@ -57,6 +59,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
         id: DEMO_STORE_ID,
         name: "Calzados Rosa",
         currency: "PEN",
+        country: "PE",
         createdBy: "semilla-rosa",
       })
       .onConflictDoNothing()
@@ -85,6 +88,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID)
     const email = invite?.trim().toLowerCase()
     if (email) {
       const [pending] = await tx
@@ -108,6 +112,122 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
         })
     }
   })
+}
+
+/**
+ * «Plan y pagos» de ejemplo (B7): lo que respondería la administración, como si ya hubiera
+ * preguntado (en desarrollo, sin `GESTORIA_CONTRACT_SECRET`, no se pregunta y queda esto). Un mes
+ * pagado, el actual por pagar, un aviso del tope y una pregunta respondida.
+ */
+async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
+  const day = 86_400_000
+  const now = Date.now()
+  const at = (days: number) => new Date(now + days * day).toISOString()
+  const state: AccountState = {
+    account: storeId,
+    found: true,
+    at: at(0),
+    access: {
+      allowed: true,
+      status: "activa",
+      reason: null,
+      readOnlyAt: null,
+      trialEndsAt: null,
+    },
+    agents: { trialExhausted: false, capReached: false },
+    budget: {
+      currency: "USD",
+      creditCents: 500,
+      creditUsedCents: 500,
+      capCents: 3000,
+      spentCents: 2460,
+      periodStart: at(-20),
+      periodEnd: at(10),
+    },
+    plan: {
+      code: "gestoria-tienda",
+      name: "Tienda",
+      currency: "USD",
+      priceCents: 1900,
+      creditCents: 500,
+    },
+    charges: [
+      {
+        id: "semilla-cargo-2",
+        periodStart: at(-50),
+        periodEnd: at(-20),
+        amountCents: 3140,
+        paidCents: 0,
+        currency: "USD",
+        status: "pendiente",
+        dueAt: at(5),
+        lines: [
+          { kind: "plan", description: "Plan Tienda", quantity: 1, amountCents: 1900 },
+          {
+            kind: "conversacion",
+            description: "Informa: atendió una conversación",
+            quantity: 62,
+            amountCents: 620,
+          },
+          {
+            kind: "conversacion",
+            description: "Gestiona: atendió una conversación y tomó un pedido",
+            quantity: 31,
+            amountCents: 620,
+          },
+        ],
+      },
+      {
+        id: "semilla-cargo-1",
+        periodStart: at(-80),
+        periodEnd: at(-50),
+        amountCents: 2380,
+        paidCents: 2380,
+        currency: "USD",
+        status: "pagada",
+        dueAt: at(-45),
+        lines: [
+          { kind: "plan", description: "Plan Tienda", quantity: 1, amountCents: 1900 },
+          {
+            kind: "conversacion",
+            description: "Informa: atendió una conversación",
+            quantity: 48,
+            amountCents: 480,
+          },
+        ],
+      },
+    ],
+    payments: [
+      {
+        id: "semilla-pago-1",
+        chargeId: "semilla-cargo-1",
+        amountCents: 2380,
+        currency: "USD",
+        status: "confirmado",
+        at: at(-46),
+      },
+    ],
+    notices: [{ key: "tope:aviso:demo", family: "tope", level: "aviso", action: "cambiar_tope" }],
+    support: [
+      {
+        id: "semilla-soporte-1",
+        status: "esperando_clinica",
+        question: "¿Puedo pagar con Yape?",
+        createdAt: at(-3),
+        replies: [
+          {
+            body: "Sí: al pagar el cobro de este mes, elige Yape y sube la captura.",
+            at: at(-2),
+          },
+        ],
+      },
+    ],
+  }
+  const values = { state, receivedAt: new Date(now), triedAt: new Date(now), lastError: null }
+  await tx
+    .insert(contractState)
+    .values({ storeId, ...values })
+    .onConflictDoUpdate({ target: contractState.storeId, set: values })
 }
 
 const isMain = process.argv[1]?.endsWith("semilla.ts")

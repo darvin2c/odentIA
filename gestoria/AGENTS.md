@@ -87,6 +87,19 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `pnpm --filter @gestoria/api eval:sofi` (banco `apps/api/eval/sofi.json`), un solo juez para
   las dos versiones (`--juzgar=a.json,b.json`). Las pruebas usan un modelo controlado, nunca la red.
 
+## El acuerdo con la administración (B7)
+
+- gestorIA le habla a la administración solo con `@odentia/contract` (ADR 0211 y 0212), firmado
+  con `GESTORIA_CONTRACT_SECRET`, en la misma entrada de la cuenta. Sin secreto no envía ni pregunta.
+- Todo aviso va por `apps/api/src/acuerdo.ts` a `contract_outbox`, en la misma transacción que lo
+  que lo causó; nunca se envía directo. Su id es su clave y no cambia al reintentar. Un cambio de
+  nombre, país o Dueño de la tienda llama a `noteStoreAccount`.
+- Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
+  a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).
+- La app nunca se detiene por la administración: se usa lo último guardado en `contract_state`;
+  sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra.
+- «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
+
 ## Trabajo
 
 - Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.

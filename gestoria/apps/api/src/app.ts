@@ -635,9 +635,7 @@ export function createApp(deps: AppDeps) {
   // «Plan y pagos» (B7): lo que dice la administración de la tienda, y pedirle ayuda. Solo el Dueño.
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
   app.get("/api/tiendas/:id/plan", async (c) =>
-    c.json(
-      await planView(deps.appDb, deps.ownerDb, contract, c.get("person"), c.req.param("id")),
-    ),
+    c.json(await planView(deps.appDb, deps.ownerDb, contract, c.get("person"), c.req.param("id"))),
   )
   app.post("/api/tiendas/:id/plan/ayuda", async (c) => {
     const input = await bodyOf(c, supportInput)

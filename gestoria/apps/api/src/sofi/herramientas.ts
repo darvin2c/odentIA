@@ -559,7 +559,12 @@ async function createOrder(ctx: SofiToolContext, args: z.infer<typeof orderSchem
     // Tomó un pedido: la conversación sube a «pedido» en lo que se cobra, en la misma
     // transacción que el pedido (el de prueba nunca).
     if (!ctx.test)
-      await countConversation(tx, ctx.storeId, { id: ctx.conversationId, channel: ctx.channel }, "pedido")
+      await countConversation(
+        tx,
+        ctx.storeId,
+        { id: ctx.conversationId, channel: ctx.channel },
+        "pedido",
+      )
     await tx
       .update(conversation)
       .set({ customerName: args.nombre.trim().slice(0, 120), updatedAt: new Date() })

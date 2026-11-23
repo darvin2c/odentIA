@@ -7,6 +7,7 @@ import { MessageSquarePlus, SendHorizontal } from "lucide-react"
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
 import { STATE_TONE, stateName } from "./lib/pedidos"
+import { AGENT_STOP_WORDS } from "./lib/plan"
 import type {
   AgentSettings,
   AnswerStatus,
@@ -14,7 +15,6 @@ import type {
   ConversationView,
   SofiOverview,
 } from "./lib/sofi"
-import { AGENT_STOP_WORDS } from "./lib/plan"
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { FormAlert, fieldErrors, SwitchField, TextField } from "./piezas"

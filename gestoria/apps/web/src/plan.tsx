@@ -61,9 +61,7 @@ export function PlanPage() {
         </p>
       </div>
       {plan.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
-      {plan.isError ? (
-        <ErrorBlock error={plan.error} onRetry={() => void plan.refetch()} />
-      ) : null}
+      {plan.isError ? <ErrorBlock error={plan.error} onRetry={() => void plan.refetch()} /> : null}
       {plan.data ? <PlanBody view={plan.data} /> : null}
     </>
   )
