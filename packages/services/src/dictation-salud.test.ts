@@ -175,7 +175,7 @@ describe("C1 y C2 · la medicación dicha en la conversación", () => {
     expect(said).toHaveLength(1)
     expect(said[0]?.encounterId).toBe(fx.encounter.id)
     expect(said[0]?.by).toEqual({ kind: "patient", name: null, relation: null })
-    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false })
+    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, said: "tomo apixabán" })
     expect(said[0]?.open).toBe(true)
     await enable(false)
   })
@@ -658,6 +658,104 @@ describe("C2 · se corrige a media frase (QA del 21 nov)", () => {
     })
     const [said] = await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))
     expect(said?.rows.map((row) => [row.key, row.value, row.before])).toEqual([["anticoagulants", "apixabán", "warfarina"]])
+    await enable(false)
+  })
+})
+
+// QA del 23 nov (verificador 2): en el niño, «tiene asma usa salbutamol» y en otra pausa «toma algo para
+// la tiroides» dejaron «salbutamol (antes dijo salbutamol)». Clío lo mandó como corrección de la salud.
+describe("una medicina más no reemplaza a la primera", () => {
+  const asthma = {
+    kind: "salud" as const,
+    payload: { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "asma" }] }, medications: { state: "recorded", items: [{ name: "salbutamol" }] } },
+    sourceText: "tiene asma y usa salbutamol",
+  }
+
+  it("«algo para la tiroides» no es una medicina: no pisa el salbutamol y va a «No lo usé» con su frase", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const [said] = (await segment({ drafts: [asthma], transcript: "tiene asma y usa salbutamol" })).suggestions
+    const phrase = "toma algo para la tiroides pero no me acuerdo el nombre"
+    const result = await segment({
+      drafts: [],
+      corrections: [{ suggestionId: said!.id, changes: { medications: { state: "recorded", items: [{ name: "algo para la tiroides" }] } }, said: phrase }],
+      transcript: phrase,
+    })
+    expect(result.corrected).toEqual([])
+    expect(result.droppedForms).toEqual([{ said: phrase, why: "«algo para la tiroides» no dice qué medicina es: no lo propuse. Pregunta cuál es o anótalo a mano.", targets: [] }])
+    const [one] = await health()
+    expect(one?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "salbutamol" }] })
+    expect(one?.summary).not.toContain("antes dijo")
+    // Lo mismo si llega como propuesta de la pausa.
+    const again = await segment({ drafts: [{ kind: "salud", payload: { declarante: "acompanante", medications: { state: "recorded", items: [{ name: "algo para la tiroides" }] } }, sourceText: phrase }], transcript: phrase })
+    expect(again.droppedForms.map((item) => item.said)).toEqual([phrase])
+    expect((await health())[0]?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "salbutamol" }] })
+    await enable(false)
+  })
+
+  it("una «corrección» sin palabras de corrección suma la medicina nueva, sin «corregido por voz» ni «antes dijo»", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const [said] = (await segment({ drafts: [asthma], transcript: "tiene asma y usa salbutamol" })).suggestions
+    const phrase = "toma levotiroxina para la tiroides"
+    const result = await segment({
+      drafts: [],
+      corrections: [{ suggestionId: said!.id, changes: { medications: { state: "recorded", items: [{ name: "levotiroxina" }] } }, said: phrase }],
+      transcript: phrase,
+    })
+    expect(result.corrected).toEqual([])
+    expect(result.added).toEqual([said!.id])
+    const [one] = await health()
+    expect(one?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "salbutamol" }, { name: "levotiroxina" }] })
+    expect(one?.voice).toBeNull()
+    expect(one?.summary).not.toContain("antes dijo")
+    await enable(false)
+  })
+
+  it("«warfarina no perdón apixabán» sí cambia esa sola, con «antes dijo «warfarina»»", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const [said] = (
+      await segment({
+        drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }, { name: "warfarina" }] } }, sourceText: "tomo losartan y warfarina" }],
+        transcript: "tomo losartan y warfarina",
+      })
+    ).suggestions
+    const phrase = "warfarina no perdon apixaban"
+    const result = await segment({ drafts: [], corrections: [{ suggestionId: said!.id, changes: { medications: { state: "recorded", items: [{ name: "apixabán" }] } }, said: phrase }], transcript: phrase })
+    expect(result.corrected).toEqual([said!.id])
+    const [one] = await health()
+    expect(one?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán" }, { name: "apixabán" }] })
+    expect(one?.summary).toContain("(antes dijo «warfarina»)")
+    await enable(false)
+  })
+})
+
+// QA del 23 nov (verificador 2): tras recargar, Alergias y Medicación citaban la misma frase unida
+// («tomo losartan para la presion no que yo sepa»): Clío citó las dos pausas juntas en la segunda.
+describe("cada dato de su salud con su frase, al sumar pausas", () => {
+  it("la medicina guarda la frase de su pausa y la alergia, la suya", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] } }, sourceText: "tomo losartan para la presion" }],
+      transcript: "tomo losartan para la presion",
+    })
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, allergies: { state: "unknown" } },
+          sourceText: "tomo losartan para la presion no que yo sepa",
+        },
+      ],
+      transcript: "no que yo sepa",
+    })
+    const [one] = await health()
+    expect(Object.fromEntries((one?.healthRows ?? []).map((row) => [row.key, row.said]))).toEqual({
+      medications: "tomo losartan para la presion",
+      allergies: "no que yo sepa",
+    })
     await enable(false)
   })
 })

@@ -270,3 +270,19 @@ describe("una respuesta no es una corrección (QA del 21 nov, H7 y hallazgo 6 de
     await enable(false)
   })
 })
+
+// QA del 23 nov (verificador 2): el tiempo corregido decía «corregido por voz, antes otro texto en
+// tiempo de enfermedad», sin lo que decía.
+describe("«corregido por voz» dice lo que decía", () => {
+  it("el tiempo corregido dice «antes dijo «dos semanas»»", async () => {
+    await enable(true)
+    const { segment, notes } = await session()
+    const [note] = (await segment({ drafts: [{ kind: "nota", payload: { reason: "Dolor de muela", illnessDuration: "dos semanas" } }], transcript: "hace dos semanas" })).suggestions
+    const said = "no perdon ya es un mes"
+    expect((await segment({ drafts: [], corrections: [{ suggestionId: note!.id, changes: { illnessDuration: "un mes" }, said }], transcript: said })).corrected).toEqual([note!.id])
+    const [after] = await notes()
+    expect(after?.payload["illnessDuration"]).toBe("un mes")
+    expect(after?.voice?.before).toBe("dijo «dos semanas»")
+    await enable(false)
+  })
+})

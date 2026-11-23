@@ -150,3 +150,49 @@ describe("cada dato de su salud con la frase en que se oyó", () => {
     expect(withSaidPhrases(healthRows(first))[0]?.said).toBeUndefined()
   })
 })
+
+// QA del 23 nov (verificador 2): en el niño, «tiene asma usa salbutamol» y en otra pausa «toma algo para
+// la tiroides» dejaron «salbutamol (antes dijo salbutamol)»: la segunda pisaba a la primera.
+describe("una medicina más se suma; solo la que se corrige cambia", () => {
+  const salbutamol = { declarante: "acompanante", vinculo: "madre", medications: { state: "recorded", items: [{ name: "salbutamol" }] } }
+
+  it("lo que solo dice para qué la toma no es una medicina: no se propone y se dice por qué", () => {
+    const heard = groundHealthNames({ medications: { state: "recorded", items: [{ name: "algo para la tiroides" }] } }, "toma algo para la tiroides pero no me acuerdo el nombre")
+    expect(heard.payload).toBeNull()
+    expect(heard.unnamed).toEqual(["algo para la tiroides"])
+    expect(groundHealthNames({ medications: { state: "recorded", items: [{ name: "Unas pastillas para la presión" }] } }, "unas pastillas para la presion").unnamed).toHaveLength(1)
+    // Un nombre de verdad sí, aunque diga cómo viene.
+    expect(groundHealthNames({ medications: { state: "recorded", items: [{ name: "tabletas de losartán" }] } }, "tabletas de losartan").unnamed).toEqual([])
+  })
+
+  it("una corrección cuya frase no nombra la medicina de antes la suma, sin «antes dijo»", () => {
+    const merged = mergeHealth(salbutamol, { medications: { state: "recorded", items: [{ name: "levotiroxina" }] } }, "y toma levotiroxina para la tiroides")
+    expect(merged.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "salbutamol" }, { name: "levotiroxina" }] })
+    expect(merged.earlier).toEqual({})
+  })
+
+  it("«warfarina no perdón apixabán» cambia esa y deja las demás; «antes dijo» nombra solo la que salió", () => {
+    const two = { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }, { name: "warfarina" }] } }
+    const merged = mergeHealth(two, { medications: { state: "recorded", items: [{ name: "apixabán" }] } }, "warfarina no perdon apixaban")
+    expect(merged.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán" }, { name: "apixabán" }] })
+    expect(merged.earlier).toEqual({ medications: "warfarina" })
+  })
+
+  it("«antes dijo» nunca nombra lo que sigue en la fila", () => {
+    const rows = healthRows({ ...salbutamol, medications: { state: "recorded", items: [{ name: "levotiroxina" }, { name: "salbutamol" }] } }, { medications: "salbutamol" })
+    expect(rows[0]?.before).toBeNull()
+    expect(healthRows(salbutamol, { medications: "warfarina · salbutamol" })[0]?.before).toBe("warfarina")
+  })
+})
+
+// QA del 23 nov (verificador 2): tras recargar, Alergias y Medicación citaban la misma frase unida.
+describe("cada dato con su frase al sumar pausas", () => {
+  it("lo que no cambió guarda su frase; la frase unida no repite la de otro dato", () => {
+    const first = { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] } }
+    const saidFirst = healthSaidOf(first, "tomo losartan para la presion")
+    const second = { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, allergies: { state: "unknown", items: [] } }
+    const merged = mergeHealth(first, second).payload
+    const said = healthSaidOf(second, "tomo losartan para la presion no que yo sepa", saidFirst, { was: first, now: merged })
+    expect(said).toEqual({ medications: "tomo losartan para la presion", allergies: "no que yo sepa" })
+  })
+})

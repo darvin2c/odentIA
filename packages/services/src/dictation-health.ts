@@ -312,18 +312,39 @@ function nameHeard(name: string, said: string): boolean {
 }
 
 /**
+ * Lo que no es el nombre de una medicina, aunque Clío lo ponga como tal (QA del 23 nov, verificador 2):
+ * «algo para la tiroides», «unas pastillas para la presión», «no me acuerdo el nombre». Dice para qué
+ * la toma, no cuál es: como medicina pisaba a la que sí nombró («salbutamol (antes dijo salbutamol)»).
+ * El nombre que sigue sin artículo sí es una medicina («tabletas de losartán»).
+ */
+const VAGUE_MEDICINE =
+  /^(?:algo|alguna cosa|(?:(?:una?|unas|unos) )?(?:pastillas?|medicinas?|medicamentos?|remedios?|tabletas?|capsulas?|jarabes?|gotas|inyecciones?)|no (?:se|sabe|recuerda|recuerdo|me acuerdo)\b.*)(?: (?:para|contra|por|de la|de las|del|de los) .*)?$/u
+
+/** ¿Ese «nombre» solo dice para qué la toma? (`VAGUE_MEDICINE`) */
+export const vagueMedicine = (name: string) => VAGUE_MEDICINE.test(plain(name).replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim())
+
+/**
  * Lo de su salud que sale de su frase (revisión del 21 nov, A5): una enfermedad, una medicina o un
  * anticoagulante cuyo nombre no está en lo que se dijo («apixabán» cuando dijo «warfarina») no se
- * propone; se dice en `notHeard`. Una lista que se queda sin nada de lo que nombró se quita entera;
- * un anticoagulante sin su nombre queda «sí, no dijo cuál». `payload` nulo: no queda nada.
+ * propone; se dice en `notHeard`. Una medicina que no dice cuál es («algo para la tiroides») tampoco:
+ * se dice en `unnamed`, y nunca reemplaza a otra. Una lista que se queda sin nada de lo que nombró se
+ * quita entera; un anticoagulante sin su nombre queda «sí, no dijo cuál». `payload` nulo: no queda nada.
  */
-export function groundHealthNames(payload: Record<string, unknown>, said: string): { payload: Record<string, unknown> | null; notHeard: string[] } {
+export function groundHealthNames(
+  payload: Record<string, unknown>,
+  said: string,
+): { payload: Record<string, unknown> | null; notHeard: string[]; unnamed: string[] } {
   const out = { ...payload }
   const notHeard: string[] = []
+  const unnamed: string[] = []
   for (const group of LISTS) {
     const value = out[group]
     if (!isRecord(value) || value["state"] !== "recorded" || !Array.isArray(value["items"]) || !value["items"].length) continue
     const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => {
+      if (group === "medications" && vagueMedicine(text(item["name"]))) {
+        unnamed.push(text(item["name"]))
+        return false
+      }
       const heard = nameHeard(text(item["name"]), said)
       if (!heard) notHeard.push(text(item["name"]))
       return heard
@@ -338,8 +359,12 @@ export function groundHealthNames(payload: Record<string, unknown>, said: string
     const { detail: _invented, ...rest } = value
     out[group] = rest
   }
-  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard }
+  return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed }
 }
+
+/** Lo que «No lo usé» dice de una medicina sin nombre (`groundHealthNames`, `unnamed`). */
+export const unnamedMedicineWhy = (names: readonly string[]) =>
+  `«${names.join("», «")}» no dice qué medicina es: no lo propuse. Pregunta cuál es o anótalo a mano.`
 
 /** Cómo se corrige uno mismo a media frase: «warfarina, no, perdón, apixabán», «digo», «mejor dicho». */
 const SELF_CORRECTION = / (?:perdon|digo|mejor dicho|me equivoque|corrijo|quise decir) /u
@@ -529,17 +554,20 @@ export function withoutSettledHealth(payload: Record<string, unknown>, settled: 
  * toca; una enfermedad o una medicina más se suma sin repetir; una respuesta de un solo valor (el
  * anticoagulante, el embarazo) dicha distinto queda con la última y guarda la anterior en
  * `earlier` («antes dijo warfarina»), y un «no» o un «no sé» después no borra lo que sí dijo. Con
- * `correct` (alguien corrigió en voz alta lo ya dicho) el grupo que trae reemplaza al que había.
+ * `correct` (alguien corrigió en voz alta lo ya dicho) el grupo que trae reemplaza al que había,
+ * salvo en una lista: una medicina más se suma, y solo sale la que nombra la frase que corrige
+ * (`correct` es la frase: «warfarina no perdón apixabán»); sin frase, la que ya no trae. «Antes
+ * dijo» nombra solo lo que salió, nunca lo que queda (QA del 23 nov, verificador 2).
  */
 export function mergeHealth(
   current: Record<string, unknown>,
   added: Record<string, unknown>,
-  correct = false,
+  correct: boolean | string = false,
 ): { payload: Record<string, unknown>; earlier: Record<string, string> } {
   const payload = { ...current }
   const earlier: Record<string, string> = {}
   const known = (who: unknown) => who === "paciente" || who === "acompanante"
-  if (added["declarante"] !== undefined && (correct || (!known(current["declarante"]) && known(added["declarante"])))) {
+  if (added["declarante"] !== undefined && (correct !== false || (!known(current["declarante"]) && known(added["declarante"])))) {
     payload["declarante"] = added["declarante"]
     if (added["vinculo"] !== undefined) payload["vinculo"] = added["vinculo"]
     else delete payload["vinculo"]
@@ -553,7 +581,19 @@ export function mergeHealth(
       continue
     }
     const was = groupWords(group, before)
-    if (correct) {
+    if (correct !== false && LISTS.includes(group) && before["state"] === "recorded" && now["state"] === "recorded") {
+      const old = (before["items"] ?? []) as Array<Record<string, unknown>>
+      const fresh = (now["items"] ?? []) as Array<Record<string, unknown>>
+      const kept = (item: Record<string, unknown>) => fresh.some((one) => sameName(one["name"], item["name"]))
+      // Con la frase, sale solo lo que esa frase nombra («no es warfarina»); sin ella, lo que ya no trae.
+      const gone = old.filter((item) => !kept(item) && (typeof correct === "string" ? nameHeard(text(item["name"]), correct) : true))
+      const items = old.filter((item) => !gone.includes(item)).map((item) => ({ ...item, ...fresh.find((one) => sameName(one["name"], item["name"])) }))
+      for (const item of fresh) if (!items.some((one) => sameName(one["name"], item["name"]))) items.push(item)
+      payload[group] = { state: "recorded", items }
+      if (gone.length) earlier[group] = groupWords(group, { state: "recorded", items: gone })
+      continue
+    }
+    if (correct !== false) {
       payload[group] = now
       if (was !== groupWords(group, now)) earlier[group] = was
       continue
@@ -726,11 +766,58 @@ export interface HealthRow {
  * La frase en que se oyó cada dato de una propuesta de su salud, por su clave (`healthKeysOf`): la de
  * la pausa que lo dijo. Se suma a lo que ya tenía; un dato dicho otra vez queda con su última frase
  * (QA del 22 nov, UX-3: cada fila del aviso dice qué se oyó).
+ *
+ * Con `change` (cómo estaba la propuesta y cómo queda al sumar), un dato que no cambió conserva su
+ * frase, y la frase nueva no repite la de otro dato que ya tenía la suya: Clío cita a veces dos pausas
+ * juntas («tomo losartan para la presion no que yo sepa») y las dos filas quedaban con esa frase unida
+ * (QA del 23 nov, verificador 2).
  */
-export function healthSaidOf(payload: Record<string, unknown>, phrase: string | undefined, before: Record<string, string> = {}): Record<string, string> {
+export function healthSaidOf(
+  payload: Record<string, unknown>,
+  phrase: string | undefined,
+  before: Record<string, string> = {},
+  change?: { was: Record<string, unknown>; now: Record<string, unknown> },
+): Record<string, string> {
   const said = phrase?.trim() ?? ""
   if (!said) return before
-  return { ...before, ...Object.fromEntries([...healthKeysOf(payload)].map((key) => [key, said])) }
+  const out = { ...before }
+  const was = change ? healthValues(change.was) : null
+  const now = change ? healthValues(change.now) : null
+  for (const key of healthKeysOf(payload)) {
+    if (was && now && before[key] && was.get(key) === now.get(key)) continue
+    // Lo que en la frase es de otro dato (su propia frase, dicha en otra pausa) no es de este.
+    let own = said
+    for (const [other, phrase] of Object.entries(before)) {
+      if (other === key || !phrase.trim() || phrase.trim() === said) continue
+      const rest = own.replace(phrase.trim(), " ").replace(/\s+/g, " ").trim()
+      if (rest !== own && /[\p{L}\p{N}]/u.test(rest)) own = rest
+    }
+    out[key] = own
+  }
+  return out
+}
+
+/** Un valor en texto sin mirar el orden de sus claves: lo guardado (jsonb) vuelve con otro orden. */
+const valueKey = (value: unknown): string =>
+  Array.isArray(value)
+    ? `[${value.map(valueKey).join(",")}]`
+    : isRecord(value)
+      ? `{${Object.keys(value)
+          .sort()
+          .map((key) => `${JSON.stringify(key)}:${valueKey(value[key])}`)
+          .join(",")}}`
+      : JSON.stringify(value ?? null)
+
+/** Lo que dice cada dato de una propuesta, por su clave (`healthKeysOf`): para saber cuál cambió. */
+function healthValues(payload: Record<string, unknown>): Map<string, string> {
+  const values = new Map<string, string>()
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value)) continue
+    if (!INTERVIEW.includes(group)) values.set(group, valueKey(value))
+    else for (const [field, answer] of Object.entries(value)) values.set(`${group}.${field}`, valueKey(answer))
+  }
+  return values
 }
 
 /** Las filas con la frase en que se oyó cada una (`healthSaidOf`). */
@@ -753,7 +840,13 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
   const rows: HealthRow[] = []
   const saidBy = healthSaidBy(payload)
   const unknownBy: HealthSaidBy = { declarante: "no_se_sabe" }
-  const push = (row: Omit<HealthRow, "before" | "denied">, denied: boolean) => rows.push({ ...row, denied, before: earlier[row.key] && earlier[row.key] !== row.value ? (earlier[row.key] as string) : null })
+  const push = (row: Omit<HealthRow, "before" | "denied">, denied: boolean, still: (name: string) => boolean = () => false) => {
+    // «Antes dijo» nunca nombra lo que sigue en la fila: de una lista, solo lo que ya no está
+    // («salbutamol (antes dijo salbutamol)», QA del 23 nov, verificador 2).
+    const said = earlier[row.key]
+    const gone = said ? said.split(" · ").filter((name) => !still(name)).join(" · ") : ""
+    rows.push({ ...row, denied, before: gone && gone !== row.value ? gone : null })
+  }
   for (const group of GROUPS) {
     const value = payload[group]
     if (!isRecord(value)) continue
@@ -770,7 +863,9 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
               })
               .join(" · ")
           : groupWords(group, value)
-      push({ key: group, group, label: GROUP_LABEL[group], value: words, by }, value["state"] === "none")
+      const still = (name: string) =>
+        items.some((item) => sameName(item["name"], name) || sameName([item["name"], item["dose"], item["frequency"]].filter(Boolean).join(" "), name))
+      push({ key: group, group, label: GROUP_LABEL[group], value: words, by }, value["state"] === "none", still)
       continue
     }
     for (const [key, item] of Object.entries(value)) {

@@ -69,6 +69,7 @@ import {
   withSaidPhrases,
   healthSummary,
   mergeHealth,
+  unnamedMedicineWhy,
   prepareHealth,
   saidInDoubt,
   selfCorrectedHealth,
@@ -1745,6 +1746,9 @@ export function saidToCorrectNote(said: string | undefined, transcript: string |
   return transcript === undefined || saysAlready(transcript, text)
 }
 
+/** Hasta cuánto de un texto anterior se dice en «antes dijo «…»»: el relato entero no cabe en una línea. */
+const BEFORE_CHARS = 80
+
 /** Qué decía la sugerencia antes de una corrección por voz, en pocas palabras. `null`: no cambió nada. */
 function describeBefore(
   kind: DictationKind,
@@ -1764,8 +1768,14 @@ function describeBefore(
     else if (key === "diagnosisCode" || key === "title") parts.push(String(old ?? "sin dato"))
     else if (key === "diagnosisType") parts.push(isDiagnosisVerification(old) ? DIAGNOSIS_VERIFICATION_LABELS[old].toLowerCase() : "sin tipo")
     else if (kind === "receta") parts.push(old == null || old === "" ? `sin ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}` : String(old))
-    // «Otro texto» solo si había un texto: sin él, lo que había era nada.
-    else parts.push(old == null || (typeof old === "string" && !old.trim()) ? `sin ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}` : `otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
+    // Sin texto, lo que había era nada. Con él, lo que decía: «antes dijo «dos semanas»», no «otro
+    // texto» (QA del 23 nov, verificador 2); con varios campos, en cuál.
+    else if (old == null || (typeof old === "string" && !old.trim())) parts.push(`sin ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
+    else {
+      const words = String(old).trim()
+      const shown = words.length > BEFORE_CHARS ? `${words.slice(0, BEFORE_CHARS).trimEnd()}…` : words
+      parts.push(`dijo «${shown}»${keys.length > 1 ? ` en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}` : ""}`)
+    }
   }
   return parts.length ? parts.join(", ") : null
 }
@@ -2025,6 +2035,8 @@ export async function saveDictationSegment(
     return row
   }
 
+  // Lo que no se usó y por qué: de una corrección (una medicina sin nombre) y de lo nuevo de la pausa.
+  const droppedForms: DictationSegmentResult["droppedForms"] = []
   const corrected: string[] = []
   // La consulta a la que una «corrección» de esta pausa solo le sumó (un campo vacío, o lo amplió).
   const addedByVoice: string[] = []
@@ -2078,15 +2090,33 @@ export async function saveDictationSegment(
       // Lo de su salud también: solo con la frase que lo corrige, y cambia solo el grupo que trae.
       if (!saidToCorrectNote(said, segment.transcript)) return false
       // Y el nombre que pone tiene que salir de esa frase (A5): «perdón, apixabán» no inventa otro.
+      // Lo que solo dice para qué la toma («algo para la tiroides») no es una medicina: va a «No lo usé».
       const heard = groundHealthNames(changes, said ?? "")
+      if (heard.unnamed.length && said?.trim()) droppedForms.push({ said: said.trim(), why: unnamedMedicineWhy(heard.unnamed), targets: [] })
       if (!heard.payload) return false
-      const merged = mergeHealth(data, heard.payload, true)
+      // Sin palabras de corrección no es una corrección: lo nuevo se suma, como lo de una pausa. Una
+      // medicina más no reemplaza a la que ya dijo (QA del 23 nov, verificador 2: «toma algo para la
+      // tiroides» dejó «salbutamol (antes dijo salbutamol)»).
+      const spoken = ` ${normalizeForSearch(said ?? "")} `
+      const fixes = CORRECTION_WORDS.test(spoken) || /^ (?:no|digo|era|es) /u.test(spoken)
+      const merged = mergeHealth(data, heard.payload, fixes ? (said ?? true) : false)
       const ready = prepareHealth(merged.payload, undefined, dictation.health)
       if (!ready || JSON.stringify(ready.payload) === JSON.stringify(data)) return false
+      const saidNow = healthSaidOf(heard.payload, said, meta.said, { was: data, now: ready.payload })
+      if (!fixes) {
+        const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
+          step && { ...step, payload: mergeHealth(step.payload, heard.payload ?? {}).payload, previous: withAdded(step.previous) }
+        await tx
+          .update(encounterDictationSuggestion)
+          .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice: withAdded(meta.voice), earlier: { ...meta.earlier, ...merged.earlier }, said: saidNow })), updatedAt: new Date() })
+          .where(eq(encounterDictationSuggestion.id, row.id))
+        if (!addedByVoice.includes(row.id)) addedByVoice.push(row.id)
+        return true
+      }
       const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: Object.values(merged.earlier).join(", ") || "otro dato de su salud" }, meta.voice)
       await tx
         .update(encounterDictationSuggestion)
-        .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice, earlier: { ...meta.earlier, ...merged.earlier } })), updatedAt: new Date() })
+        .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice, earlier: { ...meta.earlier, ...merged.earlier }, said: saidNow })), updatedAt: new Date() })
         .where(eq(encounterDictationSuggestion.id, row.id))
       if (!corrected.includes(row.id)) corrected.push(row.id)
       return true
@@ -2192,7 +2222,6 @@ export async function saveDictationSegment(
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
-  const droppedForms: DictationSegmentResult["droppedForms"] = []
   const formSources: string[] = []
   const formQuestionOf = (draft: DictationDraft) => scope.formQuestions.find((item) => item.number === draft.payload["question"])
   // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada, y lo
@@ -2238,6 +2267,7 @@ export async function saveDictationSegment(
       const heard = inPhrase.notHeard.length && scope.transcript?.trim() ? groundHealthNames(said.payload, `${phrase} ${scope.transcript}`) : inPhrase
       if (heard.notHeard.length)
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
+      if (inPhrase.unnamed.length) droppedForms.push({ said: phrase, why: unnamedMedicineWhy(inPhrase.unnamed), targets: [] })
       if (!heard.payload) continue
       draft = { ...said, payload: heard.payload }
       // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).
@@ -2397,7 +2427,7 @@ export async function saveDictationSegment(
                   ...meta,
                   voice: withAdded(meta.voice),
                   earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-                  said: healthSaidOf(fresh, draft.sourceText, meta.said),
+                  said: healthSaidOf(fresh, draft.sourceText, meta.said, { was: data, now: health.payload }),
                 }),
               ),
               sourceText: joinSource(row.sourceText, draft.sourceText),
@@ -2417,7 +2447,7 @@ export async function saveDictationSegment(
         newHealth.payload = withMeta(health.payload, {
           ...meta,
           earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-          said: healthSaidOf(ready.payload, draft.sourceText, meta.said),
+          said: healthSaidOf(ready.payload, draft.sourceText, meta.said, { was: data, now: health.payload }),
         })
         newHealth.sourceText = joinSource(newHealth.sourceText ?? "", draft.sourceText)
       }
