@@ -199,10 +199,16 @@ Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compr
 - [ ] Una pieza ausente o extraída no admite procedimientos de esa pieza, salvo los que la reponen (implante, prótesis).
 - [ ] En el Perú, el odontograma se firma en sus momentos (inicio del plan, nuevos hallazgos y culminación; NTS 188), y lo firmado coincide con lo que se ve.
 - [ ] Las palabras van en español (no «occlusal»).
+- [ ] Todo hallazgo registrado se ve en la pantalla principal, de arriba o de frente: el perno, cada conducto, el implante, el puente, las prótesis, la pieza retenida, el resto radicular y la movilidad, no solo en la lista o en la hoja. Lo que se firma y lo que se ve dicen lo mismo.
+- [ ] El resto radicular se dibuja sin corona, nunca como pieza sana. La pieza que repone un puente, un implante o una prótesis se dibuja igual en las dos vistas: lo que la repone, no la X.
+- [ ] El buscador de «¿Qué observas?» entiende cómo se dice en la clínica («perno», «puente», «placa», «brackets», «retenida», «raíz», «desgaste», «girado», «falta», «supernumerario», «conoide», «hipoplasia», «frenillos») por palabra entera («caries posterior» no es «poste»), y una palabra de varios hallazgos ofrece todos.
+- [ ] Con un hallazgo que coincide, su tarjeta va antes que «agregar al plan»: lo que ya tiene hecho no termina cobrado.
+- [ ] Al tocar una pieza, lo que ya tiene vigente está a la vista, antes de «¿Qué observas?».
+- [ ] La fractura dice su tipo (coronaria, corono-radicular, radicular; IADT 2020).
 
 - [ ] Cada hallazgo guarda su propio código y no el del diagnóstico elegido junto. Una caries profunda (CDP) no se convierte en pulpitis: el diagnóstico pulpar se sugiere sin marcar y pide evaluar la vitalidad (AAE).
 
-**Ya falló:** la caries quedaba rotulada con el código de la pulpitis elegida en el mismo panel (9 nov); una caries de dos caras contaba como dos hallazgos y quedaba una vigente tras la endodoncia (PR 553); la 38 no se podía elegir (PR 481); las piezas a 390 px medían 20 px; «Evolución» salía vacío sobre la lista.
+**Ya falló:** «perno», «puente» o «placa» no encontraban su hallazgo y el arco escondía el perno, el implante y el puente: un rehabilitado con 8 hallazgos mostraba 1 (23 nov); la caries quedaba rotulada con el código de la pulpitis elegida en el mismo panel (9 nov); una caries de dos caras contaba como dos hallazgos y quedaba una vigente tras la endodoncia (PR 553); la 38 no se podía elegir (PR 481); las piezas a 390 px medían 20 px; «Evolución» salía vacío sobre la lista.
 **Huecos conocidos:** no hay cara cervical (la clase V va como vestibular, palatina o lingual).
 **Fuentes:** ISO 3950 (notación FDI); NTS N.° 188-MINSA/DGIESP-2022 (odontograma), aprobada por la RM N.° 559-2022/MINSA (deroga la RM 272-2019/MINSA y la NTS 150), numerales 5.2 a 5.13; ADR 0036 y 0079.
 

@@ -613,6 +613,17 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Sin errores de consola en cada navegación.
 **Ya falló:** «Salir» presentado como fin del acceso; `POST /api/workspace/visit` 403 en cada pantalla (12 nov).
 
+### M-ODO-01 Ver la boca y elegir una pieza (ficha y atención)
+**Quién:** odontólogo y asistente, en cada atención (supuesto).
+**Dónde:** `apps/dental-clinic/src/components/dental/odontogram-studio.tsx` (`useMouthLayout`), `odontogram-arch.tsx`, `odontogram-front.tsx`.
+**Medida (23 nov 2026, antes de las dos vistas):** ficha → odontograma 2 clics; teclado 7 Tab (ficha) y 5 (atención) hasta el arco. Lugar de la boca con la pieza al lado: 657 px (1280), 743 (1366) y 817 (1440). Pieza más chica: 41×38 (1440), 34×37 (360), temporal 28×29. Lo de dentro del diente (perno, implante, puente) no se veía sin abrir la pieza.
+- [ ] Ninguna pieza por debajo de 24×24 px en 1440, 1366, 1280, 1024, 820, 390 y 360, con y sin la pieza abierta, también en la mixta.
+- [ ] 360 px sin desplazamiento lateral (también las pestañas Superior/Inferior).
+- [ ] La elegida se marca igual en las dos vistas, con una señal que no es solo color (el número en su pastilla).
+- [ ] Una parada de Tab por vista; Escape devuelve el foco a la pieza de la vista donde se abrió.
+- [ ] Cambiar de pieza, cerrar o salir con un hallazgo a medias avisa con el mismo diálogo.
+**Ya falló:** «Inferior · 2 hallazgos» desbordaba 33 px a 360; salir a Agenda perdía la caries a medias sin aviso (23 nov).
+
 ### Giras nuevas (para «Sus giras»)
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
 - **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
@@ -620,6 +631,7 @@ En todas las tareas de Agenda, además de lo propio:
 - **La entrega:** de lo que se manda afuera, ¿quien lo mandó sabe si llegó, si se bajó y si venció, y puede reenviarlo desde donde lo mandó?
 - **Los nombres:** la misma cosa se llama igual en el botón, la bitácora, el mensaje, la página pública y el archivo.
 - **El estado después de la acción:** tras cada botón que desaparece (comprobar, enviar, descargar), ¿dónde quedó el foco? Si cae en `BODY`, es un hallazgo.
+- **El ancho de trabajo:** cada pantalla en el ancho que queda con el panel de al lado abierto (1280, 1366 y 1440) y a 1366×768, no solo a 1440 vacío.
 
 ## Lo que se le pregunta al paciente
 
