@@ -1,9 +1,10 @@
 /**
  * Esqueletos del odontograma y del periodontograma. Sin datos ni pantallas
  * pesadas: los declara el producto al arrancar. Mismas clases que
- * `OdontogramStudio` y `PeriodontogramaTab`. Las dos columnas del estudio se
- * deciden por el ancho de su contenedor (960 px, `useContainerWide`): aquí, con
- * la misma medida en una consulta de contenedor.
+ * `OdontogramStudio` y `PeriodontogramaTab`. Las dos vistas del estudio (de
+ * arriba y de frente) van lado a lado desde 600 px de ancho de la boca
+ * (`useMouthLayout`): aquí, con la misma medida en una consulta de contenedor.
+ * «Evolución» va debajo.
  */
 import { Button, Skeleton } from "@odentia/ui"
 import { SkeletonRegion } from "@odentia/ui-patterns"
@@ -12,7 +13,10 @@ import { SkeletonRegion } from "@odentia/ui-patterns"
 const ARCH_SLOTS = Array.from({ length: 16 }, (_, index) => {
   const angle = (Math.PI * (index + 0.5)) / 16
   // Redondeado: servidor y navegador no siempre calculan el último decimal igual y la hidratación se queja.
-  return { x: Number((50 - 44 * Math.cos(angle)).toFixed(2)), rise: Number((42 * Math.sin(angle)).toFixed(2)) }
+  return {
+    x: Number((50 - 44 * Math.cos(angle)).toFixed(2)),
+    rise: Number((42 * Math.sin(angle)).toFixed(2)),
+  }
 })
 
 function ArchShape() {
@@ -46,8 +50,8 @@ function WaitingButton({ children }: { children: string }) {
 export function OdontogramSkeleton() {
   return (
     <div className="@container flex min-w-0 flex-col gap-4">
-      <div className="grid min-w-0 grid-cols-1 gap-4 @min-[960px]:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
-        <section className="flex min-w-0 flex-col gap-4 self-start rounded-lg border p-4 sm:p-5">
+      <div className="grid min-w-0 grid-cols-1 gap-4">
+        <section className="@container flex min-w-0 flex-col gap-4 self-start rounded-lg border p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold">Odontograma</h3>
             <div className="flex flex-wrap gap-2">
@@ -66,10 +70,19 @@ export function OdontogramSkeleton() {
               <Skeleton className="h-9 w-full rounded-3xl" />
             </div>
           </div>
-          <div className="-mx-3 sm:mx-0">
-            <ArchShape />
+          <div className="grid min-w-0 grid-cols-1 gap-4 @min-[600px]:grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)] @min-[600px]:gap-6">
+            <div className="mx-auto w-full max-w-[20rem]">
+              <ArchShape />
+            </div>
+            {/* La vista de frente: dos filas de piezas sobre la encía. */}
+            <div className="flex min-w-0 flex-col gap-3">
+              <Skeleton className="h-28 w-full rounded-2xl" />
+              <Skeleton className="h-28 w-full rounded-2xl" />
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">Haz clic en una pieza para abrir su registro clínico.</p>
+          <p className="text-xs text-muted-foreground">
+            Toca una pieza, de arriba o de frente, para abrir su registro clínico.
+          </p>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-red-600" />
@@ -83,7 +96,9 @@ export function OdontogramSkeleton() {
         </section>
         <section className="min-h-[70px] min-w-0 self-start rounded-sm bg-card">
           <div className="min-h-11 px-4 py-3">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Odontograma</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Odontograma
+            </span>
             <span className="block text-lg font-semibold">Evolución</span>
           </div>
         </section>
@@ -107,7 +122,10 @@ export function PeriodontogramSkeleton() {
       </div>
       <ul className="flex flex-col gap-2">
         {[0, 1].map((row) => (
-          <li key={row} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4">
+          <li
+            key={row}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4"
+          >
             <div className="flex min-w-0 flex-col gap-1.5">
               <div>
                 <Skeleton className="my-0.5 h-5 w-32" />
