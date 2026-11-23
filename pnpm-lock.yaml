@@ -1005,6 +1005,36 @@ importers:
         specifier: 4.148.0
         version: 4.148.0(@types/node@24.19.2)
 
+  gestoria/e2e:
+    devDependencies:
+      '@gestoria/db':
+        specifier: workspace:*
+        version: link:../packages/db
+      '@hono/node-server':
+        specifier: 2.1.1
+        version: 2.1.1(hono@4.13.7)
+      '@odentia/contract':
+        specifier: workspace:*
+        version: link:../../shared/packages/contract
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      '@types/node':
+        specifier: 22.20.2
+        version: 22.20.2
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   gestoria/packages/db:
     dependencies:
       drizzle-orm:

@@ -38,6 +38,7 @@ import {
   vistiaBuildEnv,
   type HarnessRuntime,
 } from "./harness-env"
+import { startGestoriaStub } from "./gestoria-stub"
 import { startMetaGraphStub } from "./meta-graph-stub"
 import { initRuntimeMeta, runtimeMetaPath, updateRuntimeMeta } from "./runtime-meta"
 import { dbSetupCommand, DB_SETUP_SCRIPTS, startStack, type DbSetupScript, type HarnessStack } from "./stack"
@@ -1218,6 +1219,11 @@ export async function main(args: string[]): Promise<number> {
     const metaGraph = await startMetaGraphStub()
     childEnv.ADMIN_META_GRAPH_URL = metaGraph.url
     childEnv.E2E_META_GRAPH_URL = metaGraph.url
+    // El gestorIA de mentira: lo que la administración le pide sale ahí, firmado (ADR 0213).
+    const gestoria = await startGestoriaStub()
+    childEnv.GESTORIA_CONTRACT_URL = gestoria.url
+    childEnv.GESTORIA_CONTRACT_SECRET = gestoria.secret
+    childEnv.E2E_GESTORIA_URL = gestoria.url
 
     const tDb = performance.now()
     for (const script of DB_SETUP_SCRIPTS) {
