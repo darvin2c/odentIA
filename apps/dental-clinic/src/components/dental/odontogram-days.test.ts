@@ -9,7 +9,7 @@ describe("«Ver estado al» por día", () => {
     "2026-11-23T15:20:00Z",
     "2026-11-23T16:45:00Z",
     "2026-11-24T14:00:00Z",
-  ]
+  ].map((at, i) => ({ at, change: `c${i}` }))
 
   it("un día por línea, del más nuevo al más viejo, con cómo quedó al terminar ese día", () => {
     const days = snapshotDays(instants, "2026-11-25")
@@ -20,6 +20,11 @@ describe("«Ver estado al» por día", () => {
     ])
     expect(days[1]?.label).toMatch(/3 cambios$/)
     expect(days[2]?.label).toMatch(/1 cambio$/)
+  })
+
+  it("cuenta hallazgos y no momentos: seis guardados a la vez son seis cambios", () => {
+    const together = [1, 2, 3, 4, 5, 6].map((i) => ({ at: "2026-11-04T16:22:26Z", change: `h${i}` }))
+    expect(snapshotDays(together, "2026-11-25")[0]?.label).toMatch(/6 cambios$/)
   })
 
   it("hoy no va: es lo mismo que «Actual»", () => {

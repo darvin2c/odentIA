@@ -598,10 +598,10 @@ export function activeFindingsAsOf<T extends FindingRecord>(
   // Cuenta también el más nuevo ya tratado: tratarlo no devuelve el anterior. Anularlo, sí (deshace).
   const newest = new Map<string, T>()
   for (const record of recordedAsOf(history, cutoff, true))
-    if (replacesSame(record.condition)) newest.set(`${record.toothNumber}|${record.condition}`, record)
+    if (replacesSame(record.condition)) newest.set(replaceKey(record), record)
   return active.filter(
     (record) =>
-      !replacesSame(record.condition) || newest.get(`${record.toothNumber}|${record.condition}`) === record,
+      !replacesSame(record.condition) || newest.get(replaceKey(record)) === record,
   )
 }
 
@@ -609,11 +609,33 @@ export function activeFindingsAsOf<T extends FindingRecord>(
  * Lo que es de toda la pieza (el perno, la corona, el implante, la pieza ausente, la movilidad…): si se
  * anota otra vez, el nuevo reemplaza al anterior, que queda en la historia (lienzo del 24 nov: quedaban
  * dos «Espigo-muñón» vigentes en la 15). No lo de las caras, ni la fractura, que se dibuja a mano y una
- * pieza puede tener dos, ni la observación clínica, que es una nota y una pieza puede tener varias.
+ * pieza puede tener dos, ni la observación clínica, que es una nota, ni la posición anormal, que la norma
+ * marca con varias letras a la vez (M, D, V, P, L).
  */
 export function replacesSame(condition: string): boolean {
   const def = findingDefinition(condition)
-  return def?.scope === "tooth" && !def.requiresDrawing && condition !== "clinical_observation"
+  return (
+    def?.scope === "tooth" &&
+    !def.requiresDrawing &&
+    condition !== "clinical_observation" &&
+    condition !== "abnormal_position"
+  )
+}
+
+/**
+ * Los hallazgos distintos que son un mismo estado de la pieza y no conviven (QA de voces del 24 nov):
+ * la corona temporal y la definitiva; la pulpotomía y el tratamiento de conducto o la pulpectomía que la
+ * sigue; la pieza que no erupcionó y la que está erupcionando.
+ */
+const REPLACE_FAMILY: Record<string, string> = {
+  temporary_crown: "crown",
+  pulpotomy: "root_canal_treatment",
+  erupting_tooth: "missing_tooth",
+}
+
+/** La pieza y el estado que el más nuevo reemplaza: «15|crown» para la corona y la corona temporal. */
+function replaceKey(record: { toothNumber: number; condition: string }): string {
+  return `${record.toothNumber}|${REPLACE_FAMILY[record.condition] ?? record.condition}`
 }
 
 /**
@@ -624,10 +646,10 @@ export function replacesSame(condition: string): boolean {
 export function withoutReplaced<T extends FindingRecord>(records: readonly T[]): T[] {
   const newest = new Map<string, T>()
   for (const record of recordedAsOf(records, Number.POSITIVE_INFINITY, true))
-    if (replacesSame(record.condition)) newest.set(`${record.toothNumber}|${record.condition}`, record)
+    if (replacesSame(record.condition)) newest.set(replaceKey(record), record)
   return records.filter(
     (record) =>
-      !replacesSame(record.condition) || newest.get(`${record.toothNumber}|${record.condition}`) === record,
+      !replacesSame(record.condition) || newest.get(replaceKey(record)) === record,
   )
 }
 
@@ -641,10 +663,8 @@ export function findingReplaced<T extends FindingRecord>(
   condition: string,
 ): T | null {
   if (!replacesSame(condition)) return null
-  return (
-    [...active].reverse().find((record) => record.toothNumber === toothNumber && record.condition === condition) ??
-    null
-  )
+  const key = replaceKey({ toothNumber, condition })
+  return [...active].reverse().find((record) => replacesSame(record.condition) && replaceKey(record) === key) ?? null
 }
 
 /** Lo registrado a esa fecha, sin lo anulado ni lo pendiente de revisión; con `treated`, también lo tratado. */

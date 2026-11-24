@@ -150,21 +150,24 @@ function snapshotLabel(iso: string): string {
  * (lienzo del 24 nov). Hoy no va: es lo mismo que «Actual».
  */
 export function snapshotDays(
-  instants: readonly string[],
+  events: readonly { at: string; change: string }[],
   today = clinicDay(new Date().toISOString()),
 ): { value: string; label: string }[] {
-  const byDay = new Map<string, { last: string; count: number }>()
-  for (const iso of instants) {
-    const day = clinicDay(iso)
-    const seen = byDay.get(day)
-    byDay.set(day, { last: !seen || iso > seen.last ? iso : seen.last, count: (seen?.count ?? 0) + 1 })
+  // Cuenta cambios (un hallazgo anotado, anulado o tratado), no momentos: lo guardado a la vez son
+  // varios cambios (QA de voces del 24 nov: «1 cambio» un día con seis hallazgos).
+  const byDay = new Map<string, { last: string; changes: Set<string> }>()
+  for (const { at, change } of events) {
+    const day = clinicDay(at)
+    const seen = byDay.get(day) ?? { last: at, changes: new Set<string>() }
+    seen.changes.add(change)
+    byDay.set(day, { last: at > seen.last ? at : seen.last, changes: seen.changes })
   }
   return [...byDay.entries()]
     .filter(([day]) => day !== today)
     .sort(([a], [b]) => b.localeCompare(a))
-    .map(([, { last, count }]) => ({
+    .map(([, { last, changes }]) => ({
       value: last,
-      label: `${snapshotLabel(last)} · ${count} ${count === 1 ? "cambio" : "cambios"}`,
+      label: `${snapshotLabel(last)} · ${changes.size} ${changes.size === 1 ? "cambio" : "cambios"}`,
     }))
 }
 
@@ -298,14 +301,18 @@ function StudioBody({
   }, [selection, onSelectionChange])
   const days = useMemo(
     () =>
-      snapshotDays([
-        ...new Set(
-          // También cuando se trató: ese día terminó con el hallazgo ya tratado.
-          state.history.flatMap((entry) =>
-            [entry.createdAt, entry.voidedAt, entry.resolvedAt].filter((date): date is string => !!date),
-          ),
-        ),
-      ]),
+      // Anotado, anulado y también tratado: ese día terminó con el hallazgo ya tratado. Las caras de una
+      // misma caries son un cambio.
+      snapshotDays(
+        state.history.flatMap((entry) => {
+          const what = `${entry.toothNumber}|${entry.condition}`
+          return [
+            entry.createdAt ? { at: entry.createdAt, change: `anotó|${entry.createdAt}|${what}` } : null,
+            entry.voidedAt ? { at: entry.voidedAt, change: `anuló|${entry.voidedAt}|${what}` } : null,
+            entry.resolvedAt ? { at: entry.resolvedAt, change: `trató|${entry.resolvedAt}|${what}` } : null,
+          ].filter((event): event is { at: string; change: string } => event !== null)
+        }),
+      ),
     [state.history],
   )
   // El día elegido que ya no está en la lista (pasó a ser hoy, o cambió lo registrado) vuelve a «Actual».

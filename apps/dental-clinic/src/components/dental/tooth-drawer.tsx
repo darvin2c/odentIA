@@ -31,7 +31,6 @@ import {
   type FindingInput,
   type FindingScope,
   conditionLabel,
-  findingColor,
   findingDefinition,
   findingIssues,
   findingReplaced,
@@ -56,7 +55,14 @@ import { z } from "zod"
 import { findingTeeth, type OdontogramEntry, teethPhrase } from "../../lib/dental/odontogram"
 import { FindingElsewhere } from "./finding-elsewhere"
 import { FindingPicker } from "./finding-picker"
-import { findingWords, useOdontogramNotation, variantChipLabel, variantFieldLabel } from "./odontogram-notation"
+import {
+  FindingDot,
+  findingLine,
+  findingWords,
+  useOdontogramNotation,
+  variantChipLabel,
+  variantFieldLabel,
+} from "./odontogram-notation"
 import { ToothFitNotice } from "./tooth-fit-notice"
 import { ToothHistory, toothHistoryWords, useToothHistory } from "./tooth-history"
 import { ToothSVG } from "./tooth-svg"
@@ -879,9 +885,10 @@ export function ToothDrawer({
                 key={ids.join(",")}
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
               >
+                <FindingDot entry={entry} />
                 <span className="min-w-0 flex-1">
                   {teeth.length > 1 || own.length > 1 ? `${where.charAt(0).toUpperCase()}${where.slice(1)} · ` : ""}
-                  {words}
+                  {findingLine(official, entry)}
                   {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
                   {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                 </span>
@@ -1651,25 +1658,15 @@ function ToothNow({
             const entry = first as OdontogramEntry
             const own = findingTeeth(entry)
             const where = own.length > 1 ? teethPhrase(own) : teeth.length > 1 ? `${tooth}` : null
-            const paint = findingColor(entry)
             return (
               <li
                 key={ids.join(",")}
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
               >
+                <FindingDot entry={entry} />
                 <span className="min-w-0 flex-1">
                   {where ? `${where.charAt(0).toUpperCase()}${where.slice(1)} · ` : ""}
-                  <span
-                    className={
-                      paint === "red"
-                        ? "font-medium text-red-700 dark:text-red-400"
-                        : paint === "blue"
-                          ? "font-medium text-blue-700 dark:text-blue-400"
-                          : "font-medium"
-                    }
-                  >
-                    {findingWords(official, entry)}
-                  </span>
+                  {findingLine(official, entry)}
                   {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
                   {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                 </span>

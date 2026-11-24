@@ -469,6 +469,19 @@ describe("el mismo hallazgo de toda la pieza, otra vez", () => {
     expect(activeFindingsAsOf(voided, "2026-11-26T00:00:00Z").map((item) => item.id)).toEqual(["viejo"])
   })
 
+  it("la corona temporal reemplaza a la corona, y la pulpectomía a la pulpotomía; la posición anormal no se reemplaza", () => {
+    const records: FindingRecord[] = [
+      { id: "cmc", toothNumber: 15, condition: "crown", status: "recorded", createdAt: "2026-10-01", details: { quality: "good" } },
+      { id: "ct", toothNumber: 15, condition: "temporary_crown", status: "recorded", createdAt: "2026-11-01" },
+      { id: "pp", toothNumber: 85, condition: "pulpotomy", status: "recorded", createdAt: "2026-10-01", details: { quality: "good" } },
+      { id: "pc", toothNumber: 85, condition: "root_canal_treatment", status: "recorded", createdAt: "2026-11-01", details: { quality: "good" } },
+      { id: "m", toothNumber: 12, condition: "abnormal_position", status: "recorded", createdAt: "2026-10-01" },
+      { id: "v", toothNumber: 12, condition: "abnormal_position", status: "recorded", createdAt: "2026-11-01" },
+    ]
+    expect(activeFindingsAsOf(records).map((item) => item.id).sort()).toEqual(["ct", "m", "pc", "v"])
+    expect(findingReplaced(activeFindingsAsOf(records), 15, "crown")?.id).toBe("ct")
+  })
+
   it("la observación clínica no se reemplaza: una pieza puede tener varias", () => {
     const notes = [
       { id: "frio", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-10-01" },
