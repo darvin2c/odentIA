@@ -178,7 +178,11 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await shot(page, "abrir-cuenta-cajon-escritorio")
   await page.getByRole("button", { name: "Abrir la cuenta" }).click()
   await expect(page.getByRole("heading", { name: "Abrir una cuenta de gestorIA" })).toHaveCount(0)
-  const row = page.getByRole("listitem").filter({ hasText: `Zapatos ${tag}` })
+  // La cuenta sale también en Suscripciones: la fila es la de «Cuentas de otras apps».
+  const row = page
+    .locator("section[aria-labelledby=otras-apps]")
+    .getByRole("listitem")
+    .filter({ hasText: `Zapatos ${tag}` })
   await expect(row).toBeVisible()
   await expect(row).toContainText(`Tienda ${tag}`)
   await shot(page, "cuentas-de-otras-apps-escritorio")
