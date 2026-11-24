@@ -132,7 +132,14 @@ function site(payload: Record<string, unknown>): string {
 function findingSummary(payload: Record<string, unknown>): string {
   const condition = String(payload["condition"] ?? "")
   const variant = typeof payload["variant"] === "string" ? payload["variant"] : null
-  const name = (variant ? variantLabel(condition, variant) : undefined) ?? conditionLabel(condition)
+  const own = variant ? variantLabel(condition, variant) : undefined
+  // El tipo de fractura («Esmalte y dentina») no dice solo qué es: va con el hallazgo. Las demás
+  // variantes ya lo nombran («Lesión de caries a nivel de la dentina», «Corona metálica»).
+  const name = own
+    ? condition === "fracture"
+      ? `${conditionLabel(condition)} · ${own.toLowerCase()}`
+      : own
+    : conditionLabel(condition)
   const quality =
     payload["quality"] === "good"
       ? "Buen estado"

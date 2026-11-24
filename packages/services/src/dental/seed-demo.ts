@@ -3669,6 +3669,8 @@ await signedVisitWith(
       toothNumber: 21,
       condition: "fracture",
       details: {
+        // El tipo de la fractura (lienzo del 24 nov): de esmalte y dentina, sin la pulpa expuesta.
+        variant: "enamel_dentin",
         drawing: [
           [
             [30, 18],

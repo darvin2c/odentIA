@@ -104,6 +104,17 @@ export const FINDINGS: readonly FindingDefinition[] = [
     color: "red",
     symbol: "Línea roja sobre la corona y/o la raíz según el caso",
     requiresDrawing: true,
+    // El tipo, de la clasificación de traumatismos dentales de la IADT (2020): cambia lo que se hace
+    // (una de esmalte se pule; con la pulpa expuesta va a endodoncia). La NTS 188 no le da sigla.
+    variantName: "Tipo",
+    variants: [
+      { value: "crack", label: "Infracción (fisura)", abbreviation: "" },
+      { value: "enamel_fracture", label: "Esmalte", abbreviation: "" },
+      { value: "enamel_dentin", label: "Esmalte y dentina", abbreviation: "" },
+      { value: "pulp_exposed", label: "Con la pulpa expuesta", abbreviation: "" },
+      { value: "crown_root", label: "Corona y raíz", abbreviation: "" },
+      { value: "root_fracture", label: "Raíz", abbreviation: "" },
+    ],
   },
   {
     code: "fusion",
