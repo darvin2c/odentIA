@@ -301,7 +301,7 @@ jobs:
             echo "::warning::Sin los repositorios de Ubuntu: se instala solo Chromium"
             pnpm --filter @gestoria/e2e exec playwright install chromium
           }
-      - run: pnpm --filter @gestoria/e2e test
+      - run: pnpm --filter @gestoria/e2e e2e
       - if: always()
         uses: actions/upload-artifact@v4
         with:
