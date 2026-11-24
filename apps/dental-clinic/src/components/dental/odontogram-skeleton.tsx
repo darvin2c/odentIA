@@ -86,7 +86,7 @@ export function OdontogramSkeleton() {
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-red-600" />
-              Patología, mal estado o temporal
+              Patología, mal estado o provisional
             </span>
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-blue-600" />

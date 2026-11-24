@@ -14,6 +14,7 @@
  */
 import { FDI_ADULT_ROWS, FDI_CHILD_ROWS, toothTypeOf } from "./anatomy.js"
 import { findingAbbreviation, findingColor } from "./findings.js"
+import { frontSpecOf } from "./tooth-front.js"
 import type { FindingDetails } from "./types.js"
 
 /** Lo que el dibujo necesita de cada hallazgo vigente (el servidor entrega la instantánea firmada). */
@@ -690,8 +691,9 @@ export function odontogramSheetRow(
       if (CONTOUR_CONDITIONS[entry.condition] && entry.surface && !contours.has(entry.surface))
         contours.set(entry.surface, paint)
     }
-    const kind = toothTypeOf(tooth)
-    const roots = kind === "molar" ? 3 : kind === "premolar" ? 2 : 1
+    // Las raíces de cada pieza, como la vista de frente (`tooth-front.ts`, Wheeler): las muelas
+    // de abajo tienen dos, las de arriba tres; el primer premolar de arriba, dos.
+    const roots = frontSpecOf(tooth).roots
     for (let r = 0; r < roots; r++) {
       const x0 = g.x + (r * CROWN_W) / roots
       const x1 = x0 + CROWN_W / roots

@@ -219,7 +219,7 @@ export default function OdontogramArch({
       <div className="oa-legend">
         <span>
           <i style={{ background: RED }} />
-          Patología, mal estado o temporal
+          Patología, mal estado o provisional
         </span>
         <span>
           <i style={{ background: BLUE }} />

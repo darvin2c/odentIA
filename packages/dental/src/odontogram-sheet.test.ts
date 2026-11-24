@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { isUpperTooth } from "./anatomy.js"
 import {
+  odontogramSheetRow,
   odontogramSheetScene,
   SHEET_INK,
   type SheetEntry,
@@ -212,5 +214,24 @@ describe("odontogramSheetScene", () => {
     )
     expect(scene.specifications).toEqual(["Control en 6 meses", "Pieza 16 CD: Profunda"])
     expect(scene.observations).toEqual(["Pieza 21: Sensible al frío"])
+  })
+})
+
+describe("las raíces de la hoja", () => {
+  /** Cuántas raíces dibuja una pieza sola: los trazos en «V» de tinta antes de su corona. */
+  function rootsOf(tooth: number): number {
+    const row = odontogramSheetRow([tooth], isUpperTooth(tooth), [])
+    return row.shapes.filter(
+      (shape) => shape.kind === "path" && shape.stroke === SHEET_INK.ink && shape.strokeWidth === 1.6 && /^M[^M]*L[^M]*L[^M]*$/.test(shape.d),
+    ).length
+  }
+
+  it("dibuja cada pieza con sus raíces, como la vista de frente", () => {
+    // Molares de arriba con tres; los de abajo, también los de leche, con dos.
+    expect([16, 26, 55, 65].map(rootsOf)).toEqual([3, 3, 3, 3])
+    expect([36, 46, 75, 85].map(rootsOf)).toEqual([2, 2, 2, 2])
+    // El primer premolar de arriba, dos; los demás premolares, una.
+    expect([14, 24, 15, 34, 45].map(rootsOf)).toEqual([2, 2, 1, 1, 1])
+    expect([11, 13, 31, 51].map(rootsOf)).toEqual([1, 1, 1, 1])
   })
 })
