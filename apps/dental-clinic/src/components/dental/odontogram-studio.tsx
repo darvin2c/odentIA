@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
+import { UnsavedDialog, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -211,8 +211,14 @@ function StudioBody({
     [onDirtyChange],
   )
   const [editorPending, setEditorPending] = useState(false)
-  const canChangeSelection = () =>
-    !editorPending && (!dirty.current || window.confirm(common.confirm.unsavedMessage))
+  // Cambiar de pieza, de dentición o de fecha con un hallazgo a medias pregunta lo mismo que cerrar la
+  // pieza, con nuestra ventana «¿Salir sin guardar?»: antes salía la del navegador, con otras palabras.
+  const [pendingChange, setPendingChange] = useState<(() => void) | null>(null)
+  const changeSelection = (action: () => void) => {
+    if (editorPending) return
+    if (dirty.current) setPendingChange(() => action)
+    else action()
+  }
   const validInitial =
     initialTooth && (FDI_ADULT.includes(initialTooth) || FDI_CHILD.includes(initialTooth))
       ? initialTooth
@@ -319,28 +325,30 @@ function StudioBody({
     history.filter(
       (entry) => entry.toothNumber === tooth || entry.details?.relatedTeeth?.includes(tooth),
     )
-  const toggle = (tooth: number, additive: boolean) => {
-    if (!canChangeSelection()) return
-    if (multiple || additive) {
-      setSelection(
-        selection.includes(tooth)
-          ? selection.filter((item) => item !== tooth)
-          : [...selection, tooth],
-      )
-      setMultiple(true)
-    } else {
-      setSelection([tooth])
-      setDrawerOpen(true)
-    }
-  }
+  const toggle = (tooth: number, additive: boolean) =>
+    changeSelection(() => {
+      if (multiple || additive) {
+        setSelection(
+          selection.includes(tooth)
+            ? selection.filter((item) => item !== tooth)
+            : [...selection, tooth],
+        )
+        setMultiple(true)
+      } else {
+        setSelection([tooth])
+        setDrawerOpen(true)
+      }
+    })
   const switchDentition = (next: Dentition) => {
-    if (next === dentition || !canChangeSelection()) return
-    setDentition(next)
-    // La vista mixta contiene las demás: solo se pierde lo que deja de verse.
-    const visible = next === "mixed" ? null : next === "primary" ? FDI_CHILD : FDI_ADULT
-    const kept = visible ? selection.filter((tooth) => visible.includes(tooth)) : selection
-    setSelection(kept)
-    if (kept.length === 0) setDrawerOpen(false)
+    if (next === dentition) return
+    changeSelection(() => {
+      setDentition(next)
+      // La vista mixta contiene las demás: solo se pierde lo que deja de verse.
+      const visible = next === "mixed" ? null : next === "primary" ? FDI_CHILD : FDI_ADULT
+      const kept = visible ? selection.filter((tooth) => visible.includes(tooth)) : selection
+      setSelection(kept)
+      if (kept.length === 0) setDrawerOpen(false)
+    })
   }
   const selectedTooth = selection.length === 1 ? selection[0] : undefined
   const visibleHistory = history
@@ -562,7 +570,7 @@ function StudioBody({
           ...Object.fromEntries(dates.map((date) => [date, snapshotLabel(date)])),
         }}
         onValueChange={(value) => {
-          if (canChangeSelection()) setSnapshot(value ?? "current")
+          changeSelection(() => setSnapshot(value ?? "current"))
         }}
         disabled={disabled}
       >
@@ -590,9 +598,26 @@ function StudioBody({
       De frente · cada pieza con su raíz
     </h4>
   )
+  // Con las dos arcadas juntas (boca entera o arcos arriba), los dos arcos son un solo grupo para el
+  // teclado; en el celular cada arcada va en su sección, con su arco y su fila.
+  const [archVisited, setArchVisited] = useState<number | null>(null)
+  const archRows = wholeRows.filter((row) => row.length > 0)
+  const archVisible = archRows.flat()
+  const archTogether =
+    layout === "narrow"
+      ? undefined
+      : {
+          rows: archRows,
+          tabStop:
+            archVisited !== null && archVisible.includes(archVisited)
+              ? archVisited
+              : (selection.find((tooth) => archVisible.includes(tooth)) ?? archVisible[0]),
+          onVisit: setArchVisited,
+        }
   const archOf = (which: "upper" | "lower") => (
     <OdontogramArch
       single={which}
+      together={archTogether}
       aspect={plan.archAspect}
       byTooth
       // En el celular cada arcada ya lleva su título encima, y en la mixta el centro es de los números
@@ -632,9 +657,10 @@ function StudioBody({
         <section
           ref={mouthRef}
           aria-label="Boca dental"
-          // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
-          // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
+          // Se queda donde está al abrir una pieza: pegada arriba, con la página bajada saltaba hacia
+          // abajo y lo que estaba bajo el dedo se corría (QA del 23 nov). El panel de al lado se pega
+          // él solo y se recorre por dentro, así que la boca no necesita seguirlo.
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -715,7 +741,7 @@ function StudioBody({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection(upperTeeth)
+                  changeSelection(() => setSelection(upperTeeth))
                 }}
               >
                 Arcada superior
@@ -725,7 +751,7 @@ function StudioBody({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection(lowerTeeth)
+                  changeSelection(() => setSelection(lowerTeeth))
                 }}
               >
                 Arcada inferior
@@ -735,7 +761,7 @@ function StudioBody({
                 variant="ghost"
                 disabled={disabled || selection.length === 0}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection([])
+                  changeSelection(() => setSelection([]))
                 }}
               >
                 Limpiar
@@ -757,6 +783,7 @@ function StudioBody({
                 >
                   {topHeading}
                   <div
+                    data-arches=""
                     className="flex flex-col"
                     style={{ marginTop: `${plan.archTop}px`, gap: `${plan.archGap}px` }}
                   >
@@ -775,7 +802,7 @@ function StudioBody({
               <div className={`${centered} flex w-fit min-w-0 max-w-full flex-col gap-4`}>
                 <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
                   {topHeading}
-                  <div className="flex justify-center gap-4">
+                  <div data-arches="" className="flex justify-center gap-4">
                     {(["upper", "lower"] as const).map((which) => (
                       <div key={which} style={{ width: `${plan.archWidth}px` }}>
                         {archOf(which)}
@@ -853,8 +880,9 @@ function StudioBody({
             aria-label="Registro clínico dental"
             className={
               showInlinePanel
-                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, a la vista.
-                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
+                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, y su botón
+                  // principal encima del pie de la atención: antes quedaba tapado por «Finalizar y firmar».
+                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px)-var(--closing-bar-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
                 : "min-w-0 self-start rounded-sm bg-card"
             }
           >
@@ -917,10 +945,11 @@ function StudioBody({
           asOfLabel={historical ? snapshotLabel(snapshot) : undefined}
           official={official}
           onSelect={(tooth) => {
-            if (!canChangeSelection()) return
-            setDentition((current) => dentitionFor(tooth, current))
-            setSelection([tooth])
-            setDrawerOpen(true)
+            changeSelection(() => {
+              setDentition((current) => dentitionFor(tooth, current))
+              setSelection([tooth])
+              setDrawerOpen(true)
+            })
           }}
         />
       ) : null}
@@ -954,6 +983,16 @@ function StudioBody({
         </div>
       ) : null}
       {besideDialog}
+      <UnsavedDialog
+        open={pendingChange !== null}
+        lost={selectedToothLost(selection)}
+        onStay={() => setPendingChange(null)}
+        onDiscard={() => {
+          const action = pendingChange
+          setPendingChange(null)
+          action?.()
+        }}
+      />
       {official ? (
         <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
           <DialogContent

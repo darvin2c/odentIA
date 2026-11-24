@@ -57,7 +57,19 @@ export function OdontogramArch({
   aspect,
   title,
   byTooth = false,
+  together,
 }: {
+  /**
+   * Los arcos de las dos arcadas como un solo grupo para el teclado: una parada de Tab entre los dos y
+   * ↑ ↓ pasan de una arcada a la otra (QA del 23 nov: eran dos paradas y ↓ no bajaba).
+   */
+  together?: {
+    /** Las filas de los dos arcos, de arriba abajo. */
+    rows: readonly (readonly number[])[]
+    /** La pieza que lleva la parada de Tab, una para los dos. */
+    tabStop: number | undefined
+    onVisit: (tooth: number) => void
+  }
   /** Una sola arcada a lo ancho (en el celular), para que cada pieza se pueda tocar. */
   single?: "upper" | "lower"
   /** Alto sobre ancho, con una sola arcada: más bajo cuando va junto a la vista de frente. */
@@ -115,10 +127,15 @@ export function OdontogramArch({
   )
   const [visited, setVisited] = useState<number | null>(null)
   const visible = rows.flat()
-  const tabStop =
+  const ownStop =
     visited !== null && visible.includes(visited)
       ? visited
       : (selected.find((tooth) => visible.includes(tooth)) ?? visible[0])
+  const tabStop = together ? together.tabStop : ownStop
+  const visit = (tooth: number) => {
+    setVisited(tooth)
+    together?.onVisit(tooth)
+  }
 
   const toothOf = (target: EventTarget): number | null => {
     const el = (target as HTMLElement).closest<HTMLElement>("[data-tooth]")
@@ -133,11 +150,13 @@ export function OdontogramArch({
       if (!disabled) onToggle(tooth, true)
       return
     }
-    const next = archNeighbor(rows, tooth, event.key)
+    const next = archNeighbor(together?.rows ?? rows, tooth, event.key)
     if (next === null) return
     event.preventDefault()
-    setVisited(next)
-    ref.current?.querySelector<HTMLElement>(`[data-tooth="${next}"]`)?.focus()
+    visit(next)
+    // Con las dos arcadas juntas, la siguiente puede estar en el otro arco.
+    const scope = together ? ref.current?.closest("[data-arches]") : ref.current
+    scope?.querySelector<HTMLElement>(`[data-tooth="${next}"]`)?.focus()
   }
 
   const { width: W, height: H } = layout
@@ -171,7 +190,7 @@ export function OdontogramArch({
       onKeyDown={onKeyDown}
       onFocus={(event) => {
         const tooth = toothOf(event.target)
-        if (tooth !== null) setVisited(tooth)
+        if (tooth !== null) visit(tooth)
       }}
     >
       <span id={hintId} className="sr-only">

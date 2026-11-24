@@ -184,7 +184,7 @@ import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { useDiscardEncounter, useOpenEncounter } from "./stale-encounter"
 import { PatientClinicalStrip } from "./patient-header"
-import { EncounterPatientLine, shortPatientName, usePastHeader, useReservedTop } from "./encounter-patient-line"
+import { EncounterPatientLine, shortPatientName, usePastHeader, useReservedBottom, useReservedTop } from "./encounter-patient-line"
 import { dictationIdle } from "./dictation-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 
@@ -2631,6 +2631,9 @@ export function EncounterEditor({
   const headerEnd = useRef<HTMLSpanElement>(null)
   const pastHeader = usePastHeader(headerEnd)
   useReservedTop()
+  // El pie fijo de abajo: el panel de la pieza termina encima de él, con su botón a la vista.
+  const closingBar = useRef<HTMLDivElement>(null)
+  useReservedBottom(closingBar, canWrite && attending)
   // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
   const saveChip =
     saveState === "offline"
@@ -3169,6 +3172,7 @@ export function EncounterEditor({
           el botón queda abajo, pegado al borde del pie. */}
       {canWrite && attending ? (
         <div
+          ref={closingBar}
           className={cn(
             "sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
             // En el teléfono, mientras se dicta, el pie es la barra del dictado (que también firma).

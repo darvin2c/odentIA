@@ -889,13 +889,14 @@ export function ToothSVG({
   // Al pasar el mouse un anillo gris, y el foco en tinta: nunca el color de la clínica, que podría
   // ser rojo o azul como los hallazgos de la norma (ADR 0162).
   // En el arco, la elegida con un anillo redondo que sigue la pieza: el cuadrado se confundía con el
-  // símbolo del implante y tocaba a las vecinas (24 nov).
-  const archClass = `rounded-full bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
+  // símbolo del implante y tocaba a las vecinas (24 nov). Va un poco por dentro de su lugar: con las
+  // piezas juntas, por fuera rozaba a la vecina (revisión del 24 nov).
+  const archClass = `relative rounded-full bg-transparent p-0 transition-shadow after:pointer-events-none after:absolute after:inset-[9%] after:rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
     selected
-      ? "ring-2 ring-violet-600"
+      ? "after:ring-2 after:ring-violet-600"
       : disabled
         ? ""
-        : "hover:ring-2 hover:ring-muted-foreground/50"
+        : "hover:after:ring-2 hover:after:ring-muted-foreground/50"
   } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`
 
   if (!isTile && mode === "static") {
