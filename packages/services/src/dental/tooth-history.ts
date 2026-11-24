@@ -1,6 +1,6 @@
 import { isTooth } from "./site.js"
 import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, doneSessionWords, isDiagnosisVerification } from "@odentia/clinical"
-import { isValidTooth } from "@odentia/dental"
+import { activeFindingsAsOf, type FindingDetails, isValidTooth, replacesSame } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -167,8 +167,21 @@ export async function getToothHistory(
   // Una lesión de varias caras (una caries DO) es una fila por cara de la misma
   // anotación: se dice en una sola línea, «(Oclusal, Distal)», por estado.
   const lesions = new Map<string, ToothEvent>()
+  // De toda la pieza, el más nuevo del mismo hallazgo reemplaza al anterior (lienzo del 24 nov): el
+  // anterior sigue aquí, como «reemplazado».
+  const active = new Set(
+    activeFindingsAsOf(findings.map(({ row }) => ({ ...row, details: row.details as FindingDetails }))).map(
+      (row) => row.id,
+    ),
+  )
   for (const { row, author } of findings) {
-    const status = row.voidedAt ? "anulado" : row.resolvedAt ? "tratado" : "vigente"
+    const status = row.voidedAt
+      ? "anulado"
+      : row.resolvedAt
+        ? "tratado"
+        : replacesSame(row.condition) && !row.needsReview && !active.has(row.id)
+          ? "reemplazado"
+          : "vigente"
     const key = [row.encounterId, row.toothNumber, row.condition, row.createdAt.getTime(), row.createdBy, status].join("|")
     const same = lesions.get(key)
     if (same) {

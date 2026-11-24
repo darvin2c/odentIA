@@ -3,6 +3,7 @@ import type { FindingRecord } from "./index.js"
 import {
   activeFindingsAsOf,
   conditionLabel,
+  findingReplaced,
   FINDINGS,
   findingAbbreviation,
   findingColor,
@@ -431,6 +432,41 @@ describe("color y vigencia", () => {
     ]
     expect(activeFindingsAsOf(history, "2026-01-20").map((item) => item.id)).toEqual(["caries"])
     expect(activeFindingsAsOf(history, "2026-02-02")).toEqual([])
+  })
+})
+
+// Lienzo del 24 nov: el espigo-muñón de la 15 anotado dos veces quedaba dos veces vigente.
+describe("el mismo hallazgo de toda la pieza, otra vez", () => {
+  const post = (id: string, createdAt: string, quality: string) => ({
+    id,
+    toothNumber: 15,
+    condition: "post_and_core",
+    status: "recorded",
+    createdAt,
+    details: { quality },
+  })
+  const history = [post("viejo", "2026-11-23T10:00:00Z", "good"), post("nuevo", "2026-11-24T10:00:00Z", "poor")]
+
+  it("el nuevo reemplaza al anterior; antes del nuevo, el anterior seguía vigente", () => {
+    expect(activeFindingsAsOf(history).map((item) => item.id)).toEqual(["nuevo"])
+    expect(activeFindingsAsOf(history, "2026-11-23T20:00:00Z").map((item) => item.id)).toEqual(["viejo"])
+  })
+
+  it("lo de las caras y la fractura no se reemplazan: pueden ser dos", () => {
+    const faces = [
+      { id: "m", toothNumber: 26, condition: "caries", surface: "mesial", status: "recorded", createdAt: "2026-11-23" },
+      { id: "d", toothNumber: 26, condition: "caries", surface: "distal", status: "recorded", createdAt: "2026-11-24" },
+      { id: "f1", toothNumber: 21, condition: "fracture", status: "recorded", createdAt: "2026-11-23" },
+      { id: "f2", toothNumber: 21, condition: "fracture", status: "recorded", createdAt: "2026-11-24" },
+    ]
+    expect(activeFindingsAsOf(faces).map((item) => item.id).sort()).toEqual(["d", "f1", "f2", "m"])
+  })
+
+  it("el panel sabe cuál reemplazaría, para avisarlo antes de registrar", () => {
+    const active = activeFindingsAsOf(history)
+    expect(findingReplaced(active, 15, "post_and_core")?.id).toBe("nuevo")
+    expect(findingReplaced(active, 14, "post_and_core")).toBeNull()
+    expect(findingReplaced(active, 15, "caries")).toBeNull()
   })
 })
 

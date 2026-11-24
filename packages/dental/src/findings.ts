@@ -583,8 +583,9 @@ function timeOf(value: string | Date | null | undefined): number | undefined {
  * al periodontograma.
  * El registro es append-only: coexisten todas las entradas válidas registradas
  * hasta la fecha; se excluyen las pendientes de revisión, las anuladas a esa
- * fecha (voidedAt o estado voided) y las tratadas a esa fecha (resolvedAt). Sin latest-wins por cara. Orden
- * determinista por creación e identificador.
+ * fecha (voidedAt o estado voided), las tratadas a esa fecha (resolvedAt) y las
+ * reemplazadas (`replacesSame`). Sin latest-wins por cara. Orden determinista por
+ * creación e identificador.
  */
 export function activeFindingsAsOf<T extends FindingRecord>(
   history: readonly T[],
@@ -592,6 +593,45 @@ export function activeFindingsAsOf<T extends FindingRecord>(
 ): T[] {
   const cutoff = iso === undefined ? Number.POSITIVE_INFINITY : Date.parse(iso)
   if (iso !== undefined && !Number.isFinite(cutoff)) return []
+  const active = recordedAsOf(history, cutoff)
+  // De toda la pieza, el más nuevo del mismo hallazgo reemplaza al anterior, que sigue en la historia.
+  const newest = new Map<string, T>()
+  for (const record of active)
+    if (replacesSame(record.condition)) newest.set(`${record.toothNumber}|${record.condition}`, record)
+  return active.filter(
+    (record) =>
+      !replacesSame(record.condition) || newest.get(`${record.toothNumber}|${record.condition}`) === record,
+  )
+}
+
+/**
+ * Lo que es de toda la pieza (el perno, la corona, el implante, la pieza ausente, la movilidad…): si se
+ * anota otra vez, el nuevo reemplaza al anterior, que queda en la historia (lienzo del 24 nov: quedaban
+ * dos «Espigo-muñón» vigentes en la 15). No lo de las caras, ni la fractura, que se dibuja a mano y una
+ * pieza puede tener dos.
+ */
+export function replacesSame(condition: string): boolean {
+  const def = findingDefinition(condition)
+  return def?.scope === "tooth" && !def.requiresDrawing
+}
+
+/**
+ * El hallazgo vigente de toda la pieza que uno nuevo del mismo tipo reemplazaría: el panel lo avisa
+ * antes de registrar. Nulo si no hay o si el hallazgo no reemplaza (`replacesSame`).
+ */
+export function findingReplaced<T extends FindingRecord>(
+  active: readonly T[],
+  toothNumber: number,
+  condition: string,
+): T | null {
+  if (!replacesSame(condition)) return null
+  return (
+    [...active].reverse().find((record) => record.toothNumber === toothNumber && record.condition === condition) ??
+    null
+  )
+}
+
+function recordedAsOf<T extends FindingRecord>(history: readonly T[], cutoff: number): T[] {
   return history
     .filter((record) => {
       const created = timeOf(record.createdAt)
