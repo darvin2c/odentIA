@@ -749,7 +749,7 @@ function StudioBody({
             {layout === "whole" ? (
               // Cada arco a la izquierda, a la altura de su fila de frente, y la vista de frente al medio
               // del alto de los dos arcos (lienzo del 24 nov). Si sobra espacio, sobra a los dos lados.
-              <div className={`${centered} flex min-w-0 items-start gap-7`}>
+              <div className={`${centered} flex min-w-0 items-start gap-4`}>
                 <section
                   aria-label="De arriba"
                   className="flex shrink-0 flex-col gap-2"
@@ -775,7 +775,7 @@ function StudioBody({
               <div className={`${centered} flex w-fit min-w-0 max-w-full flex-col gap-4`}>
                 <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
                   {topHeading}
-                  <div className="flex justify-center gap-7">
+                  <div className="flex justify-center gap-4">
                     {(["upper", "lower"] as const).map((which) => (
                       <div key={which} style={{ width: `${plan.archWidth}px` }}>
                         {archOf(which)}

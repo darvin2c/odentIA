@@ -15,8 +15,8 @@ import { FRONT_PX_PER_MM, frontViewSize } from "./odontogram-front"
  */
 export type MouthLayout = "whole" | "top" | "narrow"
 
-/** Entre el arco y la vista de frente (gap-7). */
-export const VIEWS_GAP = 28
+/** Entre el arco y la vista de frente (gap-4): con más, a 1024 px de pantalla ya no cabían lado a lado. */
+export const VIEWS_GAP = 16
 /** Entre los dos arcos, uno sobre otro, en «whole»: ya los separa el margen de sus números. */
 const ARCH_GAP = 0
 /**
@@ -28,11 +28,11 @@ const PRIMARY_PX_PER_MM = 4.4
 const NARROW_MAX_PX_PER_MM = 5.2
 
 /**
- * Alto sobre ancho de cada arco: una herradura bien más ancha que alta (2,4 a 1; 24 nov: más alta se veía mal
- * y dejaba espacio vacío junto a la vista de frente);
- * en la mixta, más honda, porque lleva adentro la de las temporales.
+ * Alto sobre ancho de cada arco: una herradura casi el doble de ancha que de alta (24 nov: más alta se veía
+ * mal; más baja, el arco no cabía al lado de su fila desde 1024 px de pantalla); en la mixta, algo más
+ * honda, porque lleva adentro la de las temporales.
  */
-const ARCH_ASPECT = { plain: 0.46, mixed: 0.55 }
+const ARCH_ASPECT = { plain: 0.56, mixed: 0.6 }
 /**
  * En el celular el arco va a todo el ancho y más hondo: con la herradura baja del escritorio, a
  * unos 300 px sus piezas quedaban en 20 px (24 nov). Ahí se marcan las caras con el dedo.

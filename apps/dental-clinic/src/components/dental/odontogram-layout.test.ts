@@ -33,8 +33,8 @@ const plan = (width: number, mixed: boolean) =>
 describe("el acomodo de la boca (24 nov: la vista de frente crecía con la pantalla)", () => {
   it("la vista de frente tiene su tamaño: en una pantalla ancha no crece", () => {
     const size = frontViewSize([U, L])
-    expect(size.width).toBeGreaterThan(460)
-    expect(size.width).toBeLessThan(520)
+    expect(size.width).toBeGreaterThan(450)
+    expect(size.width).toBeLessThan(500)
     expect(plan(1800, false)).toEqual(plan(1000, false))
   })
 
@@ -82,6 +82,10 @@ describe("el acomodo de la boca (24 nov: la vista de frente crecía con la panta
       expect(widest).toBeGreaterThan(320)
       expect(p.archWidth).toBe(334)
     }
+  })
+
+  it("cada arco cabe al lado de su fila desde 1024 px de pantalla (871 px por dentro), también en la mixta", () => {
+    for (const mixed of [false, true]) expect(plan(871, mixed).layout).toBe("whole")
   })
 
   it("con espacio, cada arco al lado de su fila; más angosta, los arcos arriba; en el celular, una arcada tras otra", () => {

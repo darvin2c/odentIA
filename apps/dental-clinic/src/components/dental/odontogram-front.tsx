@@ -31,10 +31,11 @@ const S = 5
 /**
  * Px de pantalla por mm de dibujo: el tamaño de la vista de frente, el mismo en todas las pantallas.
  * Antes el SVG se estiraba al ancho de su lugar y en una pantalla ancha cada muela pasaba de 60 px
- * (24 nov, en producción). Con 4, la fila de 16 mide unos 530 px y la incisiva más angosta, la
- * temporal inferior, 23 px más el borde que se toca: 24 o más para el dedo.
+ * (24 nov, en producción). Con 3,5, la fila de 16 mide unos 475 px, la incisiva permanente más
+ * angosta 22,6 px más el borde que se toca (24 o más para el dedo) y el arco cabe al lado desde
+ * 1024 px de pantalla. Solo con temporales va más grande (`planMouth`).
  */
-export const FRONT_PX_PER_MM = 3.6
+export const FRONT_PX_PER_MM = 3.5
 /** Las de leche en su propia fila, junto a las permanentes: a este tanto de su tamaño. */
 const PRIMARY_OWN_ROW = 0.88
 /** Alto de la franja de los números, del lado de las coronas. */
@@ -482,12 +483,13 @@ function ToothFront({
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <line x1={-w * 0.08} y1={y} x2={w * 1.08} y2={y} />
+        {/* Dentro del ancho de su corona: con las piezas juntas, más afuera tocaba a la vecina. */}
+        <line x1={w * 0.1} y1={y} x2={w * 0.9} y2={y} />
         <path
-          d={`M${n(-w * 0.08 + 4)},${n(y - 3.5)} L${n(-w * 0.08)},${n(y)} L${n(-w * 0.08 + 4)},${n(y + 3.5)}`}
+          d={`M${n(w * 0.1 + 4)},${n(y - 3.5)} L${n(w * 0.1)},${n(y)} L${n(w * 0.1 + 4)},${n(y + 3.5)}`}
         />
         <path
-          d={`M${n(w * 1.08 - 4)},${n(y - 3.5)} L${n(w * 1.08)},${n(y)} L${n(w * 1.08 - 4)},${n(y + 3.5)}`}
+          d={`M${n(w * 0.9 - 4)},${n(y - 3.5)} L${n(w * 0.9)},${n(y)} L${n(w * 0.9 - 4)},${n(y + 3.5)}`}
         />
       </g>,
     )
