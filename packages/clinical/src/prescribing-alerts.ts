@@ -64,6 +64,19 @@ export interface PrescribingSituation {
   today: string
   /** Lo que toma hoy, con su código ATC si se sabe (`currentMedicationsOf`). */
   taking: readonly TakenMedication[]
+  /**
+   * Lo que dijo en la consulta que toma y nadie confirmó todavía (`saidHealthRisks` de los servicios):
+   * también avisa, como lo que es, «dijo… sin confirmar» (QA del 21 nov, H2). Opcional.
+   */
+  said?: readonly SaidTakenMedication[]
+}
+
+/** Una medicina que dijo que toma, sin confirmar: en la consulta de hoy (`open`) o en una ya firmada. */
+export interface SaidTakenMedication {
+  /** `null`: dijo que toma un anticoagulante y no cuál. */
+  name: string | null
+  anticoagulant: boolean
+  open: boolean
 }
 
 /** Lo que la receta avisa (decide quien receta) y lo que solo recuerda, para lo que se va a recetar. */
@@ -97,6 +110,10 @@ export function prescribingAlerts(
     : `está embarazada${weeks === null ? "" : ` (${weeks} semanas)`}`
   // Anticoagulantes y antiagregantes: su clase va con el código (lo que dijo o eligió el equipo).
   const thinners = situation.taking.filter((medicine) => medicationClassOf(medicine.atcCode) === "anticoagulants")
+  // Lo dicho sin confirmar que ya está registrado no se avisa dos veces.
+  const registered = new Set(thinners.map((medicine) => medicine.name.toLocaleLowerCase("es")))
+  const saidThinners = (situation.said ?? []).filter((medicine) => medicine.anticoagulant && !(medicine.name && registered.has(medicine.name.toLocaleLowerCase("es"))))
+  const saidWords = (open: boolean) => saidThinners.filter((medicine) => medicine.open === open).map((medicine) => medicine.name ?? "un anticoagulante (no dijo cuál)")
   for (const item of items) {
     const name = item.genericName.trim()
     if (!name) continue
@@ -112,6 +129,17 @@ export function prescribingAlerts(
       warnings.push(
         `${upperFirst(name)}: toma ${thinners.map((medicine) => medicine.name).join(" y ")} (${MEDICATION_CLASSES.anticoagulants.label.toLocaleLowerCase("es")} o antiagregante) y los AINE aumentan el riesgo de sangrado; el paracetamol es la alternativa habitual.`,
       )
+    // Lo que dijo y nadie confirmó avisa igual, con esas palabras: no frena, decide quien receta.
+    for (const [open, when] of [
+      [true, "sin confirmar"],
+      [false, "en otra consulta, sin revisar"],
+    ] as const) {
+      const names = saidWords(open)
+      if (names.length > 0)
+        warnings.push(
+          `${upperFirst(name)}: dijo que toma ${names.join(" y ")}, ${when} (${MEDICATION_CLASSES.anticoagulants.label.toLocaleLowerCase("es")} o antiagregante), y los AINE aumentan el riesgo de sangrado; el paracetamol es la alternativa habitual.`,
+        )
+    }
   }
   return { warnings, reminders }
 }

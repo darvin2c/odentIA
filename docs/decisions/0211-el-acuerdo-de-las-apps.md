@@ -61,7 +61,7 @@ cuenta de otra app, separar lo que el cobro daba por hecho de una clínica.
   su plan, demos, entrar como soporte, quitar a una persona, la guía), el avance del alta y el
   comprobante subido desde la app (hoy lo registra la administración).
 - Las clínicas pasan a usar el acuerdo en el paso 5.
-- Actualización (ADR 0213): la administración ya pide abrir la cuenta de un cliente con su plan,
+- Actualización (ADR 0214): la administración ya pide abrir la cuenta de un cliente con su plan,
   dejar entrar a soporte y quitar a una persona, y el comprobante llega desde la app.
 
 ## Referencias

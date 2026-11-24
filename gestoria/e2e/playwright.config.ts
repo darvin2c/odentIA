@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test"
 import { ACCOUNT, API_PORT, WEB, WEB_PORT } from "./entorno"
 
 /**
- * El recorrido de gestorIA en un navegador (ADR 0213): su servidor y su base de verdad, con una
+ * El recorrido de gestorIA en un navegador (ADR 0214): su servidor y su base de verdad, con una
  * cuenta y una administración de mentira (`servidor.ts`), y su app compilada como en producción
  * (`vite build` + `vite preview`). Un solo trabajador: los recorridos cambian quién entra.
  */

@@ -116,7 +116,7 @@ export const APP_CONTRACT_REQUEST_STATUSES = ["pendiente", "hecho", "fallo"] as 
 export type AppContractRequestStatus = (typeof APP_CONTRACT_REQUEST_STATUSES)[number]
 
 /**
- * Lo que la administración le pide a una app que es otro sistema (ADR 0213): la bandeja de
+ * Lo que la administración le pide a una app que es otro sistema (ADR 0214): la bandeja de
  * salida de esos pedidos. Se escribe en la transacción de quien lo pide y lo envía la API en el
  * momento o el trabajador después, como los avisos de la cuenta: su `id` es su clave
  * (`webhook-id`) y no cambia al reintentar, así que la app reconoce un repetido. Los de una misma

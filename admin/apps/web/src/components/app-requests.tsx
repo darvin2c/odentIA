@@ -1,5 +1,5 @@
 /**
- * Lo que la administración le pide a una app que es otro sistema (ADR 0213, tablero 3 del
+ * Lo que la administración le pide a una app que es otro sistema (ADR 0214, tablero 3 del
  * lienzo A): abrir la cuenta de un cliente con su plan, dejar entrar a soporte y quitar a una
  * persona. Lo hace la app, con sus reglas; aquí queda el botón que lo pide, quién lo pidió y cómo
  * quedó (pendiente, hecho o falló, con lo que respondió la app). Solo la administración.

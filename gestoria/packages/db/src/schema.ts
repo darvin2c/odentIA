@@ -194,7 +194,7 @@ export const STORE_EVENT_ACTIONS = [
   "catalogo.producto",
   "catalogo.hoja",
   "configuracion.sofi",
-  // Lo que pidió la administración (ADR 0213) y la entrada de soporte.
+  // Lo que pidió la administración (ADR 0214) y la entrada de soporte.
   "soporte.pedido",
   "soporte.aceptado",
   "soporte.rechazado",
@@ -1259,7 +1259,7 @@ export const contractState = pgTable(
 )
 
 /**
- * Los pedidos de la administración ya recibidos (ADR 0213), por su `webhook-id`: el efecto y esta
+ * Los pedidos de la administración ya recibidos (ADR 0214), por su `webhook-id`: el efecto y esta
  * fila van en la misma transacción, así que un pedido repetido devuelve la misma respuesta sin
  * hacer nada otra vez. Sin clave foránea a la tienda: el de abrir una que no se pudo abrir no la
  * tiene. Solo el dueño de la base la escribe.
@@ -1281,7 +1281,7 @@ export const SUPPORT_ACCESS_STATES = ["pedido", "aceptado", "rechazado", "quitad
 export type SupportAccessState = (typeof SUPPORT_ACCESS_STATES)[number]
 
 /**
- * La entrada de soporte a una tienda (ADR 0213): la pide la administración por el acuerdo, a nombre
+ * La entrada de soporte a una tienda (ADR 0214): la pide la administración por el acuerdo, a nombre
  * de una persona del equipo de gestorIA, por un rato y para algo. Entra solo si el Dueño o un
  * Administrador la acepta, solo a mirar (`permisos.ts`) y hasta que vence o la quitan. Su id en
  * la cuenta única es el de su token: entra con su propia cuenta. Lo que pasa queda en

@@ -5,6 +5,7 @@ import {
   type DictationDraft,
   operationAgentSchema,
 } from "@odentia/services"
+import { MEDICAL_DICTATION_HEALTH } from "@odentia/services/medical"
 import { z } from "zod"
 import {
   allergyAndDonePrompt,
@@ -17,9 +18,12 @@ import {
   demoMaterial,
   dictationEdits,
   dictationFormAnswers,
+  dictationHealthPart,
+  dictationOutOfPlacePart,
   dictationItems,
   dictationList,
   dictationSaid,
+  healthPrompt,
   homeCarePrompt,
   materialsPrompt,
 } from "../dictation.js"
@@ -48,6 +52,8 @@ const indicated = operationAgentSchema("plan.indicacion", WORDS).omit({
   surfaces: true,
   alternatives: true,
 })
+
+const HEALTH = dictationHealthPart(MEDICAL_DICTATION_HEALTH)
 
 export const extraction = z.object({
   nota: operationAgentSchema("atencion.nota", WORDS)
@@ -94,6 +100,8 @@ export const extraction = z.object({
     .describe("El descanso médico, solo si lo indicó."),
   materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   fichas: dictationFormAnswers(),
+  salud: HEALTH.part,
+  sin_lugar: dictationOutOfPlacePart(),
   ...dictationEdits("temperatura"),
 })
 
@@ -112,6 +120,7 @@ const DRAFT_PARTS = [
   { key: "descanso", kind: "descanso", single: true },
   { key: "materiales", kind: "material" },
   { key: "fichas", kind: "ficha" },
+  { key: "salud", kind: "salud", single: true, schema: HEALTH.schema },
 ] as const
 
 export function systemPrompt(input: {
@@ -141,6 +150,11 @@ export function systemPrompt(input: {
       : "La clínica aún no tiene servicios.",
     ...consultaPrompt("«dolor de garganta», «control»"),
     ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
+    ...healthPrompt({
+      topics: "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, si fuma y si toma alcohol",
+      notInRelato: "Sus medicinas de siempre y sus enfermedades",
+      measured: "`signos` ni en ",
+    }),
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",

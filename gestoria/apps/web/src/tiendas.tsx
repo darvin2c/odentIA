@@ -623,7 +623,7 @@ const SUPPORT_STATUS: Record<SupportAccess["status"], string> = {
 }
 
 /**
- * Soporte de gestorIA (ADR 0213): lo que pide la administración para mirar la tienda y lo que
+ * Soporte de gestorIA (ADR 0214): lo que pide la administración para mirar la tienda y lo que
  * pasó. Dejarlo entrar, no hacerlo o sacarlo es del Dueño o un Administrador. En cada sección de
  * la tienda se ve lo que está pendiente o vigente («actual»); en Equipo, también lo último.
  */

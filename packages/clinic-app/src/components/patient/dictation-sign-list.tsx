@@ -68,6 +68,7 @@ export function DictationSignList({
   onToggledChange,
   onComplete,
   onOpenForm,
+  onReviewHealth,
   responseId,
 }: {
   session: DictationSession
@@ -79,6 +80,8 @@ export function DictationSignList({
   onComplete: (id: string) => void
   /** «Abrir la ficha»: la respuesta por revisar se elige en su pregunta. */
   onOpenForm: (responseId: string) => void
+  /** «Revisarlo»: lleva al aviso de su salud de la atención, donde se revisa con la persona. */
+  onReviewHealth?: () => void
   /**
    * Solo lo de esa ficha, dentro de su bloque de la firma (`FormsAtSign`). Sin ella, lo de la
    * consulta: lo de cada ficha va en su bloque.
@@ -102,6 +105,9 @@ export function DictationSignList({
   const list = (
       <ul aria-label={responseId ? `Lo que propone ${CLINICAL_NAME} en esta ficha` : `Lo que propone ${CLINICAL_NAME}`} className="flex flex-col gap-2">
         {items.map((item) => {
+          // Lo que dijo de su salud no se completa ni entra con la firma: se revisa con la persona en su
+          // aviso. No frena la firma, y firmada sigue avisándose hasta que alguien lo revise (A3).
+          if (item.kind === "salud") return <SaidHealthAtSign key={item.id} item={item} busy={busy} onReview={onReviewHealth} />
           const { title } = suggestionText(item)
           const can = confirmableAtSign(item)
           const checked = marked.includes(item.id)
@@ -191,6 +197,29 @@ export function DictationSignList({
       </div>
       {list}
     </section>
+  )
+}
+
+/**
+ * «Lo que dijo de su salud, sin revisar» en la firma (revisión del 21 nov, A3): lo que es, no «Falta
+ * completarla» con un cajón vacío. Lleva al aviso de la atención; firmar no lo pierde: sigue en la
+ * franja con su fecha hasta que alguien lo revise o diga que no lo registra.
+ */
+function SaidHealthAtSign({ item, busy, onReview }: { item: DictationSuggestion; busy: boolean; onReview: (() => void) | undefined }) {
+  const rows = (item.healthRows ?? []).map((row) => `${row.label}: ${row.value}`)
+  return (
+    <li className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">Lo que dijo de su salud, sin revisar</span>
+        {rows.length ? <span className="text-muted-foreground [overflow-wrap:anywhere]">{rows.join(" · ")}</span> : null}
+        <span className="text-muted-foreground">No entra con la firma: se revisa con la persona. Si firmas, sigue avisándose hasta que alguien lo revise.</span>
+      </span>
+      {onReview ? (
+        <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-8" disabled={busy} onClick={onReview}>
+          Revisarlo ahora
+        </Button>
+      ) : null}
+    </li>
   )
 }
 

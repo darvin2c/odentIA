@@ -1,5 +1,5 @@
 {
-  "id": "f7e2df4c-60d2-4c56-ae8e-e84b3d0bb1a5",
+  "id": "73304753-a80f-4c75-b09c-e931afc8f768",
   "prevId": "d044ac59-0d37-4c2f-a440-52df46fe3ab0",
   "version": "7",
   "dialect": "postgresql",
@@ -72,188 +72,6 @@
         "app_contract_message_id_check": {
           "name": "app_contract_message_id_check",
           "value": "length(\"admin\".\"app_contract_message\".\"id\") BETWEEN 1 AND 200"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.app_contract_request": {
-      "name": "app_contract_request",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "app": {
-          "name": "app",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "requested_by": {
-          "name": "requested_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pendiente'"
-        },
-        "result_message": {
-          "name": "result_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "done_at": {
-          "name": "done_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "app_contract_request_pending_idx": {
-          "name": "app_contract_request_pending_idx",
-          "columns": [
-            {
-              "expression": "app",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "status = 'pendiente'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "app_contract_request_account_idx": {
-          "name": "app_contract_request_account_idx",
-          "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "app_contract_request_account_id_saas_account_id_fk": {
-          "name": "app_contract_request_account_id_saas_account_id_fk",
-          "tableFrom": "app_contract_request",
-          "tableTo": "saas_account",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "app_contract_request_requested_by_user_id_fk": {
-          "name": "app_contract_request_requested_by_user_id_fk",
-          "tableFrom": "app_contract_request",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "requested_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "app_contract_request_app_check": {
-          "name": "app_contract_request_app_check",
-          "value": "\"admin\".\"app_contract_request\".\"app\" IN ('gestoria')"
-        },
-        "app_contract_request_type_check": {
-          "name": "app_contract_request_type_check",
-          "value": "\"admin\".\"app_contract_request\".\"type\" IN ('cuenta.abrir','soporte.entrar','equipo.quitar')"
-        },
-        "app_contract_request_status_check": {
-          "name": "app_contract_request_status_check",
-          "value": "\"admin\".\"app_contract_request\".\"status\" IN ('pendiente','hecho','fallo') AND (\"admin\".\"app_contract_request\".\"status\" = 'pendiente') = (\"admin\".\"app_contract_request\".\"done_at\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -19387,6 +19205,229 @@
       },
       "isRLSEnabled": false
     },
+    "public.encounter_dictation_segment": {
+      "name": "encounter_dictation_segment",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encounter_id": {
+          "name": "encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "segment_id": {
+          "name": "segment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transcript": {
+          "name": "transcript",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "said_at": {
+          "name": "said_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organized_at": {
+          "name": "organized_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "unused": {
+          "name": "unused",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "turns": {
+          "name": "turns",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewed_at": {
+          "name": "reviewed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "organizing_at": {
+          "name": "organizing_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewing_at": {
+          "name": "reviewing_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "encounter_dictation_segment_uidx": {
+          "name": "encounter_dictation_segment_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "encounter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "segment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "encounter_dictation_segment_said_idx": {
+          "name": "encounter_dictation_segment_said_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "encounter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "said_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "encounter_dictation_segment_organization_id_organization_id_fk": {
+          "name": "encounter_dictation_segment_organization_id_organization_id_fk",
+          "tableFrom": "encounter_dictation_segment",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_dictation_segment_created_by_user_id_fk": {
+          "name": "encounter_dictation_segment_created_by_user_id_fk",
+          "tableFrom": "encounter_dictation_segment",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "encounter_dictation_segment_encounter_fk": {
+          "name": "encounter_dictation_segment_encounter_fk",
+          "tableFrom": "encounter_dictation_segment",
+          "tableTo": "encounter",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "encounter_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "encounter_dictation_segment_transcript_check": {
+          "name": "encounter_dictation_segment_transcript_check",
+          "value": "char_length(\"encounter_dictation_segment\".\"transcript\") BETWEEN 1 AND 12000"
+        },
+        "encounter_dictation_segment_unused_check": {
+          "name": "encounter_dictation_segment_unused_check",
+          "value": "jsonb_typeof(\"encounter_dictation_segment\".\"unused\") = 'array'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.encounter_dictation_suggestion": {
       "name": "encounter_dictation_suggestion",
       "schema": "",
@@ -19591,7 +19632,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha','salud')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -23961,7 +24002,7 @@
       "checkConstraints": {
         "patient_health_declaration_via_check": {
           "name": "patient_health_declaration_via_check",
-          "value": "\"patient_health_declaration\".\"via\" IN ('enlace','registro','formulario')"
+          "value": "\"patient_health_declaration\".\"via\" IN ('enlace','registro','formulario','consulta')"
         },
         "patient_health_declaration_respondent_check": {
           "name": "patient_health_declaration_respondent_check",

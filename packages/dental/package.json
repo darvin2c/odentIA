@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./odontogram-arch": "./src/odontogram-arch.ts",
     "./odontogram-sheet": "./src/odontogram-sheet.ts",
-    "./tooth-shapes": "./src/tooth-shapes.ts"
+    "./tooth-shapes": "./src/tooth-shapes.ts",
+    "./tooth-front": "./src/tooth-front.ts",
+    "./tooth-front-marks": "./src/tooth-front-marks.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

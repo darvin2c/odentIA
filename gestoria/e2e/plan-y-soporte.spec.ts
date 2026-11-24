@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { ACCOUNT, STORE_ID, type Who } from "./entorno"
 
 /**
- * Lo nuevo de gestorIA en un navegador (ADR 0213), contra su servidor y su base de verdad:
+ * Lo nuevo de gestorIA en un navegador (ADR 0214), contra su servidor y su base de verdad:
  * - «Plan y pagos» del Dueño: subir el comprobante de un cobro sin pagar (un archivo que no es
  *   lo que dice se rechaza con su mensaje; una imagen válida queda «por enviar»).
  * - El aviso de soporte en cada sección: «Dejar entrar» abre la tienda a soporte, solo a mirar,

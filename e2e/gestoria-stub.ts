@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import { createServer, type IncomingMessage } from "node:http"
 
 /**
- * gestorIA de mentira para lo que la administración le pide (ADR 0213; solo el harness): la API
+ * gestorIA de mentira para lo que la administración le pide (ADR 0214; solo el harness): la API
  * y el worker le mandan los pedidos a este servidor (`GESTORIA_CONTRACT_URL`, con un secreto de
  * la corrida). Responde como respondería gestorIA: dejar entrar a soporte y abrir una cuenta,
  * «hecho»; quitar a una persona, «falló» porque es el único Dueño. `GET /__pedidos` devuelve lo

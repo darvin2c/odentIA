@@ -1,4 +1,4 @@
-# 0213 · La administración le pide a las apps, y el comprobante viaja en el acuerdo
+# 0214 · La administración le pide a las apps, y el comprobante viaja en el acuerdo
 
 Fecha: 2026-11-23 · Estado: aceptada · Pendientes de A4 (ADR 0211) y B7 (ADR 0212); tablero 3 y
 decisión 7 del lienzo A
@@ -69,5 +69,5 @@ base del otro, sin hacer nada dos veces y todo apagado hasta configurarlo.
 
 `shared/packages/contract/src/messages.ts`, `packages/services/src/app-contract-requests.ts`,
 `packages/services/src/app-contract.ts` (`pago.comprobante`), `gestoria/apps/api/src/acuerdo-pedidos.ts`,
-`gestoria/apps/api/src/soporte.ts`; migraciones `0154_la_administracion_pide_a_las_apps.sql` y,
+`gestoria/apps/api/src/soporte.ts`; migraciones `0155_la_administracion_pide_a_las_apps.sql` y,
 en gestorIA, `0010_soporte_y_pedidos.sql` y `0011_reglas_soporte_y_pedidos.sql`.

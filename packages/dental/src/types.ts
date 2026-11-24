@@ -48,8 +48,6 @@ export interface FindingDefinition {
    * odontograma oficial, donde es opcional y no lleva sigla.
    */
   variantName?: string
-  /** Verdadero cuando la norma solo permite registrarlo con observación clínica directa. */
-  requiresEvidence?: boolean
   /** Verdadero cuando exige trazo libre (p. ej. fractura). */
   requiresDrawing?: boolean
 }
@@ -65,6 +63,10 @@ export interface FindingDetails {
   relatedTeeth?: number[]
   /** Pilares del puente (solo prótesis parcial fija). */
   abutmentTeeth?: number[]
+  /**
+   * Ya no se pide (mesa del 23 nov): se acepta porque hay hallazgos guardados
+   * y pestañas viejas que la mandan.
+   */
   clinicallyObserved?: boolean
   /** Trazos libres normalizados 0..100 sobre el dibujo de pieza completa (viewBox 0 0 24 28). */
   drawing?: number[][][]

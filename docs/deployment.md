@@ -188,7 +188,7 @@ mientras no se configure:
 - `GESTORIA_CONTRACT_URL` (API y worker, con `GESTORIA_CONTRACT_SECRET` también en el worker):
   la dirección del servidor de gestorIA (`https://servidor.gestoria24.com`). Con ella, la
   administración le pide abrir la cuenta de un cliente, dejar entrar a soporte y quitar a una
-  persona (ADR 0213) en `/acuerdo/pedidos`, firmado con el mismo secreto: la API lo manda al
+  persona (ADR 0214) en `/acuerdo/pedidos`, firmado con el mismo secreto: la API lo manda al
   pedirlo y el worker lo reintenta con la misma clave. Vacía, los botones lo dicen y no se pide
   nada. El servidor de gestorIA acepta esos pedidos solo con su `GESTORIA_CONTRACT_SECRET`.
 

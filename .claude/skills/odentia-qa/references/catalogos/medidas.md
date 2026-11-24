@@ -125,6 +125,8 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] La atención abierta hoy está en «Mis pacientes de hoy» con «Continuar».
 - [ ] Al volver, lo escrito sigue ahí.
 
+Gira del teclado (Clío, 22 nov 2026): tras cada acción de Clío, ¿dónde queda el foco? Si cae en `BODY`, es un hallazgo.
+
 **Giras que se suman (estudio de la atención, 16 nov 2026):**
 - **Del sillón (tablet a 820):** registrar un hallazgo en una pieza con historia sin perder de vista el odontograma. Se mide a qué altura queda «¿Qué observas?» dentro del panel y si el arco se ve.
 - **Del profesional nuevo:** un odontólogo sin colegiatura en su perfil hace firmar un consentimiento en la tablet y firma la atención.
@@ -151,6 +153,32 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] La vista firmada, el Plan y el cajón llaman igual al estado («Por decidir»).
 
 **Gira «la misma corrección en cada momento»:** anular un acto antes de firmar, desde el cierre, y marcar «No se hizo» después: ¿mismo nombre, mismo patrón, mismo color?
+
+### M-ATE-10 Atender conversando con Clío (escribiendo) y firmar
+**Quién:** odontólogo; varias veces al día si dicta (supuesto).
+**Dónde:** `CA/patient/dictation-panel.tsx` (barra y cuadro), `dictation-said.tsx` («Lo que se dijo»), `health-review-notice.tsx` («Revisa con … lo que dijo de su salud»), `encounter-editor.tsx`.
+**Medida (1440, 22–23 nov 2026):** 6 pausas, de «Atender ahora» a firmada: 11 clics, 6 tecleos y 6 Ctrl+Enter, 1 página, 0 saltos; 4 decisiones pedidas, 2 necesarias. «Escribir en vez de dictar» baja la página 493 px (1254 a 390). **A mejorar** (meta: la propuesta de cada bloque donde está su campo).
+- [ ] La consulta propuesta está donde están sus campos, un renglón por campo; la evolución, en su bloque.
+- [ ] El cuadro para escribir no se mueve mientras llegan las propuestas.
+- [ ] Un solo número entre «Clío propone», «le falta un dato» y «Confirmar las N».
+- [ ] Tras «Terminar», «Conversación» se arma o la pantalla dice que no pudo separar quién habló.
+- [ ] Tras «Terminar», elegir una prestación, cambiar quién habló o «Intentar otra vez», el foco no cae en la página entera.
+- [ ] A 390 px, ningún toque de Clío mide menos de 44 px (los enlaces de salto miden 22).
+**Ya falló (corregido en la rama `fix/clio-lee-la-conversacion`):** «Conversación» desactivada tras «Terminar» con «nada nuevo» (Rosa, 6 pausas); el cuadro se corrió 126 px en 4 pausas a 390; el foco caía en la página entera; tres números distintos para lo mismo (22–23 nov).
+
+### M-ATE-11 Confirmar lo que dijo de su salud en la consulta
+**Medida (1440, 22 nov 2026):** 1 clic, 0 saltos; 75 Tab desde el foco inicial (el motivo); la acción al pie de 6 filas, unos 520 px bajo el título; 7 botones en el bloque. **A mejorar.**
+- [ ] «Lo revisé con…» está en la línea del título.
+- [ ] Cada fila trae la frase que se oyó; «dijo, sin confirmar» va una vez.
+- [ ] Mientras hay algo dicho por revisar, el bloque no ofrece además «No tiene alergias», «Niega enfermedades» ni «Registrar…».
+**Ya falló (corregido en la rama `fix/clio-lee-la-conversacion`):** «Lo revisé con…» nombraba a quien no era, y el foco no seguía tras confirmar una tarjeta (22 nov).
+
+### M-ATE-12 Recuperar lo que Clío no usó y cambiar quién habló
+**Medida (390, 23 nov 2026):** «Llevar a su salud», 5 toques y 2 saltos sin recuperar nada (abre Antecedentes vacío, «Familiares» a 2 pantallas); cambiar quién habló, 2 toques y 0 saltos. **Lo primero, a mejorar; lo segundo, a mantener.**
+- [ ] El aviso y el panel dan el mismo motivo; lo de un familiar o un peso no ofrece «Llevar a su salud».
+- [ ] «Intentar otra vez» dice qué pasó.
+- [ ] Tras cambiar quién habló, el foco vuelve a ese turno.
+**Ya falló (corregido en la rama `fix/clio-lee-la-conversacion`):** «no supe dónde va» en el panel con «Es de la salud de un familiar…» en el aviso; «Llevar a su salud» vacío (22–23 nov).
 
 ## Ficha
 
@@ -613,6 +641,20 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Sin errores de consola en cada navegación.
 **Ya falló:** «Salir» presentado como fin del acceso; `POST /api/workspace/visit` 403 en cada pantalla (12 nov).
 
+### M-ODO-01 Ver la boca y elegir una pieza (ficha y atención)
+**Quién:** odontólogo y asistente, en cada atención (supuesto).
+**Dónde:** `apps/dental-clinic/src/components/dental/odontogram-studio.tsx`, `odontogram-layout.ts` (`planMouth`), `odontogram-arch.tsx`, `odontogram-front.tsx`.
+**Medida (23 nov 2026, antes de las dos vistas):** ficha → odontograma 2 clics; teclado 7 Tab (ficha) y 5 (atención) hasta el arco. Lugar de la boca con la pieza al lado: 657 px (1280), 743 (1366) y 817 (1440). Pieza más chica: 41×38 (1440), 34×37 (360), temporal 28×29. Lo de dentro del diente (perno, implante, puente) no se veía sin abrir la pieza.
+- [ ] Ninguna pieza de frente por debajo de 24×24 px en 1440, 1366, 1280, 1024, 820, 390 y 360, con y sin la pieza abierta, también en la mixta y solo con temporales.
+- [ ] 360 px sin desplazamiento lateral.
+- [ ] Siempre las dos arcadas, en todos los anchos: sin pestañas de arcada.
+- [ ] La misma pieza mide lo mismo en el arco y de frente (la 46 de arriba y la 46 de frente); nada se estira con la pantalla y, si sobra espacio, el dibujo queda al centro.
+- [ ] Con la boca entera, cada arco a la altura de su fila y la vista de frente centrada en el alto de los dos arcos.
+- [ ] La elegida se marca igual en las dos vistas, con una señal que no es solo color (el número en su pastilla).
+- [ ] Una parada de Tab por vista; Escape devuelve el foco a la pieza de la vista donde se abrió.
+- [ ] Cambiar de pieza, cerrar o salir con un hallazgo a medias avisa con el mismo diálogo.
+**Ya falló:** «Inferior · 2 hallazgos» desbordaba 33 px a 360; salir a Agenda perdía la caries a medias sin aviso (23 nov). En producción (24 nov): la vista de frente se estiraba a todo el ancho (muelas de 60 px o más) junto a un arco chico, la atención en dos filas de 8 enormes y las coronas desparejas; la QA medía 24 px y nadie comparó cómo se veía en cada ancho.
+
 ### Giras nuevas (para «Sus giras»)
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
 - **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
@@ -620,6 +662,7 @@ En todas las tareas de Agenda, además de lo propio:
 - **La entrega:** de lo que se manda afuera, ¿quien lo mandó sabe si llegó, si se bajó y si venció, y puede reenviarlo desde donde lo mandó?
 - **Los nombres:** la misma cosa se llama igual en el botón, la bitácora, el mensaje, la página pública y el archivo.
 - **El estado después de la acción:** tras cada botón que desaparece (comprobar, enviar, descargar), ¿dónde quedó el foco? Si cae en `BODY`, es un hallazgo.
+- **El ancho de trabajo:** cada pantalla en el ancho que queda con el panel de al lado abierto (1280, 1366 y 1440) y a 1366×768, no solo a 1440 vacío.
 
 ## Lo que se le pregunta al paciente
 

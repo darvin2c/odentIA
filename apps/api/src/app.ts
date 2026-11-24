@@ -210,7 +210,7 @@ export interface AppDeps {
   reviewAccounts?: AccountReviewDeps["reviewAccounts"]
   /** Con qué secreto firma cada una lo que le dice a la administración (el acuerdo, ADR 0211). */
   appContractPeers?: AppContractDeps["appContractPeers"]
-  /** Adónde y con qué secreto la administración les pide algo (ADR 0213); sin él, no se pide. */
+  /** Adónde y con qué secreto la administración les pide algo (ADR 0214); sin él, no se pide. */
   appContractSenders?: AppContractSender[]
   webURL: string
   adminURL: string

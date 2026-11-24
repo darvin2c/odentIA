@@ -22,7 +22,12 @@ function minClearance(layout: ArchLayout, rows: readonly (readonly number[])[]) 
     for (let j = i + 1; j < teeth.length; j++) {
       const a = teeth[i]!
       const b = teeth[j]!
-      const neighbors = rows.some((row) => Math.abs(row.indexOf(a.tooth) - row.indexOf(b.tooth)) === 1 && row.includes(a.tooth) && row.includes(b.tooth))
+      const neighbors = rows.some(
+        (row) =>
+          Math.abs(row.indexOf(a.tooth) - row.indexOf(b.tooth)) === 1 &&
+          row.includes(a.tooth) &&
+          row.includes(b.tooth),
+      )
       if (neighbors) continue
       clear = Math.min(clear, Math.hypot(a.x - b.x, a.y - b.y) - (a.w + b.w) / 2)
     }
@@ -34,31 +39,99 @@ describe("arco del odontograma en herradura", () => {
   // Anchos medidos en la app: subir una imagen y ficha en el celular, el
   // diagnóstico, el tope de hoy, la ficha a 1280 px y el tope nuevo.
   const cases = [
-    ...[228, 254, 278, 334, 360, 455, 520].map((w) => ({ w, name: "permanente", outer: adult, inner: undefined })),
+    ...[228, 254, 278, 334, 360, 455, 520].map((w) => ({
+      w,
+      name: "permanente",
+      outer: adult,
+      inner: undefined,
+    })),
     ...[228, 278, 360, 520].map((w) => ({ w, name: "temporal", outer: child, inner: undefined })),
     ...[254, 278, 360, 455, 520].map((w) => ({ w, name: "mixta", outer: adult, inner: child })),
   ]
 
-  it.each(cases)("$name a $w px: ninguna pieza se pisa y todo queda dentro", ({ w, outer, inner }) => {
-    const layout = archLayout(w, outer, inner)
-    const rows = [outer.upper, outer.lower, ...(inner ? [inner.upper, inner.lower] : [])]
-    expect(layout.teeth).toHaveLength(rows.flat().length)
-    for (const row of rows) {
-      const placed = row.map((n) => layout.teeth.find((t) => t.tooth === n)!)
-      for (let i = 1; i < placed.length; i++) {
-        const a = placed[i - 1]!
-        const b = placed[i]!
-        expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.tooth} y ${b.tooth}`).toBeGreaterThanOrEqual((a.w + b.w) / 2)
+  it.each(cases)(
+    "$name a $w px: ninguna pieza se pisa y todo queda dentro",
+    ({ w, outer, inner }) => {
+      const layout = archLayout(w, outer, inner)
+      const rows = [outer.upper, outer.lower, ...(inner ? [inner.upper, inner.lower] : [])]
+      expect(layout.teeth).toHaveLength(rows.flat().length)
+      for (const row of rows) {
+        const placed = row.map((n) => layout.teeth.find((t) => t.tooth === n)!)
+        for (let i = 1; i < placed.length; i++) {
+          const a = placed[i - 1]!
+          const b = placed[i]!
+          expect(
+            Math.hypot(a.x - b.x, a.y - b.y),
+            `${a.tooth} y ${b.tooth}`,
+          ).toBeGreaterThanOrEqual((a.w + b.w) / 2)
+        }
       }
-    }
-    expect(minClearance(layout, rows)).toBeGreaterThan(1)
-    for (const t of layout.teeth) {
-      const e = extent(t)
-      expect(t.x - e.x).toBeGreaterThanOrEqual(-0.5)
-      expect(t.x + e.x).toBeLessThanOrEqual(w + 0.5)
-      expect(t.y - e.y).toBeGreaterThanOrEqual(-0.5)
-      expect(t.y + e.y).toBeLessThanOrEqual(layout.height + 0.5)
-    }
+      expect(minClearance(layout, rows)).toBeGreaterThan(1)
+      for (const t of layout.teeth) {
+        const e = extent(t)
+        expect(t.x - e.x).toBeGreaterThanOrEqual(-0.5)
+        expect(t.x + e.x).toBeLessThanOrEqual(w + 0.5)
+        expect(t.y - e.y).toBeGreaterThanOrEqual(-0.5)
+        expect(t.y + e.y).toBeLessThanOrEqual(layout.height + 0.5)
+      }
+    },
+  )
+
+  // El odontograma, junto a su vista de frente (24 nov): cada arcada sola, del alto de su fila
+  // (más ancha que alta) o, en el celular, del ancho de su vista de frente.
+  const byToothCases = [
+    ...(["upper", "lower"] as const).flatMap((single) => [
+      { single, w: 255, aspect: 0.52, outer: adult, inner: undefined },
+      { single, w: 284, aspect: 0.8, outer: adult, inner: undefined },
+      { single, w: 213, aspect: 0.52, outer: child, inner: undefined },
+      { single, w: 330, aspect: 0.74, outer: adult, inner: child },
+      { single, w: 284, aspect: 0.95, outer: adult, inner: child },
+    ]),
+  ]
+  it.each(byToothCases)(
+    "cada pieza de su ancho ($single, $w px, $aspect): ninguna se pisa y todo queda dentro",
+    ({ single, w, aspect, outer, inner }) => {
+      const shown = (rows: typeof adult) => ({
+        upper: single === "upper" ? rows.upper : [],
+        lower: single === "lower" ? rows.lower : [],
+      })
+      const layout = archLayout(w, shown(outer), inner ? shown(inner) : undefined, {
+        single,
+        aspect,
+        byTooth: true,
+      })
+      const rows = [shown(outer)[single], ...(inner ? [shown(inner)[single]] : [])]
+      for (const row of rows) {
+        const placed = row.map((n) => layout.teeth.find((t) => t.tooth === n)!)
+        for (let i = 1; i < placed.length; i++) {
+          const a = placed[i - 1]!
+          const b = placed[i]!
+          expect(
+            Math.hypot(a.x - b.x, a.y - b.y),
+            `${a.tooth} y ${b.tooth}`,
+          ).toBeGreaterThanOrEqual((a.w + b.w) / 2 - 0.5)
+        }
+      }
+      for (const t of layout.teeth) {
+        const e = extent(t)
+        expect(t.x - e.x).toBeGreaterThanOrEqual(-0.5)
+        expect(t.x + e.x).toBeLessThanOrEqual(w + 0.5)
+        expect(t.y - e.y).toBeGreaterThanOrEqual(-0.5)
+        expect(t.y + e.y).toBeLessThanOrEqual(layout.height + 0.5)
+      }
+    },
+  )
+
+  it("en el odontograma la muela es más ancha que la incisiva; en el selector de los formularios, todas iguales", () => {
+    const size = (layout: ArchLayout, n: number) => layout.teeth.find((t) => t.tooth === n)!.w
+    const own = archLayout(255, { upper: [], lower: adult.lower }, undefined, {
+      single: "lower",
+      aspect: 0.52,
+      byTooth: true,
+    })
+    expect(size(own, 46) / size(own, 41)).toBeGreaterThan(1.3)
+    const picker = archLayout(360, adult)
+    expect(size(picker, 46)).toBeCloseTo(size(picker, 41), 5)
   })
 
   it("es más ancho que alto y, al mismo ancho, las piezas son más grandes que las del óvalo (29 px a 360)", () => {
@@ -72,14 +145,21 @@ describe("arco del odontograma en herradura", () => {
     const smallest = (layout: ArchLayout) => Math.min(...layout.teeth.flatMap((t) => [t.w, t.h]))
     expect(smallest(archLayout(380, adult))).toBeGreaterThanOrEqual(24)
     for (const w of [228, 278, 379]) {
-      expect(smallest(archLayout(w, { upper: adult.upper, lower: [] }, undefined, { single: "upper" })), `${w} px`).toBeGreaterThanOrEqual(24)
-      expect(smallest(archLayout(w, { upper: [], lower: child.lower }, undefined, { single: "lower" })), `${w} px`).toBeGreaterThanOrEqual(24)
+      expect(
+        smallest(archLayout(w, { upper: adult.upper, lower: [] }, undefined, { single: "upper" })),
+        `${w} px`,
+      ).toBeGreaterThanOrEqual(24)
+      expect(
+        smallest(archLayout(w, { upper: [], lower: child.lower }, undefined, { single: "lower" })),
+        `${w} px`,
+      ).toBeGreaterThanOrEqual(24)
     }
   })
 
   it("la cara vestibular mira hacia afuera: arriba los incisivos giran media vuelta, abajo no", () => {
     const layout = archLayout(360, adult)
-    const turn = (n: number) => ((layout.teeth.find((t) => t.tooth === n)!.rotation % 360) + 360) % 360
+    const turn = (n: number) =>
+      ((layout.teeth.find((t) => t.tooth === n)!.rotation % 360) + 360) % 360
     expect(Math.abs(turn(11) - 180)).toBeLessThan(15)
     expect(Math.min(turn(41), 360 - turn(41))).toBeLessThan(15)
   })
@@ -92,8 +172,12 @@ describe("arco del odontograma en herradura", () => {
     const mixed = archLayout(360, adult, child).teeth
     const permanent = mixed.find((t) => t.tooth === 11)!
     const temporary = mixed.find((t) => t.tooth === 51)!
-    expect(distance(permanent.labelX, permanent.labelY)).toBeGreaterThan(distance(permanent.x, permanent.y))
-    expect(distance(temporary.labelX, temporary.labelY)).toBeLessThan(distance(temporary.x, temporary.y))
+    expect(distance(permanent.labelX, permanent.labelY)).toBeGreaterThan(
+      distance(permanent.x, permanent.y),
+    )
+    expect(distance(temporary.labelX, temporary.labelY)).toBeLessThan(
+      distance(temporary.x, temporary.y),
+    )
   })
 })
 

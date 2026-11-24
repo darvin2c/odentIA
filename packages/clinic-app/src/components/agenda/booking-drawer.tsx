@@ -37,6 +37,7 @@ import { z } from "zod"
 import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
+import { appointmentLine, isUpcoming, usePatientAppointments } from "../../lib/patient-appointments"
 import { useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
@@ -46,6 +47,7 @@ import { fetchService } from "../../lib/services"
 import { ASK_RECEPTION_TO_REGISTER, PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
 import { warnUnsentNotice } from "./notice-warning"
+import { openAppointmentAnywhere } from "./schedule-host"
 import { dayShort, whenSaid } from "./shared"
 import {
   type AgendaException,
@@ -461,6 +463,11 @@ export function BookingDrawer({
   // ----- Para qué -----
   // Lo aceptado sin cita de esta persona, o con sesiones por reservar (la segunda de una
   // endodoncia en dos), con su título: el que ve recepción (sin piezas ni precios).
+  // Ya tiene una cita por venir: se dice al elegirlo, sin frenar; recepción decide si mueve esa u otra aparte.
+  const theirs = usePatientAppointments(values.patientId, Boolean(values.patientId) && !registering)
+  const ahead = (theirs.data?.data ?? [])
+    .filter((appointment) => isUpcoming(appointment, Date.parse(now), timeZone))
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
   const coordinationQuery = useQuery({
     queryKey: ["treatment-coordination", values.patientId],
     queryFn: () => fetchTreatmentCoordination(values.patientId),
@@ -913,6 +920,26 @@ export function BookingDrawer({
               ) : null}
             </div>
           )}
+
+          {ahead[0] ? (
+            <p className="-mt-2 text-sm text-muted-foreground">
+              Ya tiene cita: <span className="text-foreground">{appointmentLine(ahead[0], new Date(now), timeZone)}</span>
+              {ahead.length > 1 ? ` y ${ahead.length - 1} más` : ""}
+              {" · "}
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0"
+                onClick={() => {
+                  const id = ahead[0]?.id
+                  onClose()
+                  if (id) openAppointmentAnywhere(id)
+                }}
+              >
+                Ver la cita
+              </Button>
+            </p>
+          ) : null}
 
           {toScheduleRows.length > 0 || controls.length > 0 ? (
             <FieldSet className="gap-2">

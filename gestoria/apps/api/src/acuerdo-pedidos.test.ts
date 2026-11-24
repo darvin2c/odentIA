@@ -1,5 +1,5 @@
 /**
- * Lo que pide la administración (ADR 0213) contra una base real: llega firmado, se aplica una sola
+ * Lo que pide la administración (ADR 0214) contra una base real: llega firmado, se aplica una sola
  * vez por su clave, abre la tienda de un cliente, quita a una persona sin dejar la tienda sin
  * Dueño y deja entrar a soporte solo si la tienda lo acepta, a mirar y hasta que vence. Y lo que
  * sube el Dueño en «Plan y pagos», la bandeja que se limpia y Sofi en pausa.

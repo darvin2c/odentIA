@@ -5,7 +5,7 @@ import { z } from "zod"
 import { StoreError } from "./tiendas.js"
 
 /**
- * La entrada de soporte a una tienda (ADR 0213, como la de las clínicas): la administración la
+ * La entrada de soporte a una tienda (ADR 0214, como la de las clínicas): la administración la
  * pide por el acuerdo, a nombre de una persona de su equipo, por un rato y para algo. Entra solo
  * si el Dueño o un Administrador la acepta; entra con su propia cuenta, solo a mirar (`support`
  * en `permisos.ts`), y hasta que vence o se la quitan. Todo queda en `store_event`.

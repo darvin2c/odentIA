@@ -40,7 +40,7 @@ const SALES: readonly StorePermission[] = [
 ]
 
 /**
- * Soporte de gestorIA, mientras su entrada esté aceptada (ADR 0213): no es del equipo ni un rol que
+ * Soporte de gestorIA, mientras su entrada esté aceptada (ADR 0214): no es del equipo ni un rol que
  * se da, y solo mira lo que no se toca al mirarlo (la tienda, su equipo y su catálogo, sin costos).
  * Lo que se lee con permisos que también escriben (atender, pagos, entregas) queda fuera.
  */

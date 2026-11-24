@@ -128,7 +128,7 @@ for (const problem of accountEvents.problems) console.warn(`api: ${problem}`)
 // El acuerdo de esas apps con la administración (ADR 0211): sin su secreto, apagado.
 const appContract = appContractPeersFromEnv(env)
 for (const problem of appContract.problems) console.warn(`api: ${problem}`)
-// Lo que la administración les pide (ADR 0213): sin su dirección y su secreto, no se pide nada.
+// Lo que la administración les pide (ADR 0214): sin su dirección y su secreto, no se pide nada.
 const appRequests = appContractSendersFromEnv(env)
 for (const problem of appRequests.problems) console.warn(`api: ${problem}`)
 

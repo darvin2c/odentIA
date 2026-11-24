@@ -87,7 +87,6 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "quality",
     symbol: "Línea vertical en la raíz unida a un cuadrado en la corona",
-    requiresEvidence: true,
   },
   {
     code: "deep_pits_fissures",
@@ -137,7 +136,6 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "blue",
     symbol: "Sigla I en el recuadro de la pieza",
-    requiresEvidence: true,
   },
   {
     code: "implant",
@@ -146,7 +144,6 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "quality",
     symbol: "Sigla IMP en el recuadro de la pieza o piezas reemplazadas",
-    requiresEvidence: true,
   },
   {
     code: "caries",
@@ -364,7 +361,6 @@ export const FINDINGS: readonly FindingDefinition[] = [
       { value: "root_canal", label: "Tratamiento de conductos", abbreviation: "TC" },
       { value: "pulpectomy", label: "Pulpectomía", abbreviation: "PC" },
     ],
-    requiresEvidence: true,
   },
   {
     code: "transposition",

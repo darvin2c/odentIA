@@ -999,6 +999,8 @@ export function RecetasPanel({
     interview: healthQuery.data?.data.latestAnamnesis?.answers ?? null,
     today,
     taking: taking.map((medication) => takenMedication(medication, prescribing.catalog)),
+    // Lo que dijo en la consulta y nadie confirmó también avisa, como al emitir (QA del 21 nov, H2).
+    said: healthQuery.data?.data.saidTaking ?? [],
   }
   const alertsOf = (items: ReadonlyArray<{ genericName: string }>) => prescribingAlerts(situation, items, prescribing.catalog.medications)
   /** Lo que se receta solo con motivo para un medicamento: sus alergias y lo que avisa toda receta. */

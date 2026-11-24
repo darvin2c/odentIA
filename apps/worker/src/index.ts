@@ -465,7 +465,7 @@ if (accountEvents.senders.length > 0)
     poll: async () => (await deliverAccountEvents(ownerDb, accountEvents.senders)).delivered > 0,
   })
 
-// Lo que la administración le pide a una app que es otro sistema (ADR 0213): lo reintenta si la
+// Lo que la administración le pide a una app que es otro sistema (ADR 0214): lo reintenta si la
 // API no pudo mandarlo en el momento. Sin la dirección y el secreto de una app, no se le pide nada.
 const appRequests = appContractSendersFromEnv(env)
 for (const problem of appRequests.problems) console.warn(`worker: ${problem}`)

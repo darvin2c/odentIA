@@ -242,7 +242,7 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
 }
 
 /**
- * Soporte de gestorIA pide mirar la tienda (ADR 0213), como lo pediría la administración: la
+ * Soporte de gestorIA pide mirar la tienda (ADR 0214), como lo pediría la administración: la
  * Dueña lo ve arriba en cada sección y decide. Uno solo, mientras no haya otro por responder.
  */
 async function seedDemoSupport(tx: Db, storeId: string): Promise<void> {

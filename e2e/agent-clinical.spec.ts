@@ -67,10 +67,13 @@ async function fakeSpeech(page: Page) {
 /**
  * «Escribir en vez de dictar». Sin nada dictado, la barra del dictado no ocupa la atención: se
  * abre desde «¿Qué puedo decir?» de la cabecera; con algo dictado o sugerencias, desde la barra.
+ * Ya abierto, el cuadro queda abierto entre una pausa y otra (mesa del 20 nov 2026).
  */
 async function writeDictation(page: Page, text: string, from?: Locator) {
   const bar = from ?? page.getByRole("region", { name: "Dictado de la atención" })
-  if (from || (await bar.count()) > 0) {
+  if (await (from ?? page).getByLabel("Escribe lo dictado").isVisible()) {
+    // El cuadro sigue abierto desde la pausa anterior.
+  } else if (from || (await bar.count()) > 0) {
     await bar.getByRole("button", { name: "Escribir en vez de dictar" }).click()
   } else {
     await page.getByRole("button", { name: "¿Qué puedo decir?", exact: true }).click()
@@ -211,9 +214,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(page.getByRole("dialog").filter({ hasText: "Escribir en vez de dictar" })).toContainText("Nada entra a la historia hasta que confirmes.")
   await page.keyboard.press("Escape")
   await write(DICTATION)
-  await expect(review).toContainText("Clío propone 4 en la consulta")
+  await expect(review).toContainText("Clío propone 4")
   await expect(review).toContainText("Nada entra a la historia hasta que lo confirmes.")
-  await expect(review.getByRole("button", { name: "Confirmar las 4 de la consulta" })).toBeVisible()
+  await expect(review.getByRole("button", { name: "Confirmar las 4", exact: true })).toBeVisible()
   // Cada sugerencia vive en su parte de la atención, debajo de lo registrado (sugerido no es registrado).
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico (0)")).toContainText("Sin diagnósticos registrados.")
@@ -260,11 +263,11 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await info.attach("dictado-editar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByLabel("Control", { exact: true }).fill("Control de endodoncia")
   await page.getByRole("button", { name: "Guardar y confirmar" }).click()
-  await expect(review).toContainText("Clío propone 3 en la consulta")
+  await expect(review).toContainText("Clío propone 3")
   const controls = () => call<Array<{ title: string; status: string }>>(page, "GET", `${apiPath}/follow-ups`, org.slug)
   expect(await controls()).toEqual([expect.objectContaining({ title: "Control de endodoncia", status: "pendiente" })])
 
-  await review.getByRole("button", { name: "Confirmar las 3 de la consulta" }).click()
+  await review.getByRole("button", { name: "Confirmar las 3", exact: true }).click()
   await expect(idle).toBeVisible()
   const saved = await detail()
   // La atención ya tenía motivo: lo dictado se agrega, no lo borra.
@@ -281,12 +284,13 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await idle.getByRole("button", { name: "Dictar", exact: true }).click()
   const live = page.getByRole("region", { name: "Dictado en curso" })
   await expect(live).toContainText("Escuchando")
-  await expect(signButton).toBeDisabled()
-  await expect(closing).toContainText("Termina el dictado y revisa las sugerencias para poder firmar.")
-  // El respaldo queda al lado, con qué se puede decir y cómo corregir hablando (issue 109).
-  const backup = page.getByRole("region", { name: "Lo dictado" })
-  await expect(backup).toContainText("Qué puedo decir")
-  await expect(backup).toContainText("«La 36 con caries oclusal en dentina, la 46 ausente»")
+  // El dictado no frena la firma (QA del 21 nov): «Finalizar y firmar» lo termina y lo repasa antes.
+  await expect(signButton).toBeEnabled()
+  // El respaldo queda al lado, con cómo corregir hablando (issue 109); los ejemplos de qué decir están
+  // una vez, en «¿Qué puedo decir?» (QA del 22 nov).
+  const backup = page.getByRole("region", { name: "Lo que se dijo" })
+  await expect(backup).toContainText("Para corregir")
+  await expect(backup).toContainText("«No, es la veintiséis» cambia la última sugerencia")
   await say("y hacemos endodoncia", false)
   await expect(live).toContainText("Lo último que oí«…y hacemos endodoncia»")
   await info.attach("dictado-oyendo", { body: await live.screenshot(), contentType: "image/png" })
@@ -307,7 +311,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Plan de tratamiento")).toContainText("corregido por voz, antes pieza 25", { timeout: 15_000 })
   await expect(suggested("Plan de tratamiento")).toContainText("Pieza 26")
   await live.getByRole("button", { name: "Terminar dictado" }).click()
-  await expect(review).toContainText("Clío propone 1 en la consulta")
+  await expect(review).toContainText("Clío propone 1")
   await expect(backup).toHaveCount(0)
   // Deshacer la corrección por voz vuelve a la pieza dictada primero.
   await suggested("Plan de tratamiento").getByRole("button", { name: "Deshacer" }).click()
@@ -371,22 +375,22 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Diagnóstico")).toContainText("K02.9", { timeout: 15_000 })
   const pause = live.getByRole("button", { name: "Pausar el dictado" })
   expect((await pause.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44)
-  await expect(page.getByRole("button", { name: "Ver lo dictado" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Lo que se dijo" })).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictando-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await page.getByRole("button", { name: "Ver lo dictado" }).click()
-  const backupDrawer = page.getByRole("dialog", { name: "Lo dictado" })
+  await page.getByRole("button", { name: "Lo que se dijo" }).click()
+  const backupDrawer = page.getByRole("dialog", { name: "Lo que se dijo" })
   await expect(backupDrawer).toContainText("En la veintiséis hay caries.")
   await backupDrawer.getByRole("button", { name: "Cerrar" }).click()
   await page.getByRole("button", { name: "Terminar dictado" }).click()
-  await expect(review).toContainText("Confirmar 1 de la consulta")
-  // Revisión: confirmar y descartar son iconos con nombre; «Firmar» y «Confirmar las N de la consulta» quedan al pie.
+  await expect(review).toContainText("Confirmar 1")
+  // Revisión: confirmar y descartar son iconos con nombre; «Firmar» y «Confirmar las N» quedan al pie.
   const phoneRow = suggested("Diagnóstico").getByRole("listitem")
   const confirmIcon = phoneRow.getByRole("button", { name: /^Confirmar: K02\.9/ })
   expect((await confirmIcon.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await expect(phoneRow.getByRole("button", { name: /^Descartar: K02\.9/ })).toBeVisible()
   await expect(page.getByRole("button", { name: "Firmar", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Confirmar 1 de la consulta" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Confirmar 1", exact: true })).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("revision-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // Tocar la sugerencia la abre para editarla.
@@ -459,7 +463,7 @@ test("dictado: el corte del servicio de voz del navegador no pausa; si la red no
   const encounter = await call<{ id: string }>(page, "POST", `/api/patients/${patient.id}/encounters`, org.slug, { reason: "Consulta" }, 201)
   await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   const speech = await fakeSpeech(page)
-  // «Lo dictado» se abre al lado desde 1280 px: la misma ventana que las demás atenciones de este archivo.
+  // «Lo que se dijo» se abre al lado desde 1280 px: la misma ventana que las demás atenciones de este archivo.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await page.getByRole("button", { name: "Dictar", exact: true }).click()
@@ -476,7 +480,7 @@ test("dictado: el corte del servicio de voz del navegador no pausa; si la red no
   await expect(live).toContainText("Escuchando")
   await expect(lost).toHaveCount(0)
   // Lo que se estaba oyendo al cortar no se pierde: entra a lo dictado y ya no queda como parcial.
-  const backup = page.getByRole("region", { name: "Lo dictado" })
+  const backup = page.getByRole("region", { name: "Lo que se dijo" })
   await expect(backup).toContainText("en la dieciséis hay caries")
   await expect(backup.getByRole("status")).toHaveText("Escuchando…")
   await info.attach("dictado-tras-corte", { body: await page.screenshot(), contentType: "image/png" })

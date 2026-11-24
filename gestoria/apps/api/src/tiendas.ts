@@ -171,7 +171,7 @@ export async function myStores(appDb: Db, person: Person) {
 /** Crea una tienda: quien la crea es su Dueño. */
 /**
  * Abre una tienda con su Dueño, lo anota y se lo avisa a la administración (el acuerdo, B7). La
- * usan quien la crea y la administración cuando la abre para un cliente (ADR 0213).
+ * usan quien la crea y la administración cuando la abre para un cliente (ADR 0214).
  */
 export async function openStoreIn(
   tx: Db,
@@ -600,7 +600,7 @@ export async function changeRole(
 
 /**
  * Quita a alguien del equipo sin dejar la tienda sin Dueño (`LAST_OWNER`), lo anota y, si era
- * Dueño, se lo avisa a la administración. La usan el equipo y la administración (ADR 0213).
+ * Dueño, se lo avisa a la administración. La usan el equipo y la administración (ADR 0214).
  */
 export async function removeMemberIn(
   tx: Db,

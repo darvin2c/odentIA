@@ -1,3 +1,4 @@
+import { EncounterSaidLink } from "./dictation-said"
 import { label } from "../../lib/glossary"
 import { ageInYears, diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText, visitAnswerLine } from "@odentia/clinical"
 import { visitSeenWords, visitToldLabel } from "../../lib/visit-answer-words"
@@ -639,6 +640,9 @@ export function EncounterDetailView({
       {encounter.status === "finalizada" ? (
         <EncounterMaterialsBlock patientId={patientId} encounterId={encounter.id} />
       ) : null}
+
+      {/* Lo que se dijo en la consulta, para leer: no es parte de lo firmado (mesa del 20 nov 2026). */}
+      <EncounterSaidLink patientId={patientId} encounterId={encounter.id} />
 
       {addenda.length > 0 || canAddendum ? (
       <section aria-label="Adendas">

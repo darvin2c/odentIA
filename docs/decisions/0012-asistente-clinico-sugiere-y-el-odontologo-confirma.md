@@ -1,6 +1,6 @@
 # 0012 · El asistente clínico sugiere; solo la confirmación del odontólogo escribe en la historia
 
-Fecha: 2026-10-11 · Estado: aceptada
+Fecha: 2026-10-11 · Estado: aceptada; lo que se guarda del dictado lo sustituye la [0213](0213-lo-que-se-dijo-se-guarda-con-la-atencion.md)
 
 ## Problema
 
@@ -18,7 +18,7 @@ El odontólogo registra la atención con las manos ocupadas o después, de memor
 - **Corregir hablando**: con el tramo viajan lo último ya ordenado y las sugerencias de ese dictado que siguen sin decidir, numeradas y sin tarifas. El asistente puede cambiar una («no, es la veintiséis») o quitarla («quita la endodoncia»); el servicio lo valida como cualquier edición, solo sobre sugerencias pendientes, y guarda cómo estaba para poder deshacerlo.
 - **Una parte que no cabe no bota la pausa.** El esquema le pide al modelo lo que el servicio guarda (hasta 40 sugerencias por tramo y 600 caracteres de cita), pero la respuesta se lee parte por parte: la cita más larga vale si se dijo, un registro con un dato que no encaja llega y queda «por revisar», y lo que no se puede usar se cuenta para avisar. Con el esquema estricto, ChatGPT 6 copiaba el tramo largo entero en la cita de la nota y un odontograma inicial pasaba de 10 diagnósticos: se perdía la pausa entera. Medido el 2026-10-17 con las mismas respuestas de ChatGPT 6: antes se perdían 11 de 24 pausas largas y las 10 densas; leídas por partes, ninguna. El esquema es igual en todas las pausas, así que la caché se sigue leyendo.
 - **Corregir y quitar por voz se creen menos**, porque cambian lo que ya estaba: un «quita» sin la frase dicha que lo pide no se aplica, y más de 10 correcciones o «quita» en una pausa no se aplican (quedan pendientes y se cuentan). En la misma medición, las cuatro veces que llegaron más de 10 «quita» (20, 20, 30 y 40; los 40, de Claude en una pausa de charla y sin cita) eran sugerencias que nadie pidió quitar. Con una guía de 40 correcciones, ChatGPT 6 corrigió las 40 pendientes de un odontograma; la guía es de 10.
-- **Se guarda lo mínimo**: de cada sugerencia, la frase que la originó, y solo si está tal cual en lo dictado; el dictado completo no se conserva en el servidor. «Lo dictado» que ve el odontólogo como respaldo vive en la pantalla y se pierde al salir de ella. La auditoría cuenta sugerencias, correcciones y descartes, sin texto clínico.
+- **Se guarda lo mínimo**: de cada sugerencia, la frase que la originó, y solo si está tal cual en lo dictado. La auditoría cuenta sugerencias, correcciones y descartes, sin texto clínico. (Sustituido por la [0213](0213-lo-que-se-dijo-se-guarda-con-la-atencion.md): lo dicho, tramo por tramo, se guarda con la atención, sin ser historia clínica; antes «Lo dictado» vivía solo en la pantalla y se perdía al salir de ella.)
 - **Apagado por defecto**, por clínica. Se puede probar con un dictado de práctica que no toca ninguna atención.
 - **Voz**: el reconocimiento es el del navegador cuando lo tiene; el micrófono solo se enciende con «Dictar» o «Reanudar» y se apaga al pausar, terminar o salir. El dictado siempre se puede escribir o pegar, y eso se ordena en una sola llamada.
 
@@ -27,7 +27,7 @@ El odontólogo registra la atención con las manos ocupadas o después, de memor
 - *Escribir directo en el borrador de la atención*: rápido, pero un error pasa inadvertido entre texto que parece ya revisado.
 - *Que el modelo elija la prestación y su precio*: el tarifario es de la clínica; adivinar un servicio parecido cambia lo que se cobra.
 - *Transcribir en el servidor con un servicio de audio*: mejor reconocimiento, pero el audio de una consulta saldría de la clínica y exige otro proveedor y otro consentimiento. Queda para cuando se decida grabar la consulta.
-- *Guardar el dictado completo como respaldo*: duplica información clínica fuera de la historia sin que nadie la firme.
+- *Guardar el dictado completo como respaldo*: duplica información clínica fuera de la historia sin que nadie la firme. (Revisado en la [0213](0213-lo-que-se-dijo-se-guarda-con-la-atencion.md): sin guardarlo, lo dicho se perdía al recargar y un tramo repetido se volvía a cobrar.)
 - *Reenviar todo el dictado en cada pausa y reemplazar las sugerencias*: las correcciones se entienden solas, pero las sugerencias cambian de identidad en cada llamada, lo ya confirmado o descartado reaparece y el costo crece con la duración.
 - *Columnas nuevas para el tramo y el valor anterior de una corrección*: es lo limpio, pero exige una migración; por ahora van como metadatos dentro del `payload` de la sugerencia.
 

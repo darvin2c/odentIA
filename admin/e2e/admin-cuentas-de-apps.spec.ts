@@ -12,7 +12,7 @@ import { expect, test } from "../../e2e/fixtures"
 import { gotoHydrated } from "../../e2e/hydration"
 
 /**
- * Lo que la administración le pide a gestorIA (ADR 0213), en un navegador: en la página de una
+ * Lo que la administración le pide a gestorIA (ADR 0214), en un navegador: en la página de una
  * cuenta de gestorIA se pide dejar entrar a soporte (gestorIA de mentira: «hecho») y quitar a una
  * persona («falló», con su motivo); un pedido que espera se ve «Pendiente»; y en Cobros y planes
  * se abre la cuenta de un cliente con su plan. Cada pantalla, en escritorio y a 390 px, sin

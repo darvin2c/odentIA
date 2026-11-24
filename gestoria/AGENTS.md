@@ -102,7 +102,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
   El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.
 - Lo enviado se borra de la bandeja a la semana (`purgeOutbox`), menos el último `cuenta.abierta`.
-- Lo que pide la administración (ADR 0213) llega a `/acuerdo/pedidos` y se aplica en
+- Lo que pide la administración (ADR 0214) llega a `/acuerdo/pedidos` y se aplica en
   `apps/api/src/acuerdo-pedidos.ts`, una vez por su clave (`contract_request_receipt`), con las
   reglas de la tienda: nunca sin Dueño. Responde «hecho» o «falló» con su motivo.
 - Soporte de gestorIA entra solo con el sí del Dueño o un Administrador (`soporte.ts`), con su

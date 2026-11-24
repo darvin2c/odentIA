@@ -8,7 +8,7 @@ import {
   prepareFormAnswer,
   withoutFormNotes,
 } from "./dictation-forms.js"
-import { asHeard, formVocabulary, groundHeard, heardVocabulary, phoneticKey } from "./dictation-heard.js"
+import { asHeard, formVocabulary, groundHeard, groundWords, heardVocabulary, phoneticKey } from "./dictation-heard.js"
 import type { ProductSite } from "./product-hooks.js"
 import { productHooksFor } from "./products.js"
 
@@ -188,5 +188,19 @@ describe("cada aviso dice de qué pregunta es", () => {
     expect(formDropNotices([{ draft: peso, ready: false }], new Set(), kid, { site: FDI, transcript: "peso 15 libras" })[0]?.questions).toEqual([at(kid, "peso")])
     const caries = { kind: "ficha", payload: { question: at(adult, "cpod_c"), answer: "3" }, sourceText: "cariados tres" }
     expect(formDropNotices([{ draft: caries, ready: false }], new Set(), adult, { site: FDI, transcript: "cariados tres" })[0]?.questions).toEqual([at(adult, "cpod_c"), at(adult, "ceod_c")])
+  })
+})
+
+describe("la frase dicha, sin tildes ni puntuación (QA del 21 nov)", () => {
+  it("se encuentra palabra por palabra, como la escribió la voz de Chrome", () => {
+    expect(groundWords("Tiene asma, usa salbutamol.", "tiene asma usa salbutamol que yo sepa no")).toBe("tiene asma usa salbutamol")
+    expect(groundWords("«Tomo losartán»", "si tomo losartan para la presion")).toBe("tomo losartan")
+    // Por cómo suena: la b y la v.
+    expect(groundWords("uso salbutamol", "uso salvutamol a veces")).toBe("uso salvutamol")
+  })
+
+  it("lo que no se dijo no se encuentra", () => {
+    expect(groundWords("tomo apixabán", "tomo warfarina desde el año pasado")).toBe("")
+    expect(groundWords("", "algo")).toBe("")
   })
 })

@@ -8,6 +8,7 @@ import {
   encounterProcedure,
   patient,
   patientAllergy,
+  patientCharge,
   patientMedication,
   prescriptionItem,
   serviceCatalog,
@@ -15,11 +16,11 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { findDraftBudget } from "../budgets.js"
+import { assembleEncounterBudget, findDraftBudget, getBudgetDetail } from "../budgets.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
-import { beforeAll, describe, expect, it } from "vitest"
+import { and, eq, isNull } from "drizzle-orm"
+import { beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule, zonedTimeToUtc } from "../availability.js"
@@ -45,7 +46,7 @@ import {
 } from "../encounter-dictation.js"
 import { DENTAL_DICTATION } from "./dictation.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
-import { addEncounterProcedure, voidEncounterProcedure } from "../encounters.js"
+import { addEncounterProcedure, finalizeEncounter, voidEncounterProcedure } from "../encounters.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { nextPatientNumber } from "../patients.js"
 import { insertTestPatients, setTestPatientIdentity } from "../test-patient.js"
@@ -87,7 +88,7 @@ describe("odontograma por voz (issue 109)", () => {
       drafts: [
         { kind: "odontograma", payload: { toothNumber: 36, condition: "caries", variant: "dentina", surfaces: ["oclusal"] }, sourceText: "La 36 con caries oclusal en dentina." },
         { kind: "odontograma", payload: { toothNumber: 11, condition: "crown" }, sourceText: "La 11 tiene corona." },
-        // Lo que no se dicta (pide marcar que se observó) o no existe no se adivina: queda por revisar, a la vista.
+        // El implante se dicta (mesa del 23 nov) y, sin su estado, lo pide; una pieza que no existe no se adivina.
         { kind: "odontograma", payload: { toothNumber: 46, condition: "implant" } },
         { kind: "odontograma", payload: { toothNumber: 19, condition: "missing_tooth" } },
       ],
@@ -101,7 +102,7 @@ describe("odontograma por voz (issue 109)", () => {
     })
     // La corona pide su estado para dibujarse; el material es opcional en todos los países (ADR 0200).
     expect(crown).toMatchObject({ status: "por_revisar", payload: { missing: ["quality"] } })
-    expect(implant).toMatchObject({ status: "por_revisar" })
+    expect(implant).toMatchObject({ status: "por_revisar", payload: { condition: "implant", missing: ["quality"] } })
     expect(nineteen?.note).toContain("no existe")
 
     // Elegir con un toque lo que falta la deja lista.
@@ -454,6 +455,145 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
     await enable(false)
   })
 
+  // QA clínica del 21 nov (H4): «le planteo endodoncia de la 36» en una pausa y «la otra opción es la
+  // exodoncia de la 36» en otra daban S/ 1 300 y S/ 800: la endodoncia iba suelta y además como camino.
+  const twoPaths = async (name: string) => {
+    const fx = await openSession(`Endodoncia ${name}`, "tooth")
+    // Al terminar se apaga: cada endodoncia más en la clínica deja fuera de los candidatos la posterior
+    // vital que espera v06 (c3), que se ofrece entre las de la biblioteca.
+    onTestFinished(async () => {
+      await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, fx.service.id))
+    })
+    await ownerDb.update(serviceCatalog).set({ priceCents: 65000 }).where(eq(serviceCatalog.id, fx.service.id))
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: `Exodoncia ${name}`, scope: "tooth", source: "custom", priceCents: 15000, currency: "PEN" })
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const loose = () => segment({ drafts: [{ kind: "plan", payload: { service: `endodoncia ${name}`, toothNumber: 36 }, sourceText: "Le planteo endodoncia de la 36." }] })
+    const choice = () =>
+      segment({
+        drafts: [{ kind: "plan", payload: { service: `endodoncia ${name}`, toothNumber: 36, alternatives: [`exodoncia ${name}`] }, sourceText: "La otra opción es la exodoncia de la 36." }],
+      })
+    // Lo que queda en cada opción del borrador, con su total.
+    const budgetOptions = async () => {
+      const budget = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+      const options = await ownerDb.select().from(treatmentBudgetOption).where(eq(treatmentBudgetOption.budgetId, budget!.id))
+      const lines = await ownerDb.select().from(treatmentBudgetItem).where(eq(treatmentBudgetItem.budgetId, budget!.id))
+      return options
+        .sort((a, b) => a.position - b.position)
+        .map((option) => {
+          const own = lines.filter((line) => line.optionId === option.id)
+          return { titles: own.map((line) => line.title).sort(), total: own.reduce((sum, line) => sum + (line.priceCents ?? 0), 0) }
+        })
+    }
+    const endodontics = async () =>
+      (await ownerDb.select().from(treatmentPlanItem).where(and(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id), eq(treatmentPlanItem.serviceId, fx.service.id)))).filter(
+        (item) => item.status !== "cancelado",
+      )
+    return { fx, loose, choice, budgetOptions, endodontics }
+  }
+
+  it("la elección de dos caminos absorbe la endodoncia suelta pendiente de la misma pieza (QA clínica del 21 nov, H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("de la pausa")
+    const [first] = (await loose()).suggestions
+    expect(first).toMatchObject({ status: "lista", payload: { toothNumber: 36 } })
+    const [paths] = (await choice()).suggestions
+    expect(paths).toMatchObject({ payload: { serviceName: "Endodoncia de la pausa", options: [expect.objectContaining({ serviceName: "Exodoncia de la pausa" })] } })
+    // Queda solo la elección: la endodoncia suelta ya es su camino A.
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(pending.map((item) => item.id)).toEqual([paths!.id])
+
+    // Al firmar entra lo que espera y se arma el presupuesto.
+    for (const item of pending) await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, item.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia de la pausa"], total: 65000 },
+      { titles: ["Exodoncia de la pausa"], total: 15000 },
+    ])
+    expect(await endodontics()).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("con la endodoncia suelta ya confirmada al plan, la elección la toma como su camino y el presupuesto no la suma dos veces (H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("ya confirmada")
+    const [first] = (await loose()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, first!.id))
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia ya confirmada"], total: 65000 },
+      { titles: ["Exodoncia ya confirmada"], total: 15000 },
+    ])
+    // Una sola endodoncia de la 36 en el plan: la que se confirmó antes.
+    const [endo] = await endodontics()
+    expect(await endodontics()).toHaveLength(1)
+    const firstRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, first!.id)))[0]!
+    expect(endo!.id).toBe(firstRow.entityId)
+    await enable(false)
+  })
+
+  it("la endodoncia suelta dictada después de confirmar la elección no se propone otra vez: se avisa como ya registrada (H4)", async () => {
+    await enable(true)
+    const { fx, loose, choice, budgetOptions, endodontics } = await twoPaths("después de elegir")
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    const after = await loose()
+    expect(after.suggestions).toEqual([])
+    expect(after.alreadyDone).toEqual(["Endodoncia después de elegir"])
+    // En otra pieza sí es otra indicación.
+    const other = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "endodoncia después de elegir", toothNumber: 46 } }] }),
+    )
+    expect(other.suggestions).toHaveLength(1)
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, other.suggestions[0]!.id))
+    await fx.run((tx) => assembleEncounterBudget(tx, ...fx.args, fx.encounter.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia después de elegir"], total: 65000 },
+      { titles: ["Exodoncia después de elegir"], total: 15000 },
+    ])
+    expect(await endodontics()).toHaveLength(1)
+    await enable(false)
+  })
+
+  // QA del 22 nov (H3, V-DIN-04): Rosa confirma los dos caminos de la 36 desde Clío antes de firmar
+  // y al firmar se le carga la evaluación (S/ 50). La evaluación entraba al borrador como común a las
+  // dos opciones y quedaba ahí ya cobrada: «Opción A S/ 700 · B S/ 200» con «debe S/ 50» (leería 750).
+  it("al firmar, lo hecho y cargado hoy sale del presupuesto en borrador: A S/ 650 · B S/ 150 y la cuenta S/ 50 (H3)", async () => {
+    await enable(true)
+    const { fx, choice, budgetOptions } = await twoPaths("con evaluación")
+    const [evaluation] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Evaluación de la prueba de dos caminos", scope: "general", source: "custom", priceCents: 5_000, currency: "PEN" })
+      .returning()
+    await ownerDb.update(serviceCatalog).set({ evaluationServiceId: evaluation!.id }).where(eq(serviceCatalog.id, fx.service.id))
+    onTestFinished(async () => {
+      await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, evaluation!.id))
+    })
+    const [paths] = (await choice()).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, paths!.id))
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia con evaluación"], total: 65000 },
+      { titles: ["Exodoncia con evaluación"], total: 15000 },
+    ])
+    await fx.ready(fx.encounter.id)
+    const signed = await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id, { consultationServiceId: evaluation!.id }))
+    expect(signed.charges.map((charge) => [charge.description, charge.amountCents])).toEqual([["Evaluación de la prueba de dos caminos", 5_000]])
+    // «Atención finalizada» dice el presupuesto con lo que lleva la opción recomendada.
+    expect(signed.budget?.totalCents).toBe(65000)
+    // Lo cobrado ya no está en ninguna opción; cada camino sigue con su total.
+    expect(await budgetOptions()).toEqual([
+      { titles: ["Endodoncia con evaluación"], total: 65000 },
+      { titles: ["Exodoncia con evaluación"], total: 15000 },
+    ])
+    const budget = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+    const full = await fx.run((tx) => getBudgetDetail(tx, ORG, fx.patient.id, budget!.id))
+    expect(full.options.map((option) => option.totalCents)).toEqual([65000, 15000])
+    const owed = await ownerDb.select().from(patientCharge).where(and(eq(patientCharge.patientId, fx.patient.id), isNull(patientCharge.voidedAt)))
+    expect(owed.reduce((sum, charge) => sum + charge.amountCents, 0)).toBe(5_000)
+    await enable(false)
+  })
+
   it("el mismo diagnóstico en la misma pieza no se repite; en otra pieza sí", async () => {
     await enable(true)
     const fx = await openSession("Obturación de diagnósticos")
@@ -526,20 +666,26 @@ describe("dictado en la atención", () => {
     await enable(true)
     const fx = await openSession("Obturación de la nota")
     await ownerDb.update(encounter).set({ evolution: "Lo escribí a mano.", illnessDuration: "3 días" }).where(eq(encounter.id, fx.encounter.id))
+    // Dos textos de la consulta en la misma pausa son una sola sugerencia (mesa del 20 nov 2026).
     const [first, second] = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
         { kind: "nota", payload: { evolution: "Se anestesió la 36.", illnessDuration: "una semana", prognosis: "Favorable" } },
         { kind: "nota", payload: { evolution: "Se colocó la resina, toleró bien." } },
       ]),
     )
+    expect(second).toBeUndefined()
     const confirm = (id: string) => fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, id))
     const session = async () => (await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id)))[0]!
     // La confirmación devuelve cómo quedó cada texto: la pantalla lo adopta si su borrador va por detrás.
-    expect((await confirm(first!.id)).joined).toEqual({ evolution: "Lo escribí a mano.\nSe anestesió la 36.", illnessDuration: "3 días; una semana", prognosis: "Favorable" })
-    await confirm(second!.id)
+    // El tiempo es un solo valor: queda lo dictado y lo que había, entre paréntesis, nunca con «;».
+    expect((await confirm(first!.id)).joined).toEqual({
+      evolution: "Lo escribí a mano.\nSe anestesió la 36. Se colocó la resina, toleró bien.",
+      illnessDuration: "una semana (antes: 3 días)",
+      prognosis: "Favorable",
+    })
     expect(await session()).toMatchObject({
-      evolution: "Lo escribí a mano.\nSe anestesió la 36.\nSe colocó la resina, toleró bien.",
-      illnessDuration: "3 días; una semana",
+      evolution: "Lo escribí a mano.\nSe anestesió la 36. Se colocó la resina, toleró bien.",
+      illnessDuration: "una semana (antes: 3 días)",
       prognosis: "Favorable",
     })
 
@@ -731,7 +877,7 @@ describe("dictado en la atención", () => {
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
-    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true })
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], added: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true })
     expect(await list()).toHaveLength(2)
 
     // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.
@@ -1298,6 +1444,38 @@ describe("lo que encontró la quinta prueba con voz (15 nov, c5)", () => {
     )
     expect(saved.suggestions).toEqual([])
     expect(saved.droppedForms).toContainEqual({ said: "Este 0,99", why: "Dijiste «Este 0,99»: revisa los decimales.", targets: [expect.objectContaining({ fieldId: "ihos" })] })
+    await enable(false)
+  })
+})
+
+describe("«también» suma, no corrige (QA del 22 nov, H1)", () => {
+  it("«sí, también en la 37» deja la caries de la 36 como estaba y propone la de la 37", async () => {
+    await enable(true)
+    const fx = await openSession("Resina de la prueba de también", "surface")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [caries] = (
+      await segment({
+        drafts: [{ kind: "odontograma", payload: { toothNumber: 36, condition: "caries", variant: "dentina", surfaces: ["oclusal"] }, sourceText: "la 36 tiene caries oclusal" }],
+        transcript: "la 36 tiene caries oclusal",
+      })
+    ).suggestions
+    // Clío lo mandó como corrección de la 36 y, además, como hallazgo nuevo de la 37.
+    const said = "si tambien en la 37"
+    const also = await segment({
+      drafts: [{ kind: "odontograma", payload: { toothNumber: 37, condition: "caries", variant: "dentina" }, sourceText: said }],
+      corrections: [{ suggestionId: caries!.id, changes: { toothNumber: 37 }, said }],
+      transcript: said,
+    })
+    expect(also.corrected).toEqual([])
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    const teeth = pending.filter((item) => item.kind === "odontograma").map((item) => [item.payload["toothNumber"], item.voice])
+    expect(teeth).toEqual([
+      [36, null],
+      [37, null],
+    ])
+    // Con palabras de corrección sí se corrige.
+    const fixed = await segment({ drafts: [], corrections: [{ suggestionId: caries!.id, changes: { toothNumber: 46 }, said: "perdón, también es la 46" }], transcript: "perdón, también es la 46" })
+    expect(fixed.corrected).toEqual([caries!.id])
     await enable(false)
   })
 })

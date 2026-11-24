@@ -1,4 +1,4 @@
--- Las reglas de lo que pide la administración (ADR 0213). Como en las migraciones de reglas
+-- Las reglas de lo que pide la administración (ADR 0214). Como en las migraciones de reglas
 -- anteriores, cada tabla nace cerrada a `gestoria_app`: se concede solo lo que la aplicación usa.
 --
 -- Los pedidos recibidos: solo el dueño de la base, al recibirlos (sin GRANT).

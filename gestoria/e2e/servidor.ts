@@ -1,5 +1,5 @@
 /**
- * El entorno del recorrido de gestorIA en un navegador (ADR 0213): su base de verdad
+ * El entorno del recorrido de gestorIA en un navegador (ADR 0214): su base de verdad
  * (testcontainers), su servidor de verdad (`createApp`), una cuenta de mentira que firma el token
  * de quien se elija y una administración de mentira que responde el estado de la tienda. Siembra
  * una tienda abierta por la administración, un pedido de soporte por aceptar y una conversación

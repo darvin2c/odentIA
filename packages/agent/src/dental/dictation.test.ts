@@ -1,7 +1,16 @@
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, type DictationFormQuestion, formQuestionsOf, productHooksFor } from "@odentia/services"
+import {
+  DICTATION_MAX_SUGGESTIONS,
+  DICTATION_SOURCE_CHARS,
+  type DictationFormQuestion,
+  formNetMisses,
+  formQuestionsOf,
+  prepareFormAnswer,
+  productHooksFor,
+} from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
+import { z } from "zod"
 import {
   askDictationModel,
   DICTATION_FORMS_RULES,
@@ -525,9 +534,193 @@ describe("las respuestas de una ficha", () => {
     expect(String(human?.content)).toBe(`1. «a ver over byte de 4 succión por favor»\n   Ficha de ortodoncia: ${overbite}. Overbite · número en mm, de -10 a 15`)
   })
 
+  it("consulta conversada (QA del 20 nov, C3): si Clío solo propone la pieza, la segunda lectura recibe cada oración con su pregunta", async () => {
+    const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")
+    const endo = formQuestionsOf([{ id: "endo", title: form?.title ?? "", snapshot: form?.schema, answers: {} }])
+    const site = productHooksFor("dental").site
+    const fieldOf = (number: number) => endo.find((item) => item.number === number)?.fieldId
+    const numberIn = (fieldId: string) => endo.find((item) => item.fieldId === fieldId)?.number ?? 0
+    const transcript =
+      "Hola Lucía, cuénteme qué le pasa. Doctora, me duele mucho la muela de arriba a la izquierda, la 26, ya hace dos semanas, y anoche no pude dormir del dolor, me duele solo, sin tocar nada. Vamos a ver. Le golpeo suave la muela y le duele bastante a la percusión. Con el frío le dura el dolor más de un minuto. En la radiografía veo una caries profunda que llega a la pulpa y una lesión pequeña en el ápice de la raíz. Diagnóstico: pulpitis irreversible con periodontitis apical. Necesita endodoncia de la 26."
+    // Lo que respondió Clío en la QA: de la ficha, solo la pieza.
+    const first = readWith({ fichas: [{ question: numberIn("pieza"), answer: "26", dicho: "la 26" }] }, transcript, 0, DENTAL_DICTATION_PROFILE.parts, endo)
+    const misses = formNetMisses(first?.drafts ?? [], endo, site, transcript)
+    const seen: BaseMessage[][] = []
+    const model = {
+      bindTools: () => ({
+        invoke: async (messages: BaseMessage[]) => {
+          seen.push(messages)
+          const fichas = [
+            { question: numberIn("percusion"), answer: "Positiva", dicho: "le duele bastante a la percusión" },
+            { question: numberIn("frio"), answer: "Aumentada, persiste", dicho: "Con el frío le dura el dolor más de un minuto" },
+            // «Una lesión en el ápice» no dice si es radiolúcida: no vuelve, y el aviso queda en su pregunta.
+            { question: numberIn("hallazgo_radiografico"), answers: ["Radiolucidez periapical"], dicho: "una lesión pequeña en el ápice de la raíz" },
+          ]
+          return new AIMessage({ content: "", tool_calls: [{ id: "relectura-c3", name: "registrar_fichas", args: { fichas } }] })
+        },
+      }),
+    }
+    const reread = await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, misses, endo)
+    const human = String(seen[0]?.[1]?.content)
+    expect(human).toContain("«Le golpeo suave la muela y le duele bastante a la percusión.»\n   Evaluación de endodoncia: ")
+    expect(human).toContain(". Hallazgo radiográfico periapical · varias opciones")
+    expect(human).not.toContain("Sondaje")
+    const kept = reread.flatMap((draft) => {
+      const ready = prepareFormAnswer(draft, endo, site, transcript)
+      return ready ? [[fieldOf(Number(draft.payload["question"])), ready.status, ready.payload["value"]]] : []
+    })
+    expect(kept).toEqual([
+      ["percusion", "por_revisar", "Positiva"],
+      ["frio", "por_revisar", "Aumentada, persiste"],
+    ])
+  })
+
   it("sin oraciones que leer de nuevo, no llama al modelo", async () => {
     const model = { bindTools: () => ({ invoke: async () => { throw new Error("no debía llamar") } }) }
     expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [], ortho)).toEqual([])
     expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [{ said: "algo", questions: [99] }], ortho)).toEqual([])
+  })
+})
+
+/**
+ * Lo de salud dicho en la conversación (mesa del 20 nov 2026, P3): Clío no tenía dónde ponerlo
+ * (la warfarina y la metformina caían en el relato, el asma de un niño se perdía) y «no que yo
+ * sepa» se volvía «No tiene alergias».
+ */
+describe("lo de salud dicho en la conversación", () => {
+  const fixed = DENTAL_DICTATION_PROFILE.systemPrompt({ services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText() })
+  const schema = z.toJSONSchema(DENTAL_DICTATION_PROFILE.extraction) as { properties: Record<string, { properties?: Record<string, unknown>; items?: { properties?: Record<string, unknown> } }> }
+
+  it("tiene su parte `salud`, con quién lo dijo, lo de su registro y lo de la boca", () => {
+    // Una entrada por cada persona que lo dijo (revisión del 21 nov, A4).
+    const salud = schema.properties["salud"]?.items?.properties ?? {}
+    expect(Object.keys(salud)).toEqual(
+      expect.arrayContaining(["declarante", "vinculo", "allergies", "conditions", "medications", "anticoagulants", "boneMedicines", "personal", "dental", "medical", "dicho"]),
+    )
+    const dental = (salud["dental"] as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}
+    expect(Object.keys(dental)).toEqual(
+      expect.arrayContaining(["problemaAnestesia", "corazon", "ansiedadDental", "bruxismo", "habitos", "ultimaVisita", "biberon", "dulcesEntreComidas"]),
+    )
+    // El alcohol lo pregunta solo latidIA.
+    expect(Object.keys((salud["medical"] as { properties?: Record<string, unknown> } | undefined)?.properties ?? {})).not.toContain("alcohol")
+  })
+
+  it("solo lo dicho: «no que yo sepa» es no sabe, el silencio no es «No» y lo de un familiar no es del paciente", () => {
+    expect(fixed).toContain("«No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`")
+    expect(fixed).toContain("Lo que no se preguntó ni se dijo no va: el silencio no es «No».")
+    expect(fixed).toContain("«mi papá es diabético»")
+    expect(fixed).toContain("no es del paciente: no va en `salud` ni en `alergias`")
+    expect(fixed).toContain("El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida")
+    // Lo de su salud no va al relato.
+    expect(fixed).toContain("Sus medicinas de siempre, sus enfermedades y lo de la anestesia van en `salud`, no en el relato")
+    // La alergia dictada con duda tampoco es `none`.
+    expect(fixed).toContain("«No que yo sepa», «creo que no» o «no sé» no son `none`")
+  })
+
+  it("se lee como una sola entrada, con su frase", () => {
+    const transcript = "Tiene asma, usa salbutamol. Yo soy diabética."
+    const read = readDictation(
+      {
+        salud: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+          dicho: "Tiene asma, usa salbutamol.",
+        },
+      },
+      transcript,
+      0,
+    )
+    expect(read?.omitted).toBe(0)
+    expect(read?.drafts).toEqual([
+      {
+        kind: "salud",
+        payload: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+        },
+        sourceText: "Tiene asma, usa salbutamol.",
+      },
+    ])
+  })
+
+  it("una entrada por cada persona que lo dijo, cada una con su frase (A4)", () => {
+    const transcript = "Tomo losartán. Mi papá también toma metformina, doctora."
+    const read = readDictation(
+      {
+        salud: [
+          { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }] }, dicho: "Tomo losartán." },
+          { declarante: "acompanante", vinculo: "hija", medications: { state: "recorded", items: [{ name: "metformina" }] }, dicho: "también toma metformina" },
+        ],
+      },
+      transcript,
+      0,
+    )
+    expect(read?.drafts.map((draft) => [draft.payload["declarante"], draft.sourceText])).toEqual([
+      ["paciente", "Tomo losartán."],
+      ["acompanante", "también toma metformina"],
+    ])
+  })
+
+  it("la frase se encuentra aunque la voz de Chrome la escribió sin tildes ni puntuación (QA del 21 nov, C1 y C4)", () => {
+    // Antes se perdía: «losartán» o «Tiene asma, usa salbutamol.» no estaban tal cual en lo dictado.
+    const rosa = readDictation(
+      {
+        salud: {
+          declarante: "paciente",
+          medications: { state: "recorded", items: [{ name: "losartán" }] },
+          dicho: "Sí, tomo losartán para la presión.",
+        },
+      },
+      "toma alguna medicina si tomo losartan para la presion y nada mas",
+      0,
+    )
+    expect(rosa?.omitted).toBe(0)
+    expect(rosa?.drafts.map((draft) => draft.sourceText)).toEqual(["si tomo losartan para la presion"])
+    const mateo = readDictation(
+      {
+        salud: {
+          declarante: "acompanante",
+          vinculo: "madre",
+          conditions: { state: "recorded", items: [{ name: "asma" }] },
+          medications: { state: "recorded", items: [{ name: "salbutamol" }] },
+          dicho: "Tiene asma, usa salbutamol.",
+        },
+      },
+      "tiene asma usa salbutamol alergico a algo que yo sepa no",
+      0,
+    )
+    expect(mateo?.omitted).toBe(0)
+    expect(mateo?.drafts.map((draft) => draft.sourceText)).toEqual(["tiene asma usa salbutamol"])
+  })
+
+  it("los pedazos dichos de una cita se encuentran como una sola frase seguida", () => {
+    const read = readDictation(
+      {
+        salud: {
+          declarante: "paciente",
+          medications: { state: "recorded", items: [{ name: "losartán" }] },
+          anticoagulants: { state: "recorded", detail: "apixabán" },
+          dicho: "Tomo losartán, ahora es apixabán.",
+        },
+      },
+      "si tomo losartan para la presion y tomo warfarina no perdon ahora es apixaban",
+      0,
+    )
+    expect(read?.drafts.map((draft) => draft.sourceText)).toEqual(["tomo losartan para la presion y tomo warfarina no perdon ahora es apixaban"])
+  })
+
+  it("sin su frase dicha no se propone: va a lo que no usé (A5)", () => {
+    // Antes entraba igual, con la frase vacía: «dijo apixabán, sin confirmar» sin que nadie lo dijera.
+    const read = readDictation(
+      { salud: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, dicho: "tomo apixabán" } },
+      "Tomo warfarina desde el año pasado.",
+      0,
+    )
+    expect(read?.drafts).toEqual([])
+    expect(read?.omitted).toBe(1)
   })
 })

@@ -6,6 +6,8 @@
  * dibujo, que mide 10 de ancho por 9 de alto.
  */
 
+import { drawnWidthMm } from "./tooth-front.js"
+
 export const ARCH_ASPECT = 0.9
 /**
  * Una sola arcada a lo ancho (en el celular): una U más alta que ancha, para que las piezas
@@ -94,7 +96,8 @@ function inset(pts: readonly Point[], distance: number): Point[] {
 function polyline(pts: readonly Point[]) {
   const nm = normals(pts)
   const acc = [0]
-  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y))
+  for (let i = 1; i < pts.length; i++)
+    acc.push(acc[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y))
   const length = acc[acc.length - 1]!
   return {
     length,
@@ -127,12 +130,29 @@ export function archLayout(
   width: number,
   outer: ArchRows,
   inner?: ArchRows,
-  opts: { single?: "upper" | "lower" } = {},
+  opts: {
+    single?: "upper" | "lower"
+    /**
+     * Alto sobre ancho del dibujo. Con una sola arcada, más baja que la del celular: así va
+     * cada arcada en su propio arco, una encima de la otra, junto a la vista de frente.
+     */
+    aspect?: number
+    /**
+     * Cada pieza con el ancho con que se dibuja de frente (la muela más ancha que la incisiva). Sin
+     * esto, todas iguales: el selector de piezas de los formularios.
+     */
+    byTooth?: boolean
+  } = {},
 ): ArchLayout {
   const W = width
   const single = opts.single
-  const H = W * (single ? SINGLE_ARCH_ASPECT : ARCH_ASPECT)
-  const inside = !inner
+  const H = W * (opts.aspect ?? (single ? SINGLE_ARCH_ASPECT : ARCH_ASPECT))
+  // En el odontograma, los números de las permanentes siempre por fuera (24 nov): por dentro se
+  // amontonaban en las incisivas. El selector de los formularios los sigue llevando por dentro.
+  const inside = !inner && !opts.byTooth
+  // En el odontograma, la herradura se abre un poco hacia las muelas, como la boca; en el selector,
+  // se cierra.
+  const tuck = opts.byTooth ? -0.08 : TUCK
   const count = Math.max(outer.upper.length, outer.lower.length)
   let t = W * 0.12
   let h = t / 1.2
@@ -142,16 +162,21 @@ export function archLayout(
   let curve: Point[] = []
   // El tamaño de la pieza depende del largo de la curva y la curva del margen
   // que deja la pieza: unas pocas vueltas bastan para que se estabilice.
-  const margin = () => (inside ? h / 2 + 2 : h / 2 + LABEL_PX + 8)
+  // En el odontograma el número va pasado el borde de la encía (24 nov: caía sobre él), y por eso
+  // el margen es la mitad de la franja rosada más el número.
+  const outerLabel = () => (opts.byTooth ? h * 0.675 + LABEL_PX + 9 : h / 2 + LABEL_PX + 8)
+  const margin = () => (inside ? h / 2 + 2 : outerLabel())
   for (let i = 0; i < 6; i++) {
     h = t / 1.2
     // Una sola arcada no deja hueco para la otra: ocupa todo el alto.
     gap = single ? 0 : t + 0.012 * W
-    a = W / 2 - (inside ? t / 2 + 2 : h / 2 + LABEL_PX + 9)
+    a = W / 2 - (inside ? t / 2 + 2 : outerLabel() + 1)
     b = single ? H - 2 * margin() : (H - gap) / 2 - margin()
-    curve = halfArch(a, b, TUCK)
+    curve = halfArch(a, b, tuck)
     const fit = (polyline(curve).length / (count - 1)) * 0.97 - 0.005 * W
-    t = Math.min(W * (single ? 0.15 : count <= 10 ? 0.13 : 0.1), fit)
+    // En el odontograma las piezas llenan la curva, una junto a otra (24 nov: con tope quedaba
+    // mucho espacio entre pieza y pieza); en el selector, con tope.
+    t = opts.byTooth ? fit : Math.min(W * (single ? 0.15 : count <= 10 ? 0.13 : 0.1), fit)
   }
   const yUpper = single === "upper" ? H - margin() : (H - gap) / 2
   const yLower = single === "lower" ? margin() : (H + gap) / 2
@@ -160,23 +185,57 @@ export function archLayout(
 
   const place = (row: readonly number[], lower: boolean, ring: "outer" | "inner") => {
     if (row.length === 0) return
-    const size = ring === "inner" ? t * 0.8 : t
-    const depth = size / 1.2
+    // De su ancho, la muela de la curva queda más cerca de su vecina: un poco menos, para no pisarla.
+    let size = (ring === "inner" ? t * 0.8 : t) * (opts.byTooth ? 0.95 : 1)
     let pts = curve
     if (ring === "inner") {
       // La herradura interior sigue la misma U sin cerrar las puntas, para que
-      // no se enrosque donde se cierra la exterior.
-      const tuckShift = a - Math.abs(curve[0]!.x)
-      pts = inset(halfArch(a, b, 0), h / 2 + (inside ? LABEL_PX + 13 : 3) + depth / 2 + 0.01 * W + (inside ? 0 : tuckShift))
+      // no se enrosque donde se cierra la exterior. En el odontograma, con aire entre las dos (24 nov:
+      // las temporales quedaban chancadas contra las permanentes).
+      const tuckShift = Math.max(0, a - Math.abs(curve[0]!.x))
+      pts = inset(
+        halfArch(a, b, 0),
+        h / 2 +
+          (inside ? LABEL_PX + 13 : 3) +
+          size / 2.4 +
+          (opts.byTooth ? 0.035 : 0.01) * W +
+          (inside ? 0 : tuckShift),
+      )
     }
     const line = polyline(pts)
+    // Las temporales caben en su herradura, más corta: no pasan de lo que deja la curva.
+    if (ring === "inner" && opts.byTooth && row.length > 1)
+      size = Math.min(size, (line.length / (row.length - 1)) * 0.9)
+    const depth = size / 1.2
     const start = Math.max(0, (size + 0.012 * W - gap) / 2)
     const sign = lower ? 1 : -1
     const base = lower ? yLower : yUpper
     const labelSign = ring === "inner" || inside ? -1 : 1
-    const labelOffset = depth / 2 + (ring === "inner" ? LABEL_PX - 2 : LABEL_PX)
+    // Cada pieza, de su ancho y separada según él (la suma de los anchos llena la curva igual que
+    // con todas iguales): el mismo ancho de dibujo de la vista de frente.
+    const widths = row.map((tooth) => (opts.byTooth ? drawnWidthMm(tooth) : 1))
+    const mean = widths.reduce((sum, w) => sum + w, 0) / widths.length
+    const rel = widths.map((w) => w / mean)
+    const centers: number[] = []
+    rel.reduce((acc, w) => {
+      centers.push(acc + w / 2)
+      return acc + w
+    }, 0)
+    const first = centers[0] ?? 0
+    const span = (centers.at(-1) ?? 0) - first
     row.forEach((tooth, i) => {
-      const p = line.at(row.length === 1 ? line.length / 2 : start + (i / (row.length - 1)) * (line.length - 2 * start))
+      const toothSize = size * rel[i]!
+      const toothDepth = toothSize / 1.2
+      // En el odontograma, el número fuera de la encía; en el selector de los formularios, como antes.
+      const labelAt =
+        opts.byTooth && ring === "outer"
+          ? depth * 0.675 + LABEL_PX + 1
+          : toothDepth / 2 + (ring === "inner" ? LABEL_PX + (opts.byTooth ? 6 : -2) : LABEL_PX)
+      const p = line.at(
+        row.length === 1 || span === 0
+          ? line.length / 2
+          : start + ((centers[i]! - first) / span) * (line.length - 2 * start),
+      )
       const x = W / 2 + p.x
       const y = base + sign * p.y
       const nx = p.nx
@@ -185,19 +244,26 @@ export function archLayout(
         tooth,
         x,
         y,
-        w: size,
-        h: depth,
+        w: toothSize,
+        h: toothDepth,
         rotation: (Math.atan2(ny, nx) * 180) / Math.PI - 90,
-        labelX: x + nx * labelSign * labelOffset,
-        labelY: y + ny * labelSign * labelOffset,
+        labelX: x + nx * labelSign * labelAt,
+        labelY: y + ny * labelSign * labelAt,
         inner: ring === "inner",
       })
     })
     const d = pts
-      .filter((_, i) => i % 6 === 0 || i === pts.length - 1)
-      .map((p, i) => `${i ? "L" : "M"}${(W / 2 + p.x).toFixed(1)} ${(base + sign * p.y).toFixed(1)}`)
+      .filter((_, k) => k % 6 === 0 || k === pts.length - 1)
+      .map(
+        (p, k) => `${k ? "L" : "M"}${(W / 2 + p.x).toFixed(1)} ${(base + sign * p.y).toFixed(1)}`,
+      )
       .join(" ")
-    gums.push({ d, width: depth + 10, inner: ring === "inner" })
+    // En el odontograma la franja rosada ciñe a las piezas (la muela la llena casi toda).
+    gums.push({
+      d,
+      width: opts.byTooth ? depth * 1.35 : depth + 10,
+      inner: ring === "inner",
+    })
   }
 
   place(outer.upper, false, "outer")
@@ -215,7 +281,11 @@ export function archLayout(
  * inferiores y arcada inferior. ← → recorren la fila en el orden en que se ve;
  * ↑ ↓ pasan a la fila de al lado, a la pieza en la misma posición.
  */
-export function archNeighbor(rows: readonly (readonly number[])[], tooth: number, key: string): number | null {
+export function archNeighbor(
+  rows: readonly (readonly number[])[],
+  tooth: number,
+  key: string,
+): number | null {
   const r = rows.findIndex((row) => row.includes(tooth))
   if (r < 0) return null
   const row = rows[r]!

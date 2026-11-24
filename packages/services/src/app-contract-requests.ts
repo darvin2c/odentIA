@@ -24,7 +24,7 @@ import { assignAppAccountPlan, requireAppAccount } from "./app-contract.js"
 import { invalidField, ServiceError } from "./errors.js"
 
 /**
- * Lo que la administración le pide a una app que es otro sistema (ADR 0213, tablero 3 del
+ * Lo que la administración le pide a una app que es otro sistema (ADR 0214, tablero 3 del
  * lienzo A): abrir la cuenta de un cliente con su plan, dejar entrar a soporte y quitar a una
  * persona. Lo de cada app se queda en la app; la administración conserva el botón que lo pide.
  *

@@ -1219,7 +1219,7 @@ export async function main(args: string[]): Promise<number> {
     const metaGraph = await startMetaGraphStub()
     childEnv.ADMIN_META_GRAPH_URL = metaGraph.url
     childEnv.E2E_META_GRAPH_URL = metaGraph.url
-    // El gestorIA de mentira: lo que la administración le pide sale ahí, firmado (ADR 0213).
+    // El gestorIA de mentira: lo que la administración le pide sale ahí, firmado (ADR 0214).
     const gestoria = await startGestoriaStub()
     childEnv.GESTORIA_CONTRACT_URL = gestoria.url
     childEnv.GESTORIA_CONTRACT_SECRET = gestoria.secret

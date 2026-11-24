@@ -22,7 +22,7 @@ import { createSaasCharge, createSaasPlan, upsertSaasPaymentMethod } from "./saa
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * Lo que la administración le pide a una app (ADR 0213): sale firmado, en orden por cuenta y con
+ * Lo que la administración le pide a una app (ADR 0214): sale firmado, en orden por cuenta y con
  * la misma clave al reintentar; la respuesta de la app es final. Y el comprobante que sube la app
  * queda por confirmar como el de una clínica.
  */

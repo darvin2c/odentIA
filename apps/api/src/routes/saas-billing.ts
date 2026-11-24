@@ -116,7 +116,7 @@ export interface SaasBillingAdminDeps {
   ownerDb: Db
   storage: Storage
   mailer: Mailer
-  /** Adónde se le pide algo a una app que es otro sistema (ADR 0213); sin él, sus botones lo dicen. */
+  /** Adónde se le pide algo a una app que es otro sistema (ADR 0214); sin él, sus botones lo dicen. */
   appContractSenders?: AppContractSender[]
 }
 
@@ -378,7 +378,7 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     })
   })
 
-  // --- Lo que la administración le pide a la app (ADR 0213) ------------------------------
+  // --- Lo que la administración le pide a la app (ADR 0214) ------------------------------
   // Sale en el momento, sin esperar la respuesta; si no llega, lo reintenta el trabajador.
   const sendNow = () => {
     if (!senders.length) return

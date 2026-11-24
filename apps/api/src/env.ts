@@ -51,7 +51,7 @@ const envSchema = z.object({
   GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
   /**
    * El servidor de gestorIA (`https://servidor.gestoria24.com`), adonde la administración le pide
-   * abrir una cuenta, dejar entrar a soporte o quitar a una persona (ADR 0213), firmado con el
+   * abrir una cuenta, dejar entrar a soporte o quitar a una persona (ADR 0214), firmado con el
    * mismo secreto. Vacío: no se le pide nada.
    */
   GESTORIA_CONTRACT_URL: z.string().trim().default(""),

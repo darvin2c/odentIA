@@ -8,7 +8,7 @@ import { receiveSupportRequest } from "./soporte.js"
 import { isCurrency, openStoreIn, removeMemberIn, StoreError } from "./tiendas.js"
 
 /**
- * Lo que la administración le pide a gestorIA por el acuerdo (ADR 0213, tablero 3 del lienzo A):
+ * Lo que la administración le pide a gestorIA por el acuerdo (ADR 0214, tablero 3 del lienzo A):
  * abrir la tienda de un cliente con su plan, dejar entrar a soporte y quitar a una persona. Lo
  * de cada app se queda en la app: aquí se decide cómo, con las reglas de la tienda.
  *

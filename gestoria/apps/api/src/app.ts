@@ -285,7 +285,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ message: result.message }, result.status)
   })
 
-  // Lo que pide la administración (ADR 0213): firmado con el secreto del acuerdo, de servidor a
+  // Lo que pide la administración (ADR 0214): firmado con el secreto del acuerdo, de servidor a
   // servidor. Sin el secreto no existe.
   app.post(APP_CONTRACT_PATHS.requests, async (c) => {
     const body = await c.req.text()
@@ -693,7 +693,7 @@ export function createApp(deps: AppDeps) {
     return c.body(null, 204)
   })
 
-  // Soporte de gestorIA (ADR 0213): el Dueño o un Administrador lo deja entrar, o no, y lo saca.
+  // Soporte de gestorIA (ADR 0214): el Dueño o un Administrador lo deja entrar, o no, y lo saca.
   app.post("/api/tiendas/:id/soporte/:accessId/aceptar", async (c) => {
     const { id, accessId } = c.req.param()
     await answerSupport(deps.appDb, c.get("person"), id, accessId, true)

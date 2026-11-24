@@ -53,7 +53,7 @@ responde y sin detener la venta por ella.
 - Quedan para después, porque nadie en la administración los envía todavía: dejar entrar a soporte
   y quitar a una persona, abrir la cuenta de un cliente con su plan, el comprobante subido desde la
   tienda y elegir o cambiar el plan o el tope desde gestorIA (hoy se piden en «Pedir ayuda»).
-- Actualización (ADR 0213): dejar entrar a soporte, quitar a una persona, abrir la cuenta de un
+- Actualización (ADR 0214): dejar entrar a soporte, quitar a una persona, abrir la cuenta de un
   cliente con su plan y el comprobante subido desde la tienda ya están; lo enviado se borra a la
   semana y la conversación que Sofi no atiende pasa a «Espera a una persona».
 - Una tienda no cambia de nombre ni de país en B1: si llega a hacerlo, avisa `cuenta.abierta` en

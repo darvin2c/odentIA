@@ -570,9 +570,442 @@
         "additionalProperties": false
       }
     },
+    "salud": {
+      "default": [],
+      "description": "Lo que se dijo de la salud del paciente en la conversación: una entrada por cada persona que lo dijo. Vacío si no se habló de su salud.",
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "declarante": {
+            "type": "string",
+            "enum": [
+              "paciente",
+              "acompanante",
+              "no_se_sabe"
+            ],
+            "description": "Quién contó esto de la salud del paciente: él mismo (`paciente`), quien lo acompaña y habla por él (`acompanante`) o `no_se_sabe` si no queda claro."
+          },
+          "vinculo": {
+            "description": "Si lo dijo quien lo acompaña, su vínculo con el paciente como se dijo («madre», «esposo»). Vacío si no se dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 80
+          },
+          "allergies": {
+            "description": "Solo si no sabe si tiene alergias («no que yo sepa», «creo que no», «no sé»): `unknown`. Las alergias que dijo, o que no tiene, van en `alergias`.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "unknown",
+                  "none",
+                  "recorded"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "conditions": {
+            "description": "Sus enfermedades («presión alta», «asma», «diabetes»): `recorded` con cada una en `items`, en sus palabras. `none` solo si respondió que no tiene ninguna; `unknown` si no sabe. Omítelo si no se habló de eso.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "unknown",
+                  "none",
+                  "recorded"
+                ]
+              },
+              "items": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "notes": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "state",
+              "items"
+            ],
+            "additionalProperties": false
+          },
+          "medications": {
+            "description": "Lo que toma todos los días que no es anticoagulante ni para los huesos («losartán», «metformina», «inhalador de salbutamol»), con la dosis y cuándo solo si los dijo. `none` solo si respondió que no toma nada; `unknown` si no sabe.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "unknown",
+                  "none",
+                  "recorded"
+                ]
+              },
+              "items": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "dose": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "frequency": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "notes": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "state",
+              "items"
+            ],
+            "additionalProperties": false
+          },
+          "anticoagulants": {
+            "description": "Si toma un anticoagulante o aspirina todos los días («warfarina», «apixabán», «Eliquis»): `recorded` con cuál en `detail`. `none` si respondió que no; `unknown` si no sabe.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "unknown",
+                  "none",
+                  "recorded"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "now": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "osteoporosis",
+                  "cancer",
+                  "no_sabe"
+                ]
+              },
+              "form": {
+                "type": "string",
+                "enum": [
+                  "pastillas",
+                  "inyeccion"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "boneMedicines": {
+            "description": "Si toma o tomó una medicina para los huesos («alendronato», «denosumab»): `recorded` con cuál en `detail`, y si ya no la toma (`now`), solo si lo dijo.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "unknown",
+                  "none",
+                  "recorded"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "now": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "osteoporosis",
+                  "cancer",
+                  "no_sabe"
+                ]
+              },
+              "form": {
+                "type": "string",
+                "enum": [
+                  "pastillas",
+                  "inyeccion"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "personal": {
+            "description": "Embarazo (`embarazo`; `semanasEmbarazo` solo si dijo las semanas), operaciones, hospitalizaciones y transfusiones, en sus palabras.",
+            "type": "object",
+            "properties": {
+              "embarazo": {
+                "type": "boolean"
+              },
+              "semanasEmbarazo": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 42
+              },
+              "cirugias": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "hospitalizaciones": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "transfusiones": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "additionalProperties": false
+          },
+          "dental": {
+            "description": "Lo de su boca que contó: si tuvo problemas con la anestesia del dentista o sangró mucho tras una extracción (`problemaAnestesia`, cada uno con `si`, `no` o `no_sabe`), lo del corazón que pide antibiótico antes (`corazon`), el miedo al dentista, si rechina o aprieta los dientes, sus hábitos (morderse las uñas, morder lapiceros), cuándo fue su última visita y, de un niño, el biberón, el chupón, los dulces entre comidas, la pasta con flúor y quién le cepilla.",
+            "type": "object",
+            "properties": {
+              "corazon": {
+                "type": "object",
+                "properties": {
+                  "riesgoEndocarditis": {
+                    "type": "string",
+                    "enum": [
+                      "si",
+                      "no",
+                      "no_sabe"
+                    ]
+                  },
+                  "antibioticoPrevio": {
+                    "type": "string",
+                    "enum": [
+                      "si",
+                      "no",
+                      "no_sabe"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "ansiedadDental": {
+                "type": "string",
+                "enum": [
+                  "ninguna",
+                  "leve",
+                  "moderada",
+                  "alta"
+                ]
+              },
+              "bruxismo": {
+                "type": "boolean"
+              },
+              "habitos": {
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "ultimaVisita": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "biberon": {
+                "type": "string",
+                "enum": [
+                  "no",
+                  "si",
+                  "ya_no"
+                ]
+              },
+              "chupon": {
+                "type": "string",
+                "enum": [
+                  "no",
+                  "chupon",
+                  "dedo"
+                ]
+              },
+              "dulcesEntreComidas": {
+                "type": "string",
+                "enum": [
+                  "casi_nunca",
+                  "1_a_3",
+                  "4_o_mas"
+                ]
+              },
+              "pastaConFluor": {
+                "type": "string",
+                "enum": [
+                  "si",
+                  "no",
+                  "no_sabe"
+                ]
+              },
+              "quienCepilla": {
+                "type": "string",
+                "enum": [
+                  "solo",
+                  "adulto",
+                  "ambos"
+                ]
+              },
+              "problemaAnestesia": {
+                "type": "object",
+                "properties": {
+                  "anestesia": {
+                    "type": "string",
+                    "enum": [
+                      "si",
+                      "no",
+                      "no_sabe"
+                    ]
+                  },
+                  "quePaso": {
+                    "type": "string",
+                    "enum": [
+                      "desmayo",
+                      "alergia",
+                      "otra"
+                    ]
+                  },
+                  "sangrado": {
+                    "type": "string",
+                    "enum": [
+                      "si",
+                      "no",
+                      "no_sabe"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "medical": {
+            "description": "Si da de lactar y si fuma (`cigarrillos`, cuántos al día, solo de quien fuma).",
+            "type": "object",
+            "properties": {
+              "lactancia": {
+                "type": "boolean"
+              },
+              "tabaco": {
+                "type": "string",
+                "enum": [
+                  "nunca",
+                  "fuma",
+                  "dejo"
+                ]
+              },
+              "cigarrillos": {
+                "type": "string",
+                "enum": [
+                  "menos_10",
+                  "10_o_mas"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "declarante"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sin_lugar": {
+      "default": [],
+      "description": "Lo clínico que se dijo y no tiene dónde ir, con su frase y su motivo. Vacío si no hay.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          },
+          "motivo": {
+            "type": "string",
+            "enum": [
+              "familiar",
+              "peso_dicho",
+              "otro"
+            ],
+            "description": "`familiar`: de la salud de un familiar; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "additionalProperties": false
+      }
+    },
     "correcciones": {
       "default": [],
-      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
+      "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna. Lo que suma («también en la 37», «además…», «igual en…») no corrige: es una sugerencia nueva y la pendiente queda como estaba.",
       "maxItems": 10,
       "type": "array",
       "items": {
@@ -643,6 +1076,8 @@
     "citas",
     "materiales",
     "fichas",
+    "salud",
+    "sin_lugar",
     "correcciones",
     "quitar"
   ],

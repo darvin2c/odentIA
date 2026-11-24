@@ -179,16 +179,52 @@ export function asHeard(text: string, vocabulary: HeardVocabulary): string {
  * Vacío si no está: nunca se muestra una frase que no se dictó.
  */
 export function groundHeard(said: string, transcript: string, vocabulary: HeardVocabulary): string {
+  const found = findHeard(said, transcript, vocabulary)
+  return found ? transcript.slice(found.start, found.end) : ""
+}
+
+/** Dónde está en lo dictado la frase que dice lo mismo que `said` (`groundHeard`); `null` si no está. */
+function findHeard(said: string, transcript: string, vocabulary: HeardVocabulary): { start: number; end: number } | null {
   const wanted = heardWords(said, vocabulary).map((item) => item.word)
-  if (!wanted.length) return ""
+  if (!wanted.length) return null
   const heard = heardWords(transcript, vocabulary)
   for (let index = 0; index + wanted.length <= heard.length; index += 1) {
     if (!wanted.every((word, offset) => heard[index + offset]?.word === word)) continue
     const first = heard[index] as HeardWord
     const last = heard[index + wanted.length - 1] as HeardWord
-    return transcript.slice(first.start, last.end)
+    return { start: first.start, end: last.end }
   }
-  return ""
+  return null
+}
+
+/**
+ * La frase de lo dictado que dice `said` palabra por palabra, sin mirar tildes, mayúsculas ni
+ * puntuación, y con cada palabra también por cómo suena (`groundHeard`): la voz de Chrome escribe
+ * «tiene asma usa salbutamol» y Clío cita «Tiene asma, usa salbutamol.» (QA del 21 nov: el asma y
+ * el losartán dichos se perdían por una coma o una tilde). Si la cita entera no está, valen sus
+ * pedazos (entre comas o puntos) que sí están, y se devuelve lo dictado desde el primero hasta el
+ * último: una frase seguida, tal como se dijo, nunca pedazos pegados. Vacío si no se dijo.
+ */
+export function groundWords(said: string, transcript: string): string {
+  const clean = said.replace(/[«»“”"]/gu, "").trim()
+  if (!clean || !transcript.trim()) return ""
+  const vocabulary = heardVocabulary([clean])
+  const whole = findHeard(clean, transcript, vocabulary)
+  if (whole) return transcript.slice(whole.start, whole.end)
+  const spans = clean
+    .split(/\s*(?:\.{3}|[.,;:!?¿¡…])\s*/u)
+    .filter((piece) => /[\p{L}\p{N}]{3,}/u.test(piece))
+    .map((piece) => findHeard(piece, transcript, vocabulary))
+    .filter((span): span is { start: number; end: number } => span !== null)
+  if (!spans.length) return ""
+  const start = Math.min(...spans.map((span) => span.start))
+  const end = Math.max(...spans.map((span) => span.end))
+  // Pedazos muy lejos uno de otro no son una frase: queda el más largo.
+  if (end - start > clean.length * 2 + 20) {
+    const longest = spans.reduce((best, span) => (span.end - span.start > best.end - best.start ? span : best))
+    return transcript.slice(longest.start, longest.end)
+  }
+  return transcript.slice(start, end)
 }
 
 /*

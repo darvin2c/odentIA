@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
+import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, shortDay, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { accountHeaderWords, fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -55,6 +55,7 @@ import {
   isCurrentMedication,
   type PatientFull,
   type PatientHealth,
+  type SaidHealth,
   type PatientSummary,
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
@@ -150,7 +151,7 @@ export function alertsByRisk(
     PatientFull,
     "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidUnknown"
   >,
-  health: Pick<PatientHealth, "pregnancy"> | null | undefined,
+  health: (Pick<PatientHealth, "pregnancy"> & Partial<Pick<PatientHealth, "said">>) | null | undefined,
   sex?: string | null,
 ): Array<{ id: string; label: string; short: string; tone: "destructive" | "warning" | "secondary" }> {
   const allergyOf = new Map(detail.activeAllergies.map((row) => [row.id, row]))
@@ -172,8 +173,12 @@ export function alertsByRisk(
   )
   const medicationIds = new Set(detail.currentMedications.map((row) => row.id))
   const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
+  // Lo que oyó Clío y nadie confirmó, como en la franja: gana a «no se le preguntó» y a «Niega
+  // alergias», que dirían otra cosa de lo mismo (QA del 22 nov, H11).
+  const said = saidHealthAlerts(health?.said ?? []).map(({ key: _key, ...alert }) => ({ ...alert, short: alert.label }))
+  const saidAllergies = said.some((alert) => alert.id === "dicho-allergies")
   const unasked =
-    noAllergies && detail.allergyReview === "unknown"
+    noAllergies && detail.allergyReview === "unknown" && !saidAllergies
       ? [
           {
             id: "alergias",
@@ -184,7 +189,7 @@ export function alertsByRisk(
         ].map((alert) => ({ ...alert, short: alert.label }))
       : []
   const denies =
-    noAllergies && detail.allergyReview === "none"
+    noAllergies && detail.allergyReview === "none" && !saidAllergies
       ? [{ id: "alergias", label: "Niega alergias", short: "Niega alergias", tone: "secondary" as const }]
       : []
   const pregnancy = health?.pregnancy
@@ -201,12 +206,14 @@ export function alertsByRisk(
   return [
     ...alerts.filter((alert) => alert.tone === "destructive"),
     ...unasked,
+    ...said.filter((alert) => alert.tone === "warning"),
     ...alerts.filter((alert) => mildAllergy(alert) && !intoleranceIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone === "warning"),
     ...alerts.filter((alert) => mildAllergy(alert) && intoleranceIds.has(alert.id)),
     ...pregnancy,
     ...alerts.filter((alert) => !allergyIds.has(alert.id) && !medicationIds.has(alert.id)),
     ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone !== "warning"),
+    ...said.filter((alert) => alert.tone !== "warning"),
     ...denies,
   ]
 }
@@ -305,8 +312,14 @@ export function PatientClinicalStrip({
   // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
   // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
   // A un niño no se le preguntan: «Anticoagulante: dijo que no · huesos» no le sirve a quien lo atiende (K7).
+  // Lo que dijo en una consulta en curso y nadie confirmó (lo oyó Clío): avisa ya, como lo declarado,
+  // sin frenar nada (mesa del 20 nov 2026). Lo que cambia la anestesia o la receta, no su boca.
+  const saidNow = saidHealthAlerts(health?.said ?? [])
+  const saidKeys = new Set(saidNow.map((alert) => alert.key))
   const classWords = health?.medicineClasses && !child
     ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+          // Lo dicho en la consulta ya lo dice su aviso: no se contradice con «no se le preguntó».
+          if (saidKeys.has(key)) return []
           const known = health.medicineClasses?.[key]
           if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
           // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
@@ -379,6 +392,7 @@ export function PatientClinicalStrip({
         group: groups.length - 1,
         changed: false,
       })),
+    ...saidNow.map(({ key: _key, ...alert }) => ({ ...alert, group: null, changed: true })),
     // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
     // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
     ...(health?.latestAnamnesis
@@ -415,12 +429,13 @@ export function PatientClinicalStrip({
   // La misma frase en la franja, la ficha, la atención y lo que ve recepción (estudio de la atención del
   // 16 nov, E10a). Su «No sé» no es «no se le preguntó» (QA del 15 nov, K16); su «No» va en su caja.
   const allergyWord =
+    !saidKeys.has("allergies") &&
     saidNoAllergies === null && noAllergies && (detail.allergyReview === "none" || detail.allergyReview === "unknown")
       ? noAllergiesWords({ review: detail.allergyReview, saidUnknown: detail.allergySaidUnknown }, sex)
       : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
-    detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
+    detail.currentMedications.length === 0 && medicationReview === "unknown" && !saidKeys.has("medications") ? "Medicación: no preguntado" : null
   if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0 && !unchanged) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
@@ -534,6 +549,55 @@ export function PatientClinicalStrip({
 
 /** Cuántas alertas caben en la franja antes de «+N»; las severas no cuentan para el corte. */
 const STRIP_LIMIT = 6
+
+/** Lo dicho en la consulta que va en la franja: lo que cambia la anestesia, la exodoncia o la receta. */
+const SAID_IN_STRIP = new Set([
+  "anticoagulants",
+  "boneMedicines",
+  "medications",
+  "conditions",
+  "allergies",
+  "personal.embarazo",
+  "medical.lactancia",
+  "dental.problemaAnestesia",
+  "dental.corazon",
+])
+
+/**
+ * «Anticoagulante: dijo apixabán, sin confirmar», «Alergias: no sabe, sin confirmar»: lo que dijo
+ * en una consulta en curso y nadie confirmó (`listSaidHealth`), una vez por dato. Lo que nombró
+ * avisa en ámbar; su «No» o su «No sé», en gris: no es una alerta, pero tampoco es «no preguntado».
+ * Lo de una atención ya firmada sigue avisándose, con el día en que lo dijo («dijo apixabán el 20
+ * nov»), hasta que alguien lo revise o diga que no lo registra (revisión del 21 nov, A3). De un mismo
+ * dato vale lo último que dijo.
+ */
+export function saidHealthAlerts(said: readonly SaidHealth[]): Array<{ id: string; key: string; label: string; tone: "warning" | "secondary" }> {
+  const seen = new Set<string>()
+  const latest = [...said].sort((a, b) => b.at.localeCompare(a.at))
+  return latest.flatMap((item) =>
+    item.rows.flatMap((row) => {
+      if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
+      seen.add(row.key)
+      const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
+      // «Ya no la toma» no es «dijo que sí»: lo dejó, sin alarma (QA del 21 nov, H3).
+      const stopped = row.value.endsWith("ya no la toma")
+      // Su «No sé» no es un «No»: se sabe tan poco como de lo que no se preguntó, y avisa igual (QA del 22 nov, H11).
+      const quiet = row.value === "dijo que no" || stopped
+      const named = row.value.replace(/,? ?ya no la toma$/u, "")
+      const words = stopped
+        ? `dijo que dejó ${named.startsWith("sí, no dijo cuál") ? "de tomarlo" : named}`
+        : quiet || row.value === "no sabe"
+          ? row.value
+          : row.value.startsWith("sí, no dijo cuál")
+            ? "dijo que sí"
+            : `dijo ${row.value}`
+      // Lo que corrigió al decirlo también se ve aquí: «dijo apixabán (antes dijo warfarina)» (QA del 21 nov, C2).
+      const before = row.before ? ` (antes dijo ${row.before})` : ""
+      const when = item.open === false && shortDay(item.at) ? ` el ${shortDay(item.at)}` : ""
+      return [{ id: `dicho-${row.key}`, key: row.key, label: `${label}: ${words}${before}${when}, sin confirmar`, tone: quiet ? ("secondary" as const) : ("warning" as const) }]
+    }),
+  )
+}
 
 /** La ficha con lo clínico de la salud: enfermedades activas y lo que toma hoy (la regla del Resumen). */
 function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {

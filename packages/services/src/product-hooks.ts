@@ -19,6 +19,7 @@ import {
 import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
+import type { z } from "zod"
 import type { FormSchemaDef } from "./clinical-forms.js"
 import type { DocumentCheckFacts } from "./document-check.js"
 import type { PaperStorage } from "./issued-papers.js"
@@ -447,6 +448,13 @@ export interface ProductDictation {
   /** Las clases de sugerencia propias del producto, además de las comunes. */
   kinds: readonly DictationKind[]
   /**
+   * Lo de su salud dicho en la conversación que el producto pregunta, además de lo común
+   * (`dictationHealthSchema`), con la forma de su registro (mesa del 20 nov 2026; odentIA: su boca,
+   * la lactancia y el tabaco; latidIA: también el alcohol). Clío lo ve en su esquema y el servicio
+   * guarda solo esto.
+   */
+  health: z.ZodRawShape
+  /**
    * Las palabras de lo dicho que dicen dónde y no cuál prestación (odentIA: la
    * pieza y sus caras): no cuentan al buscarla en el tarifario (`matchService`).
    */
@@ -455,9 +463,10 @@ export interface ProductDictation {
   catalogText(): string
   /**
    * Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la
-   * variante del hallazgo y para qué piezas es cada servicio de la biblioteca).
+   * variante del hallazgo, para qué piezas es cada servicio de la biblioteca y, con `patientId`, lo
+   * de toda la pieza que el paciente ya tiene vigente).
    */
-  context(tx: Db, orgId: string): Promise<unknown>
+  context(tx: Db, orgId: string, patientId?: string): Promise<unknown>
   /**
    * Si un servicio puede ser lo dicho en ese sitio y para ese paciente (prueba con voz del 15 nov,
    * c3): el tarifario se busca primero entre los que calzan y, si ninguno calza con lo dicho, entre
@@ -488,13 +497,16 @@ export interface ProductDictation {
     scope: string | null,
     done?: boolean,
   ): DictationPrepared
-  /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
+  /**
+   * Revisa una sugerencia de una clase propia, ya validada con su operación; null si no se propone
+   * (odentIA: lo de toda la pieza que el paciente ya tiene vigente).
+   */
   prepare(
     tx: Db,
     kind: DictationKind,
     payload: Record<string, unknown>,
     context: { diagnosisSystem: DiagnosisSystemKey; product: unknown },
-  ): Promise<DictationPrepared>
+  ): Promise<DictationPrepared | null>
   /** Lo que entraría a la historia, en pocas palabras, de una clase propia. */
   summarize(kind: DictationKind, payload: Record<string, unknown>): string
   /** Cómo se le nombra al asistente una sugerencia pendiente de una clase propia, después de su clase. */

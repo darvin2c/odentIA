@@ -95,7 +95,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       "descanso médico",
     ],
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
-      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
+      if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma|tiene un perno, un implante|veo la raíz de la pieza/.test(faq.q))
         return []
       // «Sin enfermedad» de un consultorio: el examen del adulto o del niño, sin odontograma.
       if (faq.q === "¿Qué diagnóstico pongo si el paciente está sano o no tiene nada?")
@@ -544,6 +544,11 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ", un descanso dictado con «Emitir descanso», que abre su formulario ya lleno, y un presupuesto dictado se deja en borrador con «Armar».",
       ),
     },
+  ],
+  // Lo de su salud que oye Clío en un consultorio: sin la anestesia del dentista, con el embarazo y lo
+  // gineco-obstétrico de su entrevista.
+  "pacientes-dictado-salud": (faq) => [
+    { ...faq, a: swap(faq.a, "(sus medicinas, sus enfermedades, el anticoagulante, la anestesia)", "(sus medicinas, sus enfermedades, el anticoagulante, un embarazo, sus hábitos)") },
   ],
   // Lo que Clío propone en la ficha (entrega 11): sin piezas ni la clase de Angle; el ejemplo es de consultorio.
   "pacientes-dictado-ficha": (faq) => [
