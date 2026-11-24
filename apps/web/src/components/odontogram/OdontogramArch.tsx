@@ -53,7 +53,7 @@ function Tooth({ tooth, finding }: { tooth: number; finding?: ExampleFinding }) 
           <path d={silhouette.crown} />
         </clipPath>
       </defs>
-      <path d={silhouette.crown} fill="#fff" stroke="#6b7280" strokeLinejoin="round" />
+      <path d={silhouette.crown} fill="#fff" stroke="#8a97ab" strokeLinejoin="round" />
       <g clipPath={`url(#${clipId})`}>
         {zones.map((zone) => {
           const filled = paint && zone === central && (finding === "caries" || finding === "restauracion")
@@ -153,17 +153,12 @@ export default function OdontogramArch({
           </span>
         ) : null}
         <svg aria-hidden="true" className="oa-under" viewBox={`0 0 ${W} ${H}`}>
+          {/* La encía rosada con su borde, la misma del odontograma de la clínica. */}
           {layout.gums.map((gum) => (
-            <path
-              key={gum.d}
-              d={gum.d}
-              fill="none"
-              stroke="#d9eff5"
-              strokeOpacity={0.7}
-              strokeWidth={round(gum.width)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+            <g key={gum.d} fill="none" strokeLinecap="round" strokeLinejoin="round">
+              <path d={gum.d} stroke="#efb8c2" strokeWidth={round(gum.width + 2)} />
+              <path d={gum.d} stroke="#f9dde2" strokeWidth={round(gum.width)} />
+            </g>
           ))}
           <line x1={W / 2} x2={W / 2} y1={H / 2 - 0.03 * H} y2={H / 2 + 0.03 * H} stroke="#e2e8f0" />
           <line x1={W / 2 - 0.03 * W} x2={W / 2 + 0.03 * W} y1={H / 2} y2={H / 2} stroke="#e2e8f0" />
