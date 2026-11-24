@@ -49,7 +49,7 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import type { OdontogramEntry } from "../../lib/dental/odontogram"
+import { findingTeeth, type OdontogramEntry, teethPhrase } from "../../lib/dental/odontogram"
 import { FindingElsewhere } from "./finding-elsewhere"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
@@ -845,23 +845,27 @@ export function ToothDrawer({
   )
   // Lo registrado en esta atención, a la vista y con su «Anular»: fuera del pliegue de la historia
   // (QA del 16 nov, Q14: para anular lo recién registrado había que abrir «Historia… sin registros»).
-  const todayFindings = teeth.flatMap((toothNumber) =>
-    findingsOfEncounter(entriesOf(toothNumber), encounterId).map((group) => ({ toothNumber, ...group })),
-  )
+  // Un hallazgo de varias piezas (el puente) sale una vez, con todas sus piezas: antes salía una vez
+  // por pieza y «Anular» decía «pieza 45» aunque anulaba las tres (QA del 23 nov).
+  const todayFindings = teeth
+    .flatMap((toothNumber) => findingsOfEncounter(entriesOf(toothNumber), encounterId))
+    .filter((group, i, all) => all.findIndex((other) => other.ids.join(",") === group.ids.join(",")) === i)
   const today =
     todayFindings.length > 0 ? (
       <section aria-label="Registrado hoy" className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Registrado hoy</h3>
         <ul className="flex flex-col gap-1.5">
-          {todayFindings.map(({ toothNumber, first: entry, ids, surfaces }) => {
+          {todayFindings.map(({ first: entry, ids, surfaces }) => {
             const words = findingWords(official, entry)
+            const own = findingTeeth(entry)
+            const where = teethPhrase(own)
             return (
               <li
                 key={ids.join(",")}
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
               >
                 <span className="min-w-0 flex-1">
-                  {teeth.length > 1 ? `Pieza ${toothNumber} · ` : ""}
+                  {teeth.length > 1 || own.length > 1 ? `${where.charAt(0).toUpperCase()}${where.slice(1)} · ` : ""}
                   {words}
                   {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
                   {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
@@ -874,7 +878,7 @@ export function ToothDrawer({
                     disabled={busy}
                     onClick={() => {
                       voidForm.reset(EMPTY_VOID)
-                      setVoiding({ ids, label: `pieza ${toothNumber} (${words})` })
+                      setVoiding({ ids, label: `${where} (${words})` })
                     }}
                   >
                     Anular

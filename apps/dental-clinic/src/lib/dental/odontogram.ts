@@ -104,6 +104,17 @@ export interface OdontogramAssessment {
   entries: OdontogramEntry[]
 }
 
+/** Las piezas de un hallazgo: la suya o, si abarca varias (un puente, una prótesis), todas. */
+export function findingTeeth(entry: Pick<OdontogramEntry, "toothNumber" | "details">): number[] {
+  return entry.details?.relatedTeeth?.length ? [...entry.details.relatedTeeth] : [entry.toothNumber]
+}
+
+/** «pieza 44» o «piezas 44, 45 y 46». */
+export function teethPhrase(teeth: readonly number[]): string {
+  if (teeth.length <= 1) return `pieza ${teeth.join("")}`
+  return `piezas ${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
+}
+
 /** Proyección por pieza de hallazgos coexistentes; el historial original no se modifica. */
 export function winnersAsOf(history: OdontogramEntry[], iso?: string): OdontogramState {
   const byTooth = new Map<number, OdontogramEntry[]>()

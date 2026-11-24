@@ -9,6 +9,7 @@ import {
   periodontalBlockSummary,
   useEncounterPeriodontal,
 } from "../../components/dental/periodontal/encounter-periodontal"
+import { findingTeeth } from "../../lib/dental/odontogram"
 import { useOdontogram } from "../../lib/dental/use-odontogram"
 import { dentalExamination } from "./examination"
 import { lazyPart } from "./lazy-part"
@@ -48,7 +49,8 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
   const [selectedTooth] = selected
   const siteFinding =
     selected.length === 1
-      ? [...groups].reverse().find((group) => group.first.toothNumber === selectedTooth)?.first.id ?? null
+      ? // Con la 45 elegida, también el puente de la 44 a la 46.
+        [...groups].reverse().find((group) => findingTeeth(group.first).includes(selectedTooth!))?.first.id ?? null
       : null
   return {
     blocks: [

@@ -12,7 +12,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
-import { and, eq, inArray, or } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { listPatientDocuments } from "../clinical.js"
 import { validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
@@ -72,7 +72,12 @@ export async function getToothHistory(
         and(
           eq(odontogramEntry.organizationId, orgId),
           eq(odontogramEntry.patientId, patientId),
-          eq(odontogramEntry.toothNumber, toothNumber),
+          // Un hallazgo de varias piezas (el puente de la 44 a la 46) se guarda en una y nombra las
+          // demás: la historia de la 45 también lo trae (QA del 23 nov: decía «sin registros»).
+          or(
+            eq(odontogramEntry.toothNumber, toothNumber),
+            sql`${odontogramEntry.details} -> 'relatedTeeth' @> ${JSON.stringify([toothNumber])}::jsonb`,
+          ),
         ),
       ),
     tx

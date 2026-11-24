@@ -1659,6 +1659,9 @@ export async function listWorkspaceAudit(
       select a.id, a.action, a.entity, a.entity_id, a.actor_user_id, a.created_at,
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
         case when a.entity_id ~ ${uuid} then a.entity_id::uuid end as eid,
+        -- El paciente que el registro nombra en sus datos (un hallazgo del odontograma), sin que el
+        -- código común conozca la tabla de cada producto (QA del 23 nov: «Sobre qué: —»).
+        case when a.metadata->>'patientId' ~ ${uuid} then (a.metadata->>'patientId')::uuid end as meta_patient,
         -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
         case when a.actor_user_id like 'contact:%' then 'patient' when a.metadata->>'by' = 'clio' then 'clio' else a.metadata->>'origin' end as origin
       from audit_event a
@@ -1687,7 +1690,8 @@ export async function listWorkspaceAudit(
     left join clinical_form_response fr on ev.entity = 'clinical_form_response' and fr.organization_id = ${orgId} and fr.id = ev.eid
     left join patient pt on pt.organization_id = ${orgId} and pt.id = coalesce(
       ap.patient_id, tk.patient_id, pm.patient_id, pa.patient_id, ch.patient_id, rf.patient_id, pr.patient_id,
-      cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, fr.patient_id, case when ev.entity = 'patient' then ev.eid end)
+      cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, fr.patient_id, case when ev.entity = 'patient' then ev.eid end,
+      ev.meta_patient)
     left join contact person on person.organization_id = ${orgId}
       and person.id = coalesce(pt.person_id, cv.contact_id, op.contact_id, case when ev.entity = 'contact' then ev.eid end)
     ${
