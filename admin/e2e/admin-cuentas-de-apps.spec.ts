@@ -34,6 +34,17 @@ async function noSideScroll(page: Page) {
   expect(fits, "la página no se desborda a lo ancho").toBe(true)
 }
 
+/**
+ * La lista de pedidos se lee al cargar la página: se recarga hasta que aparece lo que respondió la
+ * app (la API lo manda en el momento; el trabajador, si no llegó).
+ */
+async function untilShown(page: Page, text: string) {
+  await expect(async () => {
+    await page.reload()
+    await expect(page.getByText(text)).toBeVisible({ timeout: 3_000 })
+  }).toPass({ timeout: 30_000 })
+}
+
 const DESKTOP = { width: 1366, height: 860 }
 const PHONE = { width: 390, height: 844 }
 
@@ -104,17 +115,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await page.getByRole("button", { name: "Pedirlo" }).click()
   await expect(page.getByRole("heading", { name: "Dejar entrar a soporte" })).toHaveCount(0)
   // La API lo manda en el momento; gestorIA de mentira responde «hecho».
-  await expect
-    .poll(
-      async () => {
-        await page.reload()
-        return page
-          .getByText("Pedido a la tienda: su Dueño o un Administrador decide si entras.")
-          .count()
-      },
-      { timeout: 30_000 },
-    )
-    .toBeGreaterThan(0)
+  await untilShown(page, "Pedido a la tienda: su Dueño o un Administrador decide si entras.")
   await expect(page.getByText("Hecho").first()).toBeVisible()
 
   // Quitar a una persona: gestorIA responde que es el único Dueño.
@@ -122,17 +123,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await page.getByLabel("Correo de su cuenta").fill(user.email)
   await page.getByLabel("Motivo").fill("Lo pidió por correo")
   await page.getByRole("button", { name: "Pedirlo" }).click()
-  await expect
-    .poll(
-      async () => {
-        await page.reload()
-        return page
-          .getByText("Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.")
-          .count()
-      },
-      { timeout: 30_000 },
-    )
-    .toBeGreaterThan(0)
+  await untilShown(page, "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.")
   await expect(page.getByText("Falló")).toBeVisible()
   await expect(page.getByText(`${user.email} · Lo pidió por correo`)).toBeVisible()
 
@@ -189,15 +180,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await expect(row).toContainText(`Tienda ${tag}`)
   await shot(page, "cuentas-de-otras-apps-escritorio")
   await row.getByRole("button", { name: "Abrir" }).click()
-  await expect
-    .poll(
-      async () => {
-        await page.reload()
-        return page.getByText("Tienda abierta: su dueño ya puede entrar.").count()
-      },
-      { timeout: 30_000 },
-    )
-    .toBeGreaterThan(0)
+  await untilShown(page, "Tienda abierta: su dueño ya puede entrar.")
   await expect(page.getByText("Abrir la cuenta").first()).toBeVisible()
   await shot(page, "cuenta-abierta-escritorio")
 
