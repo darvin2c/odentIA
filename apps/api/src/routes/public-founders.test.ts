@@ -2,6 +2,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
+import { saasWebContact } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import type { MailMessage } from "@odentia/mail"
@@ -355,4 +356,84 @@ it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", 
   const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-latido"))
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / 86_400_000)).toBe(45)
   await ownerDb.update(saasSignupPolicy).set({ medicalMode: "invitacion" })
+})
+
+describe("las guías de la web (ADR 0214)", () => {
+  const GUIDE = "/guias/como-llenar-un-odontograma"
+  const post = (app: Hono, path: string, payload: unknown) =>
+    app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+      body: JSON.stringify(payload),
+    })
+
+  it("la solicitud enviada desde una guía guarda su página y dice si salió su copia", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const res = await post(app, `/api/public/founders/waitlist?desde=${encodeURIComponent(GUIDE)}`, request("qa.guia@example.com"))
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ existing: false, copySent: true })
+    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, "qa.guia@example.com"))
+    expect(row?.sourcePage).toBe(GUIDE)
+    // Otra vez el mismo correo: ya estaba en la lista y no sale otra copia; la pantalla lo dice.
+    const again = await post(app, "/api/public/founders/waitlist", request("qa.guia@example.com"))
+    expect(await again.json()).toMatchObject({ existing: true, copySent: false })
+  })
+
+  it("el aviso manda las plantillas adjuntas una vez al día, con la puerta para pedir entrar", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const body = { email: "QA.Milagros@example.com", page: GUIDE, sheets: ["odontograma", "odontograma-ninos"] }
+    const res = await post(app, "/api/public/founders/contact", body)
+    expect(res.status).toBe(201)
+    expect(await res.json()).toEqual({ ok: true, sent: true })
+    expect(mailer.sent).toHaveLength(1)
+    const mail = mailer.sent[0]!
+    expect(mail.to).toBe("qa.milagros@example.com")
+    expect(mail.subject).toBe("Tus plantillas para imprimir")
+    expect(mail.replyTo).toBe("hola@odentia32.com")
+    expect(mail.attachments?.map((file) => [file.filename, file.contentType])).toEqual([
+      ["odontograma.pdf", "application/pdf"],
+      ["odontograma-ninos.pdf", "application/pdf"],
+    ])
+    // Con Fundadores, «Pide tus USD 100» con su correo en el fragmento: nunca en la consulta.
+    expect(mail.html).toContain("Pide tus USD 100")
+    expect(mail.html).toContain("https://www.odentia.localhost/solicitar-invitacion#correo=qa.milagros%40example.com")
+    expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}`)
+    const again = await post(app, "/api/public/founders/contact", body)
+    expect(again.status).toBe(200)
+    expect(await again.json()).toEqual({ ok: true, sent: false, reason: "reciente" })
+    expect(mailer.sent).toHaveLength(1)
+  })
+
+  it("solo JSON y solo páginas de las guías; quien llena el campo trampa no guarda nada", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const form = await app.request("/api/public/founders/contact", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "email=qa.form%40example.com",
+    })
+    expect(form.status).toBe(415)
+    expect((await post(app, "/api/public/founders/contact", { email: "qa.precios@example.com", page: "/precios", sheets: ["odontograma"] })).status).toBe(400)
+    const trap = await post(app, "/api/public/founders/contact", {
+      email: "qa.trampa@example.com",
+      page: GUIDE,
+      sheets: ["odontograma"],
+      website: "http://spam.example",
+    })
+    expect(trap.status).toBe(201)
+    expect(mailer.sent).toHaveLength(0)
+    expect(await ownerDb.select().from(saasWebContact).where(eq(saasWebContact.email, "qa.trampa@example.com"))).toEqual([])
+  })
+
+  it("latidIA y vistIA no tienen guías: el aviso responde 404 en su dominio", async () => {
+    const app = buildApp(authFor(null, { calls: 0 }))
+    const res = await app.request("https://api.latidia.localhost/api/public/founders/contact", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "qa.latidia@example.com", page: GUIDE, sheets: ["odontograma"] }),
+    })
+    expect(res.status).toBe(404)
+  })
 })

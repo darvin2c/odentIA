@@ -10,8 +10,8 @@
  * (`pnpm --filter @odentia/services plantillas` los vuelve a escribir en la web).
  */
 import { odontogramSheetScene } from "@odentia/dental/odontogram-sheet"
-import { type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "./document-kit.js"
 import { drawChart, NTS_SOURCE } from "./dental/odontogram-pdf.js"
+import { type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "./document-kit.js"
 
 /** Las plantillas, con su archivo en la web (`apps/web/public/guias/`). */
 export const BLANK_SHEETS = {
@@ -75,15 +75,32 @@ function ruledBoxes(kit: DocumentKit, titles: string[], lines: number): void {
   titles.forEach((title, index) => {
     const x = kit.left + index * (width + gapX)
     const caption = title.toLocaleUpperCase("es")
-    kit.centeredText(caption, x + kit.textWidth(caption, "sansBold", SIZE.label) / 2, kit.y - SIZE.label, {
-      size: SIZE.label,
-      face: "sansBold",
-      color: kit.color("ink"),
+    kit.centeredText(
+      caption,
+      x + kit.textWidth(caption, "sansBold", SIZE.label) / 2,
+      kit.y - SIZE.label,
+      {
+        size: SIZE.label,
+        face: "sansBold",
+        color: kit.color("ink"),
+      },
+    )
+    kit.page.drawRectangle({
+      x,
+      y: top - height,
+      width,
+      height,
+      borderColor: kit.color("gray"),
+      borderWidth: 0.75,
     })
-    kit.page.drawRectangle({ x, y: top - height, width, height, borderColor: kit.color("gray"), borderWidth: 0.75 })
     for (let line = 1; line < lines; line++) {
       const y = top - 2 - line * leading
-      kit.page.drawLine({ start: { x: x + 6, y }, end: { x: x + width - 6, y }, thickness: 0.4, color: kit.color("gray") })
+      kit.page.drawLine({
+        start: { x: x + 6, y },
+        end: { x: x + width - 6, y },
+        thickness: 0.4,
+        color: kit.color("gray"),
+      })
     }
   })
   kit.y = top - height
@@ -108,20 +125,36 @@ function legend(kit: DocumentKit, children: boolean): void {
   // La leyenda va entera en una hoja: partida no se lee.
   kit.ensure(children ? 175 : 140)
   kit.subheading("CÓMO SE MARCA", { size: SIZE.label, before: 10, after: 2 })
-  legendLine(kit, "Rojo", "lo que hay que tratar (caries y lo que está en mal estado o es provisional).")
-  legendLine(kit, "Azul", "lo que está en buen estado y lo que no es una enfermedad, como el diente que falta.")
+  legendLine(
+    kit,
+    "Rojo",
+    "lo que hay que tratar (caries y lo que está en mal estado o es provisional).",
+  )
+  legendLine(
+    kit,
+    "Azul",
+    "lo que está en buen estado y lo que no es una enfermedad, como el diente que falta.",
+  )
   legendLine(
     kit,
     "Dibujos",
     "el aspa azul es el diente que falta (DEX se extrajo por caries, DAO por otra causa, DNE no erupcionado); el cuadrado alrededor de la corona, una corona; la línea vertical en la raíz, una endodoncia (TC).",
   )
-  legendLine(kit, "Caries", "MB mancha blanca · CE esmalte · CD dentina · CDP llega a la pulpa. Una caries de dos caras es una sola, con una sigla.")
+  legendLine(
+    kit,
+    "Caries",
+    "MB mancha blanca · CE esmalte · CD dentina · CDP llega a la pulpa. Una caries de dos caras es una sola, con una sigla.",
+  )
   legendLine(
     kit,
     "Restauraciones y coronas",
     "AM amalgama · R resina · IV ionómero de vidrio · CM metálica · CMC metalcerámica · CLM libre de metal · CT corona provisional.",
   )
-  legendLine(kit, "Otros", "RR remanente radicular · S sellante · FFP fosas y fisuras profundas · IMP implante.")
+  legendLine(
+    kit,
+    "Otros",
+    "RR remanente radicular · S sellante · FFP fosas y fisuras profundas · IMP implante.",
+  )
   if (children) {
     legendLine(
       kit,
@@ -134,10 +167,19 @@ function legend(kit: DocumentKit, children: boolean): void {
 /** Qué dientes suele tener a cada edad (AAPD, Dental Growth and Development, 2026). */
 const ERUPTION: Array<[string, string]> = [
   ["2½ a 5 años", "Los 20 de leche (51 a 85)"],
-  ["6 años", "Los 20 de leche y los molares de los 6 años (16, 26, 36, 46); empiezan a salir los incisivos centrales de abajo (31, 41)"],
-  ["7 a 8 años", "Salieron los incisivos centrales (11, 21, 31, 41) y los laterales de abajo (32, 42); se cayeron sus dientes de leche (51, 61, 71, 72, 81, 82)"],
+  [
+    "6 años",
+    "Los 20 de leche y los molares de los 6 años (16, 26, 36, 46); empiezan a salir los incisivos centrales de abajo (31, 41)",
+  ],
+  [
+    "7 a 8 años",
+    "Salieron los incisivos centrales (11, 21, 31, 41) y los laterales de abajo (32, 42); se cayeron sus dientes de leche (51, 61, 71, 72, 81, 82)",
+  ],
   ["8 a 9 años", "Salen los laterales de arriba (12, 22) y se caen el 52 y el 62"],
-  ["9 a 12 años", "Se cambian los caninos y los molares de leche por los caninos y premolares permanentes"],
+  [
+    "9 a 12 años",
+    "Se cambian los caninos y los molares de leche por los caninos y premolares permanentes",
+  ],
   ["12 a 14 años", "Salen los segundos molares (17, 27, 37, 47)"],
   ["17 años en adelante", "Pueden salir los terceros molares (18, 28, 38, 48)"],
 ]
@@ -146,7 +188,9 @@ const ERUPTION: Array<[string, string]> = [
 export const ERUPTION_BY_AGE: ReadonlyArray<readonly [string, string]> = ERUPTION
 
 async function blankOdontogram(children: boolean): Promise<Uint8Array> {
-  const kit = await openTemplate(children ? BLANK_SHEETS["odontograma-ninos"].title : BLANK_SHEETS.odontograma.title)
+  const kit = await openTemplate(
+    children ? BLANK_SHEETS["odontograma-ninos"].title : BLANK_SHEETS.odontograma.title,
+  )
   kit.gap(10)
   kit.titleWithDetails(children ? "Odontograma de niños" : "Odontograma", [])
   kit.gap(6)
@@ -184,7 +228,11 @@ async function blankOdontogram(children: boolean): Promise<Uint8Array> {
       "Las edades son aproximadas: muchos niños sanos no siguen el calendario al pie de la letra. Marca cada diente que está en la boca, en su fila: las del medio son los de leche.",
       { size: SIZE.label, tone: "gray", leading: 1.4 },
     )
-    kit.text("Fuente de las edades: AAPD, «Dental Growth and Development».", { size: SIZE.label, tone: "gray", leading: 1.4 })
+    kit.text("Fuente de las edades: AAPD, «Dental Growth and Development».", {
+      size: SIZE.label,
+      tone: "gray",
+      leading: 1.4,
+    })
   }
   return kit.finish()
 }
@@ -220,20 +268,28 @@ async function blankBudget(): Promise<Uint8Array> {
   ])
 
   kit.subheading("LO QUE ENCONTRAMOS", { size: SIZE.label, before: 10, after: 4 })
-  kit.text("Encierra en un círculo cada diente con algo que tratar; lo que encontraste va en su renglón del plan.", {
-    size: SIZE.label,
-    tone: "gray",
-    leading: 1.4,
-  })
+  kit.text(
+    "Encierra en un círculo cada diente con algo que tratar; lo que encontraste va en su renglón del plan.",
+    {
+      size: SIZE.label,
+      tone: "gray",
+      leading: 1.4,
+    },
+  )
   kit.gap(4)
-  kit.siteChart(SITE_ROWS.map((row) => row.map((tooth) => ({ label: String(tooth), marked: false }))))
+  kit.siteChart(
+    SITE_ROWS.map((row) => row.map((tooth) => ({ label: String(tooth), marked: false }))),
+  )
 
   kit.subheading("EL PLAN, POR FASES", { size: SIZE.label, before: 12, after: 2 })
-  kit.text("Un renglón por tratamiento, con su diente (y sus caras, si es una restauración). La corona de un diente va después de su endodoncia.", {
-    size: SIZE.label,
-    tone: "gray",
-    leading: 1.4,
-  })
+  kit.text(
+    "Un renglón por tratamiento, con su diente (y sus caras, si es una restauración). La corona de un diente va después de su endodoncia.",
+    {
+      size: SIZE.label,
+      tone: "gray",
+      leading: 1.4,
+    },
+  )
   for (const [phase, lines] of PHASES) {
     // La fase con sus renglones y su subtotal no se parte entre dos hojas.
     kit.ensure(30 + (lines + 2) * 21)
@@ -245,18 +301,24 @@ async function blankBudget(): Promise<Uint8Array> {
         { label: "Sesiones", width: 58, align: "center" },
         { label: "Importe", width: 78, align: "right" },
       ],
-      rows: [...Array.from({ length: lines }, () => [EMPTY, EMPTY, EMPTY, EMPTY]), [EMPTY, `Subtotal ${phase.toLocaleLowerCase("es")}`, EMPTY, EMPTY]],
+      rows: [
+        ...Array.from({ length: lines }, () => [EMPTY, EMPTY, EMPTY, EMPTY]),
+        [EMPTY, `Subtotal ${phase.toLocaleLowerCase("es")}`, EMPTY, EMPTY],
+      ],
       rowPad: 4,
       size: SIZE.dense,
     })
   }
 
   kit.subheading("OTRO CAMINO (ELIJA UNO; NO SE SUMAN)", { size: SIZE.label, before: 12, after: 2 })
-  kit.text("Dos formas de resolver lo mismo, cada una con su total. Lo demás del plan va igual en las dos.", {
-    size: SIZE.label,
-    tone: "gray",
-    leading: 1.4,
-  })
+  kit.text(
+    "Dos formas de resolver lo mismo, cada una con su total. Lo demás del plan va igual en las dos.",
+    {
+      size: SIZE.label,
+      tone: "gray",
+      leading: 1.4,
+    },
+  )
   kit.table({
     columns: [
       { label: "Opción A", pad: 9 },
@@ -264,7 +326,10 @@ async function blankBudget(): Promise<Uint8Array> {
       { label: "Opción B", pad: 9 },
       { label: "Importe", width: 70, align: "right" },
     ],
-    rows: [...Array.from({ length: 2 }, () => [EMPTY, EMPTY, EMPTY, EMPTY]), ["Subtotal A", EMPTY, "Subtotal B", EMPTY]],
+    rows: [
+      ...Array.from({ length: 2 }, () => [EMPTY, EMPTY, EMPTY, EMPTY]),
+      ["Subtotal A", EMPTY, "Subtotal B", EMPTY],
+    ],
     rowPad: 4,
     size: SIZE.dense,
   })
@@ -286,7 +351,12 @@ async function blankBudget(): Promise<Uint8Array> {
       { label: "Después", width: 56, align: "center" },
       { label: "No", width: 56, align: "center" },
     ],
-    rows: Array.from({ length: 2 }, () => [EMPTY, [{ checkbox: true }], [{ checkbox: true }], [{ checkbox: true }]]),
+    rows: Array.from({ length: 2 }, () => [
+      EMPTY,
+      [{ checkbox: true }],
+      [{ checkbox: true }],
+      [{ checkbox: true }],
+    ]),
     rowPad: 4,
     size: SIZE.dense,
   })
@@ -294,8 +364,15 @@ async function blankBudget(): Promise<Uint8Array> {
   kit.subheading("FIRMAS", { size: SIZE.label, before: 12, after: 2 })
   kit.blankLines(
     [
-      [{ label: "Paciente o su responsable", span: 2 }, { label: "Documento" }, { label: "Parentesco" }],
-      [{ label: "Firma", span: 2 }, { label: "Fecha", span: 2 }],
+      [
+        { label: "Paciente o su responsable", span: 2 },
+        { label: "Documento" },
+        { label: "Parentesco" },
+      ],
+      [
+        { label: "Firma", span: 2 },
+        { label: "Fecha", span: 2 },
+      ],
       [{ label: "Profesional", span: 2 }, { label: "Colegiatura" }, { label: "Firma" }],
     ],
     { height: 26 },

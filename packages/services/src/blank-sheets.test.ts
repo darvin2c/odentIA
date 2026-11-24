@@ -2,7 +2,13 @@
 import { readFileSync } from "node:fs"
 import { PDFDocument } from "pdf-lib"
 import { describe, expect, it } from "vitest"
-import { BLANK_SHEET_KEYS, BLANK_SHEETS, blankSheetBytes, isBlankSheet, renderBlankSheet } from "./blank-sheets.js"
+import {
+  BLANK_SHEET_KEYS,
+  BLANK_SHEETS,
+  blankSheetBytes,
+  isBlankSheet,
+  renderBlankSheet,
+} from "./blank-sheets.js"
 
 describe("las plantillas en blanco", () => {
   it("cada una sale en A4, en dos hojas como mucho", async () => {
@@ -24,8 +30,13 @@ describe("las plantillas en blanco", () => {
 
   it("los PDF de la web están al día (si cambió el dibujo: pnpm --filter @odentia/services plantillas)", async () => {
     for (const sheet of BLANK_SHEET_KEYS) {
-      const published = readFileSync(new URL(`../../../apps/web/public/guias/${BLANK_SHEETS[sheet].file}`, import.meta.url))
-      expect(Buffer.from(await renderBlankSheet(sheet)).equals(published), BLANK_SHEETS[sheet].file).toBe(true)
+      const published = readFileSync(
+        new URL(`../../../apps/web/public/guias/${BLANK_SHEETS[sheet].file}`, import.meta.url),
+      )
+      expect(
+        Buffer.from(await renderBlankSheet(sheet)).equals(published),
+        BLANK_SHEETS[sheet].file,
+      ).toBe(true)
     }
   })
 

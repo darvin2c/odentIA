@@ -272,6 +272,44 @@ export function waitlistReceivedEmail(input: {
 }
 
 /**
+ * Las plantillas que pidió quien dejó su correo en una guía de la web (ADR 0214): van
+ * adjuntas en PDF, con el enlace a la guía y la puerta para empezar (con Fundadores, «Pide
+ * tus USD 100» con su correo ya puesto). Las cifras llegan de los precios publicados.
+ */
+export function webContactEmail(input: {
+  /** Los nombres de las plantillas adjuntas: «Odontograma», «Odontograma de niños». */
+  sheets: readonly string[]
+  /** La guía donde lo dejó, en la web. */
+  guideUrl: string
+  /** Cómo se hace en la app, en una línea. */
+  pitch: string
+  /** La puerta para empezar, como el botón de la web; nula si no hay. */
+  start: { label: string; url: string } | null
+  /** Lo que promete el plan que se muestra («los primeros USD 100 de tus agentes los pagamos nosotros»); nulo si nada. */
+  offer: string | null
+  replyTo?: string | undefined
+  brand?: MailBrand
+}): MailTemplate {
+  const name = mailBrandName(input.brand)
+  const one = input.sheets.length === 1
+  return renderEmail({
+    brand: input.brand,
+    subject: one ? `Tu plantilla para imprimir: ${input.sheets[0]}` : "Tus plantillas para imprimir",
+    preview: "Van adjuntas en PDF, listas para imprimir en A4.",
+    title: one ? "Aquí tienes tu plantilla" : "Aquí tienes tus plantillas",
+    paragraphs: [
+      `Van adjuntas en PDF, listas para imprimir en A4. Los pasos para llenarlas siguen en la guía: ${input.guideUrl}`,
+      input.pitch,
+      ...(input.offer ? [input.offer] : []),
+    ],
+    list: input.sheets,
+    ...(input.start ? action(input.start.label, input.start.url) : {}),
+    reason: `Te escribimos porque dejaste tu correo en una guía de la web de ${name}.`,
+    ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
+  })
+}
+
+/**
  * Aviso a hola@ de la marca de la solicitud (ADR 0186) de
  * cada cliente nuevo que pidió entrar desde la web: qué clínica, de qué
  * producto y de dónde, con el botón a su ficha en la administración. Es
