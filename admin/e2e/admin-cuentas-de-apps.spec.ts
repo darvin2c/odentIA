@@ -116,7 +116,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await expect(page.getByRole("heading", { name: "Dejar entrar a soporte" })).toHaveCount(0)
   // La API lo manda en el momento; gestorIA de mentira responde «hecho».
   await untilShown(page, "Pedido a la tienda: su Dueño o un Administrador decide si entras.")
-  await expect(page.getByText("Hecho").first()).toBeVisible()
+  await expect(page.getByText("Hecho", { exact: true }).first()).toBeVisible()
 
   // Quitar a una persona: gestorIA responde que es el único Dueño.
   await page.getByRole("button", { name: "Quitar a una persona" }).click()
@@ -124,7 +124,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await page.getByLabel("Motivo").fill("Lo pidió por correo")
   await page.getByRole("button", { name: "Pedirlo" }).click()
   await untilShown(page, "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.")
-  await expect(page.getByText("Falló")).toBeVisible()
+  await expect(page.getByText("Falló", { exact: true })).toBeVisible()
   await expect(page.getByText(`${user.email} · Lo pidió por correo`)).toBeVisible()
 
   // Uno que todavía no llega (sin respuesta de la app), anotado después: se ve «Pendiente».
@@ -144,14 +144,14 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   })
 
   await page.reload()
-  await expect(page.getByText("Pendiente")).toBeVisible()
+  await expect(page.getByText("Pendiente", { exact: true })).toBeVisible()
   await expect(page.getByText("Todavía no llega: La app no respondió a tiempo")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "cuenta-escritorio-pendiente-hecho-y-fallo")
 
   await page.setViewportSize(PHONE)
   await page.reload()
-  await expect(page.getByText("Falló")).toBeVisible()
+  await expect(page.getByText("Falló", { exact: true })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "cuenta-telefono")
   await page.getByRole("button", { name: "Dejar entrar a soporte" }).click()

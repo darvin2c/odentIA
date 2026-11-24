@@ -50,7 +50,7 @@ test("el Dueño sube el comprobante de un cobro sin pagar", async ({ page }) => 
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/plan`)
   await expect(page.getByRole("heading", { name: "Plan y pagos" })).toBeVisible()
-  await expect(page.getByText("Lo que se te cobró")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Lo que se te cobró" })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "plan-escritorio")
 
