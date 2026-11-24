@@ -163,7 +163,10 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   // Abrir la cuenta de un cliente con su plan, desde Cobros y planes.
   await page.setViewportSize(DESKTOP)
   await gotoHydrated(page, hostUrl("admin", "/billing"))
+  // El botón espera a los planes: sin uno activo de gestorIA se queda apagado.
   const open = page.getByRole("button", { name: "Abrir una cuenta" })
+  await open.scrollIntoViewIfNeeded()
+  await expect(open).toBeEnabled()
   await open.focus()
   await page.keyboard.press("Enter")
   await expect(page.getByRole("heading", { name: "Abrir una cuenta de gestorIA" })).toBeVisible()

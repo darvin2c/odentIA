@@ -148,7 +148,7 @@ function AccountPage() {
   })
   const methods = usePaymentMethods()
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "billing"] })
-  const payments = usePaymentActions({ onChanged: refresh })
+  const payments = usePaymentActions({ onChanged: refresh, noun: "cuenta" })
   const [planCode, setPlanCode] = useState("")
   const [manualOpen, setManualOpen] = useState(false)
   const [pauseOpen, setPauseOpen] = useState(false)
@@ -364,6 +364,7 @@ function AccountPage() {
           methodName={(code) => methods.data?.find((method) => method.code === code)?.name ?? code}
           actions={payments}
           confirmPending
+          noun="cuenta"
         />
         {payments.dialogs}
         {payments.actionError ? (
@@ -469,6 +470,7 @@ function AccountPage() {
         <ManualPaymentDrawer
           orgs={[{ organizationId: account.id, organizationName: name }]}
           methods={methods.data ?? []}
+          noun="cuenta"
           onClose={() => setManualOpen(false)}
           onSaved={refresh}
         />

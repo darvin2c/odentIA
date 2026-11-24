@@ -506,7 +506,7 @@ export function StoreLayout() {
           <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em]">{store.name}</h1>
           <p className="text-sm text-muted-foreground">
             {store.supportUntil
-              ? `Entraste como soporte de gestorIA, solo a mirar, hasta el ${when(store.supportUntil)}.`
+              ? `Entraste como soporte de gestorIA, solo a mirar, hasta el ${when(store.supportUntil).replace(/\.$/, "")}.`
               : `Eres ${ROLES[store.role].name}. Vende en ${store.currency}.`}
           </p>
         </div>
