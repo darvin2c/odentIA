@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
+import { common, useDetailMode, useStaysBeside, ViewTabs } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -56,6 +56,7 @@ import { ActiveFindingsList } from "./active-findings-list"
 import { OdontogramArch } from "./odontogram-arch"
 import { SignedOdontograms } from "./odontogram-assessments"
 import { OdontogramDocument } from "./odontogram-document"
+import { OdontogramFront } from "./odontogram-front"
 import {
   findingWords,
   OdontogramNotationProvider,
@@ -64,31 +65,88 @@ import {
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
 
-/** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
+/** Ancho del contenedor disponible (no del viewport): a partir de 960 px cabe la pieza al lado. */
 function useContainerWide(): {
   ref: RefObject<HTMLDivElement | null>
   wide: boolean
-  narrow: boolean
 } {
   const ref = useRef<HTMLDivElement | null>(null)
   const [wide, setWide] = useState(false)
-  const [narrow, setNarrow] = useState(false)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
     const update = (): void => {
       // Dentro de un panel plegado mide 0: no cambia nada.
       if (el.clientWidth === 0) return
-      setWide(el.clientWidth >= 960)
-      // En el celular, una arcada a la vez: las dos juntas dejaban piezas de 23 px.
-      setNarrow(el.clientWidth < 520)
+      // La pieza al lado y a la boca le quedan 600 px por dentro de su borde (40,5rem con el relleno).
+      setWide(el.clientWidth >= 984)
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-  return { ref, wide, narrow }
+  return { ref, wide }
+}
+
+/**
+ * Cómo se acomodan las dos vistas según el ancho del lugar de la boca, no de la pantalla (mesa del
+ * 23 nov 2026, diseño UX): «whole», la boca entera, los arcos de arriba a la izquierda y la vista
+ * de frente con 16 piezas por fila (900 px o más); «beside», una arcada, su arco al lado de su
+ * vista de frente en dos filas de 8 (600 a 899: la atención con la pieza abierta al lado, la
+ * tableta); «stacked», una arcada, el arco arriba y la vista de frente debajo (el celular). Así
+ * cada pieza se toca con el dedo (24 px o más) sin desplazarse de lado.
+ */
+type MouthLayout = "whole" | "beside" | "stacked"
+function useMouthLayout(
+  mixed: boolean,
+  /** La pieza puede abrirse al lado: el acomodo es el de una arcada, con o sin ella abierta. */
+  besideAlways: boolean,
+): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
+  const ref = useRef<HTMLDivElement | null>(null)
+  // Antes de medir, la boca entera: es lo que se ve en el escritorio, donde más se atiende.
+  const [layout, setLayout] = useState<MouthLayout>("whole")
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = (): void => {
+      const width = el.clientWidth
+      if (width === 0) return
+      // En la mixta el arco necesita más ancho (sus temporales no bajan de 24 px): la boca entera
+      // desde 1040 px y, más angosta, el arco arriba a todo el ancho (QA del 23 nov).
+      // En la atención, si la pieza cabe al lado, siempre una arcada: así abrirla no reacomoda la boca
+      // ni corre lo que estaba bajo el dedo (QA del 23 nov, diseño UX).
+      if (!mixed && besideAlways && width >= 600) setLayout("beside")
+      else setLayout(width >= (mixed ? 1040 : 900) ? "whole" : !mixed && width >= 600 ? "beside" : "stacked")
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [mixed, besideAlways])
+  return { ref, layout }
+}
+
+/**
+ * Las filas de una arcada de frente: las permanentes en dos de 8 (derecha, izquierda) y las de leche
+ * en dos de 5. Así, a 360 px, ninguna pieza baja de 24 px de ancho para tocarla.
+ */
+function singleArchRows(
+  permanent: readonly number[],
+  primary: readonly number[] | null,
+  upper: boolean,
+): number[][] {
+  const halves = (row: readonly number[]) => [
+    row.slice(0, row.length / 2),
+    row.slice(row.length / 2),
+  ]
+  const rows: number[][] = permanent.length > 0 ? halves(permanent) : []
+  // Las de leche quedan del lado de las coronas, como en la boca: abajo en la superior, arriba en la inferior.
+  if (primary && primary.length > 0) {
+    if (upper) rows.push(...halves(primary))
+    else rows.unshift(...halves(primary))
+  }
+  return rows
 }
 
 /** Lo que se pierde si la pieza abierta se cierra con un hallazgo a medias. */
@@ -165,7 +223,7 @@ function StudioBody({
   const officialTitleRef = useRef<HTMLHeadingElement>(null)
   const queryClient = useQueryClient()
   const id = useId()
-  const { ref: containerRef, wide, narrow } = useContainerWide()
+  const { ref: containerRef, wide } = useContainerWide()
   const mouthRef = useRef<HTMLElement>(null)
   /** En el celular, qué arcada se ve. */
   const [arch, setArch] = useState<"upper" | "lower">("upper")
@@ -200,6 +258,10 @@ function StudioBody({
     return suggested === "mixed" ? "mixed" : primary ? "primary" : "adult"
   }
   const [dentition, setDentition] = useState<Dentition>(() => dentitionFor(validInitial, suggested))
+  const { ref: viewsRef, layout } = useMouthLayout(dentition === "mixed", compact && wide && detailMode === "panel")
+  const oneArch = layout !== "whole"
+  /** Desde qué vista se abrió la pieza: al cerrarla, el foco vuelve ahí. */
+  const openedFrom = useRef<"top" | "front">("top")
   const [selection, setSelection] = useState<number[]>(validInitial ? [validInitial] : [])
   const [drawerOpen, setDrawerOpen] = useState(Boolean(validInitial))
   const [multiple, setMultiple] = useState(false)
@@ -224,6 +286,13 @@ function StudioBody({
   useEffect(() => {
     onSelectionChange?.(selection)
   }, [selection, onSelectionChange])
+  // Con una arcada a la vez, la que se ve es la de la pieza elegida: al abrirla al lado (o desde la
+  // lista de hallazgos) no desaparece de la vista (revisión del 23 nov).
+  const firstChosen = selection[0]
+  useEffect(() => {
+    if (firstChosen === undefined) return
+    setArch([1, 2, 5, 6].includes(Math.trunc(firstChosen / 10)) ? "upper" : "lower")
+  }, [firstChosen, layout])
   const dates = useMemo(
     () =>
       [
@@ -338,14 +407,15 @@ function StudioBody({
     lost: selectedToothLost(selection),
     onClose: () => setDrawerOpen(false),
   })
-  const twoColumns = !compactRow && (wide || showInlinePanel)
+  // Dos columnas solo con la pieza al lado: «Evolución» va debajo del odontograma (lienzo del 23 nov).
+  const twoColumns = !compactRow && showInlinePanel
   const earlier = compactRow
     ? visibleHistory.filter((entry) => !encounterId || entry.encounterId !== encounterId)
     : []
   // Sin nada elegido y sin historia, «Evolución» no tiene qué mostrar: no se muestra. En la
   // ficha, en el celular, va debajo de la lista de hallazgos: plegada encima la tapaba (QA del 9 nov).
   const evolutionEmpty = selection.length === 0 && (visibleHistory.length === 0 || compact)
-  const evolutionBelow = !wide && !compact && selection.length === 0
+  const evolutionBelow = !compact
   function historyList(entries: OdontogramEntry[]) {
     // Una caries de dos caras es una lesión: una tarjeta con sus caras, como en la atención (QA del
     // 9 nov, repaso 3: la DO de la 46 salía en dos tarjetas en la ficha).
@@ -380,7 +450,9 @@ function StudioBody({
             </div>
             {(surfaces.length > 0 || entry.diagnosisCode) && (
               <p className="mt-3 text-sm text-muted-foreground">
-                {surfaces.length > 0 ? surfaces.map((surface) => surfaceLabel(surface)).join(" y ") : "Pieza completa"}
+                {surfaces.length > 0
+                  ? surfaces.map((surface) => surfaceLabel(surface)).join(" y ")
+                  : "Pieza completa"}
                 {entry.diagnosisCode
                   ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}`
                   : ""}
@@ -470,19 +542,58 @@ function StudioBody({
       </div>
     </details>
   )
+  // En el celular, «Ver como la norma» y «Ver estado al» van al pie: arriba, lo que hace falta para
+  // elegir una pieza (mesa del 23 nov, diseño UX).
+  // Lo que hace falta para leer la mixta, dicho como se ve en cada acomodo (estándar E2).
+  const mixedHint = oneArch
+    ? "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van del lado de las coronas."
+    : "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van en las filas del medio."
+  const normButton = official ? (
+    <Button size="sm" variant="outline" onClick={() => setOfficialOpen(true)}>
+      Ver como la norma
+    </Button>
+  ) : null
+  const dateField = compact ? null : (
+    <Field className="w-full sm:w-52">
+      <FieldLabel htmlFor={`${id}-date`}>Ver estado al</FieldLabel>
+      <Select
+        value={snapshot}
+        items={{
+          current: "Actual",
+          ...Object.fromEntries(dates.map((date) => [date, snapshotLabel(date)])),
+        }}
+        onValueChange={(value) => {
+          if (canChangeSelection()) setSnapshot(value ?? "current")
+        }}
+        disabled={disabled}
+      >
+        <SelectTrigger id={`${id}-date`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="current">Actual</SelectItem>
+          {dates.map((date) => (
+            <SelectItem key={date} value={date}>
+              {snapshotLabel(date)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
-        // El arco no baja de 18rem: más angosto no se lee (QA del 16 nov, Q13: quedaba en 137 px con
-        // los números encimados). Sin `overflow` aquí: el arco y el panel se pegan a la ventana.
-        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(18rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
+        // Con la pieza al lado, la boca no baja de 600 px: así caben una arcada de arriba y su vista de
+        // frente (mesa del 23 nov, diseño UX). Sin `overflow` aquí: la boca y el panel se pegan a la ventana.
+        className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(40.5rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
       >
         <section
           ref={mouthRef}
           aria-label="Boca dental"
           // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
           // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -512,7 +623,7 @@ function StudioBody({
               («Toca una pieza…»). Lo que hace falta para leer la mixta se dice siempre (estándar E2). */}
           {compact ? (
             dentition === "mixed" ? (
-              <p className="text-xs text-muted-foreground">Arco exterior: permanentes. Arco interior: temporales.</p>
+              <p className="text-xs text-muted-foreground">{mixedHint}</p>
             ) : null
           ) : (
             <p className="text-xs text-muted-foreground">
@@ -521,7 +632,7 @@ function StudioBody({
                   ? "Dentición sugerida por la edad del paciente."
                   : "Dentición por defecto: no hay fecha de nacimiento registrada."
                 : "Vista cambiada a mano."}
-              {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
+              {dentition === "mixed" ? ` ${mixedHint}` : ""}
             </p>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -535,42 +646,9 @@ function StudioBody({
               >
                 Seleccionar varias
               </Button>
-              {official ? (
-                <Button size="sm" variant="outline" onClick={() => setOfficialOpen(true)}>
-                  Ver como la norma
-                </Button>
-              ) : null}
+              {layout === "stacked" ? null : normButton}
             </div>
-            {!compact && (
-              <Field className="w-full sm:w-52">
-                <FieldLabel htmlFor={`${id}-date`}>Ver estado al</FieldLabel>
-                <Select
-                  value={snapshot}
-                  items={{
-                    current: "Actual",
-                    ...Object.fromEntries(
-                      dates.map((date) => [date, snapshotLabel(date)]),
-                    ),
-                  }}
-                  onValueChange={(value) => {
-                    if (canChangeSelection()) setSnapshot(value ?? "current")
-                  }}
-                  disabled={disabled}
-                >
-                  <SelectTrigger id={`${id}-date`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current">Actual</SelectItem>
-                    {dates.map((date) => (
-                      <SelectItem key={date} value={date}>
-                        {snapshotLabel(date)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
+            {layout === "stacked" ? null : dateField}
           </div>
           {historical && (
             <div className="flex flex-wrap items-center gap-2">
@@ -623,53 +701,107 @@ function StudioBody({
               </Button>
             </div>
           )}
-          {/* En el celular el arco llega casi al borde de la tarjeta: así las piezas
-              quedan a 24 px una de otra, lo mínimo para tocarlas con el dedo. */}
-          {narrow ? (
-            // Una arcada a la vez en el celular: cada pieza a unos 44 px, lo que se toca con el dedo.
-            // Cada botón dice cuántas piezas de esa arcada tienen algo, sin depender del color.
-            <div className="flex gap-2" role="group" aria-label="Arcada">
-              {(
-                [
-                  ["upper", "Superior", [...(outerRows[0] ?? []), ...(innerRows?.[0] ?? [])]],
-                  ["lower", "Inferior", [...(outerRows[1] ?? []), ...(innerRows?.[1] ?? [])]],
-                ] as const
-              ).map(([value, label, rowTeeth]) => {
-                const marked = rowTeeth.filter((tooth) => entriesOf(tooth).length > 0).length
-                return (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    className="min-h-11 flex-1"
-                    variant={arch === value ? "default" : "outline"}
-                    aria-pressed={arch === value}
-                    onClick={() => setArch(value)}
-                  >
-                    {marked > 0 ? `${label} · ${marked} ${marked === 1 ? "hallazgo" : "hallazgos"}` : label}
-                  </Button>
-                )
-              })}
-            </div>
-          ) : null}
-          <div className="-mx-3 sm:mx-0">
-            <OdontogramArch
-              {...(narrow ? { single: arch } : {})}
-              teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
-              inner={
-                innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined
+          {/* Dos vistas (lienzo del 23 nov 2026): de arriba, el arco, para las caras; de frente, cada
+              pieza con su raíz, para lo que el arco no muestra (el perno, los conductos, el implante,
+              el puente). Se toca una pieza en cualquiera de las dos y la elegida se marca en las dos. */}
+          <div ref={viewsRef} className="flex min-w-0 flex-col gap-3">
+            {oneArch ? (
+              // Una arcada a la vez: cada pestaña dice cuántas piezas de esa arcada tienen algo.
+              <ViewTabs
+                label="Arcada"
+                value={arch}
+                options={(
+                  [
+                    ["upper", "Superior", upperTeeth],
+                    ["lower", "Inferior", lowerTeeth],
+                  ] as const
+                ).map(([value, label, rowTeeth]) => {
+                  const marked = rowTeeth.filter((tooth) => entriesOf(tooth).length > 0).length
+                  return { value, label, ...(marked > 0 ? { count: marked } : {}) }
+                })}
+                onValueChange={setArch}
+              />
+            ) : null}
+            <div
+              className={
+                layout === "stacked"
+                  ? "flex min-w-0 flex-col gap-4"
+                  : // El arco, más angosto con una arcada (así la de frente deja las incisivas en 24 px o
+                    // más) y más ancho en la mixta (sus temporales también).
+                    `grid min-w-0 items-start gap-6 ${layout === "beside" ? "grid-cols-[minmax(0,15rem)_minmax(0,32rem)]" : dentition === "mixed" ? "grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"}`
               }
-              entriesOf={entriesOf}
-              selected={selection}
-              disabled={disabled || editorPending}
-              onToggle={toggle}
-            />
+            >
+              <section
+                aria-label="De arriba"
+                // Apilada en una pantalla ancha (la mixta en la tableta), el arco con tope: la vista de
+                // frente entra en la pantalla.
+                className={`flex min-w-0 flex-col gap-2 ${layout === "stacked" ? "mx-auto w-full max-w-[26rem]" : ""}`}
+              >
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  De arriba · las caras
+                </h4>
+                {(oneArch ? [arch] : (["upper", "lower"] as const)).map((which) => (
+                  <OdontogramArch
+                    key={which}
+                    single={which}
+                    // En el celular, la U alta de siempre a todo el ancho: piezas de unos 34 px para el dedo.
+                    aspect={layout === "stacked" ? 1.1 : 0.8}
+                    title={which === "upper" ? "Superior" : "Inferior"}
+                    teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
+                    inner={
+                      innerRows
+                        ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] }
+                        : undefined
+                    }
+                    entriesOf={entriesOf}
+                    selected={selection}
+                    disabled={disabled || editorPending}
+                    onToggle={(tooth, additive) => {
+                      openedFrom.current = "top"
+                      toggle(tooth, additive)
+                    }}
+                  />
+                ))}
+              </section>
+              <section aria-label="De frente" className="flex min-w-0 flex-col gap-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  De frente · cada pieza con su raíz
+                </h4>
+                <OdontogramFront
+                  rows={
+                    oneArch
+                      ? singleArchRows(
+                          (arch === "upper" ? outerRows[0] : outerRows[1]) ?? [],
+                          innerRows
+                            ? ((arch === "upper" ? innerRows[0] : innerRows[1]) ?? [])
+                            : null,
+                          arch === "upper",
+                        )
+                      : innerRows
+                        ? [
+                            outerRows[0] ?? [],
+                            innerRows[0] ?? [],
+                            innerRows[1] ?? [],
+                            outerRows[1] ?? [],
+                          ]
+                        : [outerRows[0] ?? [], outerRows[1] ?? []]
+                  }
+                  entriesOf={entriesOf}
+                  selected={selection}
+                  disabled={disabled || editorPending}
+                  onToggle={(tooth, additive) => {
+                    openedFrom.current = "front"
+                    toggle(tooth, additive)
+                  }}
+                />
+              </section>
+            </div>
           </div>
           {multiple || !compact ? (
             <p className="text-xs text-muted-foreground">
               {multiple
                 ? "Marca las piezas y abre la selección para editarlas juntas."
-                : "Haz clic en una pieza para abrir su registro clínico."}
+                : "Toca una pieza, de arriba o de frente, para abrir su registro clínico."}
             </p>
           ) : null}
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
@@ -682,6 +814,12 @@ function StudioBody({
               Buen estado o característica no patológica
             </span>
           </div>
+          {layout === "stacked" && (normButton || dateField) ? (
+            <div className="flex flex-wrap items-end justify-between gap-2 border-t pt-3">
+              {normButton}
+              {dateField}
+            </div>
+          ) : null}
           {earlier.length > 0 ? (
             <details className="border-t pt-2">
               <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
@@ -718,9 +856,20 @@ function StudioBody({
                   const closed = selection[0]
                   setSelection([])
                   const active = document.activeElement
-                  if (closed != null && (active === null || active === document.body || active.closest("[data-tooth-panel]")))
+                  if (
+                    closed != null &&
+                    (active === null ||
+                      active === document.body ||
+                      active.closest("[data-tooth-panel]"))
+                  )
                     requestAnimationFrame(() =>
-                      mouthRef.current?.querySelector<HTMLElement>(`[data-tooth="${closed}"]`)?.focus({ preventScroll: true }),
+                      mouthRef.current
+                        ?.querySelector<HTMLElement>(
+                          openedFrom.current === "front"
+                            ? `[data-front-tooth="${closed}"]`
+                            : `[data-tooth="${closed}"]`,
+                        )
+                        ?.focus({ preventScroll: true }),
                     )
                 }}
                 patientId={patientId}

@@ -463,9 +463,10 @@ export interface ProductDictation {
   catalogText(): string
   /**
    * Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la
-   * variante del hallazgo y para qué piezas es cada servicio de la biblioteca).
+   * variante del hallazgo, para qué piezas es cada servicio de la biblioteca y, con `patientId`, lo
+   * de toda la pieza que el paciente ya tiene vigente).
    */
-  context(tx: Db, orgId: string): Promise<unknown>
+  context(tx: Db, orgId: string, patientId?: string): Promise<unknown>
   /**
    * Si un servicio puede ser lo dicho en ese sitio y para ese paciente (prueba con voz del 15 nov,
    * c3): el tarifario se busca primero entre los que calzan y, si ninguno calza con lo dicho, entre
@@ -496,13 +497,16 @@ export interface ProductDictation {
     scope: string | null,
     done?: boolean,
   ): DictationPrepared
-  /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
+  /**
+   * Revisa una sugerencia de una clase propia, ya validada con su operación; null si no se propone
+   * (odentIA: lo de toda la pieza que el paciente ya tiene vigente).
+   */
   prepare(
     tx: Db,
     kind: DictationKind,
     payload: Record<string, unknown>,
     context: { diagnosisSystem: DiagnosisSystemKey; product: unknown },
-  ): Promise<DictationPrepared>
+  ): Promise<DictationPrepared | null>
   /** Lo que entraría a la historia, en pocas palabras, de una clase propia. */
   summarize(kind: DictationKind, payload: Record<string, unknown>): string
   /** Cómo se le nombra al asistente una sugerencia pendiente de una clase propia, después de su clase. */

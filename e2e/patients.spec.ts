@@ -546,8 +546,12 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
         "aria-pressed",
         "true",
       )
-      await expect(page.locator('[data-tooth="36"]')).toBeVisible()
-      await expect(page.locator('[data-tooth="75"]')).toBeVisible()
+      // Permanentes y temporales, de arriba y de frente (la mixta, con una arcada a la vez si no
+      // cabe la boca entera: la superior al empezar).
+      for (const tooth of [16, 55]) {
+        await expect(page.locator(`[data-tooth="${tooth}"]`)).toBeVisible()
+        await expect(page.locator(`[data-front-tooth="${tooth}"]`)).toBeVisible()
+      }
       await expect(allergy).toBeVisible()
       expect(health.status).toBe(200)
       expect(account.status).toBe(403)

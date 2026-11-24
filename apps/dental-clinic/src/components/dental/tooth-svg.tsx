@@ -58,6 +58,23 @@ function paintOf(entry: OdontogramEntry): string | null {
 }
 
 /**
+ * Lo que dice cada pieza al lector de pantalla y al pasar el cursor, igual en el arco y en la
+ * vista de frente: «Pieza 15 — Espigo-muñón; Corona» y «Pieza 15: …. Seleccionar pieza.».
+ */
+export function toothWords(
+  toothNumber: number,
+  entries: readonly OdontogramEntry[],
+  official: OdontogramStandardProfile | null,
+): { title: string; label: string } {
+  const lines = entries.map((entry) => entryLine(entry, toothNumber, official))
+  const said = lines.length > 0 ? lines.join("; ") : "sin hallazgos"
+  return {
+    title: `Pieza ${toothNumber} — ${said}`,
+    label: `Pieza ${toothNumber}: ${said}. Seleccionar pieza.`,
+  }
+}
+
+/**
  * Línea de cabecera accesible por hallazgo: la etiqueta y su variante, con la
  * sigla oficial solo en clínicas de un país con odontograma oficial (Perú).
  */
@@ -472,6 +489,31 @@ function ToothCanvas({
       contourOf[entry.surface] = paint
   }
 
+  // Lo que repone la pieza (el póntico del puente, el implante, el diente de la prótesis) se dibuja
+  // en vez de la ausencia, igual que de frente (mesa del 23 nov 2026, voz clínica): de arriba se ve
+  // como una corona. Las siglas siguen en la cabecera y en la hoja de la norma.
+  const replacement = graphic.find(
+    ({ entry }) =>
+      entry.condition === "implant" ||
+      entry.condition === "complete_denture" ||
+      // La removible repone solo las que faltan; las del gancho siguen siendo la pieza.
+      (entry.condition === "removable_partial_denture" &&
+        graphic.some((other) => other.entry.condition === "missing_tooth")) ||
+      (entry.condition === "fixed_partial_denture" &&
+        detailsOf(entry).abutmentTeeth?.includes(toothNumber) !== true),
+  )
+  const hasCrownSymbol = graphic.some(
+    ({ entry }) => entry.condition === "crown" || entry.condition === "temporary_crown",
+  )
+  // Los pilares del puente llevan corona, del color del puente, igual que de frente.
+  const abutmentOf = graphic.find(
+    ({ entry }) =>
+      entry.condition === "fixed_partial_denture" &&
+      detailsOf(entry).abutmentTeeth?.includes(toothNumber) === true,
+  )
+  // El resto radicular no es una pieza sana: la corona se apaga y queda la raíz, en rojo (QA del 23 nov).
+  const remnant = graphic.find(({ entry }) => entry.condition === "root_remnant")
+
   const supernumeraryPaint =
     graphic.find((g) => g.entry.condition === "supernumerary_tooth")?.paint ?? BLUE
   const hasSupernumerary = graphic.some((g) => g.entry.condition === "supernumerary_tooth")
@@ -682,7 +724,24 @@ function ToothCanvas({
               !!FILL_CONDITIONS[draftGraphic.entry.condition],
             )
           : null}
+        {remnant ? (
+          <g pointerEvents="none" aria-hidden="true">
+            <path d={silhouette.crown} className="fill-background" fillOpacity={0.75} stroke="none" />
+            <circle cx={12} cy={7.6} r={3.2} fill={remnant.paint} fillOpacity={0.15} stroke={remnant.paint} strokeWidth={1} />
+          </g>
+        ) : null}
+        {(replacement || abutmentOf) && !hasCrownSymbol ? (
+          <rect
+            {...CROWN_SQUARE}
+            fill="none"
+            stroke={(replacement ?? abutmentOf)?.paint}
+            strokeWidth={1}
+            pointerEvents="none"
+            aria-hidden="true"
+          />
+        ) : null}
         {graphic.map(({ entry, paint }) => {
+          if (replacement && entry.condition === "missing_tooth") return null
           const node = symbolFor(
             entry.condition,
             paint,
@@ -767,9 +826,7 @@ export function ToothSVG({
   const quadrant = Math.trunc(toothNumber / 10)
   const upper = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6
 
-  const lines = entries.map((entry) => entryLine(entry, toothNumber, official))
-  const title = `Pieza ${toothNumber} — ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}`
-  const pieceLabel = `Pieza ${toothNumber}: ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}. Seleccionar pieza.`
+  const { title, label: pieceLabel } = toothWords(toothNumber, entries, official)
   const editLabel = `Edición de la pieza ${toothNumber}: superficies pintables y dibujo libre de la forma observada.`
 
   const isTile = size === "tile"
@@ -809,14 +866,20 @@ export function ToothSVG({
   )
 
   const tileClass = `flex min-h-11 min-w-11 cursor-pointer flex-col items-center gap-0.5 rounded-md border bg-background p-1 transition-colors ${
-    selected ? "border-violet-700 ring-2 ring-violet-600" : "hover:ring-2 hover:ring-muted-foreground/50"
+    selected
+      ? "border-violet-700 ring-2 ring-violet-600"
+      : "hover:ring-2 hover:ring-muted-foreground/50"
   } ${disabled ? "cursor-not-allowed opacity-60" : ""}`
 
   // El foco usa contorno y no anillo: así convive con el anillo violeta de la selección.
   // Al pasar el mouse un anillo gris, y el foco en tinta: nunca el color de la clínica, que podría
   // ser rojo o azul como los hallazgos de la norma (ADR 0162).
   const archClass = `rounded bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
-    selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-muted-foreground/50"
+    selected
+      ? "ring-2 ring-violet-600"
+      : disabled
+        ? ""
+        : "hover:ring-2 hover:ring-muted-foreground/50"
   } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`
 
   if (!isTile && mode === "static") {

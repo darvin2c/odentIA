@@ -1,6 +1,15 @@
-import { Fragment, type RefObject, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { archLayout, archNeighbor, type ArchRows } from "@odentia/dental/odontogram-arch"
+import { type ArchRows, archLayout, archNeighbor } from "@odentia/dental/odontogram-arch"
 import { Button } from "@odentia/ui"
+import {
+  Fragment,
+  type RefObject,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { ToothSVG } from "./tooth-svg"
 
@@ -41,9 +50,15 @@ export function OdontogramArch({
   disabled = false,
   onToggle,
   single,
+  aspect,
+  title,
 }: {
   /** Una sola arcada a lo ancho (en el celular), para que cada pieza se pueda tocar. */
   single?: "upper" | "lower"
+  /** Alto sobre ancho, con una sola arcada: más bajo cuando va junto a la vista de frente. */
+  aspect?: number
+  /** El nombre de la arcada al centro («Superior»), en vez de «Derecha» e «Izquierda». */
+  title?: string
   teeth: ArchRows
   /** Segundo arco concéntrico (temporales en dentición mixta); sus números van hacia el centro. */
   inner?: ArchRows
@@ -56,20 +71,35 @@ export function OdontogramArch({
   const hintId = useId()
   const width = useArchWidth(ref)
   // Con una sola arcada, solo sus filas.
-  const shownTeeth = single ? { upper: single === "upper" ? teeth.upper : [], lower: single === "lower" ? teeth.lower : [] } : teeth
+  const shownTeeth = single
+    ? { upper: single === "upper" ? teeth.upper : [], lower: single === "lower" ? teeth.lower : [] }
+    : teeth
   const shownInner =
-    inner && single ? { upper: single === "upper" ? inner.upper : [], lower: single === "lower" ? inner.lower : [] } : inner
+    inner && single
+      ? {
+          upper: single === "upper" ? inner.upper : [],
+          lower: single === "lower" ? inner.lower : [],
+        }
+      : inner
   // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
   const layout = useMemo(
-    () => archLayout(width, shownTeeth, shownInner, single ? { single } : {}),
+    () =>
+      archLayout(
+        width,
+        shownTeeth,
+        shownInner,
+        single ? { single, ...(aspect ? { aspect } : {}) } : {},
+      ),
     // Las filas son las constantes FDI: cambian solo al cambiar de dentición.
-    [width, single, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
+    [width, single, aspect, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
   )
   // De arriba abajo, tal como se ven: así ↑ ↓ pasan a la fila de al lado.
   // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
   const rows = useMemo(
     () =>
-      [shownTeeth.upper, shownInner?.upper ?? [], shownInner?.lower ?? [], shownTeeth.lower].filter((row) => row.length > 0),
+      [shownTeeth.upper, shownInner?.upper ?? [], shownInner?.lower ?? [], shownTeeth.lower].filter(
+        (row) => row.length > 0,
+      ),
     [single, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
   )
   const [visited, setVisited] = useState<number | null>(null)
@@ -103,9 +133,10 @@ export function OdontogramArch({
   return (
     <div
       ref={ref}
-      className={`relative mx-auto w-full min-w-0 max-w-[520px] ${single ? "aspect-[10/11]" : "aspect-[10/9]"}`}
+      className={`relative mx-auto w-full min-w-0 max-w-[520px] ${aspect ? "" : single ? "aspect-[10/11]" : "aspect-[10/9]"}`}
+      style={aspect ? { aspectRatio: `1 / ${aspect}` } : undefined}
       role="group"
-      aria-label="Odontograma"
+      aria-label={title ? `Arcada ${title.toLowerCase()}, de arriba` : "Odontograma"}
       aria-describedby={hintId}
       onKeyDown={onKeyDown}
       onFocus={(event) => {
@@ -116,24 +147,62 @@ export function OdontogramArch({
       <span id={hintId} className="sr-only">
         Usa las flechas para moverte entre piezas.
       </span>
-      <svg aria-hidden="true" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 ${W} ${H}`}>
+      <svg
+        aria-hidden="true"
+        className="absolute inset-0 size-full overflow-visible"
+        viewBox={`0 0 ${W} ${H}`}
+      >
+        {/* La encía rosada, la misma de la vista de frente, con su borde un poco más oscuro (lienzo del
+            23 nov 2026): la celeste del tono de odentIA no parecía encía. Nunca el color de la clínica
+            (ADR 0162). */}
         {layout.gums.map((gum) => (
-          <path
-            key={gum.d}
-            d={gum.d}
-            fill="none"
-            strokeWidth={gum.width}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            // La encía en el tono de odentIA, no en el de la clínica (ADR 0162): el odontograma no cambia.
-            className={gum.inner ? "stroke-[color-mix(in_oklab,var(--identity-accent)_10%,transparent)]" : "stroke-[color-mix(in_oklab,var(--identity-accent)_20%,transparent)]"}
-          />
+          <g key={gum.d} fill="none" strokeLinecap="round" strokeLinejoin="round">
+            <path
+              d={gum.d}
+              strokeWidth={gum.width + 2}
+              className="stroke-rose-200 dark:stroke-rose-900"
+            />
+            <path
+              d={gum.d}
+              strokeWidth={gum.width}
+              className={
+                gum.inner
+                  ? "stroke-rose-50 dark:stroke-rose-950"
+                  : "stroke-rose-100 dark:stroke-rose-950"
+              }
+            />
+          </g>
         ))}
-        <line x1={W / 2} x2={W / 2} y1={H / 2 - 0.03 * H} y2={H / 2 + 0.03 * H} className="stroke-border" />
-        <line x1={W / 2 - 0.03 * W} x2={W / 2 + 0.03 * W} y1={H / 2} y2={H / 2} className="stroke-border" />
+        {title ? null : (
+          <>
+            <line
+              x1={W / 2}
+              x2={W / 2}
+              y1={H / 2 - 0.03 * H}
+              y2={H / 2 + 0.03 * H}
+              className="stroke-border"
+            />
+            <line
+              x1={W / 2 - 0.03 * W}
+              x2={W / 2 + 0.03 * W}
+              y1={H / 2}
+              y2={H / 2}
+              className="stroke-border"
+            />
+          </>
+        )}
       </svg>
+      {title ? (
+        <span
+          aria-hidden="true"
+          className="absolute -translate-x-1/2 -translate-y-1/2 text-[11px] font-semibold uppercase leading-none tracking-widest text-muted-foreground"
+          style={{ left: "50%", top: single === "upper" ? "62%" : "40%" }}
+        >
+          {title}
+        </span>
+      ) : null}
       {/* La 18 se ve a la izquierda pero es del lado derecho del paciente. */}
-      {(["Derecha", "Izquierda"] as const).map((side, i) => (
+      {(title ? [] : (["Derecha", "Izquierda"] as const)).map((side, i) => (
         <span
           key={side}
           aria-hidden="true"
@@ -167,10 +236,13 @@ export function OdontogramArch({
                 onSelect={(event) => onToggle(t.tooth, Boolean(event?.ctrlKey || event?.metaKey))}
               />
             </div>
+            {/* La elegida, con su número en una pastilla violeta, igual que de frente. */}
             <span
               aria-hidden="true"
               className={`absolute -translate-x-1/2 -translate-y-1/2 leading-none ${t.w >= 32 ? "text-xs" : "text-[11px]"} ${
-                isSelected ? "font-semibold text-foreground" : "text-muted-foreground"
+                isSelected
+                  ? "rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white"
+                  : "text-muted-foreground"
               }`}
               style={{ left: pct(t.labelX, W), top: pct(t.labelY, H) }}
             >
@@ -262,7 +334,9 @@ export function OdontogramArchPicker({
                 aria-pressed={arch === value}
                 onClick={() => setArch(value)}
               >
-                {chosen > 0 ? `${label} · ${chosen} ${chosen === 1 ? "elegida" : "elegidas"}` : label}
+                {chosen > 0
+                  ? `${label} · ${chosen} ${chosen === 1 ? "elegida" : "elegidas"}`
+                  : label}
               </Button>
             )
           })}

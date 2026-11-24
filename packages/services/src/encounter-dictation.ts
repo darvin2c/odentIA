@@ -427,7 +427,7 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
     codes: new Map(),
     medications: hooks.prescribing.catalog,
     dictation,
-    product: await dictation.context(tx, orgId),
+    product: await dictation.context(tx, orgId, patientId),
     choices: hooks.budgetRequired,
     site: hooks.site,
     formQuestions: [],

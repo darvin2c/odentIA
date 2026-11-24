@@ -325,14 +325,18 @@ describe("validateFinding", () => {
     ).toHaveLength(0)
   })
 
-  it("conducto y espigo exigen observación clínica; temporal exige material", () => {
+  it("conducto, espigo, implante e impactación no piden «Observé clínicamente»; temporal exige material", () => {
     expect(
       validateFinding({
         toothNumber: 34,
         condition: "root_canal_treatment",
         details: { variant: "root_canal", quality: "good" },
       }),
-    ).not.toHaveLength(0)
+    ).toHaveLength(0)
+    expect(validateFinding({ toothNumber: 15, condition: "post_and_core", details: { quality: "good" } })).toHaveLength(0)
+    expect(validateFinding({ toothNumber: 36, condition: "implant", details: { quality: "good" } })).toHaveLength(0)
+    expect(validateFinding({ toothNumber: 48, condition: "impaction" })).toHaveLength(0)
+    // Lo guardado con la casilla sigue siendo válido; un valor que no es booleano, no.
     expect(
       validateFinding({
         toothNumber: 34,
@@ -340,6 +344,13 @@ describe("validateFinding", () => {
         details: { variant: "root_canal", quality: "good", clinicallyObserved: true },
       }),
     ).toHaveLength(0)
+    expect(
+      validateFinding({
+        toothNumber: 34,
+        condition: "root_canal_treatment",
+        details: { variant: "root_canal", quality: "good", clinicallyObserved: "sí" as unknown as boolean },
+      }),
+    ).not.toHaveLength(0)
     expect(validateFinding({ toothNumber: 37, condition: "temporary_crown" })).not.toHaveLength(0)
     expect(
       validateFinding({

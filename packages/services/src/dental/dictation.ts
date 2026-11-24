@@ -1,5 +1,7 @@
 import { anesthesiaAnswersSchema, type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { odontogramEntry } from "@odentia/db/schema/dental"
+import { and, eq, isNull, ne } from "drizzle-orm"
 import { z } from "zod"
 import {
   anatomyFits,
@@ -30,10 +32,11 @@ import { registerToothFinding } from "./tooth-panel.js"
 
 /**
  * Hallazgos que se pueden dictar (issue 109, fase 1): los de una pieza, con o
- * sin caras. Quedan fuera los que piden marcar que se observó clínicamente
- * (implante, endodoncia, espigo, impactación) y los que necesitan un dato que
- * la voz no da bien (grado de movilidad, sentido del giro, posiciones): esos
- * se registran tocando la pieza, como siempre.
+ * sin caras, también el implante, la endodoncia, el espigo-muñón y la
+ * impactación desde que no piden marcar que se observaron (mesa del 23 nov).
+ * Quedan fuera los que necesitan un dato que la voz no da bien (grado de
+ * movilidad, sentido del giro, posiciones) y la observación libre: esos se
+ * registran tocando la pieza, como siempre.
  */
 const NOT_BY_VOICE = new Set([
   "pathological_mobility",
@@ -43,9 +46,7 @@ const NOT_BY_VOICE = new Set([
 ])
 export const DICTATION_FINDINGS: readonly FindingDefinition[] = FINDINGS.filter(
   (finding) =>
-    (finding.scope === "tooth" || finding.scope === "surface") &&
-    !finding.requiresEvidence &&
-    !NOT_BY_VOICE.has(finding.code),
+    (finding.scope === "tooth" || finding.scope === "surface") && !NOT_BY_VOICE.has(finding.code),
 )
 
 /**
@@ -149,6 +150,50 @@ function findingSummary(payload: Record<string, unknown>): string {
     .join("\n")
 }
 
+/**
+ * La clave de un hallazgo de toda la pieza en `DentalDictationContext.current`, con su estado y su
+ * tipo: «36:implant:good:». Así lo que cambió (la corona que ahora está en mal estado) sí se propone.
+ */
+const toothFindingKey = (tooth: number, condition: string, quality?: string | null, variant?: string | null) =>
+  `${tooth}:${condition}:${quality ?? ""}:${variant ?? ""}`
+
+/**
+ * Lo de toda la pieza (sin caras) que el paciente ya tiene vigente: ni anulado, ni resuelto, ni
+ * por revisar. Clío no lo vuelve a proponer (mesa del 23 nov): el implante de la 36 que ya está en
+ * el odontograma, dictado otra vez al describir la boca, sería un hallazgo repetido.
+ */
+async function currentToothFindings(tx: Db, orgId: string, patientId: string): Promise<Set<string>> {
+  const rows = await tx
+    .select({
+      toothNumber: odontogramEntry.toothNumber,
+      condition: odontogramEntry.condition,
+      surface: odontogramEntry.surface,
+      details: odontogramEntry.details,
+    })
+    .from(odontogramEntry)
+    .where(
+      and(
+        eq(odontogramEntry.organizationId, orgId),
+        eq(odontogramEntry.patientId, patientId),
+        isNull(odontogramEntry.voidedAt),
+        ne(odontogramEntry.status, "voided"),
+        isNull(odontogramEntry.resolvedAt),
+        eq(odontogramEntry.needsReview, false),
+      ),
+    )
+  const keys = new Set<string>()
+  for (const row of rows) {
+    if (row.surface) continue
+    const details = (row.details ?? {}) as FindingDetails
+    // Dicho sin estado ni tipo, también es el mismo hallazgo: se guarda la clave sin ellos.
+    keys.add(toothFindingKey(row.toothNumber, row.condition))
+    keys.add(toothFindingKey(row.toothNumber, row.condition, details.quality, details.variant))
+    if (details.quality) keys.add(toothFindingKey(row.toothNumber, row.condition, details.quality))
+    if (details.variant) keys.add(toothFindingKey(row.toothNumber, row.condition, undefined, details.variant))
+  }
+  return keys
+}
+
 const findingDefinitionOf = (code: string) =>
   DICTATION_FINDINGS.find((finding) => finding.code === code)
 
@@ -186,8 +231,8 @@ async function prepareFinding(
   tx: Db,
   payload: Record<string, unknown>,
   diagnosisSystem: DiagnosisSystemKey,
-  strictVariants: boolean,
-): Promise<DictationPrepared> {
+  { strictVariants, current }: Pick<DentalDictationContext, "strictVariants" | "current">,
+): Promise<DictationPrepared | null> {
   const spoken = String(payload["condition"] ?? "")
   const finding = dictatedFinding(spoken)
   if (!finding) {
@@ -211,6 +256,9 @@ async function prepareFinding(
     finding.color === "quality" && (payload["quality"] === "good" || payload["quality"] === "poor")
       ? payload["quality"]
       : undefined
+  // Lo de toda la pieza que ya tiene vigente, con el mismo estado y tipo (o dicho sin ellos), no se
+  // propone otra vez (null: no es una sugerencia). Si cambió, sí: la corona ahora en mal estado.
+  if (finding.scope === "tooth" && current.has(toothFindingKey(tooth, finding.code, quality, variant))) return null
   const surfaces = finding.scope === "surface" ? normalizeSurfaces(tooth, payload["surfaces"]) : []
   // Un hallazgo por cara dicho sin cara (una caries en la 36): la cara se elige con un
   // toque. Lo que además admite el dibujo de su forma se dibuja tocando la pieza.
@@ -434,8 +482,10 @@ function pulpFit(service: DictationService, where: Record<string, unknown>, pati
  * por su sigla (es opcional en todos, ADR 0200), para qué piezas es cada servicio activo y si es una endodoncia vital o no vital (de la
  * biblioteca o, sin ella, de su nombre).
  */
-interface DentalDictationContext {
+export interface DentalDictationContext {
   strictVariants: boolean
+  /** Lo de toda la pieza que el paciente ya tiene vigente (`pieza:hallazgo`); vacío sin paciente. */
+  current: ReadonlySet<string>
   anatomy: ReadonlyMap<string, ServiceAnatomy | null>
   pulp: ReadonlyMap<string, PulpState | null>
 }
@@ -483,11 +533,12 @@ export const DENTAL_DICTATION: ProductDictation = {
     "derecho", "derecha", "izquierdo", "izquierda", "cara", "caras", "oclusales", ...Object.keys(SPOKEN_SURFACE),
   ],
   catalogText: dictationFindingsText,
-  async context(tx, orgId): Promise<DentalDictationContext> {
+  async context(tx, orgId, patientId): Promise<DentalDictationContext> {
     const strictVariants = await orgStrictVariants(tx, orgId)
     const services = await activeServiceAnatomies(tx, orgId)
     return {
       strictVariants,
+      current: patientId ? await currentToothFindings(tx, orgId, patientId) : new Set(),
       anatomy: new Map(services.map((service) => [service.id, service.anatomy ?? anatomyFromName(service)])),
       pulp: new Map(services.map((service) => [service.id, pulpVariantOf(service, service.family)])),
     }
@@ -497,12 +548,7 @@ export const DENTAL_DICTATION: ProductDictation = {
   siteWords: site,
   fitToScope,
   prepare: (tx, _kind, payload, { diagnosisSystem, product }) =>
-    prepareFinding(
-      tx,
-      payload,
-      diagnosisSystem,
-      (product as DentalDictationContext).strictVariants,
-    ),
+    prepareFinding(tx, payload, diagnosisSystem, product as DentalDictationContext),
   summarize: (_kind, payload) => findingSummary(payload),
   modelLabel: (_kind, payload) =>
     [

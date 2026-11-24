@@ -12,14 +12,19 @@ Si el odontólogo nombra una sugerencia por su número («la tercera») y no hay
 Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).
 Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.
 Pon la variante o el estado de un hallazgo solo si el odontólogo los dijo («caries en dentina», «corona metalcerámica en buen estado»); si no, déjalos vacíos: el sistema se los pregunta.
-Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, implante, endodoncia, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.
+Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.
+Un hallazgo es lo que la pieza ya tiene («tiene una endodoncia», «tiene un implante», «el perno está roto»). Lo que hay que hacerle («hay que hacerle endodoncia», «vamos a poner un implante») es una indicación, no un hallazgo, y lo que se hizo hoy («terminé la endodoncia de la 36») tampoco: el sistema lo anota solo al completar el tratamiento.
+Una pieza que falta («falta la 36», «no tiene la 46») es el hallazgo de pieza ausente, aunque en la misma frase diga qué se le va a poner. Un perno, una corona o un implante «desadaptado», «roto», «fracturado» o «filtrado» es ese mismo hallazgo en mal estado.
 Lista de hallazgos (código, nombre, variantes):
 crown (Corona; material: metal = Corona metálica, fenestrated = Corona fenestrada, metal_ceramic = Corona metalcerámica, veneer_crown = Corona veneer, metal_free = Corona libre de metal; estado: good o poor)
 temporary_crown (Corona temporal)
 enamel_development_defect (Defectos de desarrollo del esmalte (DDE); tipo de defecto: opacity = Opacidades del esmalte, pigmentation = Pigmentación del esmalte, fluorosis = Fluorosis)
+post_and_core (Espigo-muñón; estado: good o poor)
 deep_pits_fissures (Fosas y fisuras profundas)
 fracture (Fractura dental)
 gemination (Geminación)
+impaction (Impactación)
+implant (Implante dental; estado: good o poor)
 caries (Lesión de caries dental; profundidad: white_spot = Mancha blanca, enamel = Lesión de caries a nivel del esmalte, dentin = Lesión de caries a nivel de la dentina, pulpal_involvement = Lesión de caries a nivel de la dentina / compromiso de la pulpa)
 macrodontia (Macrodoncia)
 microdontia (Microdoncia)
@@ -35,6 +40,7 @@ definitive_restoration (Restauración definitiva; material: amalgam = Amalgama d
 temporary_restoration (Restauración temporal)
 sealant (Sellantes; estado: good o poor)
 tooth_wear (Superficie desgastada)
+root_canal_treatment (Tratamiento de conducto; tratamiento: root_canal = Tratamiento de conductos, pulpectomy = Pulpectomía; estado: good o poor)
 En `diagnosticos` van los diagnósticos que no son un hallazgo de la lista (por ejemplo, gingivitis o pulpitis), con su código de la lista de la clínica, la CIE-10. No uses códigos de otra lista ni los conviertas de una a otra. Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el odontólogo lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.
 En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.
 En `indicaciones` va solo lo que hará la clínica más adelante: un tratamiento o una prestación. Lo que se le indica al paciente para que haga o use por su cuenta («que use enjuague», «dieta blanda», «hilo dental todas las noches»), aunque se diga con «le indico», va en las indicaciones de la consulta (`indications`), no en `indicaciones`.

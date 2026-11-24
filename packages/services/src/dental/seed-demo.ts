@@ -2358,6 +2358,31 @@ const seedOffers: Array<{
     priceDisclosure: "evaluacion",
     leavesFinding: { condition: "crown", variant: "metal_free" },
   },
+  // Como se dice en la clínica (mesa del 23 nov): el perno es el «Poste y muñón» de la biblioteca,
+  // que deja dibujado el espigo-muñón.
+  {
+    code: "PERNO_MUNON",
+    templateKey: "poste-y-munon",
+    name: "Perno muñón",
+    specialty: "protesis",
+    scope: "tooth",
+    priceCents: 35000,
+    durationMin: 45,
+    priceDisclosure: "desde",
+  },
+  // El puente de tres piezas se cobra entero: la biblioteca lo tiene por pieza. Se indica en una de
+  // sus piezas y no deja hallazgo al hacerse: el tramo y sus pilares se registran en el odontograma.
+  {
+    code: "PUENTE_FIJO_3",
+    officialCode: "D6242",
+    name: "Puente fijo de 3 piezas",
+    specialty: "protesis",
+    scope: "tooth",
+    priceCents: 240000,
+    durationMin: 60,
+    usualSessions: 3,
+    priceDisclosure: "evaluacion",
+  },
   {
     code: "BLANQUEAMIENTO",
     officialCode: "D9972",
@@ -3524,6 +3549,138 @@ await seedPeriodontalCase(db, {
   branchId: miraflores.id,
   daysAgo,
 })
+
+// Odontograma con raíz (mesa del 23 nov): lo que se ve en la vista de frente, en una atención
+// firmada de otro día. Mario trae los arreglos de un adulto (la 15 con conducto, perno y corona; el
+// implante de la 36 con su corona; el puente de la 44 a la 46) y lo que no está bien (la 48
+// impactada, la raíz que quedó de la 18, la 17 que se mueve, una caries en la 26). Valentina, de 8
+// años y en dentición mixta, trae un golpe en los incisivos (la 11 intruida, la 21 fracturada), la
+// pulpotomía de la 85 y una caries en la 75.
+type DemoFinding = Omit<Parameters<typeof addOdontogramEntries>[4], "encounterId">
+const signedVisitWith = async (patientId: string, days: number, reason: string, evolution: string, findings: DemoFinding[]) => {
+  const visit = await createEncounter(db, ORG_A, ANA_ID, patientId, { reason, branchId: miraflores.id })
+  await db.update(encounter).set({ startedAt: daysAgo(days) }).where(eq(encounter.id, visit.id))
+  for (const finding of findings)
+    await addOdontogramEntries(db, ORG_A, ANA_ID, patientId, { ...finding, encounterId: visit.id })
+  // Firmar pide al menos un diagnóstico con su tipo: el de cada hallazgo que lo trae, confirmado.
+  for (const finding of findings)
+    if (finding.diagnosisCode)
+      await addEncounterDiagnosis(db, ORG_A, ANA_ID, patientId, visit.id, {
+        diagnosisCode: finding.diagnosisCode,
+        diagnosisType: "confirmed",
+        toothNumber: finding.toothNumber,
+        ...(finding.surfaces?.length ? { surfaces: finding.surfaces } : {}),
+      })
+  await updateEncounterDraft(db, ORG_A, ANA_ID, patientId, visit.id, { evolution })
+  // La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
+  await finalizeEncounter(db, ORG_A, ANA_ID, patientId, visit.id, { followUpIds: [] })
+  // Lo anotado, del día de la visita: así «Ver estado al» muestra ese día (QA del 23 nov). La firma
+  // queda de hoy: una atención cerrada no se modifica.
+  await db.update(odontogramEntry).set({ createdAt: daysAgo(days) }).where(eq(odontogramEntry.encounterId, visit.id))
+}
+const mario = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Mario Castillo Vargas",
+  givenNames: "Mario",
+  familyName: "Castillo Vargas",
+  docType: "DNI",
+  docNumber: "70090840",
+  birthDate: "1972-02-14",
+  sex: "M",
+  phone: "+51987650740",
+  registeredBranchId: miraflores.id,
+})
+await signedVisitWith(
+  mario.id,
+  20,
+  "Evaluación general: quiere saber cómo están sus arreglos",
+  "Pieza 15 con tratamiento de conducto, perno y corona metalcerámica en buen estado. Implante en la 36 con su corona y puente de la 44 a la 46, bien adaptados. 48 impactada, remanente radicular de la 18 y movilidad grado 2 en la 17. Caries oclusal en la 26.",
+  [
+    { toothNumber: 15, condition: "root_canal_treatment", details: { variant: "root_canal", quality: "good" } },
+    { toothNumber: 15, condition: "post_and_core", details: { quality: "good" } },
+    { toothNumber: 15, condition: "crown", details: { variant: "metal_ceramic", quality: "good" } },
+    { toothNumber: 36, condition: "implant", details: { quality: "good" } },
+    { toothNumber: 36, condition: "crown", details: { variant: "metal_ceramic", quality: "good" } },
+    {
+      toothNumber: 44,
+      condition: "fixed_partial_denture",
+      details: { relatedTeeth: [44, 45, 46], abutmentTeeth: [44, 46], quality: "good" },
+    },
+    { toothNumber: 48, condition: "impaction" },
+    { toothNumber: 18, condition: "root_remnant" },
+    { toothNumber: 17, condition: "pathological_mobility", details: { grade: 2 } },
+    { toothNumber: 26, condition: "caries", surfaces: ["occlusal"], details: { variant: "dentin" }, diagnosisCode: DX.caries },
+  ],
+)
+// Su madre, Carmen, es su representante legal desde el alta, como Rosa con Pedro.
+const carmenRios = await createContact(db, ORG_A, {
+  displayName: "Carmen Ríos Paredes",
+  givenNames: "Carmen",
+  familyName: "Ríos Paredes",
+  phone: "+51987650741",
+})
+const valentina = await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "internal", userId: ANA_ID, contactId: carmenRios.id },
+    {
+      submissionId: randomUUID(),
+      answers: {
+        demographics: {
+          displayName: "Valentina Ríos",
+          givenNames: "Valentina",
+          familyName: "Ríos",
+          birthDate: "2018-03-15",
+          sex: "F",
+          docType: "DNI",
+          docNumber: "79012388",
+        },
+        respondent: "representative",
+        representative: {
+          displayName: "Carmen Ríos Paredes",
+          relationship: "guardian",
+          relationshipDetail: "Madre",
+          phone: "+51987650741",
+          docType: "DNI",
+          docNumber: "45678966",
+        },
+        privacyAccepted: false,
+      },
+      contacts: [
+        {
+          contactId: carmenRios.id,
+          relationship: "guardian",
+          relationshipDetail: "Madre",
+          kinship: "MTH",
+          isPreferred: true,
+        },
+      ],
+    },
+  ),
+)
+await signedVisitWith(
+  valentina.id,
+  9,
+  "Se golpeó los dientes de adelante en el colegio",
+  "Dentición mixta. Pieza 11 intruida y fractura de la 21 tras el golpe. Pulpotomía de la 85 en buen estado. Caries oclusal en la 75.",
+  [
+    { toothNumber: 11, condition: "intruded_tooth" },
+    {
+      toothNumber: 21,
+      condition: "fracture",
+      details: {
+        drawing: [
+          [
+            [30, 18],
+            [70, 32],
+          ],
+        ],
+      },
+    },
+    { toothNumber: 85, condition: "pulpotomy", details: { quality: "good" } },
+    { toothNumber: 75, condition: "caries", surfaces: ["occlusal"], details: { variant: "dentin" }, diagnosisCode: DX.caries },
+  ],
+)
 
 // --- Volumen para paginación: 40 contactos+pacientes con nombres de verdad
 // (la demo se muestra en ventas: nada de «Paciente 01»).

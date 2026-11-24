@@ -7,7 +7,10 @@ import { normalizeSearchText } from "@odentia/ui-patterns"
  * tratamiento de conducto que la pieza ya tiene (en azul), y el buscador ofrece también agregarla al plan.
  * Los nombres de todos los días («curación», «funda», «resto radicular») son de uso común en el Perú.
  * Lo temporal se dice igual con «temporal» o «provisional»: «curación temporal» es la restauración
- * temporal, no la definitiva.
+ * temporal, no la definitiva. El perno es el espigo-muñón de la norma (mesa del 23 nov). Una palabra
+ * que es de varios hallazgos («placa», «raíz», «ortodoncia») los ofrece a todos. Se escriben sin
+ * tildes ni eñes, como queda lo escrito al buscar («perno munon»). No entran los diagnósticos: el
+ * bruxismo no es lo que se ve en la pieza, y la mancha blanca es una caries inicial.
  */
 const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   definitive_restoration: ["resina", "obturacion", "curacion"],
@@ -17,11 +20,47 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
     "curacion provisional",
     "obturacion provisional",
   ],
-  root_remnant: ["resto radicular"],
+  root_remnant: ["resto radicular", "raiz", "raices", "solo raiz", "retenida", "raiz retenida"],
   crown: ["funda"],
   temporary_crown: ["funda temporal", "funda provisional", "corona provisional"],
-  root_canal_treatment: ["endodoncia", "conducto"],
+  root_canal_treatment: ["endodoncia", "conducto", "tratamiento de raiz", "raiz", "raices"],
+  post_and_core: ["perno", "poste", "perno munon", "espigo"],
+  fixed_partial_denture: ["puente"],
+  removable_partial_denture: ["placa", "protesis removible", "dentadura postiza parcial"],
+  complete_denture: ["dentadura", "dentadura postiza", "placa", "placa total"],
+  removable_orthodontic_appliance: ["placa", "aparato removible", "ortodoncia"],
+  fixed_orthodontic_appliance: ["brackets", "braquets", "frenillos", "ortodoncia"],
+  impaction: ["retenida", "retenido", "incluida", "incluido"],
+  fracture: ["raiz fracturada", "fracturado", "fracturada"],
+  tooth_wear: ["desgaste", "desgastado", "abrasion", "abfraccion", "erosion"],
+  rotation: ["girado", "girada", "rotado", "rotada"],
+  missing_tooth: ["extraida", "extraido", "falta"],
+  supernumerary_tooth: ["supernumerario", "mesiodens"],
+  peg_tooth: ["conoide"],
+  enamel_development_defect: ["hipoplasia", "fluorosis"],
 }
+
+/**
+ * Si lo escrito trae el sinónimo como palabras enteras (también en plural: «pernos»). Por pedazo
+ * no: «caries posterior» traía el espigo-muñón por «poste».
+ */
+const saysWhole = (query: string, word: string) =>
+  !NOT_SAID.some(([said, phrase]) => said === word && query.includes(phrase)) &&
+  (` ${query} `.includes(` ${word} `) ||
+    ` ${query} `.includes(` ${word}s `) ||
+    ` ${query} `.includes(` ${word}es `))
+
+/**
+ * Lo que se dice con la misma palabra y no es el hallazgo (revisión del 23 nov): la placa
+ * bacteriana no es una prótesis. «Pérdida», «roto» y «rota» no entran por lo mismo: la pérdida ósea
+ * no es una pieza ausente, y «rota» es el comienzo de «rotada».
+ */
+const NOT_SAID: ReadonlyArray<readonly [word: string, phrase: string]> = [
+  ["placa", "placa bacteriana"],
+]
+
+/** Si lo que se está escribiendo es el inicio de una palabra del sinónimo («pern» es «perno»). */
+const startsWordOf = (word: string, query: string) => ` ${word}`.includes(` ${query}`)
 
 /**
  * Los hallazgos que se dicen así. Lo escrito que trae un sinónimo entero se queda con el más largo
@@ -35,14 +74,16 @@ function findingsSaidAs(query: string): Set<string> {
     ([code, words]) =>
       [
         code,
-        Math.max(0, ...words.filter((word) => query.includes(word)).map((word) => word.length)),
+        Math.max(0, ...words.filter((word) => saysWhole(query, word)).map((word) => word.length)),
       ] as const,
   )
   const longest = Math.max(0, ...contained.map(([, length]) => length))
   if (longest > 0)
     return new Set(contained.filter(([, length]) => length === longest).map(([code]) => code))
   return new Set(
-    entries.filter(([, words]) => words.some((word) => word.includes(query))).map(([code]) => code),
+    entries
+      .filter(([, words]) => words.some((word) => startsWordOf(word, query)))
+      .map(([code]) => code),
   )
 }
 
@@ -117,7 +158,8 @@ export function searchFindings(text: string): FindingSearch {
   // Cada palabra que no es del motivo se busca sola, en el orden escrito.
   if (findings.length === 0 && query.includes(" ")) {
     const seen = new Set<string>()
-    findings = query
+    // Sin lo que se dice igual y no es el hallazgo: «placa bacteriana» no se parte en «placa».
+    findings = NOT_SAID.reduce((rest, [, phrase]) => rest.replace(phrase, " "), query)
       .split(" ")
       .filter((word) => word.length >= ELSEWHERE_MIN && reasonOf(word) === null)
       .flatMap((word) => matchFindings(word).findings)
@@ -133,18 +175,21 @@ export function searchFindings(text: string): FindingSearch {
 
 /**
  * Cómo se dice en la clínica el tratamiento que se busca para el plan: «sacar la muela», «extraer»
- * o «extracción» es la exodoncia, que es como se llama el servicio.
+ * o «extracción» es la exodoncia, que es como se llama el servicio. El perno, el poste o el espigo es
+ * el muñón («Perno muñón», «Poste y muñón»): dicho entero, no por pedazo, para que «posterior» no
+ * traiga los tratamientos de los dientes de atrás (QA del 23 nov).
  */
-const TREATMENT_SAID_AS: ReadonlyArray<readonly [name: string, words: readonly string[]]> = [
-  ["exodoncia", ["sacar", "extraer", "extraccion", "extrae"]],
+const TREATMENT_SAID_AS: ReadonlyArray<readonly [name: string, words: readonly string[], whole: boolean]> = [
+  ["exodoncia", ["sacar", "extraer", "extraccion", "extrae"], false],
+  ["muñón", ["poste", "postes", "perno", "pernos", "espigo"], true],
 ]
 
 /** Lo que se busca en los tratamientos para lo escrito: el nombre del servicio si se dijo de otro modo. */
 export function treatmentSearchTerm(text: string): string {
   const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
   const words = query.split(" ")
-  const said = TREATMENT_SAID_AS.find(([, synonyms]) =>
-    synonyms.some((synonym) => words.some((word) => word.startsWith(synonym))),
+  const said = TREATMENT_SAID_AS.find(([, synonyms, whole]) =>
+    synonyms.some((synonym) => words.some((word) => (whole ? word === synonym : word.startsWith(synonym)))),
   )
   return said ? said[0] : text.trim()
 }

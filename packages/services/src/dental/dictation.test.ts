@@ -88,7 +88,7 @@ describe("odontograma por voz (issue 109)", () => {
       drafts: [
         { kind: "odontograma", payload: { toothNumber: 36, condition: "caries", variant: "dentina", surfaces: ["oclusal"] }, sourceText: "La 36 con caries oclusal en dentina." },
         { kind: "odontograma", payload: { toothNumber: 11, condition: "crown" }, sourceText: "La 11 tiene corona." },
-        // Lo que no se dicta (pide marcar que se observó) o no existe no se adivina: queda por revisar, a la vista.
+        // El implante se dicta (mesa del 23 nov) y, sin su estado, lo pide; una pieza que no existe no se adivina.
         { kind: "odontograma", payload: { toothNumber: 46, condition: "implant" } },
         { kind: "odontograma", payload: { toothNumber: 19, condition: "missing_tooth" } },
       ],
@@ -102,7 +102,7 @@ describe("odontograma por voz (issue 109)", () => {
     })
     // La corona pide su estado para dibujarse; el material es opcional en todos los países (ADR 0200).
     expect(crown).toMatchObject({ status: "por_revisar", payload: { missing: ["quality"] } })
-    expect(implant).toMatchObject({ status: "por_revisar" })
+    expect(implant).toMatchObject({ status: "por_revisar", payload: { condition: "implant", missing: ["quality"] } })
     expect(nineteen?.note).toContain("no existe")
 
     // Elegir con un toque lo que falta la deja lista.

@@ -94,7 +94,8 @@ function inset(pts: readonly Point[], distance: number): Point[] {
 function polyline(pts: readonly Point[]) {
   const nm = normals(pts)
   const acc = [0]
-  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y))
+  for (let i = 1; i < pts.length; i++)
+    acc.push(acc[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y))
   const length = acc[acc.length - 1]!
   return {
     length,
@@ -127,11 +128,18 @@ export function archLayout(
   width: number,
   outer: ArchRows,
   inner?: ArchRows,
-  opts: { single?: "upper" | "lower" } = {},
+  opts: {
+    single?: "upper" | "lower"
+    /**
+     * Alto sobre ancho del dibujo. Con una sola arcada, más baja que la del celular: así va
+     * cada arcada en su propio arco, una encima de la otra, junto a la vista de frente.
+     */
+    aspect?: number
+  } = {},
 ): ArchLayout {
   const W = width
   const single = opts.single
-  const H = W * (single ? SINGLE_ARCH_ASPECT : ARCH_ASPECT)
+  const H = W * (opts.aspect ?? (single ? SINGLE_ARCH_ASPECT : ARCH_ASPECT))
   const inside = !inner
   const count = Math.max(outer.upper.length, outer.lower.length)
   let t = W * 0.12
@@ -167,7 +175,10 @@ export function archLayout(
       // La herradura interior sigue la misma U sin cerrar las puntas, para que
       // no se enrosque donde se cierra la exterior.
       const tuckShift = a - Math.abs(curve[0]!.x)
-      pts = inset(halfArch(a, b, 0), h / 2 + (inside ? LABEL_PX + 13 : 3) + depth / 2 + 0.01 * W + (inside ? 0 : tuckShift))
+      pts = inset(
+        halfArch(a, b, 0),
+        h / 2 + (inside ? LABEL_PX + 13 : 3) + depth / 2 + 0.01 * W + (inside ? 0 : tuckShift),
+      )
     }
     const line = polyline(pts)
     const start = Math.max(0, (size + 0.012 * W - gap) / 2)
@@ -176,7 +187,11 @@ export function archLayout(
     const labelSign = ring === "inner" || inside ? -1 : 1
     const labelOffset = depth / 2 + (ring === "inner" ? LABEL_PX - 2 : LABEL_PX)
     row.forEach((tooth, i) => {
-      const p = line.at(row.length === 1 ? line.length / 2 : start + (i / (row.length - 1)) * (line.length - 2 * start))
+      const p = line.at(
+        row.length === 1
+          ? line.length / 2
+          : start + (i / (row.length - 1)) * (line.length - 2 * start),
+      )
       const x = W / 2 + p.x
       const y = base + sign * p.y
       const nx = p.nx
@@ -195,7 +210,9 @@ export function archLayout(
     })
     const d = pts
       .filter((_, i) => i % 6 === 0 || i === pts.length - 1)
-      .map((p, i) => `${i ? "L" : "M"}${(W / 2 + p.x).toFixed(1)} ${(base + sign * p.y).toFixed(1)}`)
+      .map(
+        (p, i) => `${i ? "L" : "M"}${(W / 2 + p.x).toFixed(1)} ${(base + sign * p.y).toFixed(1)}`,
+      )
       .join(" ")
     gums.push({ d, width: depth + 10, inner: ring === "inner" })
   }
@@ -215,7 +232,11 @@ export function archLayout(
  * inferiores y arcada inferior. ← → recorren la fila en el orden en que se ve;
  * ↑ ↓ pasan a la fila de al lado, a la pieza en la misma posición.
  */
-export function archNeighbor(rows: readonly (readonly number[])[], tooth: number, key: string): number | null {
+export function archNeighbor(
+  rows: readonly (readonly number[])[],
+  tooth: number,
+  key: string,
+): number | null {
   const r = rows.findIndex((row) => row.includes(tooth))
   if (r < 0) return null
   const row = rows[r]!

@@ -548,6 +548,112 @@
         ],
         "correcciones": 0
       }
+    },
+    {
+      "id": "raiz-rehabilitado",
+      "texto": "La quince tiene endodoncia con un perno y corona metalcerámica, todo en buen estado. La treinta y seis tiene un implante con su corona, también bien.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 15,
+            "hallazgo": "root_canal_treatment",
+            "estado": "good"
+          },
+          {
+            "pieza": 15,
+            "hallazgo": "post_and_core",
+            "estado": "good"
+          },
+          {
+            "pieza": 15,
+            "hallazgo": "crown",
+            "variante": "metal_ceramic",
+            "estado": "good"
+          },
+          {
+            "pieza": 36,
+            "hallazgo": "implant",
+            "estado": "good"
+          },
+          {
+            "pieza": 36,
+            "hallazgo": "crown",
+            "estado": "good"
+          }
+        ]
+      }
+    },
+    {
+      "id": "retenida-y-resto",
+      "texto": "La cuarenta y ocho está retenida y de la dieciocho solo queda la raíz.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 48,
+            "hallazgo": "impaction"
+          },
+          {
+            "pieza": 18,
+            "hallazgo": "root_remnant"
+          }
+        ]
+      }
+    },
+    {
+      "id": "perno-desadaptado",
+      "texto": "El perno de la veinticinco está desadaptado, en mal estado.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 25,
+            "hallazgo": "post_and_core",
+            "estado": "poor"
+          }
+        ]
+      }
+    },
+    {
+      "id": "endodoncia-por-hacer",
+      "texto": "La cuarenta y seis tiene caries profunda; hay que hacerle endodoncia multirradicular y después una corona.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 46,
+            "hallazgo": "caries"
+          }
+        ],
+        "planes": [
+          46
+        ]
+      }
+    },
+    {
+      "id": "implante-por-poner",
+      "texto": "Falta la treinta y seis; le vamos a poner un implante.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 36,
+            "hallazgo": "missing_tooth"
+          }
+        ],
+        "planes": [
+          36
+        ]
+      }
+    },
+    {
+      "id": "endodoncia-antigua",
+      "texto": "La once tiene una endodoncia antigua, en buen estado.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 11,
+            "hallazgo": "root_canal_treatment",
+            "estado": "good"
+          }
+        ]
+      }
     }
   ]
 }
