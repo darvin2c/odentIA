@@ -129,9 +129,43 @@ function selectedToothLost(selection: readonly number[]): string {
     : "No se registró el hallazgo de las piezas elegidas. Si las cierras, se pierde."
 }
 
-/** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
+/** El día de un momento en la zona de la clínica («2026-11-23»): así se agrupan los cambios. */
+function clinicDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: activeOrgTimeZone() })
+}
+
+/** «23 nov 2026», en el formato y la zona de la clínica. */
 function snapshotLabel(iso: string): string {
-  return new Date(iso).toLocaleString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
+/**
+ * «Ver estado al» por día: cada día con cambios, con cómo quedó la boca al terminar ese día (su
+ * último cambio). Antes salía cada momento con segundos: diez hallazgos, diez horas del mismo día
+ * (lienzo del 24 nov). Hoy no va: es lo mismo que «Actual».
+ */
+export function snapshotDays(
+  instants: readonly string[],
+  today = clinicDay(new Date().toISOString()),
+): { value: string; label: string }[] {
+  const byDay = new Map<string, { last: string; count: number }>()
+  for (const iso of instants) {
+    const day = clinicDay(iso)
+    const seen = byDay.get(day)
+    byDay.set(day, { last: !seen || iso > seen.last ? iso : seen.last, count: (seen?.count ?? 0) + 1 })
+  }
+  return [...byDay.entries()]
+    .filter(([day]) => day !== today)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([, { last, count }]) => ({
+      value: last,
+      label: `${snapshotLabel(last)} · ${count} ${count === 1 ? "cambio" : "cambios"}`,
+    }))
 }
 
 type OdontogramStudioProps = {
@@ -262,17 +296,15 @@ function StudioBody({
   useEffect(() => {
     onSelectionChange?.(selection)
   }, [selection, onSelectionChange])
-  const dates = useMemo(
+  const days = useMemo(
     () =>
-      [
+      snapshotDays([
         ...new Set(
           state.history.flatMap((entry) =>
             [entry.createdAt, entry.voidedAt].filter((date): date is string => !!date),
           ),
         ),
-      ]
-        .sort()
-        .reverse(),
+      ]),
     [state.history],
   )
   const historical = snapshot !== "current"
@@ -567,7 +599,7 @@ function StudioBody({
         value={snapshot}
         items={{
           current: "Actual",
-          ...Object.fromEntries(dates.map((date) => [date, snapshotLabel(date)])),
+          ...Object.fromEntries(days.map((day) => [day.value, day.label])),
         }}
         onValueChange={(value) => {
           changeSelection(() => setSnapshot(value ?? "current"))
@@ -579,9 +611,9 @@ function StudioBody({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="current">Actual</SelectItem>
-          {dates.map((date) => (
-            <SelectItem key={date} value={date}>
-              {snapshotLabel(date)}
+          {days.map((day) => (
+            <SelectItem key={day.value} value={day.value}>
+              {day.label}
             </SelectItem>
           ))}
         </SelectContent>
