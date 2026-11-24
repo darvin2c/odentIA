@@ -117,7 +117,7 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   // Soporte entra con su cuenta y solo mira: sin pedidos, sin Sofi, sin el plan.
   await as("ana")
   await page.goto("/")
-  await page.getByRole("link", { name: /Calzados Rosa/ }).click()
+  // Con una sola tienda, «Tus tiendas» entra directo a ella; a soporte, por el catálogo.
   await expect(page.getByText(/Entraste como soporte de gestorIA, solo a mirar/)).toBeVisible()
   await expect(page).toHaveURL(/\/catalogo$/)
   const nav = page.getByRole("navigation", { name: /Secciones de Calzados Rosa/ })
