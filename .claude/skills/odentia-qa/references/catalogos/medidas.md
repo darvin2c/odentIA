@@ -643,14 +643,17 @@ En todas las tareas de Agenda, además de lo propio:
 
 ### M-ODO-01 Ver la boca y elegir una pieza (ficha y atención)
 **Quién:** odontólogo y asistente, en cada atención (supuesto).
-**Dónde:** `apps/dental-clinic/src/components/dental/odontogram-studio.tsx` (`useMouthLayout`), `odontogram-arch.tsx`, `odontogram-front.tsx`.
+**Dónde:** `apps/dental-clinic/src/components/dental/odontogram-studio.tsx`, `odontogram-layout.ts` (`planMouth`), `odontogram-arch.tsx`, `odontogram-front.tsx`.
 **Medida (23 nov 2026, antes de las dos vistas):** ficha → odontograma 2 clics; teclado 7 Tab (ficha) y 5 (atención) hasta el arco. Lugar de la boca con la pieza al lado: 657 px (1280), 743 (1366) y 817 (1440). Pieza más chica: 41×38 (1440), 34×37 (360), temporal 28×29. Lo de dentro del diente (perno, implante, puente) no se veía sin abrir la pieza.
-- [ ] Ninguna pieza por debajo de 24×24 px en 1440, 1366, 1280, 1024, 820, 390 y 360, con y sin la pieza abierta, también en la mixta.
-- [ ] 360 px sin desplazamiento lateral (también las pestañas Superior/Inferior).
+- [ ] Ninguna pieza de frente por debajo de 24×24 px en 1440, 1366, 1280, 1024, 820, 390 y 360, con y sin la pieza abierta, también en la mixta y solo con temporales.
+- [ ] 360 px sin desplazamiento lateral.
+- [ ] Siempre las dos arcadas, en todos los anchos: sin pestañas de arcada.
+- [ ] La misma pieza mide lo mismo en el arco y de frente (la 46 de arriba y la 46 de frente); nada se estira con la pantalla y, si sobra espacio, el dibujo queda al centro.
+- [ ] Con la boca entera, cada arco a la altura de su fila y la vista de frente centrada en el alto de los dos arcos.
 - [ ] La elegida se marca igual en las dos vistas, con una señal que no es solo color (el número en su pastilla).
 - [ ] Una parada de Tab por vista; Escape devuelve el foco a la pieza de la vista donde se abrió.
 - [ ] Cambiar de pieza, cerrar o salir con un hallazgo a medias avisa con el mismo diálogo.
-**Ya falló:** «Inferior · 2 hallazgos» desbordaba 33 px a 360; salir a Agenda perdía la caries a medias sin aviso (23 nov).
+**Ya falló:** «Inferior · 2 hallazgos» desbordaba 33 px a 360; salir a Agenda perdía la caries a medias sin aviso (23 nov). En producción (24 nov): la vista de frente se estiraba a todo el ancho (muelas de 60 px o más) junto a un arco chico, la atención en dos filas de 8 enormes y las coronas desparejas; la QA medía 24 px y nadie comparó cómo se veía en cada ancho.
 
 ### Giras nuevas (para «Sus giras»)
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?

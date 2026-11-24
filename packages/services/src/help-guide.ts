@@ -868,7 +868,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "ver el conducto",
           "ver el perno",
         ],
-        a: "En el Odontograma, en «De frente · cada pieza con su raíz». Ahí cada pieza se dibuja con su corona y su raíz dentro de la encía: se ven el perno, los conductos, el implante, el puente, el resto radicular (solo la raíz, en rojo) y la pieza retenida, más abajo. Tócala, de frente o de arriba, para abrir su registro. Las caras palatina y lingual, las fosas y fisuras y los sellantes solo se ven en el arco de arriba. Con la pantalla angosta, o con una pieza abierta al lado, ves una arcada a la vez, con las pestañas «Superior» e «Inferior» y cuántas piezas tienen algo.",
+        a: "En el Odontograma, en «De frente · cada pieza con su raíz». Ahí cada pieza se dibuja con su corona y su raíz dentro de la encía: se ven el perno, los conductos, el implante, el puente, el resto radicular (solo la raíz, en rojo) y la pieza retenida, más abajo. Tócala, de frente o de arriba, para abrir su registro. Las caras palatina y lingual, las fosas y fisuras y los sellantes solo se ven en el arco de arriba. Siempre ves las dos arcadas, y la misma pieza mide lo mismo de arriba y de frente: con espacio, cada arco al lado de su fila; más angosta, o con una pieza abierta al lado, los dos arcos arriba y las filas debajo; en el celular, la superior y debajo la inferior, cada una con su arco y su fila.",
         area: "clinica",
         notFor: { lacks: "clinical.read" },
       },
