@@ -1,4 +1,5 @@
 import { type ArchRows, archLayout, archNeighbor } from "@odentia/dental/odontogram-arch"
+import { frontRowMarksOf } from "@odentia/dental/tooth-front-marks"
 import { Button } from "@odentia/ui"
 import {
   Fragment,
@@ -140,6 +141,19 @@ export function OdontogramArch({
   }
 
   const { width: W, height: H } = layout
+  // Los puentes de cada arcada, con sus piezas vecinas de a pares (el selector no tiene hallazgos).
+  const bridges = [shownTeeth.upper, shownTeeth.lower].flatMap((row) =>
+    frontRowMarksOf(row, entriesOf)
+      .filter((mark) => mark.kind === "bridge")
+      .map((mark) => {
+        const placed = mark.teeth.flatMap((tooth) => layout.teeth.filter((t) => t.tooth === tooth))
+        return {
+          key: mark.teeth.join("-"),
+          paint: mark.paint,
+          pairs: placed.slice(1).map((b, i) => [placed[i]!, b] as const),
+        }
+      }),
+  )
   return (
     <div
       ref={ref}
@@ -278,6 +292,37 @@ export function OdontogramArch({
           </Fragment>
         )
       })}
+      {/* El puente unido entre corona y corona, encima de las piezas, como de frente: con las piezas
+          juntas, cada pilar y el póntico se leían como coronas sueltas (revisión del 24 nov). */}
+      {bridges.length > 0 ? (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 size-full overflow-visible"
+          viewBox={`0 0 ${W} ${H}`}
+        >
+          {bridges.map(({ key, paint, pairs }) =>
+            pairs.map(([a, b]) => {
+              const d = Math.hypot(b.x - a.x, b.y - a.y) || 1
+              const half = Math.min(a.w, b.w) * 0.22
+              const mx = (a.x + b.x) / 2
+              const my = (a.y + b.y) / 2
+              return (
+                <line
+                  key={`${key}-${a.tooth}`}
+                  x1={mx - ((b.x - a.x) / d) * half}
+                  y1={my - ((b.y - a.y) / d) * half}
+                  x2={mx + ((b.x - a.x) / d) * half}
+                  y2={my + ((b.y - a.y) / d) * half}
+                  stroke={paint === "red" ? "#dc2626" : "#2563eb"}
+                  strokeOpacity={0.6}
+                  strokeWidth={Math.min(a.h, b.h) * 0.3}
+                  strokeLinecap="round"
+                />
+              )
+            }),
+          )}
+        </svg>
+      ) : null}
     </div>
   )
 }
