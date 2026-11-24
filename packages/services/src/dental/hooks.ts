@@ -613,14 +613,20 @@ export const dentalHooks: ProductHooks = {
         typeof finding.toothNumber === "number" ? finding.toothNumber : null,
         Array.isArray(finding.surfaces) ? finding.surfaces.map(String) : [],
       )
-    // Los hallazgos de esta atención.
-    if (patientId && encounterId)
+    // Los hallazgos de esta atención. Una caries de dos caras son dos filas del mismo hallazgo: se
+    // proponen juntas («26 · Mesial y oclusal»); por separado quedaba solo la primera (QA del 23 nov).
+    if (patientId && encounterId) {
+      const sameFinding = new Map<
+        string,
+        { condition: string; variant: string | null; toothNumber: number; surfaces: string[] }
+      >()
       for (const entry of await tx
         .select({
           condition: odontogramEntry.condition,
           details: odontogramEntry.details,
           toothNumber: odontogramEntry.toothNumber,
           surface: odontogramEntry.surface,
+          createdAt: odontogramEntry.createdAt,
         })
         .from(odontogramEntry)
         .where(
@@ -632,14 +638,21 @@ export const dentalHooks: ProductHooks = {
           ),
         )
         .orderBy(asc(odontogramEntry.createdAt))) {
-        const variant = (entry.details as { variant?: unknown } | null)?.variant
-        add(
-          entry.condition,
-          typeof variant === "string" ? variant : null,
-          entry.toothNumber,
-          entry.surface ? [entry.surface] : [],
-        )
+        const details = entry.details as { variant?: unknown } | null
+        const variant = typeof details?.variant === "string" ? details.variant : null
+        const key = [entry.condition, variant, entry.toothNumber, entry.createdAt.toISOString()].join("|")
+        const group = sameFinding.get(key) ?? {
+          condition: entry.condition,
+          variant,
+          toothNumber: entry.toothNumber,
+          surfaces: [],
+        }
+        if (entry.surface && !group.surfaces.includes(entry.surface)) group.surfaces.push(entry.surface)
+        sameFinding.set(key, group)
       }
+      for (const group of sameFinding.values())
+        add(group.condition, group.variant, group.toothNumber, group.surfaces)
+    }
     return candidates
   },
 
