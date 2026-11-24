@@ -2,7 +2,7 @@ import { FDI_ADULT_ROWS, FDI_CHILD_ROWS } from "@odentia/dental"
 import { archLayout } from "@odentia/dental/odontogram-arch"
 import { drawnWidthMm } from "@odentia/dental/tooth-front"
 import { describe, expect, it } from "vitest"
-import { FRONT_PX_PER_MM, frontViewSize } from "./odontogram-front"
+import { FRONT_PX_PER_MM, frontNeighbor, frontViewSize } from "./odontogram-front"
 import { planMouth, singleArchRows, VIEWS_GAP } from "./odontogram-layout"
 
 const U = FDI_ADULT_ROWS[0]!
@@ -108,6 +108,39 @@ describe("el acomodo de la boca (24 nov: la vista de frente crecía con la panta
         last = step
       }
     }
+  })
+
+  it("con los arcos arriba no se achican a menos de 3/4: más angosto, una arcada tras otra (revisión del 24 nov)", () => {
+    const sets = [
+      { rows: [U, L], arch: archOf(false) },
+      { rows: [U, PU, PL, L], arch: archOf(true) },
+      { rows: [PU, PL], arch: { outer: { upper: PU, lower: PL } } },
+    ]
+    for (const { rows, arch } of sets) {
+      const full = planMouth(0, { whole: rows }, arch).archWidth
+      for (let width = 300; width <= 1300; width += 10) {
+        const p = planMouth(width, { whole: rows }, arch)
+        if (p.layout === "top")
+          expect(p.archWidth / full, `${width} px`).toBeGreaterThanOrEqual(0.75)
+      }
+    }
+    // Solo temporales en un celular grande: antes, los arcos arriba con piezas de 14,6 px.
+    expect(planMouth(372, { whole: [PU, PL] }, { outer: { upper: PU, lower: PL } }).layout).toBe(
+      "narrow",
+    )
+    // La atención más angosta, con la pieza al lado: los arcos arriba, sin las filas del celular.
+    for (const mixed of [false, true]) expect(plan(606, mixed).layout).toBe("top")
+  })
+
+  it("↑ ↓ en la vista de frente van a la pieza que está justo arriba o abajo, también en la mixta", () => {
+    const mixed = [U, PU, PL, L]
+    expect(frontNeighbor(mixed, 15, 1)).toBe(55)
+    expect(frontNeighbor(mixed, 14, 1)).toBe(54)
+    expect(frontNeighbor(mixed, 55, -1)).toBe(15)
+    expect(frontNeighbor(mixed, 11, 1)).toBe(51)
+    expect(frontNeighbor(mixed, 85, 1)).toBe(45)
+    expect(frontNeighbor(mixed, 16, -1)).toBeNull()
+    expect(frontNeighbor([U, L], 16, 1)).toBe(46)
   })
 
   it("en el celular (334 px por dentro) la arcada partida y su arco entran", () => {

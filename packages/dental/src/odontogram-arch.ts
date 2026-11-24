@@ -226,17 +226,11 @@ export function archLayout(
     row.forEach((tooth, i) => {
       const toothSize = size * rel[i]!
       const toothDepth = toothSize / 1.2
-      // Por dentro de la U, el número un poco más lejos: pegado a la corona se montaba sobre ella
-      // (23 nov, en producción).
+      // En el odontograma, el número fuera de la encía; en el selector de los formularios, como antes.
       const labelAt =
         opts.byTooth && ring === "outer"
           ? depth * 0.675 + LABEL_PX + 1
-          : toothDepth / 2 +
-            (ring === "inner"
-              ? LABEL_PX + (opts.byTooth ? 6 : -2)
-              : inside
-                ? LABEL_PX + 5
-                : LABEL_PX)
+          : toothDepth / 2 + (ring === "inner" ? LABEL_PX + (opts.byTooth ? 6 : -2) : LABEL_PX)
       const p = line.at(
         row.length === 1 || span === 0
           ? line.length / 2

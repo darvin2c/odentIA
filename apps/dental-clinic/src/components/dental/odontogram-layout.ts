@@ -40,6 +40,13 @@ const ARCH_ASPECT = { plain: 0.56, mixed: 0.6 }
 const NARROW_ARCH_ASPECT = { plain: 0.7, mixed: 0.85 }
 /** La muela del arco mide esto de la de frente: las dos vistas en proporción. */
 const ARCH_TO_FRONT = 1
+/**
+ * Con los arcos arriba, cuánto se pueden achicar como mucho (de su tamaño). Más, sus piezas bajaban
+ * a 12–15 px (solo temporales en un celular grande, la mixta a 490 px) y va mejor una arcada tras
+ * otra. En la atención más angosta (606 px para la boca) quedan al 77 %: arriba, sin las filas
+ * grandes del celular; la misma pieza se toca de frente, con 24 px o más.
+ */
+const TOP_MIN = 0.75
 /** La temporal más chica del arco, en la mixta (px). */
 const MIN_INNER_PX = 16
 
@@ -65,11 +72,17 @@ type Rows = readonly (readonly number[])[]
  * El ancho del arco con el que su pieza más ancha mide `ARCH_TO_FRONT` de la misma pieza de frente.
  * El arco escala casi en proporción a su ancho: dos vueltas bastan.
  */
+/** El ancho del arco depende solo de la dentición: no se recalcula con cada cambio de ancho. */
+const archWidths = new Map<string, number>()
+
 function archWidthFor(
   arch: { outer: ArchRows; inner?: ArchRows },
   aspect: number,
   pxPerMm: number,
 ): number {
+  const key = `${arch.outer.lower.join(",")}|${arch.inner?.lower.join(",") ?? ""}|${aspect}|${pxPerMm}`
+  const known = archWidths.get(key)
+  if (known !== undefined) return known
   const lower = { upper: [], lower: arch.outer.lower }
   const inner = arch.inner ? { upper: [], lower: arch.inner.lower } : undefined
   const widest = (width: number) => {
@@ -88,6 +101,7 @@ function archWidthFor(
     width *= target / tooth.w
   }
   if (inner) for (let i = 0; i < 3; i++) width *= Math.max(1, MIN_INNER_PX / smallestInner(width))
+  archWidths.set(key, width)
   return width
 }
 
@@ -123,14 +137,10 @@ export function planMouth(
       frontTop: Math.max(0, offset),
     }
   }
-  // Lado a lado los dos arcos; si no entran a su tamaño, un poco más chicos.
-  if (available >= whole.width)
-    return {
-      layout: "top",
-      archWidth: Math.min(archWidth, (available - VIEWS_GAP) / 2),
-      archAspect,
-      ...none,
-    }
+  // Lado a lado los dos arcos; si no entran a su tamaño, un poco más chicos, hasta `TOP_MIN`.
+  const topArch = Math.min(archWidth, (available - VIEWS_GAP) / 2)
+  if (available >= whole.width && topArch >= TOP_MIN * archWidth)
+    return { layout: "top", archWidth: topArch, archAspect, ...none }
   // En el celular, el arco y la vista de frente a todo el ancho, del mismo ancho: ahí se marcan
   // las caras y se elige la pieza con el dedo (24 nov: el arco sobresalía de sus filas).
   const widest = Math.max(

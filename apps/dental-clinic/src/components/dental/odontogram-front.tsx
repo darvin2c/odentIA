@@ -55,6 +55,31 @@ interface Placed {
 }
 
 /** Ubica las filas una debajo de otra, cada una con sus números del lado de las coronas. */
+/**
+ * ↑ ↓: la pieza de la fila de al lado que está justo arriba o abajo en el dibujo. Por posición en
+ * la fila no sirve en la mixta: la 55 va bajo la 15, no repartida a lo ancho (revisión del 24 nov).
+ */
+function aboveOrBelow(placed: readonly Placed[], tooth: number, step: -1 | 1): number | null {
+  const r = placed.findIndex((p) => p.row.teeth.some((t) => t.tooth === tooth))
+  const next = placed[r + step]?.row.teeth
+  if (r < 0 || !next || next.length === 0) return null
+  const from = placed[r]!.row.teeth.find((t) => t.tooth === tooth)!
+  const center = from.x + from.w / 2
+  let best = next[0]!
+  for (const t of next)
+    if (Math.abs(t.x + t.w / 2 - center) < Math.abs(best.x + best.w / 2 - center)) best = t
+  return best.tooth
+}
+
+/** ↑ ↓ en la vista de frente, para las pruebas. */
+export function frontNeighbor(
+  rows: readonly (readonly number[])[],
+  tooth: number,
+  step: -1 | 1,
+): number | null {
+  return aboveOrBelow(layoutRows(rows.filter((row) => row.length > 0)).placed, tooth, step)
+}
+
 function layoutRows(rows: readonly (readonly number[])[]) {
   // Las de leche en su propia fila junto a las permanentes (la mixta en el celular), al 88 %: más
   // chicas que las permanentes y su fila no más ancha que la de arriba (24 nov).
@@ -78,11 +103,16 @@ function layoutRows(rows: readonly (readonly number[])[]) {
       rowOf.set(t.tooth + 40, i)
     }
   })
-  /** Dos filas van juntas si una es la de leche de la otra: entre grupos, más espacio. */
-  const together = (a: readonly number[], b: readonly number[]) =>
-    [a, b].some((row) => isPrimaryRow(row)) &&
-    !(isPrimaryRow(a) && isPrimaryRow(b)) &&
-    rowOf.get((isPrimaryRow(a) ? a : b)[0]!) === rows.indexOf(isPrimaryRow(a) ? b : a)
+  /**
+   * Dos filas van juntas si una es la de leche de la otra, con todas sus temporales bajo esa fila
+   * de reemplazos: entre grupos, más espacio (y la fila de leche entera del celular, aparte).
+   */
+  const together = (a: readonly number[], b: readonly number[]) => {
+    if (isPrimaryRow(a) === isPrimaryRow(b)) return false
+    const primary = isPrimaryRow(a) ? a : b
+    const pair = rows.indexOf(isPrimaryRow(a) ? b : a)
+    return primary.every((tooth) => rowOf.get(tooth) === pair)
+  }
   let cursor = 4
   const placed: Placed[] = rows.map((teeth, i) => {
     // Entre una fila y la de leche que va con ella, poco; entre grupos, más (la mixta en el celular).
@@ -782,7 +812,10 @@ export function OdontogramFront({
       if (!disabled) onToggle(tooth, true)
       return
     }
-    const next = archNeighbor(shown, tooth, event.key)
+    const next =
+      event.key === "ArrowUp" || event.key === "ArrowDown"
+        ? aboveOrBelow(placed, tooth, event.key === "ArrowUp" ? -1 : 1)
+        : archNeighbor(shown, tooth, event.key)
     if (next === null) return
     event.preventDefault()
     setVisited(next)
