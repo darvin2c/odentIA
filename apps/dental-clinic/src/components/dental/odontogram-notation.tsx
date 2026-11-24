@@ -28,6 +28,34 @@ export function useOdontogramNotation(): OdontogramStandardProfile | null {
   return useContext(NotationContext)
 }
 
+/**
+ * El nombre corto de las variantes de nombre largo, para su pastilla: «Dentina» y no «Lesión de
+ * caries a nivel de la dentina». El nombre entero sigue debajo de la elegida.
+ */
+const SHORT_VARIANT: Record<string, string> = {
+  white_spot: "Mancha blanca",
+  enamel: "Esmalte",
+  dentin: "Dentina",
+  pulpal_involvement: "Pulpa",
+  unerupted: "No erupcionado",
+  caries_extraction: "Extraído por caries",
+  other_absence: "Ausente por otra razón",
+  opacity: "Opacidades",
+  pigmentation: "Pigmentación",
+}
+
+/**
+ * Lo que dice la pastilla de una variante: con la norma, su nombre corto y la sigla («Dentina · CD»),
+ * para que se entienda sin saberse las siglas (lienzo del 24 nov); sin ella, su nombre.
+ */
+export function variantChipLabel(
+  official: OdontogramStandardProfile | null,
+  variant: { value: string; label: string; abbreviation: string },
+): string {
+  if (!official || !variant.abbreviation) return variant.label
+  return `${SHORT_VARIANT[variant.value] ?? variant.label} · ${variant.abbreviation}`
+}
+
 /** Sigla del hallazgo solo con odontograma oficial; "" en el resto. */
 export function officialAbbreviation(
   official: OdontogramStandardProfile | null,
