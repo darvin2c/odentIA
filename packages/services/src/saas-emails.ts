@@ -295,14 +295,14 @@ export function webContactEmail(input: {
   return renderEmail({
     brand: input.brand,
     subject: one ? `Tu plantilla para imprimir: ${input.sheets[0]}` : "Tus plantillas para imprimir",
-    preview: "Van adjuntas en PDF, listas para imprimir en A4.",
+    preview: one ? "Va adjunta en PDF, lista para imprimir en A4." : "Van adjuntas en PDF, listas para imprimir en A4.",
     title: one ? "Aquí tienes tu plantilla" : "Aquí tienes tus plantillas",
     paragraphs: [
-      `Van adjuntas en PDF, listas para imprimir en A4. Los pasos para llenarlas siguen en la guía: ${input.guideUrl}`,
+      `${one ? "Va adjunta" : "Van adjuntas"} en PDF, ${one ? "lista" : "listas"} para imprimir en A4: ${input.sheets.join(" y ")}.`,
+      `Los pasos para ${one ? "llenarla" : "llenarlas"} siguen en la guía: ${input.guideUrl}`,
       input.pitch,
       ...(input.offer ? [input.offer] : []),
     ],
-    list: input.sheets,
     ...(input.start ? action(input.start.label, input.start.url) : {}),
     reason: `Te escribimos porque dejaste tu correo en una guía de la web de ${name}.`,
     ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
