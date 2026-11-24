@@ -120,6 +120,14 @@ describe("el buscador de hallazgos de la pieza", () => {
     expect(codes("brack")).toContain("fixed_orthodontic_appliance")
   })
 
+  // QA del 23 nov: la causa de la pieza ausente («…por experiencia de caries dental») la traía.
+  it("«caries» y «diente de leche» no ofrecen la pieza ausente; «falta» y «no erupcionado», sí", () => {
+    for (const text of ["caries", "caries posterior", "diente de leche"])
+      expect(codes(text), text).not.toContain("missing_tooth")
+    for (const text of ["falta", "no erupcionado", "ausente", "pieza ausente"])
+      expect(codes(text), text).toContain("missing_tooth")
+  })
+
   // Revisión de las reglas clínicas del 18 nov: «curación temporal» traía la restauración definitiva.
   it("lo temporal se encuentra como temporal, no como la variante definitiva", () => {
     expect(codes("curación temporal")).toEqual(["temporary_restoration"])

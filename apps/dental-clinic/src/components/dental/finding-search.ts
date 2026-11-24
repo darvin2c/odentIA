@@ -34,7 +34,7 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   fracture: ["raiz fracturada", "fracturado", "fracturada"],
   tooth_wear: ["desgaste", "desgastado", "abrasion", "abfraccion", "erosion"],
   rotation: ["girado", "girada", "rotado", "rotada"],
-  missing_tooth: ["extraida", "extraido", "falta"],
+  missing_tooth: ["extraida", "extraido", "falta", "no erupcionado", "ausente"],
   supernumerary_tooth: ["supernumerario", "mesiodens"],
   peg_tooth: ["conoide"],
   enamel_development_defect: ["hipoplasia", "fluorosis"],
@@ -132,9 +132,13 @@ function matchFindings(query: string): { findings: FindingDefinition[]; byName: 
   const otherwise = FINDINGS.filter(
     (finding) =>
       !named.has(finding.code) &&
-      ((finding.variants ?? []).some((variant) =>
-        normalizeSearchText(variant.label).includes(query),
-      ) ||
+      // Por sus variantes solo cuando son un tipo del hallazgo (la profundidad de la caries, el
+      // material): las de la pieza ausente son la causa («…por experiencia de caries dental») y
+      // «caries» o «diente de leche» la traían (QA del 23 nov).
+      ((!finding.variantName?.startsWith("Causa") &&
+        (finding.variants ?? []).some((variant) =>
+          normalizeSearchText(variant.label).includes(query),
+        )) ||
         saidAs.has(finding.code)),
   )
   // «funda» está dentro de «profundas»: la corona («funda») va antes que las fosas y fisuras.
