@@ -856,8 +856,14 @@ export function ToothDrawer({
   // (QA del 16 nov, Q14: para anular lo recién registrado había que abrir «Historia… sin registros»).
   // Un hallazgo de varias piezas (el puente) sale una vez, con todas sus piezas: antes salía una vez
   // por pieza y «Anular» decía «pieza 45» aunque anulaba las tres (QA del 23 nov).
+  // Desde la historia y no desde lo vigente: lo de hoy que otro de hoy reemplazó también se puede anular.
   const todayFindings = teeth
-    .flatMap((toothNumber) => findingsOfEncounter(entriesOf(toothNumber), encounterId))
+    .flatMap((toothNumber) =>
+      findingsOfEncounter(
+        historyOf(toothNumber).filter((entry) => !entry.voidedAt && entry.status !== "voided" && !entry.resolvedAt),
+        encounterId,
+      ),
+    )
     .filter((group, i, all) => all.findIndex((other) => other.ids.join(",") === group.ids.join(",")) === i)
   const today =
     todayFindings.length > 0 ? (
@@ -1012,8 +1018,8 @@ export function ToothDrawer({
                 >
                   La {toothNumber} ya tiene {conditionLabel(before.condition).toLowerCase()}
                   {quality}
-                  {before.createdAt ? `, desde el ${shortDay(before.createdAt)}` : ""}. Al registrar, este
-                  reemplaza al anterior, que queda en su historia.
+                  {before.createdAt ? ` desde el ${shortDay(before.createdAt).replace(/\.$/, "")}` : ""}. Al registrar,
+                  este reemplaza al anterior, que queda en su historia.
                 </p>
               )
             })}

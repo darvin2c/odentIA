@@ -593,10 +593,11 @@ export function activeFindingsAsOf<T extends FindingRecord>(
 ): T[] {
   const cutoff = iso === undefined ? Number.POSITIVE_INFINITY : Date.parse(iso)
   if (iso !== undefined && !Number.isFinite(cutoff)) return []
-  const active = recordedAsOf(history, cutoff)
+  const active = recordedAsOf(history, cutoff, false)
   // De toda la pieza, el más nuevo del mismo hallazgo reemplaza al anterior, que sigue en la historia.
+  // Cuenta también el más nuevo ya tratado: tratarlo no devuelve el anterior. Anularlo, sí (deshace).
   const newest = new Map<string, T>()
-  for (const record of active)
+  for (const record of recordedAsOf(history, cutoff, true))
     if (replacesSame(record.condition)) newest.set(`${record.toothNumber}|${record.condition}`, record)
   return active.filter(
     (record) =>
@@ -608,11 +609,26 @@ export function activeFindingsAsOf<T extends FindingRecord>(
  * Lo que es de toda la pieza (el perno, la corona, el implante, la pieza ausente, la movilidad…): si se
  * anota otra vez, el nuevo reemplaza al anterior, que queda en la historia (lienzo del 24 nov: quedaban
  * dos «Espigo-muñón» vigentes en la 15). No lo de las caras, ni la fractura, que se dibuja a mano y una
- * pieza puede tener dos.
+ * pieza puede tener dos, ni la observación clínica, que es una nota y una pieza puede tener varias.
  */
 export function replacesSame(condition: string): boolean {
   const def = findingDefinition(condition)
-  return def?.scope === "tooth" && !def.requiresDrawing
+  return def?.scope === "tooth" && !def.requiresDrawing && condition !== "clinical_observation"
+}
+
+/**
+ * Sin lo reemplazado: de toda la pieza, solo el más nuevo de cada hallazgo (con lo tratado, que
+ * también reemplaza). Para quien no proyecta a una fecha, como el plan al elegir qué hallazgo motiva
+ * un tratamiento.
+ */
+export function withoutReplaced<T extends FindingRecord>(records: readonly T[]): T[] {
+  const newest = new Map<string, T>()
+  for (const record of recordedAsOf(records, Number.POSITIVE_INFINITY, true))
+    if (replacesSame(record.condition)) newest.set(`${record.toothNumber}|${record.condition}`, record)
+  return records.filter(
+    (record) =>
+      !replacesSame(record.condition) || newest.get(`${record.toothNumber}|${record.condition}`) === record,
+  )
 }
 
 /**
@@ -631,7 +647,8 @@ export function findingReplaced<T extends FindingRecord>(
   )
 }
 
-function recordedAsOf<T extends FindingRecord>(history: readonly T[], cutoff: number): T[] {
+/** Lo registrado a esa fecha, sin lo anulado ni lo pendiente de revisión; con `treated`, también lo tratado. */
+function recordedAsOf<T extends FindingRecord>(history: readonly T[], cutoff: number, treated: boolean): T[] {
   return history
     .filter((record) => {
       const created = timeOf(record.createdAt)
@@ -647,7 +664,7 @@ function recordedAsOf<T extends FindingRecord>(history: readonly T[], cutoff: nu
       // voidedAt presente pero ilegible: exclusión conservadora del gráfico.
       if (hasVoidedAt && (voided === undefined || voided <= cutoff)) return false
       // Tratado: estuvo vigente hasta que se realizó su tratamiento.
-      if (record.resolvedAt !== undefined && record.resolvedAt !== null) {
+      if (!treated && record.resolvedAt !== undefined && record.resolvedAt !== null) {
         const resolved = timeOf(record.resolvedAt)
         if (resolved === undefined || resolved <= cutoff) return false
       }

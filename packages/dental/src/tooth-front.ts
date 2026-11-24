@@ -197,11 +197,14 @@ export function canalPaths(spec: FrontSpec, w: number, ch: number, rl: number): 
   if (spec.roots === 1) return [`M${X(0.5)},${n(0.45 * ch)} L${X(0.5)},${R(0.93)}`]
   const { centers } = rootPaths(spec, w, ch, rl)
   const [first, second] = centers as [number, number]
+  // En el molar de leche las raíces son cortas y se abren: el conducto termina antes y sigue su raíz.
+  const end = spec.primary ? 0.76 : 0.93
+  const bend = spec.primary ? 0.3 : 0.44
   const list = [
-    `M${X(0.5)},${n(0.5 * ch)} Q${X(0.44)},${n(ch)} ${X(first)},${R(0.93)}`,
-    `M${X(0.5)},${n(0.5 * ch)} Q${X(0.56)},${n(ch)} ${X(second)},${R(0.93)}`,
+    `M${X(0.5)},${n(0.5 * ch)} Q${X(bend)},${n(ch)} ${X(spec.primary ? first + 0.02 : first)},${R(end)}`,
+    `M${X(0.5)},${n(0.5 * ch)} Q${X(1 - bend)},${n(ch)} ${X(spec.primary ? second - 0.02 : second)},${R(end)}`,
   ]
-  if (spec.roots === 3) list.push(`M${X(0.5)},${n(0.5 * ch)} L${X(0.5)},${R(0.98)}`)
+  if (spec.roots === 3) list.push(`M${X(0.5)},${n(0.5 * ch)} L${X(0.5)},${R(spec.primary ? 0.74 : 0.98)}`)
   return list
 }
 

@@ -300,13 +300,18 @@ function StudioBody({
     () =>
       snapshotDays([
         ...new Set(
+          // También cuando se trató: ese día terminó con el hallazgo ya tratado.
           state.history.flatMap((entry) =>
-            [entry.createdAt, entry.voidedAt].filter((date): date is string => !!date),
+            [entry.createdAt, entry.voidedAt, entry.resolvedAt].filter((date): date is string => !!date),
           ),
         ),
       ]),
     [state.history],
   )
+  // El día elegido que ya no está en la lista (pasó a ser hoy, o cambió lo registrado) vuelve a «Actual».
+  useEffect(() => {
+    if (snapshot !== "current" && !days.some((day) => day.value === snapshot)) setSnapshot("current")
+  }, [days, snapshot])
   const historical = snapshot !== "current"
   const view = useMemo(
     () => winnersAsOf(state.history, historical ? snapshot : undefined),

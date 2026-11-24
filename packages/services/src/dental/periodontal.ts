@@ -339,17 +339,25 @@ async function syncMobilityFinding(
   if (chart.implantTeeth.includes(toothNumber)) return
   const grade = mobility !== null && mobility >= 1 ? mobility : null
   const gradeOf = (finding: FindingRecord) => (finding.details as { grade?: number } | undefined)?.grade ?? null
-  const active = activeFindingsAsOf(await patientFindings(tx, orgId, chart.patientId, toothNumber)).filter(
-    (finding) => finding.condition === "pathological_mobility",
-  ) as Array<FindingRecord & { encounterId: string | null }>
-  const own = active.filter((finding) => finding.encounterId === chart.encounterId)
+  const records = await patientFindings(tx, orgId, chart.patientId, toothNumber)
+  const mobilityOf = (list: FindingRecord[]) =>
+    activeFindingsAsOf(list).filter((finding) => finding.condition === "pathological_mobility") as Array<
+      FindingRecord & { encounterId: string | null }
+    >
+  const own = mobilityOf(records).filter((finding) => finding.encounterId === chart.encounterId)
+  const voided = new Set<string>()
   for (const finding of own) {
     if (gradeOf(finding) !== grade) {
       await voidOdontogramEntry(tx, orgId, actorUserId, finding.id, chart.patientId, MOBILITY_CORRECTED)
+      voided.add(finding.id)
     }
   }
   if (grade === null || own.some((finding) => gradeOf(finding) === grade)) return
-  const before = active.filter((finding) => finding.encounterId !== chart.encounterId).at(-1)
+  // Lo de antes, mirado sin lo que se acaba de anular: la movilidad nueva de hoy reemplazaba a la de
+  // la atención anterior, y anulada, la anterior vuelve a estar vigente (revisión del 24 nov).
+  const before = mobilityOf(records.filter((finding) => !voided.has(finding.id)))
+    .filter((finding) => finding.encounterId !== chart.encounterId)
+    .at(-1)
   if (before && gradeOf(before) === grade) return
   await insertOdontogramFinding(
     tx,

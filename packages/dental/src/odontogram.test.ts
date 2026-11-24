@@ -437,7 +437,7 @@ describe("color y vigencia", () => {
 
 // Lienzo del 24 nov: el espigo-muñón de la 15 anotado dos veces quedaba dos veces vigente.
 describe("el mismo hallazgo de toda la pieza, otra vez", () => {
-  const post = (id: string, createdAt: string, quality: string) => ({
+  const post = (id: string, createdAt: string, quality: "good" | "poor"): FindingRecord => ({
     id,
     toothNumber: 15,
     condition: "post_and_core",
@@ -460,6 +460,21 @@ describe("el mismo hallazgo de toda la pieza, otra vez", () => {
       { id: "f2", toothNumber: 21, condition: "fracture", status: "recorded", createdAt: "2026-11-24" },
     ]
     expect(activeFindingsAsOf(faces).map((item) => item.id).sort()).toEqual(["d", "f1", "f2", "m"])
+  })
+
+  it("tratar el más nuevo no devuelve el anterior; anularlo, sí", () => {
+    const treated = [history[0]!, { ...history[1]!, resolvedAt: "2026-11-25T10:00:00Z" }]
+    expect(activeFindingsAsOf(treated, "2026-11-26T00:00:00Z")).toEqual([])
+    const voided = [history[0]!, { ...history[1]!, status: "voided", voidedAt: "2026-11-25T10:00:00Z" }]
+    expect(activeFindingsAsOf(voided, "2026-11-26T00:00:00Z").map((item) => item.id)).toEqual(["viejo"])
+  })
+
+  it("la observación clínica no se reemplaza: una pieza puede tener varias", () => {
+    const notes = [
+      { id: "frio", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-10-01" },
+      { id: "color", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-11-01" },
+    ]
+    expect(activeFindingsAsOf(notes).map((item) => item.id)).toEqual(["frio", "color"])
   })
 
   it("el panel sabe cuál reemplazaría, para avisarlo antes de registrar", () => {

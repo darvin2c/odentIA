@@ -417,6 +417,17 @@ export function variantLabel(condition: string, variant: string | null | undefin
   return findingDefinition(condition)?.variants?.find((item) => item.value === variant)?.label
 }
 
+/**
+ * El hallazgo dicho por su variante, cuando la tiene: «Lesión de caries a nivel de la dentina»,
+ * «Corona metálica». El tipo de fractura no dice solo qué es («Raíz»): va con el hallazgo,
+ * «Fractura dental · raíz». Sin variante, el nombre del hallazgo.
+ */
+export function findingByVariant(condition: string, variant: string | null | undefined): string {
+  const own = variantLabel(condition, variant)
+  if (!own) return conditionLabel(condition)
+  return condition === "fracture" ? `${conditionLabel(condition)} · ${own.toLowerCase()}` : own
+}
+
 /** Etiqueta española del hallazgo; el código desconocido se devuelve tal cual, nunca "Otro". */
 export function conditionLabel(code: string): string {
   const label = Object.hasOwn(BY_CODE, code) ? BY_CODE[code]?.label : undefined

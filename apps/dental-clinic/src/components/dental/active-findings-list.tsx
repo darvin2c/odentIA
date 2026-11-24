@@ -1,4 +1,4 @@
-import { activeFindingsAsOf, conditionLabel, type OdontogramStandardProfile, surfaceLabel, variantLabel } from "@odentia/dental"
+import { activeFindingsAsOf, findingByVariant, type OdontogramStandardProfile, surfaceLabel } from "@odentia/dental"
 import { Button } from "@odentia/ui"
 import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel } from "@odentia/clinical"
@@ -7,7 +7,7 @@ import { officialAbbreviation } from "./odontogram-notation"
 
 /** «CD · Lesión de caries a nivel de la dentina»: la variante dice el hallazgo; sin ella, su nombre. */
 function compactFinding(official: OdontogramStandardProfile | null, entry: OdontogramEntry): string {
-  const what = variantLabel(entry.condition, entry.details?.variant) ?? conditionLabel(entry.condition)
+  const what = findingByVariant(entry.condition, entry.details?.variant)
   const abbr = officialAbbreviation(official, entry)
   return abbr ? `${abbr} · ${what}` : what
 }
