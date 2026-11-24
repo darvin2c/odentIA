@@ -655,7 +655,8 @@ function ToothCanvas({
         ))}
       </defs>
       <g transform={flip ? "translate(0 28) scale(1 -1)" : undefined}>
-        <g className="fill-white stroke-gray-500">
+        {/* El contorno de la corona, el mismo gris azulado de la vista de frente (lienzo del 24 nov). */}
+        <g className="fill-white stroke-[#8a97ab]">
           <path d={silhouette.crown} strokeLinejoin="round" />
           {showRoots
             ? silhouette.roots.map((d) => <path key={d} d={d} strokeLinejoin="round" />)
@@ -726,8 +727,21 @@ function ToothCanvas({
           : null}
         {remnant ? (
           <g pointerEvents="none" aria-hidden="true">
-            <path d={silhouette.crown} className="fill-background" fillOpacity={0.75} stroke="none" />
-            <circle cx={12} cy={7.6} r={3.2} fill={remnant.paint} fillOpacity={0.15} stroke={remnant.paint} strokeWidth={1} />
+            <path
+              d={silhouette.crown}
+              className="fill-background"
+              fillOpacity={0.75}
+              stroke="none"
+            />
+            <circle
+              cx={12}
+              cy={7.6}
+              r={3.2}
+              fill={remnant.paint}
+              fillOpacity={0.15}
+              stroke={remnant.paint}
+              strokeWidth={1}
+            />
           </g>
         ) : null}
         {(replacement || abutmentOf) && !hasCrownSymbol ? (
@@ -874,7 +888,9 @@ export function ToothSVG({
   // El foco usa contorno y no anillo: así convive con el anillo violeta de la selección.
   // Al pasar el mouse un anillo gris, y el foco en tinta: nunca el color de la clínica, que podría
   // ser rojo o azul como los hallazgos de la norma (ADR 0162).
-  const archClass = `rounded bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
+  // En el arco, la elegida con un anillo redondo que sigue la pieza: el cuadrado se confundía con el
+  // símbolo del implante y tocaba a las vecinas (24 nov).
+  const archClass = `rounded-full bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
     selected
       ? "ring-2 ring-violet-600"
       : disabled

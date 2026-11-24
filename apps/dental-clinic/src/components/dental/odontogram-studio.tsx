@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode, useStaysBeside, ViewTabs } from "@odentia/ui-patterns"
+import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -57,6 +57,7 @@ import { OdontogramArch } from "./odontogram-arch"
 import { SignedOdontograms } from "./odontogram-assessments"
 import { OdontogramDocument } from "./odontogram-document"
 import { OdontogramFront } from "./odontogram-front"
+import { planMouth, singleArchRows } from "./odontogram-layout"
 import {
   findingWords,
   OdontogramNotationProvider,
@@ -69,9 +70,11 @@ import { ToothSVG } from "./tooth-svg"
 function useContainerWide(): {
   ref: RefObject<HTMLDivElement | null>
   wide: boolean
+  width: number
 } {
   const ref = useRef<HTMLDivElement | null>(null)
   const [wide, setWide] = useState(false)
+  const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -80,73 +83,43 @@ function useContainerWide(): {
       if (el.clientWidth === 0) return
       // La pieza al lado y a la boca le quedan 600 px por dentro de su borde (40,5rem con el relleno).
       setWide(el.clientWidth >= 984)
+      setWidth(el.clientWidth)
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-  return { ref, wide }
+  return { ref, wide, width }
 }
 
 /**
- * Cómo se acomodan las dos vistas según el ancho del lugar de la boca, no de la pantalla (mesa del
- * 23 nov 2026, diseño UX): «whole», la boca entera, los arcos de arriba a la izquierda y la vista
- * de frente con 16 piezas por fila (900 px o más); «beside», una arcada, su arco al lado de su
- * vista de frente en dos filas de 8 (600 a 899: la atención con la pieza abierta al lado, la
- * tableta); «stacked», una arcada, el arco arriba y la vista de frente debajo (el celular). Así
- * cada pieza se toca con el dedo (24 px o más) sin desplazarse de lado.
+ * El ancho que le queda a la boca, por dentro de su borde, con la pieza abierta al lado: la grilla
+ * de abajo (la boca de 40,5rem a 1fr, la pieza de 20 a 28rem, 1rem entre las dos) menos el borde
+ * y el relleno de la boca (sm:p-5).
  */
-type MouthLayout = "whole" | "beside" | "stacked"
-function useMouthLayout(
-  mixed: boolean,
-  /** La pieza puede abrirse al lado: el acomodo es el de una arcada, con o sin ella abierta. */
-  besideAlways: boolean,
-): { ref: RefObject<HTMLDivElement | null>; layout: MouthLayout } {
+function mouthWidthWithPanel(studio: number): number {
+  const panel = Math.min(448, Math.max(320, studio - 16 - 648))
+  return studio - 16 - panel - 42
+}
+
+/** Ancho del lugar de la boca, por dentro de su borde. */
+function useViewsWidth(): { ref: RefObject<HTMLDivElement | null>; width: number } {
   const ref = useRef<HTMLDivElement | null>(null)
-  // Antes de medir, la boca entera: es lo que se ve en el escritorio, donde más se atiende.
-  const [layout, setLayout] = useState<MouthLayout>("whole")
+  const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
     const update = (): void => {
-      const width = el.clientWidth
-      if (width === 0) return
-      // En la mixta el arco necesita más ancho (sus temporales no bajan de 24 px): la boca entera
-      // desde 1040 px y, más angosta, el arco arriba a todo el ancho (QA del 23 nov).
-      // En la atención, si la pieza cabe al lado, siempre una arcada: así abrirla no reacomoda la boca
-      // ni corre lo que estaba bajo el dedo (QA del 23 nov, diseño UX).
-      if (!mixed && besideAlways && width >= 600) setLayout("beside")
-      else setLayout(width >= (mixed ? 1040 : 900) ? "whole" : !mixed && width >= 600 ? "beside" : "stacked")
+      // Dentro de un panel plegado mide 0: se conserva el último ancho.
+      if (el.clientWidth > 0) setWidth(el.clientWidth)
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [mixed, besideAlways])
-  return { ref, layout }
-}
-
-/**
- * Las filas de una arcada de frente: las permanentes en dos de 8 (derecha, izquierda) y las de leche
- * en dos de 5. Así, a 360 px, ninguna pieza baja de 24 px de ancho para tocarla.
- */
-function singleArchRows(
-  permanent: readonly number[],
-  primary: readonly number[] | null,
-  upper: boolean,
-): number[][] {
-  const halves = (row: readonly number[]) => [
-    row.slice(0, row.length / 2),
-    row.slice(row.length / 2),
-  ]
-  const rows: number[][] = permanent.length > 0 ? halves(permanent) : []
-  // Las de leche quedan del lado de las coronas, como en la boca: abajo en la superior, arriba en la inferior.
-  if (primary && primary.length > 0) {
-    if (upper) rows.push(...halves(primary))
-    else rows.unshift(...halves(primary))
-  }
-  return rows
+  }, [])
+  return { ref, width }
 }
 
 /** Lo que se pierde si la pieza abierta se cierra con un hallazgo a medias. */
@@ -223,10 +196,8 @@ function StudioBody({
   const officialTitleRef = useRef<HTMLHeadingElement>(null)
   const queryClient = useQueryClient()
   const id = useId()
-  const { ref: containerRef, wide } = useContainerWide()
+  const { ref: containerRef, wide, width: studioWidth } = useContainerWide()
   const mouthRef = useRef<HTMLElement>(null)
-  /** En el celular, qué arcada se ve. */
-  const [arch, setArch] = useState<"upper" | "lower">("upper")
   const detailMode = useDetailMode()
   const dirty = useRef(false)
   // Lo mismo, para pintar: con un hallazgo a medias, cerrar la pieza al perder el ancho pregunta.
@@ -258,8 +229,7 @@ function StudioBody({
     return suggested === "mixed" ? "mixed" : primary ? "primary" : "adult"
   }
   const [dentition, setDentition] = useState<Dentition>(() => dentitionFor(validInitial, suggested))
-  const { ref: viewsRef, layout } = useMouthLayout(dentition === "mixed", compact && wide && detailMode === "panel")
-  const oneArch = layout !== "whole"
+  const { ref: viewsRef, width: viewsWidth } = useViewsWidth()
   /** Desde qué vista se abrió la pieza: al cerrarla, el foco vuelve ahí. */
   const openedFrom = useRef<"top" | "front">("top")
   const [selection, setSelection] = useState<number[]>(validInitial ? [validInitial] : [])
@@ -286,13 +256,6 @@ function StudioBody({
   useEffect(() => {
     onSelectionChange?.(selection)
   }, [selection, onSelectionChange])
-  // Con una arcada a la vez, la que se ve es la de la pieza elegida: al abrirla al lado (o desde la
-  // lista de hallazgos) no desaparece de la vista (revisión del 23 nov).
-  const firstChosen = selection[0]
-  useEffect(() => {
-    if (firstChosen === undefined) return
-    setArch([1, 2, 5, 6].includes(Math.trunc(firstChosen / 10)) ? "upper" : "lower")
-  }, [firstChosen, layout])
   const dates = useMemo(
     () =>
       [
@@ -409,6 +372,41 @@ function StudioBody({
   })
   // Dos columnas solo con la pieza al lado: «Evolución» va debajo del odontograma (lienzo del 23 nov).
   const twoColumns = !compactRow && showInlinePanel
+  // En la atención, con la pieza al lado, el acomodo es el que cabe con ella abierta: abrirla no
+  // reacomoda la boca ni corre lo que estaba bajo el dedo (QA del 23 nov).
+  const stable = compact && wide && detailMode === "panel"
+  const archRowsOf = (which: "upper" | "lower", split: boolean) =>
+    singleArchRows(
+      (which === "upper" ? outerRows[0] : outerRows[1]) ?? [],
+      innerRows ? ((which === "upper" ? innerRows[0] : innerRows[1]) ?? []) : null,
+      which === "upper",
+      split,
+    )
+  const wholeRows = innerRows
+    ? [outerRows[0] ?? [], innerRows[0] ?? [], innerRows[1] ?? [], outerRows[1] ?? []]
+    : [outerRows[0] ?? [], outerRows[1] ?? []]
+  const available = stable && studioWidth > 0 ? mouthWidthWithPanel(studioWidth) : viewsWidth
+  // Las filas son las constantes FDI de la dentición: el acomodo cambia con el ancho y la dentición.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: las filas salen de la dentición.
+  const plan = useMemo(
+    () =>
+      planMouth(
+        available,
+        {
+          whole: wholeRows,
+          narrow: [archRowsOf("upper", true), archRowsOf("lower", true)],
+        },
+        {
+          outer: { upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] },
+          ...(innerRows ? { inner: { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } } : {}),
+        },
+      ),
+    [available, dentition],
+  )
+  const layout = plan.layout
+  // Al medio de su lugar, salvo en la atención con la pieza al lado: ahí, al abrirla, el lugar se
+  // angosta y el dibujo centrado se corría bajo el dedo; a la izquierda queda quieto (24 nov).
+  const centered = stable ? "" : "mx-auto"
   const earlier = compactRow
     ? visibleHistory.filter((entry) => !encounterId || entry.encounterId !== encounterId)
     : []
@@ -545,9 +543,10 @@ function StudioBody({
   // En el celular, «Ver como la norma» y «Ver estado al» van al pie: arriba, lo que hace falta para
   // elegir una pieza (mesa del 23 nov, diseño UX).
   // Lo que hace falta para leer la mixta, dicho como se ve en cada acomodo (estándar E2).
-  const mixedHint = oneArch
-    ? "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van del lado de las coronas."
-    : "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van en las filas del medio."
+  const mixedHint =
+    layout === "narrow"
+      ? "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van en su propia fila."
+      : "Arco exterior: permanentes; arco interior: temporales. De frente, las temporales van en las filas del medio."
   const normButton = official ? (
     <Button size="sm" variant="outline" onClick={() => setOfficialOpen(true)}>
       Ver como la norma
@@ -580,6 +579,48 @@ function StudioBody({
         </SelectContent>
       </Select>
     </Field>
+  )
+  const topHeading = (
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      De arriba · las caras
+    </h4>
+  )
+  const frontHeading = (
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      De frente · cada pieza con su raíz
+    </h4>
+  )
+  const archOf = (which: "upper" | "lower") => (
+    <OdontogramArch
+      single={which}
+      aspect={plan.archAspect}
+      byTooth
+      // En el celular cada arcada ya lleva su título encima, y en la mixta el centro es de los números
+      // de las temporales: el nombre al centro, solo en los demás casos.
+      title={layout === "narrow" || innerRows ? null : which === "upper" ? "Superior" : "Inferior"}
+      teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
+      inner={innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined}
+      entriesOf={entriesOf}
+      selected={selection}
+      disabled={disabled || editorPending}
+      onToggle={(tooth, additive) => {
+        openedFrom.current = "top"
+        toggle(tooth, additive)
+      }}
+    />
+  )
+  const frontOf = (rows: readonly (readonly number[])[]) => (
+    <OdontogramFront
+      rows={rows}
+      pxPerMm={plan.frontPxPerMm}
+      entriesOf={entriesOf}
+      selected={selection}
+      disabled={disabled || editorPending}
+      onToggle={(tooth, additive) => {
+        openedFrom.current = "front"
+        toggle(tooth, additive)
+      }}
+    />
   )
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
@@ -646,9 +687,9 @@ function StudioBody({
               >
                 Seleccionar varias
               </Button>
-              {layout === "stacked" ? null : normButton}
+              {layout === "narrow" ? null : normButton}
             </div>
-            {layout === "stacked" ? null : dateField}
+            {layout === "narrow" ? null : dateField}
           </div>
           {historical && (
             <div className="flex flex-wrap items-center gap-2">
@@ -705,97 +746,72 @@ function StudioBody({
               pieza con su raíz, para lo que el arco no muestra (el perno, los conductos, el implante,
               el puente). Se toca una pieza en cualquiera de las dos y la elegida se marca en las dos. */}
           <div ref={viewsRef} className="flex min-w-0 flex-col gap-3">
-            {oneArch ? (
-              // Una arcada a la vez: cada pestaña dice cuántas piezas de esa arcada tienen algo.
-              <ViewTabs
-                label="Arcada"
-                value={arch}
-                options={(
-                  [
-                    ["upper", "Superior", upperTeeth],
-                    ["lower", "Inferior", lowerTeeth],
-                  ] as const
-                ).map(([value, label, rowTeeth]) => {
-                  const marked = rowTeeth.filter((tooth) => entriesOf(tooth).length > 0).length
-                  return { value, label, ...(marked > 0 ? { count: marked } : {}) }
-                })}
-                onValueChange={setArch}
-              />
-            ) : null}
-            <div
-              className={
-                layout === "stacked"
-                  ? "flex min-w-0 flex-col gap-4"
-                  : // El arco, más angosto con una arcada (así la de frente deja las incisivas en 24 px o
-                    // más) y más ancho en la mixta (sus temporales también).
-                    `grid min-w-0 items-start gap-6 ${layout === "beside" ? "grid-cols-[minmax(0,15rem)_minmax(0,32rem)]" : dentition === "mixed" ? "grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" : "grid-cols-[minmax(0,17.5rem)_minmax(0,1fr)]"}`
-              }
-            >
-              <section
-                aria-label="De arriba"
-                // Apilada en una pantalla ancha (la mixta en la tableta), el arco con tope: la vista de
-                // frente entra en la pantalla.
-                className={`flex min-w-0 flex-col gap-2 ${layout === "stacked" ? "mx-auto w-full max-w-[26rem]" : ""}`}
-              >
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  De arriba · las caras
-                </h4>
-                {(oneArch ? [arch] : (["upper", "lower"] as const)).map((which) => (
-                  <OdontogramArch
+            {layout === "whole" ? (
+              // Cada arco a la izquierda, a la altura de su fila de frente, y la vista de frente al medio
+              // del alto de los dos arcos (lienzo del 24 nov). Si sobra espacio, sobra a los dos lados.
+              <div className={`${centered} flex min-w-0 items-start gap-4`}>
+                <section
+                  aria-label="De arriba"
+                  className="flex shrink-0 flex-col gap-2"
+                  style={{ width: `${plan.archWidth}px` }}
+                >
+                  {topHeading}
+                  <div
+                    className="flex flex-col"
+                    style={{ marginTop: `${plan.archTop}px`, gap: `${plan.archGap}px` }}
+                  >
+                    {archOf("upper")}
+                    {archOf("lower")}
+                  </div>
+                </section>
+                <section aria-label="De frente" className="flex min-w-0 flex-col gap-2">
+                  {frontHeading}
+                  <div style={{ marginTop: `${plan.frontTop}px` }}>{frontOf(wholeRows)}</div>
+                </section>
+              </div>
+            ) : layout === "top" ? (
+              // Más angosto (la atención con la pieza al lado), los dos arcos arriba y la boca de frente
+              // debajo: siempre las dos arcadas (lienzo del 24 nov).
+              <div className={`${centered} flex w-fit min-w-0 max-w-full flex-col gap-4`}>
+                <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
+                  {topHeading}
+                  <div className="flex justify-center gap-4">
+                    {(["upper", "lower"] as const).map((which) => (
+                      <div key={which} style={{ width: `${plan.archWidth}px` }}>
+                        {archOf(which)}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section
+                  aria-label="De frente"
+                  className="flex min-w-0 flex-col items-center gap-2"
+                >
+                  <div className="self-stretch">{frontHeading}</div>
+                  {frontOf(wholeRows)}
+                </section>
+              </div>
+            ) : (
+              // En el celular, una arcada tras otra, sin pestañas: cada una con su arco y su vista de
+              // frente, las dos a todo el ancho (lienzo del 24 nov).
+              <div className="flex min-w-0 flex-col gap-5">
+                {(["upper", "lower"] as const).map((which) => (
+                  <section
                     key={which}
-                    single={which}
-                    // En el celular, la U alta de siempre a todo el ancho: piezas de unos 34 px para el dedo.
-                    aspect={layout === "stacked" ? 1.1 : 0.8}
-                    title={which === "upper" ? "Superior" : "Inferior"}
-                    teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
-                    inner={
-                      innerRows
-                        ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] }
-                        : undefined
-                    }
-                    entriesOf={entriesOf}
-                    selected={selection}
-                    disabled={disabled || editorPending}
-                    onToggle={(tooth, additive) => {
-                      openedFrom.current = "top"
-                      toggle(tooth, additive)
-                    }}
-                  />
+                    aria-label={which === "upper" ? "Arcada superior" : "Arcada inferior"}
+                    className="flex min-w-0 flex-col items-center gap-3 border-t pt-4 first:border-t-0 first:pt-0"
+                  >
+                    <h4 className="self-stretch text-sm font-semibold">
+                      {which === "upper" ? "Superior" : "Inferior"}
+                    </h4>
+                    <div className="max-w-full" style={{ width: `${plan.archWidth}px` }}>
+                      {archOf(which)}
+                    </div>
+                    {frontOf(archRowsOf(which, true))}
+                  </section>
                 ))}
-              </section>
-              <section aria-label="De frente" className="flex min-w-0 flex-col gap-2">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  De frente · cada pieza con su raíz
-                </h4>
-                <OdontogramFront
-                  rows={
-                    oneArch
-                      ? singleArchRows(
-                          (arch === "upper" ? outerRows[0] : outerRows[1]) ?? [],
-                          innerRows
-                            ? ((arch === "upper" ? innerRows[0] : innerRows[1]) ?? [])
-                            : null,
-                          arch === "upper",
-                        )
-                      : innerRows
-                        ? [
-                            outerRows[0] ?? [],
-                            innerRows[0] ?? [],
-                            innerRows[1] ?? [],
-                            outerRows[1] ?? [],
-                          ]
-                        : [outerRows[0] ?? [], outerRows[1] ?? []]
-                  }
-                  entriesOf={entriesOf}
-                  selected={selection}
-                  disabled={disabled || editorPending}
-                  onToggle={(tooth, additive) => {
-                    openedFrom.current = "front"
-                    toggle(tooth, additive)
-                  }}
-                />
-              </section>
-            </div>
+              </div>
+            )}
           </div>
           {multiple || !compact ? (
             <p className="text-xs text-muted-foreground">
@@ -814,7 +830,7 @@ function StudioBody({
               Buen estado o característica no patológica
             </span>
           </div>
-          {layout === "stacked" && (normButton || dateField) ? (
+          {layout === "narrow" && (normButton || dateField) ? (
             <div className="flex flex-wrap items-end justify-between gap-2 border-t pt-3">
               {normButton}
               {dateField}

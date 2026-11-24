@@ -1,13 +1,13 @@
 import { archNeighbor } from "@odentia/dental/odontogram-arch"
 import {
   canalPaths,
-  mesialIsRight,
   crownPath,
   type FrontRow,
   type FrontTooth,
   frontRow,
   frontRowWidthMm,
   frontSpecOf,
+  mesialIsRight,
   pegCrownPath,
   postRootCenter,
   rootPaths,
@@ -26,11 +26,23 @@ import { toothWords } from "./tooth-svg"
 
 // Colores clínicos de la norma, los mismos del arco (rojo: por tratar; azul: lo que ya tiene).
 const INK: Record<Paint, string> = { red: "#dc2626", blue: "#2563eb" }
-/** Escala del dibujo: px por mm. El SVG se estira al ancho de su lugar. */
+/** Escala interna del dibujo: unidades del SVG por mm de dibujo. */
 const S = 5
+/**
+ * Px de pantalla por mm de dibujo: el tamaño de la vista de frente, el mismo en todas las pantallas.
+ * Antes el SVG se estiraba al ancho de su lugar y en una pantalla ancha cada muela pasaba de 60 px
+ * (24 nov, en producción). Con 3,5, la fila de 16 mide unos 475 px, la incisiva permanente más
+ * angosta 22,6 px más el borde que se toca (24 o más para el dedo) y el arco cabe al lado desde
+ * 1024 px de pantalla. Solo con temporales va más grande (`planMouth`).
+ */
+export const FRONT_PX_PER_MM = 3.5
+/** Las de leche en su propia fila, junto a las permanentes: a este tanto de su tamaño. */
+const PRIMARY_OWN_ROW = 0.88
 /** Alto de la franja de los números, del lado de las coronas. */
-const NUMBER_BAND = 22
+const NUMBER_BAND = 24
 const ROW_GAP = 10
+/** Espacio de más entre dos grupos de filas que no van juntas. */
+const GROUP_GAP = 26
 const n = (value: number) => value.toFixed(1)
 
 interface Placed {
@@ -43,35 +55,109 @@ interface Placed {
 }
 
 /** Ubica las filas una debajo de otra, cada una con sus números del lado de las coronas. */
-function layoutRows(rows: readonly (readonly number[])[], primaryScale: number) {
-  const widths = rows.map(
-    (teeth) => frontRowWidthMm(teeth) * S * (isPrimaryRow(teeth) ? primaryScale : 1),
-  )
+/**
+ * ↑ ↓: la pieza de la fila de al lado que está justo arriba o abajo en el dibujo. Por posición en
+ * la fila no sirve en la mixta: la 55 va bajo la 15, no repartida a lo ancho (revisión del 24 nov).
+ */
+function aboveOrBelow(placed: readonly Placed[], tooth: number, step: -1 | 1): number | null {
+  const r = placed.findIndex((p) => p.row.teeth.some((t) => t.tooth === tooth))
+  const next = placed[r + step]?.row.teeth
+  if (r < 0 || !next || next.length === 0) return null
+  const from = placed[r]!.row.teeth.find((t) => t.tooth === tooth)!
+  const center = from.x + from.w / 2
+  let best = next[0]!
+  for (const t of next)
+    if (Math.abs(t.x + t.w / 2 - center) < Math.abs(best.x + best.w / 2 - center)) best = t
+  return best.tooth
+}
+
+/** ↑ ↓ en la vista de frente, para las pruebas. */
+export function frontNeighbor(
+  rows: readonly (readonly number[])[],
+  tooth: number,
+  step: -1 | 1,
+): number | null {
+  return aboveOrBelow(layoutRows(rows.filter((row) => row.length > 0)).placed, tooth, step)
+}
+
+function layoutRows(rows: readonly (readonly number[])[]) {
+  // Las de leche en su propia fila junto a las permanentes (la mixta en el celular), al 88 %: más
+  // chicas que las permanentes y su fila no más ancha que la de arriba (24 nov).
+  const withPermanent = rows.some((teeth) => teeth.length > 0 && !isPrimaryRow(teeth))
+  const scaleOf = (teeth: readonly number[], aligned: boolean) =>
+    isPrimaryRow(teeth) && withPermanent && !aligned ? S * PRIMARY_OWN_ROW : S
+  const widths = rows.map((teeth) => frontRowWidthMm(teeth) * scaleOf(teeth, false))
   const inner = Math.max(...widths)
   const edge = 2.6 * S
   const width = inner + 2 * edge + 8
+  // En la mixta, cada pieza de leche va bajo la permanente que la reemplaza (la 55 bajo la 15) y se
+  // toca en todo ese lugar: así no queda más grande que la permanente.
+  const slots = new Map<number, { x: number; w: number }>()
+  /** La fila de cada reemplazo: la de leche va bajo ella y, entre las dos, poco espacio. */
+  const rowOf = new Map<number, number>()
+  rows.forEach((teeth, i) => {
+    if (isPrimaryRow(teeth)) return
+    const placed = frontRow(teeth, { scale: S, left: (width - widths[i]!) / 2, yOcc: 0 }).teeth
+    for (const t of placed) {
+      slots.set(t.tooth + 40, { x: t.x, w: t.w })
+      rowOf.set(t.tooth + 40, i)
+    }
+  })
+  /**
+   * Dos filas van juntas si una es la de leche de la otra, con todas sus temporales bajo esa fila
+   * de reemplazos: entre grupos, más espacio (y la fila de leche entera del celular, aparte).
+   */
+  const together = (a: readonly number[], b: readonly number[]) => {
+    if (isPrimaryRow(a) === isPrimaryRow(b)) return false
+    const primary = isPrimaryRow(a) ? a : b
+    const pair = rows.indexOf(isPrimaryRow(a) ? b : a)
+    return primary.every((tooth) => rowOf.get(tooth) === pair)
+  }
   let cursor = 4
   const placed: Placed[] = rows.map((teeth, i) => {
-    const size = isPrimaryRow(teeth) ? primaryScale : 1
+    // Entre una fila y la de leche que va con ella, poco; entre grupos, más (la mixta en el celular).
+    const prev = rows[i - 1]
+    if (prev && !together(prev, teeth) && (isPrimaryRow(prev) || isPrimaryRow(teeth)))
+      cursor += GROUP_GAP
+    // Bajo sus reemplazos solo si están todos en una misma fila.
+    const aligned =
+      isPrimaryRow(teeth) &&
+      teeth.every((tooth) => slots.has(tooth) && rowOf.get(tooth) === rowOf.get(teeth[0]!))
     const left = (width - widths[i]!) / 2
-    const probe = frontRow(teeth, { scale: S, size, left, yOcc: 0 })
+    const opts = aligned ? { slots } : {}
+    const scale = scaleOf(teeth, aligned)
+    const probe = frontRow(teeth, { scale, left, yOcc: 0, ...opts })
     const reach = probe.up ? -probe.top : probe.bottom
     if (probe.up) {
       const yOcc = cursor + reach
-      const row = frontRow(teeth, { scale: S, size, left, yOcc })
+      const row = frontRow(teeth, { scale, left, yOcc, ...opts })
       const numberY = yOcc + NUMBER_BAND / 2 + 2
       const bottom = yOcc + NUMBER_BAND + 4
       cursor = bottom + ROW_GAP
       return { row, numberY, top: row.top, bottom }
     }
     const yOcc = cursor + NUMBER_BAND + 4
-    const row = frontRow(teeth, { scale: S, size, left, yOcc })
+    const row = frontRow(teeth, { scale, left, yOcc, ...opts })
     const numberY = cursor + NUMBER_BAND / 2 + 2
     const top = cursor
     cursor = row.bottom + ROW_GAP
     return { row, numberY, top, bottom: row.bottom }
   })
   return { width, height: cursor - ROW_GAP + 4, placed }
+}
+
+/**
+ * Lo que mide en pantalla la vista de frente con estas filas (px): con esto se decide el acomodo
+ * de la boca y el tamaño del arco de al lado, sin medir el dibujo.
+ */
+export function frontViewSize(
+  rows: readonly (readonly number[])[],
+  pxPerMm: number = FRONT_PX_PER_MM,
+): { width: number; height: number } {
+  const shown = rows.filter((row) => row.length > 0)
+  if (shown.length === 0) return { width: 0, height: 0 }
+  const { width, height } = layoutRows(shown)
+  return { width: (width * pxPerMm) / S, height: (height * pxPerMm) / S }
 }
 
 const isPrimaryRow = (teeth: readonly number[]) =>
@@ -110,10 +196,11 @@ function ToothFront({
   const rootShape = (
     <g
       key="roots"
-      className="fill-amber-50 stroke-zinc-300 dark:fill-zinc-300 dark:stroke-zinc-400"
+      // La raíz marfil, distinta de la corona (lienzo del 24 nov).
+      className="fill-[#f7f1e6] stroke-[#c9d1dc] dark:fill-zinc-300 dark:stroke-zinc-400"
     >
-      {roots.back ? <path d={roots.back} fillOpacity={0.55} strokeWidth={1} /> : null}
-      <path d={roots.front} fillOpacity={0.85} strokeWidth={1.1} strokeLinejoin="round" />
+      {roots.back ? <path d={roots.back} fillOpacity={0.7} strokeWidth={0.9} /> : null}
+      <path d={roots.front} strokeWidth={1} strokeLinejoin="round" />
     </g>
   )
   const crownShape = (extra?: { paint?: Paint }) => (
@@ -124,7 +211,11 @@ function ToothFront({
       strokeLinejoin="round"
       {...(extra?.paint
         ? { fill: INK[extra.paint], fillOpacity: 0.16, stroke: INK[extra.paint], strokeWidth: 2 }
-        : { className: "fill-white stroke-zinc-400", strokeWidth: 1.2 })}
+        : {
+            className: "stroke-[#8a97ab] dark:stroke-zinc-400",
+            style: { fill: "var(--front-enamel, #fff)" },
+            strokeWidth: 1.3,
+          })}
     />
   )
   // Lo que va dentro de la raíz: un conducto por raíz y el perno en la raíz mayor, unido al muñón
@@ -422,12 +513,13 @@ function ToothFront({
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <line x1={-w * 0.08} y1={y} x2={w * 1.08} y2={y} />
+        {/* Dentro del ancho de su corona: con las piezas juntas, más afuera tocaba a la vecina. */}
+        <line x1={w * 0.1} y1={y} x2={w * 0.9} y2={y} />
         <path
-          d={`M${n(-w * 0.08 + 4)},${n(y - 3.5)} L${n(-w * 0.08)},${n(y)} L${n(-w * 0.08 + 4)},${n(y + 3.5)}`}
+          d={`M${n(w * 0.1 + 4)},${n(y - 3.5)} L${n(w * 0.1)},${n(y)} L${n(w * 0.1 + 4)},${n(y + 3.5)}`}
         />
         <path
-          d={`M${n(w * 1.08 - 4)},${n(y - 3.5)} L${n(w * 1.08)},${n(y)} L${n(w * 1.08 - 4)},${n(y + 3.5)}`}
+          d={`M${n(w * 0.9 - 4)},${n(y - 3.5)} L${n(w * 0.9)},${n(y)} L${n(w * 0.9 - 4)},${n(y + 3.5)}`}
         />
       </g>,
     )
@@ -441,7 +533,13 @@ function ToothFront({
   if (marks.buriedPaint) {
     // La impactada, dentro de la encía y con su contorno del color de la norma.
     parts.push(
-      <g key="buried" fill="none" stroke={INK[marks.buriedPaint]} strokeWidth={1.6} strokeLinejoin="round">
+      <g
+        key="buried"
+        fill="none"
+        stroke={INK[marks.buriedPaint]}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+      >
         <path d={crown} />
         <path d={roots.front} />
       </g>,
@@ -678,9 +776,12 @@ export function OdontogramFront({
   selected,
   disabled = false,
   onToggle,
+  pxPerMm = FRONT_PX_PER_MM,
 }: {
   /** Las filas de arriba abajo, cada una de izquierda a derecha como se ven. */
   rows: readonly (readonly number[])[]
+  /** Px por mm de dibujo; en el celular, lo que llena el ancho. */
+  pxPerMm?: number
   entriesOf: (tooth: number) => OdontogramEntry[]
   selected: number[]
   disabled?: boolean
@@ -688,13 +789,11 @@ export function OdontogramFront({
 }): React.JSX.Element {
   const official = useOdontogramNotation()
   const hintId = useId()
+  const enamelId = useId().replace(/:/g, "")
   const ref = useRef<HTMLDivElement | null>(null)
   const shown = rows.filter((row) => row.length > 0)
-  // Las de leche, más grandes que su medida real: así ninguna baja de 24 px para tocarla (la mixta
-  // de la boca entera a 900 px dejaba las incisivas inferiores en 18). En filas de 5 (una
-  // arcada), un poco más.
-  const halfRows = shown.some((row) => isPrimaryRow(row) && row.length <= 5)
-  const { width: W, height: H, placed } = layoutRows(shown, halfRows ? 1.35 : 1.3)
+  const px = pxPerMm / S
+  const { width: W, height: H, placed } = layoutRows(shown)
   const [visited, setVisited] = useState<number | null>(null)
   const visible = shown.flat()
   const tabStop =
@@ -713,7 +812,10 @@ export function OdontogramFront({
       if (!disabled) onToggle(tooth, true)
       return
     }
-    const next = archNeighbor(shown, tooth, event.key)
+    const next =
+      event.key === "ArrowUp" || event.key === "ArrowDown"
+        ? aboveOrBelow(placed, tooth, event.key === "ArrowUp" ? -1 : 1)
+        : archNeighbor(shown, tooth, event.key)
     if (next === null) return
     event.preventDefault()
     setVisited(next)
@@ -723,7 +825,14 @@ export function OdontogramFront({
   return (
     <div
       ref={ref}
-      className="relative w-full min-w-0"
+      // De su tamaño, nunca estirada al ancho de la pantalla; más angosta, se achica.
+      className="relative min-w-0 max-w-full"
+      style={
+        {
+          width: `${n(W * px)}px`,
+          "--front-enamel": `url(#${enamelId}-enamel)`,
+        } as React.CSSProperties
+      }
       role="group"
       aria-label="De frente, cada pieza con su raíz"
       aria-describedby={hintId}
@@ -741,6 +850,13 @@ export function OdontogramFront({
         viewBox={`0 0 ${n(W)} ${n(H)}`}
         className="block h-auto w-full select-none"
       >
+        <defs>
+          {/* La corona, apenas sombreada hacia el cuello. */}
+          <linearGradient id={`${enamelId}-enamel`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="#f8fafc" />
+            <stop offset="1" stopColor="#eef2f7" />
+          </linearGradient>
+        </defs>
         {placed.map((p) => {
           const rowMarks = frontRowMarksOf(
             p.row.teeth.map((t) => t.tooth),
@@ -751,10 +867,32 @@ export function OdontogramFront({
               {/* La encía, del mismo rosado que el arco de arriba. */}
               <path
                 d={p.row.gum}
-                className="fill-rose-100 stroke-rose-200 dark:fill-rose-950/70 dark:stroke-rose-900"
+                className="fill-[#f9dde2] stroke-none dark:fill-rose-950"
+                strokeLinejoin="round"
+              />
+              {p.row.teeth.map((t) => (
+                <ToothFront
+                  key={t.tooth}
+                  t={t}
+                  yOcc={p.row.yOcc}
+                  reach={Math.abs((p.row.up ? p.row.top : p.row.bottom) - p.row.yOcc)}
+                  marks={frontMarksOf(t.tooth, entriesOf(t.tooth))}
+                />
+              ))}
+              {/* La encía por delante: cubre el cuello de cada corona con su festón, como en la boca. */}
+              <path
+                d={p.row.gumFront}
+                className="fill-[#f9dde2] dark:fill-rose-950"
+                stroke="none"
+              />
+              <path
+                d={p.row.gumLine}
+                fill="none"
+                className="stroke-[#efb8c2] dark:stroke-rose-900"
                 strokeWidth={1.2}
                 strokeLinejoin="round"
               />
+              {/* La elegida, por encima de la encía: su recuadro se ve entero. */}
               {p.row.teeth.map((t) => {
                 const isSelected = selected.includes(t.tooth)
                 if (!isSelected) return null
@@ -772,15 +910,6 @@ export function OdontogramFront({
                   />
                 )
               })}
-              {p.row.teeth.map((t) => (
-                <ToothFront
-                  key={t.tooth}
-                  t={t}
-                  yOcc={p.row.yOcc}
-                  reach={Math.abs((p.row.up ? p.row.top : p.row.bottom) - p.row.yOcc)}
-                  marks={frontMarksOf(t.tooth, entriesOf(t.tooth))}
-                />
-              ))}
               {rowMarks.map((mark) => (
                 <RowMark
                   key={`${mark.kind}-${mark.paint}-${mark.teeth.join("-")}`}
@@ -803,7 +932,7 @@ export function OdontogramFront({
                       <circle
                         cx={cx}
                         cy={p.numberY}
-                        r={11.5}
+                        r={13}
                         fill="none"
                         stroke={INK[marks.ringNumber]}
                         strokeWidth={1.4}
@@ -811,11 +940,11 @@ export function OdontogramFront({
                     ) : null}
                     {isSelected ? (
                       <rect
-                        x={cx - 16}
-                        y={p.numberY - 10}
-                        width={32}
-                        height={20}
-                        rx={10}
+                        x={cx - 18}
+                        y={p.numberY - 11}
+                        width={36}
+                        height={22}
+                        rx={11}
                         className="fill-violet-600"
                       />
                     ) : null}
@@ -824,14 +953,15 @@ export function OdontogramFront({
                       y={p.numberY}
                       textAnchor="middle"
                       dominantBaseline="central"
-                      fontSize={label.length > 3 ? 10 : 12}
-                      fontWeight={isSelected ? 700 : 400}
+                      // El mismo número que en el arco: 11 px y medio grueso.
+                      fontSize={label.length > 3 ? 13 : 15}
+                      fontWeight={isSelected ? 700 : 500}
                       className={
                         isSelected
                           ? "fill-white"
                           : marks.mobility
                             ? "fill-red-700 dark:fill-red-400"
-                            : "fill-muted-foreground"
+                            : "fill-[#4b5563] dark:fill-zinc-300"
                       }
                     >
                       {label}
@@ -860,8 +990,8 @@ export function OdontogramFront({
               onClick={(event) => onToggle(t.tooth, event.ctrlKey || event.metaKey)}
               className={`absolute rounded-md bg-transparent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-foreground ${disabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted-foreground/10"}`}
               style={{
-                left: pct(t.x - 1, W),
-                width: pct(t.w + 2, W),
+                left: pct((t.hit?.x ?? t.x) - 1, W),
+                width: pct((t.hit?.w ?? t.w) + 2, W),
                 top: pct(p.top, H),
                 height: pct(p.bottom - p.top, H),
               }}

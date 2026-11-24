@@ -1,4 +1,5 @@
 import { type ArchRows, archLayout, archNeighbor } from "@odentia/dental/odontogram-arch"
+import { frontRowMarksOf } from "@odentia/dental/tooth-front-marks"
 import { Button } from "@odentia/ui"
 import {
   Fragment,
@@ -12,6 +13,9 @@ import {
 } from "react"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { ToothSVG } from "./tooth-svg"
+
+/** Cuánto más grande que su lugar se dibuja la pieza en el odontograma (`byTooth`). */
+const ICON_FILL = 1.14
 
 /** Ancho con el que se dibuja antes de medir el contenedor. */
 const FALLBACK_WIDTH = 360
@@ -52,13 +56,22 @@ export function OdontogramArch({
   single,
   aspect,
   title,
+  byTooth = false,
 }: {
   /** Una sola arcada a lo ancho (en el celular), para que cada pieza se pueda tocar. */
   single?: "upper" | "lower"
   /** Alto sobre ancho, con una sola arcada: más bajo cuando va junto a la vista de frente. */
   aspect?: number
-  /** El nombre de la arcada al centro («Superior»), en vez de «Derecha» e «Izquierda». */
-  title?: string
+  /**
+   * El nombre de la arcada al centro («Superior»), en vez de «Derecha» e «Izquierda»; `null`, nada
+   * (la pestaña de al lado ya dice cuál es).
+   */
+  title?: string | null
+  /**
+   * Cada pieza del ancho con que se dibuja de frente: el odontograma, junto a su vista de frente. El
+   * selector de los formularios, no.
+   */
+  byTooth?: boolean
   teeth: ArchRows
   /** Segundo arco concéntrico (temporales en dentición mixta); sus números van hacia el centro. */
   inner?: ArchRows
@@ -84,14 +97,12 @@ export function OdontogramArch({
   // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
   const layout = useMemo(
     () =>
-      archLayout(
-        width,
-        shownTeeth,
-        shownInner,
-        single ? { single, ...(aspect ? { aspect } : {}) } : {},
-      ),
+      archLayout(width, shownTeeth, shownInner, {
+        ...(single ? { single, ...(aspect ? { aspect } : {}) } : {}),
+        byTooth,
+      }),
     // Las filas son las constantes FDI: cambian solo al cambiar de dentición.
-    [width, single, aspect, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
+    [width, single, aspect, byTooth, teeth.upper, teeth.lower, inner?.upper, inner?.lower],
   )
   // De arriba abajo, tal como se ven: así ↑ ↓ pasan a la fila de al lado.
   // biome-ignore lint/correctness/useExhaustiveDependencies: las filas cambian con la dentición y la arcada.
@@ -130,13 +141,32 @@ export function OdontogramArch({
   }
 
   const { width: W, height: H } = layout
+  // Los puentes de cada arcada, con sus piezas vecinas de a pares (el selector no tiene hallazgos).
+  const bridges = [shownTeeth.upper, shownTeeth.lower].flatMap((row) =>
+    frontRowMarksOf(row, entriesOf)
+      .filter((mark) => mark.kind === "bridge")
+      .map((mark) => {
+        const placed = mark.teeth.flatMap((tooth) => layout.teeth.filter((t) => t.tooth === tooth))
+        return {
+          key: mark.teeth.join("-"),
+          paint: mark.paint,
+          pairs: placed.slice(1).map((b, i) => [placed[i]!, b] as const),
+        }
+      }),
+  )
   return (
     <div
       ref={ref}
       className={`relative mx-auto w-full min-w-0 max-w-[520px] ${aspect ? "" : single ? "aspect-[10/11]" : "aspect-[10/9]"}`}
       style={aspect ? { aspectRatio: `1 / ${aspect}` } : undefined}
       role="group"
-      aria-label={title ? `Arcada ${title.toLowerCase()}, de arriba` : "Odontograma"}
+      aria-label={
+        title
+          ? `Arcada ${title.toLowerCase()}, de arriba`
+          : single
+            ? `Arcada ${single === "upper" ? "superior" : "inferior"}, de arriba`
+            : "Odontograma"
+      }
       aria-describedby={hintId}
       onKeyDown={onKeyDown}
       onFocus={(event) => {
@@ -160,20 +190,20 @@ export function OdontogramArch({
             <path
               d={gum.d}
               strokeWidth={gum.width + 2}
-              className="stroke-rose-200 dark:stroke-rose-900"
+              className="stroke-[#efb8c2] dark:stroke-rose-900"
             />
             <path
               d={gum.d}
               strokeWidth={gum.width}
               className={
                 gum.inner
-                  ? "stroke-rose-50 dark:stroke-rose-950"
-                  : "stroke-rose-100 dark:stroke-rose-950"
+                  ? "stroke-[#fcebee] dark:stroke-rose-950"
+                  : "stroke-[#f9dde2] dark:stroke-rose-950"
               }
             />
           </g>
         ))}
-        {title ? null : (
+        {title !== undefined ? null : (
           <>
             <line
               x1={W / 2}
@@ -202,7 +232,7 @@ export function OdontogramArch({
         </span>
       ) : null}
       {/* La 18 se ve a la izquierda pero es del lado derecho del paciente. */}
-      {(title ? [] : (["Derecha", "Izquierda"] as const)).map((side, i) => (
+      {(title !== undefined ? [] : (["Derecha", "Izquierda"] as const)).map((side, i) => (
         <span
           key={side}
           aria-hidden="true"
@@ -221,7 +251,9 @@ export function OdontogramArch({
               style={{
                 left: pct(t.x, W),
                 top: pct(t.y, H),
-                width: pct(t.w, W),
+                // En el odontograma el dibujo de la pieza llena su lugar: la corona vista de arriba deja
+                // margen dentro de su recuadro y, a su tamaño, quedaba chica y separada (24 nov).
+                width: pct(t.w * (byTooth ? ICON_FILL : 1), W),
                 transform: `translate(-50%,-50%) rotate(${t.rotation}deg)`,
               }}
             >
@@ -239,18 +271,58 @@ export function OdontogramArch({
             {/* La elegida, con su número en una pastilla violeta, igual que de frente. */}
             <span
               aria-hidden="true"
-              className={`absolute -translate-x-1/2 -translate-y-1/2 leading-none ${t.w >= 32 ? "text-xs" : "text-[11px]"} ${
+              className={`absolute -translate-x-1/2 -translate-y-1/2 leading-none ${byTooth ? "text-[11px] font-medium" : t.w >= 32 ? "text-xs" : "text-[11px]"} ${
                 isSelected
                   ? "rounded-full bg-violet-600 px-1.5 py-0.5 font-semibold text-white"
-                  : "text-muted-foreground"
+                  : byTooth
+                    ? "text-[#4b5563] dark:text-zinc-300"
+                    : "text-muted-foreground"
               }`}
-              style={{ left: pct(t.labelX, W), top: pct(t.labelY, H) }}
+              style={(() => {
+                // La pastilla de la elegida, un poco más afuera: así no pisa su anillo.
+                const push = isSelected && byTooth ? 7 : 0
+                const dx = t.labelX - t.x
+                const dy = t.labelY - t.y
+                const k = 1 + push / (Math.hypot(dx, dy) || 1)
+                return { left: pct(t.x + dx * k, W), top: pct(t.y + dy * k, H) }
+              })()}
             >
               {t.tooth}
             </span>
           </Fragment>
         )
       })}
+      {/* El puente unido entre corona y corona, encima de las piezas, como de frente: con las piezas
+          juntas, cada pilar y el póntico se leían como coronas sueltas (revisión del 24 nov). */}
+      {bridges.length > 0 ? (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 size-full overflow-visible"
+          viewBox={`0 0 ${W} ${H}`}
+        >
+          {bridges.map(({ key, paint, pairs }) =>
+            pairs.map(([a, b]) => {
+              const d = Math.hypot(b.x - a.x, b.y - a.y) || 1
+              const half = Math.min(a.w, b.w) * 0.22
+              const mx = (a.x + b.x) / 2
+              const my = (a.y + b.y) / 2
+              return (
+                <line
+                  key={`${key}-${a.tooth}`}
+                  x1={mx - ((b.x - a.x) / d) * half}
+                  y1={my - ((b.y - a.y) / d) * half}
+                  x2={mx + ((b.x - a.x) / d) * half}
+                  y2={my + ((b.y - a.y) / d) * half}
+                  stroke={paint === "red" ? "#dc2626" : "#2563eb"}
+                  strokeOpacity={0.6}
+                  strokeWidth={Math.min(a.h, b.h) * 0.3}
+                  strokeLinecap="round"
+                />
+              )
+            }),
+          )}
+        </svg>
+      ) : null}
     </div>
   )
 }

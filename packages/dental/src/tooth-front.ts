@@ -18,8 +18,7 @@ export interface FrontSpec {
   kind: FrontKind
   /** Raíces que se ven de frente. */
   roots: 1 | 2 | 3
-  /** Alto de la corona y largo de la raíz. */
-  crown: number
+  /** Largo de la raíz, en mm. */
   root: number
 }
 
@@ -27,42 +26,66 @@ type Row = Record<number, FrontSpec>
 
 const PERMANENT: { upper: Row; lower: Row } = {
   upper: {
-    1: { mm: 8.6, kind: "incisor", roots: 1, crown: 10.5, root: 13 },
-    2: { mm: 6.6, kind: "incisor", roots: 1, crown: 9, root: 13 },
-    3: { mm: 7.6, kind: "canine", roots: 1, crown: 10, root: 15 },
-    4: { mm: 7, kind: "premolar", roots: 2, crown: 8.5, root: 14 },
-    5: { mm: 6.6, kind: "premolar", roots: 1, crown: 8.5, root: 14 },
-    6: { mm: 10.2, kind: "molar", roots: 3, crown: 7.5, root: 13 },
-    7: { mm: 9.2, kind: "molar", roots: 3, crown: 7, root: 12 },
-    8: { mm: 8.6, kind: "molar", roots: 3, crown: 6.5, root: 11 },
+    1: { mm: 8.6, kind: "incisor", roots: 1, root: 13 },
+    2: { mm: 6.6, kind: "incisor", roots: 1, root: 13 },
+    3: { mm: 7.6, kind: "canine", roots: 1, root: 15 },
+    4: { mm: 7, kind: "premolar", roots: 2, root: 14 },
+    5: { mm: 6.6, kind: "premolar", roots: 1, root: 14 },
+    6: { mm: 10.2, kind: "molar", roots: 3, root: 13 },
+    7: { mm: 9.2, kind: "molar", roots: 3, root: 12 },
+    8: { mm: 8.6, kind: "molar", roots: 3, root: 11 },
   },
   lower: {
-    1: { mm: 5.3, kind: "incisor", roots: 1, crown: 9, root: 12.5 },
-    2: { mm: 5.9, kind: "incisor", roots: 1, crown: 9.5, root: 14 },
-    3: { mm: 7, kind: "canine", roots: 1, crown: 11, root: 14.5 },
-    4: { mm: 7, kind: "premolar", roots: 1, crown: 8.5, root: 14 },
-    5: { mm: 7.1, kind: "premolar", roots: 1, crown: 8, root: 14.5 },
-    6: { mm: 11.2, kind: "molar", roots: 2, crown: 7.5, root: 14 },
-    7: { mm: 10.5, kind: "molar", roots: 2, crown: 7, root: 13 },
-    8: { mm: 10, kind: "molar", roots: 2, crown: 7, root: 11 },
+    1: { mm: 5.3, kind: "incisor", roots: 1, root: 12.5 },
+    2: { mm: 5.9, kind: "incisor", roots: 1, root: 14 },
+    3: { mm: 7, kind: "canine", roots: 1, root: 14.5 },
+    4: { mm: 7, kind: "premolar", roots: 1, root: 14 },
+    5: { mm: 7.1, kind: "premolar", roots: 1, root: 14.5 },
+    6: { mm: 11.2, kind: "molar", roots: 2, root: 14 },
+    7: { mm: 10.5, kind: "molar", roots: 2, root: 13 },
+    8: { mm: 10, kind: "molar", roots: 2, root: 11 },
   },
 }
 
 const PRIMARY: { upper: Row; lower: Row } = {
   upper: {
-    1: { mm: 6.5, kind: "incisor", roots: 1, crown: 6, root: 10 },
-    2: { mm: 5.2, kind: "incisor", roots: 1, crown: 5.6, root: 10 },
-    3: { mm: 7, kind: "canine", roots: 1, crown: 6.5, root: 13 },
-    4: { mm: 7.3, kind: "molar", roots: 3, crown: 5.2, root: 10 },
-    5: { mm: 8.2, kind: "molar", roots: 3, crown: 5.7, root: 11 },
+    1: { mm: 6.5, kind: "incisor", roots: 1, root: 10 },
+    2: { mm: 5.2, kind: "incisor", roots: 1, root: 10 },
+    3: { mm: 7, kind: "canine", roots: 1, root: 13 },
+    4: { mm: 7.3, kind: "molar", roots: 3, root: 10 },
+    5: { mm: 8.2, kind: "molar", roots: 3, root: 11 },
   },
   lower: {
-    1: { mm: 4.2, kind: "incisor", roots: 1, crown: 5, root: 9 },
-    2: { mm: 4.7, kind: "incisor", roots: 1, crown: 5.2, root: 10 },
-    3: { mm: 5.9, kind: "canine", roots: 1, crown: 7, root: 11.5 },
-    4: { mm: 7.8, kind: "molar", roots: 2, crown: 6, root: 9.5 },
-    5: { mm: 9.9, kind: "molar", roots: 2, crown: 5.5, root: 10 },
+    1: { mm: 4.2, kind: "incisor", roots: 1, root: 9 },
+    2: { mm: 4.7, kind: "incisor", roots: 1, root: 10 },
+    3: { mm: 5.9, kind: "canine", roots: 1, root: 11.5 },
+    4: { mm: 7.8, kind: "molar", roots: 2, root: 9.5 },
+    5: { mm: 9.9, kind: "molar", roots: 2, root: 10 },
   },
+}
+
+/**
+ * El alto de la corona, el mismo en toda la fila: así los bordes y los cuellos quedan en línea y
+ * la encía sigue un festón parejo, como en los odontogramas de frente. Con el alto real de cada
+ * pieza (el canino más alto que el molar) la fila se veía desordenada (23 nov, en producción).
+ */
+function crownMm(tooth: number): number {
+  return isPrimaryTooth(tooth) ? 6 : 9
+}
+
+/**
+ * El ancho medio de una pieza permanente (mm): con él se suaviza la diferencia de anchos.
+ */
+const WIDTH_REF_MM = 7.9
+
+/**
+ * El ancho con que se dibuja la pieza, en mm: la media geométrica de su ancho real y el de una pieza
+ * media. La muela sigue más ancha que la incisiva (1,45 veces y no 2,1), como en los odontogramas de
+ * frente: con el ancho real la incisiva quedaba angosta para el dedo y la fila de 16 muy ancha, y el
+ * arco, a la altura de su fila, se veía chico al lado (24 nov, en producción). El arco usa el mismo.
+ */
+export function drawnWidthMm(tooth: number): number {
+  return Math.sqrt(frontSpecOf(tooth).mm * WIDTH_REF_MM)
 }
 
 /** Las medidas de la pieza FDI (permanente o temporal). */
@@ -95,7 +118,7 @@ export function crownPath(kind: FrontKind, w: number, ch: number): string {
     case "incisor":
       return `M${X(0.2)},${Y(1)} C${X(0.06)},${Y(0.78)} ${X(0.02)},${Y(0.42)} ${X(0.05)},${Y(0.12)} Q${X(0.07)},${Y(0.02)} ${X(0.18)},${Y(0.02)} L${X(0.82)},${Y(0.02)} Q${X(0.93)},${Y(0.02)} ${X(0.95)},${Y(0.12)} C${X(0.98)},${Y(0.42)} ${X(0.94)},${Y(0.78)} ${X(0.8)},${Y(1)} Q${X(0.5)},${Y(1.07)} ${X(0.2)},${Y(1)} Z`
     case "canine":
-      return `M${X(0.22)},${Y(1)} C${X(0.05)},${Y(0.8)} ${X(0.02)},${Y(0.45)} ${X(0.12)},${Y(0.3)} Q${X(0.34)},${Y(0.1)} ${X(0.46)},${Y(0.02)} Q${X(0.5)},${Y(-0.01)} ${X(0.54)},${Y(0.02)} Q${X(0.66)},${Y(0.1)} ${X(0.88)},${Y(0.3)} C${X(0.98)},${Y(0.45)} ${X(0.95)},${Y(0.8)} ${X(0.78)},${Y(1)} Q${X(0.5)},${Y(1.07)} ${X(0.22)},${Y(1)} Z`
+      return `M${X(0.22)},${Y(1)} C${X(0.05)},${Y(0.8)} ${X(0.02)},${Y(0.4)} ${X(0.1)},${Y(0.22)} Q${X(0.3)},${Y(0.08)} ${X(0.44)},${Y(0.03)} Q${X(0.5)},${Y(0)} ${X(0.56)},${Y(0.03)} Q${X(0.7)},${Y(0.08)} ${X(0.9)},${Y(0.22)} C${X(0.98)},${Y(0.4)} ${X(0.95)},${Y(0.8)} ${X(0.78)},${Y(1)} Q${X(0.5)},${Y(1.07)} ${X(0.22)},${Y(1)} Z`
     case "premolar":
       return `M${X(0.2)},${Y(1)} C${X(0.04)},${Y(0.8)} ${X(0.02)},${Y(0.42)} ${X(0.1)},${Y(0.26)} Q${X(0.28)},${Y(0.04)} ${X(0.5)},${Y(0.03)} Q${X(0.72)},${Y(0.04)} ${X(0.9)},${Y(0.26)} C${X(0.98)},${Y(0.42)} ${X(0.96)},${Y(0.8)} ${X(0.8)},${Y(1)} Q${X(0.5)},${Y(1.07)} ${X(0.2)},${Y(1)} Z`
     case "molar":
@@ -185,6 +208,8 @@ export interface FrontTooth {
   rl: number
   /** true: la raíz va hacia arriba (piezas de arriba). */
   up: boolean
+  /** Lo que se toca, si es más ancho que la pieza: la de leche, el lugar de la que la reemplaza. */
+  hit?: { x: number; w: number }
 }
 
 export interface FrontRow {
@@ -194,6 +219,12 @@ export interface FrontRow {
   up: boolean
   /** La encía de la fila: envuelve las raíces, con el borde festoneado y las papilas. */
   gum: string
+  /**
+   * La encía por delante de las piezas: la franja del festón, que cubre el cuello de cada corona y
+   * sube entre pieza y pieza (la papila), y su borde, para trazarlo.
+   */
+  gumFront: string
+  gumLine: string
   /** Lo que ocupa la fila, de la punta de la raíz más larga al borde de las coronas. */
   top: number
   bottom: number
@@ -202,14 +233,14 @@ export interface FrontRow {
 }
 
 /** Espacio entre piezas vecinas y, más ancho, en la línea media. */
-const GAP_MM = 0.4
-const MIDLINE_MM = 1.4
+const GAP_MM = 0.1
+const MIDLINE_MM = 0.6
 
-/** El ancho de una fila en mm, con sus espacios. */
+/** El ancho de una fila en mm de dibujo, con sus espacios. */
 export function frontRowWidthMm(teeth: readonly number[]): number {
   let total = 0
   teeth.forEach((tooth, i) => {
-    total += frontSpecOf(tooth).mm
+    total += drawnWidthMm(tooth)
     const next = teeth[i + 1]
     if (next !== undefined)
       total += Math.trunc(next / 10) !== Math.trunc(tooth / 10) ? MIDLINE_MM : GAP_MM
@@ -218,43 +249,76 @@ export function frontRowWidthMm(teeth: readonly number[]): number {
 }
 
 /**
- * Ubica una fila de piezas (de izquierda a derecha como se ven) a `scale` px por mm, desde
+ * Ubica una fila de piezas (de izquierda a derecha como se ven) a `scale` px por mm de dibujo, desde
  * `left`, con el borde de las coronas en `yOcc`. Las de arriba llevan la raíz hacia arriba.
  */
 export function frontRow(
   teeth: readonly number[],
-  opts: { scale: number; left: number; yOcc: number; size?: number },
+  opts: {
+    scale: number
+    left: number
+    yOcc: number
+    /** Dónde va cada pieza (borde izquierdo y ancho de su lugar): la de leche, bajo la que la reemplaza. */
+    slots?: ReadonlyMap<number, { x: number; w: number }>
+  },
 ): FrontRow {
-  const s = opts.scale * (opts.size ?? 1)
+  const s = opts.scale
   const up = teeth.length > 0 && isUpperTooth(teeth[0]!)
   const dir = up ? -1 : 1
   let x = opts.left
   const placed: FrontTooth[] = []
   teeth.forEach((tooth, i) => {
     const spec = frontSpecOf(tooth)
-    const w = spec.mm * s
-    placed.push({ tooth, x, w, ch: spec.crown * s, rl: spec.root * s, up })
+    const w = drawnWidthMm(tooth) * s
+    const slot = opts.slots?.get(tooth)
+    if (slot) {
+      // El molar de leche es más ancho que el premolar que lo reemplaza: no pasa de su lugar.
+      const fit = Math.min(w, slot.w * 0.94)
+      placed.push({
+        tooth,
+        x: slot.x + (slot.w - fit) / 2,
+        w: fit,
+        ch: crownMm(tooth) * s,
+        rl: spec.root * s,
+        up,
+        hit: slot,
+      })
+      return
+    }
+    placed.push({ tooth, x, w, ch: crownMm(tooth) * s, rl: spec.root * s, up })
     const next = teeth[i + 1]
     if (next !== undefined)
       x += w + (Math.trunc(next / 10) !== Math.trunc(tooth / 10) ? MIDLINE_MM : GAP_MM) * s
   })
-  const right = placed.length ? placed.at(-1)!.x + placed.at(-1)!.w : opts.left
+  const right = placed.length
+    ? Math.max(...placed.map((p) => (p.hit ? p.hit.x + p.hit.w : p.x + p.w)))
+    : opts.left
+  const leftmost = placed.length
+    ? Math.min(...placed.map((p) => (p.hit ? p.hit.x : p.x)))
+    : opts.left
   const maxCh = Math.max(0, ...placed.map((p) => p.ch))
   const maxRl = Math.max(0, ...placed.map((p) => p.rl))
-  const reach = maxCh + maxRl + 3 * s
+  // La encía termina poco después de la raíz más larga: más abajo era rosado de sobra.
+  const reach = maxCh + maxRl + 2 * s
   const yOcc = opts.yOcc
   const far = yOcc + dir * reach
   // El festón: el borde de la encía sigue el cuello de cada pieza y sube entre pieza y pieza
   // (la papila), como en la boca.
   const cerv = (p: FrontTooth) => yOcc + dir * p.ch
-  const pap = (p: FrontTooth) => cerv(p) - dir * 0.2 * p.ch
+  const pap = (p: FrontTooth) => cerv(p) - dir * 0.22 * p.ch
   const edge = 2.6 * s
-  const gl = opts.left - edge
+  const gl = leftmost - edge
   const gr = right + edge
-  const r = Math.min(5 * s, reach / 3)
+  // Los cuatro extremos de la encía, redondeados como en la boca: no una caja.
+  const r = Math.min(9 * s, reach / 2.2)
+  const rc = Math.min(3 * s, reach / 4)
   let d = ""
+  let gumFront = ""
+  let gumLine = ""
   if (placed.length > 0) {
-    d = `M${n(gl)},${n(pap(placed[0]!) + dir * 1.2 * s)}`
+    const first = placed[0]!
+    const corner = `M${n(gl)},${n(pap(first) + dir * rc)} Q${n(gl)},${n(pap(first))} ${n(gl + rc)},${n(pap(first))}`
+    d = ""
     placed.forEach((p, i) => {
       const prev = placed[i - 1]
       const next = placed[i + 1]
@@ -263,20 +327,31 @@ export function frontRow(
       const endY = next ? (pap(p) + pap(next)) / 2 : pap(p)
       const endX = next ? (p.x + p.w + next.x) / 2 : p.x + p.w
       const midX = p.x + p.w / 2
-      const midY = cerv(p) + dir * 0.14 * p.ch
+      // Al medio de cada pieza el festón baja hasta el cuello: la corona se ve entera y la encía
+      // asoma entre pieza y pieza (la papila), como en la boca.
+      const midY = cerv(p) + dir * 0.02 * p.ch
       const sx = prev ? (prev.x + prev.w + p.x) / 2 : p.x
       d += ` C${n(sx + p.w * 0.22)},${n(startY)} ${n(midX - p.w * 0.28)},${n(midY)} ${n(midX)},${n(midY)}`
       d += ` C${n(midX + p.w * 0.28)},${n(midY)} ${n(endX - p.w * 0.22)},${n(endY)} ${n(endX)},${n(endY)}`
     })
     const last = placed.at(-1)!
-    d += ` L${n(gr)},${n(pap(last) + dir * 1.2 * s)}`
+    const festoon = d
+    const end = ` L${n(gr - rc)},${n(pap(last))}`
+    const closeCorner = ` Q${n(gr)},${n(pap(last))} ${n(gr)},${n(pap(last) + dir * rc)}`
+    d = `${corner}${festoon}${end}${closeCorner}`
     d += ` L${n(gr)},${n(far - dir * r)} Q${n(gr)},${n(far)} ${n(gr - r)},${n(far)} L${n(gl + r)},${n(far)} Q${n(gl)},${n(far)} ${n(gl)},${n(far - dir * r)} Z`
+    // La franja de adelante llega justo pasado el cuello: se ve el festón y la raíz sigue a la vista.
+    const band = yOcc + dir * maxCh * 1.04
+    gumFront = `${corner}${festoon}${end}${closeCorner} L${n(gr)},${n(band)} L${n(gl)},${n(band)} Z`
+    gumLine = `M${n(gl + rc)},${n(pap(first))}${festoon}${end}`
   }
   return {
     teeth: placed,
     yOcc,
     up,
     gum: d,
+    gumFront,
+    gumLine,
     top: up ? far : yOcc,
     bottom: up ? yOcc : far,
     left: gl,
