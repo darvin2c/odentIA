@@ -186,7 +186,7 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await expect(row).toBeVisible()
   await expect(row).toContainText(`Tienda ${tag}`)
   await shot(page, "cuentas-de-otras-apps-escritorio")
-  await row.getByRole("button", { name: "Abrir" }).click()
+  await row.getByRole("link", { name: "Abrir", exact: true }).click()
   await untilShown(page, "Tienda abierta: su dueño ya puede entrar.")
   await expect(page.getByText("Abrir la cuenta").first()).toBeVisible()
   await shot(page, "cuenta-abierta-escritorio")
