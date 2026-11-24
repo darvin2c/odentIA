@@ -1,0 +1,170 @@
+---
+// La figura de un paso de una guía (lienzo, tableros 3 y 5): la numeración FDI como se mira de frente
+// (en el teléfono, una fila por cuadrante: se lee sin desplazarse de lado), las caras de un diente
+// o una tabla. En pantalla no va el dibujo de la hoja de la norma: ese es solo para imprimir.
+import type { GuideFigure } from "../../lib/guides"
+import RichText from "./RichText.astro"
+
+interface Props {
+  figure: GuideFigure
+}
+const { figure } = Astro.props
+
+type Half = { name: string; teeth: number[] }
+type Row = { label?: string; halves: [Half, Half] }
+
+const range = (from: number, to: number) =>
+  Array.from({ length: Math.abs(to - from) + 1 }, (_, i) => (from < to ? from + i : from - i))
+/** Cada cuadrante como se mira de frente: la derecha del paciente queda a la izquierda. */
+const PERMANENT_UPPER: [Half, Half] = [
+  { name: "1 · superior derecho", teeth: range(18, 11) },
+  { name: "2 · superior izquierdo", teeth: range(21, 28) },
+]
+const PERMANENT_LOWER: [Half, Half] = [
+  { name: "4 · inferior derecho", teeth: range(48, 41) },
+  { name: "3 · inferior izquierdo", teeth: range(31, 38) },
+]
+const PRIMARY_UPPER: [Half, Half] = [
+  { name: "5 · de leche superior derecho", teeth: range(55, 51) },
+  { name: "6 · de leche superior izquierdo", teeth: range(61, 65) },
+]
+const PRIMARY_LOWER: [Half, Half] = [
+  { name: "8 · de leche inferior derecho", teeth: range(85, 81) },
+  { name: "7 · de leche inferior izquierdo", teeth: range(71, 75) },
+]
+const rows: Row[] =
+  figure.kind !== "fdi"
+    ? []
+    : figure.dentition === "permanente"
+      ? [{ halves: PERMANENT_UPPER }, { halves: PERMANENT_LOWER }]
+      : figure.dentition === "temporal"
+        ? [{ halves: PRIMARY_UPPER }, { halves: PRIMARY_LOWER }]
+        : [
+            { label: "Permanentes de arriba", halves: PERMANENT_UPPER },
+            { label: "De leche de arriba", halves: PRIMARY_UPPER },
+            { label: "De leche de abajo", halves: PRIMARY_LOWER },
+            { label: "Permanentes de abajo", halves: PERMANENT_LOWER },
+          ]
+const mark = figure.kind === "fdi" ? figure.mark : undefined
+const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
+---
+{figure.kind === "fdi" ? (
+  <figure class:list={["gf", "gf-fdi", { wide, mixed: figure.dentition === "mixta" }]}>
+    <div class="gf-sides" aria-hidden="true"><span>Derecha del paciente</span><span>Izquierda del paciente</span></div>
+    {rows.map((row) => (
+      <div class="gf-row">
+        {row.label ? <span class="gf-label">{row.label}</span> : null}
+        <div class="gf-halves">
+          {row.halves.map((half) => (
+            <div class="gf-half">
+              <span class="gf-q">{half.name}</span>
+              <ol class="gf-teeth" aria-label={`Cuadrante ${half.name}`}>
+                {half.teeth.map((tooth) => (
+                  <li class:list={{ on: tooth === mark }} aria-current={tooth === mark ? "true" : undefined}>{tooth}</li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+    <figcaption><RichText text={figure.caption} /></figcaption>
+  </figure>
+) : figure.kind === "caras" ? (
+  <figure class="gf gf-faces">
+    <div
+      class="gf-cross"
+      role="img"
+      aria-label="Las caras del 26: la vestibular arriba, la palatina abajo, la mesial a la izquierda, hacia el centro de la boca, la distal a la derecha y la oclusal al medio."
+    >
+      <span class="v">V<small>Vestibular</small></span>
+      <span class="m">M<small>Mesial</small></span>
+      <span class="o">O<small>Oclusal</small></span>
+      <span class="d">D<small>Distal</small></span>
+      <span class="p">P<small>Palatina</small></span>
+    </div>
+    <figcaption><RichText text={figure.caption} /></figcaption>
+  </figure>
+) : (
+  <figure class="gf gf-table">
+    <div class="gf-scroll" tabindex="0" role="region" aria-label={figure.head.join(" · ")}>
+      <table>
+        <thead><tr>{figure.head.map((cell) => <th scope="col">{cell}</th>)}</tr></thead>
+        <tbody>
+          {figure.rows.map((row) => (
+            <tr>{row.map((cell) => <td><RichText text={cell} /></td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {figure.caption ? <figcaption><RichText text={figure.caption} /></figcaption> : null}
+  </figure>
+)}
+
+<style>
+  .gf { margin: 0; background: var(--paper); border-radius: 22px; padding: 22px; box-shadow: inset 0 0 0 1px var(--line); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  figcaption { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+  /* La numeración: en la computadora, los dos lados del paciente en la misma fila, con la línea media. */
+  .gf-sides { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--soft); }
+  .gf-row { display: flex; flex-direction: column; gap: 6px; }
+  .gf-row + .gf-row { padding-top: 10px; border-top: 2px solid var(--teal); }
+  .mixed .gf-row + .gf-row { border-top-width: 1px; border-top-color: var(--line); }
+  .gf-label { font-size: 13px; font-weight: 700; color: var(--ink-2); }
+  .gf-halves { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 14px; position: relative; }
+  .gf-halves::after { content: ""; position: absolute; top: 22px; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--teal); }
+  .gf-half { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .gf-half:last-child { align-items: stretch; }
+  .gf-q { font-size: 13px; font-weight: 700; color: var(--teal); }
+  .gf-half:last-child .gf-q { text-align: right; }
+  .gf-teeth { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 4px; }
+  .wide .gf-teeth { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .gf-fdi:not(.wide) .gf-teeth, .mixed .gf-row:nth-child(3) .gf-teeth, .mixed .gf-row:nth-child(4) .gf-teeth { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .mixed .gf-row:nth-child(2) .gf-teeth, .mixed .gf-row:nth-child(5) .gf-teeth { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  /* En la mixta, los de leche del ancho de un permanente y pegados a la línea media, como en la hoja:
+     el 51 queda bajo el 11. */
+  .mixed .gf-row:nth-child(3) .gf-teeth, .mixed .gf-row:nth-child(4) .gf-teeth { grid-template-columns: repeat(5, calc((100% - 28px) / 8)); }
+  .mixed .gf-row:nth-child(3) .gf-half:first-child .gf-teeth, .mixed .gf-row:nth-child(4) .gf-half:first-child .gf-teeth { justify-content: end; }
+  .gf-teeth li { text-align: center; padding: 8px 0; border-radius: 8px; background: var(--bg); font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+  /* El diente del ejemplo, con el color de la marca: el rojo es de lo que hay que tratar. */
+  .gf-teeth li.on { background: var(--teal); color: #fff; }
+  /* En el teléfono, una fila por cuadrante, en el orden de la boca: se lee sin desplazarse de lado. */
+  @media (max-width: 640px) {
+    .gf { padding: 16px; }
+    .gf-sides { display: none; }
+    .gf-halves { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .gf-halves::after { display: none; }
+    .gf-half:last-child .gf-q { text-align: left; }
+    .gf-teeth li { padding: 10px 0; font-size: 14px; }
+    .mixed .gf-row .gf-half:first-child .gf-teeth { justify-content: start; }
+  }
+
+  /* Las caras de un diente de arriba, como en la hoja: la vestibular hacia afuera (arriba). */
+  .gf-faces { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 24px; }
+  .gf-faces figcaption { flex: 1 1 260px; }
+  .gf-cross { flex: none; display: grid; grid-template-columns: repeat(3, 72px); grid-template-rows: repeat(3, 64px); gap: 4px; text-align: center; font-weight: 800; font-size: 18px; }
+  .gf-cross span { display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; background: var(--teal-soft); color: var(--ink); line-height: 1.1; }
+  .gf-cross small { font-size: 10.5px; font-weight: 600; color: var(--muted); }
+  .gf-cross .v { grid-area: 1 / 2; }
+  .gf-cross .m { grid-area: 2 / 1; }
+  .gf-cross .o { grid-area: 2 / 2; background: var(--teal); color: #fff; }
+  .gf-cross .o small { color: #e3f4f8; }
+  .gf-cross .d { grid-area: 2 / 3; }
+  .gf-cross .p { grid-area: 3 / 2; }
+
+  /* Las tablas: la que no cabe en el teléfono se desplaza dentro de su recuadro, no la página. */
+  .gf-table { padding: 0; overflow: hidden; }
+  .gf-scroll { overflow-x: auto; }
+  .gf-scroll:focus-visible { outline: 3px solid rgba(14, 116, 144, .35); outline-offset: -3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15.5px; line-height: 1.5; }
+  th { background: #eef2f7; text-align: left; padding: 12px 18px; font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+  td { padding: 12px 18px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  td :global(b) { color: var(--ink); }
+  .gf-table figcaption { padding: 0 18px 16px; }
+  @media (max-width: 640px) {
+    table { font-size: 14.5px; }
+    th, td { padding: 10px 12px; }
+    /* Las de muchas columnas (el presupuesto) piden su ancho y se desplazan dentro. */
+    table:has(th:nth-child(4)) { min-width: 620px; }
+  }
+</style>

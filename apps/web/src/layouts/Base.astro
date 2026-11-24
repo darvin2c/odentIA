@@ -17,9 +17,11 @@ interface Props {
   /** «legal»: solo la fila legal del pie, sin el mapa de la web. */
   footer?: "full" | "legal"
   noindex?: boolean
+  /** El botón de la cabecera, si la página lo cambia (en una guía baja a su solicitud). */
+  cta?: { href: string; label: string }
 }
 
-const { title, description, jsonLd, header = "dark", footer = "full", noindex = false } = Astro.props
+const { title, description, jsonLd, header = "dark", footer = "full", noindex = false, cta } = Astro.props
 // Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
 // la del mapa del sitio y los enlaces, va sin .html.
 const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
@@ -103,7 +105,7 @@ const ld = [...(isHome ? [site] : []), org, ...(Array.isArray(jsonLd) ? jsonLd :
   </head>
   <body>
     <a class="skip" href="#contenido">Ir al contenido</a>
-    {header === "none" ? null : <Header variant={header} />}
+    {header === "none" ? null : <Header variant={header} cta={cta} />}
     <main id="contenido">
       <slot />
     </main>

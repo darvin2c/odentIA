@@ -1,0 +1,66 @@
+---
+// /guias (lienzo UYxnET…, tablero 4): una tarjeta por guía, en filas parejas, y la solicitud al final.
+// Cada guía nueva se suma sola desde su archivo (`src/lib/guides`). Solo en odentIA: latidIA y vistIA
+// no la sirven (`product-pages.json`).
+import GuideCards from "../../components/guides/GuideCards.astro"
+import GuideStart from "../../components/guides/GuideStart.astro"
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd } from "../../lib/faq"
+import { GUIDES, GUIDES_PATH, guidePath } from "../../lib/guides"
+import { ctaOf } from "../../lib/site"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const headerCta = pricing.signupMode === "invitacion" ? { href: "#pide", label: cta.label } : undefined
+const title = "Guías para tu clínica dental, paso a paso"
+const description =
+  "Guías para odontólogos: cómo llenar un odontograma, el odontograma en niños y cómo hacer un presupuesto dental, cada una con su plantilla en PDF para descargar, sin pedir tu correo."
+const jsonLd = [
+  breadcrumbJsonLd(Astro.site, [
+    ["Inicio", "/"],
+    ["Guías", GUIDES_PATH],
+  ]),
+  {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: title,
+    itemListElement: GUIDES.map((guide, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: guide.name,
+      url: new URL(guidePath(guide), Astro.site).toString(),
+    })),
+  },
+]
+---
+<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta}>
+  <section class="hero gi">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap gi-wrap">
+      <div class="gi-in">
+        <span class="tag tag-d rise">[ Guías ]</span>
+        <h1 class="gi-h1 rise d1">Guías para tu clínica dental, <span class="acc">paso a paso.</span></h1>
+        <p class="lead lead-d rise d2">Cómo llenar el odontograma, cómo armar un presupuesto y más. Cada una con su plantilla para descargar, sin pedir tu correo.</p>
+      </div>
+    </div>
+  </section>
+  <section class="section gi-list" aria-label="Las guías">
+    <div class="wrap">
+      <GuideCards guides={[...GUIDES]} level="h2" />
+    </div>
+  </section>
+  <GuideStart title="Tu clínica, sin papel." page={GUIDES_PATH} />
+</Base>
+
+<style>
+  .gi { padding: 152px 0 88px; }
+  .gi-wrap { position: relative; z-index: 2; }
+  .gi-in { display: flex; flex-direction: column; gap: 20px; max-width: 900px; }
+  .gi-h1 { margin: 0; font-size: clamp(40px, 4.6vw, 62px); line-height: 0.98; letter-spacing: -0.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .gi-list { padding: 72px 0; }
+  @media (max-width: 720px) {
+    .gi { padding: 104px 0 56px; }
+    .gi-list { padding: 48px 0; }
+  }
+</style>

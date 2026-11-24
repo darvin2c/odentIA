@@ -1,0 +1,11 @@
+/* La demo de la guía de niños: quién es y qué dentición, arriba del odontograma (ChildChartPreview). */
+.cc-top { flex: 1 1 100%; display: flex; flex-direction: column; gap: 10px; }
+.cc-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-pill {
+  min-height: 44px; padding: 0 16px; border-radius: 999px; border: 0; cursor: pointer;
+  background: var(--bg); color: var(--ink-2); font: inherit; font-size: 14.5px; font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.cc-pill[aria-pressed="true"] { background: var(--teal); color: #fff; box-shadow: none; }
+.cc-pill:focus-visible { outline: 3px solid rgba(14, 116, 144, .45); outline-offset: 2px; }
+.cc-hint { margin: 0; font-size: 14px; color: var(--muted); }

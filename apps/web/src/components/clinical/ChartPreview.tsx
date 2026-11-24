@@ -11,11 +11,11 @@ type Example = { finding: string; detail: string; kind: ExampleFinding }
 const EXAMPLES: Record<number, Example> = {
   36: {
     kind: "caries",
-    finding: "Caries oclusal profunda",
-    detail: "Dictado por la Dra. Paredes y confirmado. Diagnóstico CIE-10 K02.1. En el plan: resina, o si no una corona.",
+    finding: "Caries de dentina en oclusal",
+    detail: "Dictado por la Dra. Paredes y confirmado. Diagnóstico CIE-10 K02.1, caries de la dentina. En el plan: resina oclusal, o si no una incrustación.",
   },
   46: { kind: "ausente", finding: "Ausente", detail: "Registrado en la atención del 12 de marzo." },
-  11: { kind: "corona", finding: "Corona en buen estado", detail: "Corona de porcelana registrada en 2024." },
+  11: { kind: "corona", finding: "Corona en buen estado", detail: "Corona metal-cerámica (CMC), sobre una endodoncia. Registrada en 2024." },
   26: { kind: "restauracion", finding: "Restauración en buen estado", detail: "Resina oclusal del 3 de junio." },
 }
 

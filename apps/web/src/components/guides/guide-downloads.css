@@ -1,0 +1,50 @@
+/* Las plantillas de una guía y su aviso (GuideDownloads.tsx). */
+.gd { display: flex; flex-direction: column; gap: 14px; }
+.gd-cards { display: flex; flex-wrap: wrap; gap: 16px; }
+.gd-card {
+  flex: 1 1 280px; min-width: 0; display: flex; align-items: center; gap: 16px; padding: 20px 22px; border-radius: 18px;
+  background: var(--paper); color: var(--ink); text-decoration: none; box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.gd-card:hover { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--teal); }
+@media (hover: hover) { .gd-card:hover { transform: translateY(-1px); } }
+.gd-card:focus-visible { outline: 3px solid rgba(14, 116, 144, .45); outline-offset: 2px; }
+.gd-icon { flex: none; width: 48px; height: 48px; border-radius: 12px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; }
+.gd-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gd-what b { font-size: 18px; }
+.gd-what span { color: var(--muted); font-size: 15px; line-height: 1.4; }
+.gd-free { margin: 0; font-size: 15px; color: var(--soft); }
+
+.gd-notice { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 16px; background: #f0f9fb; box-shadow: inset 0 0 0 1px #bfe3ea; }
+.gd-status { margin: 0; font-size: 15px; color: var(--ink-2); }
+.gd-status a { font-weight: 700; white-space: nowrap; }
+.gd-offer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+.gd-offer p, .gd-form > p { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+
+/* Los estados del correo en la misma celda: la caja mide lo del más alto y no empuja nada al cambiar. */
+.gd-stage { display: grid; }
+.gd-stage > * { grid-area: 1 / 1; min-width: 0; }
+.gd-form[aria-hidden="true"] { visibility: hidden; }
+.gd-form { display: flex; flex-direction: column; gap: 10px; }
+.gd-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.gd-field { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.gd-field input {
+  font: inherit; font-weight: 400; font-size: 16px; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 0;
+  background: var(--paper); color: var(--ink); box-shadow: inset 0 0 0 1px #cbd5e1; width: 100%;
+}
+.gd-field input:focus-visible { outline: 3px solid rgba(14, 116, 144, .35); outline-offset: 1px; }
+.gd-field input[aria-invalid="true"] { box-shadow: inset 0 0 0 2px #d92d20; }
+.gd-row .btn { flex: none; }
+.gd-row .btn:disabled { opacity: .6; cursor: progress; }
+/* El renglón del error está siempre: aparecer no corre lo de abajo. */
+.gd-error { margin: 0; min-height: 1.45em; font-size: 14px; font-weight: 500; color: #b42318; }
+.gd-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.gd-done { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; }
+.gd-done p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+.gd-done p:focus { outline: none; }
+.gd-done p:focus-visible { outline: 3px solid rgba(14, 116, 144, .35); outline-offset: 4px; border-radius: 6px; }
+.gd-change { min-height: 44px; padding: 0; border: 0; background: none; font: inherit; font-weight: 700; color: var(--teal); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 640px) {
+  .gd-notice { padding: 16px; }
+  .gd-row .btn { flex: 1 1 100%; }
+}

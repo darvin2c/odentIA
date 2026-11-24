@@ -1,0 +1,38 @@
+---
+// Una dirección que no existe en esta web: con su cabecera y su pie, y por dónde seguir (antes salía
+// «404: Not found» en inglés, sin logo). Fuera del mapa del sitio y de los buscadores.
+import Base from "../layouts/Base.astro"
+import { GUIDES_PATH, HAS_GUIDES } from "../lib/guides"
+import { WORDS } from "../lib/product"
+
+Astro.response.status = 404
+---
+<Base title="Esta página no existe" description={`La dirección que buscas no existe en ${WORDS.name}.`} noindex>
+  <section class="hero nf">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap nf-wrap">
+      <div class="nf-in">
+      <span class="tag tag-d">[ 404 ]</span>
+      <h1 class="nf-h1">Esta página no existe.</h1>
+      <p class="lead lead-d">Puede que la dirección tenga un error o que la página se haya movido. Sigue por aquí:</p>
+      <div class="nf-links">
+        <a class="btn btn-p" href="/">Ir al inicio</a>
+        {HAS_GUIDES ? <a class="btn btn-g" href={GUIDES_PATH}>Ver las guías</a> : null}
+        <a class="btn btn-g" href="/precios">Ver los precios</a>
+      </div>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .nf { padding: 168px 0 120px; }
+  .nf-wrap { position: relative; z-index: 2; }
+  .nf-in { display: flex; flex-direction: column; gap: 20px; max-width: 760px; }
+  .nf-h1 { margin: 0; font-size: clamp(40px, 5vw, 64px); line-height: 1; letter-spacing: -0.045em; font-weight: 800; }
+  .nf-links { display: flex; flex-wrap: wrap; gap: 12px; }
+  @media (max-width: 720px) {
+    .nf { padding: 112px 0 72px; }
+    .nf-links .btn { flex: 1 1 100%; }
+  }
+</style>
