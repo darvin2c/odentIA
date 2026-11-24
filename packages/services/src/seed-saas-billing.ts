@@ -12,6 +12,7 @@
  */
 import { isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { appContractRequest, saasAccount } from "@odentia/db/schema/admin-accounts"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
@@ -566,6 +567,58 @@ async function seedAppAccountDemo(db: Db, now: Date): Promise<void> {
     timestamp: at,
     data: { account: "tienda-demo", userId: DEMO_ACTOR, kind: "cobro", question: "¿Cómo pago mi plan? (ficticio)" },
   })
+  // Lo que la administración le pidió a la tienda (ADR 0213): ya respondido, así nada sale en
+  // desarrollo aunque la conexión esté encendida. Uno hecho y uno que falló, con su motivo.
+  const [account] = await db
+    .select({ id: saasAccount.id })
+    .from(saasAccount)
+    .where(and(eq(saasAccount.app, "gestoria"), eq(saasAccount.externalRef, "tienda-demo")))
+    .limit(1)
+  const [asked] = account
+    ? await db.select({ id: appContractRequest.id }).from(appContractRequest).where(eq(appContractRequest.accountId, account.id)).limit(1)
+    : []
+  if (account && !asked) {
+    const ago = (hours: number) => new Date(now.getTime() - hours * HOUR)
+    await db.insert(appContractRequest).values([
+      {
+        app: "gestoria",
+        accountId: account.id,
+        type: "soporte.entrar",
+        payload: {
+          type: "soporte.entrar",
+          timestamp: ago(5).toISOString(),
+          data: {
+            account: "tienda-demo",
+            staff: { userId: SEED_STAFF_ADMIN_ID, name: "Equipo de soporte (ficticio)", email: "soporte@example.test" },
+            minutes: 30,
+            reason: "Revisar por qué no ve su catálogo (ficticio)",
+          },
+        },
+        requestedBy: SEED_STAFF_ADMIN_ID,
+        status: "hecho",
+        resultMessage: "Pedido a la tienda: su Dueño o un Administrador decide si entras.",
+        attempts: 1,
+        doneAt: ago(5),
+        createdAt: ago(5),
+      },
+      {
+        app: "gestoria",
+        accountId: account.id,
+        type: "equipo.quitar",
+        payload: {
+          type: "equipo.quitar",
+          timestamp: ago(2).toISOString(),
+          data: { account: "tienda-demo", userId: DEMO_ACTOR, reason: "Lo pidió por correo (ficticio)" },
+        },
+        requestedBy: SEED_STAFF_ADMIN_ID,
+        status: "fallo",
+        resultMessage: "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.",
+        attempts: 1,
+        doneAt: ago(2),
+        createdAt: ago(2),
+      },
+    ])
+  }
 }
 
 /**

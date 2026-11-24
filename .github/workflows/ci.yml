@@ -233,6 +233,15 @@ jobs:
           name: e2e-${{ matrix.nombre }}
           path: e2e/test-results/
           retention-days: 7
+      # Las capturas de las pantallas que un recorrido guarda a propósito (`e2e/capturas/`),
+      # siempre, para mirarlas sin abrir la traza: sin credenciales.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-${{ matrix.nombre }}
+          path: e2e/capturas/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # Solo si cambia lo que va al VPS (api y worker, y lo que dependen de ellos): la imagen
   # de producción sirve esos dos servicios. Las pantallas no están en esa imagen.
@@ -262,6 +271,50 @@ jobs:
         run: |
           docker image ls odentia-smoke:ci --format 'Tamaño de la imagen: {{.Size}}'
           bash scripts/smoke-image.sh odentia-smoke:ci
+
+  # Las pantallas de gestorIA en un navegador (ADR 0214): su servidor y su base de verdad, con
+  # una cuenta y una administración de mentira (`gestoria/e2e/servidor.ts`), y su app compilada.
+  # Solo si cambia lo suyo. Las capturas de cada estado se suben siempre.
+  e2e-gestoria:
+    needs: [alcance, ya-probado]
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.ya-probado.outputs.probado != 'true' && (needs.alcance.outputs.gestoria_vps == 'true' || contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/web')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @gestoria/e2e... --filter @gestoria/api... --filter @gestoria/web...
+      - name: Caché de Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Instalar Chromium
+        run: |
+          pnpm --filter @gestoria/e2e exec playwright install --with-deps chromium || {
+            echo "::warning::Sin los repositorios de Ubuntu: se instala solo Chromium"
+            pnpm --filter @gestoria/e2e exec playwright install chromium
+          }
+      - run: pnpm --filter @gestoria/e2e e2e
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas-gestoria
+          path: gestoria/e2e/capturas/
+          if-no-files-found: ignore
+          retention-days: 14
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-gestoria-trazas
+          path: gestoria/e2e/test-results/
+          retention-days: 7
 
   # El servidor de gestorIA (ADR 0203) es otra imagen (gestoria/Dockerfile): se comprueba que se
   # arma y que cada servicio arranca con lo que quedó, solo si cambia lo suyo.

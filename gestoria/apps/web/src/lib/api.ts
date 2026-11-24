@@ -9,8 +9,23 @@ export interface MyStore {
   id: string
   name: string
   currency: string
-  role: StoreRole
+  /** «support»: soporte de gestorIA con una entrada aceptada, solo a mirar. */
+  role: StoreRole | "support"
   permissions: string[]
+  /** Hasta cuándo puede mirar soporte; null si es del equipo. */
+  supportUntil: string | null
+}
+
+/** La entrada de soporte de gestorIA a la tienda, como la ve el equipo. */
+export interface SupportAccess {
+  id: string
+  staffName: string
+  minutes: number
+  reason: string
+  status: "por_aceptar" | "vigente" | "terminado" | "rechazado"
+  requestedAt: string
+  expiresAt: string | null
+  usedAt: string | null
 }
 
 export interface MyInvitation {
@@ -139,7 +154,11 @@ export async function api<T>(
 }
 
 /** Los nombres de cada rol y lo que puede (decisión 7 del lienzo B), como los ve la persona. */
-export const ROLES: Record<StoreRole, { name: string; can: string }> = {
+export const ROLES: Record<StoreRole | "support", { name: string; can: string }> = {
+  support: {
+    name: "Soporte de gestorIA",
+    can: "Solo mira la tienda, su equipo y su catálogo, mientras la tienda lo deja.",
+  },
   owner: { name: "Dueño", can: "Todo, también el plan." },
   admin: { name: "Administrador", can: "Todo menos el plan." },
   sales: { name: "Ventas", can: "Atiende, confirma pagos y entrega. No cambia la configuración." },

@@ -125,7 +125,19 @@ export type PaymentChange = "confirm" | "reject" | "reverse" | "refund"
  * `dialogs` una vez y llama a `request*` desde cada fila; `onChanged` dice qué
  * cambió para refrescar lo suyo.
  */
-export function usePaymentActions({ onChanged }: { onChanged: (change: PaymentChange) => void }) {
+/**
+ * A quién se le cobra, en palabras: una clínica o la cuenta de otra app (gestorIA, ADR 0211), que
+ * no es una clínica. Lo que ve una clínica no cambia.
+ */
+export type PayerNoun = "clínica" | "cuenta"
+
+export function usePaymentActions({
+  onChanged,
+  noun = "clínica",
+}: {
+  onChanged: (change: PaymentChange) => void
+  noun?: PayerNoun
+}) {
   const [rejectTarget, setRejectTarget] = useState<PaymentTarget | null>(null)
   // «Reversar» es solo de lo confirmado; lo pendiente se «Rechaza», con su propio diálogo.
   const [reverseTarget, setReverseTarget] = useState<{ id: string; organizationId: string } | null>(
@@ -200,7 +212,7 @@ export function usePaymentActions({ onChanged }: { onChanged: (change: PaymentCh
       }),
     onSuccess: () => onChanged("refund"),
   })
-  const rejectClinic = rejectTarget ? (rejectTarget.organizationName ?? "la clínica") : ""
+  const rejectClinic = rejectTarget ? (rejectTarget.organizationName ?? `la ${noun}`) : ""
 
   const dialogs: ReactNode = (
     <>
@@ -214,7 +226,7 @@ export function usePaymentActions({ onChanged }: { onChanged: (change: PaymentCh
         }
         description={`El comprobante se cierra y no suma al cargo; ${rejectClinic} podrá registrar otro. Verá este motivo en Plan y pagos y en el aviso de su pantalla. No le llega correo. Si fue un error, registra el pago en el cargo.`}
         confirmLabel="Rechazar"
-        placeholder="Por qué no se puede confirmar, como lo leerá la clínica"
+        placeholder={`Por qué no se puede confirmar, como lo leerá la ${noun}`}
         onConfirm={(reason) =>
           rejectTarget ? reject.mutateAsync({ target: rejectTarget, reason }) : Promise.resolve()
         }
@@ -236,7 +248,7 @@ export function usePaymentActions({ onChanged }: { onChanged: (change: PaymentCh
         open={refundTarget !== null}
         id="refund-reason"
         title="Devolver pago"
-        description="El dinero vuelve a la clínica y el cargo deja de sumarlo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación."
+        description={`El dinero vuelve a la ${noun} y el cargo deja de sumarlo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación.`}
         confirmLabel="Devolver"
         placeholder="Por qué se devuelve"
         onConfirm={(reason) =>
@@ -274,12 +286,14 @@ export function PaymentHistoryList({
   methodName,
   actions,
   confirmPending = false,
+  noun = "clínica",
 }: {
   organizationId: string
   organizationName: string | null
   methodName: (code: string) => string
   actions: PaymentActions
   confirmPending?: boolean
+  noun?: PayerNoun
 }) {
   const payments = useQuery({
     queryKey: ["admin", "billing", "history", organizationId],
@@ -307,7 +321,7 @@ export function PaymentHistoryList({
       />
     )
   if (payments.data.length === 0)
-    return <EmptyState title="Sin pagos" description="Esta clínica aún no registra pagos." />
+    return <EmptyState title="Sin pagos" description={`Esta ${noun} aún no registra pagos.`} />
   return (
     <ul className="flex flex-col gap-2">
       {payments.data.map((payment) => (
@@ -434,11 +448,13 @@ export function ManualPaymentDrawer({
   methods,
   onClose,
   onSaved,
+  noun = "clínica",
 }: {
   orgs: Array<{ organizationId: string; organizationName: string | null }>
   methods: PaymentMethod[]
   onClose: () => void
   onSaved: () => void
+  noun?: PayerNoun
 }) {
   // El servidor solo acepta medios activos.
   const activeMethods = methods.filter((method) => method.isActive)
@@ -508,8 +524,8 @@ export function ManualPaymentDrawer({
     >
       {single ? (
         <p className="text-sm">
-          <span className="text-muted-foreground">Clínica: </span>
-          {single.organizationName ?? "esta clínica"}
+          <span className="text-muted-foreground">{noun === "cuenta" ? "Cuenta" : "Clínica"}: </span>
+          {single.organizationName ?? `esta ${noun}`}
         </p>
       ) : (
         <form.AppField
@@ -544,7 +560,7 @@ export function ManualPaymentDrawer({
             label="Cargo"
             placeholder={
               charges.data?.length === 0
-                ? "Esta clínica no tiene cargos por pagar"
+                ? `Esta ${noun} no tiene cargos por pagar`
                 : "Elige el cargo"
             }
             options={(charges.data ?? []).map((item) => ({

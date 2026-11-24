@@ -55,6 +55,7 @@ tmp/
 
 # Playwright
 /e2e/test-results/
+/e2e/capturas/
 
 # Archivos de trabajo temporales
 .tmp-*

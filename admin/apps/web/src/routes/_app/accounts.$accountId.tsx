@@ -26,6 +26,11 @@ import { useState } from "react"
 import { z } from "zod"
 import { ACCOUNT_STATUS, AppMark } from "../../components/app-accounts"
 import {
+  AppRequestDrawer,
+  AppRequestList,
+  appRequestSchema,
+} from "../../components/app-requests"
+import {
   ManualPaymentDrawer,
   money,
   PaymentHistoryList,
@@ -95,6 +100,8 @@ const detailSchema = z.object({
       z.object({ id: z.string(), status: z.string(), question: z.string(), createdAt: z.string() }),
     ),
   }),
+  requests: z.array(appRequestSchema),
+  canRequest: z.boolean(),
 })
 
 const day = (iso: string) =>
@@ -141,10 +148,11 @@ function AccountPage() {
   })
   const methods = usePaymentMethods()
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "billing"] })
-  const payments = usePaymentActions({ onChanged: refresh })
+  const payments = usePaymentActions({ onChanged: refresh, noun: "cuenta" })
   const [planCode, setPlanCode] = useState("")
   const [manualOpen, setManualOpen] = useState(false)
   const [pauseOpen, setPauseOpen] = useState(false)
+  const [asking, setAsking] = useState<null | "soporte.entrar" | "equipo.quitar">(null)
   const assign = useMutation({
     mutationFn: (code: string) =>
       api(`/api/admin/billing/accounts/${accountId}/plan`, {
@@ -184,7 +192,7 @@ function AccountPage() {
         />
       </PageShell>
     )
-  const { account, subscription, state } = detail.data
+  const { account, subscription, state, requests, canRequest } = detail.data
   const name = account.name ?? account.externalRef
   const ownPlans = (plans.data ?? []).filter((plan) => plan.app === account.app && plan.isActive)
   const status = state.access?.status ?? "sin_suscripcion"
@@ -356,6 +364,7 @@ function AccountPage() {
           methodName={(code) => methods.data?.find((method) => method.code === code)?.name ?? code}
           actions={payments}
           confirmPending
+          noun="cuenta"
         />
         {payments.dialogs}
         {payments.actionError ? (
@@ -397,6 +406,38 @@ function AccountPage() {
         )}
       </section>
 
+      <section aria-labelledby="pedidos" className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="pedidos" className="text-base font-semibold">
+            Lo que se le pide a su app
+          </h2>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canRequest}
+              onClick={() => setAsking("soporte.entrar")}
+            >
+              Dejar entrar a soporte
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canRequest}
+              onClick={() => setAsking("equipo.quitar")}
+            >
+              Quitar a una persona
+            </Button>
+          </div>
+        </div>
+        {!canRequest ? (
+          <p className="text-sm text-muted-foreground">
+            La conexión con su app no está encendida: todavía no se le puede pedir nada.
+          </p>
+        ) : null}
+        <AppRequestList requests={requests} />
+      </section>
+
       {state.notices.length ? (
         <section aria-labelledby="avisos" className="flex flex-col gap-1 text-sm">
           <h2 id="avisos" className="text-base font-semibold">
@@ -413,10 +454,23 @@ function AccountPage() {
         </section>
       ) : null}
 
+      {asking ? (
+        <AppRequestDrawer
+          accountId={account.id}
+          app={account.app}
+          kind={asking}
+          onClose={() => setAsking(null)}
+          onSaved={() => {
+            toast.success("Pedido: sale a su app ahora.")
+            refresh()
+          }}
+        />
+      ) : null}
       {manualOpen ? (
         <ManualPaymentDrawer
           orgs={[{ organizationId: account.id, organizationName: name }]}
           methods={methods.data ?? []}
+          noun="cuenta"
           onClose={() => setManualOpen(false)}
           onSaved={refresh}
         />
