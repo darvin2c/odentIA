@@ -99,6 +99,7 @@ const adminFetch: typeof fetch = async (input, init) => {
     charges: [],
     payments: [],
     notices: [],
+    paymentMethods: [],
     support: [],
   }
   return Response.json({ ...empty, ...(known ? { found: true, ...known } : {}) })
@@ -541,6 +542,7 @@ describe("Argos se detiene con Sofi", () => {
       charges: [],
       payments: [],
       notices: [],
+      paymentMethods: [],
       support: [],
       ...change,
     })

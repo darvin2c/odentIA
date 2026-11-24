@@ -1,0 +1,21 @@
+{
+  "name": "@gestoria/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@gestoria/db": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "@odentia/contract": "workspace:*",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.2",
+    "drizzle-orm": "0.45.2",
+    "jose": "6.2.12",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

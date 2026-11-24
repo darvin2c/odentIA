@@ -242,7 +242,12 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
       // Un precio o un tipo que no es del acuerdo no pasa.
       expect((await send(app, usage.replace("atendida", "cita"))).status).toBe(400)
       expect((await send(app, "no es json")).status).toBe(400)
-      expect((await send(app, JSON.stringify({ account: "x".repeat(70_000) }))).status).toBe(413)
+      // Un aviso puede traer un comprobante (hasta 1,5 MB en base64); una pregunta, no.
+      expect((await send(app, JSON.stringify({ account: "x".repeat(2_200_000) }))).status).toBe(413)
+      expect(
+        (await send(app, JSON.stringify({ account: "x".repeat(70_000) }), SECRET, "api.gestoria.test", "/api/contract/state"))
+          .status,
+      ).toBe(413)
       expect(received).toEqual(["aviso"])
     })
 

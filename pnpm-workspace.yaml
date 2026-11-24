@@ -9,3 +9,4 @@ packages:
   # gestorIA (lienzo B): su carpeta, su base, su CI y su despliegue (ADR 0203).
   - "gestoria/apps/*"
   - "gestoria/packages/*"
+  - "gestoria/e2e"

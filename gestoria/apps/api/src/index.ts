@@ -1,6 +1,6 @@
 import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
-import { deliverOutbox, refreshStates } from "./acuerdo.js"
+import { deliverOutbox, purgeOutbox, refreshStates } from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
@@ -82,11 +82,17 @@ setInterval(() => void argos(), 15 * 60_000).unref()
 // El acuerdo con la administración (B7): cada 30 segundos envía lo que espera en la bandeja de
 // salida (con la misma clave al reintentar) y pregunta el estado de las tiendas a las que les
 // toca. Un solo servidor a la vez. Sin el secreto, los avisos se guardan y esperan.
+let nextPurge = 0
 async function agreement() {
   try {
     const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => {
       const delivered = await deliverOutbox(ownerDb, contract)
       await refreshStates(ownerDb, contract)
+      // Lo que ya salió hace más de una semana se borra (una vez por hora): la administración ya lo tiene.
+      if (Date.now() >= nextPurge) {
+        nextPurge = Date.now() + HOUR
+        await purgeOutbox(ownerDb)
+      }
       return delivered
     })
     if (run?.failed)

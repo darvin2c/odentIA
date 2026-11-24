@@ -194,6 +194,12 @@ export const STORE_EVENT_ACTIONS = [
   "catalogo.producto",
   "catalogo.hoja",
   "configuracion.sofi",
+  // Lo que pidió la administración (ADR 0214) y la entrada de soporte.
+  "soporte.pedido",
+  "soporte.aceptado",
+  "soporte.rechazado",
+  "soporte.quitado",
+  "soporte.entro",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 
@@ -1166,7 +1172,12 @@ export const stockRequest = pgTable(
  */
 
 /** Lo que gestorIA le avisa a la administración (los `type` de `@odentia/contract`). */
-export const CONTRACT_EVENT_TYPES = ["cuenta.abierta", "uso.contado", "soporte.pedido"] as const
+export const CONTRACT_EVENT_TYPES = [
+  "cuenta.abierta",
+  "uso.contado",
+  "soporte.pedido",
+  "pago.comprobante",
+] as const
 export type ContractEventType = (typeof CONTRACT_EVENT_TYPES)[number]
 
 /**
@@ -1192,9 +1203,18 @@ export const contractOutbox = pgTable(
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
     lastError: text("last_error"),
+    /**
+     * La administración lo rechazó por lo que dice (un comprobante de un cargo ya pagado): no se
+     * reintenta, porque repetirlo no lo arregla, y `last_error` dice por qué. Solo un comprobante.
+     */
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
   },
   (table) => [
     check("contract_outbox_type_check", inList("type", CONTRACT_EVENT_TYPES)),
+    check(
+      "contract_outbox_rejected_check",
+      sql`${table.rejectedAt} is null or (${table.sentAt} is null and ${table.type} = 'pago.comprobante')`,
+    ),
     foreignKey({
       name: "contract_outbox_store_id_fkey",
       columns: [table.storeId],
@@ -1203,7 +1223,9 @@ export const contractOutbox = pgTable(
     uniqueIndex("contract_outbox_dedupe_uidx").on(table.storeId, table.dedupe),
     index("contract_outbox_pending_idx")
       .on(table.nextAttemptAt, table.createdAt)
-      .where(sql`sent_at is null`),
+      .where(sql`sent_at is null and rejected_at is null`),
+    // Lo enviado se borra tras un plazo (`purgeOutbox`).
+    index("contract_outbox_sent_idx").on(table.sentAt).where(sql`sent_at is not null`),
     index("contract_outbox_store_idx").on(table.storeId, table.type, table.createdAt),
     index("contract_outbox_conversation_idx").on(table.conversationId, table.createdAt),
   ],
@@ -1233,5 +1255,78 @@ export const contractState = pgTable(
       columns: [table.storeId],
       foreignColumns: [store.id],
     }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Los pedidos de la administración ya recibidos (ADR 0214), por su `webhook-id`: el efecto y esta
+ * fila van en la misma transacción, así que un pedido repetido devuelve la misma respuesta sin
+ * hacer nada otra vez. Sin clave foránea a la tienda: el de abrir una que no se pudo abrir no la
+ * tiene. Solo el dueño de la base la escribe.
+ */
+export const contractRequestReceipt = pgTable("contract_request_receipt", {
+  webhookId: text("webhook_id").primaryKey(),
+  type: text("type").notNull(),
+  storeId: uuid("store_id"),
+  status: text("status").$type<"hecho" | "fallo">().notNull(),
+  message: text("message"),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * Cómo va la entrada de soporte: la pidió la administración, la aceptó o la rechazó el Dueño o
+ * un Administrador, o la quitaron. Aceptada vale hasta `expires_at`; después ya no entra.
+ */
+export const SUPPORT_ACCESS_STATES = ["pedido", "aceptado", "rechazado", "quitado"] as const
+export type SupportAccessState = (typeof SUPPORT_ACCESS_STATES)[number]
+
+/**
+ * La entrada de soporte a una tienda (ADR 0214): la pide la administración por el acuerdo, a nombre
+ * de una persona del equipo de gestorIA, por un rato y para algo. Entra solo si el Dueño o un
+ * Administrador la acepta, solo a mirar (`permisos.ts`) y hasta que vence o la quitan. Su id en
+ * la cuenta única es el de su token: entra con su propia cuenta. Lo que pasa queda en
+ * `store_event`.
+ */
+export const storeSupportAccess = pgTable(
+  "store_support_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    /** La persona de soporte, por su id en la cuenta única (sin clave: quizá aún no entró aquí). */
+    staffUserId: text("staff_user_id").notNull(),
+    staffName: text("staff_name").notNull(),
+    minutes: smallint("minutes").notNull(),
+    reason: text("reason").notNull(),
+    state: text("state").$type<SupportAccessState>().notNull().default("pedido"),
+    /** Hasta cuándo se puede aceptar el pedido. */
+    requestExpiresAt: timestamp("request_expires_at", { withTimezone: true }).notNull(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    answeredBy: text("answered_by"),
+    /** Aceptada: hasta cuándo entra. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** La primera vez que entró (queda también en `store_event`). */
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endedBy: text("ended_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("store_support_access_state_check", inList("state", SUPPORT_ACCESS_STATES)),
+    check("store_support_access_minutes_check", sql`${table.minutes} between 5 and 60`),
+    check(
+      "store_support_access_texts_check",
+      sql`char_length(btrim(${table.reason})) between 3 and 500 and char_length(btrim(${table.staffName})) between 1 and 200`,
+    ),
+    check(
+      "store_support_access_answer_check",
+      sql`(${table.state} = 'pedido') = (${table.answeredAt} is null) and (${table.answeredAt} is null) = (${table.answeredBy} is null) and (${table.expiresAt} is not null) = (${table.state} in ('aceptado','quitado') and ${table.answeredAt} is not null) and (${table.state} = 'quitado') = (${table.endedAt} is not null)`,
+    ),
+    foreignKey({
+      name: "store_support_access_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_support_access_store_idx").on(table.storeId, table.createdAt),
+    index("store_support_access_staff_idx").on(table.staffUserId, table.expiresAt),
   ],
 )

@@ -185,6 +185,12 @@ mientras no se configure:
   El servidor de gestorIA lleva el mismo valor en su `GESTORIA_CONTRACT_SECRET`: con él envía
   lo que espera en su bandeja de salida (cada 30 s, con la misma clave al reintentar) y pregunta
   el estado de cada tienda; vacío, guarda los avisos y sigue trabajando.
+- `GESTORIA_CONTRACT_URL` (API y worker, con `GESTORIA_CONTRACT_SECRET` también en el worker):
+  la dirección del servidor de gestorIA (`https://servidor.gestoria24.com`). Con ella, la
+  administración le pide abrir la cuenta de un cliente, dejar entrar a soporte y quitar a una
+  persona (ADR 0214) en `/acuerdo/pedidos`, firmado con el mismo secreto: la API lo manda al
+  pedirlo y el worker lo reintenta con la misma clave. Vacía, los botones lo dicen y no se pide
+  nada. El servidor de gestorIA acepta esos pedidos solo con su `GESTORIA_CONTRACT_SECRET`.
 
 ### gestorIA: su servidor, su base y su app (apagado)
 

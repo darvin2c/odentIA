@@ -19,6 +19,22 @@ export interface PlanView {
   agentStop: AgentStop | null
   /** Las preguntas que aún no están entre los casos: por enviar, o enviadas y sin respuesta todavía. */
   pendingSupport: { question: string; createdAt: string; sent: boolean }[]
+  /** Los comprobantes que subió el Dueño y la administración todavía no muestra entre sus pagos. */
+  pendingReceipts: {
+    id: string
+    chargeId: string
+    amountCents: number
+    createdAt: string
+    status: "por_enviar" | "enviado" | "rechazado"
+    /** Por qué no se aceptó, con las palabras de la administración. */
+    reason: string | null
+  }[]
+}
+
+export const RECEIPT_WORDS: Record<PlanView["pendingReceipts"][number]["status"], string> = {
+  por_enviar: "Comprobante por enviar",
+  enviado: "Comprobante enviado",
+  rechazado: "Comprobante no aceptado",
 }
 
 type Status = NonNullable<AccountState["access"]>["status"]

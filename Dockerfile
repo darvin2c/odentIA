@@ -40,6 +40,7 @@ COPY admin/e2e/package.json admin/e2e/
 COPY gestoria/apps/api/package.json gestoria/apps/api/
 COPY gestoria/apps/web/package.json gestoria/apps/web/
 COPY gestoria/packages/db/package.json gestoria/packages/db/
+COPY gestoria/e2e/package.json gestoria/e2e/
 # Instalación filtrada: solo lo que necesitan la API y el worker para ejecutar los paquetes
 # fuente TS (las migraciones viven en @odentia/db, que los dos usan).
 RUN pnpm install --frozen-lockfile \

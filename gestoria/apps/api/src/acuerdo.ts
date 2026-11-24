@@ -13,12 +13,15 @@ import {
   type AppEvent,
   accountState,
   appEvent,
+  CONTRACT_MAX_RECEIPT_BYTES,
   CONTRACT_PATHS,
+  type CONTRACT_RECEIPT_TYPES,
   SUPPORT_KINDS,
   USAGE_CHANNELS,
 } from "@odentia/contract"
 import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { signMessage } from "./firma.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -70,6 +73,8 @@ const VIEW_TIMEOUT_MS = 5_000
 const REOPEN_EVERY_MS = 24 * 3_600_000
 /** Las preguntas de ayuda que pueden esperar a salir a la vez en una tienda. */
 const MAX_PENDING_SUPPORT = 5
+/** Lo enviado se borra de la bandeja después de este plazo: la administración ya lo tiene. */
+export const OUTBOX_KEEP_MS = 7 * 86_400_000
 
 /* ---------- Lo que se avisa ---------- */
 
@@ -267,6 +272,168 @@ export async function askSupport(
   })
 }
 
+export const planReceiptInput = z.object({
+  chargeId: z.string().trim().min(1, "Elige el cobro").max(200),
+  amountCents: z
+    .number({ error: "Escribe cuánto pagaste" })
+    .int("Escribe cuánto pagaste")
+    .positive("Escribe cuánto pagaste"),
+  methodCode: z.string().trim().min(1, "Elige cómo pagaste").max(80),
+  note: z.string().trim().max(500, "Máximo 500 caracteres").optional(),
+})
+
+/** El tipo del archivo por su contenido, nunca por su nombre: una foto o un PDF. */
+function receiptType(bytes: Uint8Array): (typeof CONTRACT_RECEIPT_TYPES)[number] | null {
+  const photo = imageType(bytes)
+  if (photo) return photo
+  // Un PDF empieza con «%PDF-».
+  const head = Buffer.from(bytes.subarray(0, 5)).toString("latin1")
+  return head === "%PDF-" ? "application/pdf" : null
+}
+
+/**
+ * Los comprobantes que la administración todavía no muestra entre sus pagos: los que no salieron,
+ * los rechazados y los que salieron después de su última respuesta. Del más nuevo al más viejo.
+ */
+async function pendingReceipts(tx: Db, storeId: string, stateAt: Date | null = null) {
+  const rows = await tx
+    .select({
+      id: contractOutbox.id,
+      // Solo lo que se muestra: el archivo en base64 no se lee.
+      chargeId: sql<string>`${contractOutbox.payload} -> 'data' ->> 'chargeId'`,
+      amountCents: sql<string>`${contractOutbox.payload} -> 'data' ->> 'amountCents'`,
+      createdAt: contractOutbox.createdAt,
+      sentAt: contractOutbox.sentAt,
+      rejectedAt: contractOutbox.rejectedAt,
+      lastError: contractOutbox.lastError,
+    })
+    .from(contractOutbox)
+    .where(
+      and(
+        eq(contractOutbox.storeId, storeId),
+        eq(contractOutbox.type, "pago.comprobante"),
+        stateAt
+          ? or(isNull(contractOutbox.sentAt), gt(contractOutbox.sentAt, stateAt))
+          : isNull(contractOutbox.sentAt),
+      ),
+    )
+    .orderBy(desc(contractOutbox.createdAt))
+    .limit(20)
+  return rows.map((row) => {
+    return {
+      id: row.id,
+      chargeId: String(row.chargeId ?? ""),
+      amountCents: Number(row.amountCents ?? 0),
+      createdAt: row.createdAt,
+      status: row.rejectedAt
+        ? ("rechazado" as const)
+        : row.sentAt
+          ? ("enviado" as const)
+          : ("por_enviar" as const),
+      /** Por qué la administración no lo aceptó, con sus palabras (solo si lo rechazó). */
+      reason: row.rejectedAt ? row.lastError : null,
+    }
+  })
+}
+
+/**
+ * El Dueño sube el comprobante de un cargo («Plan y pagos»): sale a la administración por el
+ * acuerdo y allá queda por confirmar, como el de una clínica. El archivo se mira por su contenido
+ * (foto o PDF) y su tamaño, nunca por su nombre; la administración lo vuelve a mirar. El cargo y
+ * el medio de pago son los de lo último que dijo la administración. Uno por cargo mientras no sale.
+ */
+export async function sendReceipt(
+  appDb: Db,
+  config: ContractConfig,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof planReceiptInput>,
+  file: Uint8Array | null,
+  now = new Date(),
+): Promise<void> {
+  await inStore(appDb, person, storeId, "plan", async (tx) => {
+    if (!config.secret)
+      throw new StoreError(
+        409,
+        "NOT_CONNECTED",
+        "Todavía no podemos recibir comprobantes desde aquí.",
+      )
+    if (!file || file.byteLength === 0)
+      throw new StoreError(400, "VALIDATION_ERROR", "Sube la foto o el PDF del comprobante", {
+        file: "Sube la foto o el PDF del comprobante",
+      })
+    if (file.byteLength > CONTRACT_MAX_RECEIPT_BYTES)
+      throw new StoreError(400, "FILE_TOO_LARGE", "El archivo pesa demasiado: hasta 1,5 MB", {
+        file: "El archivo pesa demasiado: hasta 1,5 MB",
+      })
+    const contentType = receiptType(file)
+    if (!contentType)
+      throw new StoreError(400, "FILE_TYPE", "Sube el comprobante en JPG, PNG, WebP o PDF", {
+        file: "Sube el comprobante en JPG, PNG, WebP o PDF",
+      })
+    const { state } = await knownStateIn(tx, storeId)
+    const charge = state?.charges.find((one) => one.id === input.chargeId)
+    if (!charge || charge.paidCents >= charge.amountCents || charge.status === "anulada")
+      throw new StoreError(409, "CHARGE", "Ese cobro ya no está por pagar", {
+        chargeId: "Ese cobro ya no está por pagar",
+      })
+    if (input.amountCents > charge.amountCents - charge.paidCents)
+      throw new StoreError(400, "AMOUNT", "Es más de lo que falta pagar de ese cobro", {
+        amountCents: "Es más de lo que falta pagar de ese cobro",
+      })
+    if (!state?.paymentMethods.some((method) => method.code === input.methodCode))
+      throw new StoreError(400, "METHOD", "Elige cómo pagaste", {
+        methodCode: "Elige cómo pagaste",
+      })
+    const waiting = (await pendingReceipts(tx, storeId)).some(
+      (one) => one.chargeId === input.chargeId && one.status === "por_enviar",
+    )
+    if (waiting)
+      throw new StoreError(
+        409,
+        "RECEIPT_PENDING",
+        "Ya subiste un comprobante de ese cobro: espera a que salga.",
+      )
+    await enqueue(tx, storeId, {
+      type: "pago.comprobante",
+      timestamp: now.toISOString(),
+      data: {
+        account: storeId,
+        userId: person.userId,
+        chargeId: input.chargeId,
+        amountCents: input.amountCents,
+        methodCode: input.methodCode,
+        file: { contentType, base64: Buffer.from(file).toString("base64") },
+        note: input.note || null,
+      },
+    })
+  })
+}
+
+/**
+ * Borra de la bandeja lo que salió o se rechazó hace más del plazo (la administración ya lo tiene;
+ * el Dueño ya vio por qué no se aceptó), menos el último aviso de que se abrió cada tienda: con él
+ * se sabe si cambió algo que avisar. Lo que no salió no se toca.
+ */
+export async function purgeOutbox(ownerDb: Db, now = new Date()): Promise<number> {
+  const before = new Date(now.getTime() - OUTBOX_KEEP_MS)
+  const removed = await ownerDb
+    .delete(contractOutbox)
+    .where(
+      and(
+        or(lt(contractOutbox.sentAt, before), lt(contractOutbox.rejectedAt, before)),
+        sql`(${contractOutbox.type} <> 'cuenta.abierta' or exists (
+          select 1 from contract_outbox later
+          where later.store_id = ${contractOutbox.storeId}
+            and later.type = 'cuenta.abierta'
+            and (later.created_at, later.id) > (${contractOutbox.createdAt}, ${contractOutbox.id})
+        ))`,
+      ),
+    )
+    .returning({ id: contractOutbox.id })
+  return removed.length
+}
+
 /* ---------- El envío ---------- */
 
 export interface DeliveryRun {
@@ -313,10 +480,22 @@ export async function deliverOutbox(
 ): Promise<DeliveryRun> {
   const run = { sent: 0, failed: 0 }
   if (!config.secret) return run
+  // Sin el cuerpo: un comprobante pesa; se lee uno por uno al enviarlo.
   const due = await ownerDb
-    .select()
+    .select({
+      id: contractOutbox.id,
+      storeId: contractOutbox.storeId,
+      type: contractOutbox.type,
+      attempts: contractOutbox.attempts,
+    })
     .from(contractOutbox)
-    .where(and(isNull(contractOutbox.sentAt), lte(contractOutbox.nextAttemptAt, now)))
+    .where(
+      and(
+        isNull(contractOutbox.sentAt),
+        isNull(contractOutbox.rejectedAt),
+        lte(contractOutbox.nextAttemptAt, now),
+      ),
+    )
     .orderBy(asc(contractOutbox.createdAt))
     .limit(100)
   // Una tienda cuyo aviso de que se abrió espera su reintento: lo demás suyo espera con él.
@@ -333,36 +512,59 @@ export async function deliverOutbox(
   const waiting = new Set(opening.map((row) => row.storeId))
   for (const row of due) {
     if (waiting.has(row.storeId)) continue
+    // eslint-disable-next-line no-await-in-loop
+    const [full] = await ownerDb
+      .select({ payload: contractOutbox.payload })
+      .from(contractOutbox)
+      .where(eq(contractOutbox.id, row.id))
+    if (!full) continue
     let problem: string | null = null
     let down = false
+    let rejected = false
     try {
       // eslint-disable-next-line no-await-in-loop
       const response = await postSigned(
         config,
         CONTRACT_PATHS.events,
         row.id,
-        JSON.stringify(row.payload),
+        JSON.stringify(full.payload),
       )
       if (!response.ok) {
         problem = `La administración respondió ${response.status}`
         down = response.status >= 500 || response.status === 429
+        // Un comprobante que la administración no acepta por lo que dice (el cobro ya está pagado,
+        // es más de lo que falta, el archivo no es lo que dice) no se reintenta: repetirlo no lo
+        // arregla. El Dueño ve por qué, con las palabras de la administración.
+        if (row.type === "pago.comprobante" && (response.status === 400 || response.status === 409)) {
+          rejected = true
+          // eslint-disable-next-line no-await-in-loop
+          const body = (await response.json().catch(() => null)) as {
+            error?: { message?: unknown }
+          } | null
+          const said = body?.error?.message
+          if (typeof said === "string" && said.trim()) problem = said.trim().slice(0, 300)
+        }
       }
     } catch {
       problem = "La administración no respondió"
       down = true
     }
     const attempts = row.attempts + 1
+    // Lo que ya salió (o no se aceptó) no guarda el archivo: la administración ya lo tiene.
+    const withoutFile = sql`${contractOutbox.payload} #- '{data,file}'`
     // eslint-disable-next-line no-await-in-loop
     await ownerDb
       .update(contractOutbox)
       .set(
-        problem
-          ? {
-              attempts,
-              lastError: problem,
-              nextAttemptAt: new Date(now.getTime() + retryDelay(attempts)),
-            }
-          : { attempts, lastError: null, sentAt: now },
+        rejected
+          ? { attempts, lastError: problem, rejectedAt: now, payload: withoutFile }
+          : problem
+            ? {
+                attempts,
+                lastError: problem,
+                nextAttemptAt: new Date(now.getTime() + retryDelay(attempts)),
+              }
+            : { attempts, lastError: null, sentAt: now, payload: withoutFile },
       )
       .where(eq(contractOutbox.id, row.id))
     if (!problem) {
@@ -542,6 +744,7 @@ export async function planView(
         stale: Boolean(row?.lastError),
         agentStop: agentStopOf(state),
         pendingSupport: await pendingSupport(tx, storeId, row?.receivedAt ?? null),
+        pendingReceipts: await pendingReceipts(tx, storeId, row?.receivedAt ?? null),
         triedAt: row?.triedAt ?? null,
       }
     })

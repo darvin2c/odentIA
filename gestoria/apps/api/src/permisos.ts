@@ -39,20 +39,29 @@ const SALES: readonly StorePermission[] = [
   "entregas",
 ]
 
-export const ROLE_PERMISSIONS: Record<StoreRole, readonly StorePermission[]> = {
+/**
+ * Soporte de gestorIA, mientras su entrada esté aceptada (ADR 0214): no es del equipo ni un rol que
+ * se da, y solo mira lo que no se toca al mirarlo (la tienda, su equipo y su catálogo, sin costos).
+ * Lo que se lee con permisos que también escriben (atender, pagos, entregas) queda fuera.
+ */
+export type StoreSeat = StoreRole | "support"
+
+export const ROLE_PERMISSIONS: Record<StoreSeat, readonly StorePermission[]> = {
   owner: STORE_PERMISSIONS,
   admin: STORE_PERMISSIONS.filter((permission) => permission !== "plan"),
   sales: SALES,
+  support: ["tienda.ver", "equipo.ver", "catalogo.ver"],
 }
 
 /** Los nombres de cada rol, como los ve la persona. */
-export const ROLE_NAMES: Record<StoreRole, string> = {
+export const ROLE_NAMES: Record<StoreSeat, string> = {
   owner: "Dueño",
   admin: "Administrador",
   sales: "Ventas",
+  support: "Soporte de gestorIA",
 }
 
-export function can(role: StoreRole, permission: StorePermission): boolean {
+export function can(role: StoreSeat, permission: StorePermission): boolean {
   return ROLE_PERMISSIONS[role].includes(permission)
 }
 
@@ -60,7 +69,7 @@ export function can(role: StoreRole, permission: StorePermission): boolean {
  * Si quien tiene `actor` puede dar el rol `target` (al invitar o al cambiar un rol) o tocar a
  * alguien que lo tiene: solo un Dueño hace o toca a otro Dueño, porque el Dueño decide el plan.
  */
-export function canAssign(actor: StoreRole, target: StoreRole): boolean {
+export function canAssign(actor: StoreSeat, target: StoreRole): boolean {
   if (!can(actor, "equipo.gestionar")) return false
   return target !== "owner" || actor === "owner"
 }
