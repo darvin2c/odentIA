@@ -227,17 +227,34 @@ const startTitle = START_TITLES[guide.topic]
       first.focus({ preventScroll: true })
     })
     // El video se ve aquí mismo al tocarlo (sin cookies hasta que se reproduce); antes no carga nada de YouTube.
+    // Al tocarlo se agranda a todo el ancho de la portada, para verlo bien; «Cerrar video» vuelve a como estaba.
+    const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches
     for (const link of document.querySelectorAll<HTMLAnchorElement>("[data-embed]")) {
       link.addEventListener("click", (event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey) return
         event.preventDefault()
+        const hero = link.closest<HTMLElement>(".gh-in")
+        const box = link.closest<HTMLElement>(".gh-video")
         const frame = document.createElement("iframe")
         frame.src = `${link.dataset.embed}?autoplay=1&rel=0`
         frame.title = link.dataset.title ?? "Video"
         frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen"
         frame.className = "gh-frame"
+        const close = document.createElement("button")
+        close.type = "button"
+        close.className = "gh-close"
+        close.textContent = "Cerrar video ✕"
+        close.addEventListener("click", () => {
+          frame.replaceWith(link)
+          close.remove()
+          hero?.classList.remove("playing")
+          link.focus()
+        })
         link.replaceWith(frame)
-        frame.focus()
+        box?.prepend(close)
+        hero?.classList.add("playing")
+        box?.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" })
+        frame.focus({ preventScroll: true })
       })
     }
   </script>
@@ -265,6 +282,13 @@ const startTitle = START_TITLES[guide.topic]
   @media (prefers-reduced-motion: reduce) { .gh-badge { transition: none; } }
   .gh-vt { margin: 14px 4px 0; font-weight: 700; font-size: 16px; line-height: 1.4; color: #fff; }
   .gh-video :global(.gh-frame) { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 22px; background: #000; }
+  /* Con el video andando, ocupa toda la portada: el título y el botón quedan debajo. */
+  .gh-in.playing { grid-template-columns: minmax(0, 1fr); }
+  .gh-in.playing .gh-video { order: -1; width: 100%; max-width: 1120px; margin: 0 auto; scroll-margin-top: 96px; }
+  .gh-in.playing .gh-copy { max-width: 860px; }
+  .gh-video :global(.gh-close) { display: flex; margin: 0 0 10px auto; min-height: 44px; padding: 0 16px; align-items: center; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .08); color: #fff; font: 600 14px var(--font); cursor: pointer; }
+  .gh-video :global(.gh-close:hover) { background: rgba(255, 255, 255, .16); }
+  .gh-video :global(.gh-close:focus-visible) { outline: 2px solid var(--sky); outline-offset: 2px; }
   .gh-yt { margin: 2px 4px 0; font-size: 13px; color: var(--on-night-3); display: flex; flex-wrap: wrap; gap: 0 10px; align-items: center; }
   .gh-yt a { color: var(--sky-2); text-decoration: none; display: inline-flex; min-height: 44px; align-items: center; }
   .gh-yt a:hover { color: #fff; }
