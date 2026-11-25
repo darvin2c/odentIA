@@ -229,6 +229,16 @@ mientras no se encienda. Para encenderlo, en este orden:
    `GESTORIA_API_URL=https://servidor.gestoria24.com`: desde ahí el CI publica el Worker
    `gestoria-web`; su ruta `app.gestoria24.com/*` se pone en el panel de Cloudflare.
 
+6. **La web.** El CI publica `gestoria/apps/sitio` en el Worker `gestoria-sitio` (solo archivos,
+   sin rutas) cada vez que cambia. Una vez, en Cloudflare: borrar los registros A y CNAME `www`
+   de `gestoria24.com` que apuntan a Namecheap; en el Worker `gestoria-sitio`, *Settings ›
+   Domains & Routes › Add › Custom domain* `gestoria24.com`; una regla de redirección (*Rules ›
+   Redirect Rules*) de `www.gestoria24.com/*` a `https://gestoria24.com/${1}` (301, con la
+   consulta), con un registro `www` proxied (AAAA `100::`) para que la regla lo reciba; y en
+   *Email › Email Routing*, `hola@gestoria24.com` reenviado al correo que elija el equipo. El
+   botón de WhatsApp sale con `SALES_WHATSAPP` (variable del repositorio, E.164); sin ella, la
+   web manda a `/contacto`.
+
 La entrada de gestorIA a la cuenta sigue respondiendo 404 hasta que sus correos tengan su marca
 (cambio aparte en `shared/packages/mail`).
 

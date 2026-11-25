@@ -33,7 +33,8 @@ const SOLO_DOCS =
   /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
 // En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
-const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
+const EN_PAQUETES =
+  /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
 // Lo suelto de gestorIA (Dockerfile, compose, infra): es de su servidor.
 const GESTORIA_SUELTO = /^gestoria\//
 const ES_GESTORIA = (nombre) => nombre.startsWith("@gestoria/")
@@ -66,6 +67,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/ui-patterns",
   "@odentia/brand-scene",
   "@gestoria/web",
+  "@gestoria/sitio",
 ]
 // Apps que se publican en Cloudflare Workers (deploy-web).
 const CLOUDFLARE = [
@@ -76,6 +78,7 @@ const CLOUDFLARE = [
   "@odentia/medical-clinic",
   "@odentia/optical-clinic",
   "@gestoria/web",
+  "@gestoria/sitio",
 ]
 // Apps del VPS: la imagen de producción sirve api y worker.
 const VPS = ["@odentia/api", "@odentia/worker"]
