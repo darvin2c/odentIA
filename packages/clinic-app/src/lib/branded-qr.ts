@@ -1,4 +1,5 @@
-import { BRAND_DIGITS, type BrandId } from "@odentia/ui"
+import type { ProductWords } from "@odentia/clinical"
+import { BRAND_DIGITS } from "@odentia/ui"
 import { appWords } from "./product-words"
 
 /**
@@ -15,11 +16,11 @@ const QUIET = 2
 /** Lado del recuadro del isotipo respecto del código (~22 % del ancho). */
 const LOGO_SHARE = 0.22
 
-/** El color del isotipo sobre el blanco del código: el de cada marca en claro. */
-const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0", vistia: "#147c3b" }
+/** El color del isotipo sobre el blanco del código: el de cada marca clínica en claro (gestorIA no usa este QR). */
+const ISOTIPO_COLOR: Record<ProductWords["brand"], string> = { odentia: "#0e7490", latidia: "#6d3fc0", vistia: "#147c3b" }
 
 /** El isotipo de la marca en su caja de 128 × 112: los dos dígitos y los corchetes. */
-function isotipo(brand: BrandId): string {
+function isotipo(brand: ProductWords["brand"]): string {
   const [first, second] = BRAND_DIGITS[brand]
   return (
     `<g transform="translate(20 12) scale(.8)"><path d="${first}"/><path d="${second}"/></g>` +

@@ -7,11 +7,14 @@ import { Brand } from "./brand.js"
  * La escena de cada marca bajo su logo: las 32 piezas de la portada de odentIA
  * (`CalmToothScene`, con su trabajo del día), el pulso de latidIA
  * (`CalmPulseScene`) y la cartilla de vistIA (`CalmChartScene`). En la computadora ocupa el pie del lado de la marca; en el
- * celular, la franja de arriba.
+ * celular, la franja de arriba. gestorIA no tiene escena todavía (lienzo «Una cuenta, todas
+ * las apps»): solo la noche de su color y el logo, hasta que la marca apruebe una.
  */
-const SCENE: Record<
-  BrandId,
-  { desktop: (onWork?: (event: DayEvent) => void) => ReactNode; mobile: (onWork?: (event: DayEvent) => void) => ReactNode }
+const SCENE: Partial<
+  Record<
+    BrandId,
+    { desktop: (onWork?: (event: DayEvent) => void) => ReactNode; mobile: (onWork?: (event: DayEvent) => void) => ReactNode }
+  >
 > = {
   odentia: {
     desktop: (onWork) => <CalmToothScene className="absolute inset-x-0 bottom-0 h-[62%] w-full" onWork={onWork} />,
@@ -34,7 +37,8 @@ const SCENE: Record<
 /**
  * La noche de cada marca: el lado de la marca se ve igual en tema claro y
  * oscuro. odentIA, la de la portada de la web; latidIA, en morado (tablero
- * «Marca y color»); vistIA, en verde. El logo y los textos del lado usan los colores en oscuro.
+ * «Marca y color»); vistIA, en verde; gestorIA, en el naranja oscuro de su marca. El logo y
+ * los textos del lado usan los colores en oscuro.
  */
 const NIGHT: Record<BrandId, CSSProperties> = {
   odentia: {
@@ -58,6 +62,18 @@ const NIGHT: Record<BrandId, CSSProperties> = {
     ["--identity-accent" as string]: "#4ade80",
     ["--auth-soft" as string]: "#c6e9d3",
   },
+  gestoria: {
+    background: "radial-gradient(90% 75% at 50% 0%, #4a1a06 0%, #2c0f04 50%, #170802 100%)",
+    color: "#fff7ed",
+    ["--identity-ink" as string]: "#fff7ed",
+    ["--identity-accent" as string]: "#ea580c",
+    ["--auth-soft" as string]: "#fed7aa",
+  },
+}
+
+/** La firma del grupo bajo el formulario, en las marcas que la llevan. */
+const SIGNATURE: Partial<Record<BrandId, string>> = {
+  gestoria: "gestorIA es una marca del Grupo Sallca",
 }
 
 /** Etiqueta y titular del lado de la marca, con la voz de la web («[ ARM · Agentic Relationship Management ]», «Tu clínica es un ARM.»). */
@@ -132,6 +148,8 @@ export function AuthSplit({
 }) {
   const brand = useBrand()
   const night = NIGHT[brand]
+  const scene = SCENE[brand]
+  const signature = SIGNATURE[brand]
   return (
     <div className="grid min-h-dvh bg-surface-muted md:grid-cols-2">
       <aside className="relative hidden overflow-hidden md:flex md:flex-col" style={night}>
@@ -139,7 +157,7 @@ export function AuthSplit({
           <Brand className="w-44" />
           {aside}
         </div>
-        {SCENE[brand].desktop(onWork)}
+        {scene?.desktop(onWork)}
         {below ? <div className="relative z-10 mt-auto p-10 lg:p-12">{below}</div> : null}
       </aside>
 
@@ -149,7 +167,8 @@ export function AuthSplit({
             <Brand className="w-36" />
             {mobileAside ? <div className="w-full">{mobileAside}</div> : null}
           </div>
-          {SCENE[brand].mobile(mobileAside ? undefined : onWork)}
+          {/* Sin escena, un respiro para que la tarjeta que sube no tape el logo. */}
+          {scene ? scene.mobile(mobileAside ? undefined : onWork) : <div className="h-12" />}
         </header>
 
         <main className="relative z-10 -mt-10 flex flex-1 items-start justify-center px-4 pb-6 md:mt-0 md:items-center md:p-10">
@@ -170,6 +189,7 @@ export function AuthSplit({
             </div>
           </div>
         </main>
+        {signature ? <p className="px-4 pb-3 text-center text-xs text-muted-foreground">{signature}</p> : null}
         {legal ? (
           <footer className="flex justify-center gap-5 px-4 pb-5 text-xs text-muted-foreground">
             {legal}
