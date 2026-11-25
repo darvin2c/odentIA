@@ -524,13 +524,16 @@ export function useDictationSession({
       for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       for (const name of data.alreadyDone ?? []) toast(`Ya está registrado en esta atención: «${name}». No se vuelve a sumar.`)
       // Lo de su salud que esta pausa propuso, sumó o corrigió: la franja y el aviso lo dicen ya.
+      // También una alergia: la franja dice «Alergias: dijo…, sin confirmar» (QA del 25 nov: seguía en
+      // «Niega alergias» hasta recargar si en la pausa solo se habló de alergias).
+      const saidKinds = new Set(["salud", "alergia"])
       const healthIds = new Set(
         (queryClient.getQueryData<{ data: { suggestions: DictationSuggestion[] } }>(key)?.data.suggestions ?? [])
-          .filter((item) => item.kind === "salud")
+          .filter((item) => saidKinds.has(item.kind))
           .map((item) => item.id),
       )
       const touchedHealth =
-        data.suggestions.some((item) => item.kind === "salud") || [...(data.added ?? []), ...data.corrected].some((id) => healthIds.has(id))
+        data.suggestions.some((item) => saidKinds.has(item.kind)) || [...(data.added ?? []), ...data.corrected].some((id) => healthIds.has(id))
       setUnused((before) => {
         // Lo avisado antes que esta pausa respondió ya no se avisa; después, lo que esta no pudo usar.
         const current = withoutAnsweredUnused(before, data.suggestions)
@@ -862,6 +865,8 @@ export function useDictationSession({
       return { ...input, result: response?.data ?? null }
     },
     onSuccess: (input) => {
+      // Confirmar o descartar una alergia cambia lo que dice la franja («dijo…, sin confirmar»; QA del 25 nov).
+      if (input.item.kind === "alergia") void refreshHealth()
       // Quitar lo ya confirmado cambia la atención: se refresca como al confirmar.
       if (input.action === "undo-confirmed") onApplied(input.item)
       if (input.action !== "confirm") return

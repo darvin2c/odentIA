@@ -25,6 +25,7 @@ import {
   allergiesSaidUnknown,
   declaredGroupOf,
   noAllergiesWords,
+  saidAllergiesWords,
   saidByWords,
   saidNoGroupOf,
   shortDay,
@@ -149,6 +150,7 @@ export function AllergiesCard({
     },
   })
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
+  const saidAllergies = health.saidAllergies ?? []
   const saidPending = active.some((allergy) => declaredGroupOf(health.declared, "allergies", allergy.id))
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
   const reviewed = health.allergiesReviewedAt
@@ -186,11 +188,13 @@ export function AllergiesCard({
       {active.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           {/* La misma frase que la franja, la ficha y la atención (estudio de la atención del 16 nov, E10a). */}
+          {/* La alergia que oyó Clío y nadie confirmó gana a «no se le preguntó» (QA del 25 nov). */}
           <p className="text-sm text-muted-foreground">
-            {noAllergiesWords({ review: health.reviewStatus.allergies, saidNo, saidUnknown }, sex)}.
+            {saidAllergiesWords(saidAllergies) || noAllergiesWords({ review: health.reviewStatus.allergies, saidNo, saidUnknown }, sex)}
+            .
           </p>
           {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
-          {canWrite && (health.reviewStatus.allergies === "unknown" || saidNo) ? (
+          {canWrite && saidAllergies.length === 0 && (health.reviewStatus.allergies === "unknown" || saidNo) ? (
             <Button type="button" size="sm" variant="outline" disabled={noneReviewed.isPending} onClick={() => noneReviewed.mutate()}>
               {noneReviewed.isPending ? "Guardando…" : "No tiene alergias"}
             </Button>

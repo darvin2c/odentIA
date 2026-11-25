@@ -367,3 +367,14 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
   ]
   return rows.filter((row): row is { label: string; value: string } => row.value !== null)
 }
+
+/**
+ * La alergia que oyó Clío y nadie confirmó, dicha igual en la ficha y en su resumen: «Alergias: dijo
+ * metamizol el 25 nov, sin confirmar». Gana a «no se le preguntó» (QA del 25 nov). Vacío si no hay.
+ */
+export function saidAllergiesWords(said: ReadonlyArray<{ name: string; at: string; open?: boolean }> | undefined): string {
+  if (!said?.length) return ""
+  const signed = said.every((row) => row.open === false)
+  const day = signed ? shortDay([...said].sort((a, b) => b.at.localeCompare(a.at))[0]!.at) : ""
+  return `Alergias: dijo ${said.map((row) => row.name).join(" · ")}${day ? ` el ${day}` : ""}, sin confirmar`
+}

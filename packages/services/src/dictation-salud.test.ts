@@ -10,6 +10,7 @@ import { addDeclaredAllergies, anesthesiaRisksOf, extractionRisksOf, getPatientH
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { finalizeEncounter } from "./encounters.js"
 import {
+  confirmSaidAllergy,
   confirmDictationHealth,
   confirmSaidHealth,
   discardPendingDictation,
@@ -22,7 +23,8 @@ import {
   saveDictationSegment,
   undoDictationVoiceCorrection,
 } from "./encounter-dictation.js"
-import { prescribingSituationOf } from "./prescriptions.js"
+import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
+import { saidAllergies } from "./said-health-risks.js"
 import { productHooksFor } from "./products.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -756,6 +758,113 @@ describe("cada dato de su salud con su frase, al sumar pausas", () => {
       medications: "tomo losartan para la presion",
       allergies: "no que yo sepa",
     })
+    await enable(false)
+  })
+})
+
+describe("H2 (mesa del 25 nov) · la alergia que oyó Clío avisa antes de confirmarla", () => {
+  it("«con el ibuprofeno se le hincharon los ojos»: la franja la recibe y la receta del ibuprofeno avisa", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "ibuprofeno", reaction: "se le hincharon los ojos" }, sourceText: "con el ibuprofeno se le hincharon los ojos" }],
+      transcript: "La hija dice que con el ibuprofeno se le hincharon los ojos.",
+    })
+    const said = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said.map((row) => row.name.toLocaleLowerCase("es"))).toEqual(["ibuprofeno"])
+    const base = { strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "Cada 8 horas", duration: "3 días", quantity: 9 }
+    const refused = await fx
+      .run((tx) => createPrescription(tx, ...fx.args, { encounterId: fx.encounter.id, alertsShown: [], items: [{ ...base, genericName: "ibuprofeno" }] }))
+      .catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: "ALLERGY_CONFLICT" })
+    expect((refused as Error).message).toContain("Lo dijo en la consulta y nadie lo confirmó.")
+    await enable(false)
+  })
+})
+
+describe("H3 (mesa del 25 nov) · lo que ya está en Antecedentes no vuelve como dicho", () => {
+  it("con apixabán y losartán registrados, «por el apixabán» y «losartán» no se proponen; la metformina nueva, sí", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await ownerDb.insert(patientMedication).values([
+      { organizationId: ORG, patientId: fx.patient.id, name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" },
+      { organizationId: ORG, patientId: fx.patient.id, name: "Losartán 50 mg", genericName: "losartán", atcCode: "C09CA01" },
+    ])
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "no_se_sabe", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "después de hablar con su cardiólogo por el apixabán" }],
+      transcript: "La exodoncia la hacemos la próxima semana después de hablar con su cardiólogo por el apixabán.",
+    })
+    expect(await health()).toEqual([])
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }, { name: "metformina" }] } }, sourceText: "tomo losartán y metformina" }],
+      transcript: "Tomo losartán y metformina.",
+    })
+    const [said] = await health()
+    expect(said?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "metformina" }] })
+    expect(said?.payload).not.toHaveProperty("anticoagulants")
+    await enable(false)
+  })
+})
+
+describe("revisión del 25 nov · lo registrado corrige lo pendiente, no lo deja contradiciéndose", () => {
+  it("«Anticoagulante: no sabe» pendiente pasa a apixabán aunque el apixabán ya esté en Antecedentes", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "unknown" } }, sourceText: "no sé si tomo algo para la sangre" }],
+      transcript: "No sé si tomo algo para la sangre.",
+    })
+    await ownerDb.insert(patientMedication).values({ organizationId: ORG, patientId: fx.patient.id, name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" })
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "acompanante", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "sí toma apixabán" }],
+      transcript: "Sí, toma apixabán, dice su hija.",
+    })
+    const [said] = await health()
+    expect(said?.payload["anticoagulants"]).toMatchObject({ state: "recorded", detail: "apixabán" })
+    await enable(false)
+  })
+})
+
+describe("QA del 25 nov · la alergia dicha no se pierde al firmar", () => {
+  it("firmada sin confirmar, sigue avisando con su fecha; «Registrar» la deja en sus alergias", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "metamizol", reaction: "se le cerró la garganta" }, sourceText: "con el metamizol se le cerró la garganta" }],
+      transcript: "Con el metamizol se le cerró la garganta.",
+    })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const [said] = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said).toMatchObject({ open: false })
+    expect(said?.name.toLocaleLowerCase("es")).toBe("metamizol")
+    await fx.run((tx) => confirmSaidAllergy(tx, ...fx.args, said!.suggestionId))
+    expect(await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))).toEqual([])
+    const allergies = await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.patientId, fx.patient.id))
+    expect(allergies.map((row) => row.substance.toLocaleLowerCase("es"))).toContain("metamizol")
+    await enable(false)
+  })
+})
+
+describe("verificación del 25 nov · el cierre tampoco pierde la alergia dicha", () => {
+  it("«Descartar lo pendiente» del cierre deja la alergia; registrada a mano, deja de pedirse y «Registrar» no la duplica", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "metamizol", reaction: "se le cerró la garganta" }, sourceText: "con el metamizol se le cerró la garganta" }],
+      transcript: "Con el metamizol se le cerró la garganta.",
+    })
+    await fx.run((tx) => discardPendingDictation(tx, ...fx.args, fx.encounter.id))
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const [said] = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said?.name.toLocaleLowerCase("es")).toBe("metamizol")
+    // Alguien la registra a mano mientras esperaba: deja de pedirse, y «Registrar» no hace otra.
+    await ownerDb.insert(patientAllergy).values({ organizationId: ORG, patientId: fx.patient.id, substance: "Metamizol", severity: "severa" })
+    expect(await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))).toEqual([])
+    await fx.run((tx) => confirmSaidAllergy(tx, ...fx.args, said!.suggestionId))
+    const rows = await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.patientId, fx.patient.id))
+    expect(rows.filter((row) => row.substance.toLocaleLowerCase("es") === "metamizol")).toHaveLength(1)
     await enable(false)
   })
 })

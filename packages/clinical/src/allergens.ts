@@ -390,6 +390,9 @@ export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   { dci: "acenocumarol", atc: "B01AA07", names: ["Sintrom"] },
   { dci: "enoxaparina", atc: "B01AB05" },
   { dci: "clopidogrel", atc: "B01AC04", names: ["Plavix"] },
+  // La aspirina de todos los días es un antiagregante (B01AC06), no el analgésico (N02BA01): sin
+  // ella, «aspirina» se guardaba con el código del grupo y el aviso pedía el INR (mesa del 25 nov, H4).
+  { dci: "ácido acetilsalicílico", atc: "B01AC06", names: ["aspirina"] },
   { dci: "dabigatrán etexilato", atc: "B01AE07", names: ["dabigatrán", "Pradaxa"] },
   { dci: "rivaroxabán", atc: "B01AF01", names: ["Xarelto"] },
   { dci: "apixabán", atc: "B01AF02", names: ["Eliquis"] },
@@ -518,6 +521,19 @@ export const MEDICATION_CLASSES = {
   boneMedicines: { atc: "M05B", label: "Medicina para los huesos", unnamed: "Medicina para los huesos (no dijo cuál)" },
 } as const
 export type MedicationClass = keyof typeof MEDICATION_CLASSES
+
+/**
+ * El código de una medicina ya registrada, lo más exacto que se sabe: con el código del grupo
+ * («B01A», de antes de que la lista la conociera) y un nombre de la lista de su misma clase, el de
+ * ese nombre. Así la aspirina guardada como «B01A» se lee como antiagregante (revisión del 25 nov).
+ */
+export function specificAtc(row: { name: string; atcCode?: string | null }): string | null {
+  const atc = row.atcCode ?? null
+  const group = Object.values(MEDICATION_CLASSES).find((one) => one.atc === atc)
+  if (!group) return atc
+  const named = findHabitualMedication(row.name)?.atc
+  return named?.startsWith(group.atc) ? named : atc
+}
 
 /** La clase con marca de un código ATC; null si no es de ninguna. */
 export function medicationClassOf(atc: string | null | undefined): MedicationClass | null {
@@ -672,6 +688,35 @@ export function allergyWarnings(
     }
   }
   return lines
+}
+
+/**
+ * La alergia que oyó Clío y nadie confirmó, frente a lo que se receta: el mismo aviso, dicho así
+ * («… Lo dijo en la consulta y nadie lo confirmó.»). La ya registrada no se repite. La misma regla en
+ * la pantalla y en el servidor, para que los dos digan lo mismo (mesa del 25 nov, H2).
+ */
+export function saidAllergyWarnings(
+  dci: string,
+  said: readonly AllergyOnRecord[],
+  registered: readonly AllergyOnRecord[],
+  catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
+): string[] {
+  // Una descartada no avisa (`allergyWarnings`): no puede callar la que se dijo hoy (revisión del 25 nov).
+  const fresh = said.filter((row) => !sameAllergyOnRecord(row, registered))
+  return allergyWarnings(dci, fresh, catalog).map((line) => `${line} Lo dijo en la consulta y nadie lo confirmó.`)
+}
+
+/**
+ * ¿Ya está entre sus alergias vigentes? Por su código, si las dos lo tienen, o por el nombre: la que
+ * dijo trae el código de la lista y la anotada a mano a veces no («Metamizol»; verificación del 25 nov).
+ */
+export function sameAllergyOnRecord(said: AllergyOnRecord & { name?: string | null }, registered: readonly AllergyOnRecord[]): boolean {
+  const names = [said.substance, said.name].filter((value): value is string => !!value).map(normalizeDrugText)
+  return registered.some(
+    (row) =>
+      row.verification !== "descartada" &&
+      ((!!row.substanceCode && !!said.substanceCode && row.substanceCode === said.substanceCode) || names.includes(normalizeDrugText(row.substance))),
+  )
 }
 
 /** Lo que ya toma, de sus antecedentes: el nombre que se ve y su código ATC, si lo tiene. */

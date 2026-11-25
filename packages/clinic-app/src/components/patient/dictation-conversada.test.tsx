@@ -355,6 +355,22 @@ describe("la franja avisa lo dicho sin confirmar", () => {
     ])
   })
 
+  it("la alergia que oyó Clío y nadie confirmó gana a su «no sabe»: «Alergias: dijo ibuprofeno, sin confirmar» (mesa del 25 nov, H2)", () => {
+    const alerts = saidHealthAlerts(
+      [
+        {
+          suggestionId: "salud-1",
+          encounterId: "e-1",
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-25T15:05:00.000Z",
+          rows: [{ key: "allergies", label: "Alergias", value: "no sabe" }],
+        },
+      ],
+      [{ suggestionId: "s-1", substance: "Ibuprofeno", substanceSystem: "atc", substanceCode: "M01AE01", name: "ibuprofeno", severity: null, at: "2026-11-25T15:00:00.000Z", open: true }],
+    )
+    expect(alerts.map((alert) => [alert.label, alert.tone])).toEqual([["Alergias: dijo ibuprofeno, sin confirmar", "warning"]])
+  })
+
   it("firmada la atención, lo sigue avisando con el día en que lo dijo; de un dato vale lo último (A3)", () => {
     const alerts = saidHealthAlerts([
       {

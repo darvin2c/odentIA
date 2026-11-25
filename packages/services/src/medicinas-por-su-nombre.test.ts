@@ -19,10 +19,10 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
-const migration = readFileSync(
-  fileURLToPath(new URL("../../db/drizzle/0150_medicinas_por_su_nombre.sql", import.meta.url)),
-  "utf8",
-)
+// La 0150 y la 0158 (la aspirina, revisión del 25 nov): juntas dicen los mismos nombres que el código.
+const migration = ["0150_medicinas_por_su_nombre.sql", "0158_aspirina_antiagregante.sql"]
+  .map((file) => readFileSync(fileURLToPath(new URL(`../../db/drizzle/${file}`, import.meta.url)), "utf8"))
+  .join(String.fromCharCode(10))
 
 it("la migración reconoce los mismos nombres que el código: DCI, nombre local y marca", () => {
   const coded = HABITUAL_MEDICATIONS.filter((entry) => medicationClassOf(entry.atc) !== null)
@@ -59,6 +59,9 @@ it("lo escrito a mano antes recibe el código de su DCI y conserva su texto; lo 
         // La dosis y la frecuencia, sí.
         { name: "alendronato 70 mg/semana" },
         { name: "Xarelto 20 mg mañana y noche" },
+        // La aspirina (0158): la escrita a mano y la que quedó con el código del grupo.
+        { name: "Aspirina 100 mg" },
+        { name: "aspirina", atcCode: "B01A" },
       ].map((row) => ({ organizationId: "org_a", patientId: f.patient.id, ...row })),
     )
     .returning({ id: patientMedication.id })
@@ -92,6 +95,8 @@ it("lo escrito a mano antes recibe el código de su DCI y conserva su texto; lo 
     { name: "Warfarina 5 mg e ibuprofeno", genericName: null, atc: null },
     { name: "alendronato 70 mg/semana", genericName: null, atc: "M05BA04" },
     { name: "Xarelto 20 mg mañana y noche", genericName: null, atc: "B01AF01" },
+    { name: "Aspirina 100 mg", genericName: null, atc: "B01AC06" },
+    { name: "aspirina", genericName: null, atc: "B01AC06" },
   ])
   // Lo mismo que dice el código para cada texto del grupo (el que ya tenía código no se toca).
   for (const row of after.filter((row) => row!.name !== "Fosamax")) {

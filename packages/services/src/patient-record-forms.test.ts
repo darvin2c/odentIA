@@ -883,7 +883,8 @@ it("QA de la entrega 2: la medicina que ya no toma no se lee como vigente, en el
   const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
   const text = await printedText(record)
   expect(text).toContain("Ya no lo toma: Sulfato ferroso · hasta el 31/01/2026 · Suspendida por indicación médica")
-  expect(text).toContain("Medicamento: Aspirina 100 mg · Cada 24 horas")
+  // La aspirina de todos los días se dice con su clase, como en la franja (revisión del 25 nov).
+  expect(text).toContain("Antiagregante: Aspirina 100 mg · Cada 24 horas")
   // Con un fin por venir todavía la toma: dice hasta cuándo.
   expect(text).toContain("Medicamento: Amoxicilina 500 mg · hasta el 31/12/2099")
   expect(text).not.toContain("Medicamento: Sulfato ferroso")
