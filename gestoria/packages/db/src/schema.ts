@@ -1177,6 +1177,7 @@ export const CONTRACT_EVENT_TYPES = [
   "uso.contado",
   "soporte.pedido",
   "pago.comprobante",
+  "equipo.cambiado",
 ] as const
 export type ContractEventType = (typeof CONTRACT_EVENT_TYPES)[number]
 

@@ -13,7 +13,7 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
-import { noteStoreAccount } from "./acuerdo.js"
+import { noteStoreAccount, noteStoreTeam } from "./acuerdo.js"
 import type { Person } from "./cuenta.js"
 import {
   can,
@@ -202,6 +202,8 @@ export async function openStoreIn(
     detail: input.detail,
   })
   await noteStoreAccount(tx, input.id)
+  // La cuenta sabe que es suya: la tienda aparece en su selector de lugares.
+  await noteStoreTeam(tx, input.id)
 }
 
 export async function createStore(appDb: Db, person: Person, input: z.infer<typeof newStoreInput>) {
@@ -534,6 +536,8 @@ export async function acceptInvitation(
       subject: person.email,
       detail: { role: member?.role ?? invitation.role },
     })
+    // La cuenta sabe que entró: la tienda aparece en su selector de lugares.
+    await noteStoreTeam(tx, invitation.storeId)
     return { storeId: invitation.storeId }
   })
 }
@@ -595,6 +599,7 @@ export async function changeRole(
     })
     // Si cambió quién es el Dueño, la administración lo sabe.
     if (target.role === "owner" || role === "owner") await noteStoreAccount(tx, storeId)
+    await noteStoreTeam(tx, storeId)
   })
 }
 
@@ -628,6 +633,7 @@ export async function removeMemberIn(
     detail: { role: target.role, ...detail },
   })
   if (target.role === "owner") await noteStoreAccount(tx, storeId)
+  await noteStoreTeam(tx, storeId)
 }
 
 export async function removeMember(appDb: Db, person: Person, storeId: string, userId: string) {
