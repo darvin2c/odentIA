@@ -51,7 +51,7 @@ import {
   TextField,
   useDirty,
 } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * Un producto del catálogo (lienzo B, tableros 7 y 14): sus datos y opciones, el precio y lo que
@@ -115,6 +115,7 @@ export function ProductPage() {
     return (
       <>
         {back}
+        <StoreHeader title="Producto" />
         <p className="text-sm text-muted-foreground">Cargando el producto…</p>
       </>
     )
@@ -122,6 +123,7 @@ export function ProductPage() {
     return (
       <>
         {back}
+        <StoreHeader title="Producto" />
         <ErrorBlock error={product.error} onRetry={() => void product.refetch()} />
       </>
     )
@@ -129,24 +131,22 @@ export function ProductPage() {
   return (
     <>
       {back}
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">{p.name}</h2>
+      <StoreHeader
+        title={p.name}
+        subtitle={[
+          p.category,
+          priceRange(p.fromCents, p.toCents, store.currency),
+          `${p.variants.length} ${p.variants.length === 1 ? "variante" : "variantes"}`,
+          `${p.variants.reduce((n, v) => n + v.stock, 0)} en stock`,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      />
+      {canEdit ? null : (
         <p className="text-sm text-muted-foreground">
-          {[
-            p.category,
-            priceRange(p.fromCents, p.toCents, store.currency),
-            `${p.variants.length} ${p.variants.length === 1 ? "variante" : "variantes"}`,
-            `${p.variants.reduce((n, v) => n + v.stock, 0)} en stock`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+          Lo ves como Ventas: los cambios los hacen el dueño o un administrador.
         </p>
-        {canEdit ? null : (
-          <p className="text-sm text-muted-foreground">
-            Lo ves como Ventas: los cambios los hacen el dueño o un administrador.
-          </p>
-        )}
-      </div>
+      )}
       <div className="grid min-w-0 gap-6 lg:grid-cols-2 lg:items-start">
         <div className="flex min-w-0 flex-col gap-6">
           <DataCard key={`datos-${p.id}`} product={p} canEdit={canEdit} />

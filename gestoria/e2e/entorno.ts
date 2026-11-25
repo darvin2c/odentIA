@@ -13,3 +13,6 @@ export const PEOPLE = {
   ana: { id: "e2e-ana", email: "ana@soporte.test", name: "Ana de Soporte" },
 } as const
 export type Who = keyof typeof PEOPLE
+
+/** La contraseña de todas en la cuenta de mentira. */
+export const CLAVE = "clave-de-prueba"

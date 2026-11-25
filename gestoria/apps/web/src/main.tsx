@@ -1,6 +1,11 @@
 import "./styles.css"
-import { Toaster } from "@odentia/ui"
-import { AccessLinkPasswordGate, ErrorState } from "@odentia/ui-patterns"
+import { BrandProvider, Toaster } from "@odentia/ui"
+import {
+  AccessLinkPasswordGate,
+  applyTheme,
+  ErrorState,
+  readStoredTheme,
+} from "@odentia/ui-patterns"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   createRootRoute,
@@ -31,11 +36,12 @@ import { ReportsPage } from "./reportes"
 import { SofiPage } from "./sofi"
 import { InvitationPage, NewStorePage, StoreLayout, StoresPage, TeamPage } from "./tiendas"
 
-// El tema sigue al del equipo de la persona.
-const dark = window.matchMedia("(prefers-color-scheme: dark)")
-const applyTheme = () => document.documentElement.classList.toggle("dark", dark.matches)
-applyTheme()
-dark.addEventListener("change", applyTheme)
+// El tema que eligió la persona en «Apariencia» (el mismo de las clínicas), o el de su equipo.
+// Dentro de la tienda lo lleva el menú de la persona; aquí vale también para la entrada.
+applyTheme(readStoredTheme())
+window
+  .matchMedia("(prefers-color-scheme: dark)")
+  .addEventListener("change", () => applyTheme(readStoredTheme()))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -226,8 +232,10 @@ const container = document.getElementById("app")
 if (container)
   createRoot(container).render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+      <BrandProvider brand="gestoria">
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </BrandProvider>
     </StrictMode>,
   )

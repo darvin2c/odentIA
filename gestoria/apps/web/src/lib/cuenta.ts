@@ -101,9 +101,7 @@ function expiresAtOf(token: string): number {
  */
 export class AccountUnavailable extends Error {
   constructor() {
-    super(
-      "Tu cuenta no responde en este momento. Reintenta en unos segundos.",
-    )
+    super("Tu cuenta no responde en este momento. Reintenta en unos segundos.")
   }
 }
 
@@ -160,5 +158,46 @@ export function safeNext(next: string | undefined | null): string | null {
     return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Lo que la entrada recuerda de la última persona que entró desde este navegador, como la de las
+ * clínicas: su nombre y su correo, para mostrárselos enteros y pedirle solo la contraseña. Nunca
+ * la contraseña. «Entrar con otra cuenta» lo borra. Si el navegador no deja guardar, se pide todo.
+ */
+export interface RememberedUser {
+  name: string
+  email: string
+}
+
+const REMEMBERED = "gestoria.ultimo-acceso"
+
+export function readRememberedUser(): RememberedUser | null {
+  try {
+    const raw = window.localStorage.getItem(REMEMBERED)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<RememberedUser>
+    if (typeof value.email !== "string" || !value.email || typeof value.name !== "string")
+      return null
+    return { name: value.name, email: value.email }
+  } catch {
+    return null
+  }
+}
+
+export function rememberUser(user: RememberedUser): void {
+  try {
+    window.localStorage.setItem(REMEMBERED, JSON.stringify(user))
+  } catch {
+    // Sin almacenamiento, la próxima vez se pide el correo; nada más.
+  }
+}
+
+export function forgetUser(): void {
+  try {
+    window.localStorage.removeItem(REMEMBERED)
+  } catch {
+    // Igual que arriba.
   }
 }

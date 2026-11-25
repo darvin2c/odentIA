@@ -6,7 +6,8 @@
  * que espera a una persona porque Sofi está apagada. Solo pruebas: nunca corre en producción.
  *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
- * `POST /__como/<persona>`. Sin la red: ningún proveedor real.
+ * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
+ * Sin la red: ningún proveedor real.
  */
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:http"
@@ -24,7 +25,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from
 import { createApp } from "../apps/api/src/app.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
-import { ACCOUNT_PORT, API_PORT, PEOPLE, STORE_ID, WEB_PORT, type Who } from "./entorno.js"
+import { ACCOUNT_PORT, API_PORT, CLAVE, PEOPLE, STORE_ID, WEB_PORT, type Who } from "./entorno.js"
 
 const ACCOUNT = `http://127.0.0.1:${ACCOUNT_PORT}`
 const WEB = `http://127.0.0.1:${WEB_PORT}`
@@ -166,7 +167,7 @@ if (sofi.status !== "apagada") throw new Error(`Sofi debía estar apagada: ${sof
 serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
 // La cuenta de mentira, con las cabeceras que pide la pantalla (credenciales, su origen).
-let current: Who = "rosa"
+let current: Who | null = "rosa"
 const account = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", ACCOUNT)
   const headers = {
@@ -182,9 +183,39 @@ const account = createServer(async (request, response) => {
   }
   if (request.method === "OPTIONS") return json(204, {})
   const como = /^\/__como\/(\w+)$/.exec(url.pathname)?.[1]
-  if (request.method === "POST" && como && como in PEOPLE) {
-    current = como as Who
+  if (request.method === "POST" && como && (como in PEOPLE || como === "nadie")) {
+    current = como === "nadie" ? null : (como as Who)
     return json(200, { como })
+  }
+  // Entrar con correo y contraseña (la de todas es `CLAVE`) y cerrar la sesión.
+  if (request.method === "POST" && url.pathname === "/api/auth/sign-in/email") {
+    const chunks: Buffer[] = []
+    for await (const chunk of request) chunks.push(chunk as Buffer)
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as {
+      email?: string
+      password?: string
+    }
+    const who = (Object.keys(PEOPLE) as Who[]).find((key) => PEOPLE[key].email === body.email)
+    if (!who || body.password !== CLAVE)
+      return json(401, {
+        code: "INVALID_EMAIL_OR_PASSWORD",
+        message: "Invalid email or password",
+      })
+    current = who
+    const person = PEOPLE[who]
+    return json(200, {
+      redirect: false,
+      token: `t-${person.id}`,
+      user: { id: person.id, email: person.email, name: person.name, emailVerified: true },
+    })
+  }
+  if (request.method === "POST" && url.pathname === "/api/auth/sign-out") {
+    current = null
+    return json(200, { success: true })
+  }
+  if (!current) {
+    if (url.pathname === "/api/auth/get-session") return json(200, null)
+    return json(401, { message: "Sin sesión" })
   }
   const p = PEOPLE[current]
   if (url.pathname === "/api/auth/get-session")

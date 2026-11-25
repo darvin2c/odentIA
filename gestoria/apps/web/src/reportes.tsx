@@ -8,7 +8,7 @@ import { api } from "./lib/api"
 import { CHANNELS, localToday, when } from "./lib/pedidos"
 import { type ArgosBoard, type StoreReport, usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Reportes» (lienzo B, tablero 13): cómo va la tienda y lo que hizo y le toca a Argos. Solo
@@ -36,10 +36,7 @@ export function ReportsPage() {
   const r = report.data
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">Reportes</h2>
-        <p className="text-sm text-muted-foreground">Cómo va la tienda.</p>
-      </div>
+      <StoreHeader title="Reportes" subtitle="Cómo va la tienda." />
       <Argos />
       <ViewTabs
         label="Qué periodo ver"

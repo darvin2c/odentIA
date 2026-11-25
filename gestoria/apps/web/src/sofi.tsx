@@ -18,7 +18,7 @@ import type {
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { FormAlert, fieldErrors, SwitchField, TextField } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Sofi» (lienzo B, tablero 8): lo que el dueño le deja escrito y «Probar a Sofi». Mientras no
@@ -37,12 +37,10 @@ export function SofiPage() {
   })
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">Sofi</h2>
-        <p className="text-sm text-muted-foreground">
-          La vendedora de tu tienda: responde, recomienda, negocia dentro de tus límites y cobra.
-        </p>
-      </div>
+      <StoreHeader
+        title="Sofi"
+        subtitle="La vendedora de tu tienda: responde, recomienda, negocia dentro de tus límites y cobra."
+      />
       {overview.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {overview.isError ? (
         <ErrorBlock error={overview.error} onRetry={() => void overview.refetch()} />
