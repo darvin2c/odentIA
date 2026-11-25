@@ -917,6 +917,21 @@ p {
   gap: 12px;
 }
 
+/* Los celulares más angostos (320 px): la cabecera cabe en una fila. */
+@media (max-width: 380px) {
+  .logo svg {
+    width: 112px;
+  }
+
+  .actions {
+    gap: 8px;
+  }
+
+  .actions .btn-ghost {
+    padding: 0 14px;
+  }
+}
+
 /* El celular: una columna y el botón primero. */
 @media (max-width: 640px) {
   .hero {

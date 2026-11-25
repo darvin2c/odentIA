@@ -4,9 +4,9 @@
 import logotipo from "../assets/logotipo.svg?raw"
 
 // El enlace ya dice «gestorIA, inicio»: el dibujo no se lee dos veces.
-const svg = logotipo.replace(
-  ' role="img" aria-label="gestorIA"',
-  ' aria-hidden="true" focusable="false"',
-)
+const svg = logotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
 ---
 <a class="logo" href="/" aria-label="gestorIA, inicio"><Fragment set:html={svg} /></a>

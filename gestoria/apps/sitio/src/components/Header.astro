@@ -32,6 +32,11 @@ const { variant } = Astro.props
           <a class="btn btn-big" href={cta.href}>{cta.label}</a>
         </div>
       </details>
+      <script is:inline>
+        // Al tocar una sección del menú, el menú se cierra: si no, queda abierto encima al volver arriba.
+        for (const link of document.querySelectorAll(".menu-panel a"))
+          link.addEventListener("click", () => link.closest("details")?.removeAttribute("open"))
+      </script>
     </div>
   </div>
 </header>

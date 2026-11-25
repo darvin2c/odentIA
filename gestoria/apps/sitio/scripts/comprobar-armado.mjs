@@ -22,12 +22,14 @@ for (const file of [
 
 if (fallos.length === 0) {
   const mapa = read("sitemap-0.xml")
+  // El dominio con que se armó, el mismo del mapa del sitio.
+  const site = new URL(read("robots.txt").match(/Sitemap: (\S+)/)?.[1] ?? "").origin
   for (const file of PAGINAS) {
     const html = read(file)
     const marcas = /\[Por (completar|confirmar)/.test(html)
     const noindex = html.includes('name="robots" content="noindex')
     const path = file === "index.html" ? "/" : `/${file.replace(/\.html$/, "")}`
-    const enMapa = mapa.includes(`<loc>https://gestoria24.com${path === "/" ? "/" : path}</loc>`)
+    const enMapa = mapa.includes(`<loc>${site}${path}</loc>`)
     if (marcas && !noindex) fallos.push(`${file} tiene marcas «[Por completar]» y no lleva noindex`)
     if (marcas && enMapa) fallos.push(`${file} tiene marcas y está en el mapa del sitio`)
     if (file === "404.html" && enMapa) fallos.push("la 404 está en el mapa del sitio")
@@ -43,6 +45,9 @@ if (fallos.length === 0) {
   }
   if (!read("index.html").includes("gestorIA es una marca del Grupo Sallca"))
     fallos.push("la portada no lleva la firma")
+  // El enlace del logo ya dice «gestorIA, inicio»: el dibujo no se lee otra vez.
+  if (!/aria-label="gestorIA, inicio"><svg aria-hidden="true"/.test(read("index.html")))
+    fallos.push("el logo de la cabecera no está oculto a los lectores de pantalla")
 }
 
 if (fallos.length > 0) {
