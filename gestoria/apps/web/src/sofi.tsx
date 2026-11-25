@@ -18,7 +18,7 @@ import type {
 import { usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { FormAlert, fieldErrors, SwitchField, TextField } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Sofi» (lienzo B, tablero 8): lo que el dueño le deja escrito y «Probar a Sofi». Mientras no
@@ -37,12 +37,10 @@ export function SofiPage() {
   })
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">Sofi</h2>
-        <p className="text-sm text-muted-foreground">
-          La vendedora de tu tienda: responde, recomienda, negocia dentro de tus límites y cobra.
-        </p>
-      </div>
+      <StoreHeader
+        title="Sofi"
+        subtitle="La vendedora de tu tienda: responde, recomienda, negocia dentro de tus límites y cobra."
+      />
       {overview.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {overview.isError ? (
         <ErrorBlock error={overview.error} onRetry={() => void overview.refetch()} />
@@ -110,9 +108,9 @@ function Settings({ settings }: { settings: AgentSettings }) {
       className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
     >
       <div className="flex flex-col gap-1">
-        <h3 id="sofi-ajustes" className="text-lg font-bold">
+        <h2 id="sofi-ajustes" className="text-lg font-bold">
           Cómo vende
-        </h3>
+        </h2>
         <p className="text-sm text-muted-foreground">
           Sofi usa tu catálogo, tus precios mínimos y tus formas de pago y de entrega. Aquí va lo
           demás.{canEdit ? "" : " Lo cambia el dueño o un administrador."}
@@ -275,9 +273,9 @@ function TestChat({ overview }: { overview: SofiOverview }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h3 id="sofi-prueba" className="text-lg font-bold">
+          <h2 id="sofi-prueba" className="text-lg font-bold">
             Probar a Sofi
-          </h3>
+          </h2>
           <p className="text-sm text-muted-foreground">
             Sus pedidos son de prueba: no mueven el stock, no crean un link de pago real y no
             cuentan en Reportes.
