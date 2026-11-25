@@ -332,6 +332,13 @@ describe("los permisos de cada rol (decisión 7)", () => {
     expect(lastOwner.status).toBe(409)
     expect(lastOwner.json.error.code).toBe("LAST_OWNER")
     expect((await call("rosa", "DELETE", `/api/tiendas/${storeId}/equipo/u-rosa`)).status).toBe(409)
+    // Antes de cerrar su cuenta, la pantalla sabe que Rosa es la única con el rol de Dueño.
+    expect((await call("rosa", "GET", "/api/yo")).json.stores).toEqual([
+      expect.objectContaining({ id: storeId, role: "owner", onlyOwner: true }),
+    ])
+    expect((await call("mario", "GET", "/api/yo")).json.stores).toEqual([
+      expect.objectContaining({ id: storeId, onlyOwner: false }),
+    ])
   })
 
   it("quien no es del equipo no sabe si la tienda existe", async () => {
@@ -589,5 +596,30 @@ describe("la tienda de ejemplo", () => {
     expect(body.invitations).toEqual([
       expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
     ])
+  })
+})
+
+describe("antes de cerrar la cuenta", () => {
+  it("con dos Dueños, ninguno es el único; con uno solo, sí", async () => {
+    const created = await call("ajena", "POST", "/api/tiendas", {
+      name: "Dos Dueños",
+      currency: "PEN",
+    })
+    const id = created.json.store.id as string
+    const onlyOwner = async (who: Who) =>
+      (
+        (await call(who, "GET", "/api/yo")).json.stores as { id: string; onlyOwner: boolean }[]
+      ).find((s) => s.id === id)?.onlyOwner
+    expect(await onlyOwner("ajena")).toBe(true)
+    const invited = await call("ajena", "POST", `/api/tiendas/${id}/invitaciones`, {
+      email: "nueva@polos.test",
+      role: "owner",
+    })
+    expect(
+      (await call("nueva", "POST", `/api/invitaciones/${invited.json.invitation.id}/aceptar`))
+        .status,
+    ).toBe(200)
+    expect(await onlyOwner("ajena")).toBe(false)
+    expect(await onlyOwner("nueva")).toBe(false)
   })
 })

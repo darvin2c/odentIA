@@ -20,6 +20,14 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Sus variables llevan `GESTORIA_` (nunca `DATABASE_URL` a secas): así no toma la base ni la cuenta
   de las clínicas por error.
 
+## La cuenta de la persona
+
+- Mi perfil y Soporte de la cuenta son las pantallas comunes de `@odentia/ui-patterns`
+  (`AccountProfilePage`, `AccountSupportPage`; ADR 0218), en `/cuenta` y `/cuenta/soporte`, con la
+  API de la cuenta en su dominio (`ACCOUNT_API`). No se rehacen aquí: lo propio de gestorIA entra
+  por sus ranuras. Cerrar la cuenta no se ofrece mientras sea el único Dueño de una tienda
+  (`onlyOwner` de `/api/yo`).
+
 ## Tiendas y permisos
 
 - Una persona puede tener o atender varias tiendas y elige al entrar (decisión 8). Cada tienda

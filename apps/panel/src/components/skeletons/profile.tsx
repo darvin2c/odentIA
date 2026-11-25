@@ -4,24 +4,9 @@
  * separado y cada una tiene su pieza.
  */
 import { Button, Separator, Skeleton } from "@odentia/ui"
+import { SessionsSkeleton, TwoFactorSkeleton } from "@odentia/ui-patterns"
 import { useKnownStaffRecord } from "../../lib/admin-access"
 import { PageLoading, TextSm, TextXs } from "./page-loading"
-
-export function SessionsSkeleton() {
-  return (
-    <ul className="flex flex-col gap-3">
-      {[0, 1].map((row) => (
-        <li key={row} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
-          <Skeleton className="size-5 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <TextSm className="w-36" />
-            <TextXs className="w-56" />
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
-}
 
 export function ClinicsSkeleton() {
   return (
@@ -42,28 +27,6 @@ export function ClinicsSkeleton() {
   )
 }
 
-export function TwoFactorSkeleton() {
-  // El personal no la activa aquí: la pantalla le dice que se maneja en la administración, sin botón.
-  if (useKnownStaffRecord()) {
-    return (
-      <div className="flex flex-col gap-1">
-        <TextSm className="w-52" />
-        <TextSm className="w-72" />
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex max-w-md flex-1 flex-col gap-1">
-        <TextSm className="w-52" />
-        <TextSm className="w-full" />
-        <TextSm className="w-3/4" />
-      </div>
-      <Skeleton className="h-9 w-24 shrink-0 rounded-3xl" />
-    </div>
-  )
-}
-
 function CardTitle({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -74,6 +37,8 @@ function CardTitle({ title, description }: { title: string; description: string 
 }
 
 export function ProfilePageSkeleton() {
+  // El personal no la activa aquí: la pantalla le dice que se maneja en la administración.
+  const staff = useKnownStaffRecord()
   return (
     <PageLoading
       title="Mi perfil"
@@ -124,7 +89,7 @@ export function ProfilePageSkeleton() {
           </Button>
         </div>
         <Separator />
-        <TwoFactorSkeleton />
+        <TwoFactorSkeleton staff={staff} />
       </div>
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <CardTitle title="Sesiones activas" description="Dispositivos con acceso a tu cuenta." />
@@ -133,7 +98,10 @@ export function ProfilePageSkeleton() {
         </div>
       </div>
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
-        <CardTitle title="Mis clínicas" description="Clínicas a las que perteneces y tu rol en cada una." />
+        <CardTitle
+          title="Mis clínicas"
+          description="Clínicas a las que perteneces y tu rol en cada una."
+        />
         <ClinicsSkeleton />
       </div>
       <div className="flex flex-col gap-6 elevated rounded-xl border border-destructive/30 bg-card p-6">

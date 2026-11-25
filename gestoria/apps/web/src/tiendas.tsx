@@ -45,6 +45,7 @@ import {
   ChartColumn,
   Copy,
   CreditCard,
+  KeyRound,
   LifeBuoy,
   MailOpen,
   MessageCircle,
@@ -54,6 +55,7 @@ import {
   Store,
   Truck,
   UserPlus,
+  UserRound,
   Users,
 } from "lucide-react"
 import {
@@ -256,21 +258,65 @@ function StoreSwitcher({ me, store }: { me: Me; store: MyStore }) {
  * de la tienda; abajo, la persona con su nombre y su correo, Apariencia y «Cerrar sesión». Fuera
  * de una tienda (elegirla, crearla, una invitación), solo «Tus tiendas».
  */
-export function Shell({ me, store, children }: { me: Me; store?: MyStore; children: ReactNode }) {
+export function Shell({
+  me,
+  store,
+  bare = false,
+  children,
+}: {
+  me: Me
+  store?: MyStore
+  /** La página pone su propio `PageShell` (las pantallas de la cuenta). */
+  bare?: boolean
+  children: ReactNode
+}) {
   const { pathname } = useLocation()
+  // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
+  const live = authClient.useSession().data?.user
   const items: AppShellNavItem[] = store
     ? storeSections(store)
     : [{ label: "Tus tiendas", to: "/", icon: Store }]
+  // `tienda` deja en la cuenta el enlace para volver a esta tienda, como «Mi perfil» de la
+  // clínica; vacía, fuera de una tienda, olvida la de antes. Ya en la cuenta, se conserva.
+  const from: { tienda?: string } = pathname.startsWith("/cuenta")
+    ? {}
+    : { tienda: store?.id ?? "" }
   return (
     <AppShell
       notice={store?.supportUntil ? <SupportStrip until={store.supportUntil} /> : undefined}
       items={items}
       LinkComponent={RouterLink}
       pathname={pathname}
-      user={{ name: me.person.name, email: me.person.email }}
+      user={{
+        name: live?.name ?? me.person.name,
+        email: live?.email ?? me.person.email,
+        avatarUrl: live?.image ?? null,
+        givenNames: live?.firstName ?? null,
+        familyName: live?.lastName ?? null,
+      }}
+      userMenuItems={
+        store?.role === "support"
+          ? []
+          : [
+              {
+                label: "Mi perfil",
+                icon: UserRound,
+                to: "/cuenta",
+                ...(from ? { search: from } : {}),
+              },
+              {
+                label: "Cambiar contraseña",
+                icon: KeyRound,
+                to: "/cuenta",
+                search: { edit: "password", ...from },
+              },
+            ]
+      }
       brand={<Brand />}
       brandIcon={<Brand compact />}
       switcher={store ? <StoreSwitcher me={me} store={store} /> : undefined}
+      // La sesión es la misma en las apps abiertas desde aquí con el pase (ADR 0215): se cierra en todas.
+      signOutHint="Cierra tu sesión aquí y en las apps que abriste desde aquí"
       onSignOut={() => void signOut()}
     >
       <HeaderUtilitiesProvider
@@ -278,7 +324,7 @@ export function Shell({ me, store, children }: { me: Me; store?: MyStore; childr
           utilities: store?.permissions.includes("plan") ? <AskForHelp store={store} /> : undefined,
         }}
       >
-        <PageShell className="flex flex-col gap-6">{children}</PageShell>
+        {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
       </HeaderUtilitiesProvider>
     </AppShell>
   )

@@ -11,6 +11,13 @@ import { createAuthClient } from "better-auth/react"
 export const ACCOUNT_URL = (import.meta.env.VITE_ACCOUNT_URL as string | undefined) ?? ""
 
 /**
+ * La API de la cuenta en el dominio de gestorIA, sin `/api/auth`: ahí también responde lo de la
+ * persona que usan Mi perfil y Soporte de la cuenta (`/api/account/*`, la foto), nunca lo de sus
+ * clínicas (ADR 0218).
+ */
+export const ACCOUNT_API = ACCOUNT_URL.replace(/\/api\/auth\/?$/, "").replace(/\/+$/, "")
+
+/**
  * La versión de los documentos que se aceptan al crear la cuenta. La cuenta exige la vigente
  * (`LEGAL_VERSION` de las clínicas, que gestorIA no importa); si cambia, la cuenta responde
  * `TERMS_OUTDATED` y la pantalla lo dice. Los textos propios de gestorIA llegan antes de abrirla.

@@ -19,6 +19,7 @@ import {
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { CatalogPage } from "./catalogo"
+import { AccountSupportRoute, PROFILE_PATH, ProfilePage, SUPPORT_PATH } from "./cuenta"
 import {
   ForgotPasswordPage,
   LoginPage,
@@ -73,7 +74,8 @@ const rootRoute = createRootRoute({
   component: () => (
     <>
       <Outlet />
-      <Toaster />
+      {/* Arriba, como en las clínicas: abajo taparía los botones de los cajones. */}
+      <Toaster position="top-center" richColors />
     </>
   ),
   notFoundComponent: () => (
@@ -210,6 +212,20 @@ const routeTree = rootRoute.addChildren([
       getParentRoute: () => signedIn,
       path: "/invitacion/$id",
       component: InvitationPage,
+    }),
+    // La cuenta de la persona, la misma de todas sus apps (ADR 0218): `?edit=` abre su cajón,
+    // `?tienda=` deja volver a la tienda desde la que se llegó y `?caso=` abre un caso de soporte.
+    createRoute({
+      getParentRoute: () => signedIn,
+      path: PROFILE_PATH,
+      validateSearch: search,
+      component: ProfilePage,
+    }),
+    createRoute({
+      getParentRoute: () => signedIn,
+      path: SUPPORT_PATH,
+      validateSearch: search,
+      component: AccountSupportRoute,
     }),
   ]),
 ])

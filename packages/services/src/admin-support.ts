@@ -961,10 +961,18 @@ export async function giveSupportAccessFromHelp(
 /* ---------- Cuenta (panel, sin clínica): casos de acceso con ownerDb ---------- */
 
 /** Casos de acceso: problemas para entrar sin organización (cuenta del panel). */
+/**
+ * Desde dónde se pidió ayuda de la cuenta en una app que es otro sistema (`/gestoria`, ADR
+ * 0216): el aviso de la respuesta lleva a su soporte, en su dominio y con su marca.
+ */
+export function accountSupportScreen(app: string): string {
+  return `/${app}`
+}
+
 export async function createAccessSupportCase(
   db: Db,
   userId: string,
-  input: { question: unknown; detail?: unknown; appVersion?: string | null },
+  input: { question: unknown; detail?: unknown; appVersion?: string | null; screen?: string },
 ): Promise<SupportCaseListItem> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) {
     throw invalidField("question", "Cuenta qué pasa con al menos 3 caracteres.")
@@ -982,7 +990,8 @@ export async function createAccessSupportCase(
           typeof input.detail === "string" && input.detail.trim()
             ? input.detail.trim().slice(0, 500)
             : null,
-        screen: "/panel",
+        // Desde dónde se pidió: el panel o la app que es otro sistema (`/gestoria`).
+        screen: input.screen ?? "/panel",
         role: "Cuenta",
         appVersion: input.appVersion ?? null,
         dedupeKey,

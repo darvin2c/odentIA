@@ -7,7 +7,9 @@
  *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
- * Sin la red: ningún proveedor real.
+ * También lo de Mi perfil que usa el recorrido de la cuenta (ADR 0218): cambiar la contraseña
+ * (la actual es `CLAVE`; la nueva no se guarda) y activar los dos pasos con el código
+ * `CODIGO_TOTP`. `GET /__cuenta` dice lo que pidió la pantalla. Sin la red: ningún proveedor real.
  */
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:http"
@@ -25,7 +27,16 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from
 import { createApp } from "../apps/api/src/app.js"
 import { defaultLinkAdapters } from "../apps/api/src/link-de-pago.js"
 import { answer } from "../apps/api/src/sofi/sofi.js"
-import { ACCOUNT_PORT, API_PORT, CLAVE, PEOPLE, STORE_ID, WEB_PORT, type Who } from "./entorno.js"
+import {
+  ACCOUNT_PORT,
+  API_PORT,
+  CLAVE,
+  CODIGO_TOTP,
+  PEOPLE,
+  STORE_ID,
+  WEB_PORT,
+  type Who,
+} from "./entorno.js"
 
 const ACCOUNT = `http://127.0.0.1:${ACCOUNT_PORT}`
 const WEB = `http://127.0.0.1:${WEB_PORT}`
@@ -168,6 +179,14 @@ serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
 // La cuenta de mentira, con las cabeceras que pide la pantalla (credenciales, su origen).
 let current: Who | null = "rosa"
+/** Quién activó los dos pasos y lo que pidió Mi perfil (para que el recorrido lo compruebe). */
+const twoFactorOn = new Set<Who>()
+const asked: Array<{ path: string; body: Record<string, unknown> }> = []
+const readBody = async (request: import("node:http").IncomingMessage) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of request) chunks.push(chunk as Buffer)
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as Record<string, unknown>
+}
 const account = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", ACCOUNT)
   const headers = {
@@ -187,6 +206,7 @@ const account = createServer(async (request, response) => {
     current = como === "nadie" ? null : (como as Who)
     return json(200, { como })
   }
+  if (request.method === "GET" && url.pathname === "/__cuenta") return json(200, { asked })
   // Entrar con correo y contraseña (la de todas es `CLAVE`) y cerrar la sesión.
   if (request.method === "POST" && url.pathname === "/api/auth/sign-in/email") {
     const chunks: Buffer[] = []
@@ -228,6 +248,50 @@ const account = createServer(async (request, response) => {
       },
       user: { id: p.id, email: p.email, name: p.name, emailVerified: true, image: null },
     })
+  // Mi perfil (ADR 0218): los dos pasos, las sesiones y la contraseña de quien entró.
+  if (request.method === "GET" && url.pathname === "/api/account/two-factor")
+    return json(200, {
+      data: {
+        enabled: twoFactorOn.has(current),
+        staff: false,
+        hasPassword: true,
+        requiredBy: [],
+        trustedBrowsers: 0,
+      },
+    })
+  if (request.method === "GET" && url.pathname === "/api/auth/list-sessions")
+    return json(200, [
+      {
+        id: `s-${p.id}`,
+        token: `t-${p.id}`,
+        userAgent: request.headers["user-agent"] ?? null,
+        ipAddress: "127.0.0.1",
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+  if (request.method === "POST" && url.pathname.startsWith("/api/auth/")) {
+    const body = await readBody(request)
+    const path = url.pathname.slice("/api/auth".length)
+    asked.push({ path, body })
+    const user = { id: p.id, email: p.email, name: p.name, emailVerified: true }
+    if (path === "/change-password" || path === "/two-factor/enable") {
+      const password = path === "/change-password" ? body.currentPassword : body.password
+      if (password !== CLAVE)
+        return json(400, { code: "INVALID_PASSWORD", message: "Invalid password" })
+      if (path === "/change-password") return json(200, { token: `t-${p.id}`, user })
+      return json(200, {
+        method: "totp",
+        totpURI: `otpauth://totp/gestorIA:${encodeURIComponent(p.email)}?secret=JBSWY3DPEHPK3PXP&issuer=gestorIA`,
+        backupCodes: ["aaaa1-bbbb1", "aaaa2-bbbb2", "aaaa3-bbbb3", "aaaa4-bbbb4"],
+      })
+    }
+    if (path === "/two-factor/verify-totp") {
+      if (body.code !== CODIGO_TOTP)
+        return json(401, { code: "INVALID_CODE", message: "Invalid code" })
+      twoFactorOn.add(current)
+      return json(200, { token: `t-${p.id}`, user })
+    }
+  }
   if (url.pathname === "/api/auth/token") {
     const iat = Math.floor(Date.now() / 1000)
     const token = await new SignJWT({

@@ -160,14 +160,18 @@ producto del dominio desde el que se pide (decisión 17).
 gestorIA es otro sistema que entra con la misma cuenta (ADR 0201). Todo lo suyo está apagado
 mientras no se configure:
 
-- `GESTORIA_DOMAIN` (API): en ese dominio solo responde su entrada a la cuenta
-  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones) y nada de las clínicas.
+- `GESTORIA_DOMAIN` (API y worker): en ese dominio solo responde su entrada a la cuenta
+  (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones), lo de la persona que usan Mi
+  perfil y Soporte de la cuenta en gestorIA (`/api/account/two-factor`, `/api/account/close`,
+  `/api/account/support/*` sin los casos de una clínica, `/api/uploads/avatar`; ADR 0218) y nada
+  de las clínicas. Con él, el worker manda la respuesta a un caso pedido desde gestorIA a
+  `https://app.<dominio>/cuenta/soporte`, con su marca.
   `/api/auth/token` da a quien entró un JWT de 15 minutos firmado (EdDSA) y
   `/api/auth/jwks` publica la llave para verificarlo. Los correos de esa entrada (verificar,
   entrar sin contraseña, cambiar el correo o la contraseña) salen con la marca de gestorIA y,
   en el pie, Términos, Privacidad y Ayuda de `https://<dominio>/terminos`, `/privacidad` y
   `/contacto`: su web tiene que tenerlas.
-- `GESTORIA_SMTP_FROM` (API): el remitente de esos correos, cuando su dominio tenga SPF y
+- `GESTORIA_SMTP_FROM` (API y worker): el remitente de esos correos, cuando su dominio tenga SPF y
   DKIM; vacío, el de `SMTP_FROM` con «gestorIA».
 - `GESTORIA_ACCOUNT_EVENTS_URL` y `GESTORIA_ACCOUNT_EVENTS_SECRET` (API y worker): adónde
   (https) y con qué secreto (`whsec_` y al menos 24 bytes en base64) se avisa a gestorIA que

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseUserAgent, relativeTime } from "./user-agent"
+import { parseUserAgent, relativeTime } from "./user-agent.js"
 
 describe("parseUserAgent", () => {
   it("identifica Chrome en Windows", () => {

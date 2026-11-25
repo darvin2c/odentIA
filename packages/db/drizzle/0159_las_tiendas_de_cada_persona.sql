@@ -18,6 +18,6 @@ CREATE TABLE "auth"."app_place_member" (
 --> statement-breakpoint
 ALTER TABLE "auth"."app_place_member" ADD CONSTRAINT "app_place_member_place_fk" FOREIGN KEY ("app","ref") REFERENCES "auth"."app_place"("app","ref") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "app_place_member_user_idx" ON "auth"."app_place_member" USING btree ("user_id");--> statement-breakpoint
--- Reglas (ADR 0063 y 0216): las dos tablas no reciben nada del rol de la aplicación. La copia de
+-- Reglas (ADR 0063 y 0217): las dos tablas no reciben nada del rol de la aplicación. La copia de
 -- los lugares de otra app la escribe y la lee la conexión propietaria (el acuerdo, la cuenta).
 REVOKE ALL ON TABLE auth.app_place, auth.app_place_member FROM dentalagent_app;

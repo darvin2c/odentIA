@@ -16,7 +16,13 @@ import type { AppDeps } from "../app.js"
 import { errorBody } from "../lib/error.js"
 import { runService, validationError } from "./helpers.js"
 
-export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {}
+export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {
+  /**
+   * Solo lo de la persona (dos pasos y cerrar la cuenta), sin sus clínicas ni sus invitaciones:
+   * el dominio de una app que es otro sistema (gestorIA, ADR 0218).
+   */
+  personOnly?: boolean
+}
 
 /**
  * Tras cerrar, bloquear o reabrir una cuenta, el aviso a las apps que son otro sistema sale en el momento
@@ -57,34 +63,37 @@ export function createAccountRoute(deps: AccountDeps) {
     return { userId: session.user.id, email: session.user.email }
   }
 
-  app.get("/invitations/pending", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => owner((tx) => listMyInvitations(tx, who.email)))
-  })
+  if (!deps.personOnly) {
+    app.get("/invitations/pending", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () => owner((tx) => listMyInvitations(tx, who.email)))
+    })
 
-  app.get("/organizations", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => owner((tx) => listMyOrganizations(tx, who.userId)))
-  })
+    app.get("/organizations", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () => owner((tx) => listMyOrganizations(tx, who.userId)))
+    })
+
+    app.post("/organizations/:id/leave", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () =>
+        owner((tx) => leaveOrganization(tx, who.userId, c.req.param("id"))).then(() => ({
+          ok: true,
+        })),
+      )
+    })
+  }
 
   // Los lugares de la persona en las apps que son otro sistema (las tiendas de gestorIA, ADR
   // 0217): la copia que la cuenta guarda de lo que la app avisa. Cada app arma su dirección.
+  // Es de la persona: también responde en el dominio de gestorIA.
   app.get("/places", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
     return runService(c, 200, () => owner((tx) => listMyAppPlaces(tx, who.userId)))
-  })
-
-  app.post("/organizations/:id/leave", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () =>
-      owner((tx) => leaveOrganization(tx, who.userId, c.req.param("id"))).then(() => ({
-        ok: true,
-      })),
-    )
   })
 
   // Verificación en dos pasos (ADR 0107): activar, cambiar de teléfono y los
@@ -93,13 +102,24 @@ export function createAccountRoute(deps: AccountDeps) {
   app.get("/two-factor", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => getMyTwoFactor(deps.ownerDb, who.userId))
+    return runService(c, 200, async () => {
+      const status = await getMyTwoFactor(deps.ownerDb, who.userId)
+      if (!deps.personOnly) return status
+      // Fuera de las clínicas no se nombra ninguna: se dice cuántas la piden, para que se
+      // entienda por qué no se puede desactivar.
+      const count = status.requiredBy.length
+      const requiredBy =
+        count === 0 ? [] : [count === 1 ? "Una de tus clínicas" : `${count} de tus clínicas`]
+      return { ...status, requiredBy }
+    })
   })
 
   app.post("/two-factor/forget-browsers", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, async () => ({ forgotten: await forgetTrustedBrowsers(deps.ownerDb, who.userId) }))
+    return runService(c, 200, async () => ({
+      forgotten: await forgetTrustedBrowsers(deps.ownerDb, who.userId),
+    }))
   })
 
   app.post("/close", async (c) => {

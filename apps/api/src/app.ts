@@ -6,6 +6,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import {
+  accountSupportScreen,
   type AdminChannels,
   brandMailbox,
   CLINIC_LOGO_MAX_BYTES,
@@ -492,6 +493,101 @@ export function createApp(deps: AppDeps) {
     return (product === BASE_PRODUCT ? undefined : deps.productAuth?.[product]) || auth
   }
 
+  /** Lo que se responde ante un error: el de un servicio con su motivo, lo demás como interno. */
+  function answerError(err: Error, c: Context) {
+    if (err instanceof ServiceError)
+      return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+    // Un id con forma de otra cosa en la dirección (`/patients/HTTP`) no existe: lo dice
+    // Postgres al comparar con una columna uuid. Se responde 404 para toda ruta, no una a una.
+    if (idMalformadoEnLaDireccion(err, c.req.path))
+      return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+    console.error(err)
+    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
+  }
+
+  /** Las rutas de la cuenta que existen también en el dominio de una app que es otro sistema. */
+  const isExternalAccountPath = (path: string) =>
+    path === "/api/uploads/avatar" || path === "/api/account" || path.startsWith("/api/account/")
+
+  /**
+   * Lo de la cuenta que la app de otro sistema sirve en su dominio (ADR 0218): los dos pasos,
+   * cerrar la cuenta, la foto y los casos de soporte de la cuenta. Con la sesión de su entrada y
+   * solo desde sus pantallas: una escritura que no viene de ellas no se acepta.
+   */
+  function externalAccountRoutes(entry: ExternalAppEntry): Hono {
+    const routes = new Hono()
+    routes.onError(answerError)
+    routes.use("*", async (c, next) => {
+      const method = c.req.method
+      if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next()
+      if (!entry.trustedOrigins.includes(c.req.header("origin") ?? ""))
+        return c.json(errorBody(c, "FORBIDDEN", "Origen no permitido"), 403)
+      return next()
+    })
+    routes.use("/api/uploads/*", requireSession({ auth: entry.auth }))
+    routes.post("/api/uploads/avatar", uploadAvatar)
+    routes.route(
+      "/api/account/support",
+      createAccountSupportRoute({
+        ...deps,
+        auth: entry.auth,
+        accountCasesOnly: true,
+        screen: accountSupportScreen(entry.app),
+      }),
+    )
+    routes.route("/api/account", createAccountRoute({ ...deps, auth: entry.auth, personOnly: true }))
+    routes.all("*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404))
+    return routes
+  }
+
+  const AVATAR_MIME: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+  }
+  const AVATAR_MAX_BYTES = 2 * 1024 * 1024
+
+  /** La foto de la persona: la sube ya encuadrada y reemplaza la anterior. Pide la sesión antes. */
+  async function uploadAvatar(c: Context) {
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get("file")
+    if (!(file instanceof File)) {
+      return c.json(
+        errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }),
+        400,
+      )
+    }
+    const ext = AVATAR_MIME[file.type]
+    if (!ext) {
+      return c.json(
+        errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP", {
+          file: "Solo se admiten PNG, JPG o WebP",
+        }),
+        400,
+      )
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      return c.json(
+        errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB", {
+          file: "La imagen no puede superar 2 MB",
+        }),
+        400,
+      )
+    }
+    const userId = c.get("userId") as string
+    const previousImage = c.get("userImage") as string | null
+    const { url } = await deps.storage.putAvatar({
+      userId,
+      body: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type,
+      ext,
+    })
+    if (previousImage) {
+      await deps.storage.deleteByUrl(previousImage, userId).catch(() => {})
+    }
+    return c.json({ data: { url } }, 201)
+  }
+
   const app = new Hono()
 
   app.use("*", requestId())
@@ -507,9 +603,16 @@ export function createApp(deps: AppDeps) {
     const entryAuth = entry.auth
     // El segundo factor del personal se cuida igual que en las clínicas (ADR 0089).
     const factorBoundary = createAdminFactorBoundary({ auth: entryAuth, ownerDb: deps.ownerDb })
+    const personAccount = externalAccountRoutes(entry)
     app.use("*", async (c, next) => {
       if (!isOnDomain(c.req.url, entry.domain)) return next()
       const path = c.req.path
+      // Mi perfil y Soporte de la cuenta en la app (ADR 0218): solo lo de la persona, con la
+      // sesión de su dominio. Nada de sus clínicas.
+      if (isExternalAccountPath(path))
+        return entryCors(c, async () => {
+          c.res = await personAccount.fetch(c.req.raw)
+        })
       // La revisión diaria de su copia de las cuentas: de servidor a servidor, firmada con el
       // secreto de sus avisos. Existe aunque gestorIA no esté configurada del todo.
       if (path === ACCOUNT_REVIEW_PATH) return answerAccountReview(c, entry.app, deps)
@@ -581,16 +684,7 @@ export function createApp(deps: AppDeps) {
     await next()
   })
 
-  app.onError((err, c) => {
-    if (err instanceof ServiceError)
-      return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
-    // Un id con forma de otra cosa en la dirección (`/patients/HTTP`) no existe: lo dice
-    // Postgres al comparar con una columna uuid. Se responde 404 para toda ruta, no una a una.
-    if (idMalformadoEnLaDireccion(err, c.req.path))
-      return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
-    console.error(err)
-    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
-  })
+  app.onError(answerError)
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
 
   app.get("/health", async (c) => {
@@ -883,52 +977,7 @@ export function createApp(deps: AppDeps) {
     return requireSession(deps)(c, next)
   })
 
-  const AVATAR_MIME: Record<string, string> = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/webp": "webp",
-  }
-  const AVATAR_MAX_BYTES = 2 * 1024 * 1024
-
-  userScoped.post("/uploads/avatar", async (c) => {
-    const form = await c.req.formData().catch(() => null)
-    const file = form?.get("file")
-    if (!(file instanceof File)) {
-      return c.json(
-        errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }),
-        400,
-      )
-    }
-    const ext = AVATAR_MIME[file.type]
-    if (!ext) {
-      return c.json(
-        errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP", {
-          file: "Solo se admiten PNG, JPG o WebP",
-        }),
-        400,
-      )
-    }
-    if (file.size > AVATAR_MAX_BYTES) {
-      return c.json(
-        errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB", {
-          file: "La imagen no puede superar 2 MB",
-        }),
-        400,
-      )
-    }
-    const userId = (c as Context).get("userId") as string
-    const previousImage = (c as Context).get("userImage") as string | null
-    const { url } = await deps.storage.putAvatar({
-      userId,
-      body: Buffer.from(await file.arrayBuffer()),
-      contentType: file.type,
-      ext,
-    })
-    if (previousImage) {
-      await deps.storage.deleteByUrl(previousImage, userId).catch(() => {})
-    }
-    return c.json({ data: { url } }, 201)
-  })
+  userScoped.post("/uploads/avatar", uploadAvatar)
 
   // Lo que se propone al elegir país: moneda, formato, zona y papel. Es dato
   // de referencia, no de una organización: el alta lo consulta antes de que

@@ -1,6 +1,6 @@
-import { SUBMIT_ERROR_WORDS, submitErrorOf } from "@odentia/ui-patterns"
+import { SUBMIT_ERROR_WORDS, submitErrorOf } from "../form/submit-error.js"
 import { describe, expect, it } from "vitest"
-import { authError } from "./auth-error"
+import { authError } from "./auth-error.js"
 
 describe("authError", () => {
   it("un código equivocado (401 de Better Auth) se dice en su campo, no como sesión vencida", () => {
