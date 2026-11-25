@@ -482,6 +482,25 @@ describe("el mismo hallazgo de toda la pieza, otra vez", () => {
     expect(findingReplaced(activeFindingsAsOf(records), 15, "crown")?.id).toBe("ct")
   })
 
+  it("el puente rehecho en las mismas piezas reemplaza al anterior; en otras piezas, conviven", () => {
+    const bridge = (id: string, createdAt: string, relatedTeeth: number[]): FindingRecord => ({
+      id,
+      toothNumber: relatedTeeth[0]!,
+      condition: "fixed_partial_denture",
+      status: "recorded",
+      createdAt,
+      details: { relatedTeeth, quality: "good" },
+    })
+    const records = [
+      bridge("viejo", "2026-10-01", [44, 45, 46]),
+      bridge("otro", "2026-10-01", [24, 25, 26]),
+      bridge("nuevo", "2026-11-01", [46, 45, 44]),
+    ]
+    expect(activeFindingsAsOf(records).map((item) => item.id).sort()).toEqual(["nuevo", "otro"])
+    expect(findingReplaced(activeFindingsAsOf(records), 44, "fixed_partial_denture", [44, 45, 46])?.id).toBe("nuevo")
+    expect(findingReplaced(activeFindingsAsOf(records), 34, "fixed_partial_denture", [34, 35, 36])).toBeNull()
+  })
+
   it("la observación clínica no se reemplaza: una pieza puede tener varias", () => {
     const notes = [
       { id: "frio", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-10-01" },

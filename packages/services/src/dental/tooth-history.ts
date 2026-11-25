@@ -1,6 +1,6 @@
 import { isTooth } from "./site.js"
 import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, doneSessionWords, isDiagnosisVerification } from "@odentia/clinical"
-import { activeFindingsAsOf, type FindingDetails, isValidTooth, replacesSame } from "@odentia/dental"
+import { activeFindingsAsOf, type FindingDetails, isValidTooth, replacesOlder } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -179,7 +179,7 @@ export async function getToothHistory(
       ? "anulado"
       : row.resolvedAt
         ? "tratado"
-        : replacesSame(row.condition) && !row.needsReview && !active.has(row.id)
+        : replacesOlder({ ...row, details: row.details as FindingDetails }) && !row.needsReview && !active.has(row.id)
           ? "reemplazado"
           : "vigente"
     const key = [row.encounterId, row.toothNumber, row.condition, row.createdAt.getTime(), row.createdBy, status].join("|")

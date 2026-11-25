@@ -584,7 +584,7 @@ function timeOf(value: string | Date | null | undefined): number | undefined {
  * El registro es append-only: coexisten todas las entradas válidas registradas
  * hasta la fecha; se excluyen las pendientes de revisión, las anuladas a esa
  * fecha (voidedAt o estado voided), las tratadas a esa fecha (resolvedAt) y las
- * reemplazadas (`replacesSame`). Sin latest-wins por cara. Orden determinista por
+ * reemplazadas (`replacesOlder`). Sin latest-wins por cara. Orden determinista por
  * creación e identificador.
  */
 export function activeFindingsAsOf<T extends FindingRecord>(
@@ -594,14 +594,15 @@ export function activeFindingsAsOf<T extends FindingRecord>(
   const cutoff = iso === undefined ? Number.POSITIVE_INFINITY : Date.parse(iso)
   if (iso !== undefined && !Number.isFinite(cutoff)) return []
   const active = recordedAsOf(history, cutoff, false)
-  // De toda la pieza, el más nuevo del mismo hallazgo reemplaza al anterior, que sigue en la historia.
+  // De toda la pieza o del mismo tramo, el más nuevo del mismo hallazgo reemplaza al anterior, que sigue
+  // en la historia.
   // Cuenta también el más nuevo ya tratado: tratarlo no devuelve el anterior. Anularlo, sí (deshace).
   const newest = new Map<string, T>()
   for (const record of recordedAsOf(history, cutoff, true))
-    if (replacesSame(record.condition)) newest.set(replaceKey(record), record)
+    if (replacesOlder(record)) newest.set(replaceKey(record), record)
   return active.filter(
     (record) =>
-      !replacesSame(record.condition) || newest.get(replaceKey(record)) === record,
+      !replacesOlder(record) || newest.get(replaceKey(record)) === record,
   )
 }
 
@@ -633,8 +634,33 @@ const REPLACE_FAMILY: Record<string, string> = {
   erupting_tooth: "missing_tooth",
 }
 
-/** La pieza y el estado que el más nuevo reemplaza: «15|crown» para la corona y la corona temporal. */
-function replaceKey(record: { toothNumber: number; condition: string }): string {
+/** Lo que abarca varias piezas: el puente, la prótesis, el aparato, el diastema entre dos. */
+const MULTI_TOOTH = new Set(["span", "arch", "pair"])
+
+type Replaceable = { toothNumber: number; condition: string; details?: { relatedTeeth?: readonly number[] } }
+
+/**
+ * Si un registro reemplaza al anterior del mismo hallazgo: lo de toda la pieza (`replacesSame`) y lo de
+ * varias piezas sobre las mismas piezas (el puente de la 44 a la 46 rehecho; QA del 24 nov: quedaban dos
+ * puentes vigentes). Dos puentes en piezas distintas conviven.
+ */
+export function replacesOlder(record: Replaceable): boolean {
+  const def = findingDefinition(record.condition)
+  if (!def) return false
+  if (MULTI_TOOTH.has(def.scope)) return (record.details?.relatedTeeth?.length ?? 0) > 1
+  return replacesSame(record.condition)
+}
+
+/**
+ * La pieza y el estado que el más nuevo reemplaza: «15|crown» para la corona y la corona temporal; en
+ * lo de varias piezas, el hallazgo y sus piezas: «fixed_partial_denture|44,45,46».
+ */
+function replaceKey(record: Replaceable): string {
+  const def = findingDefinition(record.condition)
+  if (def && MULTI_TOOTH.has(def.scope)) {
+    const teeth = [...(record.details?.relatedTeeth ?? [record.toothNumber])].sort((a, b) => a - b)
+    return `${record.condition}|${teeth.join(",")}`
+  }
   return `${record.toothNumber}|${REPLACE_FAMILY[record.condition] ?? record.condition}`
 }
 
@@ -646,25 +672,27 @@ function replaceKey(record: { toothNumber: number; condition: string }): string 
 export function withoutReplaced<T extends FindingRecord>(records: readonly T[]): T[] {
   const newest = new Map<string, T>()
   for (const record of recordedAsOf(records, Number.POSITIVE_INFINITY, true))
-    if (replacesSame(record.condition)) newest.set(replaceKey(record), record)
+    if (replacesOlder(record)) newest.set(replaceKey(record), record)
   return records.filter(
     (record) =>
-      !replacesSame(record.condition) || newest.get(replaceKey(record)) === record,
+      !replacesOlder(record) || newest.get(replaceKey(record)) === record,
   )
 }
 
 /**
- * El hallazgo vigente de toda la pieza que uno nuevo del mismo tipo reemplazaría: el panel lo avisa
- * antes de registrar. Nulo si no hay o si el hallazgo no reemplaza (`replacesSame`).
+ * El hallazgo vigente que uno nuevo del mismo tipo reemplazaría: el panel lo avisa antes de registrar.
+ * Con varias piezas (un puente), `teeth` son las piezas elegidas. Nulo si no hay o si no reemplaza.
  */
 export function findingReplaced<T extends FindingRecord>(
   active: readonly T[],
   toothNumber: number,
   condition: string,
+  teeth?: readonly number[],
 ): T | null {
-  if (!replacesSame(condition)) return null
-  const key = replaceKey({ toothNumber, condition })
-  return [...active].reverse().find((record) => replacesSame(record.condition) && replaceKey(record) === key) ?? null
+  const probe: Replaceable = { toothNumber, condition, details: teeth ? { relatedTeeth: teeth } : {} }
+  if (!replacesOlder(probe)) return null
+  const key = replaceKey(probe)
+  return [...active].reverse().find((record) => replacesOlder(record) && replaceKey(record) === key) ?? null
 }
 
 /** Lo registrado a esa fecha, sin lo anulado ni lo pendiente de revisión; con `treated`, también lo tratado. */
