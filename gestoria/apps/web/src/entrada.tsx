@@ -1,26 +1,52 @@
 import { Button, Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input } from "@odentia/ui"
-import { PasswordInput, SubmitButton } from "@odentia/ui-patterns"
+import { AuthSplit, PasswordInput, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { MailCheck } from "lucide-react"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, type ReactNode, useState } from "react"
 import { z } from "zod"
 import {
   accountErrorText,
   authClient,
   authFetch,
   forgetToken,
+  forgetUser,
+  readRememberedUser,
+  rememberUser,
   safeNext,
   TERMS_VERSION,
 } from "./lib/cuenta"
-import { AuthAlert, AuthLayout } from "./marca"
 
 /**
  * La entrada de gestorIA con la cuenta única (lienzo B, tablero 9): entrar, crear la cuenta,
  * verificar el correo, recuperar el acceso y el segundo paso. Por detrás es la misma cuenta de
  * odentIA, latidIA y vistIA: quien ya la tiene entra con su contraseña; quien llega nuevo se
  * registra aquí y no ve otra marca. Las direcciones (`/login`, `/forgot-password`,
- * `/two-factor`) son las que usa la cuenta al volver de un enlace.
+ * `/two-factor`) son las que usa la cuenta al volver de un enlace. La pantalla es la misma de
+ * las clínicas (`AuthSplit`), con la marca de gestorIA (lienzo «Una cuenta, todas las apps»,
+ * tablero 5).
  */
+
+/** Un aviso dentro de un formulario de la entrada: junto al botón, no en uno que se va. */
+function AuthAlert({ children, id }: { children: ReactNode; id?: string }) {
+  return (
+    <p
+      id={id}
+      role="alert"
+      className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger"
+    >
+      {children}
+    </p>
+  )
+}
+
+/** La línea bajo «Entrar»: la cuenta no es solo de gestorIA. */
+function SameAccount() {
+  return (
+    <p className="text-center text-xs text-muted-foreground">
+      Tu cuenta es la misma en todas tus apps.
+    </p>
+  )
+}
 
 const emailSchema = z.string().trim().email("Escribe un correo válido, como nombre@tienda.com")
 
@@ -36,7 +62,9 @@ function useFormState() {
 export function LoginPage() {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { next?: string; bloqueada?: string }
-  const [email, setEmail] = useState("")
+  // Quien entró la última vez desde este navegador: su correo entero y solo la contraseña.
+  const [known, setKnown] = useState(readRememberedUser)
+  const [email, setEmail] = useState(known?.email ?? "")
   const [password, setPassword] = useState("")
   const [unverified, setUnverified] = useState(false)
   const [resent, setResent] = useState(false)
@@ -65,7 +93,12 @@ export function LoginPage() {
           )
         return
       }
-      if ((result.data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect) {
+      const signed = result.data as {
+        twoFactorRedirect?: boolean
+        user?: { name: string; email: string }
+      } | null
+      if (signed?.user) rememberUser({ name: signed.user.name, email: signed.user.email })
+      if (signed?.twoFactorRedirect) {
         await navigate({ to: "/two-factor", search: next ? { next } : {} })
         return
       }
@@ -79,21 +112,35 @@ export function LoginPage() {
     }
   }
 
+  /** Otra persona en este navegador: deja de recordar a la anterior y pide el correo. */
+  function otherAccount() {
+    forgetUser()
+    setKnown(null)
+    setEmail("")
+    setPassword("")
+    form.setErrors({})
+    form.setProblem(null)
+    setUnverified(false)
+    // El botón desaparece: el foco pasa al correo, que es lo que sigue (WCAG 2.4.3).
+    window.requestAnimationFrame(() => document.getElementById("email")?.focus())
+  }
+
   return (
-    <AuthLayout
+    <AuthSplit
       title="Entra a tu tienda"
-      description="Con tu cuenta del Grupo Sallca: si ya usas odentIA, latidIA o vistIA, es la misma."
       footer={
-        <>
-          ¿Aún no tienes cuenta?{" "}
-          <Link
-            to="/register"
-            search={next ? { next } : {}}
-            className="font-medium text-primary underline"
-          >
-            Crear una cuenta
-          </Link>
-        </>
+        known ? null : (
+          <>
+            ¿Aún no tienes cuenta?{" "}
+            <Link
+              to="/register"
+              search={next ? { next } : {}}
+              className="font-medium text-primary underline"
+            >
+              Crear una cuenta
+            </Link>
+          </>
+        )
       }
     >
       {search.bloqueada === "1" ? (
@@ -101,22 +148,44 @@ export function LoginPage() {
       ) : null}
       <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
-          <Field data-invalid={form.errors.email ? true : undefined}>
-            <FieldLabel htmlFor="email">Correo</FieldLabel>
-            <Input
-              id="email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={form.errors.email ? true : undefined}
-              aria-describedby={form.errors.email ? "email-error" : undefined}
-            />
-            {form.errors.email ? (
-              <FieldError id="email-error">{form.errors.email}</FieldError>
-            ) : null}
-          </Field>
+          {known ? (
+            <div className="flex items-center gap-3">
+              <PersonAvatar name={known.name} className="size-10" decorative />
+              <div className="flex min-w-0 flex-col">
+                <span className="font-semibold [overflow-wrap:anywhere]">{known.name}</span>
+                {/* El correo entero: cortado, dos cuentas parecidas se confunden. */}
+                <span className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                  {known.email}
+                </span>
+              </div>
+              {/* El gestor de contraseñas necesita el usuario aunque no se escriba. */}
+              <input
+                type="email"
+                name="email"
+                autoComplete="username"
+                value={known.email}
+                readOnly
+                hidden
+              />
+            </div>
+          ) : (
+            <Field data-invalid={form.errors.email ? true : undefined}>
+              <FieldLabel htmlFor="email">Correo</FieldLabel>
+              <Input
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={form.errors.email ? true : undefined}
+                aria-describedby={form.errors.email ? "email-error" : undefined}
+              />
+              {form.errors.email ? (
+                <FieldError id="email-error">{form.errors.email}</FieldError>
+              ) : null}
+            </Field>
+          )}
           <Field data-invalid={form.errors.password ? true : undefined}>
             <div className="flex items-baseline justify-between gap-3">
               <FieldLabel htmlFor="password">Contraseña</FieldLabel>
@@ -133,6 +202,7 @@ export function LoginPage() {
               value={password}
               onChange={setPassword}
               autoComplete="current-password"
+              autoFocus={Boolean(known)}
               invalid={Boolean(form.errors.password)}
               describedBy={form.errors.password ? "password-error" : undefined}
             />
@@ -165,12 +235,18 @@ export function LoginPage() {
             </AuthAlert>
           ) : null}
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Entrar
           </SubmitButton>
+          {known ? (
+            <Button type="button" variant="outline" className="w-full" onClick={otherAccount}>
+              Entrar con otra cuenta
+            </Button>
+          ) : null}
+          <SameAccount />
         </FieldGroup>
       </form>
-    </AuthLayout>
+    </AuthSplit>
   )
 }
 
@@ -226,9 +302,9 @@ export function RegisterPage() {
   }
 
   return (
-    <AuthLayout
+    <AuthSplit
       title="Crea tu cuenta"
-      description="Una sola cuenta para todas las apps del Grupo Sallca. Después creas tu tienda."
+      description="Tu cuenta es la misma en todas tus apps. Después creas tu tienda."
       footer={
         <>
           ¿Ya tienes cuenta?{" "}
@@ -326,12 +402,12 @@ export function RegisterPage() {
           </Field>
           {form.errors.terms ? <FieldError id="terms-error">{form.errors.terms}</FieldError> : null}
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Crear mi cuenta
           </SubmitButton>
         </FieldGroup>
       </form>
-    </AuthLayout>
+    </AuthSplit>
   )
 }
 
@@ -340,7 +416,7 @@ export function VerifyEmailSentPage() {
   const [resent, setResent] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   return (
-    <AuthLayout
+    <AuthSplit
       title={
         <span className="flex flex-col gap-3">
           <MailCheck className="size-10 rounded-xl bg-primary-soft p-2 text-primary" aria-hidden />
@@ -382,7 +458,7 @@ export function VerifyEmailSentPage() {
         </Button>
       ) : null}
       {problem ? <AuthAlert>{problem}</AuthAlert> : null}
-    </AuthLayout>
+    </AuthSplit>
   )
 }
 
@@ -415,7 +491,7 @@ export function ForgotPasswordPage() {
 
   if (sentTo)
     return (
-      <AuthLayout
+      <AuthSplit
         title={
           <span className="flex flex-col gap-3">
             <MailCheck
@@ -438,11 +514,11 @@ export function ForgotPasswordPage() {
         }
       >
         <span />
-      </AuthLayout>
+      </AuthSplit>
     )
 
   return (
-    <AuthLayout
+    <AuthSplit
       title="Recupera tu acceso"
       description="Te enviamos un enlace que te deja dentro; ahí eliges tu nueva contraseña."
       footer={
@@ -471,12 +547,12 @@ export function ForgotPasswordPage() {
             ) : null}
           </Field>
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Enviarme el enlace
           </SubmitButton>
         </FieldGroup>
       </form>
-    </AuthLayout>
+    </AuthSplit>
   )
 }
 
@@ -508,6 +584,9 @@ export function TwoFactorPage() {
         )
         return
       }
+      // Con el segundo paso, la cuenta dice quién es recién aquí: la entrada la recuerda igual.
+      const user = (result.data as { user?: { name: string; email: string } } | null)?.user
+      if (user) rememberUser({ name: user.name, email: user.email })
       forgetToken()
       window.location.assign(next ?? "/")
     } finally {
@@ -516,7 +595,7 @@ export function TwoFactorPage() {
   }
 
   return (
-    <AuthLayout
+    <AuthSplit
       title="Un paso más"
       description={
         backup
@@ -555,11 +634,11 @@ export function TwoFactorPage() {
             {form.errors.code ? <FieldError id="code-error">{form.errors.code}</FieldError> : null}
           </Field>
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Entrar
           </SubmitButton>
         </FieldGroup>
       </form>
-    </AuthLayout>
+    </AuthSplit>
   )
 }

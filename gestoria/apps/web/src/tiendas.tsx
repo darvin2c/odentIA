@@ -18,15 +18,25 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  AppShell,
+  type AppShellNavItem,
+  Brand,
   type CountryCode,
   CountrySelect,
   EmptyState,
   ErrorState,
+  HeaderUtilitiesProvider,
   LoadingState,
+  NoticeStrip,
+  PageHeader,
+  type PageHeaderProps,
+  PageShell,
   PersonAvatar,
+  type Place,
+  PlaceSwitcher,
   regionCountry,
-  SectionNav,
   SubmitButton,
+  useHeaderCompact,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
@@ -35,7 +45,8 @@ import {
   ChartColumn,
   Copy,
   CreditCard,
-  LogOut,
+  LifeBuoy,
+  MailOpen,
   MessageCircle,
   Package,
   Plus,
@@ -67,69 +78,209 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
-import { authClient, forgetToken } from "./lib/cuenta"
+import { authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { when } from "./lib/pedidos"
-import { GroupSignature, Logo } from "./marca"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
 export function useMe() {
   return useQuery({ queryKey: ["yo"], queryFn: () => api<Me>("/api/yo") })
 }
 
+/** Cierra la sesión de la cuenta en este navegador. La entrada sigue recordando quién era. */
 async function signOut() {
   forgetToken()
   await authClient.signOut().catch(() => undefined)
   window.location.assign("/login")
 }
 
-/** El marco de las pantallas con sesión: la marca, la persona y salir. */
-export function Shell({
+/**
+ * El enlace del router con lo que le pasan el armazón y el selector (`aria-current`, `title`,
+ * `onClick`). `exact`: el armazón decide cuál es el destino activo, no cada prefijo de la ruta.
+ */
+function RouterLink({
+  to,
+  search,
   children,
-  store,
-  wide = false,
+  ...rest
 }: {
+  to: string
+  search?: Record<string, string>
+  className?: string
   children: ReactNode
-  store?: MyStore
-  /** El catálogo y su producto usan más ancho en el escritorio. */
-  wide?: boolean
+  title?: string
+  onClick?: MouseEventHandler<HTMLAnchorElement>
 }) {
-  const width = wide ? "max-w-6xl" : "max-w-4xl"
-  const me = useMe()
   return (
-    <div className="flex min-h-dvh flex-col bg-surface-muted">
-      <header className="border-b bg-card">
-        <div className={`mx-auto flex h-14 w-full ${width} items-center gap-3 px-4`}>
-          <Link to="/" aria-label="Tus tiendas" className="shrink-0">
-            <Logo className="w-28 sm:w-32" />
-          </Link>
-          {store ? (
-            <span
-              className="min-w-0 truncate border-l pl-3 text-sm font-semibold"
-              title={store.name}
-            >
-              {store.name}
-            </span>
-          ) : null}
-          <div className="ml-auto flex items-center gap-2">
-            {me.data ? (
-              <span className="hidden text-sm text-muted-foreground sm:inline">
-                {me.data.person.name}
-              </span>
-            ) : null}
-            <Button variant="ghost" size="sm" onClick={() => void signOut()}>
-              <LogOut aria-hidden />
-              Salir
-            </Button>
-          </div>
-        </div>
-      </header>
-      <main className={`mx-auto flex w-full ${width} min-w-0 flex-1 flex-col gap-6 px-4 py-6`}>
-        {children}
-      </main>
-      <footer className="flex justify-center px-4 pb-5">
-        <GroupSignature />
-      </footer>
+    <Link to={to} search={search} activeOptions={{ exact: true }} {...rest}>
+      {children}
+    </Link>
+  )
+}
+
+/** Mientras se sabe quién es y qué tiendas tiene: el aviso a la vista, sin el armazón. */
+function Opening({ message }: { message: string }) {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-canvas p-4">
+      <LoadingState kind="indeterminate" message={message} className="w-full max-w-sm" />
     </div>
+  )
+}
+
+/** Lo que no se pudo abrir antes de saber quién es: el error y «Reintentar», sin el armazón. */
+function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-canvas p-4">
+      <div className="w-full max-w-md">
+        <ErrorBlock error={error} onRetry={onRetry} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * «Pedir ayuda» en la cabecera (lienzo «Una cuenta, todas las apps», decisión 6): lleva a la
+ * ayuda del soporte de gestorIA, en «Plan y pagos», mientras gestorIA no tenga su propia Ayuda.
+ * Es del Dueño, como el plan (el servidor lo exige igual).
+ */
+function AskForHelp({ store }: { store: MyStore }) {
+  const compact = useHeaderCompact()
+  return (
+    <Button
+      variant="outline"
+      className="elevated h-9 gap-2 rounded-full px-3"
+      render={<Link to="/tiendas/$id/plan" params={{ id: store.id }} hash="plan-ayuda" />}
+    >
+      <LifeBuoy className="size-4" aria-hidden />
+      <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
+    </Button>
+  )
+}
+
+/**
+ * La franja de soporte de gestorIA mirando la tienda: no se cierra y dice hasta cuándo. Como la
+ * de las clínicas, sigue al permiso: cada medio minuto y al vencer vuelve a preguntar, así lo que
+ * estaba a la vista no queda abierto después de que la tienda lo saca o de que vence.
+ */
+function SupportStrip({ until }: { until: string }) {
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    const check = () => void queryClient.invalidateQueries({ queryKey: ["yo"] })
+    const timer = window.setInterval(check, 30_000)
+    const left = new Date(until).getTime() - Date.now()
+    const atEnd = left > 0 ? window.setTimeout(check, left + 1_000) : undefined
+    return () => {
+      window.clearInterval(timer)
+      if (atEnd) window.clearTimeout(atEnd)
+    }
+  }, [until, queryClient])
+  // «p. m.» termina en punto: en la frase larga no se repite antes del siguiente.
+  const end = when(until)
+  return (
+    <NoticeStrip
+      label="Soporte de gestorIA"
+      notices={[
+        {
+          id: "soporte-mirando",
+          tone: "alarma",
+          message: `Entraste como soporte de gestorIA, solo a mirar, hasta el ${end.replace(/\.$/, "")}. No puedes cambiar nada.`,
+          short: `Solo mirar · hasta el ${end}`,
+        },
+      ]}
+    />
+  )
+}
+
+/**
+ * El selector de tiendas, el mismo de las clínicas (`PlaceSwitcher`): la tienda y el rol de
+ * quien está («Tienda · Dueño»), «Plan y pagos» si es del Dueño, sus otras tiendas y, al final,
+ * sus invitaciones y crear otra.
+ */
+function StoreSwitcher({ me, store }: { me: Me; store: MyStore }) {
+  const navigate = useNavigate()
+  // Bajo el nombre cabe una palabra: «Soporte», no «Soporte de gestorIA» (lo dice la franja).
+  const roleOf = (item: MyStore) => (item.role === "support" ? "Soporte" : ROLES[item.role].name)
+  const places: Place[] = me.stores.map((item) => ({
+    id: item.id,
+    name: item.name,
+    brand: "gestoria",
+    role: roleOf(item),
+    href: `/tiendas/${item.id}`,
+  }))
+  const invitations = me.invitations.length
+  return (
+    <PlaceSwitcher
+      current={{ id: store.id, name: store.name, brand: "gestoria", role: roleOf(store) }}
+      places={places}
+      actions={
+        store.permissions.includes("plan")
+          ? [
+              {
+                label: "Plan y pagos",
+                icon: <CreditCard aria-hidden />,
+                onSelect: () =>
+                  void navigate({ to: "/tiendas/$id/plan", params: { id: store.id } }),
+              },
+            ]
+          : []
+      }
+      footerActions={[
+        ...(invitations > 0
+          ? [
+              {
+                label:
+                  invitations === 1 ? "Ver tu invitación" : `Ver tus ${invitations} invitaciones`,
+                icon: <MailOpen aria-hidden />,
+                onSelect: () => void navigate({ to: "/" }),
+              },
+            ]
+          : []),
+        // Soporte mirando una tienda ajena no viene a crear la suya.
+        ...(store.role === "support"
+          ? []
+          : [
+              {
+                label: "Crear otra tienda",
+                icon: <Plus aria-hidden />,
+                onSelect: () => void navigate({ to: "/tiendas/nueva" }),
+              },
+            ]),
+      ]}
+      menuLabel="Menú de la tienda"
+    />
+  )
+}
+
+/**
+ * El armazón de gestorIA, el mismo de las clínicas (`AppShell`; lienzo «Una cuenta, todas las
+ * apps», tableros 6 y 7): la barra lateral con la marca, el selector de tiendas y las secciones
+ * de la tienda; abajo, la persona con su nombre y su correo, Apariencia y «Cerrar sesión». Fuera
+ * de una tienda (elegirla, crearla, una invitación), solo «Tus tiendas».
+ */
+export function Shell({ me, store, children }: { me: Me; store?: MyStore; children: ReactNode }) {
+  const { pathname } = useLocation()
+  const items: AppShellNavItem[] = store
+    ? storeSections(store)
+    : [{ label: "Tus tiendas", to: "/", icon: Store }]
+  return (
+    <AppShell
+      notice={store?.supportUntil ? <SupportStrip until={store.supportUntil} /> : undefined}
+      items={items}
+      LinkComponent={RouterLink}
+      pathname={pathname}
+      user={{ name: me.person.name, email: me.person.email }}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
+      switcher={store ? <StoreSwitcher me={me} store={store} /> : undefined}
+      onSignOut={() => void signOut()}
+    >
+      <HeaderUtilitiesProvider
+        value={{
+          utilities: store?.permissions.includes("plan") ? <AskForHelp store={store} /> : undefined,
+        }}
+      >
+        <PageShell className="flex flex-col gap-6">{children}</PageShell>
+      </HeaderUtilitiesProvider>
+    </AppShell>
   )
 }
 
@@ -155,32 +306,19 @@ export function StoresPage() {
   }, [only, navigate])
 
   if (me.isPending || only)
-    return (
-      <Shell>
-        <LoadingState message={only ? "Abriendo tu tienda…" : "Cargando tus tiendas…"} />
-      </Shell>
-    )
-  if (me.isError)
-    return (
-      <Shell>
-        <ErrorBlock error={me.error} onRetry={() => void me.refetch()} />
-      </Shell>
-    )
+    return <Opening message={only ? "Abriendo tu tienda…" : "Cargando tus tiendas…"} />
+  if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   const { stores, invitations, person } = me.data
   const nothing = stores.length === 0 && invitations.length === 0
 
   return (
-    <Shell>
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-extrabold tracking-[-0.02em]">
-          Hola, {person.name.split(" ")[0]}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {nothing
-            ? "Crea tu tienda para empezar a vender."
-            : "Elige con qué tienda vas a trabajar."}
-        </p>
-      </div>
+    <Shell me={me.data}>
+      <PageHeader
+        title={`Hola, ${person.name.split(" ")[0]}`}
+        subtitle={
+          nothing ? "Crea tu tienda para empezar a vender." : "Elige con qué tienda vas a trabajar."
+        }
+      />
 
       {invitations.length > 0 ? (
         <section aria-labelledby="invitaciones" className="flex flex-col gap-3">
@@ -296,6 +434,17 @@ function useCurrencies() {
 
 /** Crear la tienda: el nombre y la moneda en que vende (decisión 9: una sola). */
 export function NewStorePage() {
+  const me = useMe()
+  if (me.isPending) return <Opening message="Cargando…" />
+  if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
+  return (
+    <Shell me={me.data}>
+      <NewStoreForm />
+    </Shell>
+  )
+}
+
+function NewStoreForm() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currencies = useCurrencies()
@@ -330,13 +479,11 @@ export function NewStorePage() {
   }
 
   return (
-    <Shell>
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-extrabold tracking-[-0.02em]">Crea tu tienda</h1>
-        <p className="text-sm text-muted-foreground">
-          Quedas como su dueño. Después invitas a tu equipo.
-        </p>
-      </div>
+    <>
+      <PageHeader
+        title="Crea tu tienda"
+        subtitle="Quedas como su dueño. Después invitas a tu equipo."
+      />
       <form noValidate onSubmit={onSubmit} className="max-w-md rounded-xl border bg-card p-5">
         <FieldGroup className="gap-5">
           <Field data-invalid={errors.name ? true : undefined}>
@@ -413,7 +560,7 @@ export function NewStorePage() {
           </div>
         </FieldGroup>
       </form>
-    </Shell>
+    </>
   )
 }
 
@@ -445,36 +592,13 @@ function storeSections(store: MyStore) {
       ? [{ label: "Reportes", to: `/tiendas/${id}/reportes`, icon: ChartColumn }]
       : []),
     { label: "Equipo", to: `/tiendas/${id}/equipo`, icon: Users },
-    // El plan, lo cobrado y los pagos: solo el Dueño.
-    ...(store.permissions.includes("plan")
-      ? [{ label: "Plan y pagos", to: `/tiendas/${id}/plan`, icon: CreditCard }]
-      : []),
+    // «Plan y pagos» (solo el Dueño) va en el selector de la tienda, como en las clínicas.
   ]
 }
 
-/** El enlace de cada sección, con el del router (lo que recibe se lo pasa tal cual). */
-function SectionLink({
-  to,
-  search: _search,
-  children,
-  ...rest
-}: {
-  to: string
-  search?: Record<string, string>
-  className?: string
-  children: ReactNode
-  title?: string
-  onClick?: MouseEventHandler<HTMLAnchorElement>
-}) {
-  return (
-    <Link to={to} {...rest}>
-      {children}
-    </Link>
-  )
-}
-
 /**
- * La tienda: su nombre, el rol de quien está y sus secciones (lienzo B, tableros 6 y 7). Lo que
+ * La tienda en el armazón: sus secciones en la barra lateral y su nombre y el rol de quien está
+ * en el selector (lienzo B, tableros 6 y 7; «Una cuenta, todas las apps», tablero 6). Lo que
  * llega después (WhatsApp) se suma como otra sección.
  */
 export function StoreLayout() {
@@ -483,21 +607,12 @@ export function StoreLayout() {
   const me = useMe()
   const store = me.data?.stores.find((s) => s.id === id)
 
-  if (me.isPending)
-    return (
-      <Shell wide>
-        <LoadingState message="Abriendo tu tienda…" />
-      </Shell>
-    )
-  if (me.isError)
-    return (
-      <Shell>
-        <ErrorBlock error={me.error} onRetry={() => void me.refetch()} />
-      </Shell>
-    )
+  if (me.isPending) return <Opening message="Abriendo tu tienda…" />
+  if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   if (!store)
     return (
-      <Shell>
+      <Shell me={me.data}>
+        <PageHeader title="Tienda no encontrada" />
         <ErrorState
           title="No encontramos esa tienda en tu cuenta"
           message="Puede que te hayan quitado del equipo."
@@ -511,39 +626,29 @@ export function StoreLayout() {
   if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
     return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
   return (
-    <Shell store={store} wide>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em]">{store.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {store.supportUntil
-              ? `Entraste como soporte de gestorIA, solo a mirar, hasta el ${when(store.supportUntil).replace(/\.$/, "")}.`
-              : `Eres ${ROLES[store.role].name}. Vende en ${store.currency}.`}
-          </p>
-        </div>
-        {me.data.stores.length > 1 || me.data.invitations.length > 0 ? (
-          <Button variant="outline" size="sm" render={<Link to="/" />}>
-            Cambiar de tienda
-          </Button>
-        ) : null}
-      </div>
-      <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
-        <SectionNav
-          label={`Secciones de ${store.name}`}
-          items={storeSections(store)}
-          pathname={pathname}
-          LinkComponent={SectionLink}
-          mobilePosition="header"
-        >
-          <div className="flex min-w-0 flex-col gap-6">
-            {store.permissions.includes("equipo.gestionar") && !pathname.endsWith("/equipo") ? (
-              <SupportAccessPanel store={store} only="actual" />
-            ) : null}
-            <Outlet />
-          </div>
-        </SectionNav>
-      </StoreContext.Provider>
-    </Shell>
+    <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
+      <Shell me={me.data} store={store}>
+        <Outlet />
+      </Shell>
+    </StoreContext.Provider>
+  )
+}
+
+/**
+ * El encabezado de cada sección de la tienda (`PageHeader`) y, debajo, lo que soporte de
+ * gestorIA pide o tiene abierto, para que el Dueño o un Administrador lo vea donde esté. En
+ * Equipo ya se ve entero.
+ */
+export function StoreHeader(props: PageHeaderProps) {
+  const { store } = useStoreContext()
+  const { pathname } = useLocation()
+  return (
+    <>
+      <PageHeader {...props} />
+      {store.permissions.includes("equipo.gestionar") && !pathname.endsWith("/equipo") ? (
+        <SupportAccessPanel store={store} only="actual" />
+      ) : null}
+    </>
   )
 }
 
@@ -562,60 +667,59 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
   const [inviting, setInviting] = useState(false)
 
   return (
-    <section aria-labelledby="equipo" className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col">
-          <h2 id="equipo" className="text-lg font-bold">
-            Tu equipo
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Quién atiende tu tienda y qué puede hacer.
-          </p>
-        </div>
-        {canManage ? (
-          <Button onClick={() => setInviting(true)}>
-            <UserPlus aria-hidden />
-            Invitar
-          </Button>
+    <>
+      <StoreHeader
+        title="Equipo"
+        subtitle="Quién atiende tu tienda y qué puede hacer."
+        primary={
+          canManage
+            ? { label: "Invitar", icon: <UserPlus aria-hidden />, onClick: () => setInviting(true) }
+            : undefined
+        }
+      />
+      <section aria-label="Tu equipo" className="flex flex-col gap-4 rounded-xl border bg-card p-5">
+        {team.isPending ? (
+          <p className="text-sm text-muted-foreground">Cargando tu equipo…</p>
         ) : null}
-      </div>
-      {team.isPending ? <p className="text-sm text-muted-foreground">Cargando tu equipo…</p> : null}
-      {team.isError ? <ErrorBlock error={team.error} onRetry={() => void team.refetch()} /> : null}
-      {team.data ? (
-        <>
-          <ul className="flex flex-col divide-y">
-            {team.data.members.map((member) => (
-              <MemberRow
-                key={member.userId}
-                store={store}
-                member={member}
-                isMe={member.userId === meId}
-                canManage={canManage}
-              />
-            ))}
-          </ul>
-          {team.data.invitations.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">Invitaciones pendientes</h3>
-              <ul className="flex flex-col divide-y rounded-lg border">
-                {team.data.invitations.map((invitation) => (
-                  <PendingRow
-                    key={invitation.id}
-                    store={store}
-                    invitation={invitation}
-                    canManage={canManage}
-                  />
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </>
-      ) : null}
-      {team.data && team.data.support.length > 0 ? (
-        <SupportAccessPanel store={store} only="todo" />
-      ) : null}
+        {team.isError ? (
+          <ErrorBlock error={team.error} onRetry={() => void team.refetch()} />
+        ) : null}
+        {team.data ? (
+          <>
+            <ul className="flex flex-col divide-y">
+              {team.data.members.map((member) => (
+                <MemberRow
+                  key={member.userId}
+                  store={store}
+                  member={member}
+                  isMe={member.userId === meId}
+                  canManage={canManage}
+                />
+              ))}
+            </ul>
+            {team.data.invitations.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-semibold">Invitaciones pendientes</h2>
+                <ul className="flex flex-col divide-y rounded-lg border">
+                  {team.data.invitations.map((invitation) => (
+                    <PendingRow
+                      key={invitation.id}
+                      store={store}
+                      invitation={invitation}
+                      canManage={canManage}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {team.data && team.data.support.length > 0 ? (
+          <SupportAccessPanel store={store} only="todo" />
+        ) : null}
+      </section>
       {inviting ? <InviteDialog store={store} onClose={() => setInviting(false)} /> : null}
-    </section>
+    </>
   )
 }
 
@@ -669,9 +773,9 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
       aria-labelledby={`soporte-${only}`}
       className={only === "todo" ? "flex flex-col gap-2" : "rounded-xl border bg-card p-4"}
     >
-      <h3 id={`soporte-${only}`} className="text-sm font-semibold">
+      <h2 id={`soporte-${only}`} className="text-sm font-semibold">
         Soporte de gestorIA
-      </h3>
+      </h2>
       <ul className="flex flex-col divide-y">
         {rows.map((row) => (
           <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
@@ -1089,29 +1193,21 @@ export function InvitationPage() {
   const me = useMe()
   const invitation = me.data?.invitations.find((i) => i.id === id)
 
-  if (me.isPending) return <Shell>{null}</Shell>
-  if (me.isError)
-    return (
-      <Shell>
-        <ErrorBlock error={me.error} onRetry={() => void me.refetch()} />
-      </Shell>
-    )
+  if (me.isPending) return <Opening message="Abriendo tu invitación…" />
+  if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
   if (invitation)
     return (
-      <Shell>
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-extrabold tracking-[-0.02em]">
-            Te invitaron a {invitation.storeName}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Al aceptar, entras a su equipo con tu cuenta.
-          </p>
-        </div>
+      <Shell me={me.data}>
+        <PageHeader
+          title={`Te invitaron a ${invitation.storeName}`}
+          subtitle="Al aceptar, entras a su equipo con tu cuenta."
+        />
         <InvitationCard invitation={invitation} />
       </Shell>
     )
   return (
-    <Shell>
+    <Shell me={me.data}>
+      <PageHeader title="Invitación" />
       <ErrorState
         title="Esta invitación no está disponible"
         message={`Ya no está vigente, ya la aceptaste o es para otro correo. Entraste como ${me.data.person.email}.`}
@@ -1123,6 +1219,8 @@ export function InvitationPage() {
         <Button
           variant="ghost"
           onClick={async () => {
+            // Otra cuenta: la entrada ya no saluda a esta persona.
+            forgetUser()
             forgetToken()
             await authClient.signOut().catch(() => undefined)
             window.location.assign(`/login?next=${encodeURIComponent(`/invitacion/${id}`)}`)
