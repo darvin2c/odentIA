@@ -328,6 +328,20 @@ export interface PatientHealth {
   said?: SaidHealth[]
   /** Lo que dijo que toma y nadie confirmó: la receta lo avisa como al emitirla. Opcional. */
   saidTaking?: Array<{ name: string | null; atcCode: string | null; anticoagulant: boolean; boneMedicine: boolean; at: string; open: boolean }>
+  /** Las alergias que oyó Clío y nadie confirmó: la franja y la receta las avisan. Opcional. */
+  saidAllergies?: SaidAllergy[]
+}
+
+/** Una alergia que propuso Clío y nadie confirmó (`saidAllergies` del servidor). */
+export interface SaidAllergy {
+  suggestionId: string
+  substance: string
+  substanceSystem: string | null
+  substanceCode: string | null
+  name: string
+  severity: string | null
+  at: string
+  open: boolean
 }
 
 /** Lo que dijo de su salud en una atención en borrador, dato por dato, sin confirmar (`listSaidHealth`). */

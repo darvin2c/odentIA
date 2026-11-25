@@ -9,6 +9,7 @@
 import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
+  saidAllergyWarnings,
   DOSAGE_FORMS,
   dispensedUnit,
   duplicateWarnings,
@@ -1006,6 +1007,8 @@ export function RecetasPanel({
   /** Lo que se receta solo con motivo para un medicamento: sus alergias y lo que avisa toda receta. */
   const conflictsOf = (genericName: string) => [
     ...allergyWarnings(genericName, activeAllergies, prescribing.catalog),
+    // La alergia que oyó Clío y nadie confirmó, con las palabras del servidor (mesa del 25 nov, H2).
+    ...saidAllergyWarnings(genericName, healthQuery.data?.data.saidAllergies ?? [], activeAllergies, prescribing.catalog),
     ...alertsOf([{ genericName }]).warnings,
   ]
   // El esquema se arma una vez; las reglas y las alergias llegan después y cambian.

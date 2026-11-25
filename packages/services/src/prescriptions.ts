@@ -1,6 +1,7 @@
 import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
+  saidAllergyWarnings,
   duplicateWarnings,
   findMedication,
   type MedicationCatalog,
@@ -29,7 +30,7 @@ import { getLatestAnamnesis } from "./clinical.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
-import { saidHealthRisks } from "./said-health-risks.js"
+import { saidAllergies, saidHealthRisks } from "./said-health-risks.js"
 import type { ProductPrescribing } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -265,7 +266,11 @@ export async function createPrescription(
   const others = prescribingAlerts(situation, items, prescribing.catalog.medications).warnings
   // La alergia y lo demás se avisan: decide quien receta, y queda en la receta que lo vio (ADR 0143).
   // El motivo es opcional.
-  const conflicts = [...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)), ...others]
+  // La alergia que oyó Clío y nadie confirmó también avisa, dicha así: la receta del mismo ibuprofeno
+  // salía sin aviso (mesa del 25 nov, H2). La ya registrada no se repite.
+  const said = await saidAllergies(tx, orgId, patientId)
+  const saidConflicts = items.flatMap((item) => saidAllergyWarnings(item.genericName, said, allergies, prescribing.catalog))
+  const conflicts = [...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)), ...saidConflicts, ...others]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
   const shown = input.alertsShown ? new Set(input.alertsShown.map((line) => line.trim())) : null
   // Lo de alergia o embarazo que la pantalla no mostró se muestra antes de emitir: nunca a ciegas.

@@ -424,8 +424,16 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-firmar-sin-decidir",
         q: "¿Cómo firmo si Clío dejó algo sin confirmar?",
-        a: "Como siempre, con «Finalizar y firmar»: trae lo que propone Clío en «Lo que propone Clío», marcado, y lo de cada ficha en el bloque de esa ficha. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que cambia lo que ya escribiste viene desmarcado: márcalo solo si va. Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). Cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; desmárcala para terminarla después.",
-        forms: ["como firmo si clio dejo algo sin confirmar", "firmar con propuestas de clio pendientes", "clio dejo sugerencias y quiero firmar", "que pasa con lo propuesto si firmo"],
+        a: "Como siempre, con «Finalizar y firmar»: trae lo que propone Clío en «Lo que propone Clío», marcado, y lo de cada ficha en el bloque de esa ficha. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que cambia lo que ya escribiste viene desmarcado: márcalo solo si va. Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). Cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; desmárcala para terminarla después. Lo que dijo de su salud y una alergia que nombró no se pierden si firmas sin revisarlos: siguen avisándose con su fecha («dijo metamizol el 25 nov, sin confirmar») hasta que alguien los revise en el aviso de su salud, arriba de su próxima atención: la alergia, con «Registrar» o «No la registro». Si alguien la registra antes en Antecedentes, deja de pedirse.",
+        forms: [
+          "como firmo si clio dejo algo sin confirmar",
+          "firmar con propuestas de clio pendientes",
+          "clio dejo sugerencias y quiero firmar",
+          "que pasa con lo propuesto si firmo",
+          "que pasa si firmo y no confirme una alergia que dijo",
+          "firme sin confirmar la alergia se pierde",
+          "la alergia que dijo y no confirme",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -746,7 +754,7 @@ export const CLINICA: readonly HelpMore[] = [
         // Revisión final de formularios del 15 nov: el aviso de la exodoncia (Y2 de clínica, `extractionRisksOf`).
         id: "pacientes-exodoncia-aviso-medicinas",
         q: "¿Por qué la exodoncia o el implante dicen «pide su INR del día» o «riesgo de osteonecrosis»?",
-        a: "Porque toma algo que cambia una cirugía: en la atención, en el plan, la fila de la exodoncia, el implante o la cirugía por hacer lo dice (también la apicectomía y la cirugía de las encías: colgajos, injertos, gingivectomía, alargamiento de corona; la endodoncia y el raspado, no). Si lo contó la persona y nadie lo revisó, dice cuándo lo dijo: «(lo dijo ella el 14 nov)». Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo, o denosumab), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. La medicina cuenta escrita por su nombre, su nombre común o su marca, también con la dosis: «alendronato 70 mg semanal», «Fosamax» o «Eliquis 5 mg». Lo escrito de otra forma («la pastilla del hueso») no se reconoce: elígelo de la lista en Antecedentes. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
+        a: "Porque toma algo que cambia una cirugía: en el plan de la atención y en la pestaña Plan, la fila de la exodoncia, el implante o la cirugía por hacer lo dice, también como opción por decidir entre conservar o extraer (también la apicectomía y la cirugía de las encías: colgajos, injertos, gingivectomía, alargamiento de corona; la endodoncia y el raspado, no). Si lo contó la persona y nadie lo revisó, dice cuándo lo dijo: «(lo dijo ella el 14 nov)». Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo, o denosumab), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. La medicina cuenta escrita por su nombre, su nombre común o su marca, también con la dosis: «alendronato 70 mg semanal», «Fosamax» o «Eliquis 5 mg». Lo escrito de otra forma («la pastilla del hueso») no se reconoce: elígelo de la lista en Antecedentes. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
         forms: [
           "por que la exodoncia me dice que pida su inr",
           "por que no me avisa del alendronato",

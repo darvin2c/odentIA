@@ -73,6 +73,7 @@ import {
   MEDICATION_CLASSES,
   type MedicationClass,
   medicationClassOf,
+  medicationKindLabel,
   type MedicineClassAnswer,
   PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
@@ -1824,8 +1825,8 @@ export async function renderPatientRecordPdf(
         const mark = markOf("medications", m.id)
         // La de una clase se dice con su clase, como la ficha: «Anticoagulante: Warfarina 5 mg» (auditor, A15).
         // Lo que no volvió a nombrar al decir que cambió no se lee como lo de hoy (dev H2): «Antes».
-        const group = medicationClassOf(m.atcCode)
-        const kind = group ? MEDICATION_CLASSES[group].label : null
+        // La aspirina y el clopidogrel se dicen «Antiagregante», como en la franja (revisión del 25 nov).
+        const kind = medicationKindLabel(m)
         const before = record.changed?.medications.includes(m.id)
         const head =
           ended || before

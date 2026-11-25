@@ -53,8 +53,11 @@ import {
   getPatientHealth,
   getPatientSummary,
   listSaidHealth,
+  saidAllergies,
   saidHealthRisks,
+  confirmSaidAllergy,
   confirmSaidHealth,
+  discardSaidAllergy,
   discardSaidHealth,
   getPlanNextStep,
   getPlanNextSteps,
@@ -1112,6 +1115,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         // Lo que dijo que toma, sin confirmar, para lo que avisa la receta en la pantalla como al
         // emitirla (`prescribingAlerts`, QA del 21 nov, H2).
         saidTaking: (await saidHealthRisks(tx, orgId, c.req.param("id"))).medications,
+        // Las alergias que oyó Clío y nadie confirmó: la franja y la receta las avisan (mesa del 25 nov, H2).
+        saidAllergies: await saidAllergies(tx, orgId, c.req.param("id")),
       })),
     )
   })
@@ -1181,6 +1186,24 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     if (!at.success) return validationError(c, at.error.issues)
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) => discardSaidHealth(tx, orgId, userId, at.data.id, at.data.suggestionId))
+      return { ok: true }
+    })
+  })
+  /**
+   * La alergia que oyó Clío en una atención ya firmada y nadie confirmó (QA del 25 nov): «Registrar»
+   * la deja en sus alergias y «No la registro» la deja de avisar. Escribe en la historia: `clinical.write`.
+   */
+  app.post("/:id/health/said-allergies/:suggestionId/:action{confirm|discard}", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = saidHealthParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const action = c.req.param("action")
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        action === "confirm"
+          ? confirmSaidAllergy(tx, orgId, userId, at.data.id, at.data.suggestionId)
+          : discardSaidAllergy(tx, orgId, userId, at.data.id, at.data.suggestionId),
+      )
       return { ok: true }
     })
   })
