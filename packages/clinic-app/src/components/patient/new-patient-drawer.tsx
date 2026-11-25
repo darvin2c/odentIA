@@ -508,6 +508,8 @@ export function NewPatientDrawer({
   })
   const surface = useFormSurface(form, { fieldMap: draftField })
   const values = useStore(form.store, (state) => state.values)
+  // Un «Registrar» con errores vuelve a armar el aviso del panel: se dice otra vez que está guardado.
+  const submissionAttempts = useStore(form.store, (state) => state.submissionAttempts)
 
   // Cada vez que se abre empieza de cero, con lo que ya se sabe. Solo al
   // abrir: si la persona se vuelve a leer mientras se escribe, no se pierde nada.
@@ -630,7 +632,8 @@ export function NewPatientDrawer({
       ? `${values.guardianGivenNames.trim()} ${guardianFirstSurname}`
       : ""
   const guardianDigits = (values.guardianPhone ?? "").replace(/\D/g, "")
-  const guardianPhoneProbe = guardianDigits.length >= 8 ? guardianDigits.slice(-8) : ""
+  // Con el número completo: con un dígito de menos, los últimos 8 traían a gente ajena (QA del 25 nov).
+  const guardianPhoneProbe = values.guardianPhone && guardianDigits.length >= 9 ? guardianDigits : ""
   const [guardianProbes, setGuardianProbes] = useState<string[]>([])
   useEffect(() => {
     const next = values.guardianNew ? [guardianNameProbe, guardianPhoneProbe].filter(Boolean) : []
@@ -716,7 +719,7 @@ export function NewPatientDrawer({
     >
       {stage === "form" ? (
         <div className="flex min-w-0 flex-col gap-5">
-          {target.kind !== "person" ? <KeptInTab signature={JSON.stringify(values)} /> : null}
+          {target.kind !== "person" ? <KeptInTab signature={`${submissionAttempts}:${JSON.stringify(values)}`} /> : null}
           {resumed && !picked ? (
             <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
               <span>Seguías con {[resumed.givenNames, resumed.surnames].filter(Boolean).join(" ") || "lo que escribiste"}.</span>
@@ -730,6 +733,7 @@ export function NewPatientDrawer({
                   setGuardianPick(null)
                   form.reset(initialDraft(target))
                   submission.current = crypto.randomUUID()
+                  focusSoon("np-given")
                 }}
               >
                 Empezar de cero
@@ -823,6 +827,8 @@ export function NewPatientDrawer({
                 description={
                   guardian && !field.state.value
                     ? `Si no tiene celular propio, sus avisos le llegan a ${guardian.displayName}.`
+                    : minor && values.guardianNew && !field.state.value
+                      ? "Si no tiene celular propio, déjalo vacío: sus avisos le llegan a quien lo trae."
                     : field.state.value
                       ? "Aquí le avisamos sus citas por WhatsApp."
                       : // Avisa sin frenar: sin celular también se registra.
@@ -984,15 +990,15 @@ export function NewPatientDrawer({
                           </Button>
                         </p>
                         <form.AppField name="guardianGivenNames">
-                          {(field) => <field.TextField label="Sus nombres" id="np-guardian-given" maxLength={100} />}
+                          {(field) => <field.TextField label="Nombres de quien lo trae" id="np-guardian-given" maxLength={100} />}
                         </form.AppField>
                         <form.AppField name="guardianSurnames">
-                          {(field) => <field.TextField label="Sus apellidos" id="np-guardian-surnames" maxLength={200} />}
+                          {(field) => <field.TextField label="Apellidos de quien lo trae" id="np-guardian-surnames" maxLength={200} />}
                         </form.AppField>
                         <form.AppField name="guardianPhone">
                           {(field) => (
                             <field.PhoneField
-                              label="Su celular"
+                              label="Celular de quien lo trae"
                               id="np-guardian-phone"
                               defaultCountry={defaultCountry}
                               description={`A este número le avisamos las citas de ${name}.`}
@@ -1044,6 +1050,7 @@ export function NewPatientDrawer({
                               {(control) => (
                                 <PersonPicker
                                   id={control.id}
+                                  label="Su responsable"
                                   invalid={control.invalid}
                                   onBlur={control.onBlur}
                                   value={guardianPick}

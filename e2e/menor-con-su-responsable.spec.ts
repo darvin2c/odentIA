@@ -24,8 +24,8 @@ test("un menor con su responsable nuevo se registra en el mismo cajón, y lo esc
 
   // La abuela no está: se escribe aquí mismo.
   await form.getByRole("button", { name: "No está: registrarla aquí", exact: true }).click()
-  await form.getByLabel("Sus nombres", { exact: true }).fill("Rosa")
-  await form.getByLabel("Sus apellidos", { exact: true }).fill("Quispe Vega")
+  await form.getByLabel("Nombres de quien lo trae", { exact: true }).fill("Rosa")
+  await form.getByLabel("Apellidos de quien lo trae", { exact: true }).fill("Quispe Vega")
 
   // Sonó el teléfono: se cierra sin preguntar, y al volver sigue lo escrito.
   await page.keyboard.press("Escape")
@@ -34,9 +34,9 @@ test("un menor con su responsable nuevo se registra en el mismo cajón, y lo esc
   await page.locator("header").getByRole("button", { name: "Nuevo paciente", exact: true }).click()
   await expect(form).toBeVisible()
   await expect(form.getByText("Seguías con Camila Quispe Rojas.", { exact: true })).toBeVisible()
-  await expect(form.getByLabel("Sus nombres", { exact: true })).toHaveValue("Rosa")
+  await expect(form.getByLabel("Nombres de quien lo trae", { exact: true })).toHaveValue("Rosa")
 
-  await form.getByLabel("Su celular", { exact: true }).fill("977555810")
+  await form.getByLabel("Celular de quien lo trae", { exact: true }).fill("977555810")
   await form.getByRole("button", { name: "Otro familiar", exact: true }).click()
   await form.getByLabel("¿Qué es de Camila? (opcional)", { exact: true }).fill("abuela")
   await form.getByText(/^Le informé a Rosa cómo usamos los datos de Camila/).click()
