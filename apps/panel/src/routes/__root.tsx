@@ -1,4 +1,5 @@
-import { type BrandId, BrandProvider, Toaster } from "@odentia/ui"
+import type { ProductWords } from "@odentia/clinical"
+import { BrandProvider, Toaster } from "@odentia/ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
@@ -10,8 +11,8 @@ import { ApiError } from "../lib/api"
 import { panelWords } from "../lib/brand"
 import appCss from "../styles/app.css?url"
 
-/** El ícono de cada marca: odentIA con su .ico para los navegadores viejos; latidIA y vistIA, el SVG. */
-const BRAND_ICONS: Record<BrandId, Array<{ rel: string; href: string; type?: string; sizes?: string }>> = {
+/** El ícono de cada marca clínica: odentIA con su .ico para los navegadores viejos; latidIA y vistIA, el SVG. */
+const BRAND_ICONS: Record<ProductWords["brand"], Array<{ rel: string; href: string; type?: string; sizes?: string }>> = {
   odentia: [
     { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
     { rel: "icon", href: favicon, type: "image/svg+xml" },

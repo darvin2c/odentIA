@@ -13,7 +13,7 @@ Un ejemplo: la Dra. Vela entra a `sanmartin.latidia72.com`. Hoy no podría inici
 
 ## Decisión y motivo
 
-- **Una instancia de Better Auth por dominio.** Las dos usan la misma base y el mismo secreto. `/api/auth/*` usa la del `Host` de la petición, así que cada cookie vive en su dominio. Quien trabaja en los dos productos entra una vez en cada dominio. Una cookie no puede cruzar dominios, y separar la base rompería «una persona, una historia».
+- **Una instancia de Better Auth por dominio.** Las dos usan la misma base y el mismo secreto. `/api/auth/*` usa la del `Host` de la petición, así que cada cookie vive en su dominio. Quien trabaja en los dos productos entra una vez en cada dominio (desde el 2026-11-25, quien pasa desde la app lleva su sesión con el pase: ADR 0215). Una cookie no puede cruzar dominios, y separar la base rompería «una persona, una historia».
 - **Cada enlace sale del dominio del producto de su clínica.** Todos los enlaces públicos se arman con `clinicOrigin(slug, product)` o con `clinicOriginOf`. El panel y la clínica abren cada clínica en su dominio.
 - **El producto lo fija el dominio donde nace la clínica, y no cambia después.**
   - En el alta asistida lo elige la administración.
@@ -34,7 +34,7 @@ Un ejemplo: la Dra. Vela entra a `sanmartin.latidia72.com`. Hoy no podría inici
 ## Consecuencias
 
 - **Beneficio:** un solo código y una sola operación. La clínica médica ve sus palabras desde el primer día.
-- **Sacrificio:** quien trabaja en los dos productos inicia sesión dos veces. Una pantalla nueva que nombre a quien atiende o lo que se reserva debe usar `appWords()`.
+- **Sacrificio:** quien trabaja en los dos productos inicia sesión dos veces (reemplazado por el pase del ADR 0215 cuando pasa desde la app). Una pantalla nueva que nombre a quien atiende o lo que se reserva debe usar `appWords()`.
 - **Pendiente fuera del código:** cada servicio externo necesita el segundo dominio (`docs/deployment.md`).
 - **Cuándo revisarlo:** si un tercer producto necesita palabras con otro género o una lista de palabras más larga.
 

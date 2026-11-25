@@ -102,7 +102,7 @@ for (const viewport of [
         )
         await expect(again.getByLabel("Correo")).toHaveCount(0)
         await shot(again, info.outputPath("8-entrar-te-reconoce.png"))
-        await again.getByRole("button", { name: "¿No eres tú?" }).click()
+        await again.getByRole("button", { name: "Entrar con otra cuenta" }).click()
         await expect(again.getByLabel("Correo")).toBeVisible()
 
         await gotoHydrated(again, `${PANEL}/register`)

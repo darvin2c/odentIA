@@ -102,6 +102,8 @@ export interface AppShellProps {
   user: AppShellUser
   userMenuItems?: AppShellUserMenuItem[]
   onSignOut: () => void
+  /** Lo que cierra «Cerrar sesión», en una línea debajo (p. ej. también en otras apps). */
+  signOutHint?: string
   theme?: ThemeMode
   defaultTheme?: ThemeMode
   onThemeChange?: (mode: ThemeMode) => void
@@ -455,6 +457,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     user,
     userMenuItems,
     onSignOut,
+    signOutHint,
     theme,
     defaultTheme,
     onThemeChange,
@@ -507,9 +510,16 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         <ThemeTabs value={themeMode} onValueChange={setThemeMode} />
       </div>
       <DropdownMenuSeparator />
-      <DropdownMenuItem onClick={onSignOut}>
-        <LogOut />
-        Cerrar sesión
+      <DropdownMenuItem onClick={onSignOut} className={signOutHint ? "items-start" : undefined}>
+        <LogOut className={signOutHint ? "mt-0.5" : undefined} />
+        {signOutHint ? (
+          <span className="flex min-w-0 flex-col">
+            <span>Cerrar sesión</span>
+            <span className="text-xs text-muted-foreground">{signOutHint}</span>
+          </span>
+        ) : (
+          "Cerrar sesión"
+        )}
       </DropdownMenuItem>
     </>
   )

@@ -36,7 +36,7 @@ import {
   TextField,
   useDirty,
 } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * El catálogo (lienzo B, tablero 7): lo único de lo que habla Sofi. Cada producto agrupa sus
@@ -71,28 +71,32 @@ export function CatalogPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-bold">Catálogo</h2>
-          <p className="text-sm text-muted-foreground">
-            {catalog.data
-              ? `${products.length} ${products.length === 1 ? "producto" : "productos"} · ${variants} ${variants === 1 ? "variante" : "variantes"}${soldOut ? ` · ${soldOut} ${soldOut === 1 ? "agotado" : "agotados"}` : ""}`
-              : "Lo que vendes, con sus variantes y su stock."}
-          </p>
-        </div>
-        {canEdit ? (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setUploading(true)}>
-              <Upload aria-hidden />
-              Subir una hoja
-            </Button>
-            <Button onClick={() => setAdding(true)}>
-              <Plus aria-hidden />
-              Agregar producto
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      <StoreHeader
+        title="Catálogo"
+        subtitle={
+          catalog.data
+            ? `${products.length} ${products.length === 1 ? "producto" : "productos"} · ${variants} ${variants === 1 ? "variante" : "variantes"}${soldOut ? ` · ${soldOut} ${soldOut === 1 ? "agotado" : "agotados"}` : ""}`
+            : "Lo que vendes, con sus variantes y su stock."
+        }
+        primary={
+          canEdit
+            ? {
+                label: "Agregar producto",
+                icon: <Plus aria-hidden />,
+                onClick: () => setAdding(true),
+              }
+            : undefined
+        }
+        secondary={
+          canEdit
+            ? {
+                label: "Subir una hoja",
+                icon: <Upload aria-hidden />,
+                onClick: () => setUploading(true),
+              }
+            : undefined
+        }
+      />
 
       {catalog.isPending ? (
         <p className="text-sm text-muted-foreground">Cargando el catálogo…</p>
@@ -109,6 +113,11 @@ export function CatalogPage() {
               ? "Agrega tus productos uno por uno o súbelos de una vez con una hoja. Sofi solo ofrece lo que está aquí."
               : "Cuando el dueño o un administrador agregue productos, aparecen aquí."
           }
+          // En el celular la cabecera deja solo íconos: las dos formas de empezar, aquí con su nombre.
+          actionLabel={canEdit ? "Agregar producto" : undefined}
+          onAction={canEdit ? () => setAdding(true) : undefined}
+          secondaryActionLabel={canEdit ? "Subir una hoja" : undefined}
+          onSecondaryAction={canEdit ? () => setUploading(true) : undefined}
         />
       ) : null}
       {products.length > 0 ? (
