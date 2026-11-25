@@ -135,6 +135,19 @@
       }
     },
     {
+      "id": "fractura-con-su-tipo",
+      "texto": "Se golpeó jugando fútbol: la veintiuno tiene una fractura de esmalte y dentina, sin exponer la pulpa.",
+      "espera": {
+        "hallazgos": [
+          {
+            "pieza": 21,
+            "hallazgo": "fracture",
+            "variante": "enamel_dentin"
+          }
+        ]
+      }
+    },
+    {
       "id": "gingivitis-sin-pieza",
       "texto": "Encías inflamadas en general, sangran al sondaje. Gingivitis asociada a placa. Profilaxis y destartraje hoy, control en tres meses.",
       "espera": {

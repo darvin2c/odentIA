@@ -922,10 +922,14 @@ export function OdontogramFront({
                 const isSelected = selected.includes(t.tooth)
                 const marks = frontMarksOf(t.tooth, entriesOf(t.tooth))
                 // El grado de movilidad cambia la conducta: va junto al número (con la sigla M solo donde la
-                // norma del país la usa).
+                // norma del país la usa). La pieza retenida lleva su «I» en azul donde la norma la pide: su
+                // corona queda dentro de la encía y sola se leía como una pieza más corta (NTS 6.1.14).
+                const impacted = !marks.mobility?.grade && marks.buried && official
                 const label = marks.mobility?.grade
                   ? `${t.tooth}·${official ? "M" : ""}${marks.mobility.grade}`
-                  : String(t.tooth)
+                  : impacted
+                    ? `${t.tooth}·I`
+                    : String(t.tooth)
                 return (
                   <g key={`n-${t.tooth}`}>
                     {marks.ringNumber ? (
@@ -961,7 +965,9 @@ export function OdontogramFront({
                           ? "fill-white"
                           : marks.mobility
                             ? "fill-red-700 dark:fill-red-400"
-                            : "fill-[#4b5563] dark:fill-zinc-300"
+                            : impacted
+                              ? "fill-blue-700 dark:fill-blue-400"
+                              : "fill-[#4b5563] dark:fill-zinc-300"
                       }
                     >
                       {label}

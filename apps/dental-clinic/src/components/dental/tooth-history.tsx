@@ -37,6 +37,7 @@ const KIND_LABELS: Record<ToothEvent["kind"], string> = {
 const STATUS_LABELS: Record<string, string> = {
   vigente: "Vigente",
   tratado: "Tratado",
+  reemplazado: "Reemplazado",
   anulado: "Anulado",
   en_curso: "En la atención en curso",
   realizado: "Realizado",

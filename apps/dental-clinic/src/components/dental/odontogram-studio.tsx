@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
+import { UnsavedDialog, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -129,9 +129,46 @@ function selectedToothLost(selection: readonly number[]): string {
     : "No se registró el hallazgo de las piezas elegidas. Si las cierras, se pierde."
 }
 
-/** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
+/** El día de un momento en la zona de la clínica («2026-11-23»): así se agrupan los cambios. */
+function clinicDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: activeOrgTimeZone() })
+}
+
+/** «23 nov 2026», en el formato y la zona de la clínica. */
 function snapshotLabel(iso: string): string {
-  return new Date(iso).toLocaleString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
+/**
+ * «Ver estado al» por día: cada día con cambios, con cómo quedó la boca al terminar ese día (su
+ * último cambio). Antes salía cada momento con segundos: diez hallazgos, diez horas del mismo día
+ * (lienzo del 24 nov). Hoy no va: es lo mismo que «Actual».
+ */
+export function snapshotDays(
+  events: readonly { at: string; change: string }[],
+  today = clinicDay(new Date().toISOString()),
+): { value: string; label: string }[] {
+  // Cuenta cambios (un hallazgo anotado, anulado o tratado), no momentos: lo guardado a la vez son
+  // varios cambios (QA de voces del 24 nov: «1 cambio» un día con seis hallazgos).
+  const byDay = new Map<string, { last: string; changes: Set<string> }>()
+  for (const { at, change } of events) {
+    const day = clinicDay(at)
+    const seen = byDay.get(day) ?? { last: at, changes: new Set<string>() }
+    seen.changes.add(change)
+    byDay.set(day, { last: at > seen.last ? at : seen.last, changes: seen.changes })
+  }
+  return [...byDay.entries()]
+    .filter(([day]) => day !== today)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([, { last, changes }]) => ({
+      value: last,
+      label: `${snapshotLabel(last)} · ${changes.size} ${changes.size === 1 ? "cambio" : "cambios"}`,
+    }))
 }
 
 type OdontogramStudioProps = {
@@ -211,8 +248,14 @@ function StudioBody({
     [onDirtyChange],
   )
   const [editorPending, setEditorPending] = useState(false)
-  const canChangeSelection = () =>
-    !editorPending && (!dirty.current || window.confirm(common.confirm.unsavedMessage))
+  // Cambiar de pieza, de dentición o de fecha con un hallazgo a medias pregunta lo mismo que cerrar la
+  // pieza, con nuestra ventana «¿Salir sin guardar?»: antes salía la del navegador, con otras palabras.
+  const [pendingChange, setPendingChange] = useState<(() => void) | null>(null)
+  const changeSelection = (action: () => void) => {
+    if (editorPending) return
+    if (dirty.current) setPendingChange(() => action)
+    else action()
+  }
   const validInitial =
     initialTooth && (FDI_ADULT.includes(initialTooth) || FDI_CHILD.includes(initialTooth))
       ? initialTooth
@@ -256,19 +299,26 @@ function StudioBody({
   useEffect(() => {
     onSelectionChange?.(selection)
   }, [selection, onSelectionChange])
-  const dates = useMemo(
+  const days = useMemo(
     () =>
-      [
-        ...new Set(
-          state.history.flatMap((entry) =>
-            [entry.createdAt, entry.voidedAt].filter((date): date is string => !!date),
-          ),
-        ),
-      ]
-        .sort()
-        .reverse(),
+      // Anotado, anulado y también tratado: ese día terminó con el hallazgo ya tratado. Las caras de una
+      // misma caries son un cambio.
+      snapshotDays(
+        state.history.flatMap((entry) => {
+          const what = `${entry.toothNumber}|${entry.condition}`
+          return [
+            entry.createdAt ? { at: entry.createdAt, change: `anotó|${entry.createdAt}|${what}` } : null,
+            entry.voidedAt ? { at: entry.voidedAt, change: `anuló|${entry.voidedAt}|${what}` } : null,
+            entry.resolvedAt ? { at: entry.resolvedAt, change: `trató|${entry.resolvedAt}|${what}` } : null,
+          ].filter((event): event is { at: string; change: string } => event !== null)
+        }),
+      ),
     [state.history],
   )
+  // El día elegido que ya no está en la lista (pasó a ser hoy, o cambió lo registrado) vuelve a «Actual».
+  useEffect(() => {
+    if (snapshot !== "current" && !days.some((day) => day.value === snapshot)) setSnapshot("current")
+  }, [days, snapshot])
   const historical = snapshot !== "current"
   const view = useMemo(
     () => winnersAsOf(state.history, historical ? snapshot : undefined),
@@ -319,28 +369,30 @@ function StudioBody({
     history.filter(
       (entry) => entry.toothNumber === tooth || entry.details?.relatedTeeth?.includes(tooth),
     )
-  const toggle = (tooth: number, additive: boolean) => {
-    if (!canChangeSelection()) return
-    if (multiple || additive) {
-      setSelection(
-        selection.includes(tooth)
-          ? selection.filter((item) => item !== tooth)
-          : [...selection, tooth],
-      )
-      setMultiple(true)
-    } else {
-      setSelection([tooth])
-      setDrawerOpen(true)
-    }
-  }
+  const toggle = (tooth: number, additive: boolean) =>
+    changeSelection(() => {
+      if (multiple || additive) {
+        setSelection(
+          selection.includes(tooth)
+            ? selection.filter((item) => item !== tooth)
+            : [...selection, tooth],
+        )
+        setMultiple(true)
+      } else {
+        setSelection([tooth])
+        setDrawerOpen(true)
+      }
+    })
   const switchDentition = (next: Dentition) => {
-    if (next === dentition || !canChangeSelection()) return
-    setDentition(next)
-    // La vista mixta contiene las demás: solo se pierde lo que deja de verse.
-    const visible = next === "mixed" ? null : next === "primary" ? FDI_CHILD : FDI_ADULT
-    const kept = visible ? selection.filter((tooth) => visible.includes(tooth)) : selection
-    setSelection(kept)
-    if (kept.length === 0) setDrawerOpen(false)
+    if (next === dentition) return
+    changeSelection(() => {
+      setDentition(next)
+      // La vista mixta contiene las demás: solo se pierde lo que deja de verse.
+      const visible = next === "mixed" ? null : next === "primary" ? FDI_CHILD : FDI_ADULT
+      const kept = visible ? selection.filter((tooth) => visible.includes(tooth)) : selection
+      setSelection(kept)
+      if (kept.length === 0) setDrawerOpen(false)
+    })
   }
   const selectedTooth = selection.length === 1 ? selection[0] : undefined
   const visibleHistory = history
@@ -372,6 +424,23 @@ function StudioBody({
   })
   // Dos columnas solo con la pieza al lado: «Evolución» va debajo del odontograma (lienzo del 23 nov).
   const twoColumns = !compactRow && showInlinePanel
+  // El panel al lado se pega arriba, pero solo dentro de la boca: con la página bajada, su título («Pieza
+  // 15 — …» y su «×») quedaba bajo la línea del paciente (QA del 24 nov). Al abrirlo, baja lo que la
+  // página se pasó; la boca no se mueve.
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [panelDrop, setPanelDrop] = useState(0)
+  const opened = showInlinePanel ? selection.join("-") : ""
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!opened || !grid) {
+      setPanelDrop(0)
+      return
+    }
+    const root = getComputedStyle(document.documentElement)
+    const px = (name: string) => Number.parseFloat(root.getPropertyValue(name)) || 0
+    const line = px("--notice-strip-h") + px("--patient-line-h") + 16
+    setPanelDrop(Math.max(0, Math.round(line - grid.getBoundingClientRect().top)))
+  }, [opened])
   // En la atención, con la pieza al lado, el acomodo es el que cabe con ella abierta: abrirla no
   // reacomoda la boca ni corre lo que estaba bajo el dedo (QA del 23 nov).
   const stable = compact && wide && detailMode === "panel"
@@ -559,10 +628,10 @@ function StudioBody({
         value={snapshot}
         items={{
           current: "Actual",
-          ...Object.fromEntries(dates.map((date) => [date, snapshotLabel(date)])),
+          ...Object.fromEntries(days.map((day) => [day.value, day.label])),
         }}
         onValueChange={(value) => {
-          if (canChangeSelection()) setSnapshot(value ?? "current")
+          changeSelection(() => setSnapshot(value ?? "current"))
         }}
         disabled={disabled}
       >
@@ -571,9 +640,9 @@ function StudioBody({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="current">Actual</SelectItem>
-          {dates.map((date) => (
-            <SelectItem key={date} value={date}>
-              {snapshotLabel(date)}
+          {days.map((day) => (
+            <SelectItem key={day.value} value={day.value}>
+              {day.label}
             </SelectItem>
           ))}
         </SelectContent>
@@ -590,9 +659,26 @@ function StudioBody({
       De frente · cada pieza con su raíz
     </h4>
   )
+  // Con las dos arcadas juntas (boca entera o arcos arriba), los dos arcos son un solo grupo para el
+  // teclado; en el celular cada arcada va en su sección, con su arco y su fila.
+  const [archVisited, setArchVisited] = useState<number | null>(null)
+  const archRows = wholeRows.filter((row) => row.length > 0)
+  const archVisible = archRows.flat()
+  const archTogether =
+    layout === "narrow"
+      ? undefined
+      : {
+          rows: archRows,
+          tabStop:
+            archVisited !== null && archVisible.includes(archVisited)
+              ? archVisited
+              : (selection.find((tooth) => archVisible.includes(tooth)) ?? archVisible[0]),
+          onVisit: setArchVisited,
+        }
   const archOf = (which: "upper" | "lower") => (
     <OdontogramArch
       single={which}
+      together={archTogether}
       aspect={plan.archAspect}
       byTooth
       // En el celular cada arcada ya lleva su título encima, y en la mixta el centro es de los números
@@ -625,6 +711,7 @@ function StudioBody({
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
+        ref={gridRef}
         // Con la pieza al lado, la boca no baja de 600 px: así caben una arcada de arriba y su vista de
         // frente (mesa del 23 nov, diseño UX). Sin `overflow` aquí: la boca y el panel se pegan a la ventana.
         className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(40.5rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
@@ -632,9 +719,10 @@ function StudioBody({
         <section
           ref={mouthRef}
           aria-label="Boca dental"
-          // Pegado debajo de la franja de avisos y de la línea fija del paciente (`--patient-line-h`,
-          // que solo existe dentro de la atención): nunca detrás de ellas (QA del 16 nov, Q12).
-          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "lg:sticky lg:top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)] self-start" : ""}`}
+          // Se queda donde está al abrir una pieza: pegada arriba, con la página bajada saltaba hacia
+          // abajo y lo que estaba bajo el dedo se corría (QA del 23 nov). El panel de al lado se pega
+          // él solo y se recorre por dentro, así que la boca no necesita seguirlo.
+          className={`flex min-w-0 flex-col gap-4 rounded-lg border p-3 sm:p-5 ${twoColumns ? "self-start" : ""}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* En la atención el bloque ya se titula «Odontograma»: aquí solo para el lector de pantalla. */}
@@ -715,7 +803,7 @@ function StudioBody({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection(upperTeeth)
+                  changeSelection(() => setSelection(upperTeeth))
                 }}
               >
                 Arcada superior
@@ -725,7 +813,7 @@ function StudioBody({
                 variant="outline"
                 disabled={disabled}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection(lowerTeeth)
+                  changeSelection(() => setSelection(lowerTeeth))
                 }}
               >
                 Arcada inferior
@@ -735,7 +823,7 @@ function StudioBody({
                 variant="ghost"
                 disabled={disabled || selection.length === 0}
                 onClick={() => {
-                  if (canChangeSelection()) setSelection([])
+                  changeSelection(() => setSelection([]))
                 }}
               >
                 Limpiar
@@ -757,6 +845,7 @@ function StudioBody({
                 >
                   {topHeading}
                   <div
+                    data-arches=""
                     className="flex flex-col"
                     style={{ marginTop: `${plan.archTop}px`, gap: `${plan.archGap}px` }}
                   >
@@ -775,7 +864,7 @@ function StudioBody({
               <div className={`${centered} flex w-fit min-w-0 max-w-full flex-col gap-4`}>
                 <section aria-label="De arriba" className="flex min-w-0 flex-col gap-2">
                   {topHeading}
-                  <div className="flex justify-center gap-4">
+                  <div data-arches="" className="flex justify-center gap-4">
                     {(["upper", "lower"] as const).map((which) => (
                       <div key={which} style={{ width: `${plan.archWidth}px` }}>
                         {archOf(which)}
@@ -851,10 +940,12 @@ function StudioBody({
           <section
             data-tooth-panel=""
             aria-label="Registro clínico dental"
+            style={showInlinePanel && panelDrop > 0 ? { marginTop: `${panelDrop}px` } : undefined}
             className={
               showInlinePanel
-                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, a la vista.
-                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
+                ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, y su botón
+                  // principal encima del pie de la atención: antes quedaba tapado por «Finalizar y firmar».
+                  "h-[calc(100dvh-3rem-var(--notice-strip-h,0px)-var(--patient-line-h,0px)-var(--closing-bar-h,0px))] min-h-0 min-w-0 self-start overflow-hidden sticky top-[calc(var(--notice-strip-h,0px)+var(--patient-line-h,0px)+1rem)]"
                 : "min-w-0 self-start rounded-sm bg-card"
             }
           >
@@ -917,10 +1008,11 @@ function StudioBody({
           asOfLabel={historical ? snapshotLabel(snapshot) : undefined}
           official={official}
           onSelect={(tooth) => {
-            if (!canChangeSelection()) return
-            setDentition((current) => dentitionFor(tooth, current))
-            setSelection([tooth])
-            setDrawerOpen(true)
+            changeSelection(() => {
+              setDentition((current) => dentitionFor(tooth, current))
+              setSelection([tooth])
+              setDrawerOpen(true)
+            })
           }}
         />
       ) : null}
@@ -954,6 +1046,16 @@ function StudioBody({
         </div>
       ) : null}
       {besideDialog}
+      <UnsavedDialog
+        open={pendingChange !== null}
+        lost={selectedToothLost(selection)}
+        onStay={() => setPendingChange(null)}
+        onDiscard={() => {
+          const action = pendingChange
+          setPendingChange(null)
+          action?.()
+        }}
+      />
       {official ? (
         <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
           <DialogContent

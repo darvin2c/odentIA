@@ -13,9 +13,10 @@
   --perio-gm: #d1342f;
   --perio-cal: #1f5fd1;
   --perio-pocket: rgb(31 95 209 / 0.14);
-  --perio-enamel: #fdfbf6;
-  --perio-dentin: #efe8da;
-  --perio-tooth-line: #a3acba;
+  /* La corona, la raíz y su borde, los de la vista de frente del odontograma (lienzo del 24 nov). */
+  --perio-enamel: #f8fafc;
+  --perio-dentin: #f7f1e6;
+  --perio-tooth-line: #8a97ab;
   --perio-shine: rgb(255 255 255 / 0.95);
   --perio-implant: #7b8794;
   --perio-implant-dark: #56616d;

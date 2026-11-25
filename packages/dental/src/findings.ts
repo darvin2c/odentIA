@@ -583,8 +583,9 @@ function timeOf(value: string | Date | null | undefined): number | undefined {
  * al periodontograma.
  * El registro es append-only: coexisten todas las entradas válidas registradas
  * hasta la fecha; se excluyen las pendientes de revisión, las anuladas a esa
- * fecha (voidedAt o estado voided) y las tratadas a esa fecha (resolvedAt). Sin latest-wins por cara. Orden
- * determinista por creación e identificador.
+ * fecha (voidedAt o estado voided), las tratadas a esa fecha (resolvedAt) y las
+ * reemplazadas (`replacesOlder`). Sin latest-wins por cara. Orden determinista por
+ * creación e identificador.
  */
 export function activeFindingsAsOf<T extends FindingRecord>(
   history: readonly T[],
@@ -592,6 +593,110 @@ export function activeFindingsAsOf<T extends FindingRecord>(
 ): T[] {
   const cutoff = iso === undefined ? Number.POSITIVE_INFINITY : Date.parse(iso)
   if (iso !== undefined && !Number.isFinite(cutoff)) return []
+  const active = recordedAsOf(history, cutoff, false)
+  // De toda la pieza o del mismo tramo, el más nuevo del mismo hallazgo reemplaza al anterior, que sigue
+  // en la historia.
+  // Cuenta también el más nuevo ya tratado: tratarlo no devuelve el anterior. Anularlo, sí (deshace).
+  const newest = new Map<string, T>()
+  for (const record of recordedAsOf(history, cutoff, true))
+    if (replacesOlder(record)) newest.set(replaceKey(record), record)
+  return active.filter(
+    (record) =>
+      !replacesOlder(record) || newest.get(replaceKey(record)) === record,
+  )
+}
+
+/**
+ * Lo que es de toda la pieza (el perno, la corona, el implante, la pieza ausente, la movilidad…): si se
+ * anota otra vez, el nuevo reemplaza al anterior, que queda en la historia (lienzo del 24 nov: quedaban
+ * dos «Espigo-muñón» vigentes en la 15). No lo de las caras, ni la fractura, que se dibuja a mano y una
+ * pieza puede tener dos, ni la observación clínica, que es una nota, ni la posición anormal, que la norma
+ * marca con varias letras a la vez (M, D, V, P, L).
+ */
+export function replacesSame(condition: string): boolean {
+  const def = findingDefinition(condition)
+  return (
+    def?.scope === "tooth" &&
+    !def.requiresDrawing &&
+    condition !== "clinical_observation" &&
+    condition !== "abnormal_position"
+  )
+}
+
+/**
+ * Los hallazgos distintos que son un mismo estado de la pieza y no conviven (QA de voces del 24 nov):
+ * la corona temporal y la definitiva; la pulpotomía y el tratamiento de conducto o la pulpectomía que la
+ * sigue; la pieza que no erupcionó y la que está erupcionando.
+ */
+const REPLACE_FAMILY: Record<string, string> = {
+  temporary_crown: "crown",
+  pulpotomy: "root_canal_treatment",
+  erupting_tooth: "missing_tooth",
+}
+
+/** Lo que abarca varias piezas: el puente, la prótesis, el aparato, el diastema entre dos. */
+const MULTI_TOOTH = new Set(["span", "arch", "pair"])
+
+type Replaceable = { toothNumber: number; condition: string; details?: { relatedTeeth?: readonly number[] } }
+
+/**
+ * Si un registro reemplaza al anterior del mismo hallazgo: lo de toda la pieza (`replacesSame`) y lo de
+ * varias piezas sobre las mismas piezas (el puente de la 44 a la 46 rehecho; QA del 24 nov: quedaban dos
+ * puentes vigentes). Dos puentes en piezas distintas conviven.
+ */
+export function replacesOlder(record: Replaceable): boolean {
+  const def = findingDefinition(record.condition)
+  if (!def) return false
+  if (MULTI_TOOTH.has(def.scope)) return (record.details?.relatedTeeth?.length ?? 0) > 1
+  return replacesSame(record.condition)
+}
+
+/**
+ * La pieza y el estado que el más nuevo reemplaza: «15|crown» para la corona y la corona temporal; en
+ * lo de varias piezas, el hallazgo y sus piezas: «fixed_partial_denture|44,45,46».
+ */
+function replaceKey(record: Replaceable): string {
+  const def = findingDefinition(record.condition)
+  if (def && MULTI_TOOTH.has(def.scope)) {
+    const teeth = [...(record.details?.relatedTeeth ?? [record.toothNumber])].sort((a, b) => a - b)
+    return `${record.condition}|${teeth.join(",")}`
+  }
+  return `${record.toothNumber}|${REPLACE_FAMILY[record.condition] ?? record.condition}`
+}
+
+/**
+ * Sin lo reemplazado: de toda la pieza, solo el más nuevo de cada hallazgo (con lo tratado, que
+ * también reemplaza). Para quien no proyecta a una fecha, como el plan al elegir qué hallazgo motiva
+ * un tratamiento.
+ */
+export function withoutReplaced<T extends FindingRecord>(records: readonly T[]): T[] {
+  const newest = new Map<string, T>()
+  for (const record of recordedAsOf(records, Number.POSITIVE_INFINITY, true))
+    if (replacesOlder(record)) newest.set(replaceKey(record), record)
+  return records.filter(
+    (record) =>
+      !replacesOlder(record) || newest.get(replaceKey(record)) === record,
+  )
+}
+
+/**
+ * El hallazgo vigente que uno nuevo del mismo tipo reemplazaría: el panel lo avisa antes de registrar.
+ * Con varias piezas (un puente), `teeth` son las piezas elegidas. Nulo si no hay o si no reemplaza.
+ */
+export function findingReplaced<T extends FindingRecord>(
+  active: readonly T[],
+  toothNumber: number,
+  condition: string,
+  teeth?: readonly number[],
+): T | null {
+  const probe: Replaceable = { toothNumber, condition, details: teeth ? { relatedTeeth: teeth } : {} }
+  if (!replacesOlder(probe)) return null
+  const key = replaceKey(probe)
+  return [...active].reverse().find((record) => replacesOlder(record) && replaceKey(record) === key) ?? null
+}
+
+/** Lo registrado a esa fecha, sin lo anulado ni lo pendiente de revisión; con `treated`, también lo tratado. */
+function recordedAsOf<T extends FindingRecord>(history: readonly T[], cutoff: number, treated: boolean): T[] {
   return history
     .filter((record) => {
       const created = timeOf(record.createdAt)
@@ -607,7 +712,7 @@ export function activeFindingsAsOf<T extends FindingRecord>(
       // voidedAt presente pero ilegible: exclusión conservadora del gráfico.
       if (hasVoidedAt && (voided === undefined || voided <= cutoff)) return false
       // Tratado: estuvo vigente hasta que se realizó su tratamiento.
-      if (record.resolvedAt !== undefined && record.resolvedAt !== null) {
+      if (!treated && record.resolvedAt !== undefined && record.resolvedAt !== null) {
         const resolved = timeOf(record.resolvedAt)
         if (resolved === undefined || resolved <= cutoff) return false
       }
