@@ -347,6 +347,24 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Línea base (16 nov 2026):** sesión 2 de endodoncia, «Endodoncia posterior vital» 7 veces; el requisito del diagnóstico, 3 veces; 11 frases de regla en la consulta vacía; 3615 px a 1440 y 4289 px a 390.
 
+## V-DAT-11 La oferta en la web: regalo, descuento, cuota y días para responder
+**Aparece en:** el cierre de cada página (`apps/web/src/components/CtaBand.astro`), Precios, la solicitud (`founders/WaitlistForm.tsx` y `WaitlistSplit.tsx`), el final de cada guía (`guides/GuideStart.astro`), el botón de la cabecera (`lib/site.ts` `ctaOf`), el correo de la solicitud y el de las plantillas (`S/saas-emails.ts`).
+**A mano:** se lee `GET /api/public/founders/pricing?product=<producto>` y se compara cada frase: regalo = `trialCreditCents` del plan que se muestra; descuento = `discountPercent`; cuota = `priceCents`; días = `terms.waitlistAnswerDays`.
+- [ ] Ninguna frase de la oferta se escribe a mano: sale de `offerOf`, `ctaOf`, `giftOf` o de los precios que lee la API.
+- [ ] El regalo dice «de tus agentes».
+- [ ] Con el alta abierta no aparecen «Sin cuota» ni «gratis» si el plan que se muestra cobra cuota.
+- [ ] La pantalla de enviada no dice «Te enviamos una copia» cuando el servidor no la envió (solicitud ya en la lista).
+- [ ] La página de la solicitud (`/solicitar-invitacion`) cambia con el alta: con el alta abierta no dice «invitación», «sin cuota» ni «50 % menos».
+**Caso:** precios del 24 nov 2026 (Fundadores sin cuota, USD 100, 50 % menos, 2 días hábiles): cada lugar dice lo mismo. Con `signupMode` en «abierta», ningún lugar dice «gratis» ni «sin cuota».
+
+## V-DAT-12 El título y la fecha de una guía, en todos sus lugares
+**Aparece en:** la guía (H1, ruta de arriba, «Actualizada el»), el `<title>` y los datos para Google, el índice `/guias`, el pie («Guías»), «Sigue con» de las otras guías, «Guías de este tema» de su página de producto, el mapa del sitio (`apps/web/astro.config.mjs`) y «Llegó desde» en la administración (la ruta, con su enlace).
+**A mano:** se abre el archivo de la guía y se compara cada lugar con su `name` o `menu`, y con su fecha.
+- [ ] Ningún lugar escribe el título a mano; dos guías no comparten nombre corto.
+- [ ] La fecha de la página, la de los datos para Google y el `lastmod` del mapa son la misma.
+- [ ] Cada guía está en el mapa del sitio con su dirección real.
+**Caso:** se cambia el título de «Cómo llenar un odontograma en niños»: el índice, el pie y «Sigue con» dicen el nuevo.
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.
@@ -476,3 +494,13 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Cambiar «Preguntas al paciente» deja qué pregunta pasó de qué a qué.
 - [ ] La Ayuda distingue lo que respondió al registrarse o en su enlace del cuestionario de «Fichas de consulta».
 - **Caso:** el 14 el equipo anota «fuma, 10 o más». El mismo día la paciente responde por su enlace lactancia «Sí» y, minutos después, se registra otra vez diciendo «Lo dejé» y lactancia «No». Recepción pulsa «Sí, sin cambios». La ficha dice quién dijo cada cosa y cuándo, y la atención lo muestra.
+
+## V-PRO-04 Lo que la web promete que hace la app, junto a la demo
+**Aparece en:** «Pruébalo aquí» de cada guía, las portadas de producto (`clinical/ChartPreview.tsx`, `clinical/ChildChartPreview.tsx`, `odontogram/OdontogramArch.tsx`, `budgets/BudgetDemo.tsx`) y las plantillas PDF de las guías.
+**A mano:** por cada frase («tocas…», «elige…», «hasta tres…»), se hace en la demo de al lado y se busca en la app el botón que lo hace.
+- [ ] Lo que la frase dice que pasa al tocar, pasa en la demo de al lado; si no, la frase habla de la app y no invita a tocar.
+- [ ] La plantilla descargable es la hoja que imprime la app (mismas filas y piezas), no un dibujo aparte.
+- [ ] Una palabra no tiene dos sentidos en la misma página («temporal» = de leche y = provisional).
+- [ ] Una leyenda impresa define todas las siglas que la guía enseña (I, IMP, el espigo).
+**Ya falló (mesa del 24 nov 2026, en el lienzo):** «tocas la cara y queda marcada» junto a una demo que no marca; un PDF «Niños 51–85» que no sirve para una dentición mixta.
+**Caso:** Mateo, 7 años, mixta: con la plantilla de la guía de niños se marcan la 36 permanente y la 75 temporal en la misma hoja.

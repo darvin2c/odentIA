@@ -17,7 +17,7 @@ const OPTIONS: Array<{ name: string; lines: Line[]; total: string; tax: string; 
   {
     name: "Opción A",
     lines: [
-      ["Resina · pieza 36", "S/ 180,00"],
+      ["Resina oclusal · pieza 36", "S/ 180,00"],
       ["Limpieza dental", "S/ 120,00"],
     ],
     total: "S/ 300,00",
@@ -27,11 +27,11 @@ const OPTIONS: Array<{ name: string; lines: Line[]; total: string; tax: string; 
   {
     name: "Opción B",
     lines: [
-      ["Corona · pieza 36", "S/ 950,00"],
+      ["Incrustación · pieza 36", "S/ 650,00"],
       ["Limpieza dental", "S/ 120,00"],
     ],
-    total: "S/ 1.070,00",
-    tax: "Incluye IGV S/ 163,22",
+    total: "S/ 770,00",
+    tax: "Incluye IGV S/ 117,46",
     recommended: false,
   },
 ]
@@ -103,7 +103,7 @@ export default function BudgetDemo() {
       <div className="bd-chips">
         <span className={`bd-chip bd-clio${s >= 1 ? " bd-on" : ""}`}>
           <i aria-hidden="true" />
-          Clío lo armó del dictado: «resina, o si no una corona»
+          Clío lo armó del dictado: «resina, o si no una incrustación»
         </span>
         <span className={`bd-chip bd-argos${s >= 2 ? " bd-on" : ""}`}>
           <i aria-hidden="true" />

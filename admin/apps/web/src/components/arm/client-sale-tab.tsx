@@ -21,6 +21,7 @@ import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { money } from "../../lib/cost-format"
 import { focusInsideLater } from "../../lib/focus"
+import { siteUrl } from "../../lib/host"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { supportDay, supportDayTime } from "../../lib/support-words"
 import { useDemos, useOpenDemo } from "../demos"
@@ -896,6 +897,18 @@ function RequestCard({ clientId, client }: { clientId: string; client: ClientSal
             <Line label="Usan hoy">
               {TOOL_WORDS[request.currentTool as keyof typeof TOOL_WORDS] ?? request.currentTool}
             </Line>
+            {request.sourcePage ? (
+              <Line label="Llegó desde">
+                <a
+                  className="underline underline-offset-2"
+                  href={siteUrl(client.product, request.sourcePage)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {request.sourcePage}
+                </a>
+              </Line>
+            ) : null}
             {answerWords(request) ? <Line label="Plazo">{answerWords(request)}</Line> : null}
             {request.discardReason ? <Line label="Descartada">{request.discardReason}</Line> : null}
           </dl>

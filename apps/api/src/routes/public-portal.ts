@@ -40,6 +40,7 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { calendarResponse } from "../lib/calendar-response.js"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { portalOrigin, portalOrganization } from "../lib/portal-origin.js"
 import { portalSlugInput } from "./portal-input.js"
@@ -144,7 +145,7 @@ export function createPublicPortalRoute(deps: {
     if (!raw) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión del portal requerida"), 401)
     const orgId = await resolvePortalOrgBySessionToken(deps.ownerDb, raw)
     if (!orgId) return unavailable(c)
-    if (limited(c, `${orgId}:${address(c) ?? "shared"}`, 300)) {
+    if (limited(c, `${orgId}:${rateKeyOf(address(c))}`, 300)) {
       return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
     }
     try {
@@ -163,7 +164,7 @@ export function createPublicPortalRoute(deps: {
 
   function publicLimited(c: Context): Response | null {
     const policyRead = c.req.method === "GET"
-    return limited(c, `${policyRead ? "policy" : "access"}:${address(c) ?? "shared"}`, policyRead ? 120 : 30)
+    return limited(c, `${policyRead ? "policy" : "access"}:${rateKeyOf(address(c))}`, policyRead ? 120 : 30)
       ? c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429) : null
   }
 
@@ -239,7 +240,7 @@ export function createPublicPortalRoute(deps: {
   })
 
   app.post("/exchange", async (c) => {
-    if (limited(c, `exchange:${address(c) ?? "shared"}`, 10)) {
+    if (limited(c, `exchange:${rateKeyOf(address(c))}`, 10)) {
       return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
     }
     const parsed = exchangeInput.safeParse(await c.req.json().catch(() => null))

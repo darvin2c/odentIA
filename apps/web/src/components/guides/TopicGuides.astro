@@ -1,0 +1,28 @@
+---
+// «Guías de este tema» en una página de producto (lienzo, tablero 4): quien llega a vender aprende
+// ahí mismo, y cada guía enlaza de vuelta. Solo donde hay guías (odentIA).
+import { guideBySlug, HAS_GUIDES } from "../../lib/guides"
+import GuideCards from "./GuideCards.astro"
+
+interface Props {
+  /** Las guías del tema, por su slug. */
+  slugs: string[]
+}
+const guides = Astro.props.slugs.map(guideBySlug)
+---
+{HAS_GUIDES ? (
+  <section class="section tg" aria-labelledby="tg-t">
+    <div class="wrap tg-in">
+      <span class="tag">[ Guías de este tema ]</span>
+      <h2 class="h3" id="tg-t">Aprende a hacerlo, paso a paso y con su plantilla.</h2>
+      <GuideCards guides={guides} compact />
+    </div>
+  </section>
+) : null}
+
+<style>
+  .tg { padding: 72px 0; }
+  .tg-in { display: flex; flex-direction: column; gap: 16px; }
+  .tg-in h2 { margin: 0 0 6px; }
+  @media (max-width: 720px) { .tg { padding: 48px 0; } }
+</style>

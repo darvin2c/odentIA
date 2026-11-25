@@ -2,9 +2,11 @@ import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { DemoKindRecipe } from "./demo-recipes.js"
 import { DENTAL_AGENT_TEXTS } from "./dental/agent-texts.js"
+import { DENTAL_GUIDE_SHEETS } from "./dental/blank-sheets.js"
 import { DENTAL_DEMO_KINDS } from "./dental/demo-kinds.js"
 import { dentalHooks } from "./dental/hooks.js"
 import { ServiceError } from "./errors.js"
+import type { GuideSheets } from "./guide-sheets.js"
 import { HELP_TOPICS, type HelpTopic } from "./help-guide.js"
 import { orgProduct } from "./locale.js"
 import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
@@ -101,6 +103,18 @@ const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = {
   dental: HELP_TOPICS,
   medical: MEDICAL_HELP_TOPICS,
   optical: OPTICAL_HELP_TOPICS,
+}
+
+/** Las plantillas en blanco de las guías de la web de cada producto (ADR 0216); sin guías, ninguna. */
+/** Las plantillas que adjunta el aviso de las guías de la web de un producto, si tiene guías. */
+export function guideSheetsFor(product: ClinicalProduct): GuideSheets | null {
+  // El mapa se arma al pedirlo: las plantillas importan el kit, que vuelve a pasar por aquí.
+  const sheets: Record<ClinicalProduct, GuideSheets | null> = {
+    dental: DENTAL_GUIDE_SHEETS,
+    medical: null,
+    optical: null,
+  }
+  return sheets[product]
 }
 
 /** La guía de la Ayuda de un producto, sin clínica (las mediciones). */

@@ -619,9 +619,9 @@ export const PAGES = {
 
   presupuestos: {
     path: "/presupuestos-dentales",
-    title: "Cómo hacer presupuestos dentales claros",
+    title: "Presupuestos dentales claros, con hasta tres opciones",
     description:
-      "Cómo hacer presupuestos dentales: arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, el administrador, retome los que quedaron sin respuesta.",
+      "Presupuestos dentales claros: arma el presupuesto desde el tarifario de tu clínica, ofrece hasta tres opciones y deja que Argos, el administrador, retome los que quedaron sin respuesta.",
     crumb: "Presupuestos",
     faq: [
       {

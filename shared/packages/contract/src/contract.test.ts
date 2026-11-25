@@ -6,6 +6,7 @@ import {
   appEvent,
   CONTRACT_MAX_EVENT_BYTES,
   CONTRACT_MAX_RECEIPT_BYTES,
+  MAX_TEAM_MEMBERS,
   stateQuestion,
 } from "./messages.js"
 import { isSigningSecret, signMessage, verifySignedMessage } from "./signing.js"
@@ -191,7 +192,9 @@ describe("lo nuevo del acuerdo (ADR 0213)", () => {
     const big = "A".repeat(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 8)
     expect(appEvent.safeParse(receipt(big)).success).toBe(false)
     // El aviso con el archivo más grande cabe en lo que se acepta.
-    const largest = JSON.stringify(receipt("A".repeat(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3))))
+    const largest = JSON.stringify(
+      receipt("A".repeat(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3))),
+    )
     expect(largest.length).toBeLessThan(CONTRACT_MAX_EVENT_BYTES)
   })
 
@@ -218,9 +221,17 @@ describe("lo nuevo del acuerdo (ADR 0213)", () => {
     ).toBe(true)
     for (const bad of [
       // La tienda la elige la administración: un id, no un nombre.
-      { type: "cuenta.abrir", timestamp: at, data: { account: "tienda", name: "x", currency: "PEN", country: null, owner } },
+      {
+        type: "cuenta.abrir",
+        timestamp: at,
+        data: { account: "tienda", name: "x", currency: "PEN", country: null, owner },
+      },
       // Más de una hora, como en las clínicas, no.
-      { type: "soporte.entrar", timestamp: at, data: { account: "t", staff: owner, minutes: 120, reason: "Mirar" } },
+      {
+        type: "soporte.entrar",
+        timestamp: at,
+        data: { account: "t", staff: owner, minutes: 120, reason: "Mirar" },
+      },
       // Sin motivo, no.
       { type: "equipo.quitar", timestamp: at, data: { account: "t", userId: "u-2", reason: " " } },
       { type: "cuenta.cerrar", timestamp: at, data: { account: "t" } },
@@ -228,6 +239,41 @@ describe("lo nuevo del acuerdo (ADR 0213)", () => {
       expect(adminRequest.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
     expect(adminRequestResult.safeParse({ status: "hecho", message: null }).success).toBe(true)
     expect(adminRequestResult.safeParse({ status: "listo", message: null }).success).toBe(false)
+  })
+
+  it("el equipo de una cuenta va entero, cada persona una vez y con un rol del acuerdo", () => {
+    const team = (members: unknown, name: unknown = "Calzados Rosa") => ({
+      type: "equipo.cambiado",
+      timestamp: at,
+      data: { account: "tienda-1", name, members },
+    })
+    expect(
+      appEvent.safeParse(
+        team([
+          { userId: "u-1", role: "owner" },
+          { userId: "u-2", role: "sales" },
+        ]),
+      ).success,
+    ).toBe(true)
+    // Ya no queda nadie: también se avisa.
+    expect(appEvent.safeParse(team([])).success).toBe(true)
+    for (const bad of [
+      team([
+        { userId: "u-1", role: "owner" },
+        { userId: "u-1", role: "admin" },
+      ]),
+      // El rol es de la lista del acuerdo, no la palabra de la app.
+      team([{ userId: "u-1", role: "Dueño" }]),
+      team([{ userId: " ", role: "owner" }]),
+      team([{ userId: "u-1", role: "owner" }], " "),
+      team(
+        Array.from({ length: MAX_TEAM_MEMBERS + 1 }, (_, i) => ({
+          userId: `u-${i}`,
+          role: "sales",
+        })),
+      ),
+    ])
+      expect(appEvent.safeParse(bad).success, JSON.stringify(bad).slice(0, 120)).toBe(false)
   })
 
   it("el estado sin medios de pago (una administración de antes) se lee como lista vacía", () => {

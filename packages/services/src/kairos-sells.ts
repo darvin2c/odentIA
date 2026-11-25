@@ -38,7 +38,7 @@ import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, type SQL, sql } from "drizzle-orm"
 import { type ChatApp, chatAppOf } from "./admin-chat-app.js"
-import { findClientDuplicates } from "./admin-clients.js"
+import { findClientDuplicates, UNKNOWN_CONTACT_NAME } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import {
   type ChatReply,
@@ -917,7 +917,7 @@ export async function kairosSaveContact(
       .insert(saasClientContact)
       .values({
         clientId: chat.clientId,
-        name: chat.displayName?.trim().slice(0, 160) || "Contacto (nombre por preguntar)",
+        name: chat.displayName?.trim().slice(0, 160) || UNKNOWN_CONTACT_NAME,
         rolesConfirmed: false,
         createdAt: now,
         updatedAt: now,
@@ -1012,7 +1012,7 @@ export async function kairosClinicData(
   const personName =
     input.personName?.replace(/\s+/g, " ").trim().slice(0, 160) ||
     chat.displayName?.trim().slice(0, 160) ||
-    "Contacto (nombre por preguntar)"
+    UNKNOWN_CONTACT_NAME
   const [contact] = await tx
     .insert(saasClientContact)
     .values({

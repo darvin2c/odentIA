@@ -1,0 +1,10 @@
+---
+// El texto de una guía con su **negrita** y sus [enlaces](/ruta) a la propia web (`lib/guides/rich.ts`).
+import { richParts } from "../../lib/guides/rich"
+
+interface Props {
+  text: string
+}
+const parts = richParts(Astro.props.text)
+---
+{parts.map((part) => (part.href ? <a href={part.href}>{part.text}</a> : part.bold ? <b>{part.text}</b> : part.text))}

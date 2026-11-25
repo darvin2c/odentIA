@@ -1,5 +1,6 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
 import { ARM_PATH } from "./arm"
+import { GUIDES, GUIDES_PATH, guidePath } from "./guides"
 import { giftOf, type Pricing } from "./pricing"
 import { DEFAULT_DOMAIN, ofProduct, WORDS } from "./product"
 
@@ -28,6 +29,8 @@ export function salesWhatsAppHref(phone: string | undefined, name: string): stri
 export const salesWhatsApp = salesWhatsAppHref(import.meta.env.VITE_SALES_WHATSAPP, WORDS.name)
 /** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
 export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
+/** El correo que se deja en el aviso de una guía (ADR 0216): la misma ruta pública. */
+export const guideContactApiUrl = `https://api.${domain}${port}/api/public/founders/contact`
 
 /**
  * La llamada a la acción de toda la web, con el regalo del plan que se
@@ -182,6 +185,11 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
         { href: "/seguridad", label: "Seguridad" },
         { href: "/contacto", label: "Habla con nosotros" },
       ],
+    },
+    // Las guías (ADR 0216), solo en odentIA: latidIA y vistIA no las tienen todavía.
+    {
+      title: "Guías",
+      links: [...GUIDES.map((guide) => ({ href: guidePath(guide), label: guide.menu })), { href: GUIDES_PATH, label: "Todas las guías" }],
     },
   ],
   medical: [

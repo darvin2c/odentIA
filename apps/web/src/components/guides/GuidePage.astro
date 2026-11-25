@@ -1,0 +1,240 @@
+---
+// El molde de cada guía (lienzo UYxnET…, tablero 2; acta de la mesa del 24 nov; ADR 0216): responde,
+// enseña, muestra cómo lo hace odentIA y deja empezar ahí mismo. Arriba, lo que buscó y la plantilla;
+// el video, si ya está; «En corto»; los pasos con su figura; las plantillas (sin pedir el correo; al
+// descargar, el aviso); «Pruébalo aquí» con la demo de su página de producto; las preguntas; dos
+// guías para seguir y la solicitud ahí mismo. Todo sale del archivo de la guía.
+import { FDI_ADULT, FDI_CHILD, toothNameOf } from "@odentia/dental"
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import {
+  dayWords,
+  GUIDES_PATH,
+  type Guide,
+  guideArticleJsonLd,
+  guidePath,
+  readingMinutes,
+  relatedOf,
+  SHEET_FILES,
+  SHEET_NAMES,
+  sheetImages,
+} from "../../lib/guides"
+import { ctaOf, guideContactApiUrl } from "../../lib/site"
+import BudgetDemo from "../budgets/BudgetDemo"
+import ChartPreview from "../clinical/ChartPreview"
+import ChildChartPreview from "../clinical/ChildChartPreview"
+import Faq from "../Faq.astro"
+import GuideCards from "./GuideCards.astro"
+import GuideDownloads from "./GuideDownloads"
+import GuideFigure from "./GuideFigure.astro"
+import GuideStart from "./GuideStart.astro"
+import RichText from "./RichText.astro"
+
+interface Props {
+  guide: Guide
+}
+const { guide } = Astro.props
+const pricing = Astro.locals.pricing
+const path = guidePath(guide)
+const invitation = pricing.signupMode === "invitacion"
+// Con Fundadores, el botón de la cabecera baja a la solicitud de la misma página.
+const cta = ctaOf(pricing)
+const headerCta = invitation ? { href: "#pide", label: cta.label } : undefined
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Guías", GUIDES_PATH],
+  [guide.name, path],
+]
+const organization = `${Astro.site?.toString() ?? ""}#organizacion`
+const jsonLd = [guideArticleJsonLd(Astro.site, guide, organization), breadcrumbJsonLd(Astro.site, trail), faqJsonLd(guide.faq)]
+const minutes = readingMinutes(guide)
+const firstSheet = guide.sheets[0]
+const sheets = guide.sheets.map((item) => ({
+  ...item,
+  href: SHEET_FILES[item.sheet],
+  image: { src: sheetImages(item.sheet).page },
+}))
+// Al compartir el enlace, la imagen de su primera plantilla.
+const share = firstSheet
+  ? {
+      image: sheetImages(firstSheet.sheet).share,
+      alt: `Plantilla gratis en PDF: ${SHEET_NAMES[firstSheet.sheet]}, para imprimir y llenar a mano.`,
+      article: { published: guide.published, modified: guide.updated },
+    }
+  : undefined
+// Los nombres de las piezas se arman aquí, en el servidor: la isla no carga el dominio dental entero.
+const names = Object.fromEntries([...FDI_ADULT, ...FDI_CHILD].map((tooth) => [tooth, toothNameOf(tooth)]))
+const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel." : "Tu odontograma, sin papel."
+---
+<Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} cta={headerCta} share={share}>
+  <section class="hero gh">
+    <div class="grain" aria-hidden="true"></div>
+    <div class:list={["wrap", "gh-in", { video: guide.video }]}>
+      <div class="gh-copy">
+        <nav class="gh-trail mono rise" aria-label="Ruta">
+          <a href={GUIDES_PATH}>Guías</a> <span aria-hidden="true">›</span> <span>{guide.topic}</span>
+        </nav>
+        <h1 class="gh-h1 rise d1">{guide.title} <span class="acc">{guide.accent}</span></h1>
+        <p class="lead lead-d rise d2">{guide.lead}</p>
+        <p class="gh-meta mono rise d2">
+          Actualizada el <time datetime={guide.updated}>{dayWords(guide.updated)}</time> · Lectura de {minutes} minutos{guide.video ? " · Con video" : ""}
+        </p>
+        <div class="gh-ctas rise d3">
+          <a class="btn btn-p" href="#descargar" data-guide-download>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></svg>
+            {guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : `Descarga ${firstSheet?.label === "Presupuesto en blanco" ? "el presupuesto" : "la plantilla"} en PDF`}
+          </a>
+        </div>
+      </div>
+      {guide.video ? (
+        <div class="gh-video rise d2">
+          {/* La imagen del video y su enlace: YouTube carga recién al tocarla. */}
+          <a class="gh-play" href={`https://www.youtube.com/watch?v=${guide.video.youtubeId}`} target="_blank" rel="noopener">
+            <img src={`https://i.ytimg.com/vi/${guide.video.youtubeId}/hqdefault.jpg`} alt="" width="480" height="360" loading="lazy" decoding="async" />
+            <span class="gh-badge" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z" /></svg></span>
+            <span class="gh-vt">{guide.video.title} <span class="gh-yt">· en YouTube</span></span>
+          </a>
+        </div>
+      ) : null}
+    </div>
+  </section>
+
+  <section class="gshort" aria-labelledby="corto-t">
+    <div class="gwrap">
+      <div class="gbox">
+        <h2 id="corto-t">En corto</h2>
+        <ul>{guide.short.map((line) => <li><RichText text={line} /></li>)}</ul>
+      </div>
+    </div>
+  </section>
+
+  <article id="pasos" class="gwrap gsteps">
+    {guide.steps.map((step, index) => (
+      <section class="gstep" aria-labelledby={`paso-${index + 1}`}>
+        <span class="tag">Paso {index + 1}</span>
+        <h2 class="gstep-t" id={`paso-${index + 1}`}>{step.title}</h2>
+        {step.text.map((paragraph) => <p><RichText text={paragraph} /></p>)}
+        {step.list ? <ul class="glist">{step.list.map((item) => <li><RichText text={item} /></li>)}</ul> : null}
+        {step.figure ? <GuideFigure figure={step.figure} /> : null}
+        {step.after?.map((paragraph) => <p><RichText text={paragraph} /></p>)}
+      </section>
+    ))}
+
+    <section id="descargar" class="gstep gdown" aria-labelledby="descargar-t" tabindex="-1">
+      <h2 class="gstep-t" id="descargar-t">{guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : "Descarga la plantilla en PDF"}</h2>
+      <p>Para imprimir en A4 y llenar a mano. {guide.sheets.length > 1 ? "Llevan" : "Lleva"} al pie «Plantilla gratis de odentIA · odentia32.com».</p>
+      <GuideDownloads
+        client:idle
+        sheets={sheets}
+        page={path}
+        ask={invitation ? "correo" : "boton"}
+        cta={cta}
+        contactUrl={guideContactApiUrl}
+      />
+    </section>
+  </article>
+
+  <section id="pruebalo" class="section section-white gtry" aria-labelledby="pruebalo-t">
+    <div class="wrap gtry-in">
+      <div class="gtry-copy">
+        <span class="tag">[ Pruébalo aquí ]</span>
+        <h2 class="h2 gtry-t" id="pruebalo-t">{guide.tryIt.title}</h2>
+        <p class="gtry-text"><RichText text={guide.tryIt.text} /></p>
+        {guide.tryIt.note ? <p class="gtry-note">{guide.tryIt.note}</p> : null}
+        <a class="gtry-link" href={guide.tryIt.product.href}>{guide.tryIt.product.label} <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="gtry-demo">
+        {guide.tryIt.demo === "odontograma" ? (
+          <ChartPreview client:visible names={names} />
+        ) : guide.tryIt.demo === "odontograma-ninos" ? (
+          <ChildChartPreview client:visible names={names} />
+        ) : (
+          <BudgetDemo client:visible />
+        )}
+      </div>
+    </div>
+  </section>
+
+  <Faq items={guide.faq} />
+
+  <section class="section section-white gnext" aria-labelledby="sigue-t">
+    <div class="wrap gnext-in">
+      <h2 class="h3" id="sigue-t">Sigue con</h2>
+      <GuideCards guides={relatedOf(guide)} white />
+    </div>
+  </section>
+
+  <GuideStart title={startTitle} page={path} />
+  <script>
+    // El botón de arriba (sin JavaScript, solo baja a las plantillas): con una sola plantilla la
+    // descarga ahí mismo, con su aviso; con varias, lleva a elegir. El foco queda en la plantilla.
+    document.querySelector("[data-guide-download]")?.addEventListener("click", (event) => {
+      const cards = [...document.querySelectorAll<HTMLAnchorElement>(".gd-card")]
+      const first = cards[0]
+      if (!first) return
+      event.preventDefault()
+      if (cards.length === 1) first.click()
+      first.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
+      first.focus({ preventScroll: true })
+    })
+  </script>
+</Base>
+
+<style>
+  /* La cabecera del sitio va encima de la portada: 88 px de cabecera y 64 de aire. */
+  .gh { padding: 152px 0 88px; }
+  .gh-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 860px); gap: 48px; align-items: center; }
+  .gh-in.video { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .gh-copy { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .gh-trail { font-size: 13px; color: var(--on-night-3); display: flex; gap: 6px; align-items: center; }
+  .gh-trail a { color: var(--sky-2); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+  .gh-trail a:hover { color: #fff; }
+  .gh-h1 { margin: 0; font-size: clamp(40px, 4.6vw, 62px); line-height: 0.98; letter-spacing: -0.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .gh-meta { margin: 0; font-size: 13px; color: var(--on-night-3); }
+  .gh-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .gh-video { min-width: 0; }
+  .gh-play { position: relative; display: block; border-radius: 22px; overflow: hidden; background: #000; color: #fff; text-decoration: none; aspect-ratio: 16 / 9; }
+  .gh-play img { width: 100%; height: 100%; object-fit: cover; opacity: .85; }
+  .gh-badge { position: absolute; top: 50%; left: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px; border-radius: 999px; background: var(--teal); display: flex; align-items: center; justify-content: center; }
+  .gh-vt { position: absolute; left: 16px; right: 16px; bottom: 14px; font-weight: 800; font-size: 17px; text-shadow: 0 1px 8px rgba(0, 0, 0, .6); }
+  .gh-yt { font-weight: 500; opacity: .85; }
+
+  .gwrap { max-width: 860px; margin: 0 auto; padding-inline: 32px; box-sizing: content-box; }
+  .gshort { background: var(--paper); padding: 56px 0; }
+  .gbox { border-radius: 22px; background: var(--teal-soft); padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; }
+  .gbox h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  .gbox ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 17px; line-height: 1.55; color: var(--ink-2); }
+
+  .gsteps { display: flex; flex-direction: column; gap: 56px; padding-block: 72px; }
+  .gstep { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 24px; }
+  .gstep-t { margin: 0; font-size: clamp(28px, 3vw, 38px); line-height: 1.08; letter-spacing: -0.03em; font-weight: 800; text-wrap: balance; }
+  .gstep p { margin: 0; font-size: 18px; line-height: 1.6; color: var(--ink-2); text-wrap: pretty; }
+  .glist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 17px; line-height: 1.55; color: var(--ink-2); }
+  .gstep :global(b) { color: var(--ink); }
+
+  .gtry-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .gtry-copy { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .gtry-t { font-size: clamp(30px, 3.6vw, 44px); }
+  .gtry-text { margin: 0; font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .gtry-note { margin: 0; font-size: 14px; color: var(--soft); }
+  .gtry-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; text-decoration: none; }
+  .gtry-demo { flex: 1.4 1 520px; min-width: 0; }
+
+  .gnext-in { display: flex; flex-direction: column; gap: 22px; }
+  .gnext { padding: 72px 0; }
+
+  @media (max-width: 1080px) {
+    .gh-in.video { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 720px) {
+    .gh { padding: 104px 0 56px; }
+    .gwrap { padding-inline: 16px; }
+    .gshort { padding: 40px 0; }
+    .gbox { padding: 20px; }
+    .gbox ul { font-size: 16px; }
+    .gsteps { gap: 44px; padding-block: 48px; }
+    .gstep p { font-size: 17px; }
+    .gh-ctas .btn { flex: 1 1 100%; white-space: normal; text-align: center; }
+  }
+</style>
