@@ -354,6 +354,7 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] El regalo dice «de tus agentes».
 - [ ] Con el alta abierta no aparecen «Sin cuota» ni «gratis» si el plan que se muestra cobra cuota.
 - [ ] La pantalla de enviada no dice «Te enviamos una copia» cuando el servidor no la envió (solicitud ya en la lista).
+- [ ] La página de la solicitud (`/solicitar-invitacion`) cambia con el alta: con el alta abierta no dice «invitación», «sin cuota» ni «50 % menos».
 **Caso:** precios del 24 nov 2026 (Fundadores sin cuota, USD 100, 50 % menos, 2 días hábiles): cada lugar dice lo mismo. Con `signupMode` en «abierta», ningún lugar dice «gratis» ni «sin cuota».
 
 ## V-DAT-12 El título y la fecha de una guía, en todos sus lugares
@@ -500,5 +501,6 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Lo que la frase dice que pasa al tocar, pasa en la demo de al lado; si no, la frase habla de la app y no invita a tocar.
 - [ ] La plantilla descargable es la hoja que imprime la app (mismas filas y piezas), no un dibujo aparte.
 - [ ] Una palabra no tiene dos sentidos en la misma página («temporal» = de leche y = provisional).
+- [ ] Una leyenda impresa define todas las siglas que la guía enseña (I, IMP, el espigo).
 **Ya falló (mesa del 24 nov 2026, en el lienzo):** «tocas la cara y queda marcada» junto a una demo que no marca; un PDF «Niños 51–85» que no sirve para una dentición mixta.
 **Caso:** Mateo, 7 años, mixta: con la plantilla de la guía de niños se marcan la 36 permanente y la 75 temporal en la misma hoja.
