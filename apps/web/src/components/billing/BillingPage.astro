@@ -14,6 +14,7 @@ import FeatureGrid from "../agents/FeatureGrid.astro"
 import SplitHero from "../agents/SplitHero.astro"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
+import TopicGuides from "../guides/TopicGuides.astro"
 import Related from "../pages/Related.astro"
 import CashDay from "./CashDay"
 import CloseSheet from "./CloseSheet"
@@ -129,6 +130,7 @@ const jsonLd = [
     </FeatureGrid>
 
     <Related hrefs={page.related} />
+    <TopicGuides slugs={["cierre-de-caja-dental"]} />
     <div class="faqwrap">
       <Faq items={page.faq} title="Sobre la caja y los cobros." />
     </div>

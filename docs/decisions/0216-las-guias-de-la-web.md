@@ -16,6 +16,14 @@ Lo que más buscan las clínicas en Google son tareas: llenar un odontograma, el
 - **La solicitud guarda la página desde la que se envió** (`saas_waitlist_request.source_page`), una ruta comprobada y nunca un título del navegador. Viaja en la dirección (`?desde=`), no en el cuerpo: así la API de antes la ignora durante el despliegue, cuando la web nueva ya se publicó.
 - **Solo odentIA las tiene por ahora:** latidIA y vistIA no sirven /guias y su pie no las muestra, hasta que tengan las suyas con el mismo molde.
 
+## Los videos (25 nov, segundo PR)
+
+Cada guía puede tener la **lista de reproducción** de su tema en el canal de YouTube (`playlist` en su archivo). La web lee el feed público de la lista (sin clave ni costo, los últimos 15), lo guarda 6 horas (en Workers, en la caché del centro de datos) y muestra el más reciente en la portada y los demás en «Más videos de este tema». Un tutorial nuevo que se suma a la lista aparece solo, sin tocar la web. Si YouTube no responde en 1,5 s, o la guía no tiene lista, va el video fijo (`video`), o ninguno: la página nunca espera ni falla por YouTube.
+
+El video se ve en la misma página al tocarlo (YouTube sin cookies hasta entonces; antes solo se carga la miniatura) y debajo están «Verlo en YouTube» y «Suscríbete al canal». Cada video va a Google como `VideoObject`, para que la guía también salga en los resultados de video.
+
+*Descartado:* leer el canal entero (el feed trae solo los últimos 15, casi todos Shorts) o la API de YouTube (pide clave y cuota).
+
 ## Alternativas descartadas
 
 - *Pedir el correo a cambio del PDF:* quien busca «odontograma pdf» se va a la página siguiente, Google no muestra un PDF escondido tras un formulario y la mayoría de quienes lo bajan no son clínicas.

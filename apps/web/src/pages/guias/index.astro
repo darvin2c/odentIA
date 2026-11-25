@@ -14,7 +14,7 @@ const cta = ctaOf(pricing)
 const headerCta = pricing.signupMode === "invitacion" ? { href: "#pide", label: cta.label } : undefined
 const title = "Guías para tu clínica dental, paso a paso"
 const description =
-  "Guías para odontólogos: cómo llenar un odontograma, el odontograma en niños y cómo hacer un presupuesto dental, cada una con su plantilla en PDF para descargar, sin pedir tu correo."
+  "Guías para odontólogos: odontograma, historia clínica, consentimiento informado, presupuesto dental y cierre de caja, cada una con su plantilla en PDF gratis."
 const jsonLd = [
   breadcrumbJsonLd(Astro.site, [
     ["Inicio", "/"],
@@ -33,14 +33,14 @@ const jsonLd = [
   },
 ]
 ---
-<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma y presupuesto dental, para imprimir y llenar a mano." }}>
+<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma, historia clínica, consentimiento, presupuesto y cierre de caja, para imprimir y llenar a mano." }}>
   <section class="hero gi">
     <div class="grain" aria-hidden="true"></div>
     <div class="wrap gi-wrap">
       <div class="gi-in">
         <span class="tag tag-d rise">[ Guías ]</span>
         <h1 class="gi-h1 rise d1">Guías para tu clínica dental, <span class="acc">paso a paso.</span></h1>
-        <p class="lead lead-d rise d2">Cómo llenar el odontograma, cómo armar un presupuesto y más. Cada una con su plantilla para descargar, sin pedir tu correo.</p>
+        <p class="lead lead-d rise d2">Cómo llenar el odontograma y la historia clínica, el consentimiento, el presupuesto y el cierre de caja. Cada una con su plantilla para descargar, sin pedir tu correo.</p>
       </div>
     </div>
   </section>

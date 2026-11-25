@@ -2,16 +2,19 @@
 // minutos de lectura, la fecha en palabras y los datos para Google). Hoy son solo de odentIA: en
 // latidIA y vistIA, /guias no existe (`product-pages.json` no la sirve) y el pie no las muestra.
 import { PRODUCT } from "../product"
+import { guide as caja } from "./cierre-de-caja-dental"
 import { guide as odontograma } from "./como-llenar-un-odontograma"
+import { guide as consentimiento } from "./consentimiento-informado-dental"
+import { guide as historia } from "./historia-clinica-odontologica"
 import { guide as ninos } from "./odontograma-en-ninos"
 import { guide as presupuesto } from "./presupuesto-dental"
 import { plainText } from "./rich"
 import type { Guide, GuideSheet } from "./types"
 
-export type { Guide, GuideFigure, GuideSheet, GuideStep, Rich } from "./types"
+export type { Guide, GuideFigure, GuideSheet, GuideStep, GuideVideo, Rich } from "./types"
 
 /** Las guías, en el orden del índice. Una nueva se suma aquí y con su página en `src/pages/guias/`. */
-export const GUIDES: readonly Guide[] = [odontograma, ninos, presupuesto]
+export const GUIDES: readonly Guide[] = [odontograma, ninos, historia, consentimiento, presupuesto, caja]
 
 /** ¿Esta web tiene guías? Solo la de odentIA, hasta que las otras tengan las suyas. */
 export const HAS_GUIDES = PRODUCT === "dental"
@@ -35,6 +38,9 @@ export const SHEET_FILES: Record<GuideSheet, string> = {
   odontograma: "/guias/odontograma.pdf",
   "odontograma-ninos": "/guias/odontograma-ninos.pdf",
   presupuesto: "/guias/presupuesto-dental.pdf",
+  "historia-clinica": "/guias/historia-clinica-odontologica.pdf",
+  consentimiento: "/guias/consentimiento-informado-dental.pdf",
+  "cierre-de-caja": "/guias/cierre-de-caja.pdf",
 }
 
 /** Qué es cada plantilla, en palabras: el texto de su imagen. */
@@ -42,6 +48,9 @@ export const SHEET_NAMES: Record<GuideSheet, string> = {
   odontograma: "odontograma de adultos en blanco",
   "odontograma-ninos": "odontograma de niños en blanco",
   presupuesto: "presupuesto dental en blanco, por fases",
+  "historia-clinica": "historia clínica odontológica en blanco",
+  consentimiento: "consentimiento informado dental en blanco",
+  "cierre-de-caja": "cierre de caja en blanco, con el arqueo",
 }
 
 /**
@@ -89,7 +98,7 @@ export function dayWords(iso: string): string {
 /** Lo que trae la guía, en su tarjeta: «6 min · 2 plantillas en PDF · Video». */
 export function cardMeta(guide: Guide): string {
   const sheets = guide.sheets.length === 1 ? "Plantilla en PDF" : `${guide.sheets.length} plantillas en PDF`
-  return [`${readingMinutes(guide)} min`, sheets, guide.video ? "Video" : null].filter(Boolean).join(" · ")
+  return [`${readingMinutes(guide)} min`, sheets, guide.video || guide.playlist ? "Video" : null].filter(Boolean).join(" · ")
 }
 
 /**
