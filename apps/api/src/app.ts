@@ -483,6 +483,18 @@ export function createApp(deps: AppDeps) {
     return (product === BASE_PRODUCT ? undefined : deps.productAuth?.[product]) || auth
   }
 
+  /** Lo que se responde ante un error: el de un servicio con su motivo, lo demás como interno. */
+  function answerError(err: Error, c: Context) {
+    if (err instanceof ServiceError)
+      return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+    // Un id con forma de otra cosa en la dirección (`/patients/HTTP`) no existe: lo dice
+    // Postgres al comparar con una columna uuid. Se responde 404 para toda ruta, no una a una.
+    if (idMalformadoEnLaDireccion(err, c.req.path))
+      return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+    console.error(err)
+    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
+  }
+
   /** Las rutas de la cuenta que existen también en el dominio de una app que es otro sistema. */
   const isExternalAccountPath = (path: string) =>
     path === "/api/uploads/avatar" || path === "/api/account" || path.startsWith("/api/account/")
@@ -494,6 +506,7 @@ export function createApp(deps: AppDeps) {
    */
   function externalAccountRoutes(entry: ExternalAppEntry): Hono {
     const routes = new Hono()
+    routes.onError(answerError)
     routes.use("*", async (c, next) => {
       const method = c.req.method
       if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next()
@@ -661,16 +674,7 @@ export function createApp(deps: AppDeps) {
     await next()
   })
 
-  app.onError((err, c) => {
-    if (err instanceof ServiceError)
-      return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
-    // Un id con forma de otra cosa en la dirección (`/patients/HTTP`) no existe: lo dice
-    // Postgres al comparar con una columna uuid. Se responde 404 para toda ruta, no una a una.
-    if (idMalformadoEnLaDireccion(err, c.req.path))
-      return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
-    console.error(err)
-    return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
-  })
+  app.onError(answerError)
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
 
   app.get("/health", async (c) => {

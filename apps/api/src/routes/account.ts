@@ -92,7 +92,15 @@ export function createAccountRoute(deps: AccountDeps) {
   app.get("/two-factor", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => getMyTwoFactor(deps.ownerDb, who.userId))
+    return runService(c, 200, async () => {
+      const status = await getMyTwoFactor(deps.ownerDb, who.userId)
+      if (!deps.personOnly) return status
+      // Fuera de las clínicas no se nombra ninguna: se dice cuántas la piden, para que se
+      // entienda por qué no se puede desactivar.
+      const count = status.requiredBy.length
+      const requiredBy = count === 0 ? [] : [count === 1 ? "Una de tus clínicas" : `${count} de tus clínicas`]
+      return { ...status, requiredBy }
+    })
   })
 
   app.post("/two-factor/forget-browsers", async (c) => {

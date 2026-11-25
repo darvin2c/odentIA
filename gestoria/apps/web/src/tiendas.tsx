@@ -276,8 +276,11 @@ export function Shell({
   const items: AppShellNavItem[] = store
     ? storeSections(store)
     : [{ label: "Tus tiendas", to: "/", icon: Store }]
-  // `tienda` deja en la cuenta el enlace para volver a esta tienda, como «Mi perfil» de la clínica.
-  const from = store ? { tienda: store.id } : undefined
+  // `tienda` deja en la cuenta el enlace para volver a esta tienda, como «Mi perfil» de la
+  // clínica; vacía, fuera de una tienda, olvida la de antes. Ya en la cuenta, se conserva.
+  const from: { tienda?: string } = pathname.startsWith("/cuenta")
+    ? {}
+    : { tienda: store?.id ?? "" }
   return (
     <AppShell
       notice={store?.supportUntil ? <SupportStrip until={store.supportUntil} /> : undefined}

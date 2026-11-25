@@ -11,7 +11,7 @@ import {
   storeMember,
   withPerson,
 } from "@gestoria/db"
-import { and, asc, count, desc, eq, gt, inArray, isNull } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { noteStoreAccount } from "./acuerdo.js"
 import type { Person } from "./cuenta.js"
@@ -146,19 +146,24 @@ export async function myStores(appDb: Db, person: Person) {
       )
       .orderBy(desc(storeInvitation.createdAt))
     const mine = new Set(stores.map((s) => s.id))
-    // Las tiendas donde es el único Dueño: antes de cerrar su cuenta, que le dé el rol a otra
-    // persona (la cuenta no conoce las tiendas; se lo pregunta a gestorIA).
-    const owned = stores.filter((s) => s.role === "owner").map((s) => s.id)
-    const owners = owned.length
-      ? await tx
-          .select({ storeId: storeMember.storeId, owners: count() })
-          .from(storeMember)
-          .where(and(inArray(storeMember.storeId, owned), eq(storeMember.role, "owner")))
-          .groupBy(storeMember.storeId)
-      : []
-    const ownersOf = new Map(owners.map((row) => [row.storeId, row.owners]))
     // Las que soporte de gestorIA puede mirar ahora (la tienda la dejó entrar), solo a mirar.
     const support = (await supportStoresOf(tx, person.userId)).filter((s) => !mine.has(s.id))
+    // Las tiendas donde es el único Dueño: antes de cerrar su cuenta, que le dé el rol a otra
+    // persona (la cuenta no conoce las tiendas; se lo pregunta a gestorIA). El equipo de una
+    // tienda solo se ve dentro de ella: se entra a cada una a contar, y se sale al terminar.
+    const ownersOf = new Map<string, number>()
+    for (const s of stores) {
+      if (s.role !== "owner") continue
+      // eslint-disable-next-line no-await-in-loop
+      await enterStore(tx, s.id)
+      // eslint-disable-next-line no-await-in-loop
+      const [row] = await tx
+        .select({ owners: count() })
+        .from(storeMember)
+        .where(and(eq(storeMember.storeId, s.id), eq(storeMember.role, "owner")))
+      ownersOf.set(s.id, row?.owners ?? 0)
+    }
+    if (ownersOf.size > 0) await enterStore(tx, "")
     return {
       stores: [
         ...stores.map((s) => ({

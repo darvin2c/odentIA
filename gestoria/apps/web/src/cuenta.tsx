@@ -33,13 +33,15 @@ const DESDE_KEY = "gestoria.cuenta.desde-tienda"
 
 function useStoreOfOrigin(me: Me | undefined): MyStore | null {
   const { tienda } = useSearch({ strict: false }) as { tienda?: string }
-  const [id, setId] = useState<string | null>(tienda ?? null)
+  const [id, setId] = useState<string | null>(tienda || null)
   useEffect(() => {
     try {
+      // Llegó desde una tienda: se recuerda; desde fuera de una (`tienda` vacía), se olvida.
       if (tienda) window.sessionStorage.setItem(DESDE_KEY, tienda)
-      setId(tienda ?? window.sessionStorage.getItem(DESDE_KEY))
+      else if (tienda === "") window.sessionStorage.removeItem(DESDE_KEY)
+      setId(tienda === undefined ? window.sessionStorage.getItem(DESDE_KEY) : tienda || null)
     } catch {
-      setId(tienda ?? null)
+      setId(tienda || null)
     }
   }, [tienda])
   return me?.stores.find((s) => s.id === id) ?? null
