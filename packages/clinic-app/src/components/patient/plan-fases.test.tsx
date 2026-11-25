@@ -95,3 +95,25 @@ it("la nota del plan dice que el diagnóstico de urgencia propone «Urgencia», 
   declareProduct(base)
   expect(planPhasesNote()).toBe("Cada procedimiento registrado en una atención suma una sesión.")
 })
+
+it("la exodoncia avisa lo que toma en el Plan: por hacer y como opción por decidir entre conservar o extraer", async () => {
+  const risks = ["Toma apixabán 5 mg: riesgo de sangrado."]
+  const base = { planId: "plan-1", scope: "tooth", surfaces: [], status: "pendiente", plannedSessions: 1, sessionsDone: 0, sessions: [] }
+  const path = (positions: number[]) => ({ budgetId: "b-1", positions, name: null, pathCount: 2, chosen: false })
+  const exo38 = { ...base, id: "it-38", title: "Exodoncia simple", toothNumber: 38, decisionStatus: "aceptado", extractionRisks: risks } as unknown as PlanItem
+  const endo46 = { ...base, id: "it-endo", title: "Endodoncia", toothNumber: 46, decisionStatus: "pendiente", path: path([1]) } as unknown as PlanItem
+  const exo46 = { ...base, id: "it-46", title: "Exodoncia simple", toothNumber: 46, decisionStatus: "pendiente", path: path([2]), extractionRisks: risks } as unknown as PlanItem
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <PlanPhases patientId="p-1" items={[exo38, endo46, exo46]} journeys={[]} selectedId="" onSelect={() => undefined} />
+    </QueryClientProvider>,
+  )
+  const warnings = await screen.findAllByRole("list", { name: "Antes de la exodoncia" })
+  expect(warnings).toHaveLength(2)
+  const pending = (await screen.findByText(/por decidir entre dos opciones/)).closest("section") as HTMLElement
+  expect(pending.textContent).toContain("Toma apixabán 5 mg: riesgo de sangrado.")
+  // Solo bajo el camino que extrae: la endodoncia no lo dice.
+  const conserve = [...pending.querySelectorAll("li")].find((li) => li.textContent?.startsWith("Endodoncia")) as HTMLElement
+  expect(conserve.textContent).not.toContain("riesgo de sangrado")
+})
