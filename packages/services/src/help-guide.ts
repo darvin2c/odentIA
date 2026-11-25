@@ -253,6 +253,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         general: true,
       },
       {
+        id: "paso-otra-clinica",
+        q: "¿Cómo paso a otra de mis clínicas?",
+        a: "Toca el nombre de la clínica, arriba a la izquierda: debajo dice qué es y tu rol ahí. Se abre con lo de esta clínica arriba (como «Plan y pagos», si la administras) y, debajo, tus clínicas, con la que estás marcada. Si tienes de más de un tipo, por ejemplo una clínica dental y un consultorio médico, van agrupadas con su nombre y su color. Con Ctrl+clic se abre en otra pestaña. Una de otra app abre en su propia dirección y puede pedirte entrar la primera vez en ese navegador. «Cambiar de clínica» lleva a la lista completa, donde también aceptas una invitación o creas otra clínica.",
+        forms: ["cambiar de clinica", "pasar a otra clinica", "tengo dos clinicas", "abrir mi otra clinica", "como entro a mi otro consultorio"],
+        general: true,
+      },
+      {
         id: "hay-manual",
         q: "¿Hay un manual?",
         a: "El manual soy yo: dime con tus palabras qué quieres hacer y te llevo a la pantalla. Abajo, «En esta pantalla suelen preguntar» trae lo más común de donde estás. Para empezar, Inicio muestra los pasos que le faltan a tu clínica.",
@@ -474,7 +481,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "nueva-cita-ya-tiene-cita",
         q: "¿Cómo sé si el paciente ya tiene una cita antes de darle otra?",
-        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita:» con su próxima cita (día, hora, servicio y profesional) y cuántas más tiene. No frena nada: tú eliges si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y si la cambia o es otra aparte.",
+        a: "En «Nueva cita», al elegirlo aparece debajo «Ya tiene cita» con su próxima cita (por ejemplo, hoy a las 17:00, con su servicio y profesional) y cuántas más tiene. No frena nada: tú eliges si reservas otra aparte o, con «Ver la cita», mueves esa. Lo que no se puede es darle dos citas a la misma hora: al reservar te lo dice. Sofi hace lo mismo por el chat: le recuerda su cita y si la cambia o es otra aparte.",
       },
       {
         id: "elijo-tratamientos-trae-cita",

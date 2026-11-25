@@ -131,6 +131,15 @@ export {
   type PageHeaderPrimary,
   type PageHeaderProps,
 } from "./page-header.js"
+export {
+  groupPlaces,
+  type Place,
+  type PlaceAction,
+  type PlaceAlert,
+  PlaceSwitcher,
+  type PlaceSwitcherProps,
+  placeLine,
+} from "./place-switcher.js"
 export { ScrollingTabsList } from "./scrolling-tabs-list.js"
 export { type ViewTabOption, type ViewTabsProps, ViewTabs } from "./view-tabs.js"
 export { PersonAvatar, type PersonAvatarProps, personFirstName, personInitials } from "./person-avatar.js"

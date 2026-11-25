@@ -22,6 +22,7 @@ import {
   CountrySelect,
   EmptyState,
   ErrorState,
+  LoadingState,
   PersonAvatar,
   regionCountry,
   SectionNav,
@@ -66,8 +67,8 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
-import { when } from "./lib/pedidos"
 import { authClient, forgetToken } from "./lib/cuenta"
+import { when } from "./lib/pedidos"
 import { GroupSignature, Logo } from "./marca"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
@@ -153,7 +154,12 @@ export function StoresPage() {
     if (only) void navigate({ to: "/tiendas/$id", params: { id: only.id }, replace: true })
   }, [only, navigate])
 
-  if (me.isPending || only) return <Shell>{null}</Shell>
+  if (me.isPending || only)
+    return (
+      <Shell>
+        <LoadingState message={only ? "Abriendo tu tienda…" : "Cargando tus tiendas…"} />
+      </Shell>
+    )
   if (me.isError)
     return (
       <Shell>
@@ -477,7 +483,12 @@ export function StoreLayout() {
   const me = useMe()
   const store = me.data?.stores.find((s) => s.id === id)
 
-  if (me.isPending) return <Shell wide>{null}</Shell>
+  if (me.isPending)
+    return (
+      <Shell wide>
+        <LoadingState message="Abriendo tu tienda…" />
+      </Shell>
+    )
   if (me.isError)
     return (
       <Shell>
@@ -525,8 +536,7 @@ export function StoreLayout() {
           mobilePosition="header"
         >
           <div className="flex min-w-0 flex-col gap-6">
-            {store.permissions.includes("equipo.gestionar") &&
-            !pathname.endsWith("/equipo") ? (
+            {store.permissions.includes("equipo.gestionar") && !pathname.endsWith("/equipo") ? (
               <SupportAccessPanel store={store} only="actual" />
             ) : null}
             <Outlet />
@@ -678,9 +688,7 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
                 ni tus conversaciones, y no cambia nada.
               </span>
             </div>
-            {only === "todo" ? (
-              <Badge variant="outline">{SUPPORT_STATUS[row.status]}</Badge>
-            ) : null}
+            {only === "todo" ? <Badge variant="outline">{SUPPORT_STATUS[row.status]}</Badge> : null}
             {canManage && row.status === "por_aceptar" ? (
               <div className="flex gap-2">
                 <Button
