@@ -218,6 +218,18 @@ export function medicationAlertWords(row: { name: string; dose?: string | null; 
   return { label: row.name === unnamed ? unnamed : `${named}: ${what}`, group }
 }
 
+/**
+ * Cómo se llama la clase de una medicina registrada: «Anticoagulante», «Antiagregante» (B01AC: la
+ * aspirina, el clopidogrel) o «Medicina para los huesos»; null si no es de ninguna. La misma palabra
+ * en la franja, la ficha y la copia de la historia (revisión del 25 nov).
+ */
+export function medicationKindLabel(row: { name: string; atcCode?: string | null }): string | null {
+  const atcCode = specificAtc(row)
+  const group = medicationClassOf(atcCode)
+  if (!group) return null
+  return group === "anticoagulants" && atcCode?.startsWith("B01AC") ? "Antiagregante" : MEDICATION_CLASSES[group].label
+}
+
 /** Lo que va junto con un dato: las semanas, con el embarazo; cuántos al día, con el tabaco. */
 const COMES_WITH: Record<string, RegistrationFieldKey> = {
   "personal.semanasEmbarazo": "personal.embarazo",
