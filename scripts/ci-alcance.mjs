@@ -6,7 +6,7 @@
 // SHA (commit probado, por defecto HEAD). Requiere `turbo` en el PATH o `pnpm exec turbo`.
 //
 // Reglas, de lo más seguro a lo más preciso:
-// - Solo documentación o skills (lista blanca abajo): no corre nada.
+// - Solo documentación, skills o subagentes (lista blanca abajo): no corre nada.
 // - Un archivo fuera de apps/, packages/, e2e/, admin/ y shared/ (CI, Dockerfile, compose,
 //   infra, raíz, turbo.json, lockfile): corre todo. No se sabe qué toca.
 // - Si no hay base comparable: corre todo.
@@ -28,9 +28,9 @@ import { appendFileSync } from "node:fs"
 const BASE = process.env.BASE ?? ""
 const SHA = process.env.SHA || "HEAD"
 
-// Solo documentación y skills: no se compilan, no se prueban ni se despliegan.
+// Solo documentación, skills y los subagentes de la QA: no se compilan, no se prueban ni se despliegan.
 const SOLO_DOCS =
-  /^(docs\/|\.agents\/|\.claude\/skills\/|AGENTS\.md$|README\.md$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
+  /^(docs\/|\.agents\/|\.claude\/skills\/|\.claude\/agents\/|AGENTS\.md$|README\.md$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
 // En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
 const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
