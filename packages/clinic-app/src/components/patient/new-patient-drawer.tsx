@@ -1496,5 +1496,12 @@ function KeptInTab({ signature }: { signature: string }): null {
   useEffect(() => {
     report(true)
   }, [signature, report])
+  // Un «Registrar» rechazado vuelve a armar el aviso del panel después de esto: se dice otra vez, en
+  // el turno siguiente (QA del 25 nov, auditor: tras un error, salir decía «Si sales, se pierde»).
+  useEffect(() => {
+    const again = () => window.setTimeout(() => report(true), 0)
+    document.addEventListener("odentia:submit-rejected", again)
+    return () => document.removeEventListener("odentia:submit-rejected", again)
+  }, [report])
   return null
 }
