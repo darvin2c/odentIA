@@ -4,9 +4,11 @@ import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, isNull, ne } from "drizzle-orm"
 import { z } from "zod"
 import {
+  activeFindingsAsOf,
   anatomyFits,
   conditionLabel,
   type Dentition,
+  findingByVariant,
   dentitionOf,
   FINDINGS,
   type FindingDefinition,
@@ -132,7 +134,7 @@ function site(payload: Record<string, unknown>): string {
 function findingSummary(payload: Record<string, unknown>): string {
   const condition = String(payload["condition"] ?? "")
   const variant = typeof payload["variant"] === "string" ? payload["variant"] : null
-  const name = (variant ? variantLabel(condition, variant) : undefined) ?? conditionLabel(condition)
+  const name = findingByVariant(condition, variant)
   const quality =
     payload["quality"] === "good"
       ? "Buen estado"
@@ -163,12 +165,16 @@ const toothFindingKey = (tooth: number, condition: string, quality?: string | nu
  * el odontograma, dictado otra vez al describir la boca, sería un hallazgo repetido.
  */
 async function currentToothFindings(tx: Db, orgId: string, patientId: string): Promise<Set<string>> {
-  const rows = await tx
+  const recorded = await tx
     .select({
+      id: odontogramEntry.id,
       toothNumber: odontogramEntry.toothNumber,
       condition: odontogramEntry.condition,
       surface: odontogramEntry.surface,
+      status: odontogramEntry.status,
       details: odontogramEntry.details,
+      createdAt: odontogramEntry.createdAt,
+      resolvedAt: odontogramEntry.resolvedAt,
     })
     .from(odontogramEntry)
     .where(
@@ -177,10 +183,12 @@ async function currentToothFindings(tx: Db, orgId: string, patientId: string): P
         eq(odontogramEntry.patientId, patientId),
         isNull(odontogramEntry.voidedAt),
         ne(odontogramEntry.status, "voided"),
-        isNull(odontogramEntry.resolvedAt),
         eq(odontogramEntry.needsReview, false),
       ),
     )
+  // Lo vigente con la regla de siempre: lo tratado no, y de toda la pieza solo el más nuevo (la corona
+  // que pasó a mal estado reemplaza a la de buen estado; dictar «buen estado» es un cambio).
+  const rows = activeFindingsAsOf(recorded.map((row) => ({ ...row, details: (row.details ?? {}) as FindingDetails })))
   const keys = new Set<string>()
   for (const row of rows) {
     if (row.surface) continue

@@ -171,9 +171,20 @@ function TeamActivityPage() {
         accessorKey: "createdAt",
         header: "Cuándo",
         meta: { view: { primary: true } },
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap">{formatWhen(row.original.createdAt, locale, activeOrgTimeZone())}</span>
-        ),
+        // La fecha y la hora en dos renglones, y lo que hizo partido: así «Sobre qué» entra en la tabla y no
+        // queda cortado a la derecha (QA del 24 nov, a 1440 px con el menú de Configuración).
+        cell: ({ row }) => {
+          const when = formatWhen(row.original.createdAt, locale, activeOrgTimeZone())
+          const cut = when.lastIndexOf(", ")
+          return cut > 0 ? (
+            <span className="flex flex-col whitespace-nowrap">
+              <span>{when.slice(0, cut)}</span>
+              <span className="text-sm text-muted-foreground">{when.slice(cut + 2)}</span>
+            </span>
+          ) : (
+            <span className="whitespace-nowrap">{when}</span>
+          )
+        },
       },
       { accessorKey: "who", header: "Quién", meta: { view: { primary: true } } },
       {
@@ -183,10 +194,10 @@ function TeamActivityPage() {
         cell: ({ row }) => {
           const also = alsoText(row.original.also)
           return (
-            <span className="flex min-w-0 flex-col">
+            <span className="flex min-w-0 max-w-xs flex-col whitespace-normal">
               <span className="font-medium">{`${row.original.what}${times(row.original.times)}`}</span>
               {/* Lo demás se parte en renglones: no empuja «Sobre qué» fuera de la tabla. */}
-              {also ? <span className="max-w-md whitespace-normal text-sm text-muted-foreground">{also}</span> : null}
+              {also ? <span className="text-sm text-muted-foreground">{also}</span> : null}
             </span>
           )
         },

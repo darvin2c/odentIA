@@ -1,5 +1,5 @@
 /**
- * Las plantillas en blanco que la web de un producto ofrece en sus guías (ADR 0214): lo que el
+ * Las plantillas en blanco que la web de un producto ofrece en sus guías (ADR 0215): lo que el
  * aviso adjunta al correo. Cada producto da las suyas en `products.ts` (`guideSheetsFor`); el
  * que no tiene guías, ninguna.
  */

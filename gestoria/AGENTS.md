@@ -97,8 +97,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
   a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).
 - La app nunca se detiene por la administración: se usa lo último guardado en `contract_state`;
-  sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra.
+  sin nada, se deja trabajar. Solo Sofi se detiene (`agentStopOf`), y solo en lo que se cobra; la
+  conversación que no atiende (en pausa o apagada) pasa a «Espera a una persona» con su motivo.
 - «Plan y pagos» es del Dueño (`plan`). Los textos los escribe gestorIA; la administración manda datos.
+  El comprobante de un cargo sale en su aviso (`pago.comprobante`), mirado por su contenido.
+- Lo enviado se borra de la bandeja a la semana (`purgeOutbox`), menos el último `cuenta.abierta`.
+- Lo que pide la administración (ADR 0214) llega a `/acuerdo/pedidos` y se aplica en
+  `apps/api/src/acuerdo-pedidos.ts`, una vez por su clave (`contract_request_receipt`), con las
+  reglas de la tienda: nunca sin Dueño. Responde «hecho» o «falló» con su motivo.
+- Soporte de gestorIA entra solo con el sí del Dueño o un Administrador (`soporte.ts`), con su
+  cuenta, solo a mirar (`support` en `permisos.ts`) y hasta que vence o lo sacan. No es del equipo:
+  `inStore` lo reconoce por su entrada vigente. Un permiso nuevo de solo lectura se le suma solo
+  si leer con él no escribe nada.
 
 ## Trabajo
 

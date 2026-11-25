@@ -105,7 +105,7 @@ const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = {
   optical: OPTICAL_HELP_TOPICS,
 }
 
-/** Las plantillas en blanco de las guías de la web de cada producto (ADR 0214); sin guías, ninguna. */
+/** Las plantillas en blanco de las guías de la web de cada producto (ADR 0215); sin guías, ninguna. */
 const GUIDE_SHEETS: Record<ClinicalProduct, GuideSheets | null> = {
   dental: DENTAL_GUIDE_SHEETS,
   medical: null,

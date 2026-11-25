@@ -11,6 +11,7 @@ import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
 import { fetchTreatmentPlans, PLAN_QUERY_KEYS, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
 import { correctApi } from "@odentia/clinic-app/lib/encounters"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import { useDiagnosisSystem, useOrgProfile } from "@odentia/clinic-app/lib/org"
 import {
   DIAGNOSIS_TYPE_LABELS,
@@ -29,8 +30,10 @@ import {
   type FindingField,
   type FindingInput,
   type FindingScope,
+  conditionLabel,
   findingDefinition,
   findingIssues,
+  findingReplaced,
   isValidTooth,
   surfacesForTooth,
   toothGroupOf,
@@ -49,10 +52,17 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import type { OdontogramEntry } from "../../lib/dental/odontogram"
+import { findingTeeth, type OdontogramEntry, teethPhrase } from "../../lib/dental/odontogram"
 import { FindingElsewhere } from "./finding-elsewhere"
 import { FindingPicker } from "./finding-picker"
-import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
+import {
+  FindingDot,
+  findingLine,
+  findingWords,
+  useOdontogramNotation,
+  variantChipLabel,
+  variantFieldLabel,
+} from "./odontogram-notation"
 import { ToothFitNotice } from "./tooth-fit-notice"
 import { ToothHistory, toothHistoryWords, useToothHistory } from "./tooth-history"
 import { ToothSVG } from "./tooth-svg"
@@ -522,6 +532,13 @@ export function ToothDrawer({
   })
   const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
   const draft = useStore(form.store, (state) => state.values)
+  // Con un diagnóstico elegido, el tipo llega como «Presuntivo»: para cerrar basta, y quien atiende lo
+  // pasa a «Definitivo» con un toque. Sin tipo, el botón no registraba y el aviso quedaba fuera de la
+  // vista (lienzo del 24 nov). Sin diagnóstico, sin tipo.
+  const presumeType = (code: string) => {
+    if (!code) form.setFieldValue("diagnosisType", "")
+    else if (!form.getFieldValue("diagnosisType")) form.setFieldValue("diagnosisType", "provisional")
+  }
 
   // Una pieza por grupo: la 36 y la 46 dicen lo mismo. Con grupos distintos se avisa por cada
   // uno y no se ofrece cambiar, porque el otro servicio no serviría para todas.
@@ -832,11 +849,9 @@ export function ToothDrawer({
           key={toothNumber}
           patientId={patientId}
           toothNumber={toothNumber}
-          entries={entriesOf(toothNumber)}
           history={historyOf(toothNumber)}
           planQuery={planQuery}
           docsQuery={docsQuery}
-          encounterId={encounterId}
           // Lo registrado hoy ya está arriba con su «Anular»: la historia se abre sola solo al consultar.
           defaultOpen={!canMutate}
         />
@@ -845,24 +860,35 @@ export function ToothDrawer({
   )
   // Lo registrado en esta atención, a la vista y con su «Anular»: fuera del pliegue de la historia
   // (QA del 16 nov, Q14: para anular lo recién registrado había que abrir «Historia… sin registros»).
-  const todayFindings = teeth.flatMap((toothNumber) =>
-    findingsOfEncounter(entriesOf(toothNumber), encounterId).map((group) => ({ toothNumber, ...group })),
-  )
+  // Un hallazgo de varias piezas (el puente) sale una vez, con todas sus piezas: antes salía una vez
+  // por pieza y «Anular» decía «pieza 45» aunque anulaba las tres (QA del 23 nov).
+  // Desde la historia y no desde lo vigente: lo de hoy que otro de hoy reemplazó también se puede anular.
+  const todayFindings = teeth
+    .flatMap((toothNumber) =>
+      findingsOfEncounter(
+        historyOf(toothNumber).filter((entry) => !entry.voidedAt && entry.status !== "voided" && !entry.resolvedAt),
+        encounterId,
+      ),
+    )
+    .filter((group, i, all) => all.findIndex((other) => other.ids.join(",") === group.ids.join(",")) === i)
   const today =
     todayFindings.length > 0 ? (
       <section aria-label="Registrado hoy" className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Registrado hoy</h3>
         <ul className="flex flex-col gap-1.5">
-          {todayFindings.map(({ toothNumber, first: entry, ids, surfaces }) => {
+          {todayFindings.map(({ first: entry, ids, surfaces }) => {
             const words = findingWords(official, entry)
+            const own = findingTeeth(entry)
+            const where = teethPhrase(own)
             return (
               <li
                 key={ids.join(",")}
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
               >
+                <FindingDot entry={entry} />
                 <span className="min-w-0 flex-1">
-                  {teeth.length > 1 ? `Pieza ${toothNumber} · ` : ""}
-                  {words}
+                  {teeth.length > 1 || own.length > 1 ? `${where.charAt(0).toUpperCase()}${where.slice(1)} · ` : ""}
+                  {findingLine(official, entry)}
                   {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
                   {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                 </span>
@@ -874,7 +900,7 @@ export function ToothDrawer({
                     disabled={busy}
                     onClick={() => {
                       voidForm.reset(EMPTY_VOID)
-                      setVoiding({ ids, label: `pieza ${toothNumber} (${words})` })
+                      setVoiding({ ids, label: `${where} (${words})` })
                     }}
                   >
                     Anular
@@ -886,6 +912,9 @@ export function ToothDrawer({
         </ul>
       </section>
     ) : null
+  // Lo que ya tiene la pieza, antes de «¿Qué observas?»: se lee antes de anotar algo nuevo (lienzo del
+  // 24 nov). Lo de esta atención va en «Registrado hoy», con su «Anular».
+  const now = <ToothNow teeth={teeth} entriesOf={entriesOf} encounterId={encounterId} />
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -893,6 +922,7 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
+      {now}
       {today}
 
       {!canMutate ? (
@@ -976,17 +1006,44 @@ export function ToothDrawer({
               </Button>
             </div>
             {previewContent}
+            {/* La pieza ya lo tiene: avisa y no frena. Al registrar, el nuevo reemplaza al anterior,
+                que queda en la historia (lienzo del 24 nov). */}
+            {/* Lo de varias piezas (un puente rehecho), una vez, con las piezas elegidas. */}
+            {(def && ["span", "arch", "pair"].includes(def.scope) ? teeth.slice(0, 1) : teeth).map((toothNumber) => {
+              const multi = teeth.length > 1 && !!def && ["span", "arch", "pair"].includes(def.scope)
+              const before = findingReplaced(entriesOf(toothNumber), toothNumber, condition, multi ? teeth : undefined)
+              if (!before) return null
+              const where = multi ? `Las ${teethPhrase(teeth)} ya tienen` : `La ${toothNumber} ya tiene`
+              const quality =
+                before.details?.quality === "good"
+                  ? " en buen estado"
+                  : before.details?.quality === "poor"
+                    ? " en mal estado"
+                    : ""
+              return (
+                <p
+                  key={toothNumber}
+                  role="status"
+                  className="rounded-md border border-info/30 bg-info-soft px-3 py-2 text-sm"
+                >
+                  {where} {conditionLabel(before.condition).toLowerCase()}
+                  {quality}
+                  {before.createdAt ? ` desde el ${shortDay(before.createdAt).replace(/\.$/, "")}` : ""}. Al registrar,
+                  este reemplaza al anterior, que queda en su historia.
+                </p>
+              )
+            })}
           </section>
 
-          {/* Pocas opciones cortas, todas a la vista y de un toque (estándar E4): la sigla en la
-              pastilla y, debajo de la elegida, su nombre entero: «CDP» no lo entiende todo el que empieza. */}
+          {/* Pocas opciones cortas, todas a la vista y de un toque (estándar E4): el nombre corto y la
+              sigla en la pastilla («Dentina · CD») y, debajo de la elegida, su nombre entero. */}
           {def?.variants?.length ? (
             <form.AppField name="variant">
               {(field) => {
                 const legend = variantFieldLabel(condition)
                 const chosen = def.variants?.find((v) => v.value === field.state.value)
-                const sigla = (v: { label: string; abbreviation: string }) =>
-                  official && v.abbreviation ? v.abbreviation : v.label
+                const sigla = (v: { value: string; label: string; abbreviation: string }) =>
+                  variantChipLabel(official, v)
                 const longName = chosen && sigla(chosen) !== chosen.label ? chosen.label : null
                 return (
                   <field.Group legend={legend} className="flex flex-col gap-2 sm:col-span-2">
@@ -1260,6 +1317,7 @@ export function ToothDrawer({
                             field.handleChange(choice.code)
                             form.setFieldValue("diagnosisSystem", choice.code ? choice.system : null)
                             form.setFieldValue("diagnosisDescription", choice.code ? choice.description : "")
+                            presumeType(choice.code)
                           }}
                         />
                         {draft.diagnosisDescription && (
@@ -1274,16 +1332,27 @@ export function ToothDrawer({
                 {(field) => (
                   <field.Group legend="Tipo" className="flex min-w-0 flex-col gap-2">
                     {(control) => (
-                      <RadioChips
-                        id={control.id}
-                        aria-label="Tipo del diagnóstico"
-                        aria-describedby={control.describedBy}
-                        invalid={control.invalid}
-                        disabled={fieldDisabled || !draft.diagnosisCode}
-                        value={field.state.value || null}
-                        options={DIAGNOSIS_TYPE_OPTIONS}
-                        onChange={(value) => field.handleChange(value)}
-                      />
+                      <>
+                        <RadioChips
+                          id={control.id}
+                          aria-label="Tipo del diagnóstico"
+                          aria-describedby={
+                            [control.describedBy, field.state.value === "provisional" ? `${uid}-presumed` : null]
+                              .filter(Boolean)
+                              .join(" ") || undefined
+                          }
+                          invalid={control.invalid}
+                          disabled={fieldDisabled || !draft.diagnosisCode}
+                          value={field.state.value || null}
+                          options={DIAGNOSIS_TYPE_OPTIONS}
+                          onChange={(value) => field.handleChange(value)}
+                        />
+                        {draft.diagnosisCode && field.state.value === "provisional" ? (
+                          <p id={`${uid}-presumed`} className="text-xs text-muted-foreground">
+                            Presuntivo hasta que lo confirmes.
+                          </p>
+                        ) : null}
+                      </>
                     )}
                   </field.Group>
                 )}
@@ -1322,6 +1391,7 @@ export function ToothDrawer({
                             form.setFieldValue("diagnosisCode", choice.code)
                             form.setFieldValue("diagnosisSystem", diagnosisList.key)
                             form.setFieldValue("diagnosisDescription", choice.title)
+                            presumeType(choice.code)
                           }}
                         >
                           {choice.label}
@@ -1545,32 +1615,110 @@ export function ToothDrawer({
   )
 }
 
+/** «23 nov», en la zona de la clínica. */
+function shortDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "short",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
 /**
- * Lo que tiene la pieza: su estado actual (lo registrado en esta atención se
- * anula arriba del panel, en «Registrado hoy»), su plan, su historia y sus imágenes. La evolución del
- * odontograma, con lo anulado, es una sola y vive junto al gráfico.
+ * Lo que tienen ahora las piezas abiertas: una línea por hallazgo vigente, con su estado y su
+ * fecha, en rojo o azul como en la norma. Un puente sale una vez, con todas sus piezas.
+ */
+function ToothNow({
+  teeth,
+  entriesOf,
+  encounterId,
+}: {
+  teeth: number[]
+  entriesOf: (tooth: number) => OdontogramEntry[]
+  encounterId?: string
+}): React.JSX.Element | null {
+  const official = useOdontogramNotation()
+  if (teeth.length === 0) return null
+  const rows = teeth
+    .flatMap((tooth) =>
+      groupFindings(entriesOf(tooth).filter((entry) => !encounterId || entry.encounterId !== encounterId)).map(
+        (group) => ({ tooth, ...group }),
+      ),
+    )
+    .filter((row, i, all) => all.findIndex((other) => other.ids.join(",") === row.ids.join(",")) === i)
+  const needsReview = rows.filter((row) => row.first.needsReview).length
+  return (
+    <section aria-label="Lo que tiene ahora" className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">Tiene ahora</h3>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {teeth.length === 1 ? "Sin hallazgos vigentes en esta pieza." : "Sin hallazgos vigentes en estas piezas."}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {/* Una caries de dos caras es un hallazgo: una fila con sus caras (QA del 9 nov). */}
+          {rows.map(({ tooth, first, ids, surfaces }) => {
+            const entry = first as OdontogramEntry
+            const own = findingTeeth(entry)
+            const where = own.length > 1 ? teethPhrase(own) : teeth.length > 1 ? `${tooth}` : null
+            return (
+              <li
+                key={ids.join(",")}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
+              >
+                <FindingDot entry={entry} />
+                <span className="min-w-0 flex-1">
+                  {where ? `${where.charAt(0).toUpperCase()}${where.slice(1)} · ` : ""}
+                  {findingLine(official, entry)}
+                  {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
+                  {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
+                </span>
+                {entry.needsReview ? <Badge variant="outline">Requiere revisión</Badge> : null}
+                {entry.leftByPlanItemId ? <Badge variant="outline">Lo dejó un tratamiento</Badge> : null}
+                {entry.createdAt ? (
+                  <span className="text-xs text-muted-foreground">{shortDay(entry.createdAt)}</span>
+                ) : null}
+                {entry.note ? <p className="w-full text-muted-foreground">{entry.note}</p> : null}
+                {entry.needsReview && originalLegacyText(entry) ? (
+                  <p className="w-full text-xs text-muted-foreground">{originalLegacyText(entry)}.</p>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {needsReview > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {needsReview === 1
+            ? "Un registro anterior migrado requiere revisión clínica: se muestra en la evolución, fuera del dibujo."
+            : `${needsReview} registros anteriores migrados requieren revisión clínica: se muestran en la evolución, fuera del dibujo.`}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+/**
+ * La historia de la pieza, plegada: su plan, sus hechos y sus imágenes. Lo que tiene ahora va arriba
+ * del panel («Tiene ahora») y lo registrado en esta atención se anula en «Registrado hoy». La
+ * evolución del odontograma, con lo anulado, es una sola y vive junto al gráfico.
  */
 function ToothContext({
   patientId,
   toothNumber,
-  entries,
   history,
   planQuery,
   docsQuery,
-  encounterId,
   defaultOpen,
 }: {
   patientId: string
   toothNumber: number
-  entries: OdontogramEntry[]
   history: OdontogramEntry[]
   planQuery: PlanQueryState
   docsQuery: DocsQueryState
-  encounterId?: string
   defaultOpen: boolean
 }): React.JSX.Element {
   const official = useOdontogramNotation()
-  const needsReview = entries.filter((e) => e.needsReview)
 
   const toothPlan = (planQuery.data?.data ?? []).filter((item) => item.toothNumber === toothNumber)
   // La opción que no eligió no es un tratamiento activo de la pieza (QA del 9 nov): sigue en su presupuesto.
@@ -1595,62 +1743,6 @@ function ToothContext({
       </summary>
 
       <div className="flex flex-col gap-3 pt-2">
-        <section
-          aria-label={`Estado actual de la pieza ${toothNumber}`}
-          className="flex flex-col gap-2"
-        >
-          <h4 className="text-sm font-medium">Estado actual</h4>
-          {entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin hallazgos vigentes en esta pieza.</p>
-          ) : (
-            <ul className="flex flex-col gap-1.5">
-              {/* Una caries de dos caras es un hallazgo: una fila con sus caras (QA del 9 nov). */}
-              {groupFindings(entries).map(({ first: entry, ids, surfaces }) => {
-                const words = findingWords(official, entry)
-                // Lo registrado en la atención en curso se anula arriba, en «Registrado hoy»: aquí
-                // solo se dice, sin otro «Anular» igual.
-                const ownedHere = !!encounterId && entry.encounterId === encounterId
-                return (
-                  <li
-                    key={ids.join(",")}
-                    className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
-                  >
-                    <span className="min-w-0 flex-1">
-                      {words}
-                      {surfaces.length ? ` · ${surfaces.map((surface) => clinicalSurfaceLabel(surface)).join(", ")}` : ""}
-                      {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
-                    </span>
-                    {entry.needsReview ? <Badge variant="outline">Requiere revisión</Badge> : null}
-                    {entry.leftByPlanItemId ? <Badge variant="outline">Lo dejó un tratamiento</Badge> : null}
-                    {entry.createdAt ? (
-                      <span className="text-xs text-muted-foreground">{timeAgo(entry.createdAt)}</span>
-                    ) : null}
-                    {ownedHere ? <Badge variant="outline">Hoy</Badge> : null}
-                    {entry.note ? <p className="w-full text-muted-foreground">{entry.note}</p> : null}
-                    {entry.needsReview && originalLegacyText(entry) ? (
-                      <p className="w-full text-xs text-muted-foreground">{originalLegacyText(entry)}.</p>
-                    ) : null}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          {needsReview.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {needsReview.length}{" "}
-              {needsReview.length === 1
-                ? "registro anterior migrado requiere"
-                : "registros anteriores migrados requieren"}{" "}
-              revisión clínica: se muestran en la evolución, fuera del dibujo.
-            </p>
-          )}
-          {history.some((entry) => entry.status === "voided") ? (
-            <p className="text-xs text-muted-foreground">
-              Lo anulado de esta pieza sigue en la evolución, con su motivo.
-            </p>
-          ) : null}
-        </section>
-
         <section aria-label={`Plan de la pieza ${toothNumber}`} className="flex flex-col gap-2">
           <h4 className="text-sm font-medium">Plan de la pieza</h4>
           {planQuery.isPending && <p className="text-sm text-muted-foreground">Cargando plan…</p>}

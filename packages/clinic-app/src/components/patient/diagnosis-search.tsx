@@ -123,7 +123,9 @@ export function DiagnosisSearch({
         <ComboboxInput
           id={id}
           disabled={disabled}
-          placeholder={`Buscar en la ${list.short} por código o nombre…`}
+          // Corto: en el panel de la pieza la columna es angosta y se cortaba en «…por có» (QA del 24 nov).
+          // La lista ya se nombra arriba, en su etiqueta.
+          placeholder="Código o nombre…"
           showTrigger={false}
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}

@@ -52,7 +52,7 @@ const pages = pageFiles(pagesDir)
   .filter(ours)
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
-// La fecha de cada guía (ADR 0214): la de su archivo (`updated: "AAAA-MM-DD"` en src/lib/guides),
+// La fecha de cada guía (ADR 0215): la de su archivo (`updated: "AAAA-MM-DD"` en src/lib/guides),
 // la misma que dice la página y sus datos para Google. El índice lleva la más nueva.
 const guidesDir = fileURLToPath(new URL("./src/lib/guides", import.meta.url))
 const guideDates = new Map(

@@ -1,5 +1,5 @@
 {
-  "id": "cb15b7b8-9d4c-4211-8975-279a9b48987e",
+  "id": "65c428d3-c543-4d32-86ba-e3e7c716ad78",
   "prevId": "73304753-a80f-4c75-b09c-e931afc8f768",
   "version": "7",
   "dialect": "postgresql",
@@ -72,6 +72,188 @@
         "app_contract_message_id_check": {
           "name": "app_contract_message_id_check",
           "value": "length(\"admin\".\"app_contract_message\".\"id\") BETWEEN 1 AND 200"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "admin.app_contract_request": {
+      "name": "app_contract_request",
+      "schema": "admin",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "app": {
+          "name": "app",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_by": {
+          "name": "requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendiente'"
+        },
+        "result_message": {
+          "name": "result_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "done_at": {
+          "name": "done_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "app_contract_request_pending_idx": {
+          "name": "app_contract_request_pending_idx",
+          "columns": [
+            {
+              "expression": "app",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "status = 'pendiente'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "app_contract_request_account_idx": {
+          "name": "app_contract_request_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "app_contract_request_account_id_saas_account_id_fk": {
+          "name": "app_contract_request_account_id_saas_account_id_fk",
+          "tableFrom": "app_contract_request",
+          "tableTo": "saas_account",
+          "schemaTo": "admin",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "app_contract_request_requested_by_user_id_fk": {
+          "name": "app_contract_request_requested_by_user_id_fk",
+          "tableFrom": "app_contract_request",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "requested_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "app_contract_request_app_check": {
+          "name": "app_contract_request_app_check",
+          "value": "\"admin\".\"app_contract_request\".\"app\" IN ('gestoria')"
+        },
+        "app_contract_request_type_check": {
+          "name": "app_contract_request_type_check",
+          "value": "\"admin\".\"app_contract_request\".\"type\" IN ('cuenta.abrir','soporte.entrar','equipo.quitar')"
+        },
+        "app_contract_request_status_check": {
+          "name": "app_contract_request_status_check",
+          "value": "\"admin\".\"app_contract_request\".\"status\" IN ('pendiente','hecho','fallo') AND (\"admin\".\"app_contract_request\".\"status\" = 'pendiente') = (\"admin\".\"app_contract_request\".\"done_at\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -4316,163 +4498,6 @@
         "saas_task_done_note_check": {
           "name": "saas_task_done_note_check",
           "value": "\"admin\".\"saas_task\".\"done_note\" IS NULL OR length(\"admin\".\"saas_task\".\"done_note\") <= 2000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_web_contact": {
-      "name": "saas_web_contact",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mailbox": {
-          "name": "mailbox",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_page": {
-          "name": "source_page",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sheets": {
-          "name": "sheets",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_web_contact_mailbox_idx": {
-          "name": "saas_web_contact_mailbox_idx",
-          "columns": [
-            {
-              "expression": "mailbox",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_web_contact_created_idx": {
-          "name": "saas_web_contact_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_web_contact_client_idx": {
-          "name": "saas_web_contact_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_web_contact_client_id_saas_client_id_fk": {
-          "name": "saas_web_contact_client_id_saas_client_id_fk",
-          "tableFrom": "saas_web_contact",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_web_contact_email_check": {
-          "name": "saas_web_contact_email_check",
-          "value": "\"admin\".\"saas_web_contact\".\"email\" = lower(\"admin\".\"saas_web_contact\".\"email\") AND length(\"admin\".\"saas_web_contact\".\"email\") BETWEEN 3 AND 254"
-        },
-        "saas_web_contact_mailbox_check": {
-          "name": "saas_web_contact_mailbox_check",
-          "value": "\"admin\".\"saas_web_contact\".\"mailbox\" = lower(\"admin\".\"saas_web_contact\".\"mailbox\") AND length(\"admin\".\"saas_web_contact\".\"mailbox\") BETWEEN 3 AND 254"
-        },
-        "saas_web_contact_product_check": {
-          "name": "saas_web_contact_product_check",
-          "value": "\"admin\".\"saas_web_contact\".\"product\" IN ('dental','medical','optical')"
-        },
-        "saas_web_contact_page_check": {
-          "name": "saas_web_contact_page_check",
-          "value": "\"admin\".\"saas_web_contact\".\"source_page\" ~ '^/[a-z0-9-]+(/[a-z0-9-]+)*$' AND length(\"admin\".\"saas_web_contact\".\"source_page\") <= 160"
-        },
-        "saas_web_contact_sheets_check": {
-          "name": "saas_web_contact_sheets_check",
-          "value": "cardinality(\"admin\".\"saas_web_contact\".\"sheets\") BETWEEN 1 AND 5 AND array_to_string(\"admin\".\"saas_web_contact\".\"sheets\", ',') ~ '^[a-z0-9-]{1,40}(,[a-z0-9-]{1,40})*$'"
         }
       },
       "isRLSEnabled": false
@@ -49699,12 +49724,6 @@
           "notNull": true,
           "default": "'web'"
         },
-        "source_page": {
-          "name": "source_page",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -49867,10 +49886,6 @@
         "saas_waitlist_request_source_check": {
           "name": "saas_waitlist_request_source_check",
           "value": "\"admin\".\"saas_waitlist_request\".\"source\" IN ('web','administracion')"
-        },
-        "saas_waitlist_request_source_page_check": {
-          "name": "saas_waitlist_request_source_page_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"source_page\" IS NULL OR \"admin\".\"saas_waitlist_request\".\"source_page\" ~ '^/[a-z0-9-]+(/[a-z0-9-]+)*$' AND length(\"admin\".\"saas_waitlist_request\".\"source_page\") <= 160"
         },
         "saas_waitlist_request_status_check": {
           "name": "saas_waitlist_request_status_check",

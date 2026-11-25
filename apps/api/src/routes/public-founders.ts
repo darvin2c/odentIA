@@ -188,7 +188,7 @@ export function createPublicFoundersRoute(deps: {
     const parsed = waitlistInputSchemaFor(product).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     // La página desde la que se envió va en la dirección (`?desde=`), no en el cuerpo: así la
-    // API de antes la ignora mientras la web nueva ya se publicó (ADR 0214).
+    // API de antes la ignora mientras la web nueva ya se publicó (ADR 0215).
     const sourcePage = webPageOf(c.req.query("desde"))
     const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product, { sourcePage }))
     // La copia sale una sola vez: si ya estaba en la lista, no se repite.
@@ -214,12 +214,12 @@ export function createPublicFoundersRoute(deps: {
       if (team) await noticeTeam(team, result.id, result.clientId, product, parsed.data)
     }
     // La misma respuesta si ya estaba en la lista: la web no dice si un correo ya pidió entrar,
-    // ni promete la copia (ADR 0214).
+    // ni promete la copia (ADR 0215).
     return c.json({ ok: true, answerDays: result.answerDays }, 201)
   })
 
   /**
-   * El aviso de una guía (ADR 0214): quien bajó una plantilla deja su correo y le llegan
+   * El aviso de una guía (ADR 0215): quien bajó una plantilla deja su correo y le llegan
    * las plantillas adjuntas. Solo JSON, con su campo trampa y 3 por red cada 10 minutos; los
    * topes que frenan el abuso viven en la base (`submitWebContact`): uno por buzón al día y
    * unos pocos por hora entre todos. No dice si ese correo ya es cliente o ya pidió entrar, y

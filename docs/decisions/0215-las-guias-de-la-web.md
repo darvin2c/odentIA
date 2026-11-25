@@ -1,4 +1,4 @@
-# 0214 · Las guías de la web: plantillas sin pedir el correo y el correo opcional al descargar
+# 0215 · Las guías de la web: plantillas sin pedir el correo y el correo opcional al descargar
 
 Fecha: 2026-11-24 · Estado: aceptada · Extiende la [0046](0046-web-de-marketing-en-astro.md) (la web) y la [0185](0185-el-arm-de-la-administracion.md) (el cliente existe desde el primer contacto)
 

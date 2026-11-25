@@ -6,7 +6,7 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { accountEventSendersFromEnv, adminChannelsFromEnv, appContractPeersFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { accountEventSendersFromEnv, adminChannelsFromEnv, appContractPeersFromEnv, appContractSendersFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp, type ExternalAppEntry } from "./app.js"
 import { env } from "./env.js"
 import { instagramLoginFromEnv, metaPagesFromEnv } from "./routes/meta-pages.js"
@@ -128,6 +128,9 @@ for (const problem of accountEvents.problems) console.warn(`api: ${problem}`)
 // El acuerdo de esas apps con la administración (ADR 0211): sin su secreto, apagado.
 const appContract = appContractPeersFromEnv(env)
 for (const problem of appContract.problems) console.warn(`api: ${problem}`)
+// Lo que la administración les pide (ADR 0214): sin su dirección y su secreto, no se pide nada.
+const appRequests = appContractSendersFromEnv(env)
+for (const problem of appRequests.problems) console.warn(`api: ${problem}`)
 
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
@@ -178,6 +181,7 @@ const app = createApp({
   externalApps,
   accountEventSenders: accountEvents.senders,
   appContractPeers: appContract.peers,
+  appContractSenders: appRequests.senders,
   webURL: env.WEB_URL,
   adminURL: env.ADMIN_URL,
   mailer,

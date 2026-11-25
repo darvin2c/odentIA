@@ -20,6 +20,8 @@ export interface FrontSpec {
   roots: 1 | 2 | 3
   /** Largo de la raíz, en mm. */
   root: number
+  /** Temporal: sus molares tienen raíces cortas, finas y abiertas. */
+  primary?: boolean
 }
 
 type Row = Record<number, FrontSpec>
@@ -90,10 +92,11 @@ export function drawnWidthMm(tooth: number): number {
 
 /** Las medidas de la pieza FDI (permanente o temporal). */
 export function frontSpecOf(tooth: number): FrontSpec {
-  const table = isPrimaryTooth(tooth) ? PRIMARY : PERMANENT
+  const primary = isPrimaryTooth(tooth)
+  const table = primary ? PRIMARY : PERMANENT
   const spec = table[isUpperTooth(tooth) ? "upper" : "lower"][tooth % 10]
   if (!spec) throw new RangeError(`Pieza FDI inválida: ${tooth}`)
-  return spec
+  return primary ? { ...spec, primary } : spec
 }
 
 /**
@@ -152,6 +155,7 @@ export function rootPaths(spec: FrontSpec, w: number, ch: number, rl: number): R
       centers: [0.5],
     }
   }
+  if (spec.primary) return primaryMolarRoots(spec, w, ch, rl)
   // Dos raíces: el premolar se divide más abajo y más junto que el molar.
   const premolar = spec.kind === "premolar"
   const f = premolar ? 0.5 : 0.22
@@ -168,6 +172,24 @@ export function rootPaths(spec: FrontSpec, w: number, ch: number, rl: number): R
   }
 }
 
+/**
+ * Las raíces del molar temporal: se separan casi en el cuello, son finas y se abren hasta el ancho
+ * de la corona, porque abrazan al premolar que viene debajo (Wheeler, dentición temporal). Con la
+ * forma del molar permanente se veían largas y paralelas (QA del 23 nov, voz clínica).
+ */
+function primaryMolarRoots(spec: FrontSpec, w: number, ch: number, rl: number): RootGeometry {
+  const X = (f: number) => n(f * w)
+  const R = (f: number) => n(ch + f * rl)
+  const front = `M${X(0.15)},${n(ch - 1)} C${X(0.1)},${R(0.3)} ${X(0.02)},${R(0.62)} ${X(0.02)},${R(0.85)} Q${X(0.05)},${R(0.93)} ${X(0.11)},${R(0.84)} C${X(0.16)},${R(0.6)} ${X(0.38)},${R(0.22)} ${X(0.47)},${R(0.14)} Q${X(0.5)},${R(0.1)} ${X(0.53)},${R(0.14)} C${X(0.62)},${R(0.22)} ${X(0.84)},${R(0.6)} ${X(0.89)},${R(0.84)} Q${X(0.95)},${R(0.93)} ${X(0.98)},${R(0.85)} C${X(0.98)},${R(0.62)} ${X(0.9)},${R(0.3)} ${X(0.85)},${n(ch - 1)} Z`
+  const centers = [0.07, 0.93]
+  if (spec.roots === 2) return { front, centers }
+  return {
+    back: `M${X(0.38)},${n(ch - 1)} C${X(0.38)},${R(0.45)} ${X(0.45)},${R(0.82)} ${X(0.5)},${R(0.84)} C${X(0.55)},${R(0.82)} ${X(0.62)},${R(0.45)} ${X(0.62)},${n(ch - 1)} Z`,
+    front,
+    centers: [...centers, 0.5],
+  }
+}
+
 /** Un conducto por raíz, desde la cámara hasta cerca del ápice (NTS 6.1.37: uno por conducto). */
 export function canalPaths(spec: FrontSpec, w: number, ch: number, rl: number): string[] {
   const X = (f: number) => n(f * w)
@@ -175,11 +197,14 @@ export function canalPaths(spec: FrontSpec, w: number, ch: number, rl: number): 
   if (spec.roots === 1) return [`M${X(0.5)},${n(0.45 * ch)} L${X(0.5)},${R(0.93)}`]
   const { centers } = rootPaths(spec, w, ch, rl)
   const [first, second] = centers as [number, number]
+  // En el molar de leche las raíces son cortas y se abren: el conducto termina antes y sigue su raíz.
+  const end = spec.primary ? 0.76 : 0.93
+  const bend = spec.primary ? 0.3 : 0.44
   const list = [
-    `M${X(0.5)},${n(0.5 * ch)} Q${X(0.44)},${n(ch)} ${X(first)},${R(0.93)}`,
-    `M${X(0.5)},${n(0.5 * ch)} Q${X(0.56)},${n(ch)} ${X(second)},${R(0.93)}`,
+    `M${X(0.5)},${n(0.5 * ch)} Q${X(bend)},${n(ch)} ${X(spec.primary ? first + 0.02 : first)},${R(end)}`,
+    `M${X(0.5)},${n(0.5 * ch)} Q${X(1 - bend)},${n(ch)} ${X(spec.primary ? second - 0.02 : second)},${R(end)}`,
   ]
-  if (spec.roots === 3) list.push(`M${X(0.5)},${n(0.5 * ch)} L${X(0.5)},${R(0.98)}`)
+  if (spec.roots === 3) list.push(`M${X(0.5)},${n(0.5 * ch)} L${X(0.5)},${R(spec.primary ? 0.74 : 0.98)}`)
   return list
 }
 

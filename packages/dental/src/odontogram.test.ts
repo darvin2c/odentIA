@@ -3,6 +3,7 @@ import type { FindingRecord } from "./index.js"
 import {
   activeFindingsAsOf,
   conditionLabel,
+  findingReplaced,
   FINDINGS,
   findingAbbreviation,
   findingColor,
@@ -431,6 +432,88 @@ describe("color y vigencia", () => {
     ]
     expect(activeFindingsAsOf(history, "2026-01-20").map((item) => item.id)).toEqual(["caries"])
     expect(activeFindingsAsOf(history, "2026-02-02")).toEqual([])
+  })
+})
+
+// Lienzo del 24 nov: el espigo-muñón de la 15 anotado dos veces quedaba dos veces vigente.
+describe("el mismo hallazgo de toda la pieza, otra vez", () => {
+  const post = (id: string, createdAt: string, quality: "good" | "poor"): FindingRecord => ({
+    id,
+    toothNumber: 15,
+    condition: "post_and_core",
+    status: "recorded",
+    createdAt,
+    details: { quality },
+  })
+  const history = [post("viejo", "2026-11-23T10:00:00Z", "good"), post("nuevo", "2026-11-24T10:00:00Z", "poor")]
+
+  it("el nuevo reemplaza al anterior; antes del nuevo, el anterior seguía vigente", () => {
+    expect(activeFindingsAsOf(history).map((item) => item.id)).toEqual(["nuevo"])
+    expect(activeFindingsAsOf(history, "2026-11-23T20:00:00Z").map((item) => item.id)).toEqual(["viejo"])
+  })
+
+  it("lo de las caras y la fractura no se reemplazan: pueden ser dos", () => {
+    const faces = [
+      { id: "m", toothNumber: 26, condition: "caries", surface: "mesial", status: "recorded", createdAt: "2026-11-23" },
+      { id: "d", toothNumber: 26, condition: "caries", surface: "distal", status: "recorded", createdAt: "2026-11-24" },
+      { id: "f1", toothNumber: 21, condition: "fracture", status: "recorded", createdAt: "2026-11-23" },
+      { id: "f2", toothNumber: 21, condition: "fracture", status: "recorded", createdAt: "2026-11-24" },
+    ]
+    expect(activeFindingsAsOf(faces).map((item) => item.id).sort()).toEqual(["d", "f1", "f2", "m"])
+  })
+
+  it("tratar el más nuevo no devuelve el anterior; anularlo, sí", () => {
+    const treated = [history[0]!, { ...history[1]!, resolvedAt: "2026-11-25T10:00:00Z" }]
+    expect(activeFindingsAsOf(treated, "2026-11-26T00:00:00Z")).toEqual([])
+    const voided = [history[0]!, { ...history[1]!, status: "voided", voidedAt: "2026-11-25T10:00:00Z" }]
+    expect(activeFindingsAsOf(voided, "2026-11-26T00:00:00Z").map((item) => item.id)).toEqual(["viejo"])
+  })
+
+  it("la corona temporal reemplaza a la corona, y la pulpectomía a la pulpotomía; la posición anormal no se reemplaza", () => {
+    const records: FindingRecord[] = [
+      { id: "cmc", toothNumber: 15, condition: "crown", status: "recorded", createdAt: "2026-10-01", details: { quality: "good" } },
+      { id: "ct", toothNumber: 15, condition: "temporary_crown", status: "recorded", createdAt: "2026-11-01" },
+      { id: "pp", toothNumber: 85, condition: "pulpotomy", status: "recorded", createdAt: "2026-10-01", details: { quality: "good" } },
+      { id: "pc", toothNumber: 85, condition: "root_canal_treatment", status: "recorded", createdAt: "2026-11-01", details: { quality: "good" } },
+      { id: "m", toothNumber: 12, condition: "abnormal_position", status: "recorded", createdAt: "2026-10-01" },
+      { id: "v", toothNumber: 12, condition: "abnormal_position", status: "recorded", createdAt: "2026-11-01" },
+    ]
+    expect(activeFindingsAsOf(records).map((item) => item.id).sort()).toEqual(["ct", "m", "pc", "v"])
+    expect(findingReplaced(activeFindingsAsOf(records), 15, "crown")?.id).toBe("ct")
+  })
+
+  it("el puente rehecho en las mismas piezas reemplaza al anterior; en otras piezas, conviven", () => {
+    const bridge = (id: string, createdAt: string, relatedTeeth: number[]): FindingRecord => ({
+      id,
+      toothNumber: relatedTeeth[0]!,
+      condition: "fixed_partial_denture",
+      status: "recorded",
+      createdAt,
+      details: { relatedTeeth, quality: "good" },
+    })
+    const records = [
+      bridge("viejo", "2026-10-01", [44, 45, 46]),
+      bridge("otro", "2026-10-01", [24, 25, 26]),
+      bridge("nuevo", "2026-11-01", [46, 45, 44]),
+    ]
+    expect(activeFindingsAsOf(records).map((item) => item.id).sort()).toEqual(["nuevo", "otro"])
+    expect(findingReplaced(activeFindingsAsOf(records), 44, "fixed_partial_denture", [44, 45, 46])?.id).toBe("nuevo")
+    expect(findingReplaced(activeFindingsAsOf(records), 34, "fixed_partial_denture", [34, 35, 36])).toBeNull()
+  })
+
+  it("la observación clínica no se reemplaza: una pieza puede tener varias", () => {
+    const notes = [
+      { id: "frio", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-10-01" },
+      { id: "color", toothNumber: 21, condition: "clinical_observation", status: "recorded", createdAt: "2026-11-01" },
+    ]
+    expect(activeFindingsAsOf(notes).map((item) => item.id)).toEqual(["frio", "color"])
+  })
+
+  it("el panel sabe cuál reemplazaría, para avisarlo antes de registrar", () => {
+    const active = activeFindingsAsOf(history)
+    expect(findingReplaced(active, 15, "post_and_core")?.id).toBe("nuevo")
+    expect(findingReplaced(active, 14, "post_and_core")).toBeNull()
+    expect(findingReplaced(active, 15, "caries")).toBeNull()
   })
 })
 

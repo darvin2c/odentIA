@@ -85,7 +85,8 @@ export function TextField({
       inputMode={inputMode}
       aria-invalid={error ? true : undefined}
       aria-describedby={describedBy}
-      className={prefix ? "pl-9" : undefined}
+      /* «S/» cabe en pl-9; «US$» o «MX$» necesitan más, o el número queda debajo del símbolo. */
+      className={prefix ? (prefix.length > 2 ? "pl-12" : "pl-9") : undefined}
     />
   )
   return (

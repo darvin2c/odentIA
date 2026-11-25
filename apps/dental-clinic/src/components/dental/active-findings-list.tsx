@@ -1,13 +1,13 @@
-import { activeFindingsAsOf, conditionLabel, type OdontogramStandardProfile, surfaceLabel, variantLabel } from "@odentia/dental"
+import { activeFindingsAsOf, findingByVariant, type OdontogramStandardProfile, surfaceLabel } from "@odentia/dental"
 import { Button } from "@odentia/ui"
 import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import type { OdontogramEntry } from "../../lib/dental/odontogram"
+import { findingTeeth, type OdontogramEntry, teethPhrase } from "../../lib/dental/odontogram"
 import { officialAbbreviation } from "./odontogram-notation"
 
 /** «CD · Lesión de caries a nivel de la dentina»: la variante dice el hallazgo; sin ella, su nombre. */
 function compactFinding(official: OdontogramStandardProfile | null, entry: OdontogramEntry): string {
-  const what = variantLabel(entry.condition, entry.details?.variant) ?? conditionLabel(entry.condition)
+  const what = findingByVariant(entry.condition, entry.details?.variant)
   const abbr = officialAbbreviation(official, entry)
   return abbr ? `${abbr} · ${what}` : what
 }
@@ -62,9 +62,12 @@ export function ActiveFindingsList({
         <ul className="flex flex-col divide-y">
           {groups.map((group) => {
             const entry = group.first as OdontogramEntry
+            const own = findingTeeth(entry)
             const words = [
               // Corto: la sigla de la norma (si la clínica la usa) y la variante, sin repetir el hallazgo.
               compactFinding(official, entry),
+              // El puente de la 44 a la 46 nombra todas sus piezas, no solo la 44 (QA del 23 nov).
+              own.length > 1 ? teethPhrase(own) : null,
               group.surfaces.length ? surfacesWords(group.surfaces) : null,
               entry.diagnosisName ?? (entry.diagnosisCode ? diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode) : null),
             ]

@@ -1,9 +1,12 @@
 import {
   Badge,
+  Button,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
+  FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
   toast,
@@ -11,8 +14,8 @@ import {
 import { Textarea } from "@odentia/ui/components/textarea"
 import { EmptyState, KpiCard, PageNotice, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown, CreditCard } from "lucide-react"
-import { type FormEvent, useId, useState } from "react"
+import { ChevronDown, CreditCard, Upload } from "lucide-react"
+import { type FormEvent, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
 import { when } from "./lib/pedidos"
 import {
@@ -23,13 +26,23 @@ import {
   noticeTone,
   PAYMENT_WORDS,
   type PlanView,
+  RECEIPT_WORDS,
   STATUS_WORDS,
   SUPPORT_KIND_LABELS,
   SUPPORT_STATUS_WORDS,
   type SupportKind,
 } from "./lib/plan"
-import { money } from "./lib/tienda"
-import { FormAlert, fieldErrors, SELECT_CLASSES, TextField } from "./piezas"
+import { money, moneyInput, readMoney } from "./lib/tienda"
+import {
+  FormAlert,
+  FormSheet,
+  fieldErrors,
+  MoneyField,
+  SELECT_CLASSES,
+  shrinkPhoto,
+  TextField,
+  useDirty,
+} from "./piezas"
 import { ErrorBlock, useStoreContext } from "./tiendas"
 
 /**
@@ -96,8 +109,8 @@ function PlanBody({ view }: { view: PlanView }) {
       {state ? (
         <>
           <Summary state={state} />
-          <Charges state={state} />
-          <Payments state={state} />
+          <Charges state={state} connected={view.connected} />
+          <Payments state={state} view={view} />
         </>
       ) : (
         <EmptyState
@@ -166,7 +179,10 @@ function Summary({ state }: { state: Known }) {
   )
 }
 
-function Charges({ state }: { state: Known }) {
+function Charges({ state, connected }: { state: Known; connected: boolean }) {
+  const [paying, setPaying] = useState<Known["charges"][number] | null>(null)
+  // Se sube un comprobante de lo que falta pagar, si hay cómo pagar y gestorIA está conectada.
+  const canSend = connected && state.paymentMethods.length > 0
   return (
     <section aria-labelledby="plan-cobros" className="flex flex-col gap-3">
       <h3 id="plan-cobros" className="text-lg font-bold">
@@ -201,6 +217,16 @@ function Charges({ state }: { state: Known }) {
                   <ChevronDown aria-hidden className="size-4 text-muted-foreground" />
                   <span className="sr-only">Ver el detalle</span>
                 </CollapsibleTrigger>
+                {canSend &&
+                charge.paidCents < charge.amountCents &&
+                charge.status !== "anulada" ? (
+                  <div className="px-4 pb-3">
+                    <Button size="sm" variant="outline" onClick={() => setPaying(charge)}>
+                      <Upload aria-hidden />
+                      Subir comprobante
+                    </Button>
+                  </div>
+                ) : null}
                 <CollapsibleContent>
                   <ul className="flex flex-col gap-1 border-t px-4 py-3 text-sm">
                     {charge.lines.map((line) => (
@@ -224,19 +250,175 @@ function Charges({ state }: { state: Known }) {
           ))}
         </ul>
       )}
+      {paying ? (
+        <ReceiptSheet charge={paying} state={state} onClose={() => setPaying(null)} />
+      ) : null}
     </section>
   )
 }
 
-function Payments({ state }: { state: Known }) {
+/**
+ * Subir el comprobante de un cobro: sale a la administración, que lo revisa y confirma el pago.
+ * Una foto (se achica antes de subirla) o un PDF, hasta 1,5 MB.
+ */
+function ReceiptSheet({
+  charge,
+  state,
+  onClose,
+}: {
+  charge: Known["charges"][number]
+  state: Known
+  onClose: () => void
+}) {
+  const { store } = useStoreContext()
+  const queryClient = useQueryClient()
+  const owed = charge.amountCents - charge.paidCents
+  const [amount, setAmount] = useState(moneyInput(owed, charge.currency))
+  const [methodCode, setMethodCode] = useState(state.paymentMethods[0]?.code ?? "")
+  const [file, setFile] = useState<File | null>(null)
+  const [localError, setLocalError] = useState<Record<string, string>>({})
+  const fileInput = useRef<HTMLInputElement>(null)
+  const methodId = useId()
+  const dirty = useDirty({ amount, methodCode, file: file?.name })
+  const method = state.paymentMethods.find((one) => one.code === methodCode)
+  const send = useMutation({
+    mutationFn: async (amountCents: number) => {
+      const form = new FormData()
+      form.set("chargeId", charge.id)
+      form.set("amountCents", String(amountCents))
+      form.set("methodCode", methodCode)
+      if (file)
+        form.set(
+          "archivo",
+          file.type === "application/pdf" ? file : await shrinkPhoto(file),
+          "comprobante",
+        )
+      return api(`/api/tiendas/${store.id}/plan/comprobante`, { method: "POST", form })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: PLAN_KEY(store.id) })
+      toast.success("Comprobante subido: lo revisamos y confirmamos tu pago.")
+      onClose()
+    },
+  })
+  const submit = () => {
+    const cents = readMoney(amount, charge.currency)
+    const problems: Record<string, string> = {}
+    if (!cents) problems.amountCents = "Escribe cuánto pagaste"
+    if (!file) problems.file = "Elige la foto o el PDF del comprobante"
+    setLocalError(problems)
+    if (cents && file) send.mutate(cents)
+  }
+  const errors = { ...fieldErrors(send.error), ...localError }
+  return (
+    <FormSheet
+      open
+      title="Subir comprobante"
+      description={`Del cobro del ${day(charge.periodStart)} al ${day(charge.periodEnd)}. Lo revisamos y confirmamos tu pago.`}
+      onClose={onClose}
+      onSubmit={submit}
+      dirty={dirty}
+      footer={
+        <>
+          <Button variant="outline" type="button" onClick={onClose}>
+            Cancelar
+          </Button>
+          <SubmitButton type="submit" pending={send.isPending}>
+            Subir comprobante
+          </SubmitButton>
+        </>
+      }
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor={methodId}>Cómo pagaste</FieldLabel>
+          <select
+            id={methodId}
+            value={methodCode}
+            onChange={(e) => setMethodCode(e.target.value)}
+            className={SELECT_CLASSES}
+          >
+            {state.paymentMethods.map((one) => (
+              <option key={one.code} value={one.code}>
+                {one.name}
+              </option>
+            ))}
+          </select>
+          {method?.instructions ? (
+            <FieldDescription className="whitespace-pre-wrap">{method.instructions}</FieldDescription>
+          ) : null}
+          {errors.methodCode ? <FieldError>{errors.methodCode}</FieldError> : null}
+        </Field>
+        <MoneyField
+          label="Cuánto pagaste"
+          currency={charge.currency}
+          value={amount}
+          onChange={setAmount}
+          error={errors.amountCents}
+          help={`Falta pagar ${money(owed, charge.currency)}.`}
+        />
+        <Field>
+          <FieldLabel>Foto o PDF del comprobante</FieldLabel>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            className="sr-only"
+            tabIndex={-1}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" type="button" onClick={() => fileInput.current?.click()}>
+              {file ? "Elegir otro" : "Elegir el archivo"}
+            </Button>
+            {file ? <span className="min-w-0 truncate text-sm">{file.name}</span> : null}
+          </div>
+          {errors.file ? (
+            <FieldError>{errors.file}</FieldError>
+          ) : (
+            <FieldDescription>JPG, PNG, WebP o PDF, hasta 1,5 MB.</FieldDescription>
+          )}
+        </Field>
+        <FormAlert error={send.error} />
+      </FieldGroup>
+    </FormSheet>
+  )
+}
+
+function Payments({ state, view }: { state: Known; view: PlanView }) {
   return (
     <section aria-labelledby="plan-pagos" className="flex flex-col gap-3">
       <h3 id="plan-pagos" className="text-lg font-bold">
         Tus pagos
       </h3>
-      {state.payments.length === 0 ? (
+      {view.pendingReceipts.length > 0 ? (
+        <ul className="flex flex-col divide-y rounded-xl border bg-card">
+          {view.pendingReceipts.map((receipt) => (
+            <li key={receipt.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4">
+              <span className="min-w-0 flex-1 basis-40 text-sm">
+                {when(receipt.createdAt)}
+                {receipt.reason ? (
+                  <span className="block text-muted-foreground">{receipt.reason}</span>
+                ) : null}
+              </span>
+              <span className="font-semibold tabular-nums">
+                {money(
+                  receipt.amountCents,
+                  state.charges.find((one) => one.id === receipt.chargeId)?.currency ??
+                    state.plan?.currency ??
+                    "USD",
+                )}
+              </span>
+              <Badge variant={receipt.status === "rechazado" ? "destructive" : "outline"}>
+                {RECEIPT_WORDS[receipt.status]}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {state.payments.length === 0 && view.pendingReceipts.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no hay pagos.</p>
-      ) : (
+      ) : state.payments.length === 0 ? null : (
         <ul className="flex flex-col divide-y rounded-xl border bg-card">
           {state.payments.map((payment) => (
             <li key={payment.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4">

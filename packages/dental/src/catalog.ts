@@ -104,6 +104,17 @@ export const FINDINGS: readonly FindingDefinition[] = [
     color: "red",
     symbol: "Línea roja sobre la corona y/o la raíz según el caso",
     requiresDrawing: true,
+    // El tipo, de la clasificación de traumatismos dentales de la IADT (2020): cambia lo que se hace
+    // (una de esmalte se pule; con la pulpa expuesta va a endodoncia). La NTS 188 no le da sigla.
+    variantName: "Tipo",
+    variants: [
+      { value: "crack", label: "Infracción (fisura)", abbreviation: "" },
+      { value: "enamel_fracture", label: "Esmalte", abbreviation: "" },
+      { value: "enamel_dentin", label: "Esmalte y dentina", abbreviation: "" },
+      { value: "pulp_exposed", label: "Con la pulpa expuesta", abbreviation: "" },
+      { value: "crown_root", label: "Corona y raíz", abbreviation: "" },
+      { value: "root_fracture", label: "Raíz", abbreviation: "" },
+    ],
   },
   {
     code: "fusion",
@@ -404,6 +415,17 @@ const LEGACY_LABELS: Record<string, string> = {
 export function variantLabel(condition: string, variant: string | null | undefined): string | undefined {
   if (!variant) return undefined
   return findingDefinition(condition)?.variants?.find((item) => item.value === variant)?.label
+}
+
+/**
+ * El hallazgo dicho por su variante, cuando la tiene: «Lesión de caries a nivel de la dentina»,
+ * «Corona metálica». El tipo de fractura no dice solo qué es («Raíz»): va con el hallazgo,
+ * «Fractura dental · raíz». Sin variante, el nombre del hallazgo.
+ */
+export function findingByVariant(condition: string, variant: string | null | undefined): string {
+  const own = variantLabel(condition, variant)
+  if (!own) return conditionLabel(condition)
+  return condition === "fracture" ? `${conditionLabel(condition)} · ${own.toLowerCase()}` : own
 }
 
 /** Etiqueta española del hallazgo; el código desconocido se devuelve tal cual, nunca "Otro". */

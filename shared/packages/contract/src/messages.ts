@@ -24,8 +24,32 @@ export const CONTRACT_PATHS = {
   state: "/api/contract/state",
 } as const
 
-/** Lo más que pesa un mensaje en cualquiera de los dos sentidos. */
+/**
+ * Lo que la administración le pide a la app (`POST` a la dirección de la app más
+ * `APP_CONTRACT_PATHS.requests`), firmado con el mismo secreto del par: abrir la cuenta de un
+ * cliente, dejar entrar a soporte y quitar a una persona.
+ */
+export const APP_CONTRACT_PATHS = { requests: "/acuerdo/pedidos" } as const
+
+/** Lo más que pesa un mensaje en cualquiera de los dos sentidos (salvo un aviso con su comprobante). */
 export const CONTRACT_MAX_BODY_BYTES = 64 * 1024
+
+/**
+ * El comprobante de pago que sube la app viaja dentro de su aviso (`pago.comprobante`), en
+ * base64: así nadie lee el almacenamiento del otro ni hace falta un enlace. Tipos y tope: los de
+ * una foto o un PDF de una pantalla; la administración vuelve a mirar el contenido.
+ */
+export const CONTRACT_RECEIPT_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+] as const
+export const CONTRACT_MAX_RECEIPT_BYTES = 1_500_000
+/** Lo que ocupa ese archivo en base64. */
+export const CONTRACT_MAX_RECEIPT_BASE64 = Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 4
+/** Lo más que pesa un aviso a `CONTRACT_PATHS.events`: el comprobante en base64 y sus datos. */
+export const CONTRACT_MAX_EVENT_BYTES = CONTRACT_MAX_RECEIPT_BASE64 + 16 * 1024
 
 /** La referencia de la cuenta en la app (en gestorIA, su tienda): la app la elige y no cambia. */
 const accountRef = z.string().trim().min(1).max(200)
@@ -86,7 +110,39 @@ export const supportEvent = z.object({
   }),
 })
 
-export const appEvent = z.discriminatedUnion("type", [accountOpenedEvent, usageEvent, supportEvent])
+/**
+ * Subió un comprobante de pago de un cargo: queda por confirmar en la administración, como el que
+ * sube una clínica. El cargo y el medio de pago son los que la app leyó en el estado de la cuenta.
+ * La clave del aviso es la del pago: repetido, no se registra dos veces.
+ */
+export const receiptEvent = z.object({
+  type: z.literal("pago.comprobante"),
+  timestamp: instant,
+  data: z.object({
+    account: accountRef,
+    userId,
+    chargeId: z.string().trim().min(1).max(200),
+    amountCents: z.number().int().positive(),
+    methodCode: z.string().trim().min(1).max(80),
+    file: z.object({
+      contentType: z.enum(CONTRACT_RECEIPT_TYPES),
+      /** En base64 estándar; el tope es el del archivo. */
+      base64: z
+        .string()
+        .min(4)
+        .max(CONTRACT_MAX_RECEIPT_BASE64)
+        .regex(/^[A-Za-z0-9+/]+={0,2}$/, "El archivo va en base64"),
+    }),
+    note: z.string().trim().max(500).nullable().optional(),
+  }),
+})
+
+export const appEvent = z.discriminatedUnion("type", [
+  accountOpenedEvent,
+  usageEvent,
+  supportEvent,
+  receiptEvent,
+])
 export type AppEvent = z.infer<typeof appEvent>
 export type AppEventType = AppEvent["type"]
 
@@ -178,6 +234,16 @@ export const accountState = z.object({
   notices: z.array(
     z.object({ key: z.string(), family: z.string(), level: z.string(), action: z.string() }),
   ),
+  /** Cómo se le puede pagar a la administración (sus medios activos), para el comprobante. */
+  paymentMethods: z
+    .array(
+      z.object({
+        code: z.string(),
+        name: z.string(),
+        instructions: z.string().nullable(),
+      }),
+    )
+    .default([]),
   /** Los casos de soporte de la cuenta con las respuestas del equipo. */
   support: z.array(
     z.object({
@@ -190,3 +256,74 @@ export const accountState = z.object({
   ),
 })
 export type AccountState = z.infer<typeof accountState>
+
+/* ---------- Lo que la administración le pide a la app ---------- */
+
+/** Una persona de la cuenta única por su id (el `sub` de su token). */
+const person = z.object({
+  userId,
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().toLowerCase().email().max(254),
+})
+const reason = z.string().trim().min(3).max(500)
+
+/**
+ * Abrir la cuenta de un cliente con su plan: la administración ya la abrió de su lado (con el id
+ * que manda) y la app crea la cuenta con ese id, a nombre de su dueño. Repetido, no abre otra.
+ */
+export const openAccountRequest = z.object({
+  type: z.literal("cuenta.abrir"),
+  timestamp: instant,
+  data: z.object({
+    account: z.uuid(),
+    name: z.string().trim().min(1).max(80),
+    /** ISO 4217: la moneda en que vende. */
+    currency,
+    country: country.nullable(),
+    owner: person,
+  }),
+})
+
+/** Lo más que dura la entrada de soporte, como en las clínicas. */
+export const SUPPORT_ACCESS_MAX_MINUTES = 60
+
+/**
+ * Dejar entrar a soporte: una persona del equipo pide mirar la cuenta un rato, para algo. La app
+ * decide cómo (en gestorIA lo acepta su Dueño o su Administrador) y lo deja anotado.
+ */
+export const supportAccessRequest = z.object({
+  type: z.literal("soporte.entrar"),
+  timestamp: instant,
+  data: z.object({
+    account: accountRef,
+    staff: person,
+    minutes: z.number().int().min(5).max(SUPPORT_ACCESS_MAX_MINUTES),
+    reason,
+  }),
+})
+
+/** Quitar a una persona de la cuenta, con el motivo. */
+export const removePersonRequest = z.object({
+  type: z.literal("equipo.quitar"),
+  timestamp: instant,
+  data: z.object({ account: accountRef, userId, reason }),
+})
+
+export const adminRequest = z.discriminatedUnion("type", [
+  openAccountRequest,
+  supportAccessRequest,
+  removePersonRequest,
+])
+export type AdminRequest = z.infer<typeof adminRequest>
+export type AdminRequestType = AdminRequest["type"]
+
+/**
+ * Lo que responde la app a un pedido (siempre 200 si lo leyó): «hecho» o «fallo» con su motivo
+ * en palabras para el equipo (es la app la que sabe por qué). Repetido con la misma clave, la
+ * misma respuesta. Cualquier otra respuesta (sin firma, caída) se reintenta con la misma clave.
+ */
+export const adminRequestResult = z.object({
+  status: z.enum(["hecho", "fallo"]),
+  message: z.string().max(500).nullable(),
+})
+export type AdminRequestResult = z.infer<typeof adminRequestResult>

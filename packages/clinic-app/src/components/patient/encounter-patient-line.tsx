@@ -71,6 +71,29 @@ export function useReservedTop(): void {
   }, [])
 }
 
+/**
+ * El alto del pie fijo de la atención («Faltan…» y «Finalizar y firmar»): lo que se pega arriba y
+ * llega hasta abajo (el panel de la pieza) termina encima del pie, no detrás. Sin el pie vale 0.
+ */
+export const CLOSING_BAR_HEIGHT_VAR = "--closing-bar-h"
+
+/** Mide el pie fijo mientras se ve y lo publica en `--closing-bar-h`. */
+export function useReservedBottom(bar: RefObject<HTMLElement | null>, shown: boolean): void {
+  useEffect(() => {
+    const el = bar.current
+    if (!shown || !el) return
+    const root = document.documentElement
+    const update = () => root.style.setProperty(CLOSING_BAR_HEIGHT_VAR, `${el.offsetHeight}px`)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      root.style.removeProperty(CLOSING_BAR_HEIGHT_VAR)
+    }
+  }, [bar, shown])
+}
+
 export function EncounterPatientLine({
   detail,
   health,

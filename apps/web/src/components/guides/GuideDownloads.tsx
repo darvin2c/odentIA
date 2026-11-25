@@ -1,7 +1,7 @@
 // Las plantillas de una guía y el aviso al descargar (lienzo, tablero 3; acta de la mesa del 24 nov):
 // el PDF baja sin pedir nada. Recién al tocarlo aparece, debajo, «Se está descargando · ¿No bajó?
 // Ábrelo aquí» y, con Fundadores, el correo opcional: le llegan las plantillas adjuntas con la puerta
-// para pedir entrar (`POST /api/public/founders/contact`, ADR 0214). Con el alta abierta no se pide
+// para pedir entrar (`POST /api/public/founders/contact`, ADR 0215). Con el alta abierta no se pide
 // nada: el botón de toda la web. Los estados van en la misma caja, del alto del más alto, y un
 // segundo PDF no vuelve a pedir el correo. Nunca dice si ese correo ya pidió entrar, y si no se
 // sabe si el correo salió no invita a reintentarlo: el servidor no lo manda dos veces.

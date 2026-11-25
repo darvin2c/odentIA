@@ -49,6 +49,12 @@ const envSchema = z.object({
    * acuerdo no existe y nada se acepta.
    */
   GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
+  /**
+   * El servidor de gestorIA (`https://servidor.gestoria24.com`), adonde la administración le pide
+   * abrir una cuenta, dejar entrar a soporte o quitar a una persona (ADR 0214), firmado con el
+   * mismo secreto. Vacío: no se le pide nada.
+   */
+  GESTORIA_CONTRACT_URL: z.string().trim().default(""),
   /** El dominio de vistIA (`vistia20.com`), como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()

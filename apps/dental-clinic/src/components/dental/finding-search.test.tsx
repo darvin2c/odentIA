@@ -8,7 +8,7 @@ import {
   toothPulp,
 } from "./finding-elsewhere"
 import { FindingReasonNotice, findingPickerBlocks } from "./finding-picker"
-import { searchFindings, treatmentSearchTerm } from "./finding-search"
+import { foundBySaying, searchFindings, treatmentSearchTerm } from "./finding-search"
 
 // Reglas clínicas del 18 nov: «¿Qué observas?» encuentra los hallazgos por cómo se dicen y, lo que
 // no es un hallazgo, lo dice y ofrece anotarlo como diagnóstico, agregarlo al plan o ir al motivo.
@@ -118,6 +118,22 @@ describe("el buscador de hallazgos de la pieza", () => {
     // A medio escribir, desde el inicio de la palabra: «pern» ya es el perno.
     expect(codes("pern")).toContain("post_and_core")
     expect(codes("brack")).toContain("fixed_orthodontic_appliance")
+  })
+
+  // QA de voces del 24 nov: «perno» trae el «Espigo-muñón» y la tarjeta dice que es el perno.
+  it("la tarjeta dice cómo se buscó si no fue por su nombre", () => {
+    expect(foundBySaying("post_and_core", "perno")).toBe(true)
+    expect(foundBySaying("post_and_core", "espigo")).toBe(false)
+    expect(foundBySaying("crown", "funda")).toBe(true)
+    expect(foundBySaying("caries", "caries")).toBe(false)
+  })
+
+  // QA del 23 nov: la causa de la pieza ausente («…por experiencia de caries dental») la traía.
+  it("«caries» y «diente de leche» no ofrecen la pieza ausente; «falta» y «no erupcionado», sí", () => {
+    for (const text of ["caries", "caries posterior", "diente de leche"])
+      expect(codes(text), text).not.toContain("missing_tooth")
+    for (const text of ["falta", "no erupcionado", "ausente", "pieza ausente"])
+      expect(codes(text), text).toContain("missing_tooth")
   })
 
   // Revisión de las reglas clínicas del 18 nov: «curación temporal» traía la restauración definitiva.

@@ -34,7 +34,7 @@ const FINDING_SYNONYMS: Partial<Record<string, readonly string[]>> = {
   fracture: ["raiz fracturada", "fracturado", "fracturada"],
   tooth_wear: ["desgaste", "desgastado", "abrasion", "abfraccion", "erosion"],
   rotation: ["girado", "girada", "rotado", "rotada"],
-  missing_tooth: ["extraida", "extraido", "falta"],
+  missing_tooth: ["extraida", "extraido", "falta", "no erupcionado", "ausente"],
   supernumerary_tooth: ["supernumerario", "mesiodens"],
   peg_tooth: ["conoide"],
   enamel_development_defect: ["hipoplasia", "fluorosis"],
@@ -123,6 +123,18 @@ export interface FindingSearch {
   elsewhere: boolean
 }
 
+/**
+ * Si el hallazgo salió por cómo se dice en la clínica y no por su nombre: «perno» trae el «Espigo-muñón»
+ * y la tarjeta lo dice, para no dudar si son lo mismo (QA de voces del 24 nov).
+ */
+export function foundBySaying(code: string, text: string): boolean {
+  const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
+  if (query.length < ELSEWHERE_MIN) return false
+  const finding = FINDINGS.find((item) => item.code === code)
+  if (!finding || normalizeSearchText(finding.label).includes(query)) return false
+  return findingsSaidAs(query).has(code)
+}
+
 /** Lo escrito, en el orden en que se ofrece: por el nombre desde el inicio de una palabra, por cómo se dice, y por el medio de una palabra. */
 function matchFindings(query: string): { findings: FindingDefinition[]; byName: number } {
   const startsWord = (label: string) => ` ${label}`.includes(` ${query}`)
@@ -132,9 +144,13 @@ function matchFindings(query: string): { findings: FindingDefinition[]; byName: 
   const otherwise = FINDINGS.filter(
     (finding) =>
       !named.has(finding.code) &&
-      ((finding.variants ?? []).some((variant) =>
-        normalizeSearchText(variant.label).includes(query),
-      ) ||
+      // Por sus variantes solo cuando son un tipo del hallazgo (la profundidad de la caries, el
+      // material): las de la pieza ausente son la causa («…por experiencia de caries dental») y
+      // «caries» o «diente de leche» la traían (QA del 23 nov).
+      ((!finding.variantName?.startsWith("Causa") &&
+        (finding.variants ?? []).some((variant) =>
+          normalizeSearchText(variant.label).includes(query),
+        )) ||
         saidAs.has(finding.code)),
   )
   // «funda» está dentro de «profundas»: la corona («funda») va antes que las fosas y fisuras.

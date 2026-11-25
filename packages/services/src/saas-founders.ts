@@ -112,7 +112,7 @@ export async function setSignupMode(
 
 /* ---------- Solicitudes de la web ---------- */
 
-/** Una página de la web, como se guarda (ADR 0214): «/guias/como-llenar-un-odontograma». */
+/** Una página de la web, como se guarda (ADR 0215): «/guias/como-llenar-un-odontograma». */
 const WEB_PAGE = /^\/[a-z0-9-]+(\/[a-z0-9-]+)*$/
 
 /**

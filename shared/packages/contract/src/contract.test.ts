@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { accountState, appEvent, stateQuestion } from "./messages.js"
+import {
+  accountState,
+  adminRequest,
+  adminRequestResult,
+  appEvent,
+  CONTRACT_MAX_EVENT_BYTES,
+  CONTRACT_MAX_RECEIPT_BYTES,
+  stateQuestion,
+} from "./messages.js"
 import { isSigningSecret, signMessage, verifySignedMessage } from "./signing.js"
 
 // El ejemplo de la especificación de Standard Webhooks (el mismo de sus bibliotecas oficiales).
@@ -158,5 +166,84 @@ describe("los mensajes del acuerdo", () => {
     expect(
       accountState.safeParse({ ...known, access: { ...known.access, status: "otra" } }).success,
     ).toBe(false)
+  })
+})
+
+describe("lo nuevo del acuerdo (ADR 0213)", () => {
+  const at = "2026-11-23T12:00:00.000Z"
+  const receipt = (base64: string, contentType = "image/png") => ({
+    type: "pago.comprobante",
+    timestamp: at,
+    data: {
+      account: "tienda-1",
+      userId: "u-1",
+      chargeId: "c-1",
+      amountCents: 1500,
+      methodCode: "yape",
+      file: { contentType, base64 },
+    },
+  })
+
+  it("el comprobante va en base64, con un tipo de la lista y hasta su tope", () => {
+    expect(appEvent.safeParse(receipt("iVBORw0KGgo=")).success).toBe(true)
+    expect(appEvent.safeParse(receipt("iVBORw0KGgo=", "text/html")).success).toBe(false)
+    expect(appEvent.safeParse(receipt("no es base64!")).success).toBe(false)
+    const big = "A".repeat(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3) + 8)
+    expect(appEvent.safeParse(receipt(big)).success).toBe(false)
+    // El aviso con el archivo más grande cabe en lo que se acepta.
+    const largest = JSON.stringify(receipt("A".repeat(Math.ceil((CONTRACT_MAX_RECEIPT_BYTES * 4) / 3))))
+    expect(largest.length).toBeLessThan(CONTRACT_MAX_EVENT_BYTES)
+  })
+
+  it("lo que pide la administración: abrir, dejar entrar a soporte y quitar, con su motivo", () => {
+    const owner = { userId: "u-1", name: "Rosa", email: "Rosa@Tienda.test" }
+    const open = adminRequest.parse({
+      type: "cuenta.abrir",
+      timestamp: at,
+      data: {
+        account: "7d0f1f6e-1d7b-4c43-9a3b-5f3e1d7b4c43",
+        name: "Calzados",
+        currency: "PEN",
+        country: "PE",
+        owner,
+      },
+    })
+    expect(open.type === "cuenta.abrir" && open.data.owner.email).toBe("rosa@tienda.test")
+    expect(
+      adminRequest.safeParse({
+        type: "soporte.entrar",
+        timestamp: at,
+        data: { account: "t", staff: owner, minutes: 30, reason: "Mirar el catálogo" },
+      }).success,
+    ).toBe(true)
+    for (const bad of [
+      // La tienda la elige la administración: un id, no un nombre.
+      { type: "cuenta.abrir", timestamp: at, data: { account: "tienda", name: "x", currency: "PEN", country: null, owner } },
+      // Más de una hora, como en las clínicas, no.
+      { type: "soporte.entrar", timestamp: at, data: { account: "t", staff: owner, minutes: 120, reason: "Mirar" } },
+      // Sin motivo, no.
+      { type: "equipo.quitar", timestamp: at, data: { account: "t", userId: "u-2", reason: " " } },
+      { type: "cuenta.cerrar", timestamp: at, data: { account: "t" } },
+    ])
+      expect(adminRequest.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
+    expect(adminRequestResult.safeParse({ status: "hecho", message: null }).success).toBe(true)
+    expect(adminRequestResult.safeParse({ status: "listo", message: null }).success).toBe(false)
+  })
+
+  it("el estado sin medios de pago (una administración de antes) se lee como lista vacía", () => {
+    const parsed = accountState.parse({
+      account: "t",
+      found: false,
+      at,
+      access: null,
+      agents: null,
+      budget: null,
+      plan: null,
+      charges: [],
+      payments: [],
+      notices: [],
+      support: [],
+    })
+    expect(parsed.paymentMethods).toEqual([])
   })
 })

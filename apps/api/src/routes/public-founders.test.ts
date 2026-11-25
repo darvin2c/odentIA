@@ -358,7 +358,7 @@ it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", 
   await ownerDb.update(saasSignupPolicy).set({ medicalMode: "invitacion" })
 })
 
-describe("las guías de la web (ADR 0214)", () => {
+describe("las guías de la web (ADR 0215)", () => {
   const GUIDE = "/guias/como-llenar-un-odontograma"
   const post = (app: Hono, path: string, payload: unknown) =>
     app.request(path, {

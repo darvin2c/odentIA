@@ -71,6 +71,20 @@
       "when": 1795444523230,
       "tag": "0009_reglas_acuerdo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795451432652,
+      "tag": "0010_soporte_y_pedidos",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795451433571,
+      "tag": "0011_reglas_soporte_y_pedidos",
+      "breakpoints": true
     }
   ]
 }

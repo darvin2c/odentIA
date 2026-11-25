@@ -1,4 +1,4 @@
-// Las guías de la web (ADR 0214): la lista, sus direcciones y lo que se arma de cada archivo (los
+// Las guías de la web (ADR 0215): la lista, sus direcciones y lo que se arma de cada archivo (los
 // minutos de lectura, la fecha en palabras y los datos para Google). Hoy son solo de odentIA: en
 // latidIA y vistIA, /guias no existe (`product-pages.json` no la sirve) y el pie no las muestra.
 import { PRODUCT } from "../product"

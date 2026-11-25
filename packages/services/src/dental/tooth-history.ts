@@ -1,6 +1,6 @@
 import { isTooth } from "./site.js"
 import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, doneSessionWords, isDiagnosisVerification } from "@odentia/clinical"
-import { isValidTooth } from "@odentia/dental"
+import { activeFindingsAsOf, type FindingDetails, isValidTooth, replacesOlder } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -12,7 +12,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
-import { and, eq, inArray, or } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { listPatientDocuments } from "../clinical.js"
 import { validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
@@ -72,7 +72,12 @@ export async function getToothHistory(
         and(
           eq(odontogramEntry.organizationId, orgId),
           eq(odontogramEntry.patientId, patientId),
-          eq(odontogramEntry.toothNumber, toothNumber),
+          // Un hallazgo de varias piezas (el puente de la 44 a la 46) se guarda en una y nombra las
+          // demás: la historia de la 45 también lo trae (QA del 23 nov: decía «sin registros»).
+          or(
+            eq(odontogramEntry.toothNumber, toothNumber),
+            sql`${odontogramEntry.details} -> 'relatedTeeth' @> ${JSON.stringify([toothNumber])}::jsonb`,
+          ),
         ),
       ),
     tx
@@ -162,8 +167,21 @@ export async function getToothHistory(
   // Una lesión de varias caras (una caries DO) es una fila por cara de la misma
   // anotación: se dice en una sola línea, «(Oclusal, Distal)», por estado.
   const lesions = new Map<string, ToothEvent>()
+  // De toda la pieza, el más nuevo del mismo hallazgo reemplaza al anterior (lienzo del 24 nov): el
+  // anterior sigue aquí, como «reemplazado».
+  const active = new Set(
+    activeFindingsAsOf(findings.map(({ row }) => ({ ...row, details: row.details as FindingDetails }))).map(
+      (row) => row.id,
+    ),
+  )
   for (const { row, author } of findings) {
-    const status = row.voidedAt ? "anulado" : row.resolvedAt ? "tratado" : "vigente"
+    const status = row.voidedAt
+      ? "anulado"
+      : row.resolvedAt
+        ? "tratado"
+        : replacesOlder({ ...row, details: row.details as FindingDetails }) && !row.needsReview && !active.has(row.id)
+          ? "reemplazado"
+          : "vigente"
     const key = [row.encounterId, row.toothNumber, row.condition, row.createdAt.getTime(), row.createdBy, status].join("|")
     const same = lesions.get(key)
     if (same) {
