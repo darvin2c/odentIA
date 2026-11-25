@@ -25,6 +25,7 @@ import {
   allergiesSaidUnknown,
   declaredGroupOf,
   noAllergiesWords,
+  saidAllergiesWords,
   saidByWords,
   saidNoGroupOf,
   shortDay,
@@ -189,9 +190,7 @@ export function AllergiesCard({
           {/* La misma frase que la franja, la ficha y la atención (estudio de la atención del 16 nov, E10a). */}
           {/* La alergia que oyó Clío y nadie confirmó gana a «no se le preguntó» (QA del 25 nov). */}
           <p className="text-sm text-muted-foreground">
-            {saidAllergies.length > 0
-              ? `Alergias: dijo ${saidAllergies.map((row) => row.name).join(" · ")}${saidAllergies.every((row) => row.open === false) && shortDay(saidAllergies[0]!.at) ? ` el ${shortDay(saidAllergies[0]!.at)}` : ""}, sin confirmar`
-              : noAllergiesWords({ review: health.reviewStatus.allergies, saidNo, saidUnknown }, sex)}
+            {saidAllergiesWords(saidAllergies) || noAllergiesWords({ review: health.reviewStatus.allergies, saidNo, saidUnknown }, sex)}
             .
           </p>
           {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
