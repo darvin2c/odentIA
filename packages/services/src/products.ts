@@ -105,7 +105,7 @@ const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = {
   optical: OPTICAL_HELP_TOPICS,
 }
 
-/** Las plantillas en blanco de las guías de la web de cada producto (ADR 0215); sin guías, ninguna. */
+/** Las plantillas en blanco de las guías de la web de cada producto (ADR 0216); sin guías, ninguna. */
 /** Las plantillas que adjunta el aviso de las guías de la web de un producto, si tiene guías. */
 export function guideSheetsFor(product: ClinicalProduct): GuideSheets | null {
   // El mapa se arma al pedirlo: las plantillas importan el kit, que vuelve a pasar por aquí.

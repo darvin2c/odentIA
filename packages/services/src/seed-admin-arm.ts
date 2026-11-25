@@ -176,7 +176,7 @@ class Clock {
 /* ---------- Clientes ---------- */
 
 /**
- * Quien solo dejó su correo en el aviso de una guía (ADR 0215): un cliente de nombre su correo,
+ * Quien solo dejó su correo en el aviso de una guía (ADR 0216): un cliente de nombre su correo,
  * con la guía de origen y la fila «Dejó su correo en una guía de la web» en su historial, sin
  * venta. Por el mismo camino que la web; una sola vez.
  */

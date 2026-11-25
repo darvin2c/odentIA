@@ -1,4 +1,4 @@
-# 0215 · Las guías de la web: plantillas sin pedir el correo y el correo opcional al descargar
+# 0216 · Las guías de la web: plantillas sin pedir el correo y el correo opcional al descargar
 
 Fecha: 2026-11-24 · Estado: aceptada · Extiende la [0046](0046-web-de-marketing-en-astro.md) (la web) y la [0185](0185-el-arm-de-la-administracion.md) (el cliente existe desde el primer contacto)
 
@@ -34,4 +34,4 @@ Lo que más buscan las clínicas en Google son tareas: llenar un odontograma, el
 
 - Web: `apps/web/src/lib/guides/`, `apps/web/src/components/guides/`, `apps/web/src/pages/guias/`.
 - Plantillas: `packages/services/src/dental/blank-sheets.ts` (`pnpm --filter @odentia/services plantillas`) y `guideSheetsFor` en `products.ts`.
-- El correo: `POST /api/public/founders/contact` (`apps/api/src/routes/public-founders.ts`), `packages/services/src/web-contacts.ts`; la llave de los topes por red, `apps/api/src/lib/rate-key.ts`; migración `0155_las_guias`.
+- El correo: `POST /api/public/founders/contact` (`apps/api/src/routes/public-founders.ts`), `packages/services/src/web-contacts.ts`; la llave de los topes por red, `apps/api/src/lib/rate-key.ts`; migración `0157_las_guias`.

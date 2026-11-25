@@ -444,7 +444,7 @@ export const saasClientContact = adminSchema.table(
 )
 
 /**
- * El correo que dejó alguien en el aviso de una guía de la web (ADR 0215): a quién se le
+ * El correo que dejó alguien en el aviso de una guía de la web (ADR 0216): a quién se le
  * mandaron las plantillas, desde qué página y cuándo salió. Es el rastro del contacto en su
  * ficha y los topes del aviso (uno por buzón al día y unos pocos por hora entre todos). Se
  * agrega una fila por aviso; después solo se anota `sent_at`, cuando el correo salió.

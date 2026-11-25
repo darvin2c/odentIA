@@ -1,4 +1,4 @@
-// Las guías de la web (lienzo UYxnET…, ADR 0215): cada guía es un archivo con su texto, y la web
+// Las guías de la web (lienzo UYxnET…, ADR 0216): cada guía es un archivo con su texto, y la web
 // arma la página sola con el molde (`components/guides/GuidePage.astro`). El texto admite
 // **negrita** y [enlaces](/ruta) (`rich.ts`). Ninguna cifra de precio de odentIA: el bloque final
 // la lee de Precios. Antes de publicar una, la revisa la voz clínica y lo que dice de odentIA se

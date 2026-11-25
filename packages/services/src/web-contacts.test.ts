@@ -1,4 +1,4 @@
-/** El aviso de las guías (ADR 0215): el correo que deja quien bajó una plantilla. */
+/** El aviso de las guías (ADR 0216): el correo que deja quien bajó una plantilla. */
 import { randomUUID } from "node:crypto"
 import {
   saasClient,

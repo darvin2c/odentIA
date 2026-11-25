@@ -29,7 +29,7 @@ export function salesWhatsAppHref(phone: string | undefined, name: string): stri
 export const salesWhatsApp = salesWhatsAppHref(import.meta.env.VITE_SALES_WHATSAPP, WORDS.name)
 /** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
 export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
-/** El correo que se deja en el aviso de una guía (ADR 0215): la misma ruta pública. */
+/** El correo que se deja en el aviso de una guía (ADR 0216): la misma ruta pública. */
 export const guideContactApiUrl = `https://api.${domain}${port}/api/public/founders/contact`
 
 /**
@@ -186,7 +186,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
         { href: "/contacto", label: "Habla con nosotros" },
       ],
     },
-    // Las guías (ADR 0215), solo en odentIA: latidIA y vistIA no las tienen todavía.
+    // Las guías (ADR 0216), solo en odentIA: latidIA y vistIA no las tienen todavía.
     {
       title: "Guías",
       links: [...GUIDES.map((guide) => ({ href: guidePath(guide), label: guide.menu })), { href: GUIDES_PATH, label: "Todas las guías" }],

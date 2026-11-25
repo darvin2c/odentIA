@@ -1,5 +1,5 @@
 /**
- * El aviso de las guías de la web (ADR 0215): quien bajó una plantilla deja su correo, si
+ * El aviso de las guías de la web (ADR 0216): quien bajó una plantilla deja su correo, si
  * quiere, y le llegan las plantillas con la puerta para pedir entrar. Entra al ARM como un
  * cliente con su contacto y la guía de la que llegó, sin abrir una venta.
  *

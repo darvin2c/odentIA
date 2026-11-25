@@ -272,7 +272,7 @@ export function waitlistReceivedEmail(input: {
 }
 
 /**
- * Las plantillas que pidió quien dejó su correo en una guía de la web (ADR 0215): van
+ * Las plantillas que pidió quien dejó su correo en una guía de la web (ADR 0216): van
  * adjuntas en PDF, con el enlace a la guía y la puerta para empezar (con Fundadores, «Pide
  * tus USD 100» con su correo ya puesto). Las cifras llegan de los precios publicados.
  */

@@ -1,5 +1,5 @@
 /**
- * Las plantillas en blanco de las guías de la web de odentIA (ADR 0215): el odontograma, el
+ * Las plantillas en blanco de las guías de la web de odentIA (ADR 0216): el odontograma, el
  * odontograma de niños y el presupuesto, para imprimir y llenar a mano.
  *
  * Salen del mismo kit de los papeles que imprime la app (`DocumentKit`) y el odontograma, de

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { professionalSchedule } from "@odentia/db/schema/availability"
-import { member, user } from "@odentia/db/schema/auth"
+import { member, session, user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { pushSubscription } from "@odentia/db/schema/workspace"
@@ -147,6 +147,38 @@ it("quien deja la clínica no recibe nada y su equipo se olvida; el mismo equipo
   expect(await collect()).toEqual([])
   expect(await ownerDb.select().from(pushSubscription).where(eq(pushSubscription.organizationId, orgId))).toEqual([])
   expect(await pushSubscribedOrgs(ownerDb)).not.toContain(orgId)
+})
+
+it("al cerrar la sesión con que se activaron, desde cualquier app, el equipo deja de recibir los avisos", async () => {
+  const { orgId, people, tx, collect } = await clinic({ rita: "reception" })
+  const open = async (expiresAt = new Date(Date.now() + 86_400_000)) => {
+    const id = randomUUID()
+    await ownerDb.insert(session).values({ id, token: randomUUID(), userId: people.rita!, expiresAt, createdAt: new Date(), updatedAt: new Date() })
+    return id
+  }
+  const save = (endpoint: string, sessionId: string | null) =>
+    tx((db) => savePushSubscription(db, orgId, people.rita!, workspaceAccessFor("reception"), keys(endpoint), sessionId))
+  const mine = () => ownerDb.select({ endpoint: pushSubscription.endpoint }).from(pushSubscription).where(eq(pushSubscription.organizationId, orgId))
+
+  // Cerrar la sesión (en la clínica, en el panel o en otra app con la misma sesión) la borra.
+  const desk = await open()
+  await save("escritorio", desk)
+  expect((await collect()).map((d) => d.endpoint)).toEqual([keys("escritorio").endpoint])
+  await ownerDb.delete(session).where(eq(session.id, desk))
+  expect(await mine()).toEqual([])
+
+  // Vencida sin cerrar, no recibe nada.
+  const old = await open(new Date(Date.now() - 1000))
+  await save("vencida", old)
+  expect(await collect()).toEqual([])
+
+  // La activada antes de atarla queda atada a la sesión de quien la revisa en ese navegador.
+  await ownerDb.delete(pushSubscription).where(eq(pushSubscription.organizationId, orgId))
+  await save("antigua", null)
+  const phone = await open()
+  expect(await tx((db) => getPushSubscription(db, orgId, people.rita!, keys("antigua").endpoint, phone))).toEqual({ active: true })
+  await ownerDb.delete(session).where(eq(session.id, phone))
+  expect(await mine()).toEqual([])
 })
 
 it("una clínica no ve ni avisa los equipos de otra", async () => {

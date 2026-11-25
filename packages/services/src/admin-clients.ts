@@ -1272,7 +1272,7 @@ export async function clientForWaitlistRequest(
   // cliente (Kairós propone fusionarlos si es la misma; `ruleDuplicates`).
   const reused = (await clientByEmail(tx, email, { withoutAccount: true }))?.clientId
   if (reused) {
-    // Quien solo había dejado su correo en una guía (ADR 0215) tiene de nombre su correo y
+    // Quien solo había dejado su correo en una guía (ADR 0216) tiene de nombre su correo y
     // el país por defecto: su solicitud trae los de verdad. Solo ese cliente provisional, el
     // que creó el aviso: los datos de otro no se cambian con solo conocer su correo.
     const provisional = sql`lower(${saasClient.name}) = ${email.slice(0, 160)} and ${saasClient.origin} = 'web' and exists (
@@ -1375,7 +1375,7 @@ export async function clientForWaitlistRequest(
 }
 
 /**
- * El cliente de quien dejó su correo en el aviso de una guía (ADR 0215): el que ya tiene
+ * El cliente de quien dejó su correo en el aviso de una guía (ADR 0216): el que ya tiene
  * ese correo, también si es de alguien del equipo de una clínica con cuenta, o uno nuevo, de
  * nombre su correo, con su contacto y la guía de origen. Si el correo es de varios clientes,
  * no elige (como `clientByEmail`): el aviso queda sin cliente. No abre una venta: dejar un
@@ -2400,7 +2400,7 @@ export async function mergeClients(
       .where(eq(saasWaitlistRequest.clientId, dropId))
       .returning({ id: saasWaitlistRequest.id }),
   )
-  // El correo que dejó en una guía sigue en el historial del que queda (ADR 0215).
+  // El correo que dejó en una guía sigue en el historial del que queda (ADR 0216).
   await tx.update(saasWebContact).set({ clientId: keepId }).where(eq(saasWebContact.clientId, dropId))
   await tx
     .update(saasClient)
@@ -3225,7 +3225,7 @@ export async function clientTimeline(
     })
   }
 
-  // El correo que dejó en el aviso de una guía (ADR 0215), y si le llegaron las plantillas.
+  // El correo que dejó en el aviso de una guía (ADR 0216), y si le llegaron las plantillas.
   if (wants("venta")) {
     const contacts = await tx
       .select()

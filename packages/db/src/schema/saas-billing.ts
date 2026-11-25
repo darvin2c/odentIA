@@ -962,7 +962,7 @@ export const saasWaitlistRequest = adminSchema.table(
     /** `web` (la pidió la clínica) o `administracion` (la creó el equipo al invitar a un cliente). */
     source: text("source").notNull().default("web"),
     /**
-     * La página de la web desde la que se envió (ADR 0215): «/guias/como-llenar-un-odontograma».
+     * La página de la web desde la que se envió (ADR 0216): «/guias/como-llenar-un-odontograma».
      * Nula en la página de la solicitud y en las de antes. Es una ruta comprobada, nunca un título.
      */
     sourcePage: text("source_page"),

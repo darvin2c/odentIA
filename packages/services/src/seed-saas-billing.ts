@@ -662,7 +662,7 @@ interface DemoRequest {
   /** Entró: la clínica de la semilla que abrió (entró el día en que se creó) y el plan con que se la invitó. */
   entered?: { organizationId: string; planCode: string }
   discardReason?: string
-  /** La página de la web desde la que la envió: la ficha dice «Llegó desde» (ADR 0215). */
+  /** La página de la web desde la que la envió: la ficha dice «Llegó desde» (ADR 0216). */
   sourcePage?: string
 }
 

@@ -1,4 +1,4 @@
-/** Las guías (ADR 0215): cada archivo trae lo que el molde necesita, y lo que enlaza existe. */
+/** Las guías (ADR 0216): cada archivo trae lo que el molde necesita, y lo que enlaza existe. */
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it, vi } from "vitest"

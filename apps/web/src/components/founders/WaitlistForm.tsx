@@ -1,5 +1,5 @@
 // La solicitud de Fundadores, sus 9 datos (issue 165): la usan la página «Pide tus USD 100» y,
-// como sección, el final de cada guía (ADR 0215). Va a la ruta pública de la API (excepción a ADR
+// como sección, el final de cada guía (ADR 0216). Va a la ruta pública de la API (excepción a ADR
 // 0046, como el Libro de Reclamaciones). Cada error, también lo que rechaza el servidor, va bajo su
 // campo y el foco al primero. Enviada, «Qué sigue» aparece en el mismo lugar con el foco en su
 // título: en una guía larga, la respuesta queda donde está la persona.
@@ -234,7 +234,7 @@ export default function WaitlistForm({ gift, answerDays, variant, sourcePage, on
         professionals: value.professionals,
         currentTool: value.currentTool,
       }
-      // La página va en la dirección, no en el cuerpo: la API de antes la ignora (ADR 0215).
+      // La página va en la dirección, no en el cuerpo: la API de antes la ignora (ADR 0216).
       const url = sourcePage ? `${waitlistApiUrl}?desde=${encodeURIComponent(sourcePage)}` : waitlistApiUrl
       let res: Response
       try {
@@ -326,7 +326,7 @@ export default function WaitlistForm({ gift, answerDays, variant, sourcePage, on
             Te llega tu invitación a {sent.email} y abres {WORDS.yourClinic} como Fundadora.
           </li>
         </ol>
-        {/* Lo mismo si ese correo ya había pedido entrar: la web no lo dice (ADR 0215). */}
+        {/* Lo mismo si ese correo ya había pedido entrar: la web no lo dice (ADR 0216). */}
         <p className="wl-note">
           Si te equivocaste en un dato, escríbenos a <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.
         </p>

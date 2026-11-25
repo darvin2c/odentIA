@@ -1,5 +1,5 @@
 {
-  "id": "cf3bd1a7-5ca9-4205-97ef-fcef154d444a",
+  "id": "892ef553-a6ca-4cae-b559-44667ceb448a",
   "prevId": "65c428d3-c543-4d32-86ba-e3e7c716ad78",
   "version": "7",
   "dialect": "postgresql",
@@ -4498,163 +4498,6 @@
         "saas_task_done_note_check": {
           "name": "saas_task_done_note_check",
           "value": "\"admin\".\"saas_task\".\"done_note\" IS NULL OR length(\"admin\".\"saas_task\".\"done_note\") <= 2000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_web_contact": {
-      "name": "saas_web_contact",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mailbox": {
-          "name": "mailbox",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_page": {
-          "name": "source_page",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sheets": {
-          "name": "sheets",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_web_contact_mailbox_idx": {
-          "name": "saas_web_contact_mailbox_idx",
-          "columns": [
-            {
-              "expression": "mailbox",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_web_contact_created_idx": {
-          "name": "saas_web_contact_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_web_contact_client_idx": {
-          "name": "saas_web_contact_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_web_contact_client_id_saas_client_id_fk": {
-          "name": "saas_web_contact_client_id_saas_client_id_fk",
-          "tableFrom": "saas_web_contact",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_web_contact_email_check": {
-          "name": "saas_web_contact_email_check",
-          "value": "\"admin\".\"saas_web_contact\".\"email\" = lower(\"admin\".\"saas_web_contact\".\"email\") AND length(\"admin\".\"saas_web_contact\".\"email\") BETWEEN 3 AND 254"
-        },
-        "saas_web_contact_mailbox_check": {
-          "name": "saas_web_contact_mailbox_check",
-          "value": "\"admin\".\"saas_web_contact\".\"mailbox\" = lower(\"admin\".\"saas_web_contact\".\"mailbox\") AND length(\"admin\".\"saas_web_contact\".\"mailbox\") BETWEEN 3 AND 254"
-        },
-        "saas_web_contact_product_check": {
-          "name": "saas_web_contact_product_check",
-          "value": "\"admin\".\"saas_web_contact\".\"product\" IN ('dental','medical','optical')"
-        },
-        "saas_web_contact_page_check": {
-          "name": "saas_web_contact_page_check",
-          "value": "\"admin\".\"saas_web_contact\".\"source_page\" ~ '^/[a-z0-9-]+(/[a-z0-9-]+)*$' AND length(\"admin\".\"saas_web_contact\".\"source_page\") <= 160"
-        },
-        "saas_web_contact_sheets_check": {
-          "name": "saas_web_contact_sheets_check",
-          "value": "cardinality(\"admin\".\"saas_web_contact\".\"sheets\") BETWEEN 1 AND 5 AND array_to_string(\"admin\".\"saas_web_contact\".\"sheets\", ',') ~ '^[a-z0-9-]{1,40}(,[a-z0-9-]{1,40})*$'"
         }
       },
       "isRLSEnabled": false
@@ -40198,6 +40041,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "endpoint": {
           "name": "endpoint",
           "type": "text",
@@ -40299,6 +40148,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "push_subscription_session_idx": {
+          "name": "push_subscription_session_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -40327,6 +40191,20 @@
             "id"
           ],
           "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "push_subscription_session_id_session_id_fk": {
+          "name": "push_subscription_session_id_session_id_fk",
+          "tableFrom": "push_subscription",
+          "tableTo": "session",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -49881,12 +49759,6 @@
           "notNull": true,
           "default": "'web'"
         },
-        "source_page": {
-          "name": "source_page",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -50049,10 +49921,6 @@
         "saas_waitlist_request_source_check": {
           "name": "saas_waitlist_request_source_check",
           "value": "\"admin\".\"saas_waitlist_request\".\"source\" IN ('web','administracion')"
-        },
-        "saas_waitlist_request_source_page_check": {
-          "name": "saas_waitlist_request_source_page_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"source_page\" IS NULL OR \"admin\".\"saas_waitlist_request\".\"source_page\" ~ '^/[a-z0-9-]+(/[a-z0-9-]+)*$' AND length(\"admin\".\"saas_waitlist_request\".\"source_page\") <= 160"
         },
         "saas_waitlist_request_status_check": {
           "name": "saas_waitlist_request_status_check",
