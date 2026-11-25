@@ -407,10 +407,6 @@ export async function receiveAppEvent(
       .onConflictDoNothing()
       .returning({ id: appContractMessage.id })
     if (!fresh) return { repeated: true }
-    // El equipo de una cuenta lo guarda la cuenta única en su propio cambio: mientras tanto no se
-    // acepta (409, sin la clave), y la app lo reintenta con la misma.
-    if (event.type === "equipo.cambiado")
-      throw new ServiceError("CONFLICT", 409, "Todavía no se guarda el equipo de una cuenta")
     const accountId =
       event.type === "equipo.cambiado"
         ? await applyTeam(tx, app, event)
