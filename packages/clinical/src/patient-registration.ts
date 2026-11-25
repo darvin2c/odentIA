@@ -922,7 +922,9 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     else {
       if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Escribe el teléfono o el correo del responsable"
       // Su celular, con la misma regla que el del paciente: el error va en su campo (mesa del 25 nov).
-      if (data.representative.phone && !normalizePhone(data.representative.phone, context.countryCode))
+      // Solo en la clínica: desde un enlace, un celular mal escrito del representante no se usaba y no
+      // frenaba el registro, y no se cambia ese recorrido (revisión del 25 nov).
+      if (context.mode === "internal" && data.representative.phone && !normalizePhone(data.representative.phone, context.countryCode))
         errors["representative.phone"] = phoneFormatError(context.countryCode)
       // En la clínica, un menor puede venir con otro familiar (su abuela) que lo acompaña y recibe sus
       // avisos sin representarlo (mesa del 25 nov, decisión 2). Desde fuera, quien registra a un menor

@@ -2059,3 +2059,18 @@ it("un adulto con un responsable escrito no se registra: lo escrito se perdía e
     ),
   ).rejects.toMatchObject({ status: 400 })
 })
+
+it("sin marcar la privacidad, lo que dijo de sus mensajes igual queda a nombre de quien lo trae", async () => {
+  const created = await registerMinorWith(
+    { displayName: "Rosa Sin Aviso", givenNames: "Rosa", familyName: "Sin Aviso", relationship: "guardian", relationshipDetail: "Madre", phone: "+51977555814" },
+    { privacyAccepted: false, acceptsMessages: false },
+  )
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  const rosa = detail.contacts.find((row) => row.relationship === "guardian")
+  const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, rosa!.contactId))
+  expect(permissions.map((row) => [row.purpose, row.status]).sort()).toEqual([
+    ["novedades", "revoked"],
+    ["recordatorio", "granted"],
+  ])
+  expect(await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", created.id))).toEqual([])
+})

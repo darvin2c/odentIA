@@ -322,7 +322,8 @@ export function NewPatientDrawer({
   const docTypeOf = (current: Draft) => current.docType || docTypes[0]?.value || ""
   const guardianDocTypeOf = (current: Draft) => current.guardianDocType || docTypes[0]?.value || ""
   const minorOf = (current: Draft) => isRealDate(current.birthDate) && isMinor(current.birthDate, today)
-  const needsGuardianDocOf = (current: Draft) => dependent && minorOf(current) && !guardian?.docNumber
+  // Quien solo lo acompaña («Otro familiar») no firma por él: su documento no se pide.
+  const needsGuardianDocOf = (current: Draft) => dependent && minorOf(current) && !guardian?.docNumber && current.relation !== "otro"
 
   function answersFrom(current: Draft): {
     answers: RegistrationAnswers
@@ -358,15 +359,20 @@ export function NewPatientDrawer({
       privacyAccepted: current.privacy,
       // Lo que dijo de sus mensajes lo guarda el servidor a nombre de quien otorga: el responsable
       // de un menor, no el menor (mesa del 25 nov). Antes se anotaba después, en la persona del niño.
-      ...(current.privacy ? { acceptsReminders: true } : {}),
-      ...(current.privacy && current.promotions ? { acceptsMessages: current.promotions === "si" } : {}),
+      // Se le dijo que le escribiremos sobre sus citas y respondió a las promociones: se guarda
+      // aunque la privacidad no se marque, como antes (revisión del 25 nov).
+      acceptsReminders: true,
+      ...(current.promotions ? { acceptsMessages: current.promotions === "si" } : {}),
     }
+    // El menor con su responsable solo cuando recepción completa sus datos ahora: con «El paciente,
+    // en su celular» no se manda su fecha y el servidor lo vería adulto (revisión del 25 nov).
+    const minorHere = (showDetails || !!guardian) && minorOf(current)
     // Otro familiar (su abuela) lo acompaña y recibe sus avisos, sin representarlo (decisión 2).
     const relationshipOf = (relation: Relation | null) =>
-      relation === "otro" ? "family" : minorOf(current) || relation === "tutor" ? "guardian" : "family"
+      relation === "otro" ? (minorOf(current) ? "family" : "other") : minorOf(current) || relation === "tutor" ? "guardian" : "family"
     const detailOf = (relation: Relation | null) =>
       relation === "otro" ? trimmed(current.relationDetail) || "Familiar" : relation ? RELATION_WORDS[relation] : "Familiar"
-    if (!guardian && current.guardianNew && minorOf(current)) {
+    if (!guardian && current.guardianNew && minorHere) {
       const givenNames = trimmed(current.guardianGivenNames)
       const surnames = trimmed(current.guardianSurnames)
       answers.representative = {
@@ -441,7 +447,7 @@ export function NewPatientDrawer({
     // campo («le faltan dígitos»): ese no se guarda a medias.
     if (dependent && !current.relation) found.relation = `Elige qué es ${guardianFirst} para él o ella`
     // Un menor sin responsable: se elige o se escribe aquí mismo (mesa del 25 nov).
-    if (!dependent && minorOf(current)) {
+    if (!dependent && current.who === "equipo" && minorOf(current)) {
       if (!current.guardianNew) found.guardianGivenNames = "Busca a quien viene con él o ella, o regístrala aquí"
       else {
         const newFirst = current.guardianGivenNames.trim() || "esta persona"
@@ -515,19 +521,30 @@ export function NewPatientDrawer({
     setPermissionNote(null)
     // Lo que se había escrito y no se registró (sonó el teléfono): sigue ahí, con el mismo envío,
     // para que «Registrar» no cree a otro igual (mesa del 25 nov, C3 y D5).
-    const saved = readSavedDraft(draftKey)
+    // Con un nombre buscado («Crear paciente «Zoila Torres»»), lo nuevo gana a lo de antes.
+    const saved = target.kind === "new" && target.name?.trim() ? null : readSavedDraft(draftKey)
     setResumed(saved ? saved.values : null)
     form.reset(saved ? { ...initialDraft(target), ...saved.values } : initialDraft(target))
     submission.current = saved?.submissionId ?? crypto.randomUUID()
     // Si se archivó mientras tanto, `pickGuardian` lo deja sin elegir y vuelve el buscador.
     if (saved?.guardian && target.kind !== "dependent") pickGuardian(saved.guardian)
+    // Quien ya era de la clínica («Es esta persona»): se vuelve a leer, así no se registra a otra igual.
+    if (saved?.pickedId)
+      void fetchPerson(saved.pickedId)
+        .then((page) => {
+          if (openRef.current) setPicked(page.data)
+        })
+        .catch(() => undefined)
   }, [open])
   // Se guarda en la pestaña mientras se escribe: de esta clínica, de quien escribe y de este destino.
   useEffect(() => {
-    if (!open || stage !== "form" || created) return
+    // Para una persona que ya existe no se guarda: lo que se sabe de ella viene de su página, y lo
+    // guardado pisaba lo que se corrigió ahí (revisión del 25 nov).
+    if (!open || stage !== "form" || created || target.kind === "person") return
     const touched = values.givenNames || values.surnames || values.phone || values.guardianGivenNames
-    if (touched) writeSavedDraft(draftKey, { values, submissionId: submission.current, guardian: guardianPick })
-  }, [open, stage, created, values, draftKey, guardianPick])
+    if (touched)
+      writeSavedDraft(draftKey, { values, submissionId: submission.current, guardian: guardianPick, pickedId: picked?.id ?? null })
+  }, [open, stage, created, values, draftKey, guardianPick, picked, target.kind])
 
   // Mientras se escribe se busca si ya existe: por el nombre, el celular y el
   // documento. Solo al registrar a alguien nuevo (no desde una persona).
@@ -601,6 +618,8 @@ export function NewPatientDrawer({
     form.setFieldValue("guardianNew", true)
     if (first) form.setFieldValue("guardianGivenNames", first)
     if (rest.length) form.setFieldValue("guardianSurnames", rest.join(" "))
+    // El control que tenía el foco se va: el foco sigue en lo que hay que escribir.
+    focusSoon("np-guardian-given")
   }
   // La persona nueva también se busca antes de crearla, por nombre y celular: el mismo celular de
   // un contacto de WhatsApp no la vuelve la misma persona, pero se pregunta (mesa del 25 nov, D3).
@@ -954,7 +973,10 @@ export function NewPatientDrawer({
                             type="button"
                             variant="link"
                             className="h-auto p-0"
-                            onClick={() => form.setFieldValue("guardianNew", false)}
+                            onClick={() => {
+                              form.setFieldValue("guardianNew", false)
+                              focusSoon("np-guardian")
+                            }}
                           >
                             Mejor buscarla
                           </Button>
@@ -1421,6 +1443,8 @@ interface SavedDraft {
   submissionId: string
   /** La persona ya registrada que se eligió como su responsable: se vuelve a leer al recuperar. */
   guardian?: PickedPerson | null
+  /** «Es esta persona»: quien ya estaba en la clínica y se registra como paciente. */
+  pickedId?: string | null
 }
 
 function readSavedDraft(key: string): SavedDraft | null {
@@ -1441,4 +1465,9 @@ function writeSavedDraft(key: string, draft: SavedDraft): void {
   } catch {
     // Sin almacenamiento no se guarda: no traba el registro.
   }
+}
+
+/** El foco en un campo que aparece en el próximo cuadro (el que lo tenía se desmontó). */
+function focusSoon(id: string): void {
+  window.requestAnimationFrame(() => document.getElementById(id)?.focus())
 }
