@@ -57,4 +57,4 @@ miraba las clínicas: la única Dueña de una tienda podía cerrarla y dejar la 
 
 `shared/packages/contract/src/messages.ts` (`teamChangedEvent`), `packages/services/src/app-places.ts`,
 `gestoria/apps/api/src/acuerdo.ts` (`noteStoreTeam`, `reviewStoreTeams`); migraciones
-`0158_las_tiendas_de_cada_persona.sql` y, en gestorIA, `0012_el_equipo_de_cada_tienda.sql`.
+`0159_las_tiendas_de_cada_persona.sql` y, en gestorIA, `0012_el_equipo_de_cada_tienda.sql`.
