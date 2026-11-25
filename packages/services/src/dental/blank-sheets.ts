@@ -1,6 +1,7 @@
 /**
  * Las plantillas en blanco de las guías de la web de odentIA (ADR 0216): el odontograma, el
- * odontograma de niños y el presupuesto, para imprimir y llenar a mano.
+ * odontograma de niños, el presupuesto, la historia clínica, el consentimiento informado y el
+ * cierre de caja, para imprimir y llenar a mano. Cada una sigue la hoja que ya imprime la app.
  *
  * Salen del mismo kit de los papeles que imprime la app (`DocumentKit`) y el odontograma, de
  * la misma hoja de la norma (`odontogramSheetScene`, cuatro filas: a los 7 años se usan las
@@ -9,8 +10,16 @@
  * da el mismo archivo, así la web y el correo del aviso mandan lo mismo
  * (`pnpm --filter @odentia/services plantillas` los vuelve a escribir en la web).
  */
+import {
+  CONSENT_DECLARATION,
+  CONSENT_PERSONAL_RISKS_LABEL,
+  CONSENT_SECTION_LABELS,
+  DECLARED_CONDITION_OPTIONS,
+  DIAGNOSIS_VERIFICATION_LABELS,
+} from "@odentia/clinical"
+import { DENTAL_EXAM_LABELS, TREATMENT_PHASE_LABELS } from "@odentia/dental"
 import { odontogramSheetScene } from "@odentia/dental/odontogram-sheet"
-import { type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "../document-kit.js"
+import { type Cell, type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "../document-kit.js"
 import type { GuideSheets } from "../guide-sheets.js"
 import { drawChart, NTS_SOURCE } from "./odontogram-pdf.js"
 
@@ -19,6 +28,9 @@ export const BLANK_SHEETS = {
   odontograma: { file: "odontograma.pdf", title: "Odontograma" },
   "odontograma-ninos": { file: "odontograma-ninos.pdf", title: "Odontograma de niños" },
   presupuesto: { file: "presupuesto-dental.pdf", title: "Presupuesto dental" },
+  "historia-clinica": { file: "historia-clinica-odontologica.pdf", title: "Historia clínica odontológica" },
+  consentimiento: { file: "consentimiento-informado-dental.pdf", title: "Consentimiento informado dental" },
+  "cierre-de-caja": { file: "cierre-de-caja.pdf", title: "Cierre de caja" },
 } as const
 
 /**
@@ -40,6 +52,32 @@ const SEARCH: Record<keyof typeof BLANK_SHEETS, { title: string; subject: string
     title: "Plantilla de presupuesto dental (PDF) · odentIA",
     subject: "Presupuesto dental por fases, con opciones, forma de pago, adelanto, vigencia y firmas, para llenar a mano en A4.",
     keywords: ["presupuesto dental", "plantilla de presupuesto dental", "formato de presupuesto odontológico", "presupuesto dental PDF"],
+  },
+  "historia-clinica": {
+    title: "Formato de historia clínica odontológica (PDF) · odentIA",
+    subject: "Historia clínica odontológica para llenar a mano en A4: datos del paciente, motivo de consulta, antecedentes, signos vitales, examen, odontograma, diagnóstico con CIE-10, plan de tratamiento y evolución.",
+    keywords: [
+      "historia clínica odontológica",
+      "formato de historia clínica dental",
+      "historia clínica dental PDF",
+      "ficha odontológica",
+      "anamnesis odontológica",
+    ],
+  },
+  consentimiento: {
+    title: "Formato de consentimiento informado dental (PDF) · odentIA",
+    subject: "Consentimiento informado odontológico para llenar a mano en A4: procedimiento, diagnóstico, beneficios, riesgos, alternativas, consecuencias de no tratarse, declaración y firmas.",
+    keywords: [
+      "consentimiento informado odontológico",
+      "formato de consentimiento informado dental",
+      "consentimiento informado dental PDF",
+      "consentimiento informado odontología",
+    ],
+  },
+  "cierre-de-caja": {
+    title: "Formato de cierre de caja (PDF) · odentIA",
+    subject: "Cierre de caja para llenar a mano en A4: lo que debe haber, el efectivo contado, la diferencia, lo que queda y lo que se entrega, los cobros y gastos del día, el arqueo de billetes y monedas, y las firmas.",
+    keywords: ["cierre de caja", "formato de cierre de caja", "arqueo de caja", "cuadre de caja", "cierre de caja PDF"],
   },
 }
 
@@ -378,6 +416,513 @@ async function blankBudget(): Promise<Uint8Array> {
   return kit.finish()
 }
 
+/** Un título de sección en mayúsculas, con lo que le sigue: no queda solo al pie de una hoja. */
+function section(kit: DocumentKit, title: string, keep: number, before = 12): void {
+  kit.ensure(before + SIZE.label * 1.4 + 3 + keep)
+  kit.subheading(title.toLocaleUpperCase("es"), { size: SIZE.label, before, after: 3 })
+}
+
+/** Una nota corta en gris bajo un título: cómo se llena. */
+function hint(kit: DocumentKit, text: string): void {
+  kit.text(text, { size: SIZE.label, tone: "gray", leading: 1.4 })
+}
+
+/** Preguntas con «Sí», «No» y «No sabe» para marcar, y dónde escribir el detalle. */
+function questions(kit: DocumentKit, rows: Array<[string, string]>): void {
+  const box: Cell = [{ checkbox: true, size: 11 }]
+  kit.table({
+    columns: [
+      { label: "Pregunta" },
+      { label: "Sí", width: 30, align: "center" },
+      { label: "No", width: 30, align: "center" },
+      { label: "No sabe", width: 46, align: "center" },
+      { label: "Detalle", width: 140 },
+    ],
+    // Lo que se pregunta con el «Sí» va en gris junto a la pregunta: el detalle queda libre para escribir.
+    rows: rows.map(([question, detail]) => [
+      [{ inlines: detail ? [question, { text: ` ${detail}`, tone: "gray" }] : question }],
+      box,
+      box,
+      box,
+      EMPTY,
+    ]),
+    rowPad: 3,
+    size: SIZE.label,
+  })
+}
+
+/** Las preguntas de salud del registro de la app (`registration-questionnaire.tsx`), dichas a quien responde. */
+const HEALTH_QUESTIONS: Array<[string, string]> = [
+  ["¿Tiene alergia a algún medicamento o material, como la anestesia, la penicilina o el látex?", "¿A qué? ¿Qué le pasó?"],
+  [
+    "¿Tiene una válvula del corazón operada, nació con un problema del corazón o tuvo una infección en el corazón (endocarditis)?",
+    "",
+  ],
+  ["¿Algún médico le dijo que tome antibiótico antes de ir al dentista?", ""],
+  ["¿Toma algún medicamento para que la sangre no forme coágulos, o aspirina todos los días?", "¿Cuál?"],
+  ["¿Toma o tomó alguna vez medicinas para los huesos, por osteoporosis o por un cáncer?", "¿Cuál y desde cuándo?"],
+  ["¿Toma algún otro medicamento todos los días?", "¿Cuál?"],
+  ["¿Tuvo algún problema con la anestesia del dentista?", "¿Qué pasó?"],
+  ["¿Sangró mucho después de una extracción?", ""],
+]
+
+const PERSONAL_QUESTIONS: Array<[string, string]> = [
+  ["¿Está embarazada?", "¿De cuántas semanas?"],
+  ["¿Está dando de lactar?", ""],
+  ["¿Le han operado alguna vez?", "¿De qué y cuándo?"],
+  ["¿Ha estado internado en un hospital?", "¿Por qué y cuándo?"],
+  ["¿Le han hecho una transfusión de sangre?", "¿Cuándo?"],
+  ["¿Fuma?", "¿Cuántos cigarrillos al día?"],
+  ["¿Toma alcohol?", "¿De vez en cuando o con frecuencia?"],
+]
+
+/**
+ * Las enfermedades que se marcan: las de la lista de la app (`DECLARED_CONDITION_OPTIONS`), con sus
+ * palabras, y las que una historia en papel también pregunta porque cambian la atención (los
+ * riñones y el hígado en los medicamentos, la úlcera en los antiinflamatorios, las defensas
+ * bajas, la tuberculosis y el VIH en el cuidado y en la cicatrización).
+ */
+const DISEASES = [
+  ...DECLARED_CONDITION_OPTIONS,
+  "Enfermedad de los riñones",
+  "Enfermedad del hígado",
+  "Gastritis o úlcera",
+  "Defensas bajas",
+  "Tuberculosis",
+  "VIH",
+]
+
+/** Lo de su boca que pregunta la app (`antecedentesOdontologicos`): el hilo, el bruxismo y sus hábitos. */
+const MOUTH_HABITS = [
+  "¿Usa hilo dental?",
+  "¿Aprieta o rechina los dientes?",
+  "¿Se muerde las uñas?",
+  "¿Muerde lápices u objetos?",
+  "¿Respira por la boca?",
+  "¿Se chupa el dedo?",
+]
+
+/**
+ * Cada cosa con su «Sí» y su «No», de dos en dos por fila: lo que no se marcó queda sin
+ * responder, no se lee como un «No».
+ */
+function yesNoPairs(kit: DocumentKit, title: string, items: readonly string[]): void {
+  const box: Cell = [{ checkbox: true, size: 11 }]
+  const rows: Cell[][] = []
+  for (let index = 0; index < items.length; index += 2) {
+    const second = items[index + 1]
+    rows.push([items[index] ?? EMPTY, box, box, second ?? EMPTY, second ? box : EMPTY, second ? box : EMPTY])
+  }
+  kit.table({
+    columns: [
+      { label: title, pad: 8 },
+      { label: "Sí", width: 26, align: "center" },
+      { label: "No", width: 44, align: "center", pad: 18 },
+      { label: title, pad: 8 },
+      { label: "Sí", width: 26, align: "center" },
+      { label: "No", width: 26, align: "center" },
+    ],
+    rows,
+    rowPad: 2,
+    size: SIZE.label,
+  })
+}
+
+/** Las fases del plan en el orden en que se atiende, como las nombra la app. */
+const PHASE_WORDS = Object.values(TREATMENT_PHASE_LABELS)
+  .map((phase) => phase.toLocaleLowerCase("es"))
+  .join(", ")
+
+/** Una fila vacía para escribir a mano. */
+const blankRow = (columns: number): Cell[] => Array.from({ length: columns }, () => EMPTY)
+
+/**
+ * La historia clínica odontológica: lo que guarda la app de cada paciente, en el orden de su
+ * copia (`patient-record.ts`) y de su atención: los datos de su registro, el motivo, sus
+ * antecedentes con las preguntas de su enlace, los signos vitales, el examen de la boca
+ * (`@odentia/dental` examination), el odontograma de la norma, el diagnóstico con su código
+ * CIE-10, el plan por fases y la evolución, con la firma de quien atiende.
+ */
+async function blankHistory(): Promise<Uint8Array> {
+  const kit = await openTemplate(BLANK_SHEETS["historia-clinica"].title, "historia-clinica")
+  kit.gap(10)
+  kit.titleWithDetails("Historia clínica odontológica", [], SIZE.titleBudget)
+  kit.gap(6)
+  kit.blankLines([[{ label: "Historia clínica N.°" }, { label: "Fecha de apertura" }, { label: "Sede" }]])
+
+  section(kit, "Datos del paciente", 7 * 24)
+  kit.blankLines([
+    [{ label: "Nombres y apellidos", span: 3 }, { label: "Sexo" }],
+    [{ label: "Fecha de nacimiento", span: 3 }, { label: "Edad", span: 2 }, { label: "Documento (tipo y número)", span: 5 }],
+    [{ label: "Lugar de nacimiento", span: 2 }, { label: "Nacionalidad" }, { label: "Estado civil" }],
+    [{ label: "Ocupación", span: 2 }, { label: "Nivel educativo", span: 2 }],
+    [{ label: "Dirección" }],
+    [{ label: "Teléfono" }, { label: "Correo", span: 2 }, { label: "Seguro" }],
+    [{ label: "Contacto de emergencia", span: 2 }, { label: "Parentesco" }, { label: "Teléfono" }],
+  ])
+
+  section(kit, "Responsable, si es menor de edad", 2 * 24)
+  kit.blankLines([
+    [{ label: "Nombres y apellidos", span: 2 }, { label: "Parentesco" }, { label: "Documento" }],
+    [{ label: "Teléfono" }, { label: "Correo", span: 3 }],
+  ])
+
+  section(kit, "Motivo de consulta", 140)
+  ruledBoxes(kit, ["Lo que lo trae, en sus palabras"], 2)
+  kit.gap(2)
+  kit.blankLines([[{ label: "Tiempo de enfermedad" }, { label: "¿Le duele ahora? De 0 a 10" }]])
+  ruledBoxes(kit, ["Relato de la enfermedad: cómo empezó y siguió, qué lo alivia o empeora y qué tomó"], 3)
+
+  // Entra entero bajo el relato, en la primera hoja.
+  section(kit, "Antecedentes odontológicos", 24 + 40 + 3 * 17 + 16, 6)
+  kit.blankLines([[{ label: "Última visita al dentista", span: 2 }, { label: "Cepillados al día" }]])
+  kit.choiceRow("¿Cómo le fue esa vez?", ["Positiva", "Regular", "Traumática"])
+  kit.choiceRow("Ansiedad dental", ["Ninguna", "Leve", "Moderada", "Alta"])
+  yesNoPairs(kit, "Su boca y sus hábitos", MOUTH_HABITS)
+
+  // Lo de su salud empieza en una hoja nueva: sus dos tablas van juntas.
+  kit.newPage()
+  kit.subheading("ANTECEDENTES: SU SALUD", { size: SIZE.label, before: 2, after: 3 })
+  questions(kit, HEALTH_QUESTIONS)
+  kit.gap(6)
+  kit.gap(4)
+  yesNoPairs(kit, "Enfermedad", DISEASES)
+  kit.blankLines([[{ label: "Otra enfermedad", span: 3 }, { label: "Grupo sanguíneo" }]])
+
+  section(kit, "Antecedentes personales y hábitos", 7 * 19 + 40)
+  questions(kit, PERSONAL_QUESTIONS)
+  kit.gap(4)
+  kit.blankLines([[{ label: "Antecedentes familiares" }]])
+
+  section(kit, "Signos vitales", 3 * 24)
+  kit.blankLines([
+    [{ label: "Presión arterial (mmHg)" }, { label: "Frecuencia cardiaca (/min)" }],
+    [{ label: "Frecuencia respiratoria (/min)" }, { label: "Temperatura (°C)" }],
+    [{ label: "Saturación de oxígeno (%)", span: 4 }, { label: "Peso (kg)", span: 3 }, { label: "Talla (cm)", span: 3 }],
+  ])
+
+  const exam = (keys: string[]) => keys.map((key) => ({ label: DENTAL_EXAM_LABELS[key] ?? key }))
+  section(kit, "Examen clínico", 5 * 24)
+  kit.blankLines([exam(["atm", "ganglios", "labios"])])
+  kit.choiceRow("Higiene oral", ["Buena", "Regular", "Mala"])
+  kit.blankLines([exam(["encias", "lengua", "paladar"]), exam(["pisoBoca", "carrillos", "orofaringe"])])
+
+  // El odontograma va entero, con su fuente y sus recuadros.
+  section(kit, "Odontograma", 460)
+  kit.choiceRow("Momento", ["Inicio", "Nuevos hallazgos", "Culminación", "Reingreso"])
+  kit.gap(4)
+  drawChart(kit, odontogramSheetScene([]).rows)
+  kit.gap(2)
+  kit.text(NTS_SOURCE, { size: SIZE.label, tone: "gray", align: "center", leading: 1.35 })
+  ruledBoxes(kit, ["Especificaciones", "Observaciones"], 2)
+
+  // El diagnóstico, el plan y la evolución, juntos en la última hoja.
+  kit.newPage()
+  kit.subheading("EXÁMENES AUXILIARES", { size: SIZE.label, before: 2, after: 0 })
+  ruledBoxes(kit, ["Radiografías y pruebas (frío, percusión)"], 3)
+  section(kit, "Diagnóstico", 5 * 22)
+  const box: Cell = [{ checkbox: true, size: 11 }]
+  kit.table({
+    columns: [
+      { label: "Diente o zona", width: 80 },
+      { label: "Diagnóstico" },
+      { label: "CIE-10", width: 60 },
+      { label: DIAGNOSIS_VERIFICATION_LABELS.provisional, width: 62, align: "center" },
+      { label: DIAGNOSIS_VERIFICATION_LABELS.confirmed, width: 62, align: "center" },
+    ],
+    rows: Array.from({ length: 4 }, () => [EMPTY, EMPTY, EMPTY, box, box]),
+    rowPad: 4,
+    size: SIZE.dense,
+  })
+
+  section(kit, "Plan de tratamiento", 6 * 22)
+  hint(kit, `Un renglón por tratamiento, con su diente y sus caras. Las fases, en el orden en que se atiende: ${PHASE_WORDS}.`)
+  kit.table({
+    columns: [
+      { label: "Diente (caras)", width: 84 },
+      { label: "Tratamiento" },
+      { label: "Fase", width: 100 },
+      { label: "Sesiones", width: 54, align: "center" },
+    ],
+    rows: Array.from({ length: 6 }, () => blankRow(4)),
+    rowPad: 4,
+    size: SIZE.dense,
+  })
+
+  section(kit, "Evolución", 4 * 22)
+  hint(kit, "Cada atención: lo que se hizo, en qué diente, y lo que sigue. Firma quien atendió. Si se acaba, sigue en una hoja aparte.")
+  // Los renglones que caben hasta la firma de la historia: la hoja se llena, sin pasar a otra.
+  const signature = 24 + 14
+  const rowHeight = SIZE.dense * 1.45 + 8 + 0.4
+  const rows = Math.max(6, Math.floor((kit.room() - SIZE.label * 1.3 - 8 - signature) / rowHeight))
+  kit.table({
+    columns: [
+      { label: "Fecha", width: 66 },
+      { label: "Diente", width: 54 },
+      { label: "Lo que se hizo y lo que sigue" },
+      { label: "Firma", width: 92 },
+    ],
+    rows: Array.from({ length: rows }, () => blankRow(4)),
+    rowPad: 4,
+    size: SIZE.dense,
+  })
+  kit.gap(14)
+  kit.blankLines([[{ label: "Profesional a cargo", span: 2 }, { label: "Colegiatura" }, { label: "Firma" }]])
+  return kit.finish()
+}
+
+/**
+ * El consentimiento informado: la hoja que la app imprime para firmar en papel
+ * (`renderConsentPaperPdf` en `consent-pdf.ts`), con sus secciones en el mismo orden y con
+ * sus nombres (`CONSENT_SECTION_LABELS`), la misma declaración y las firmas de quien
+ * consiente, su huella y el profesional que informa. Las secciones van en blanco, para
+ * escribirlas a mano con el paciente.
+ */
+async function blankConsent(): Promise<Uint8Array> {
+  const kit = await openTemplate(BLANK_SHEETS.consentimiento.title, "consentimiento")
+  kit.gap(10)
+  kit.titleWithDetails("Consentimiento informado", [], SIZE.titleBudget)
+  kit.gap(6)
+  kit.blankLines([
+    // La pieza escrita evita tratar la que no es.
+    [{ label: "Tratamiento", span: 3 }, { label: "Pieza(s)" }, { label: "Fecha" }],
+    [{ label: "Paciente", span: 2 }, { label: "Documento" }, { label: "Historia clínica" }],
+    [{ label: "Representante, si es menor", span: 4 }, { label: "Documento", span: 2 }, { label: "Parentesco", span: 2 }],
+  ])
+  ruledBoxes(kit, [CONSENT_SECTION_LABELS.procedure], 2)
+  kit.gap(6)
+  kit.blankLines([[{ label: CONSENT_SECTION_LABELS.diagnosis, span: 3 }, { label: "CIE-10" }]])
+  ruledBoxes(kit, [CONSENT_SECTION_LABELS.benefits, CONSENT_SECTION_LABELS.risks], 4)
+  ruledBoxes(kit, [CONSENT_PERSONAL_RISKS_LABEL, CONSENT_SECTION_LABELS.alternatives], 3)
+  ruledBoxes(kit, [CONSENT_SECTION_LABELS.consequences, CONSENT_SECTION_LABELS.notes], 3)
+  kit.gap(6)
+  const signatures = [
+    {
+      heading: "Paciente o representante legal",
+      strokes: null,
+      // De un menor firma su representante legal, como dice la hoja de la app: su nombre va arriba.
+      lines: [{ text: "Nombre, documento y fecha" }],
+    },
+    { heading: "Huella digital", strokes: null, lines: [{ text: "Si no sabe firmar" }], width: 84 },
+    {
+      heading: "Profesional que informa",
+      strokes: null,
+      lines: [{ text: "Nombre y colegiatura" }, { text: "Fecha y hora" }],
+    },
+  ]
+  const boxHeight = 50
+  // La declaración pasa de hoja con las firmas: una firma sola no dice qué se firmó.
+  const declaration = { title: "Declaración", body: CONSENT_DECLARATION, size: SIZE.read }
+  kit.ensure(kit.panelHeight(declaration) + 16 + kit.penSignaturesHeight(signatures, { boxHeight }))
+  kit.panel(declaration)
+  kit.gap(16)
+  kit.penSignatures(signatures, { boxHeight })
+  return kit.finish()
+}
+
+/** Los billetes y monedas que se cuentan, de mayor a menor. */
+const CASH_PIECES = ["200", "100", "50", "20", "10", "5", "2", "1", "0,50", "0,20", "0,10"]
+
+/** Una columna de una tabla lado a lado. */
+interface SideColumn {
+  label: string
+  /** Ancho en puntos; sin él, reparte lo que queda. */
+  width?: number
+  align?: "left" | "right" | "center"
+}
+
+/** Lo que va en una celda: texto, texto en negrita o casillas para marcar una. */
+type SideCell = string | { text: string; strong?: boolean } | { choices: string[] }
+
+/**
+ * Tablas angostas una al lado de la otra, con filas del mismo alto: lo que se suma de la caja
+ * junto al conteo de billetes. `kit.table` ocupa todo el ancho; así la hoja cabe en una A4.
+ */
+function sideTables(kit: DocumentKit, tables: Array<{ columns: SideColumn[]; rows: SideCell[][] }>, rowHeight = 19): void {
+  const gapX = 21
+  const headHeight = SIZE.label * 1.3 + 4
+  const rows = Math.max(...tables.map((table) => table.rows.length))
+  kit.ensure(headHeight + rows * rowHeight + 2)
+  const top = kit.y
+  const tableWidth = (kit.width - gapX * (tables.length - 1)) / tables.length
+  /** Un texto en su celda; deja `kit.y` donde estaba la fila. */
+  const write = (
+    value: string,
+    x: number,
+    rowTop: number,
+    width: number,
+    style: { strong?: boolean; head?: boolean; align?: "left" | "right" | "center" },
+  ) => {
+    const size = style.head ? SIZE.label : SIZE.dense
+    const leading = 1.3
+    kit.y = style.head ? rowTop : rowTop - (rowHeight - size * leading) / 2
+    kit.text(value, {
+      size,
+      leading,
+      indent: x - kit.left,
+      width,
+      face: style.head ? "sansSemi" : style.strong ? "sansBold" : "sans",
+      tone: style.head ? "gray" : "ink",
+      align: style.align ?? "left",
+    })
+  }
+  tables.forEach((table, index) => {
+    const x0 = kit.left + index * (tableWidth + gapX)
+    const fixed = table.columns.reduce((sum, column) => sum + (column.width ?? 0), 0)
+    const free = table.columns.filter((column) => column.width === undefined).length
+    // Cada columna con su borde izquierdo y su ancho.
+    let edge = x0
+    const placed = table.columns.map((column) => {
+      const width = column.width ?? (tableWidth - fixed) / Math.max(free, 1)
+      const at = { ...column, x: edge, width }
+      edge += width
+      return at
+    })
+    for (const column of placed) write(column.label, column.x, top, column.width - 6, { head: true, align: column.align })
+    const rule = (y: number, ink: boolean) =>
+      kit.page.drawLine({
+        start: { x: x0, y },
+        end: { x: x0 + tableWidth, y },
+        thickness: ink ? 0.75 : 0.4,
+        color: kit.color(ink ? "ink" : "gray"),
+      })
+    const bodyTop = top - headHeight
+    rule(bodyTop, true)
+    table.rows.forEach((row, r) => {
+      const rowTop = bodyTop - r * rowHeight
+      row.forEach((cell, i) => {
+        const column = placed[i]
+        if (!column) return
+        if (typeof cell === "object" && "choices" in cell) {
+          // «☐ Cuadra ☐ Sobra ☐ Falta»: se marca una.
+          const box = 10
+          let x = column.x
+          for (const choice of cell.choices) {
+            kit.page.drawRectangle({
+              x,
+              y: rowTop - (rowHeight + box) / 2,
+              width: box,
+              height: box,
+              borderColor: kit.color("ink"),
+              borderWidth: 0.75,
+            })
+            write(choice, x + box + 4, rowTop, column.width, {})
+            x += box + 4 + kit.textWidth(choice, "sans", SIZE.dense) + 12
+          }
+          return
+        }
+        const text = typeof cell === "string" ? cell : cell.text
+        const strong = typeof cell === "object" && cell.strong
+        if (text) write(text, column.x, rowTop, column.width - 6, { strong, align: column.align })
+      })
+      rule(rowTop - rowHeight, r === table.rows.length - 1)
+    })
+  })
+  kit.y = top - headHeight - rows * rowHeight
+}
+
+/**
+ * El cierre de caja: la hoja «CIERRE DE CAJA» que imprime la app al cerrar
+ * (`CashClosureSheet` en `cash-close-drawer.tsx`), con sus renglones y en su orden: lo que
+ * debe haber, lo contado, la diferencia, lo que queda y lo que se entrega, y los otros
+ * medios, que no se cuentan. Para hacerlo a mano suma el conteo de billetes y monedas, y los
+ * cobros y gastos del día.
+ */
+async function blankCashClose(): Promise<Uint8Array> {
+  const kit = await openTemplate(BLANK_SHEETS["cierre-de-caja"].title, "cierre-de-caja")
+  kit.gap(10)
+  kit.titleWithDetails("Cierre de caja", [], SIZE.titleBudget)
+  kit.gap(4)
+  kit.blankLines([
+    [{ label: "Fecha y hora", span: 2 }, { label: "Sede" }, { label: "Caja (moneda)" }],
+    [{ label: "Cerró", span: 2 }, { label: "Desde (el cierre anterior)", span: 2 }],
+  ])
+
+  // Filas más bajas que las de una tabla: así el arqueo, los otros medios y los cobros caben en una hoja.
+  const row = 17
+  section(kit, "El efectivo", 12 * row + 20, 10)
+  sideTables(
+    kit,
+    [
+      {
+        columns: [{ label: "Concepto" }, { label: "Importe", width: 78, align: "right" }],
+        rows: [
+          ["Quedó del cierre anterior", ""],
+          ["+ Cobros en efectivo", ""],
+          ["+ Efectivo ingresado", ""],
+          ["− Gastos pagados con la caja", ""],
+          ["− Efectivo retirado", ""],
+          ["− Devuelto en efectivo", ""],
+          [{ text: "= Debe haber", strong: true }, ""],
+          ["Efectivo que contaste", ""],
+          [{ text: "Diferencia", strong: true }, ""],
+          [{ choices: ["Cuadra", "Sobra", "Falta"] }, ""],
+          ["Queda en caja para mañana", ""],
+          [{ text: "ENTREGA", strong: true }, ""],
+        ],
+      },
+      {
+        columns: [
+          { label: "Billete o moneda" },
+          { label: "Cantidad", width: 60, align: "center" },
+          { label: "Importe", width: 78, align: "right" },
+        ],
+        rows: [...CASH_PIECES.map((piece) => [`S/ ${piece}`, "", ""]), [{ text: "Total contado", strong: true }, "", ""]],
+      },
+    ],
+    row,
+  )
+
+  kit.gap(14)
+  sideTables(
+    kit,
+    [
+      {
+        columns: [{ label: "Otros medios (no se cuentan)" }, { label: "Importe", width: 78, align: "right" }],
+        rows: [["Tarjeta", ""], ["Transferencia", ""], ["Billetera digital", ""], ["Otro:", ""]],
+      },
+      {
+        columns: [
+          // «Gastos pagados con la caja» no cabe en una línea junto al comprobante.
+          { label: "Gastos con la caja" },
+          { label: "Comprobante", width: 72 },
+          { label: "Importe", width: 64, align: "right" },
+        ],
+        rows: [[""], [""], [""], [""]],
+      },
+    ],
+    row,
+  )
+
+  // Los cobros llenan lo que queda hasta las firmas, sin pasar a otra hoja.
+  const signatures = 24 + 8 + 30
+  const head = SIZE.label * 1.4 + 3 + 12 + SIZE.label * 1.3 + 4
+  const charges = Math.max(8, Math.floor((kit.room() - head - 12 - signatures) / row))
+  section(kit, "Cobros del día", 4 * row)
+  sideTables(
+    kit,
+    [
+      {
+        columns: [
+          { label: "Hora", width: 48 },
+          { label: "Paciente" },
+          { label: "Concepto" },
+          { label: "Medio", width: 90 },
+          { label: "Importe", width: 78, align: "right" },
+        ],
+        rows: Array.from({ length: charges }, () => [""]),
+      },
+    ],
+    row,
+  )
+
+  kit.gap(12)
+  kit.blankLines([[{ label: "Nota" }]])
+  kit.gap(8)
+  kit.blankLines([[{ label: "Entrega (quien cierra)", span: 2 }, { label: "Recibe", span: 2 }]], { height: 30 })
+  return kit.finish()
+}
+
 /** El PDF de una plantilla. */
 export function renderBlankSheet(sheet: BlankSheet): Promise<Uint8Array> {
   switch (sheet) {
@@ -387,6 +932,12 @@ export function renderBlankSheet(sheet: BlankSheet): Promise<Uint8Array> {
       return blankOdontogram(true)
     case "presupuesto":
       return blankBudget()
+    case "historia-clinica":
+      return blankHistory()
+    case "consentimiento":
+      return blankConsent()
+    case "cierre-de-caja":
+      return blankCashClose()
   }
 }
 
@@ -404,17 +955,44 @@ export function blankSheetBytes(sheet: BlankSheet): Promise<Uint8Array> {
   return bytes
 }
 
+/**
+ * Lo que el correo cuenta de la app según la plantilla, solo lo que la app hace: Clío ordena
+ * lo conversado o dictado (`help-guide/clinica.ts`), el consentimiento se firma en la clínica,
+ * en papel o por enlace, y el del enlace espera la confirmación del profesional
+ * (`CONSENT_SIGNATURE_NOTES.enlace`, `consent-pdf.ts`), y el cierre calcula lo que debe haber y la
+ * diferencia (`cash-close-drawer.tsx`).
+ */
+const SHEET_PITCH = {
+  "historia-clinica":
+    "En odentIA, la historia se llena mientras atiendes: conversas con el paciente o dictas, y Clío deja cada cosa en su lugar (el motivo, el relato, su salud y el examen) para que tú lo confirmes.",
+  consentimiento:
+    "En odentIA, los tratamientos que más lo piden traen su consentimiento sugerido, y le sumas los riesgos propios de su caso. El paciente lo firma en la tablet o en papel y queda en su historia con la fecha y la hora; si lo firma desde su celular, queda pendiente hasta que el profesional lo confirma con él.",
+  "cierre-de-caja":
+    "En odentIA, la caja suma sola lo que debe haber: cuentas el efectivo, te dice si cuadra, sobra o falta, y la hoja de cierre sale lista para firmar.",
+} as const satisfies Partial<Record<BlankSheet, string>>
+
 /** Las plantillas de las guías de odentIA, para el aviso (`guideSheetsFor` en `products.ts`). */
 export const DENTAL_GUIDE_SHEETS: GuideSheets = {
   // Las de `apps/web/src/pages/guias/` (`blank-sheets.test.ts` lo comprueba).
-  pages: ["/guias/como-llenar-un-odontograma", "/guias/odontograma-en-ninos", "/guias/presupuesto-dental"],
+  pages: [
+    "/guias/como-llenar-un-odontograma",
+    "/guias/odontograma-en-ninos",
+    "/guias/presupuesto-dental",
+    "/guias/historia-clinica-odontologica",
+    "/guias/consentimiento-informado-dental",
+    "/guias/cierre-de-caja-dental",
+  ],
   sheets: BLANK_SHEETS,
   bytes: (key) =>
     Object.hasOwn(BLANK_SHEETS, key)
       ? blankSheetBytes(key as BlankSheet)
       : Promise.reject(new Error("Esa plantilla no existe")),
-  pitch: (keys) =>
-    keys.every((key) => key === "presupuesto")
+  pitch: (keys) => {
+    // La de la primera que pidió; el odontograma y el presupuesto, como siempre.
+    const first = keys[0]
+    if (first && Object.hasOwn(SHEET_PITCH, first)) return SHEET_PITCH[first as keyof typeof SHEET_PITCH]
+    return keys.every((key) => key === "presupuesto")
       ? "En odentIA, el presupuesto sale del plan, con los precios de tu lista y hasta tres opciones, y el paciente lo recibe en su celular."
-      : "En odentIA, el odontograma se llena en la pantalla: tocas el diente, eliges lo que ves y queda dibujado con su fecha en la historia del paciente.",
+      : "En odentIA, el odontograma se llena en la pantalla: tocas el diente, eliges lo que ves y queda dibujado con su fecha en la historia del paciente."
+  },
 }

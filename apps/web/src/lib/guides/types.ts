@@ -9,7 +9,23 @@ import type { FaqItem } from "../faq"
 export type Rich = string
 
 /** Las plantillas en PDF de `apps/web/public/guias/` (las escribe `pnpm --filter @odentia/services plantillas`). */
-export type GuideSheet = "odontograma" | "odontograma-ninos" | "presupuesto"
+export type GuideSheet =
+  | "odontograma"
+  | "odontograma-ninos"
+  | "presupuesto"
+  | "historia-clinica"
+  | "consentimiento"
+  | "cierre-de-caja"
+
+/** Un video del canal de YouTube de odentIA. */
+export interface GuideVideo {
+  youtubeId: string
+  title: string
+  /** Cuándo se publicó, con su hora y zona (ISO 8601, como lo da YouTube): Google lo pide para mostrar el video. */
+  published: string
+  /** Su primera línea en YouTube, para Google; sin ella, la descripción de la guía. */
+  description?: string
+}
 
 /** La figura de un paso: la numeración, las caras o una tabla. */
 export type GuideFigure =
@@ -34,7 +50,7 @@ export interface Guide {
   /** La dirección: `/guias/<slug>`. */
   slug: string
   /** Su tema, en la ruta («Guías › Odontograma») y en las tarjetas. */
-  topic: "Odontograma" | "Presupuestos"
+  topic: "Odontograma" | "Presupuestos" | "Historia clínica" | "Consentimiento" | "Caja"
   /** El título, en dos partes: la segunda va en color. */
   title: string
   accent: string
@@ -51,8 +67,13 @@ export interface Guide {
   updated: string
   /** Cuándo salió por primera vez: no cambia al editarla (Google la lee como la fecha del artículo). */
   published: string
-  /** El video de YouTube, cuando esté publicado; sin él, la guía no muestra esa parte. */
-  video?: { youtubeId: string; title: string }
+  /**
+   * La lista de reproducción del tema en el canal (PL…): la guía muestra sus videos, el más reciente
+   * arriba y los demás en «Más videos de este tema». Un tutorial que se suma a la lista aparece solo.
+   */
+  playlist?: string
+  /** El video fijo: el que se muestra sin lista o si YouTube no responde. Sin ninguno, no hay esa parte. */
+  video?: GuideVideo
   /** «En corto»: la respuesta en tres líneas. */
   short: Rich[]
   steps: GuideStep[]
@@ -60,7 +81,7 @@ export interface Guide {
   sheets: Array<{ sheet: GuideSheet; label: string; detail: string }>
   /** «Pruébalo aquí»: la demo de su página de producto y cómo se hace en odentIA. */
   tryIt: {
-    demo: "odontograma" | "odontograma-ninos" | "presupuesto"
+    demo: "odontograma" | "odontograma-ninos" | "presupuesto" | "historia" | "consentimiento" | "caja"
     title: string
     text: Rich
     /** Lo que se hace con la demo, si ella misma no lo dice. */

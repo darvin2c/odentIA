@@ -88,7 +88,7 @@ export type WebContactResult =
       hasAccount: boolean
       sheets: WebContactSheet[]
     }
-  /** «reciente»: ese buzón ya pidió las plantillas hoy; «ocupado»: se llegó al tope de la hora. */
+  /** «reciente»: ese buzón ya pidió hoy las plantillas de esa guía; «ocupado»: se llegó al tope de la hora. */
   | { send: false; reason: "reciente" | "ocupado" }
 
 /**
@@ -118,10 +118,12 @@ export async function submitWebContact(
     and(gt(saasWebContact.createdAt, new Date(now.getTime() - ms)), lte(saasWebContact.createdAt, now))
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${email}`}, 0))`)
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('saas-web-contact', 0))`)
+  // Una vez al día por buzón y por guía: quien sigue de la historia al consentimiento recibe las dos
+  // (con seis guías enlazadas entre sí, es el camino normal); los topes de la hora siguen por encima.
   const [recent] = await tx
     .select({ id: saasWebContact.id })
     .from(saasWebContact)
-    .where(and(eq(saasWebContact.mailbox, mailbox), since(DAY_MS)))
+    .where(and(eq(saasWebContact.mailbox, mailbox), eq(saasWebContact.sourcePage, input.page), since(DAY_MS)))
     .limit(1)
   if (recent) return { send: false, reason: "reciente" }
   const [hour] = await tx

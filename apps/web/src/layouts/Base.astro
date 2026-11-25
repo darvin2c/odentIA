@@ -108,7 +108,8 @@ const ld = [...(isHome ? [site] : []), org, ...(Array.isArray(jsonLd) ? jsonLd :
     {ICON.ico ? <link rel="icon" href={ICON.ico} sizes="16x16 32x32 48x48 64x64" /> : null}
     <link rel="icon" href={ICON.svg} type="image/svg+xml" />
     <link rel="sitemap" href="/sitemap-index.xml" />
-    {ld.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
+    {/* «<» va escapado: un texto que llega de afuera (el título de un video) no cierra el script. */}
+    {ld.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item).replace(/</g, "\\u003c")} />)}
   </head>
   <body>
     <a class="skip" href="#contenido">Ir al contenido</a>

@@ -164,7 +164,7 @@ describe("el correo del aviso", () => {
     ).rejects.toMatchObject({ status: 400, fields: { page: expect.any(String) } })
   })
 
-  it("una vez por buzón al día, aunque se escriba de otra forma", async () => {
+  it("una vez por buzón y por guía al día, aunque se escriba de otra forma", async () => {
     const first = sent(await submitWebContact(ownerDb, contact("qa.dos@example.com"), "dental"))
     await markWebContactSent(ownerDb, first.contactId)
     for (const again of ["qa.dos@example.com", "QA.DOS+guias@example.com"])
@@ -177,6 +177,11 @@ describe("el correo del aviso", () => {
       send: false,
       reason: "reciente",
     })
+    // Otra guía el mismo día sí: es lo que pidió después, y es el mismo cliente.
+    const other = sent(
+      await submitWebContact(ownerDb, contact("qa.dos@example.com", { page: "/guias/presupuesto-dental", sheets: ["presupuesto"] }), "dental"),
+    )
+    expect(other.clientId).toBe(first.clientId)
     // Al día siguiente sí, y es el mismo cliente.
     const tomorrow = new Date(Date.now() + 25 * 60 * 60 * 1000)
     const again = sent(await submitWebContact(ownerDb, contact("qa.dos@example.com"), "dental", tomorrow))

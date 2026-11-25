@@ -1,0 +1,6 @@
+---
+// La guía «/guias/historia-clinica-odontologica»: su texto está en `src/lib/guides/historia-clinica-odontologica.ts` y el molde en GuidePage.
+import GuidePage from "../../components/guides/GuidePage.astro"
+import { guideBySlug } from "../../lib/guides"
+---
+<GuidePage guide={guideBySlug("historia-clinica-odontologica")} />

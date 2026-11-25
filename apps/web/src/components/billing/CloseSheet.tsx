@@ -13,7 +13,8 @@ const OPTIONS = [
   { id: "more", label: "S/ 190,00", counted: 190 },
 ] as const
 
-const soles = (v: number) => `S/ ${v.toFixed(2).replace(".", ",")}`
+/** Con un espacio que no se corta: «S/ 200,00» no se parte en dos renglones. */
+const soles = (v: number) => `S/${String.fromCharCode(160)}${v.toFixed(2).replace(".", ",")}`
 
 export default function CloseSheet() {
   const [pick, setPick] = useState<(typeof OPTIONS)[number]["id"]>("exact")
@@ -71,7 +72,7 @@ export default function CloseSheet() {
           </div>
           <span className="cs-hint">Escribe uno y el otro se calcula solo: juntos suman lo que contaste.</span>
         </div>
-        <span className="cs-others">Otros medios, no se cuentan aquí: Tarjeta S/ 200,00 · Transferencia S/ 150,00. Compáralos con el reporte de cada medio.</span>
+        <span className="cs-others">Otros medios, no se cuentan aquí: Tarjeta {soles(200)} · Transferencia {soles(150)}. Compáralos con el reporte de cada medio.</span>
       </div>
 
       <div className="cs-sheet" aria-label="Hoja de cierre">

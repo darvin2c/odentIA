@@ -5,6 +5,13 @@ import { richParts } from "../../lib/guides/rich"
 interface Props {
   text: string
 }
-const parts = richParts(Astro.props.text)
+// Un importe no se parte en dos renglones: «S/ 185» y «− S/ 85» llevan espacios que no se cortan.
+const NBSP = String.fromCharCode(160)
+const keep = (text: string) =>
+  text
+    .replace(/S\/ (?=\d)/g, `S/${NBSP}`)
+    .replace(/(?<=\d) (?=\d{3})/g, NBSP)
+    .replace(/− (?=S\/)/g, `−${NBSP}`)
+const parts = richParts(Astro.props.text).map((part) => ({ ...part, text: keep(part.text) }))
 ---
 {parts.map((part) => (part.href ? <a href={part.href}>{part.text}</a> : part.bold ? <b>{part.text}</b> : part.text))}

@@ -57,7 +57,7 @@ const pages = pageFiles(pagesDir)
 const guidesDir = fileURLToPath(new URL("./src/lib/guides", import.meta.url))
 const guideDates = new Map(
   readdirSync(guidesDir)
-    .filter((name) => name.endsWith(".ts") && !["index.ts", "types.ts", "rich.ts"].includes(name) && !name.endsWith(".test.ts"))
+    .filter((name) => name.endsWith(".ts") && !["index.ts", "types.ts", "rich.ts", "videos.ts"].includes(name) && !name.endsWith(".test.ts"))
     .flatMap((name) => {
       const text = readFileSync(join(guidesDir, name), "utf8")
       const slug = text.match(/slug:\s*"([a-z0-9-]+)"/)?.[1]

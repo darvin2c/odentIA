@@ -73,7 +73,7 @@ describe("cada guía", () => {
 
   it("el mapa del sitio lee la misma fecha que la página", () => {
     // astro.config.mjs saca la fecha del archivo con esta misma lectura.
-    for (const name of readdirSync(HERE).filter((file) => file.endsWith(".ts") && !["index.ts", "types.ts", "rich.ts"].includes(file) && !file.endsWith(".test.ts"))) {
+    for (const name of readdirSync(HERE).filter((file) => file.endsWith(".ts") && !["index.ts", "types.ts", "rich.ts", "videos.ts"].includes(file) && !file.endsWith(".test.ts"))) {
       const text = readFileSync(`${HERE}${name}`, "utf8")
       const slug = text.match(/slug:\s*"([a-z0-9-]+)"/)?.[1]
       const updated = text.match(/updated:\s*"(\d{4}-\d{2}-\d{2})"/)?.[1]
@@ -131,7 +131,10 @@ describe("las guías en cada web", () => {
     expect(footerGroups.find((group) => group.title === "Guías")?.links.map((link) => link.href)).toEqual([
       "/guias/como-llenar-un-odontograma",
       "/guias/odontograma-en-ninos",
+      "/guias/historia-clinica-odontologica",
+      "/guias/consentimiento-informado-dental",
       "/guias/presupuesto-dental",
+      "/guias/cierre-de-caja-dental",
       "/guias",
     ])
   })

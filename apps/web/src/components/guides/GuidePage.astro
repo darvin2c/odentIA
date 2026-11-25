@@ -1,7 +1,7 @@
 ---
 // El molde de cada guía (lienzo UYxnET…, tablero 2; acta de la mesa del 24 nov; ADR 0216): responde,
 // enseña, muestra cómo lo hace odentIA y deja empezar ahí mismo. Arriba, lo que buscó y la plantilla;
-// el video, si ya está; «En corto»; los pasos con su figura; las plantillas (sin pedir el correo; al
+// el video del canal (de la lista del tema, si tiene; si no, el fijo); «En corto»; los pasos con su figura; las plantillas (sin pedir el correo; al
 // descargar, el aviso); «Pruébalo aquí» con la demo de su página de producto; las preguntas; dos
 // guías para seguir y la solicitud ahí mismo. Todo sale del archivo de la guía.
 import { FDI_ADULT, FDI_CHILD, toothNameOf } from "@odentia/dental"
@@ -20,15 +20,18 @@ import {
   sheetImages,
 } from "../../lib/guides"
 import { ctaOf, guideContactApiUrl } from "../../lib/site"
+import CloseSheet from "../billing/CloseSheet"
 import BudgetDemo from "../budgets/BudgetDemo"
 import ChartPreview from "../clinical/ChartPreview"
 import ChildChartPreview from "../clinical/ChildChartPreview"
+import ConsentDemo from "../consent/ConsentDemo"
 import Faq from "../Faq.astro"
 import GuideCards from "./GuideCards.astro"
 import GuideDownloads from "./GuideDownloads"
 import GuideFigure from "./GuideFigure.astro"
 import GuideStart from "./GuideStart.astro"
 import RichText from "./RichText.astro"
+import { CHANNEL_URL, embedUrl, guideVideos, thumbUrl, videoJsonLd, watchUrl } from "../../lib/guides/videos"
 
 interface Props {
   guide: Guide
@@ -46,7 +49,17 @@ const trail: [string, string][] = [
   [guide.name, path],
 ]
 const organization = `${Astro.site?.toString() ?? ""}#organizacion`
-const jsonLd = [guideArticleJsonLd(Astro.site, guide, organization), breadcrumbJsonLd(Astro.site, trail), faqJsonLd(guide.faq)]
+const videos = await guideVideos(guide)
+const [video, ...moreVideos] = videos
+/** El título sin sus etiquetas de YouTube («#Shorts»). */
+const shown = (title: string) => title.replace(/\s*#\w+/g, "").trim()
+const jsonLd = [
+  guideArticleJsonLd(Astro.site, guide, organization),
+  breadcrumbJsonLd(Astro.site, trail),
+  faqJsonLd(guide.faq),
+  // Solo el que se ve en la página: los de «Más videos» son enlaces a YouTube.
+  ...videoJsonLd(video ? [video] : [], guide),
+]
 const minutes = readingMinutes(guide)
 const firstSheet = guide.sheets[0]
 const sheets = guide.sheets.map((item) => ({
@@ -64,12 +77,19 @@ const share = firstSheet
   : undefined
 // Los nombres de las piezas se arman aquí, en el servidor: la isla no carga el dominio dental entero.
 const names = Object.fromEntries([...FDI_ADULT, ...FDI_CHILD].map((tooth) => [tooth, toothNameOf(tooth)]))
-const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel." : "Tu odontograma, sin papel."
+const START_TITLES: Record<Guide["topic"], string> = {
+  Odontograma: "Tu odontograma, sin papel.",
+  Presupuestos: "Tus presupuestos, sin papel.",
+  "Historia clínica": "Tu historia clínica, sin papel.",
+  Consentimiento: "Tus consentimientos, sin papel.",
+  Caja: "Tu caja, sin cuadernos.",
+}
+const startTitle = START_TITLES[guide.topic]
 ---
 <Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} cta={headerCta} share={share}>
   <section class="hero gh">
     <div class="grain" aria-hidden="true"></div>
-    <div class:list={["wrap", "gh-in", { video: guide.video }]}>
+    <div class:list={["wrap", "gh-in", { video }]}>
       <div class="gh-copy">
         <nav class="gh-trail mono rise" aria-label="Ruta">
           <a href={GUIDES_PATH}>Guías</a> <span aria-hidden="true">›</span> <span>{guide.topic}</span>
@@ -77,23 +97,29 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
         <h1 class="gh-h1 rise d1">{guide.title} <span class="acc">{guide.accent}</span></h1>
         <p class="lead lead-d rise d2">{guide.lead}</p>
         <p class="gh-meta mono rise d2">
-          Actualizada el <time datetime={guide.updated}>{dayWords(guide.updated)}</time> · Lectura de {minutes} minutos{guide.video ? " · Con video" : ""}
+          Actualizada el <time datetime={guide.updated}>{dayWords(guide.updated)}</time> · Lectura de {minutes} minutos{video ? " · Con video" : ""}
         </p>
         <div class="gh-ctas rise d3">
           <a class="btn btn-p" href="#descargar" data-guide-download>
             <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></svg>
-            {guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : `Descarga ${firstSheet?.label === "Presupuesto en blanco" ? "el presupuesto" : "la plantilla"} en PDF`}
+            {guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : `Descarga ${firstSheet?.label.startsWith("Presupuesto") ? "el presupuesto" : "la plantilla"} en PDF`}
           </a>
         </div>
       </div>
-      {guide.video ? (
+      {video ? (
         <div class="gh-video rise d2">
-          {/* La imagen del video y su enlace: YouTube carga recién al tocarla. */}
-          <a class="gh-play" href={`https://www.youtube.com/watch?v=${guide.video.youtubeId}`} target="_blank" rel="noopener">
-            <img src={`https://i.ytimg.com/vi/${guide.video.youtubeId}/hqdefault.jpg`} alt="" width="480" height="360" loading="lazy" decoding="async" />
+          {/* La imagen del video: YouTube carga recién al tocarla, aquí mismo. Sin JavaScript, abre YouTube. */}
+          <a class="gh-play" href={watchUrl(video.youtubeId)} target="_blank" rel="noopener" data-embed={embedUrl(video.youtubeId)} data-title={video.title} aria-label={`Ver el video: ${video.title}`}>
+            <img src={thumbUrl(video.youtubeId)} alt="" width="640" height="480" fetchpriority="high" decoding="async" />
             <span class="gh-badge" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z" /></svg></span>
-            <span class="gh-vt">{guide.video.title} <span class="gh-yt">· en YouTube</span></span>
           </a>
+          {/* El título va debajo: la miniatura ya trae su propio texto. */}
+          <p class="gh-vt">{shown(video.title)}</p>
+          <p class="gh-yt mono">
+            <a href={watchUrl(video.youtubeId)} target="_blank" rel="noopener">Verlo en YouTube</a>
+            <span aria-hidden="true">·</span>
+            <a href={`${CHANNEL_URL}?sub_confirmation=1`} target="_blank" rel="noopener">Suscríbete al canal</a>
+          </p>
         </div>
       ) : null}
     </div>
@@ -134,6 +160,25 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
     </section>
   </article>
 
+  {moreVideos.length ? (
+    <section class="section gvids" aria-labelledby="videos-t">
+      <div class="wrap gvids-in">
+        <h2 class="h3" id="videos-t">Más videos de este tema</h2>
+        <ul class="gvids-list">
+          {moreVideos.map((item) => (
+            <li>
+              <a href={watchUrl(item.youtubeId)} target="_blank" rel="noopener" data-embed={embedUrl(item.youtubeId)} data-title={item.title}>
+                <img src={thumbUrl(item.youtubeId)} alt="" width="480" height="270" loading="lazy" decoding="async" />
+                <span>{shown(item.title)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+        <a class="gvids-all" href={CHANNEL_URL} target="_blank" rel="noopener">Todos los tutoriales en YouTube <span aria-hidden="true">→</span></a>
+      </div>
+    </section>
+  ) : null}
+
   <section id="pruebalo" class="section section-white gtry" aria-labelledby="pruebalo-t">
     <div class="wrap gtry-in">
       <div class="gtry-copy">
@@ -148,6 +193,12 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
           <ChartPreview client:visible names={names} />
         ) : guide.tryIt.demo === "odontograma-ninos" ? (
           <ChildChartPreview client:visible names={names} />
+        ) : guide.tryIt.demo === "historia" ? (
+          <ChartPreview client:visible names={names} />
+        ) : guide.tryIt.demo === "consentimiento" ? (
+          <ConsentDemo client:visible />
+        ) : guide.tryIt.demo === "caja" ? (
+          <CloseSheet client:visible />
         ) : (
           <BudgetDemo client:visible />
         )}
@@ -177,6 +228,51 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
       first.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
       first.focus({ preventScroll: true })
     })
+    // El video se ve aquí mismo al tocarlo (sin cookies hasta que se reproduce); antes no carga nada de YouTube.
+    // Al tocarlo se agranda a todo el ancho de la portada, para verlo bien; «Cerrar video» vuelve a como estaba.
+    // Los de «Más videos de este tema» se ven en el mismo lugar, en grande.
+    const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches
+    const hero = document.querySelector<HTMLElement>(".gh-in")
+    const box = document.querySelector<HTMLElement>(".gh-video")
+    const cover = box?.querySelector<HTMLAnchorElement>(".gh-play")
+    let frame: HTMLIFrameElement | null = null
+    let close: HTMLButtonElement | null = null
+    const stop = () => {
+      if (!frame || !close || !cover) return
+      frame.replaceWith(cover)
+      close.remove()
+      frame = null
+      close = null
+      hero?.classList.remove("playing")
+      cover.focus()
+    }
+    const play = (embed: string, title: string): boolean => {
+      if (!box || !cover) return false
+      if (!frame) {
+        frame = document.createElement("iframe")
+        frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen"
+        frame.className = "gh-frame"
+        close = document.createElement("button")
+        close.type = "button"
+        close.className = "gh-close"
+        close.textContent = "Cerrar video ✕"
+        close.addEventListener("click", stop)
+        cover.replaceWith(frame)
+        box.prepend(close)
+        hero?.classList.add("playing")
+      }
+      frame.src = `${embed}?autoplay=1&rel=0`
+      frame.title = title
+      box.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" })
+      frame.focus({ preventScroll: true })
+      return true
+    }
+    for (const link of document.querySelectorAll<HTMLAnchorElement>("[data-embed]")) {
+      link.addEventListener("click", (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return
+        if (play(link.dataset.embed ?? "", link.dataset.title ?? "Video")) event.preventDefault()
+      })
+    }
   </script>
 </Base>
 
@@ -195,10 +291,32 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
   .gh-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
   .gh-video { min-width: 0; }
   .gh-play { position: relative; display: block; border-radius: 22px; overflow: hidden; background: #000; color: #fff; text-decoration: none; aspect-ratio: 16 / 9; }
-  .gh-play img { width: 100%; height: 100%; object-fit: cover; opacity: .85; }
-  .gh-badge { position: absolute; top: 50%; left: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px; border-radius: 999px; background: var(--teal); display: flex; align-items: center; justify-content: center; }
-  .gh-vt { position: absolute; left: 16px; right: 16px; bottom: 14px; font-weight: 800; font-size: 17px; text-shadow: 0 1px 8px rgba(0, 0, 0, .6); }
-  .gh-yt { font-weight: 500; opacity: .85; }
+  .gh-play img { width: 100%; height: 100%; object-fit: cover; }
+  /* El botón en la esquina: la miniatura trae su título en el centro y no se tapa. */
+  .gh-badge { position: absolute; right: 12px; bottom: 12px; width: 48px; height: 48px; border-radius: 999px; background: var(--teal); display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); transition: transform .15s ease; }
+  .gh-play:hover .gh-badge, .gh-play:focus-visible .gh-badge { transform: scale(1.08); }
+  @media (prefers-reduced-motion: reduce) { .gh-badge { transition: none; } }
+  .gh-vt { margin: 14px 4px 0; font-weight: 700; font-size: 16px; line-height: 1.4; color: #fff; }
+  .gh-video :global(.gh-frame) { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 22px; background: #000; }
+  /* Con el video andando, ocupa toda la portada: el título y el botón quedan debajo. */
+  .gh-in.playing { grid-template-columns: minmax(0, 1fr); }
+  .gh-in.playing .gh-video { order: -1; width: 100%; max-width: 1120px; margin: 0 auto; scroll-margin-top: 96px; }
+  .gh-in.playing .gh-copy { max-width: 860px; }
+  .gh-video :global(.gh-close) { display: flex; margin: 0 0 10px auto; min-height: 44px; padding: 0 16px; align-items: center; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .08); color: #fff; font: 600 14px var(--font); cursor: pointer; }
+  .gh-video :global(.gh-close:hover) { background: rgba(255, 255, 255, .16); }
+  .gh-video :global(.gh-close:focus-visible) { outline: 2px solid var(--sky); outline-offset: 2px; }
+  .gh-yt { margin: 2px 4px 0; font-size: 13px; color: var(--on-night-3); display: flex; flex-wrap: wrap; gap: 0 10px; align-items: center; }
+  .gh-yt a { color: var(--sky-2); text-decoration: none; display: inline-flex; min-height: 44px; align-items: center; }
+  .gh-yt a:hover { color: #fff; }
+
+  .gvids { padding: 64px 0; }
+  .gvids-in { display: flex; flex-direction: column; gap: 20px; }
+  .gvids-in h2 { margin: 0; }
+  .gvids-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+  .gvids-list a { display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 700; font-size: 15px; line-height: 1.35; }
+  .gvids-list img { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; background: #0f172a; }
+  .gvids-list a:hover span { color: var(--teal-hover); }
+  .gvids-all { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; text-decoration: none; }
 
   .gwrap { max-width: 860px; margin: 0 auto; padding-inline: 32px; box-sizing: content-box; }
   .gshort { background: var(--paper); padding: 56px 0; }

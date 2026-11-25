@@ -236,7 +236,7 @@ export function createPublicFoundersRoute(deps: {
   /**
    * El aviso de una guía (ADR 0216): quien bajó una plantilla deja su correo y le llegan
    * las plantillas adjuntas. Solo JSON, con su campo trampa y 3 por red cada 10 minutos; los
-   * topes que frenan el abuso viven en la base (`submitWebContact`): uno por buzón al día y
+   * topes que frenan el abuso viven en la base (`submitWebContact`): uno por buzón y por guía al día y
    * unos pocos por hora entre todos. No dice si ese correo ya es cliente o ya pidió entrar, y
    * un correo que no se sabe si salió no se reintenta. No avisa al equipo: el contacto queda
    * en Clientes con su guía.
