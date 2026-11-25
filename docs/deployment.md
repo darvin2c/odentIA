@@ -208,11 +208,17 @@ mientras no se encienda. Para encenderlo, en este orden:
    `GESTORIA_BACKUP_DATABASE_URL` (el superusuario sobre la base `gestoria`): cada vuelta la
    vuelca, la restaura para comprobarla y la sube a `gestoria/` del mismo bucket. Un fallo queda
    en el registro del servicio (`[backup] …: gestorIA: FALLO en …`); todavía no sale en Soporte.
-3. **El servidor.** Un proyecto nuevo en OpenShip con `gestoria/compose.prod.yaml` y las
-   variables de `gestoria/infra/prod/.env.example`; en GitHub, `GESTORIA_OPENSHIP_PROJECT_ID`
-   (variable) y `GESTORIA_OPENSHIP_DEPLOY_TOKEN` (secreto). Desde ahí cada cambio de
-   `gestoria/` que llega a `main` se despliega solo en ese proyecto. Su contenedor se une a la red
-   de las clínicas (`GESTORIA_CLINICS_NETWORK`) solo para llegar a PostgreSQL y al túnel.
+3. **El servidor.** Un proyecto nuevo en OpenShip desde este repositorio, con
+   `rootDirectory: gestoria` y `composePath: gestoria/compose.prod.yaml` (el contexto `..` es la
+   raíz), y las variables de `gestoria/infra/prod/.env.example`. OpenShip aísla la red de cada
+   proyecto: gestorIA llega al PostgreSQL con un enlace interno (`openship project connections
+   create`) a la salida `url` del servicio `postgres` de las clínicas, que declara `expose: 5432`.
+   El enlace lo nombra `shared-<id del servicio en minúsculas, con - por _>`, y ese es el host de
+   `GESTORIA_DATABASE_URL` y `GESTORIA_APP_DATABASE_URL`. El servidor espera a la base antes de
+   migrar (el enlace se arma después de crear los contenedores). En GitHub,
+   `GESTORIA_OPENSHIP_PROJECT_ID` (variable); la llave es la de las clínicas salvo que haya
+   `GESTORIA_OPENSHIP_DEPLOY_TOKEN`. Desde ahí cada cambio de `gestoria/` que llega a `main` se
+   despliega solo en ese proyecto.
 4. **El dominio.** `gestoria24.com` en Cloudflare: en el túnel, `api.gestoria24.com` →
    `http://api:3001` (la cuenta) y `servidor.gestoria24.com` → `http://gestoria-api:3201`.
    En la API y el worker de las clínicas, `GESTORIA_DOMAIN=gestoria24.com`,
