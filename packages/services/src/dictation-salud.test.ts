@@ -804,3 +804,22 @@ describe("H3 (mesa del 25 nov) · lo que ya está en Antecedentes no vuelve como
     await enable(false)
   })
 })
+
+describe("revisión del 25 nov · lo registrado corrige lo pendiente, no lo deja contradiciéndose", () => {
+  it("«Anticoagulante: no sabe» pendiente pasa a apixabán aunque el apixabán ya esté en Antecedentes", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "unknown" } }, sourceText: "no sé si tomo algo para la sangre" }],
+      transcript: "No sé si tomo algo para la sangre.",
+    })
+    await ownerDb.insert(patientMedication).values({ organizationId: ORG, patientId: fx.patient.id, name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" })
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "acompanante", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "sí toma apixabán" }],
+      transcript: "Sí, toma apixabán, dice su hija.",
+    })
+    const [said] = await health()
+    expect(said?.payload["anticoagulants"]).toMatchObject({ state: "recorded", detail: "apixabán" })
+    await enable(false)
+  })
+})

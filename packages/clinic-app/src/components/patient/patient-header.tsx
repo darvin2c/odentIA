@@ -6,6 +6,7 @@ import {
   type MedicineClassAnswer,
   medicationAlertWords,
   medicationClassOf,
+  normalizeDrugText,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -176,7 +177,7 @@ export function alertsByRisk(
   const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
   // Lo que oyó Clío y nadie confirmó, como en la franja: gana a «no se le preguntó» y a «Niega
   // alergias», que dirían otra cosa de lo mismo (QA del 22 nov, H11).
-  const said = saidHealthAlerts(health?.said ?? [], health?.saidAllergies ?? []).map(({ key: _key, ...alert }) => ({ ...alert, short: alert.label }))
+  const said = saidHealthAlerts(health?.said ?? [], unregisteredSaid(health?.saidAllergies, detail.activeAllergies)).map(({ key: _key, ...alert }) => ({ ...alert, short: alert.label }))
   const saidAllergies = said.some((alert) => alert.id === "dicho-allergies")
   const unasked =
     noAllergies && detail.allergyReview === "unknown" && !saidAllergies
@@ -315,7 +316,7 @@ export function PatientClinicalStrip({
   // A un niño no se le preguntan: «Anticoagulante: dijo que no · huesos» no le sirve a quien lo atiende (K7).
   // Lo que dijo en una consulta en curso y nadie confirmó (lo oyó Clío): avisa ya, como lo declarado,
   // sin frenar nada (mesa del 20 nov 2026). Lo que cambia la anestesia o la receta, no su boca.
-  const saidNow = saidHealthAlerts(health?.said ?? [], health?.saidAllergies ?? [])
+  const saidNow = saidHealthAlerts(health?.said ?? [], unregisteredSaid(health?.saidAllergies, detail.activeAllergies))
   const saidKeys = new Set(saidNow.map((alert) => alert.key))
   const classWords = health?.medicineClasses && !child
     ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
@@ -349,7 +350,7 @@ export function PatientClinicalStrip({
           },
         ]
       : []),
-    ...(saidNoAllergies !== null
+    ...(saidNoAllergies !== null && !saidKeys.has("allergies")
       ? // Su «No» no es una alerta: se dice, sin forma de aviso (revisión final del 15 nov, ux U3).
         [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "secondary" as const, group: saidNoAllergies, changed: false }]
       : []),
@@ -1114,4 +1115,17 @@ export function PersonHeader({
       {patient && !person.archived ? <StaleEncounterNotice patientId={patient.id} /> : null}
     </header>
   )
+}
+
+/**
+ * Las alergias que oyó Clío y todavía no están en sus alergias: la que ya se registró a mano no se
+ * dice dos veces («Alergia: ibuprofeno» y «dijo ibuprofeno, sin confirmar»; revisión del 25 nov).
+ */
+function unregisteredSaid(
+  said: readonly SaidAllergy[] | undefined,
+  registered: ReadonlyArray<{ substance: string; substanceCode?: string | null; verification?: string | null }>,
+): SaidAllergy[] {
+  const key = (row: { substance: string; substanceCode?: string | null }) => (row.substanceCode ?? normalizeDrugText(row.substance)).toLocaleLowerCase("es")
+  const known = new Set(registered.filter((row) => row.verification !== "descartada").map(key))
+  return (said ?? []).filter((row) => !known.has(key(row)))
 }

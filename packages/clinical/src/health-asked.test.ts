@@ -297,3 +297,8 @@ it("la aspirina de todos los días es un antiagregante, no un anticoagulante (me
   expect(entry?.atc).toBe("B01AC06")
   expect(medicationAlertWords({ name: "aspirina", dose: "100 mg", atcCode: entry?.atc }).label).toBe("Antiagregante: aspirina 100 mg")
 })
+
+it("la aspirina ya guardada con el código del grupo se lee como antiagregante (revisión del 25 nov)", () => {
+  expect(medicationAlertWords({ name: "aspirina", dose: "100 mg", atcCode: "B01A" }).label).toBe("Antiagregante: aspirina 100 mg")
+  expect(medicationAlertWords({ name: "warfarina", atcCode: "B01A" }).label).toBe("Anticoagulante: warfarina")
+})

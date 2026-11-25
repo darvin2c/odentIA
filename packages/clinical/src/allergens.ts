@@ -522,6 +522,19 @@ export const MEDICATION_CLASSES = {
 } as const
 export type MedicationClass = keyof typeof MEDICATION_CLASSES
 
+/**
+ * El código de una medicina ya registrada, lo más exacto que se sabe: con el código del grupo
+ * («B01A», de antes de que la lista la conociera) y un nombre de la lista de su misma clase, el de
+ * ese nombre. Así la aspirina guardada como «B01A» se lee como antiagregante (revisión del 25 nov).
+ */
+export function specificAtc(row: { name: string; atcCode?: string | null }): string | null {
+  const atc = row.atcCode ?? null
+  const group = Object.values(MEDICATION_CLASSES).find((one) => one.atc === atc)
+  if (!group) return atc
+  const named = findHabitualMedication(row.name)?.atc
+  return named?.startsWith(group.atc) ? named : atc
+}
+
 /** La clase con marca de un código ATC; null si no es de ninguna. */
 export function medicationClassOf(atc: string | null | undefined): MedicationClass | null {
   if (!atc) return null
@@ -689,7 +702,8 @@ export function saidAllergyWarnings(
   catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
 ): string[] {
   const key = (row: AllergyOnRecord) => (row.substanceCode ?? normalizeDrugText(row.substance)).toLocaleLowerCase("es")
-  const known = new Set(registered.map(key))
+  // Una descartada no avisa (`allergyWarnings`): no puede callar la que se dijo hoy (revisión del 25 nov).
+  const known = new Set(registered.filter((row) => row.verification !== "descartada").map(key))
   const fresh = said.filter((row) => !known.has(key(row)))
   return allergyWarnings(dci, fresh, catalog).map((line) => `${line} Lo dijo en la consulta y nadie lo confirmó.`)
 }

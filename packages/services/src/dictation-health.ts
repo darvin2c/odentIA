@@ -544,7 +544,22 @@ export function healthOfPayload(payload: Record<string, unknown>): NonNullable<z
 
 const sameName = (a: unknown, b: unknown) => normalizeDrugText(text(a)) === normalizeDrugText(text(b))
 /** La medicina, sin dosis ni frecuencia: «apixabán 5 mg dos veces al día» → «apixaban». */
-const drugHead = (value: unknown) => normalizeDrugText(text(value)).split(" ")[0] ?? ""
+/**
+ * La medicina, sin dosis ni frecuencia, para saber si dos frases nombran la misma: por su código ATC
+ * si las dos están en la lista de todos los días («Eliquis» y «apixabán»), y si no, por las palabras
+ * antes de la dosis («apixabán 5 mg dos veces al día» → «apixaban»). Nunca por la primera palabra
+ * sola: «ácido fólico» y «ácido zoledrónico» son dos medicinas (revisión del 25 nov).
+ */
+const DOSE_WORD = /^(\d|mg$|g$|ml$|mcg$|ui$|cada$|una?$|uno$|dos$|tres$|cuatro$|cinco$|diez$|veinte$|cincuenta$|cien$|quinientos$|mil$|al$|por$|en$|veces?$|diari[oa]$|todos$|semanal$|noche$|manana$|tableta|pastilla|capsula|gota)/
+const drugHead = (value: unknown) => {
+  const said = text(value)
+  const atc = said ? findHabitualMedication(said)?.atc : undefined
+  if (atc) return `atc:${atc}`
+  const words = normalizeDrugText(said).split(" ").filter(Boolean)
+  const cut = words.findIndex((word, index) => index > 0 && DOSE_WORD.test(word))
+  const kept = (cut === -1 ? words : words.slice(0, cut)).filter((word, index, all) => !(index === all.length - 1 && ["de", "del"].includes(word)))
+  return kept.join(" ")
+}
 
 /**
  * El repaso al terminar (mesa del 20 nov 2026, P4): lo de su salud que no repite lo ya decidido
@@ -572,7 +587,11 @@ export function withoutSettledHealth(
     // otra dosis («apixabán» y «apixabán cinco miligramos dos veces al día») ya está decidida (H3).
     const sameAnswer = (item: Record<string, unknown>) =>
       JSON.stringify(item) === JSON.stringify(now) ||
-      (DIRECTED.includes(group) && item["state"] === now["state"] && (now["state"] !== "recorded" || drugHead(item["detail"]) === drugHead(now["detail"])))
+      (DIRECTED.includes(group) &&
+        item["state"] === now["state"] &&
+        // «Ya no la toma» no es lo mismo que tomarla: no se quita (revisión del 25 nov).
+        (item["now"] ?? true) === (now["now"] ?? true) &&
+        (now["state"] !== "recorded" || drugHead(item["detail"]) === drugHead(now["detail"])))
     if (before.some(sameAnswer)) {
       delete kept[group]
       continue

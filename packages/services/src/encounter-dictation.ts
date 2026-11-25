@@ -2398,7 +2398,10 @@ export async function saveDictationSegment(
     if (kind === "nota") return payload
     if (!same.length && kind !== "salud") return payload
     if (kind === "salud") {
-      const namedAllergy = settled.some((item) => item.kind === "alergia" && typeof item.payload["substance"] === "string" && item.payload["substance"].trim() !== "")
+      // Una alergia descartada (mal entendida) no cuenta como nombrada (revisión del 25 nov).
+      const namedAllergy = settled.some(
+        (item) => item.kind === "alergia" && item.status !== "descartada" && typeof item.payload["substance"] === "string" && item.payload["substance"].trim() !== "",
+      )
       return withoutSettledHealth(payload, same.map((item) => item.payload), namedAllergy)
     }
     if (kind === "plan") {
@@ -2470,8 +2473,14 @@ export async function saveDictationSegment(
       // Lo que ya está en sus Antecedentes no vuelve como dicho (mesa del 25 nov, H3).
       onFile ??= await healthOnFile(tx, orgId, patientId)
       const fresh = onFile.length ? withoutSettledHealth(ready.payload, onFile) : ready.payload
-      if (!fresh) continue
-      if (fresh !== ready.payload) ready = { ...ready, payload: fresh }
+      // Lo que corrige una pendiente de esta atención se queda, aunque ya esté en Antecedentes: el
+      // «Anticoagulante: no sabe» pendiente no puede quedar contradiciendo al apixabán (revisión del 25 nov).
+      const pendingData = pendingHealthId ? splitMeta(((await pendingRow(pendingHealthId))?.payload ?? {}) as Record<string, unknown>).data : {}
+      const kept = fresh ? { ...fresh } : {}
+      for (const [group, value] of Object.entries(ready.payload)) if (!(group in kept) && group in pendingData) kept[group] = value
+      const anything = Object.entries(kept).some(([group, value]) => typeof value === "object" && value !== null && group !== "_meta")
+      if (!anything) continue
+      if (JSON.stringify(kept) !== JSON.stringify(ready.payload)) ready = { ...ready, payload: kept }
     }
     if (draft.kind === "salud" && pendingHealthId) {
       const row = await pendingRow(pendingHealthId)

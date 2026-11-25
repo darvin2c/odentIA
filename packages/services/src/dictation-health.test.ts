@@ -219,3 +219,18 @@ describe("el repaso no vuelve a proponer lo de salud ya resuelto (mesa del 25 no
     expect(withoutSettledHealth({ allergies: { state: "unknown", items: [] } }, [], false)).toEqual({ allergies: { state: "unknown", items: [] } })
   })
 })
+
+describe("revisión del 25 nov · la misma medicina, no la misma primera palabra", () => {
+  it("«ácido fólico» registrado no quita «ácido alendrónico»; «Losartán 50 mg» sí quita «losartán de cincuenta»", () => {
+    const onFile = [{ medications: { state: "recorded", items: [{ name: "Ácido fólico 5 mg" }, { name: "Losartán 50 mg" }] } }]
+    const said = { medications: { state: "recorded", items: [{ name: "ácido fólico" }, { name: "ácido alendrónico" }, { name: "losartán de cincuenta" }] } }
+    expect(withoutSettledHealth(said, onFile)).toEqual({ medications: { state: "recorded", items: [{ name: "ácido alendrónico" }] } })
+  })
+
+  it("«ya no toma el apixabán» no se quita por tener el apixabán registrado", () => {
+    const onFile = [{ anticoagulants: { state: "recorded", detail: "apixabán" } }]
+    const stopped = { anticoagulants: { state: "recorded", detail: "apixabán", now: false } }
+    expect(withoutSettledHealth(stopped, onFile)).toEqual(stopped)
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "Eliquis" } }, onFile)).toBeNull()
+  })
+})
