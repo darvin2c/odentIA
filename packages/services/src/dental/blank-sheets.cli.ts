@@ -44,11 +44,13 @@ async function shareImage(page: Buffer, title: string): Promise<Buffer> {
     .extract({ left: 0, top: 0, width: 420, height: Math.min(height, 570) })
     .toBuffer()
   // El nombre en dos renglones si es de dos o más palabras («Odontograma / de niños»): en uno se
-  // metía bajo la hoja. Cada renglón mide como mucho 12 letras a 64 px, unos 560 px de ancho.
+  // metía bajo la hoja. Cada renglón cabe en unos 580 px de ancho.
   const [first = "", ...rest] = title.split(" ")
   const lines = rest.length ? [first, rest.join(" ")] : [first]
+  // Un renglón de más de 16 letras («clínica odontológica») va más chico: si no, toca la hoja.
+  const size = Math.max(...lines.map((line) => line.length)) > 16 ? 54 : 64
   const name = lines
-    .map((line, i) => `<text x="80" y="${lines.length > 1 ? 222 + i * 72 : 250}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="64" font-weight="700" fill="#ffffff">${escape(line)}</text>`)
+    .map((line, i) => `<text x="80" y="${lines.length > 1 ? 222 + i * 72 : 250}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="${size}" font-weight="700" fill="#ffffff">${escape(line)}</text>`)
     .join("\n  ")
   const below = lines.length > 1 ? 72 : 0
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">

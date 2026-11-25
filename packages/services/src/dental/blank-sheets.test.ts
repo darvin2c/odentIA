@@ -4,6 +4,7 @@ import { PDFDocument } from "pdf-lib"
 import { describe, expect, it } from "vitest"
 import { guideSheetsFor } from "../products.js"
 import {
+  type BlankSheet,
   BLANK_SHEET_KEYS,
   BLANK_SHEETS,
   blankSheetBytes,
@@ -12,12 +13,21 @@ import {
 } from "./blank-sheets.js"
 
 describe("las plantillas en blanco", () => {
-  it("cada una sale en A4, en dos hojas como mucho", async () => {
+  it("cada una sale en A4, con sus hojas", async () => {
+    // El odontograma de adultos con su leyenda, el consentimiento con sus firmas y el cierre de caja,
+    // en una sola hoja; la historia clínica, en cuatro: datos y motivo, antecedentes, examen con el
+    // odontograma, y diagnóstico, plan y evolución.
+    const pages: Record<BlankSheet, number> = {
+      odontograma: 1,
+      "odontograma-ninos": 2,
+      presupuesto: 2,
+      "historia-clinica": 4,
+      consentimiento: 1,
+      "cierre-de-caja": 1,
+    }
     for (const sheet of BLANK_SHEET_KEYS) {
       const pdf = await PDFDocument.load(await renderBlankSheet(sheet))
-      expect(pdf.getPageCount(), sheet).toBeLessThanOrEqual(2)
-      // El odontograma de adultos, con su leyenda, en una sola hoja: se imprime una por paciente.
-      if (sheet === "odontograma") expect(pdf.getPageCount()).toBe(1)
+      expect(pdf.getPageCount(), sheet).toBe(pages[sheet])
       const { width, height } = pdf.getPage(0).getSize()
       expect([Math.round(width), Math.round(height)], sheet).toEqual([595, 842])
       // El título que muestra Google: lo que es, con «PDF» y la marca, y el idioma para leerlo.
@@ -59,5 +69,17 @@ describe("las plantillas en blanco", () => {
       .map((file) => `/guias/${file.replace(/\.astro$/, "")}`)
     expect([...DENTAL_GUIDE_SHEETS.pages].sort()).toEqual(pages.sort())
     await expect(DENTAL_GUIDE_SHEETS.bytes("constructor")).rejects.toThrow()
+  })
+
+  it("el correo cuenta lo de la app que va con la primera plantilla que pidió", () => {
+    const pitch = DENTAL_GUIDE_SHEETS.pitch
+    expect(pitch(["odontograma"])).toContain("odontograma")
+    expect(pitch(["presupuesto"])).toContain("presupuesto")
+    expect(pitch(["historia-clinica", "odontograma"])).toContain("Clío")
+    expect(pitch(["consentimiento"])).toContain("firma")
+    expect(pitch(["cierre-de-caja"])).toContain("caja")
+    // Las de antes siguen igual: con el odontograma en la lista, el del odontograma.
+    expect(pitch(["presupuesto", "odontograma"])).toContain("odontograma")
+    expect(pitch(["constructor"])).toContain("odontograma")
   })
 })
