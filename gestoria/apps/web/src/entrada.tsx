@@ -233,11 +233,11 @@ export function LoginPage() {
             </AuthAlert>
           ) : null}
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Entrar
           </SubmitButton>
           {known ? (
-            <Button type="button" variant="outline" className="h-11 w-full" onClick={otherAccount}>
+            <Button type="button" variant="outline" className="w-full" onClick={otherAccount}>
               Entrar con otra cuenta
             </Button>
           ) : null}
@@ -400,7 +400,7 @@ export function RegisterPage() {
           </Field>
           {form.errors.terms ? <FieldError id="terms-error">{form.errors.terms}</FieldError> : null}
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Crear mi cuenta
           </SubmitButton>
         </FieldGroup>
@@ -545,7 +545,7 @@ export function ForgotPasswordPage() {
             ) : null}
           </Field>
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Enviarme el enlace
           </SubmitButton>
         </FieldGroup>
@@ -629,7 +629,7 @@ export function TwoFactorPage() {
             {form.errors.code ? <FieldError id="code-error">{form.errors.code}</FieldError> : null}
           </Field>
           {form.problem ? <AuthAlert>{form.problem}</AuthAlert> : null}
-          <SubmitButton type="submit" pending={form.pending} className="h-11 w-full text-base">
+          <SubmitButton type="submit" pending={form.pending} className="w-full">
             Entrar
           </SubmitButton>
         </FieldGroup>
