@@ -84,6 +84,51 @@ export const Marcas: Story = {
   ),
 }
 
+/** El logo de gestorIA en claro y oscuro, como lo pone su app con `data-brand`. */
+export const MarcaGestoria: Story = {
+  render: () => (
+    <OnHtml brand="gestoria">
+      <div className="grid gap-6 p-6 md:grid-cols-2">
+        {[false, true].map((dark) => (
+          <section key={String(dark)} className={dark ? "dark" : ""}>
+            <div
+              className="flex flex-col gap-6 rounded-xl bg-background p-6 text-foreground"
+              style={{ "--identity-ink": dark ? "#fafafa" : "#18181b" } as CSSProperties}
+            >
+              <h2>gestorIA · {dark ? "oscuro" : "claro"}</h2>
+              <Brand />
+              <div className="flex items-center gap-6 text-[var(--identity-accent)]">
+                <Brand compact />
+                <Spinner className="size-10" />
+              </div>
+              <button
+                type="button"
+                className="self-start rounded-full bg-primary-fill px-4 py-2 font-semibold text-primary-fill-foreground"
+              >
+                Anotar un pedido
+              </button>
+            </div>
+          </section>
+        ))}
+      </div>
+    </OnHtml>
+  ),
+}
+
+/** El acceso de gestorIA: sin escena, la noche de su naranja, el logo y la firma del grupo. */
+export const AccesoGestoria: Story = {
+  render: () => (
+    <OnHtml brand="gestoria">
+      <AuthSplit title="Buenas tardes." description="Entra a tu tienda." aside={<AuthAside tag="gestorIA" title="Tu tienda" />}>
+        <PasswordInput id="pw-gestoria" value="" onChange={() => {}} autoComplete="current-password" />
+        <button type="button" className="h-10 rounded-full bg-primary-fill font-semibold text-primary-fill-foreground">
+          Entrar
+        </button>
+      </AuthSplit>
+    </OnHtml>
+  ),
+}
+
 /** El acceso de latidIA: noche morada, «Tu consultorio» y el pulso a 72 lpm (tablero «Marca y color»). */
 export const AccesoLatidia: Story = {
   render: () => (

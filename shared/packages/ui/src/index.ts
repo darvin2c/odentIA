@@ -6,7 +6,7 @@
 
 export { cn } from "./lib/utils.js";
 export { useIsMobile } from "./hooks/use-mobile.js";
-export { BRAND_DIGITS, BRAND_NAMES, BRANDS, type BrandId, BrandProvider, isBrand, useBrand } from "./lib/brand.js";
+export { BRAND_DIGITS, BRAND_NAMES, BRAND_PLACES, BRANDS, type BrandId, BrandProvider, isBrand, useBrand } from "./lib/brand.js";
 
 export { Button, buttonVariants } from "./components/button.js";
 export { ButtonGroup, ButtonGroupSeparator, ButtonGroupText, buttonGroupVariants } from "./components/button-group.js";
@@ -54,7 +54,9 @@ export {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./components/dropdown-menu.js";
