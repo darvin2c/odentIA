@@ -76,5 +76,6 @@ it("en la Actividad, «Anotó un hallazgo en el odontograma» dice de qué pacie
     listWorkspaceAudit(tx, "org_a", { action: "odontogram.entry_added" }),
   )
   const mine = activity.items.find((item) => item.subject?.patientId === f.patientId)
-  expect(mine?.subject).toMatchObject({ patientId: f.patientId, personName: "Mario Castillo" })
+  // Y la pieza: «Sobre qué» dice cuál (QA del 24 nov).
+  expect(mine?.subject).toMatchObject({ patientId: f.patientId, personName: "Mario Castillo", label: "Pieza 16" })
 })

@@ -1537,6 +1537,9 @@ type AuditRow = {
   /** La plantilla de formulario de la que trata, con su versión. */
   formTitle: string | null
   formVersion: number | null
+  /** La pieza (o las piezas de un puente) que el registro nombra en sus datos: un hallazgo del odontograma. */
+  toothNumber: string | null
+  relatedTeeth: unknown
 }
 
 /** De qué formulario trata una acción de Configuración: «Ficha periodontal · versión 2». */
@@ -1570,14 +1573,27 @@ function auditSubjectOf(rows: AuditRow[], lead: AuditRow, zone: { locale: string
   const ticket = [lead, ...rows].find((row) => row.ticketId)
   const appointment = [lead, ...rows].find((row) => row.appointmentId && row.appointmentAt)
   const budget = [lead, ...rows].find((row) => row.budgetId)
+  const tooth = [lead, ...rows].find((row) => row.toothNumber)
   const target = ticket?.ticketId
     ? { label: `Ticket N.º ${String(ticket.ticketNumber ?? 0).padStart(6, "0")}`, open: { kind: "ticket" as const, id: ticket.ticketId } }
     : appointment?.appointmentId && appointment.appointmentAt
       ? { label: `Cita del ${auditWhen(appointment.appointmentAt, zone.locale, zone.timezone)}`, open: { kind: "appointment" as const, id: appointment.appointmentId } }
       : budget?.budgetId
         ? { label: `Presupuesto N.º ${budget.budgetNumber ?? "—"}`, open: { kind: "budget" as const, id: budget.budgetId } }
-        : { label: null, open: null }
+        : tooth?.toothNumber
+          ? { label: auditTeethLabel(tooth.toothNumber, tooth.relatedTeeth), open: null }
+          : { label: null, open: null }
   return { personId: person.personId, personName: person.personName, patientId: person.patientId, ...target }
+}
+
+/** «Pieza 15» o, en un puente, «Piezas 44, 45 y 46». */
+function auditTeethLabel(toothNumber: string, related: unknown): string {
+  const teeth =
+    Array.isArray(related) && related.length > 1 && related.every((tooth) => Number.isInteger(tooth))
+      ? (related as number[])
+      : [Number(toothNumber)]
+  if (teeth.length === 1) return `Pieza ${teeth[0]}`
+  return `Piezas ${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
 }
 
 /**
@@ -1654,7 +1670,8 @@ export async function listWorkspaceAudit(
       coalesce(tk.id, pa.ticket_id, pr.ticket_id) as "ticketId",
       coalesce(tk.ticket_number, (select t2.ticket_number from payment_ticket t2 where t2.organization_id = ${orgId} and t2.id = coalesce(pa.ticket_id, pr.ticket_id))) as "ticketNumber",
       bu.id as "budgetId", bu.budget_number as "budgetNumber",
-      ft.title as "formTitle", ft.version as "formVersion"
+      ft.title as "formTitle", ft.version as "formVersion",
+      ev.meta_tooth as "toothNumber", ev.meta_teeth as "relatedTeeth"
     from (
       select a.id, a.action, a.entity, a.entity_id, a.actor_user_id, a.created_at,
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
@@ -1662,6 +1679,9 @@ export async function listWorkspaceAudit(
         -- El paciente que el registro nombra en sus datos (un hallazgo del odontograma), sin que el
         -- código común conozca la tabla de cada producto (QA del 23 nov: «Sobre qué: —»).
         case when a.metadata->>'patientId' ~ ${uuid} then (a.metadata->>'patientId')::uuid end as meta_patient,
+        -- Y la pieza: «Sobre qué» dice «Pieza 15» (QA del 24 nov: no decía cuál).
+        case when a.metadata->>'toothNumber' ~ '^[0-9]{2}$' then a.metadata->>'toothNumber' end as meta_tooth,
+        case when jsonb_typeof(a.metadata->'relatedTeeth') = 'array' then a.metadata->'relatedTeeth' end as meta_teeth,
         -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
         case when a.actor_user_id like 'contact:%' then 'patient' when a.metadata->>'by' = 'clio' then 'clio' else a.metadata->>'origin' end as origin
       from audit_event a
