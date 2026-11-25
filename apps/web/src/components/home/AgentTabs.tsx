@@ -38,7 +38,7 @@ const TONE_OPTS: [Tone, string][] = [
 ]
 const LINES = [
   "Carlos viene por dolor al frío en una muela de abajo, del lado izquierdo, desde hace una semana.",
-  "En la 36 hay caries oclusal profunda. La percusión es negativa.",
+  "En la 36 hay una caries de dentina en oclusal. La percusión es negativa.",
   "Hoy hacemos una resina en la 36 y control en seis meses.",
 ]
 
@@ -399,8 +399,8 @@ export default function AgentTabs() {
                     <div>
                       <span className="tag sl">Consulta y evolución</span>
                       <p>
-                        Dolor al frío en la pieza 36 desde hace una semana. Caries oclusal profunda
-                        en 36, percusión negativa.
+                        Dolor al frío en la pieza 36 desde hace una semana. Caries de dentina en
+                        oclusal de la 36, percusión negativa.
                       </p>
                     </div>
                     <div>

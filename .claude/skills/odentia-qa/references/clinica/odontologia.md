@@ -196,6 +196,10 @@ Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compr
 **Dónde:** en la atención, `OdontogramStudio` y `ToothDrawer` (`DA/components/dental/`); en la ficha, Clínica › Odontograma (`odontograma-tab.tsx`), con «Evolución», «Ver estado al» y el historial por pieza (`S/dental/tooth-history.ts`). El registro es `registerToothFinding` (`S/dental/tooth-panel.ts`) y las reglas, `findingIssues` (`D/findings.ts`).
 
 - [ ] Numeración FDI de dos dígitos: 11 a 48 en permanentes (las terceras molares 18, 28, 38 y 48 se pueden elegir) y 51 a 85 en temporales. La dentición mixta de un niño muestra las dos.
+- [ ] La leyenda dice «provisional», no «temporal», para lo que va en rojo por no ser definitivo: en la vista de un niño, «temporal» en rojo se lee como «dientes de leche en rojo». Caso: mixta de un niño de 7 años.
+- [ ] La hoja impresa dibuja las raíces de cada diente igual que la vista de frente (2 en los molares de abajo, 3 en los de arriba, 2 en el primer premolar de arriba).
+- [ ] Lo que va «en la raíz» va dentro de cada raíz: en una pieza de dos raíces (36, 46, 14, 24, 74, 75, 84, 85) la línea de la endodoncia (TC o PC) no cae entre las raíces, y el espigo va en una. Ya falló: con las raíces por pieza, la línea de la TC quedó en la furca (QA de las guías, 25 nov 2026).
+- [ ] La pulpotomía se dibuja como la pulpa de la corona y la pulpectomía como la línea vertical, cada una con su sigla, igual en la pantalla, la hoja firmada y lo que enseña la guía.
 - [ ] Las piezas se aciertan con el dedo o el mouse, también a 390 px y en tablet. Las vecinas (46 y 47, 18 y 48) no se confunden.
 - [ ] El odontograma inicial está siempre a la vista en la primera consulta, no escondido en «Agregar si ocurrió».
 - [ ] **Una lesión con varias caras es un solo hallazgo** en el panel, la lista, la Historia, el «hallazgo que motiva» y el PDF.
@@ -222,6 +226,26 @@ Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compr
 
 **Sumado por el estudio de la atención (16 nov 2026):**
 - [ ] Una sesión que solo trata (sin hallazgos nuevos) no firma el odontograma como «Nuevos hallazgos».
+
+## P-ODO-30 Guías y plantillas públicas de la web
+
+**Dónde:** las guías de odentIA (`apps/web/src/lib/guides/`, molde `apps/web/src/components/guides/GuidePage.astro`) y sus plantillas en PDF (`packages/services/src/blank-sheets.ts`, en `apps/web/public/guias/`).
+
+- [ ] Lo que enseña la guía coincide con lo que dibuja la app: colores, siglas, aspa, recuadro de la corona y línea de la endodoncia.
+- [ ] La figura de las caras coincide con la hoja que se descarga: vestibular hacia afuera, arriba en los dientes de arriba y abajo en los de abajo.
+- [ ] El ejemplo de numeración no se resalta en rojo: el rojo enseña «lo que hay que tratar».
+- [ ] Cada fila de «Cómo se marca» dice su color y su sigla: el aspa azul con DEX, DAO o DNE; el cuadrado de la corona según su estado con su tipo; la línea de la endodoncia con TC.
+- [ ] La plantilla de niños trae las cuatro filas y la tabla de edades con su fuente (AAPD, Logan y Kronfeld); a los 7 años se usan las dos denticiones.
+- [ ] La guía de presupuesto pone la alternativa dentro de su fase, con un total por opción, y no promete que el papel de odentIA con opciones muestre las fases.
+- [ ] La plantilla de presupuesto pone la alternativa dentro de su fase (columna «Opción»), con renglones suficientes para el ejemplo de la guía, y dice la moneda.
+- [ ] Los ejemplos de la guía son clínicamente correctos: no se restaura una caries de esmalte (ADA 2018, tratamientos no restauradores) y cada tratamiento va en la fase que propone la app (el implante en la quirúrgica).
+- [ ] El paciente de ejemplo de una guía tiene los mismos hallazgos en su tabla y en la demo de la web (Mateo, 7 años).
+- [ ] Cada fuente lleva su edición y su página (AAPD, Reference Manual 2026, p. 675).
+- [ ] El odontograma de adultos en blanco, con su leyenda, se imprime en una sola hoja.
+- [ ] Nada que no tenga fuente se enseña como regla (por ejemplo, qué se marca en la mixta con un diente que todavía no sale): queda por confirmar con una clínica real.
+
+**Fuentes:** AAPD, *Reference Manual of Pediatric Dentistry*, «Dental Growth and Development» (2026, p. 675); ISO 3950.
+**Caso:** C2 a C5 del banco de la mesa del 24 nov 2026 (Jorge, 42 años; Valentina, 4; Mateo, 7; el presupuesto por fases con implante o puente).
 
 ## P-ODO-06 Diagnóstico
 
