@@ -26,11 +26,17 @@ export function dayShort(date: string): string {
   return formatDayShort(date).replace(".", "")
 }
 
-/** «hoy a las 11:00» o «el mar 13 a las 09:00». */
+/** «hoy a las 11:00», «el mar 13 a las 09:00» o, lejos de esta semana, «el mar 13 ene a las 09:00». */
 export function whenSaid(startISO: string, timeZone: string, today: string): string {
   const date = zonedDateOf(startISO, timeZone)
+  // Con su mes fuera de esta semana, como `rangeSaid`: «el mar 13» de otro mes no dice cuál.
+  const far = date < addDays(today, -6) || date > addDays(today, 6)
   const day =
-    date === today ? "hoy" : date === addDays(today, 1) ? "mañana" : `el ${dayShort(date)}`
+    date === today
+      ? "hoy"
+      : date === addDays(today, 1)
+        ? "mañana"
+        : `el ${dayShort(date)}${far ? ` ${monthShort(date).toLocaleLowerCase("es")}` : ""}`
   return `${day} a las ${hourLabel(dayMinutesIn(startISO, timeZone))}`
 }
 
