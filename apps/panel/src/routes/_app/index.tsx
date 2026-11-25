@@ -1,4 +1,5 @@
-import { Avatar, AvatarFallback, AvatarImage, Button, buttonVariants, Input, toast } from "@odentia/ui"
+import { isClinicalProduct, productWords } from "@odentia/clinical"
+import { Avatar, AvatarFallback, AvatarImage, BRAND_PLACES, Button, buttonVariants, Input, toast } from "@odentia/ui"
 import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
@@ -219,6 +220,8 @@ function OrgsPage() {
   const canCreate = founderToken !== null || (politicaLista && !invitationOnly)
 
   const todas = useMemo(() => organizations.data ?? [], [organizations.data])
+  // Con clínicas de más de un tipo, cada fila dice qué es, como el selector de la clínica.
+  const variosTipos = new Set(todas.map((org) => org.product)).size > 1
   const ordenadas = useMemo(() => {
     const lista = [...todas]
     // La última clínica usada va primero; el resto conserva el orden del servidor.
@@ -272,7 +275,7 @@ function OrgsPage() {
             {ordenadas.length === 0 ? <p className="rounded-xl border bg-card p-4 text-center text-sm text-muted-foreground">Ninguna clínica coincide con «{texto.trim()}».</p> : (
               <ul className="space-y-3">
                 {ordenadas.map((org) => (
-                  <OrganizationItem key={org.organizationId} org={org} abiertaEl={org.organizationId === ultima ? (ultimaGuardada?.at ?? null) : undefined} userId={session.userId} onLeave={() => setLeaving(org)} />
+                  <OrganizationItem key={org.organizationId} org={org} conTipo={variosTipos} abiertaEl={org.organizationId === ultima ? (ultimaGuardada?.at ?? null) : undefined} userId={session.userId} onLeave={() => setLeaving(org)} />
                 ))}
               </ul>
             )}
@@ -292,7 +295,12 @@ function OrgsPage() {
   )
 }
 
-function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrganization; abiertaEl?: number | null; userId: string; onLeave: () => void }) {
+/** «Clínica dental», «Consultorio médico»: lo que es la clínica, con la misma etiqueta que el selector de lugares. */
+function tipoDe(product: string): string {
+  return BRAND_PLACES[isClinicalProduct(product) ? productWords(product).brand : panelWords.brand].one
+}
+
+function OrganizationItem({ org, conTipo, abiertaEl, userId, onLeave }: { org: AccountOrganization; conTipo: boolean; abiertaEl?: number | null; userId: string; onLeave: () => void }) {
   const status = useQuery({
     queryKey: ["account", "billing-status", org.organizationId],
     queryFn: async () => z.object({ data: billingStatusSchema }).parse(await apiFetch<unknown>(`/api/account/billing/status?orgId=${encodeURIComponent(org.organizationId)}`)).data,
@@ -320,7 +328,7 @@ function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrg
   const acciones: RowActionItem[] = org.canLeave
     ? [{ key: "salir", label: "Salir de esta clínica", tone: "danger", icon: <LogOut className="size-4" aria-hidden />, onSelect: onLeave }]
     : []
-  const linea = [`${org.slug}.${domainOf(org.product)}`, org.roleLabel, sedesTexto(org.branches), abiertaEl !== undefined ? abriste(abiertaEl) : null]
+  const linea = [conTipo ? tipoDe(org.product) : null, `${org.slug}.${domainOf(org.product)}`, org.roleLabel, sedesTexto(org.branches), abiertaEl !== undefined ? abriste(abiertaEl) : null]
     .filter(Boolean)
     .join(" · ")
   const enlace = "font-medium break-words before:absolute before:inset-0 before:rounded-xl focus-visible:outline-none"

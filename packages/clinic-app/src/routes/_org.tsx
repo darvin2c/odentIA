@@ -1,14 +1,5 @@
 import { canAccess, canAccessAny, platformPathPermission, seesBilling } from "@odentia/auth/permissions"
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@odentia/ui"
+import { isClinicalProduct, productWords } from "@odentia/clinical"
 import {
   AccessLinkPasswordGate,
   type ClinicAgreementStatus,
@@ -21,6 +12,9 @@ import {
   HeaderUtilitiesProvider,
   LoadingState,
   NoticeStrip,
+  type Place,
+  type PlaceAlert,
+  PlaceSwitcher,
   SideDockProvider,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -37,7 +31,6 @@ import {
   BarChart3,
   Bot,
   CalendarDays,
-  ChevronsUpDown,
   CreditCard,
   Home,
   Inbox,
@@ -82,7 +75,7 @@ import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
 import { endSupportSession, loadSupportSession, type SupportMode } from "../lib/support-mode"
 import { productUi } from "../product/product-ui"
-import { appRoleLabel } from "../lib/product-words"
+import { appRoleLabel, appWords } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
 import { forgetDevicePushOnSignOut, registerAppWorker, syncThemeColor } from "../lib/pwa"
 import { setActiveBranchOwner } from "../lib/active-branch"
@@ -325,77 +318,52 @@ function OrgSwitcher() {
   const { data: orgs } = useQuery({
     queryKey: ["account", "organizations"],
     queryFn: async () =>
-      (await apiFetch<{ data: Array<{ organizationId: string; organizationName: string; slug: string; product: string }> }>(
-        "/api/account/organizations",
-      )).data,
+      (
+        await apiFetch<{
+          data: Array<{
+            organizationId: string
+            organizationName: string
+            slug: string
+            product: string
+            roleLabel: string
+            logo?: string | null
+          }>
+        }>("/api/account/organizations")
+      ).data,
   })
   // Lo de cobro que pide actuar marca el nombre de la clínica (ADR 0065).
   const notices = useClinicNotices()
   const billingNotice = billing
     ? notices.data?.find((notice) => (notice.topic === "cobro" || notice.topic === "tope") && notice.tone !== "aviso")
     : undefined
-  const others = (orgs ?? []).filter((item) => item.organizationId !== org.id)
-  const initial = org.name.trim().charAt(0).toUpperCase() || "C"
+  const alert: PlaceAlert | undefined = billingNotice
+    ? { label: billingNotice.short, tone: billingNotice.tone === "limite" ? "danger" : "warning" }
+    : undefined
+  const brand = appWords().brand
+  // Cada clínica con su marca (de qué app es) y su dirección, armada aquí: el selector no conoce dominios.
+  const places: Place[] = (orgs ?? []).map((item) => ({
+    id: item.organizationId,
+    name: item.organizationName,
+    brand: isClinicalProduct(item.product) ? productWords(item.product).brand : brand,
+    role: item.roleLabel,
+    href: tenantUrl(item.slug, "/home", item.product),
+    logo: item.logo ?? null,
+  }))
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={`${org.name}${billingNotice ? `, ${billingNotice.short}` : ""}. Menú de la clínica`}
-        className="elevated flex min-h-14 w-full items-center gap-2.5 rounded-xl border bg-card px-2.5 py-2 transition-colors outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span className="relative shrink-0">
-          <Avatar className="size-9 rounded-[10px]">
-            {org.logo ? <AvatarImage src={org.logo} alt="" className="rounded-[10px]" /> : null}
-            <AvatarFallback className="rounded-[10px] bg-primary-soft font-semibold text-primary">{initial}</AvatarFallback>
-          </Avatar>
-          {billingNotice ? (
-            <span
-              aria-hidden
-              className={`absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-card ${billingNotice.tone === "limite" ? "bg-destructive" : "bg-warning-strong"}`}
-            />
-          ) : null}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-          <span className="truncate text-sm font-semibold">{org.name}</span>
-          <span className="truncate text-xs text-muted-foreground">{appRoleLabel(role, "Miembro")}</span>
-        </span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-(--anchor-width) min-w-56">
-        {billing ? (
-          <DropdownMenuItem onClick={() => void navigate({ to: PLAN_PATH })}>
-            <CreditCard aria-hidden />
-            <span className="flex-1">Plan y pagos</span>
-            {billingNotice ? (
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${billingNotice.tone === "limite" ? "bg-destructive text-destructive-foreground" : "bg-warning-strong text-warning-strong-foreground"}`}
-              >
-                {billingNotice.short}
-              </span>
-            ) : null}
-          </DropdownMenuItem>
-        ) : null}
-        {others.length > 0 ? (
-          <>
-            {billing ? <DropdownMenuSeparator /> : null}
-            {others.map((item) => (
-              <DropdownMenuItem
-                key={item.organizationId}
-                onClick={() => window.location.assign(tenantUrl(item.slug, "/home", item.product))}
-              >
-                {item.organizationName}
-              </DropdownMenuItem>
-            ))}
-          </>
-        ) : null}
-        {billing || others.length > 0 ? <DropdownMenuSeparator /> : null}
-        {/* Vuelve al selector sin autoentrar (issue 114). */}
-        <DropdownMenuItem onClick={() => window.location.assign(panelUrl("/?cambiar=1"))}>
-          <ArrowLeftRight aria-hidden />
-          Cambiar de clínica
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <PlaceSwitcher
+      current={{ id: org.id, name: org.name, brand, role: appRoleLabel(role, "Miembro"), logo: org.logo }}
+      places={places}
+      alert={alert}
+      actions={
+        billing
+          ? [{ label: "Plan y pagos", icon: <CreditCard aria-hidden />, onSelect: () => void navigate({ to: PLAN_PATH }), badge: alert }]
+          : []
+      }
+      // Vuelve al selector sin autoentrar (issue 114): ahí también se aceptan invitaciones y se crea otra clínica.
+      footerActions={[{ label: "Cambiar de clínica", icon: <ArrowLeftRight aria-hidden />, href: panelUrl("/?cambiar=1") }]}
+      menuLabel="Menú de la clínica"
+    />
   )
 }
 
