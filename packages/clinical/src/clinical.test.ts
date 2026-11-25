@@ -1,3 +1,4 @@
+import { saidAllergyWarnings } from "./allergens.js"
 import { describe, expect, it } from "vitest"
 import {
   ageLabel,
@@ -235,4 +236,10 @@ describe("descanso médico (issue 229, decisión 8)", () => {
     expect(medicalLeaveWords("2026-10-24", 3)).toBe("3 días de descanso, del 24/10/2026 al 26/10/2026")
     expect(medicalLeaveWords("2026-10-24", 1)).toBe("1 día de descanso, el 24/10/2026")
   })
+})
+
+it("la alergia que oyó Clío avisa aunque una igual se haya descartado antes (revisión del 25 nov)", () => {
+  const said = [{ substance: "ibuprofeno" }]
+  expect(saidAllergyWarnings("ibuprofeno", said, [{ substance: "ibuprofeno", verification: "descartada" }])).toHaveLength(1)
+  expect(saidAllergyWarnings("ibuprofeno", said, [{ substance: "ibuprofeno" }])).toEqual([])
 })

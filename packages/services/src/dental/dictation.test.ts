@@ -16,7 +16,8 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { assembleEncounterBudget, findDraftBudget, getBudgetDetail } from "../budgets.js"
+import { assembleEncounterBudget, decideBudget, deliverBudget, findDraftBudget, getBudgetDetail } from "../budgets.js"
+import { getPatientAccount } from "../payments.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq, isNull } from "drizzle-orm"
@@ -591,6 +592,21 @@ describe("lo que el asistente registra dos veces (dictados reales)", () => {
     expect(full.options.map((option) => option.totalCents)).toEqual([65000, 15000])
     const owed = await ownerDb.select().from(patientCharge).where(and(eq(patientCharge.patientId, fx.patient.id), isNull(patientCharge.voidedAt)))
     expect(owed.reduce((sum, charge) => sum + charge.amountCents, 0)).toBe(5_000)
+    // Rosa elige conservar (opción A): no se le vuelve a cobrar la evaluación, ni entra a lo acordado.
+    const optionA = full.options[0]!
+    await fx.run((tx) => deliverBudget(tx, ...fx.args, budget!.id))
+    await fx.run((tx) =>
+      decideBudget(tx, ...fx.args, budget!.id, {
+        optionId: optionA.id,
+        decisions: full.items
+          .filter((line) => line.optionId === optionA.id)
+          .map((line) => ({ planItemId: line.planItemId, decision: "aceptado" as const })),
+      }),
+    )
+    const afterA = await ownerDb.select().from(patientCharge).where(and(eq(patientCharge.patientId, fx.patient.id), isNull(patientCharge.voidedAt)))
+    expect(afterA.map((charge) => [charge.description, charge.amountCents])).toEqual([["Evaluación de la prueba de dos caminos", 5_000]])
+    const account = await fx.run((tx) => getPatientAccount(tx, ORG, fx.patient.id))
+    expect(account.byCurrency.find((row) => row.currency === "PEN")?.agreedCents).toBe(65000)
     await enable(false)
   })
 

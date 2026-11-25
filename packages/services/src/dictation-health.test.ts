@@ -204,3 +204,33 @@ describe("cada dato con su frase al sumar pausas", () => {
     expect(said).toEqual({ medications: "tomo losartan para la presion", allergies: "no que yo sepa" })
   })
 })
+
+describe("el repaso no vuelve a proponer lo de salud ya resuelto (mesa del 25 nov, H3)", () => {
+  it("el mismo anticoagulante con otra dosis ya está decidido; otro, no", () => {
+    const decided = [{ anticoagulants: { state: "recorded", detail: "apixaban cinco miligramos dos veces al dia" } }]
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "apixabán" } }, decided)).toBeNull()
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "aspirina" } }, decided)).toEqual({ anticoagulants: { state: "recorded", detail: "aspirina" } })
+  })
+
+  it("con la alergia ya nombrada, su «no que ella sepa» no vuelve; otra alergia nombrada, sí", () => {
+    const fresh = { allergies: { state: "unknown", items: [] }, anticoagulants: { state: "recorded", detail: "apixabán" } }
+    expect(withoutSettledHealth(fresh, [], true)).toEqual({ anticoagulants: { state: "recorded", detail: "apixabán" } })
+    expect(withoutSettledHealth({ allergies: { state: "unknown", items: [] } }, [], true)).toBeNull()
+    expect(withoutSettledHealth({ allergies: { state: "unknown", items: [] } }, [], false)).toEqual({ allergies: { state: "unknown", items: [] } })
+  })
+})
+
+describe("revisión del 25 nov · la misma medicina, no la misma primera palabra", () => {
+  it("«ácido fólico» registrado no quita «ácido alendrónico»; «Losartán 50 mg» sí quita «losartán de cincuenta»", () => {
+    const onFile = [{ medications: { state: "recorded", items: [{ name: "Ácido fólico 5 mg" }, { name: "Losartán 50 mg" }] } }]
+    const said = { medications: { state: "recorded", items: [{ name: "ácido fólico" }, { name: "ácido alendrónico" }, { name: "losartán de cincuenta" }] } }
+    expect(withoutSettledHealth(said, onFile)).toEqual({ medications: { state: "recorded", items: [{ name: "ácido alendrónico" }] } })
+  })
+
+  it("«ya no toma el apixabán» no se quita por tener el apixabán registrado", () => {
+    const onFile = [{ anticoagulants: { state: "recorded", detail: "apixabán" } }]
+    const stopped = { anticoagulants: { state: "recorded", detail: "apixabán", now: false } }
+    expect(withoutSettledHealth(stopped, onFile)).toEqual(stopped)
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "Eliquis" } }, onFile)).toBeNull()
+  })
+})

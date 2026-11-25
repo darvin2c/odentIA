@@ -9,6 +9,7 @@ import {
   changedHistoryOf,
   declaredGroupOf,
   noAllergiesWords,
+  saidAllergiesWords,
   pregnancyGroupOf,
   pregnancyWords,
   saidByWords,
@@ -267,9 +268,10 @@ export function ClinicalAlertsCard({
           <li className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
             {/* La misma frase que la franja y la atención (estudio de la atención del 16 nov, E10a). */}
             <span className="text-sm font-medium">
-              {noAllergiesWords({ review: allergyState, saidNo: saidNoGroupOf(groups, "allergies"), saidUnknown }, sex)}
+              {/* La alergia que oyó Clío y nadie confirmó gana a «no se le preguntó» (QA del 25 nov). */}
+              {saidAllergiesWords(health.saidAllergies) || noAllergiesWords({ review: allergyState, saidNo: saidNoGroupOf(groups, "allergies"), saidUnknown }, sex)}
             </span>
-            {allergyState === "unknown" && canWrite && !archived ? (
+            {allergyState === "unknown" && canWrite && !archived && !health.saidAllergies?.length ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />
             ) : null}
           </li>

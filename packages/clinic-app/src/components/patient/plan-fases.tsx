@@ -51,6 +51,7 @@ import {
   pathCountWord,
   pathTotal,
 } from "./plan/plan-paths"
+import { ExtractionRisks } from "./extraction-risks"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
@@ -342,6 +343,7 @@ function PlanPhasesGroup({
                             .filter(Boolean)
                             .join(" · ")}
                         </span>
+                        {closed ? null : <ExtractionRisks lines={item.extractionRisks} className="mt-1" />}
                         {done.length > 0 ? (
                           <PlanItemSessions
                             sessions={done}
@@ -570,11 +572,15 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
             : titles || budgetOptionLabel(path.position)
           const total = pathTotal(path.items)
           return (
-            <li key={path.position}>
-              {words}
-              {total ? (
-                <span className="tabular-nums"> · {money(total.cents, total.currency)}</span>
-              ) : null}
+            <li key={path.position} className="flex flex-col gap-1">
+              <span>
+                {words}
+                {total ? (
+                  <span className="tabular-nums"> · {money(total.cents, total.currency)}</span>
+                ) : null}
+              </span>
+              {/* Lo que toma y cambia la exodoncia de ese camino: se decide justo aquí. */}
+              <ExtractionRisks lines={path.items.find((item) => item.extractionRisks?.length)?.extractionRisks} className="" />
             </li>
           )
         })}

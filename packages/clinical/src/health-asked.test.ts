@@ -1,3 +1,4 @@
+import { findHabitualMedication } from "./allergens.js"
 import { describe, expect, it } from "vitest"
 import {
   allergiesSaidUnknownOf,
@@ -289,4 +290,15 @@ describe("lo que saltó no es «no se le preguntó»", () => {
       said: false,
     })
   })
+})
+
+it("la aspirina de todos los días es un antiagregante, no un anticoagulante (mesa del 25 nov, H4)", () => {
+  const entry = findHabitualMedication("aspirina 100")
+  expect(entry?.atc).toBe("B01AC06")
+  expect(medicationAlertWords({ name: "aspirina", dose: "100 mg", atcCode: entry?.atc }).label).toBe("Antiagregante: aspirina 100 mg")
+})
+
+it("la aspirina ya guardada con el código del grupo se lee como antiagregante (revisión del 25 nov)", () => {
+  expect(medicationAlertWords({ name: "aspirina", dose: "100 mg", atcCode: "B01A" }).label).toBe("Antiagregante: aspirina 100 mg")
+  expect(medicationAlertWords({ name: "warfarina", atcCode: "B01A" }).label).toBe("Anticoagulante: warfarina")
 })

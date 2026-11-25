@@ -3,6 +3,7 @@ import {
   type AllergenEntry,
   type ClinicalProduct,
   allergenName,
+  sameAllergyOnRecord,
   allergyWarnings,
   duplicateWarnings,
   appendDictated,
@@ -11,7 +12,9 @@ import {
   DIAGNOSIS_SYSTEM_INFO,
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
+  findHabitualMedication,
   findMedication,
+  medicationClassOf,
   type HealthDeclarant,
   isDiagnosisVerification,
   type MedicationCatalog,
@@ -33,6 +36,8 @@ import {
   encounterDictationSuggestion,
   encounterProcedure,
   patientAllergy,
+  patientCondition,
+  patientMedication,
   patientRegistration,
   prescription,
   serviceCatalog,
@@ -116,6 +121,7 @@ import { clinicToday } from "./inventory-stock.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
 import { patientAge } from "./responsibilities.js"
 import { everydayServiceVariants } from "./search-text.js"
+import { discardableWhenSigning } from "./said-health-risks.js"
 
 /*
  * ---------- Asistente clínico: lo dictado se vuelve sugerencias que el profesional confirma ----------
@@ -1984,6 +1990,37 @@ async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounte
  * una frase de duda, va a lo de su salud como que no sabe, que se revisa con la persona y nunca
  * entra de un toque.
  */
+/**
+ * Lo que ya está vigente en sus Antecedentes, con la forma de lo que propone Clío de su salud: lo
+ * dicho que ya está ahí no se propone otra vez. «Después de hablar con su cardiólogo por el
+ * apixabán», dicho por la doctora con el apixabán ya registrado, se volvía otro «dijo apixabán, sin
+ * confirmar» junto al registrado (mesa del 25 nov, H3).
+ */
+async function healthOnFile(tx: Db, orgId: string, patientId: string): Promise<Array<Record<string, unknown>>> {
+  const today = await clinicToday(tx, orgId)
+  const [medicines, conditions] = await Promise.all([
+    tx
+      .select({ name: patientMedication.name, genericName: patientMedication.genericName, atcCode: patientMedication.atcCode, endDate: patientMedication.endDate })
+      .from(patientMedication)
+      .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId))),
+    tx
+      .select({ name: patientCondition.name })
+      .from(patientCondition)
+      .where(and(eq(patientCondition.organizationId, orgId), eq(patientCondition.patientId, patientId), eq(patientCondition.status, "activa"))),
+  ])
+  const out: Array<Record<string, unknown>> = []
+  const others: Array<{ name: string }> = []
+  for (const row of medicines) {
+    if (row.endDate && row.endDate < today) continue
+    const group = medicationClassOf(row.atcCode ?? findHabitualMedication(row.genericName ?? row.name)?.atc)
+    if (group) out.push({ [group]: { state: "recorded", detail: row.genericName ?? row.name } })
+    else others.push({ name: row.name })
+  }
+  if (others.length) out.push({ medications: { state: "recorded", items: others } })
+  if (conditions.length) out.push({ conditions: { state: "recorded", items: conditions.map((row) => ({ name: row.name })) } })
+  return out
+}
+
 export function doubtfulAllergy(draft: DictationDraft): DictationDraft {
   if (draft.kind !== "alergia" || draft.payload["none"] !== true || !saidInDoubt(draft.sourceText)) return draft
   return { kind: "salud", payload: { declarante: "no_se_sabe", allergies: { state: "unknown" } }, ...(draft.sourceText ? { sourceText: draft.sourceText } : {}) }
@@ -2360,8 +2397,15 @@ export async function saveDictationSegment(
   }
   const unsettled = (kind: DictationKind, payload: Record<string, unknown>): Record<string, unknown> | null => {
     const same = settled.filter((item) => item.kind === kind)
-    if (!same.length || kind === "nota") return payload
-    if (kind === "salud") return withoutSettledHealth(payload, same.map((item) => item.payload))
+    if (kind === "nota") return payload
+    if (!same.length && kind !== "salud") return payload
+    if (kind === "salud") {
+      // Una alergia descartada (mal entendida) no cuenta como nombrada (revisión del 25 nov).
+      const namedAllergy = settled.some(
+        (item) => item.kind === "alergia" && item.status !== "descartada" && typeof item.payload["substance"] === "string" && item.payload["substance"].trim() !== "",
+      )
+      return withoutSettledHealth(payload, same.map((item) => item.payload), namedAllergy)
+    }
     if (kind === "plan") {
       const entry = planEntry(null, payload)
       const decided = same.map((item) => planEntry(null, item.payload))
@@ -2382,6 +2426,7 @@ export async function saveDictationSegment(
   let newNote: (typeof rows)[number] | undefined
   // Lo de su salud también es uno solo en la atención (mesa del 20 nov 2026, P3): se suma igual.
   let pendingHealthId = pendingNow.filter((item) => item.kind === "salud").at(-1)?.id
+  let onFile: Array<Record<string, unknown>> | undefined
   let newHealth: (typeof rows)[number] | undefined
   const added: string[] = [...addedByVoice]
   const joinSource = (before: string, now: string | undefined) => {
@@ -2396,7 +2441,7 @@ export async function saveDictationSegment(
     if (segment.review && draft.kind !== "nota" && draft.kind !== "salud" && saidBefore(draft.kind, draft.sourceText)) continue
     const kept = settled.length ? unsettled(draft.kind, checked.payload) : checked.payload
     if (!kept) continue
-    const ready = kept === checked.payload ? checked : { ...checked, payload: kept }
+    let ready = kept === checked.payload ? checked : { ...checked, payload: kept }
     if (draft.kind === "nota" && pendingNoteId) {
       const row = await pendingRow(pendingNoteId)
       if (!row) pendingNoteId = undefined
@@ -2425,6 +2470,19 @@ export async function saveDictationSegment(
           continue
         }
       }
+    }
+    if (draft.kind === "salud") {
+      // Lo que ya está en sus Antecedentes no vuelve como dicho (mesa del 25 nov, H3).
+      onFile ??= await healthOnFile(tx, orgId, patientId)
+      const fresh = onFile.length ? withoutSettledHealth(ready.payload, onFile) : ready.payload
+      // Lo que corrige una pendiente de esta atención se queda, aunque ya esté en Antecedentes: el
+      // «Anticoagulante: no sabe» pendiente no puede quedar contradiciendo al apixabán (revisión del 25 nov).
+      const pendingData = pendingHealthId ? splitMeta(((await pendingRow(pendingHealthId))?.payload ?? {}) as Record<string, unknown>).data : {}
+      const kept = fresh ? { ...fresh } : {}
+      for (const [group, value] of Object.entries(ready.payload)) if (!(group in kept) && group in pendingData) kept[group] = value
+      const anything = Object.entries(kept).some(([group, value]) => typeof value === "object" && value !== null && group !== "_meta")
+      if (!anything) continue
+      if (JSON.stringify(kept) !== JSON.stringify(ready.payload)) ready = { ...ready, payload: kept }
     }
     if (draft.kind === "salud" && pendingHealthId) {
       const row = await pendingRow(pendingHealthId)
@@ -3484,6 +3542,64 @@ export async function discardSaidHealth(tx: Db, orgId: string, actorUserId: stri
 }
 
 /**
+ * La alergia que oyó Clío en una atención ya firmada y nadie confirmó (QA del 25 nov): sigue
+ * avisándose con su fecha hasta que alguien la registre o diga que no la registra, como lo dicho de
+ * su salud. Lo decide quien escribe en la historia (`clinical.write`, la guarda de la ruta).
+ */
+async function lockSignedSaidAllergy(tx: Db, orgId: string, patientId: string, id: string) {
+  const [row] = await tx
+    .select({ suggestion: encounterDictationSuggestion, encounterStatus: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.kind, "alergia"),
+      ),
+    )
+    .for("update", { of: encounterDictationSuggestion })
+    .limit(1)
+  if (!row || typeof row.suggestion.payload["substance"] !== "string") throw notFound("La alergia que dijo")
+  if (row.suggestion.status !== "lista" && row.suggestion.status !== "por_revisar") throw conflict("SUGGESTION_DECIDED", "Esto ya se revisó o se descartó")
+  if (row.encounterStatus !== "finalizada") throw conflict("ENCOUNTER_STILL_OPEN", "Esto se revisa en su atención, que sigue abierta")
+  return row.suggestion
+}
+
+/** «Registrar» la alergia que dijo en una atención ya firmada: entra a sus alergias como dicha. */
+export async function confirmSaidAllergy(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
+  const row = await lockSignedSaidAllergy(tx, orgId, patientId, id)
+  const payload = splitMeta(row.payload).data
+  // Ya registrada (a mano, mientras esperaba): queda esa, sin otra igual ni error (QA del 25 nov).
+  const said = { ...dictatedAllergy(payload), name: typeof payload["name"] === "string" ? payload["name"] : null }
+  const onFile = (await tx
+    .select()
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId), eq(patientAllergy.isActive, true), ne(patientAllergy.verification, "descartada")))).find((existing) => sameAllergyOnRecord(said, [existing]))
+  const created = onFile ?? await addPatientAllergy(tx, orgId, actorUserId, patientId, {
+    substance: String(payload["substance"]),
+    substanceSystem: (payload["substanceSystem"] as string | undefined) ?? null,
+    substanceCode: (payload["substanceCode"] as string | undefined) ?? null,
+    severity: (payload["severity"] as string | undefined) ?? null,
+    reaction: (payload["reaction"] as string | undefined) ?? null,
+  })
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "confirmada", entityId: created.id, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, row.id))
+}
+
+/** «No la registro»: la alergia que dijo en una atención firmada deja de avisarse. */
+export async function discardSaidAllergy(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
+  const row = await lockSignedSaidAllergy(tx, orgId, patientId, id)
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, row.id))
+}
+
+/**
  * Lo que oyó Clío de su salud, con las claves de la entrevista de su producto (la anestesia, el
  * corazón, el embarazo, lo de un niño; en latidIA, sus hábitos): la misma regla que la declaración
  * al confirmarla (`ProductInterview.declared`). «Corregir algo» deja eso puesto en Antecedentes.
@@ -4017,7 +4133,7 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
         eq(encounterDictationSuggestion.organizationId, orgId),
         eq(encounterDictationSuggestion.encounterId, encounterId),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
-        ne(encounterDictationSuggestion.kind, "salud"),
+        discardableWhenSigning(),
       ),
     )
     .returning({ id: encounterDictationSuggestion.id })

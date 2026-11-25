@@ -1,7 +1,7 @@
-import { findHabitualMedication, HABITUAL_MEDICATIONS, type HabitualMedicationEntry, medicationClassOf } from "@odentia/clinical"
+import { findHabitualMedication, HABITUAL_MEDICATIONS, normalizeDrugText, sameAllergyOnRecord, type HabitualMedicationEntry, medicationClassOf } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { encounter, encounterDictationSuggestion } from "@odentia/db/schema/clinical"
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { encounter, encounterDictationSuggestion, patientAllergy } from "@odentia/db/schema/clinical"
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm"
 
 /*
  * ---------- Lo que dijo de su salud y nadie confirmó, para lo que avisa ----------
@@ -109,4 +109,81 @@ export async function saidHealthRisks(
     rows.map((row) => ({ payload: row.payload as Record<string, unknown>, at: row.updatedAt.toISOString(), open: row.encounterStatus === "borrador" })),
     habitual,
   )
+}
+
+/** Una alergia que propuso Clío y nadie confirmó: la sustancia como la dijo. */
+export interface SaidAllergy {
+  /** Su propuesta: con ella se registra o se deja de avisar en una atención firmada. */
+  suggestionId: string
+  /** Lo que se compara con la receta: la sustancia de la lista, o como la dijo. */
+  substance: string
+  substanceSystem: string | null
+  substanceCode: string | null
+  /** Cómo se dice en la franja: «ibuprofeno». */
+  name: string
+  severity: string | null
+  /** Cuándo lo dijo (ISO 8601). */
+  at: string
+  /** Su atención sigue en borrador. Si no, ya se firmó sin revisarla. */
+  open: boolean
+}
+
+/**
+ * Las alergias que oyó Clío (propuestas de tipo `alergia`) y nadie confirmó ni descartó. La franja
+ * no decía nada de ellas: con «ibuprofeno» propuesto, seguía en «Alergias: no se le preguntó», y la
+ * receta del mismo ibuprofeno no avisaba (mesa del 25 nov, H2). Avisan como lo dicho, sin frenar.
+ */
+export async function saidAllergies(tx: Db, orgId: string, patientId: string): Promise<SaidAllergy[]> {
+  const rows = await tx
+    .select({ id: encounterDictationSuggestion.id, payload: encounterDictationSuggestion.payload, updatedAt: encounterDictationSuggestion.updatedAt, encounterStatus: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.kind, "alergia"),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        inArray(encounter.status, ["borrador", "finalizada"]),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt))
+  // La que ya está en sus alergias (alguien la registró a mano) no pide revisión (QA del 25 nov).
+  const registered = await tx
+    .select({ substance: patientAllergy.substance, substanceCode: patientAllergy.substanceCode, verification: patientAllergy.verification })
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId), eq(patientAllergy.isActive, true)))
+  const allergyKey = (code: string | null | undefined, substance: string) => (code || normalizeDrugText(substance)).toLocaleLowerCase("es")
+  const seen = new Set<string>()
+  const out: SaidAllergy[] = []
+  for (const row of rows) {
+    const payload = isRecord(row.payload) ? row.payload : {}
+    const substance = text(payload["substance"]) || text(payload["name"])
+    const name = text(payload["name"]) || substance
+    const key = allergyKey(text(payload["substanceCode"]), substance)
+    if (!substance || seen.has(key)) continue
+    if (sameAllergyOnRecord({ substance, name, substanceCode: text(payload["substanceCode"]) || null }, registered)) continue
+    seen.add(key)
+    out.push({
+      suggestionId: row.id,
+      substance,
+      substanceSystem: text(payload["substanceSystem"]) || null,
+      substanceCode: text(payload["substanceCode"]) || null,
+      name,
+      severity: text(payload["severity"]) || null,
+      at: row.updatedAt.toISOString(),
+      open: row.encounterStatus === "borrador",
+    })
+  }
+  return out
+}
+
+/**
+ * Lo que no se descarta al firmar ni al cerrar sin revisarlo: lo dicho de su salud y una alergia con
+ * su sustancia. Sigue avisándose con su fecha hasta que alguien lo revise (revisión del 21 nov, A3;
+ * QA del 25 nov). Una sola regla para la firma (`finalizeEncounter`) y el cierre
+ * (`discardPendingDictation`): en la QA, el cierre descartaba lo que la firma ya cuidaba.
+ */
+export function discardableWhenSigning(): SQL {
+  return sql`not (${encounterDictationSuggestion.kind} = 'salud' or (${encounterDictationSuggestion.kind} = 'alergia' and coalesce(${encounterDictationSuggestion.payload}->>'substance', '') <> ''))`
 }

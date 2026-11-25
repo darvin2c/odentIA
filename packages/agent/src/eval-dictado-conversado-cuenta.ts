@@ -30,7 +30,7 @@ export interface ServerParts {
   doubtfulAllergy?: (draft: DictationDraft) => DictationDraft
   mergeHealth?: (current: Payload, added: Payload, correct?: boolean) => { payload: Payload; earlier: Record<string, string> }
   prepareHealth?: (payload: Payload, said: string | undefined, own: object) => { payload: Payload; status: string; note: string | null } | null
-  withoutSettledHealth?: (payload: Payload, settled: readonly Payload[]) => Payload | null
+  withoutSettledHealth?: (payload: Payload, settled: readonly Payload[], namedAllergy?: boolean) => Payload | null
   dictationContext?: (earlier: readonly string[]) => string
 }
 
@@ -290,7 +290,11 @@ export function applyPause(
     if (draft.kind === "salud") {
       let payload = ready.payload
       if (input.review && parts.withoutSettledHealth) {
-        const kept = parts.withoutSettledHealth(payload, discarded.filter((item) => item.kind === "salud").map((item) => item.payload))
+        // Como el servidor: una alergia ya nombrada (pendiente o descartada) gana al «no sabe» (mesa del 25 nov, H3).
+        const namedAllergy = state.suggestions.some(
+          (item) => item.kind === "alergia" && typeof item.payload["substance"] === "string" && String(item.payload["substance"]).trim() !== "",
+        )
+        const kept = parts.withoutSettledHealth(payload, discarded.filter((item) => item.kind === "salud").map((item) => item.payload), namedAllergy)
         if (!kept) continue
         payload = kept
       }

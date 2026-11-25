@@ -11,6 +11,7 @@ import { SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { addDeclaredHealth, getPatientHealth, recordHealthDeclaration, savePatientHealth } from "../clinical.js"
 import { createConsentDocument, createConsentTemplate, publishConsentTemplate } from "../clinical-forms.js"
 import { clinicalFixture } from "../clinical-test-fixture.js"
+import { placeBudgetPath } from "../budget-paths.js"
 import { addPlanItem, listPlanItems } from "../plan.js"
 import { ownerDb, setupTestDb } from "../test-setup.js"
 
@@ -235,4 +236,37 @@ it("la apicectomía, el colgajo, el injerto, la gingivectomía y el alargamiento
   )
   // El raspado sigue con lo de siempre del periodontal: la herida, sin el hueso.
   expect((await prepare(scalingItem.id)).some((risk) => risk.includes("osteonecrosis"))).toBe(false)
+})
+
+it("la exodoncia por decidir entre dos caminos también avisa el anticoagulante confirmado", async () => {
+  const f = await clinicalFixture()
+  const tooth = (name: string, priceCents: number) =>
+    ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: "org_a", name, scope: "tooth", source: "custom", priceCents, currency: "PEN" })
+      .returning()
+      .then((rows) => rows[0]!)
+  const exo = await tooth("Exodoncia simple", 15000)
+  const endo = await tooth("Endodoncia", 65000)
+  await ownerDb.insert(serviceFinding).values({ serviceId: exo.id, organizationId: "org_a", condition: "missing_tooth" })
+  const health = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await f.run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "Apixabán 5 mg", genericName: "apixabán" }],
+    }),
+  )
+  // Conservar la 46 (endodoncia) o extraerla: la exodoncia queda «por decidir» en la otra opción.
+  await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: endo.id, sourceEncounterId: f.encounter.id, toothNumber: 46 }))
+  const exodoncia = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: exo.id, sourceEncounterId: f.encounter.id, toothNumber: 46 }),
+  )
+  await f.run((tx) => placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }))
+  const listed = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { extractionRisks: true }))).find(
+    (row) => row.id === exodoncia.id,
+  )
+  expect(listed?.decisionStatus).toBe("pendiente")
+  expect(listed?.extractionRisks).toEqual(["Toma apixabán 5 mg: riesgo de sangrado."])
 })

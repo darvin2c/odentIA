@@ -25,6 +25,7 @@ import {
   markHealthDeniedApi,
   type PatientHealth,
   reviewDeclaredHealthApi,
+  type SaidAllergy,
   type SaidHealth,
   unaskedHealthGroups,
 } from "../../lib/patients"
@@ -377,20 +378,25 @@ export function HealthReviewNotice({
   // Lo que dijo en una atención ya firmada y nadie revisó: sigue esperando aquí, con su fecha, hasta
   // que alguien lo revise o diga que no lo registra (revisión del 21 nov, A3).
   const earlierSaid = (health.said ?? []).filter((item) => item.open === false && item.rows.length > 0)
+  // La alergia que oyó Clío en una atención ya firmada: también espera aquí (QA del 25 nov).
+  const earlierAllergies = (health.saidAllergies ?? []).filter((item) => item.open === false)
+  const earlierCount = earlierSaid.length + earlierAllergies.length
   const heardOf = (group: NonNullable<HeardHealthRow["group"]>) => heard.rows.find((row) => row.group === group) ?? null
   const isAllergy = (item: DictationSuggestion) => item.kind === "alergia"
   const dictatedAllergies =
     !!dictation?.enabled &&
     (dictation.suggestions.some(isAllergy) || dictation.removedByVoice.some(isAllergy) || dictation.undoRequests.some(isAllergy))
   const heardAny = heard.rows.length > 0 || dictatedAllergies
-  if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy && !heardAny && earlierSaid.length === 0)) return null
+  if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy && !heardAny && earlierCount === 0)) return null
   // Mientras corre «Deshacer» de «Lo revisé con ella», sin nada más que pedir, la caja no queda vacía
   // con su título (pantalla, 15 nov): sigue montada para guardar o deshacer.
-  if (reviewedHere && !(allergiesDue && !allergiesSaid) && unasked.length === 0 && !confirmPregnancy && !heardAny && earlierSaid.length === 0) return null
+  if (reviewedHere && !(allergiesDue && !allergiesSaid) && unasked.length === 0 && !confirmPregnancy && !heardAny && earlierCount === 0) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   // Las que ya tenía, anotadas o revisadas por el equipo: revisar las alergias también las cubre.
   const others = active.filter((allergy) => !declaredAllergyIds.has(allergy.id))
-  const allergyRow = allergiesDue && !allergiesSaid
+  // Con una alergia que dijo esperando revisión, la fila no dice «no se le preguntó» ni ofrece «No tiene
+  // alergias»: se revisa en su propia fila (QA del 25 nov).
+  const allergyRow = allergiesDue && !allergiesSaid && (health.saidAllergies ?? []).length === 0
   const saidUnknownAllergies = allergyRow ? allergiesSaidUnknown(health) : null
   // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
   const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)
@@ -411,7 +417,7 @@ export function HealthReviewNotice({
   // Lucas» bajo «Revisa con su madre (Marta…)» no se entendía (QA del 23 nov, verificador 2).
   const heardWho = heard.by && heard.by !== "el paciente" ? heard.by : null
   const heardWith = heardWho ?? first
-  const title = heardAny || (earlierSaid.length > 0 && topics.length === 0 && !declaredHere)
+  const title = heardAny || (earlierCount > 0 && topics.length === 0 && !declaredHere)
     ? `Revisa con ${heardWho ?? first}${(heardWho ?? first).includes(",") ? "," : ""} lo que dijo de ${heardWho || talksFor ? `la salud de ${patientFirst}` : "su salud"}`
     : topics.length === 0
       ? declaredHere
@@ -690,6 +696,9 @@ export function HealthReviewNotice({
         {earlierSaid.map((item) => (
           <SaidEarlierRow key={item.suggestionId} patientId={patientId} item={item} patientFirst={patientFirst} disabled={busy} onDone={refresh} />
         ))}
+        {earlierAllergies.map((item) => (
+          <SaidAllergyEarlierRow key={item.suggestionId} patientId={patientId} item={item} disabled={busy} onDone={refresh} />
+        ))}
         {declaredHere && !reviewedHere ? (
           // En una línea (revisión final del 15 nov, ux propuesta 3): qué dijo, «Ver lo que dijo» y
           // «Lo revisé con ella», que lo resuelve en un toque. Lo que la franja ya dice no se repite.
@@ -852,6 +861,44 @@ function SaidEarlierRow({
             {`Lo revisé con ${who}`}
           </SubmitButton>
         ) : null}
+      </div>
+      {act.error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {submitErrorMessage(act.error)}
+        </p>
+      ) : null}
+    </li>
+  )
+}
+
+/**
+ * La alergia que oyó Clío en una atención ya firmada y nadie confirmó (QA del 25 nov): con el día en
+ * que se dijo, «Registrar» (entra a sus alergias) y «No la registro» (deja de avisarse).
+ */
+function SaidAllergyEarlierRow({ patientId, item, disabled, onDone }: { patientId: string; item: SaidAllergy; disabled: boolean; onDone: () => Promise<void> }) {
+  const day = shortDay(item.at)
+  const act = useMutation({
+    mutationFn: (action: "confirm" | "discard") =>
+      apiFetch(`/api/patients/${patientId}/health/said-allergies/${item.suggestionId}/${action}`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: async (_result, action) => {
+      await onDone()
+      toast.success(action === "confirm" ? `Alergia a ${item.name}: quedó en sus alergias` : "No se registra: ya no se avisa")
+    },
+  })
+  return (
+    <li className="flex flex-col gap-2 py-2 first:pt-0 last:pb-0">
+      <h3 className="text-sm font-medium">{day ? `La alergia que dijo el ${day}, sin revisar` : "La alergia que dijo en otra consulta, sin revisar"}</h3>
+      <p className="text-sm">
+        <span className="font-medium">Alergia:</span> {item.name}
+        {item.severity ? <span className="text-muted-foreground"> · {item.severity}</span> : null}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" disabled={disabled || act.isPending} onClick={() => act.mutate("discard")}>
+          No la registro
+        </Button>
+        <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending && act.variables === "confirm"} disabled={disabled || act.isPending} onClick={() => act.mutate("confirm")}>
+          Registrar
+        </SubmitButton>
       </div>
       {act.error ? (
         <p role="alert" className="text-sm text-destructive">
