@@ -91,8 +91,22 @@ export async function listMyAppPlaces(tx: Db, userId: string): Promise<MyAppPlac
 /**
  * Antes de cerrar la cuenta: un lugar de otra app nunca se queda sin dueño, como una clínica sin
  * Propietario. Si la persona es la única dueña de alguno, no se cierra y se dice cuál.
+ *
+ * Toma el candado de cada lugar donde es dueña (el mismo de `applyTeamChanged`, en orden) hasta
+ * el final de la transacción del cierre: dos dueñas que cierran a la vez no se ven la una a la
+ * otra como la que queda.
  */
 export async function assertKeepsAppPlaceOwners(tx: Db, userId: string): Promise<void> {
+  const owned = await tx
+    .select({ app: appPlaceMember.app, ref: appPlaceMember.ref })
+    .from(appPlaceMember)
+    .where(and(eq(appPlaceMember.userId, userId), eq(appPlaceMember.role, "owner")))
+    .orderBy(asc(appPlaceMember.app), asc(appPlaceMember.ref))
+  if (owned.length === 0) return
+  for (const place of owned)
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`app-place:${place.app}:${place.ref}`}, 0))`,
+    )
   const other = alias(appPlaceMember, "other")
   const names = await tx
     .select({ app: appPlace.app, name: appPlace.name })

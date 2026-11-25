@@ -537,7 +537,7 @@ export async function acceptInvitation(
       detail: { role: member?.role ?? invitation.role },
     })
     // La cuenta sabe que entró: la tienda aparece en su selector de lugares.
-    await noteStoreTeam(tx, invitation.storeId, now)
+    await noteStoreTeam(tx, invitation.storeId)
     return { storeId: invitation.storeId }
   })
 }

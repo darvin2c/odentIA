@@ -159,7 +159,12 @@ async function teamOf(tx: Db, storeId: string) {
     .from(storeMember)
     .where(eq(storeMember.storeId, storeId))
     .orderBy(asc(storeMember.userId))
-  return { account: storeId, name: shop.name, members }
+  // Recortado como lo guarda el acuerdo: así se compara igual con lo último que se avisó.
+  return {
+    account: storeId,
+    name: shop.name.trim(),
+    members: members.map((one) => ({ userId: one.userId.trim(), role: one.role })),
+  }
 }
 
 /**
@@ -167,13 +172,18 @@ async function teamOf(tx: Db, storeId: string) {
  * avisó: al crearla, al entrar alguien, al cambiar un rol, al sacar a alguien y al cerrarse la
  * cuenta de alguien del equipo. Va el equipo entero, en la transacción del cambio. Con `force`,
  * aunque no haya cambiado.
+ *
+ * Dos cambios del mismo equipo a la vez se avisan uno después del otro: el candado de la tienda
+ * se toma antes de leer el equipo y dura hasta el final de la transacción, y la hora del aviso es
+ * la de la base ya con el candado. Así el que avisa después lee lo del otro y lleva la hora más
+ * nueva, que es la que la cuenta guarda.
  */
-export async function noteStoreTeam(
-  tx: Db,
-  storeId: string,
-  now = new Date(),
-  force = false,
-): Promise<boolean> {
+export async function noteStoreTeam(tx: Db, storeId: string, force = false): Promise<boolean> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`equipo:${storeId}`}, 0))`)
+  const [clock] = (await tx.execute(sql`select clock_timestamp() as at`)) as unknown as Array<{
+    at: Date | string
+  }>
+  const now = new Date(clock?.at ?? Date.now())
   const data = await teamOf(tx, storeId)
   if (!data) return false
   if (!force) {
@@ -205,12 +215,12 @@ function sameTeam(before: unknown, now: NonNullable<Awaited<ReturnType<typeof te
  * no coincide. Es la carga inicial (las tiendas de antes de este aviso) y lo que arregla un
  * aviso que dos cambios a la vez dejaron atrás. Corre en el trabajo del acuerdo, una vez por hora.
  */
-export async function reviewStoreTeams(ownerDb: Db, now = new Date()): Promise<number> {
+export async function reviewStoreTeams(ownerDb: Db): Promise<number> {
   const stores = await ownerDb.select({ id: store.id }).from(store).orderBy(asc(store.id))
   let noted = 0
   for (const one of stores) {
     // eslint-disable-next-line no-await-in-loop
-    if (await ownerDb.transaction((tx) => noteStoreTeam(tx, one.id, now))) noted++
+    if (await ownerDb.transaction((tx) => noteStoreTeam(tx, one.id))) noted++
   }
   return noted
 }
