@@ -674,6 +674,23 @@ export function allergyWarnings(
   return lines
 }
 
+/**
+ * La alergia que oyó Clío y nadie confirmó, frente a lo que se receta: el mismo aviso, dicho así
+ * («… Lo dijo en la consulta y nadie lo confirmó.»). La ya registrada no se repite. La misma regla en
+ * la pantalla y en el servidor, para que los dos digan lo mismo (mesa del 25 nov, H2).
+ */
+export function saidAllergyWarnings(
+  dci: string,
+  said: readonly AllergyOnRecord[],
+  registered: readonly AllergyOnRecord[],
+  catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
+): string[] {
+  const key = (row: AllergyOnRecord) => (row.substanceCode ?? normalizeDrugText(row.substance)).toLocaleLowerCase("es")
+  const known = new Set(registered.map(key))
+  const fresh = said.filter((row) => !known.has(key(row)))
+  return allergyWarnings(dci, fresh, catalog).map((line) => `${line} Lo dijo en la consulta y nadie lo confirmó.`)
+}
+
 /** Lo que ya toma, de sus antecedentes: el nombre que se ve y su código ATC, si lo tiene. */
 export interface TakenMedication {
   name: string

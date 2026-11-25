@@ -22,7 +22,8 @@ import {
   saveDictationSegment,
   undoDictationVoiceCorrection,
 } from "./encounter-dictation.js"
-import { prescribingSituationOf } from "./prescriptions.js"
+import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
+import { saidAllergies } from "./said-health-risks.js"
 import { productHooksFor } from "./products.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -756,6 +757,26 @@ describe("cada dato de su salud con su frase, al sumar pausas", () => {
       medications: "tomo losartan para la presion",
       allergies: "no que yo sepa",
     })
+    await enable(false)
+  })
+})
+
+describe("H2 (mesa del 25 nov) · la alergia que oyó Clío avisa antes de confirmarla", () => {
+  it("«con el ibuprofeno se le hincharon los ojos»: la franja la recibe y la receta del ibuprofeno avisa", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "ibuprofeno", reaction: "se le hincharon los ojos" }, sourceText: "con el ibuprofeno se le hincharon los ojos" }],
+      transcript: "La hija dice que con el ibuprofeno se le hincharon los ojos.",
+    })
+    const said = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said.map((row) => row.name.toLocaleLowerCase("es"))).toEqual(["ibuprofeno"])
+    const base = { strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "Cada 8 horas", duration: "3 días", quantity: 9 }
+    const refused = await fx
+      .run((tx) => createPrescription(tx, ...fx.args, { encounterId: fx.encounter.id, alertsShown: [], items: [{ ...base, genericName: "ibuprofeno" }] }))
+      .catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: "ALLERGY_CONFLICT" })
+    expect((refused as Error).message).toContain("Lo dijo en la consulta y nadie lo confirmó.")
     await enable(false)
   })
 })

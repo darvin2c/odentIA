@@ -110,3 +110,60 @@ export async function saidHealthRisks(
     habitual,
   )
 }
+
+/** Una alergia que propuso Clío y nadie confirmó: la sustancia como la dijo. */
+export interface SaidAllergy {
+  /** Lo que se compara con la receta: la sustancia de la lista, o como la dijo. */
+  substance: string
+  substanceSystem: string | null
+  substanceCode: string | null
+  /** Cómo se dice en la franja: «ibuprofeno». */
+  name: string
+  severity: string | null
+  /** Cuándo lo dijo (ISO 8601). */
+  at: string
+  /** Su atención sigue en borrador. Si no, ya se firmó sin revisarla. */
+  open: boolean
+}
+
+/**
+ * Las alergias que oyó Clío (propuestas de tipo `alergia`) y nadie confirmó ni descartó. La franja
+ * no decía nada de ellas: con «ibuprofeno» propuesto, seguía en «Alergias: no se le preguntó», y la
+ * receta del mismo ibuprofeno no avisaba (mesa del 25 nov, H2). Avisan como lo dicho, sin frenar.
+ */
+export async function saidAllergies(tx: Db, orgId: string, patientId: string): Promise<SaidAllergy[]> {
+  const rows = await tx
+    .select({ payload: encounterDictationSuggestion.payload, updatedAt: encounterDictationSuggestion.updatedAt, encounterStatus: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.kind, "alergia"),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        inArray(encounter.status, ["borrador", "finalizada"]),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt))
+  const seen = new Set<string>()
+  const out: SaidAllergy[] = []
+  for (const row of rows) {
+    const payload = isRecord(row.payload) ? row.payload : {}
+    const substance = text(payload["substance"]) || text(payload["name"])
+    const name = text(payload["name"]) || substance
+    const key = (text(payload["substanceCode"]) || substance).toLocaleLowerCase("es")
+    if (!substance || seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      substance,
+      substanceSystem: text(payload["substanceSystem"]) || null,
+      substanceCode: text(payload["substanceCode"]) || null,
+      name,
+      severity: text(payload["severity"]) || null,
+      at: row.updatedAt.toISOString(),
+      open: row.encounterStatus === "borrador",
+    })
+  }
+  return out
+}

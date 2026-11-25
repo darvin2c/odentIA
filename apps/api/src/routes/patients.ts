@@ -53,6 +53,7 @@ import {
   getPatientHealth,
   getPatientSummary,
   listSaidHealth,
+  saidAllergies,
   saidHealthRisks,
   confirmSaidHealth,
   discardSaidHealth,
@@ -1112,6 +1113,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         // Lo que dijo que toma, sin confirmar, para lo que avisa la receta en la pantalla como al
         // emitirla (`prescribingAlerts`, QA del 21 nov, H2).
         saidTaking: (await saidHealthRisks(tx, orgId, c.req.param("id"))).medications,
+        // Las alergias que oyó Clío y nadie confirmó: la franja y la receta las avisan (mesa del 25 nov, H2).
+        saidAllergies: await saidAllergies(tx, orgId, c.req.param("id")),
       })),
     )
   })
