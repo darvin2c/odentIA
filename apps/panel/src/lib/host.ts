@@ -26,14 +26,41 @@ export const KNOWN_DOMAINS: readonly string[] = [
   ...new Set([BASE_DOMAIN, ...Object.values(PRODUCT_DOMAINS).filter((domain): domain is string => Boolean(domain))]),
 ]
 
-/** La dirección de una clínica, en el dominio de su producto. */
+/** La dirección de una clínica, en el dominio de su producto; en otro dominio, con el pase. */
 export const tenantUrl = (slug: string, path = "/", product?: string | null) =>
-  `https://${slug}.${domainOf(product)}${BASE_PORT}${path}`
+  crossDomainHref(`https://${slug}.${domainOf(product)}${BASE_PORT}${path}`)
+
+/**
+ * Abrir un lugar de otro dominio del grupo con la misma sesión (ADR 0215): el enlace pasa por
+ * el pase de la API de destino, que trae la sesión de este dominio y sigue al lugar. En el mismo
+ * dominio, o fuera de los del grupo, la dirección queda igual.
+ */
+export function crossDomainHref(target: string): string {
+  let host: string
+  try {
+    host = new URL(target).hostname
+  } catch {
+    return target
+  }
+  const on = (domain: string) => host === domain || host.endsWith(`.${domain}`)
+  if (on(BASE_DOMAIN)) return target
+  const destination = KNOWN_DOMAINS.find(on)
+  if (!destination) return target
+  const pase = new URL(`https://api.${destination}${BASE_PORT}/api/auth/pase/ir`)
+  pase.searchParams.set("desde", BASE_DOMAIN)
+  pase.searchParams.set("next", target)
+  return pase.href
+}
 
 /** El propio panel: la página de «Conectar con Facebook» se abre siempre aquí (issue 166). */
 export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
 
-export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT}${path}`
+/**
+ * La administración es una sola, en el dominio de odentIA (ADR 0091): desde el panel de otro
+ * producto se llega con el pase, sin entrar otra vez.
+ */
+export const adminUrl = (path = "/") =>
+  crossDomainHref(`https://admin.${PRODUCT_DOMAINS.dental || BASE_DOMAIN}${BASE_PORT}${path}`)
 /** Página de la web de marketing (dominio raíz): términos, privacidad, contacto. */
 export const webUrl = (path = "/") => `https://${BASE_DOMAIN}${BASE_PORT}${path}`
 

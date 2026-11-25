@@ -1093,6 +1093,13 @@
       "when": 1795549532374,
       "tag": "0155_la_administracion_pide_a_las_apps",
       "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1795627508100,
+      "tag": "0156_avisos_con_la_sesion",
+      "breakpoints": true
     }
   ]
 }
