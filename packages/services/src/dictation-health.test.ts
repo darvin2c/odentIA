@@ -204,3 +204,18 @@ describe("cada dato con su frase al sumar pausas", () => {
     expect(said).toEqual({ medications: "tomo losartan para la presion", allergies: "no que yo sepa" })
   })
 })
+
+describe("el repaso no vuelve a proponer lo de salud ya resuelto (mesa del 25 nov, H3)", () => {
+  it("el mismo anticoagulante con otra dosis ya está decidido; otro, no", () => {
+    const decided = [{ anticoagulants: { state: "recorded", detail: "apixaban cinco miligramos dos veces al dia" } }]
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "apixabán" } }, decided)).toBeNull()
+    expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "aspirina" } }, decided)).toEqual({ anticoagulants: { state: "recorded", detail: "aspirina" } })
+  })
+
+  it("con la alergia ya nombrada, su «no que ella sepa» no vuelve; otra alergia nombrada, sí", () => {
+    const fresh = { allergies: { state: "unknown", items: [] }, anticoagulants: { state: "recorded", detail: "apixabán" } }
+    expect(withoutSettledHealth(fresh, [], true)).toEqual({ anticoagulants: { state: "recorded", detail: "apixabán" } })
+    expect(withoutSettledHealth({ allergies: { state: "unknown", items: [] } }, [], true)).toBeNull()
+    expect(withoutSettledHealth({ allergies: { state: "unknown", items: [] } }, [], false)).toEqual({ allergies: { state: "unknown", items: [] } })
+  })
+})

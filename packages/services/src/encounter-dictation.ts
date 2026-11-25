@@ -2360,8 +2360,12 @@ export async function saveDictationSegment(
   }
   const unsettled = (kind: DictationKind, payload: Record<string, unknown>): Record<string, unknown> | null => {
     const same = settled.filter((item) => item.kind === kind)
-    if (!same.length || kind === "nota") return payload
-    if (kind === "salud") return withoutSettledHealth(payload, same.map((item) => item.payload))
+    if (kind === "nota") return payload
+    if (!same.length && kind !== "salud") return payload
+    if (kind === "salud") {
+      const namedAllergy = settled.some((item) => item.kind === "alergia" && typeof item.payload["substance"] === "string" && item.payload["substance"].trim() !== "")
+      return withoutSettledHealth(payload, same.map((item) => item.payload), namedAllergy)
+    }
     if (kind === "plan") {
       const entry = planEntry(null, payload)
       const decided = same.map((item) => planEntry(null, item.payload))

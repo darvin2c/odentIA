@@ -543,19 +543,37 @@ export function healthOfPayload(payload: Record<string, unknown>): NonNullable<z
 }
 
 const sameName = (a: unknown, b: unknown) => normalizeDrugText(text(a)) === normalizeDrugText(text(b))
+/** La medicina, sin dosis ni frecuencia: «apixabán 5 mg dos veces al día» → «apixaban». */
+const drugHead = (value: unknown) => normalizeDrugText(text(value)).split(" ")[0] ?? ""
 
 /**
  * El repaso al terminar (mesa del 20 nov 2026, P4): lo de su salud que no repite lo ya decidido
  * (confirmado con la persona o descartado). Un grupo igual se quita entero; de una lista, la
  * enfermedad o la medicina ya decidida. `null` si no queda nada nuevo.
  */
-export function withoutSettledHealth(payload: Record<string, unknown>, settled: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> | null {
+export function withoutSettledHealth(
+  payload: Record<string, unknown>,
+  settled: ReadonlyArray<Record<string, unknown>>,
+  /** Ya hay una alergia con su sustancia, propuesta o decidida: su «no sabe» o su «no» no vuelve. */
+  namedAllergy = false,
+): Record<string, unknown> | null {
   const kept = { ...payload }
   for (const group of GROUPS) {
     const now = kept[group]
     if (!isRecord(now)) continue
+    // Con la alergia ya nombrada (la hija: «con el ibuprofeno se le hincharon los ojos»), el «no que
+    // ella sepa» de la paciente no vuelve en el repaso a contradecirla (mesa del 25 nov, H3).
+    if (group === "allergies" && namedAllergy && now["state"] !== "recorded") {
+      delete kept[group]
+      continue
+    }
     const before = settled.map((item) => item[group]).filter(isRecord)
-    if (before.some((item) => JSON.stringify(item) === JSON.stringify(now))) {
+    // El anticoagulante y la medicina para los huesos son una respuesta: la misma medicina dicha con
+    // otra dosis («apixabán» y «apixabán cinco miligramos dos veces al día») ya está decidida (H3).
+    const sameAnswer = (item: Record<string, unknown>) =>
+      JSON.stringify(item) === JSON.stringify(now) ||
+      (DIRECTED.includes(group) && item["state"] === now["state"] && (now["state"] !== "recorded" || drugHead(item["detail"]) === drugHead(now["detail"])))
+    if (before.some(sameAnswer)) {
       delete kept[group]
       continue
     }
