@@ -11,8 +11,8 @@ import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
 // Las presentaciones (/presentacion y cada una debajo) son para mostrarlas o enviarlas, no para
-// buscadores (llevan noindex).
-const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
+// buscadores (llevan noindex), y tampoco la página de «no existe».
+const FUERA_DEL_MAPA = /\/(presentacion(\/.*)?|404)$/
 
 // Cada producto con web la publica el mismo servidor con su VITE_PRODUCT: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/product-pages.json`, las mismas que sirve `servesPage` en
@@ -51,6 +51,21 @@ const pages = pageFiles(pagesDir)
   .map((file) => `/${relative(pagesDir, file).replaceAll("\\", "/").replace(/\.astro$/, "").replace(/(^|\/)index$/, "")}`)
   .filter(ours)
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
+
+// La fecha de cada guía (ADR 0216): la de su archivo (`updated: "AAAA-MM-DD"` en src/lib/guides),
+// la misma que dice la página y sus datos para Google. El índice lleva la más nueva.
+const guidesDir = fileURLToPath(new URL("./src/lib/guides", import.meta.url))
+const guideDates = new Map(
+  readdirSync(guidesDir)
+    .filter((name) => name.endsWith(".ts") && !["index.ts", "types.ts", "rich.ts"].includes(name) && !name.endsWith(".test.ts"))
+    .flatMap((name) => {
+      const text = readFileSync(join(guidesDir, name), "utf8")
+      const slug = text.match(/slug:\s*"([a-z0-9-]+)"/)?.[1]
+      const updated = text.match(/updated:\s*"(\d{4}-\d{2}-\d{2})"/)?.[1]
+      return slug && updated ? [[`/guias/${slug}`, updated]] : []
+    }),
+)
+if (guideDates.size > 0) guideDates.set("/guias", [...guideDates.values()].sort().at(-1))
 
 // La última vez que cambió la web (el último commit que tocó apps/web): el buscador vuelve a pasar
 // cuando cambia. Sin git (un armado fuera del repositorio), el mapa va sin fecha.
@@ -93,6 +108,11 @@ export default defineConfig({
         // Cada web, solo sus páginas: las demás responden 404 en su dominio.
         const clean = new URL(page).pathname.replace(/\/$/, "") || "/"
         return ours(clean) && !FUERA_DEL_MAPA.test(path)
+      },
+      // Una guía lleva su propia fecha, no la del último cambio de la web.
+      serialize: (item) => {
+        const updated = guideDates.get(new URL(item.url).pathname.replace(/\/$/, ""))
+        return updated ? { ...item, lastmod: new Date(`${updated}T12:00:00Z`).toISOString() } : item
       },
     }),
   ],

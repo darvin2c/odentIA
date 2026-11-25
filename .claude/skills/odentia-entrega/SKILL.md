@@ -1,6 +1,6 @@
 ---
 name: odentia-entrega
-description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo en la mesa con las cinco voces de odentia-qa (novato, clínica, desarrollo, auditor y diseño UX), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, pasar la QA de odentia-qa antes de entregar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
+description: Llevar un cambio de las clínicas (odentIA, latidIA, vistIA), de gestorIA o de la web de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo en la mesa con las voces de odentia-qa que el sistema pide (novato, clínica, comercial, desarrollo, auditor y diseño UX), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, pasar la QA de odentia-qa antes de entregar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
 ---
 
 # Entregar un cambio
@@ -31,8 +31,8 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 | Qué llega | Mesa | Lienzo | QA antes de entregar |
 |---|---|---|---|
 | Una entrega que una ronda de `odentia-qa` dejó lista (acta y lienzo aprobados) | Sin mesa: ya la tuvo. Solo se comprueba que `main` no cambió lo que el acta da por hecho | Ya está | Las voces del acta |
-| Lienzo aprobado | Completa, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Las cinco voces |
-| Función nueva que cambia una pantalla o un recorrido | Completa | Si hay más de una forma razonable | Las cinco voces |
+| Lienzo aprobado | Completa, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está | Todas las voces del sistema |
+| Función nueva que cambia una pantalla o un recorrido | Completa | Si hay más de una forma razonable | Todas las voces del sistema |
 | Función pequeña dentro de un patrón que ya existe, o mover algo de lugar | Corta: quien hace la tarea (el novato en su rol) y desarrollo | No | Novato, desarrollo y diseño UX |
 | Error | Corta, solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No | Desarrollo y las voces a las que afecte |
 | Cambio interno, sin efecto visible | Sin mesa | No | Desarrollo |
@@ -42,7 +42,7 @@ La administración no lleva voces: la usa el equipo de odentIA, y las voces imit
 
 Los tamaños de la mesa están en `.claude/skills/odentia-qa/references/mesa.md`. Cualquier cambio sube de tamaño si toca dinero, firmas, datos clínicos o permisos, o si lo va a ver otro rol.
 
-Las voces son las de `.claude/skills/odentia-qa/references/voces.md`. Clínica entra siempre que el cambio toque datos o decisiones clínicas, en la mesa y en la QA, con el catálogo de procesos de su producto.
+Las voces son las de `.claude/skills/odentia-qa/references/voces.md`, y cada una es su subagente en `.claude/agents/`. La tabla de arriba dice cuántas; cuáles, lo dice el sistema que toca el cambio («Quién entra: según el sistema», en `mesa.md`). Un cambio de la web no llama a clínica, y uno de gestorIA no recorre las clínicas. Clínica entra siempre que el cambio toque datos o decisiones clínicas, en la mesa y en la QA, con el catálogo de procesos de su producto. Comercial entra siempre que cambie lo que se promete o se vende.
 
 Un error se explica antes de arreglarlo: qué le pasó a la persona, si es un error y de qué (falló el modelo o falló una regla nuestra), en palabras simples. Si la causa todavía no está comprobada, se dice así. Si afecta a una persona real, se dice primero quién debe avisarle; el agente no le escribe sin permiso. Después se arregla sin esperar respuesta, salvo que el arreglo sea una decisión de producto. Lo que ya está comprobado que es falso se corrige aunque la causa del caso siga en duda.
 
@@ -194,7 +194,7 @@ Unir con `gh pr merge <número> --squash`.
 
 ### 11. Seguir hasta producción
 
-Unir no es llegar. `main` corre todo y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
+Unir no es llegar. `main` corre lo afectado desde lo último que quedó en producción y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
 
 - `deploy` en `skipped`: falló algo en `main` y no llegó nada. Decirlo enseguida en palabras simples y corregirlo con un PR de arreglo, desde la etapa 4. Es el único otro PR que abre la entrega, y no termina hasta que ese arreglo despliega.
 - `deploy` en `success` no basta: si `main` avanzó, la corrida termina bien sin desplegar y lo hace la del commit más nuevo. Mirar que el paso «Desplegar el commit verificado» haya corrido en un commit que incluya el tuyo.
@@ -205,7 +205,7 @@ Comprobar por fuera lo que se pueda, solo leyendo: `odentia32.com`, `latidia72.c
 
 ### 12. Cerrar
 
-- Apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo, como `apps/*/src/routeTree.gen.ts`. Los contenedores de otras sesiones no se tocan.
+- Apagar `pnpm dev` y la demo de la QA (`entorno.sh down <ronda>`, que borra sus contenedores y devuelve `apps/*/src/routeTree.gen.ts` si estaba limpio), borrar los demás contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo. Los contenedores de otras sesiones no se tocan.
 - Lo que quedó fuera va a la memoria y al informe como pendiente. No se empieza otro PR sin que lo pidan.
 - Guardar en la memoria lo que no sale del código: decisiones pendientes y en qué va el lienzo.
 - Informar: el PR unido, el commit desplegado, qué cambia para la persona, qué no se comprobó y qué quedó pendiente.

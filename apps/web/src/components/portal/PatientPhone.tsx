@@ -207,7 +207,7 @@ export default function PatientPhone() {
                 </span>
                 {budget === "pending" && (
                   <>
-                    <span className="dpp-what">Pieza 36: resina o corona</span>
+                    <span className="dpp-what">Pieza 36: resina o incrustación</span>
                     <button type="button" className="dpp-btn dpp-wide" onClick={() => setBudget("open")}>
                       Ver y responder
                     </button>
@@ -224,8 +224,8 @@ export default function PatientPhone() {
                     </span>
                     <span className="dpp-opt">
                       <span className="dpp-opt-row">
-                        <b>Opción B · Corona</b>
-                        <b>S/ 1.070</b>
+                        <b>Opción B · Incrustación</b>
+                        <b>S/ 770</b>
                       </span>
                     </span>
                     <span className="dpp-sub">Puedes aceptar solo una parte.</span>

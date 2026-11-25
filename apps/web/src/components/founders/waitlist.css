@@ -32,10 +32,12 @@
 .wl-h { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
 .wl-note { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
 .wl-center { text-align: center; }
-.wl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+/* Cada campo ocupa tres filas de la rejilla (su nombre, su caja y su error): en un par, las cajas
+   quedan a la misma altura aunque un nombre ocupe dos líneas o el otro campo muestre su error. */
+.wl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; row-gap: 6px; }
 .wl-wide { grid-column: span 2; }
-.wl-field { display: flex; flex-direction: column; gap: 6px; font-size: 15px; font-weight: 500; }
-.wl-field label { font-weight: 500; }
+.wl-field { display: grid; grid-row: span 3; grid-template-rows: subgrid; font-size: 15px; font-weight: 500; }
+.wl-field label { font-weight: 500; align-self: end; }
 .wl-field input, .wl-field select {
   font: inherit; font-weight: 400; border: 0; border-radius: 14px; padding: 11px 14px; background: #e6ecf2; color: var(--ink); width: 100%; box-sizing: border-box; min-height: 44px;
 }
@@ -70,7 +72,6 @@
   .wl-main { padding: 24px 16px 48px; align-items: flex-start; }
   /* Como en el lienzo: nombre y apellidos, país y ciudad, y las dos preguntas van en pares; lo largo, solo. */
   .wl-wide-sm { grid-column: span 2; }
-  .wl-field { justify-content: space-between; }
 }
 
 /* latidIA (decisión 18 del issue 229): el mismo formulario con su lila. */
