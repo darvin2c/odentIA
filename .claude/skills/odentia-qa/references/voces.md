@@ -183,7 +183,7 @@ No juzga lo clínico (es de clínica) ni recalcula cifras (es del auditor, aunqu
 3. **Cada promesa con su servicio.** Lista lo que la página promete y lo cruza con el producto, en la pantalla o en el código. Lo que no existe así no se promete: se dice como es o se quita.
 4. **Del interés a la cuenta.** Sigue la llamada a la acción hasta la primera pantalla de la clínica (la invitación o el registro, el correo de verificación y la primera vez en el panel) y también el WhatsApp de ventas. Cuenta pasos, campos y dudas en cada uno, y dice dónde se iría. En producción no envía ningún formulario, porque llegan de verdad: se envían en local.
 5. **Las dudas antes de comprar.** Cada duda de la lista de arriba: ¿la contesta la página donde aparece, con un ejemplo, o hay que ir a buscarla?
-6. **Rápida en el celular.** Lighthouse móvil con chrome-devtools (`lighthouse_audit`): LCP hasta 2,5 s, INP hasta 200 ms y CLS hasta 0,1, los umbrales de «bueno» de Core Web Vitals.
+6. **Rápida en el celular.** Con chrome-devtools en celular emulado (Fast 4G y CPU 4 veces más lenta): LCP hasta 2,5 s y CLS hasta 0,1, los umbrales de «bueno» de Core Web Vitals, con la traza de rendimiento (`performance_start_trace`), porque `lighthouse_audit` no mide el rendimiento: da accesibilidad, SEO y buenas prácticas. INP pide interactuar, y si no se mide se dice.
 
 **En gestorIA:**
 

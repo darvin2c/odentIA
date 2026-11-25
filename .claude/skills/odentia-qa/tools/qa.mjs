@@ -16,7 +16,8 @@
 // borrar…) ni escribe: eso lo decide la voz. Lee JEV_API_KEY (y QA_JEV_MODEL, jev-1.14.0 por omisión).
 //
 // El guion es el cuerpo de una función async con: page, context, shot(nombre) -> ruta, log(...) y
-// ver(selector?, tope?) -> texto. La página, la sesión y lo escrito siguen ahí en la próxima llamada.
+// ver(selector?, tope?) -> texto (ya lo imprime: no hace falta pasarlo por log). La página, la sesión
+// y lo escrito siguen ahí en la próxima llamada.
 // Variables: QA_CAPTURAS (carpeta de capturas, al hacer start), QA_PERFILES (perfiles, por omisión
 // ~/odentia-qa/perfiles, fuera del repositorio porque guardan sesiones), QA_CHROME (otro Chromium).
 import { spawn } from "node:child_process"
@@ -195,11 +196,15 @@ async function opcionesDe(page) {
               ? "en el pie"
               : "en la página"
       const tipo = el.getAttribute("role") || (el.tagName === "A" ? "enlace" : "botón")
-      const clave = `${tipo}|${nombre}|${href ?? ""}`
+      // Varios «Responder» o «Revisar» se distinguen por su fila: la persona o el asunto de al lado.
+      const fila = el.closest("li,tr,[role=row],[role=listitem],article")
+      const deFila = fila && fila !== el ? fila.innerText.replace(/\s+/g, " ").trim() : ""
+      const junto = deFila && deFila !== nombre ? ` (junto a: ${deFila.slice(0, 100)})` : ""
+      const clave = `${tipo}|${nombre}|${href ?? ""}|${junto}`
       if (vistos.has(clave)) continue
       vistos.add(clave)
       el.setAttribute("data-qa-ir", String(lista.length))
-      lista.push({ i: lista.length, texto: `${tipo} «${nombre}» ${lugar}` })
+      lista.push({ i: lista.length, texto: `${tipo} «${nombre}» ${lugar}${junto}` })
       if (lista.length >= 250) break
     }
     return lista
