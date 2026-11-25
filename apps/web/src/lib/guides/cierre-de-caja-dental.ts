@@ -18,6 +18,8 @@ export const guide: Guide = {
   lead: "Cuánto debe haber, cómo contar el efectivo y qué hacer si no cuadra, para entregar la caja con su hoja firmada. Con el formato en blanco en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
+  // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
+  playlist: "PLEImciNTdIZ4",
   short: [
     "Debe haber lo que quedó del cierre anterior, más los cobros en efectivo, menos los gastos que pagaste con la caja.",
     "Cuenta el efectivo, billete por billete, y anota la diferencia: no la tapes. Tarjeta y transferencias no se cuentan: se comparan con su reporte.",

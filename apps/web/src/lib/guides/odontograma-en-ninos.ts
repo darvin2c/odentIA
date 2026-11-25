@@ -17,6 +17,8 @@ export const guide: Guide = {
   lead: "Los dientes de leche del 51 al 85, la dentición mixta y el molar de los 6 años, que no es de leche. Con el odontograma infantil en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
+  // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
+  playlist: "PLWLbx_BbsOEo",
   short: [
     "Los dientes de leche se numeran del 51 al 85: cuadrantes 5 a 8 y dientes 1 a 5 desde el centro.",
     "A los 4 años tiene sus 20 dientes de leche. De los 6 a los 12 conviven con los permanentes, y el molar de los 6 años ya es permanente.",

@@ -17,6 +17,8 @@ export const guide: Guide = {
   lead: "Qué se escribe en cada parte, cómo se explica antes de firmar y quién firma cuando es un niño. Con el formato en blanco en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
+  // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
+  playlist: "PLEB_Oo_neqa4",
   video: {
     youtubeId: "gj8FwYiV59k",
     title: "Consentimiento informado: todas las formas de firmarlo en odentIA (celular, código o papel)",
@@ -78,7 +80,7 @@ export const guide: Guide = {
       ],
     },
   ],
-  sheets: [{ sheet: "consentimiento", label: "Consentimiento en blanco", detail: "Las siete partes, la declaración y las firmas · PDF" }],
+  sheets: [{ sheet: "consentimiento", label: "Consentimiento en blanco", detail: "Las ocho partes, la declaración y las firmas · PDF" }],
   tryIt: {
     demo: "consentimiento",
     title: "En odentIA, se firma en la tablet, en su celular o en papel.",

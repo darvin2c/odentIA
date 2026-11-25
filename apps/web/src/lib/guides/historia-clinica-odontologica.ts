@@ -16,6 +16,8 @@ export const guide: Guide = {
   lead: "Qué va en cada parte, en el orden en que atiendes: de los datos del paciente a la evolución de cada visita. Con el formato en blanco en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
+  // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
+  playlist: "PLAdZkePtKV2U",
   video: {
     youtubeId: "ngFPnBO64ZE",
     title: "La primera atención de un paciente en odentIA: anamnesis, consulta, cobro y presupuesto",

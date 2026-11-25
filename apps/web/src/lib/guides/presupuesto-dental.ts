@@ -17,6 +17,8 @@ export const guide: Guide = {
   lead: "Del odontograma al presupuesto: un renglón por tratamiento, ordenado por fases y con su forma de pago. Con el presupuesto en blanco en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
+  // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
+  playlist: "PLCnWdOlMGuYU",
   video: {
     youtubeId: "ngFPnBO64ZE",
     title: "La primera atención de un paciente en odentIA: anamnesis, consulta, cobro y presupuesto",

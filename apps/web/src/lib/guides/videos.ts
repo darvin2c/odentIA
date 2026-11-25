@@ -17,7 +17,7 @@ const MAX_VIDEOS = 7
 export const CHANNEL_URL = "https://www.youtube.com/@odentIA32"
 
 /** Una lista de YouTube (PL…), para no armar una dirección con cualquier cosa. */
-export const PLAYLIST_ID = /^PL[\w-]{10,64}$/
+export const PLAYLIST_ID = /^PL[\w-]{11,64}$/
 
 export const watchUrl = (id: string) => `https://www.youtube.com/watch?v=${id}`
 /** La miniatura de 640 × 480 (la de 480 se veía borrosa en la portada). */
@@ -43,6 +43,9 @@ const tag = (xml: string, name: string) => {
   return found === undefined ? undefined : decode(found.trim())
 }
 
+/** Un Short (vertical): va después de los tutoriales. */
+const isShort = (video: GuideVideo) => /#shorts/i.test(`${video.title} ${video.description ?? ""}`)
+
 /** Los videos del feed de una lista, del más reciente al más viejo. */
 export function parseFeed(xml: string): GuideVideo[] {
   const videos: GuideVideo[] = []
@@ -54,7 +57,8 @@ export function parseFeed(xml: string): GuideVideo[] {
     const description = tag(entry, "media:description")
     videos.push({ youtubeId, title, published, description: description?.split("\n")[0] || undefined })
   }
-  return videos.sort((a, b) => b.published.localeCompare(a.published))
+  // Del más reciente al más viejo, y los tutoriales antes que los Shorts: el principal se ve en grande.
+  return videos.sort((a, b) => Number(isShort(a)) - Number(isShort(b)) || b.published.localeCompare(a.published))
 }
 
 /** Lo leído: los videos y hasta cuándo valen (la falla vale menos). Se guarda igual en el proceso y en la caché. */
