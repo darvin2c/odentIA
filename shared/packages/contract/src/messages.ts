@@ -4,8 +4,8 @@ import { z } from "zod"
  * El acuerdo entre una app que es otro sistema (gestorIA) y la administración (ADR 0211, paso 4
  * del lienzo A): lo único que se dicen. Nadie lee la base del otro.
  *
- * - **La app avisa** (`POST` a `CONTRACT_PATHS.events`): abrió o cambió una cuenta, esto usó y
- *   pide soporte. Cada aviso va firmado (`signing.ts`) y su `webhook-id` es su clave: repetido con
+ * - **La app avisa** (`POST` a `CONTRACT_PATHS.events`): abrió o cambió una cuenta, esto usó,
+ *   pide soporte y quién está en su equipo. Cada aviso va firmado (`signing.ts`) y su `webhook-id` es su clave: repetido con
  *   la misma clave, la administración lo reconoce y no lo cuenta dos veces. La app reintenta lo
  *   que no sabe si llegó, siempre con la misma clave.
  * - **La app pregunta** (`POST` a `CONTRACT_PATHS.state`, también firmado): si la cuenta puede
@@ -137,11 +137,46 @@ export const receiptEvent = z.object({
   }),
 })
 
+/**
+ * Los roles de una persona en una cuenta de la app, para la cuenta única: dueño (decide el plan y
+ * nunca falta), administrador y quien atiende (en gestorIA, Dueño, Administrador y Ventas). Una
+ * app con otros nombres dice cuál de estos es cada uno.
+ */
+export const TEAM_ROLES = ["owner", "admin", "sales"] as const
+export type TeamRole = (typeof TEAM_ROLES)[number]
+/** Lo más que se acepta en el equipo de una cuenta en un solo aviso. */
+export const MAX_TEAM_MEMBERS = 500
+
+/**
+ * Quién está en una cuenta de la app y con qué rol, entero: lo que la cuenta única guarda para
+ * mostrar a cada persona sus lugares (el selector de las clínicas) y para no cerrar la cuenta del
+ * único dueño. Se avisa al abrirla y en cada alta, baja o cambio de rol, y la app lo repite si no
+ * sabe si la cuenta lo tiene. Siempre el equipo entero, nunca el cambio: repetido o en desorden
+ * da lo mismo, y manda el de `timestamp` más nuevo. Un equipo vacío es que ya nadie está.
+ */
+export const teamChangedEvent = z.object({
+  type: z.literal("equipo.cambiado"),
+  timestamp: instant,
+  data: z.object({
+    account: accountRef,
+    /** El nombre de la cuenta (en gestorIA, la tienda), como lo verá la persona. */
+    name: z.string().trim().min(1).max(200),
+    members: z
+      .array(z.object({ userId, role: z.enum(TEAM_ROLES) }))
+      .max(MAX_TEAM_MEMBERS)
+      .refine(
+        (members) => new Set(members.map((one) => one.userId)).size === members.length,
+        "Cada persona va una sola vez",
+      ),
+  }),
+})
+
 export const appEvent = z.discriminatedUnion("type", [
   accountOpenedEvent,
   usageEvent,
   supportEvent,
   receiptEvent,
+  teamChangedEvent,
 ])
 export type AppEvent = z.infer<typeof appEvent>
 export type AppEventType = AppEvent["type"]
