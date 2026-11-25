@@ -205,7 +205,7 @@ Comprobar por fuera lo que se pueda, solo leyendo: `odentia32.com`, `latidia72.c
 
 ### 12. Cerrar
 
-- Apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo, como `apps/*/src/routeTree.gen.ts`. Los contenedores de otras sesiones no se tocan.
+- Apagar `pnpm dev` y la demo de la QA (`entorno.sh down <ronda>`, que borra sus contenedores y devuelve `apps/*/src/routeTree.gen.ts` si estaba limpio), borrar los demás contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo. Los contenedores de otras sesiones no se tocan.
 - Lo que quedó fuera va a la memoria y al informe como pendiente. No se empieza otro PR sin que lo pidan.
 - Guardar en la memoria lo que no sale del código: decisiones pendientes y en qué va el lienzo.
 - Informar: el PR unido, el commit desplegado, qué cambia para la persona, qué no se comprobó y qué quedó pendiente.

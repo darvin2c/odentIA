@@ -158,7 +158,7 @@ Las voces no pueden recorrer algo que no está definido. Con lo que salió de la
 
 ### 3. Segunda vuelta: la propuesta
 
-Cada voz recorre los casos del banco con la propuesta puesta y contesta su pregunta:
+Cada voz recorre los casos del banco con la propuesta puesta, a la vez y por separado, y contesta su pregunta:
 
 | Voz | Su pregunta | Lo que entrega |
 |---|---|---|
@@ -218,7 +218,7 @@ Cuando termina la QA antes de entregar, o la ronda siguiente sobre esa área, el
 - cuántos problemas de diseño se encontraron después y cuántos había anticipado la mesa;
 - cuántos pendientes guardados volvió a encontrar sola;
 - cuántas afirmaciones de las voces eran falsas;
-- por voz: modelo, esfuerzo, tokens y hallazgos confirmados.
+- por voz: modelo, esfuerzo, tokens, minutos y hallazgos confirmados.
 
 Los errores del código nuevo no cuentan en contra de la mesa: no podía verlos.
 
