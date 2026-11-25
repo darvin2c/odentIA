@@ -1,10 +1,13 @@
 import { withOrgContext } from "@odentia/db"
 import { deletePushSubscription, getPushSubscription, savePushSubscription, workspaceAccessFor } from "@odentia/services"
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
+
+/** La sesión de quien pide (la pone `requireSession`): los avisos se atan a ella (ADR 0215). */
+const sessionOf = (c: Context): string | null => (c.get("sessionId") as string | undefined) ?? null
 
 const endpointInput = z.object({ endpoint: z.string().url().max(1000) })
 const subscribeInput = endpointInput.extend({ keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }) })
@@ -25,14 +28,14 @@ export function createPushRoute(deps: CrmDeps & { vapidPublicKey?: string }) {
     if (!body.success) return validationError(c, body.error.issues)
     const { endpoint, keys } = body.data
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
-      savePushSubscription(tx, orgId, userId, workspaceAccessFor(memberRole), { endpoint, ...keys })))
+      savePushSubscription(tx, orgId, userId, workspaceAccessFor(memberRole), { endpoint, ...keys }, sessionOf(c))))
   })
   // ¿Este equipo recibe hoy mis avisos? Otra persona pudo activarlos después en el mismo equipo.
   app.post("/subscriptions/state", async c => {
     const { orgId, userId } = orgContextOf(c)
     const body = endpointInput.safeParse(await c.req.json().catch(() => null))
     if (!body.success) return validationError(c, body.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getPushSubscription(tx, orgId, userId, body.data.endpoint)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => getPushSubscription(tx, orgId, userId, body.data.endpoint, sessionOf(c))))
   })
   app.delete("/subscriptions", async c => {
     const { orgId, userId } = orgContextOf(c)

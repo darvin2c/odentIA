@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm"
 import { boolean, check, date, index, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
-import { user } from "./auth.js"
+import { session, user } from "./auth.js"
 import { orgFk } from "./crm.js"
 import { adminSchema } from "./schemas.js"
 
@@ -40,6 +40,12 @@ export const pushSubscription = pgTable("push_subscription", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   userId: text("user_id").notNull().references(() => user.id),
+  /**
+   * La sesión con que se activó (ADR 0215): al cerrarla, desde cualquier app que la usa, el
+   * equipo deja de recibir los avisos. Nula en las activadas antes: valen hasta que se revisan
+   * en la campana, que las ata a la sesión de quien mira.
+   */
+  sessionId: text("session_id").references(() => session.id, { onDelete: "cascade" }),
   endpoint: text("endpoint").notNull(),
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
@@ -57,6 +63,7 @@ export const pushSubscription = pgTable("push_subscription", {
 }, table => [
   uniqueIndex("push_subscription_endpoint_uidx").on(table.organizationId, table.endpoint),
   index("push_subscription_user_idx").on(table.organizationId, table.userId),
+  index("push_subscription_session_idx").on(table.sessionId),
 ])
 
 /**

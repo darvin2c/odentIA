@@ -153,9 +153,15 @@ function AppLayout() {
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={signOut}>
-                  <LogOut />
-                  Cerrar sesión
+                {/* La sesión es la misma en las apps abiertas desde aquí con el pase (ADR 0215). */}
+                <DropdownMenuItem onClick={signOut} className="items-start">
+                  <LogOut className="mt-0.5" />
+                  <span className="flex min-w-0 flex-col">
+                    <span>Cerrar sesión</span>
+                    <span className="text-xs text-muted-foreground">
+                      Cierra tu sesión aquí y en las apps que abriste desde aquí
+                    </span>
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

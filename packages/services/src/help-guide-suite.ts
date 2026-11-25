@@ -26,7 +26,8 @@ function screensText(): string {
       }
     }
   }
-  for (const dir of ["packages/clinic-app/src", "shared/packages/ui-patterns/src", "apps/dental-clinic/src", "apps/medical-clinic/src", "apps/optical-clinic/src", "packages/services/src", "packages/clinical/src", "packages/dental/src", "packages/auth/src", "apps/api/src"]) {
+  // El panel también: la cuenta (Mi perfil, sus sesiones, la entrada) vive ahí y la guía la nombra.
+  for (const dir of ["packages/clinic-app/src", "apps/panel/src", "shared/packages/ui-patterns/src", "apps/dental-clinic/src", "apps/medical-clinic/src", "apps/optical-clinic/src", "packages/services/src", "packages/clinical/src", "packages/dental/src", "packages/auth/src", "apps/api/src"]) {
     walk(resolve(ROOT, dir))
   }
   return out.join("\n").normalize("NFC").toLowerCase()

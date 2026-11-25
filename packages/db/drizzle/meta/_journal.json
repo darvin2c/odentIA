@@ -1097,8 +1097,15 @@
     {
       "idx": 156,
       "version": "7",
-      "when": 1795549592374,
-      "tag": "0156_aspirina_antiagregante",
+      "when": 1795627508100,
+      "tag": "0156_avisos_con_la_sesion",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1795627568100,
+      "tag": "0157_aspirina_antiagregante",
       "breakpoints": true
     }
   ]

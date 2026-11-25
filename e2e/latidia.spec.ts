@@ -221,6 +221,51 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await context.close()
 })
 
+test("latidIA: desde el panel de odentIA se pasa al consultorio con la misma sesión, y salir cierra las dos", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  await openConsultorio(page, vela, fixtureDb)
+  // Este navegador olvida la sesión de latidIA: solo queda entrar en odentIA.
+  const medical = process.env.E2E_MEDICAL_DOMAIN ?? ""
+  await context.clearCookies({ domain: new RegExp(`${medical.replaceAll(".", "\\.")}$`) })
+  await gotoHydrated(page, hostUrl("app", "/login"))
+  const signedIn = await request(page, hostUrl("api"), "POST", "/api/auth/sign-in/email", undefined, {
+    email: vela.email,
+    password: PASSWORD,
+  })
+  expect(signedIn.status).toBe(200)
+
+  // «Elige tu clínica» abre el consultorio de latidIA por el pase: sin pedir la clave.
+  await gotoHydrated(page, hostUrl("app", "/?cambiar=1"))
+  const link = page.getByRole("link", { name: "Entrar a Consultorio San Martín" })
+  expect(await link.getAttribute("href")).toContain("/api/auth/pase/ir?")
+  await link.click()
+  await page.waitForURL((url) => url.hostname.endsWith(process.env.E2E_MEDICAL_DOMAIN ?? "") && !url.hostname.startsWith("api.") && !url.hostname.startsWith("app."))
+  await expect(page.locator("html")).toHaveAttribute("data-brand", "latidia")
+  await expect(page.getByRole("button", { name: /Menú de la clínica/ })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("pase-llega-al-consultorio.png") })
+
+  // Es la misma sesión: cerrarla en latidIA la cierra también en odentIA.
+  const latidiaSession = await request<{ session: { id: string } } | null>(page, latidiaUrl("api"), "GET", "/api/auth/get-session")
+  await gotoHydrated(page, hostUrl("app", "/login"))
+  const odentiaSession = await request<{ session: { id: string } } | null>(page, hostUrl("api"), "GET", "/api/auth/get-session")
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  expect(latidiaSession.body?.session.id).toBeTruthy()
+  expect(latidiaSession.body?.session.id).toBe(odentiaSession.body?.session.id)
+  expect((await request(page, latidiaUrl("api"), "POST", "/api/auth/sign-out", undefined, {})).status).toBe(200)
+  // Se pregunta desde una página de odentIA: entre dominios de producción la cookie no viajaría.
+  await gotoHydrated(page, hostUrl("app", "/login"))
+  const after = await request<{ session: { id: string } } | null>(page, hostUrl("api"), "GET", "/api/auth/get-session")
+  expect(after.body).toBeNull()
+  await context.close()
+})
+
 for (const longAgo of [false, true]) {
   const title = longAgo ? "latidIA: consentimiento por enlace, a quien escribió hace dos días" : "latidIA: consentimiento por enlace, con sus palabras"
   test(title, async ({ browser, fixtureDb, passwordHash, nextEventId }, testInfo) => {

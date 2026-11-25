@@ -98,7 +98,15 @@ export const PUSH_DEVICES_PER_PERSON = 10
  * y antes sale «Listo» para que se vea que funciona. Volver a activarlo la misma
  * persona solo renueva sus claves: no repite el «Listo».
  */
-export async function savePushSubscription(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, keys: PushKeys) {
+export async function savePushSubscription(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  access: WorkspaceAccess,
+  keys: PushKeys,
+  /** La sesión con que se activa (ADR 0215): al cerrarla, en cualquier app, el equipo deja de recibir. */
+  sessionId: string | null = null,
+) {
   const { endpoint, p256dh, auth } = checkKeys(keys)
   const [current] = await tx.select({ userId: pushSubscription.userId, p256dh: pushSubscription.p256dh, auth: pushSubscription.auth })
     .from(pushSubscription).where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint))).limit(1)
@@ -107,16 +115,16 @@ export async function savePushSubscription(tx: Db, orgId: string, userId: string
   if (current && current.userId !== userId && (current.p256dh !== p256dh || current.auth !== auth))
     throw validation("Este equipo ya recibe los avisos de otra persona")
   if (current?.userId === userId) {
-    await tx.update(pushSubscription).set({ p256dh, auth })
+    await tx.update(pushSubscription).set({ p256dh, auth, ...(sessionId ? { sessionId } : {}) })
       .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.endpoint, endpoint)))
     return { active: true }
   }
   const seen = await listWorkspaceWaitingPeople(tx, orgId, userId, access)
   await tx.insert(pushSubscription)
-    .values({ organizationId: orgId, userId, endpoint, p256dh, auth, waitingSeen: seen })
+    .values({ organizationId: orgId, userId, sessionId, endpoint, p256dh, auth, waitingSeen: seen })
     .onConflictDoUpdate({
       target: [pushSubscription.organizationId, pushSubscription.endpoint],
-      set: { userId, p256dh, auth, welcomedAt: null, waitingSeen: seen, waitingPushedAt: null, noticesSince: sql`now()`, createdAt: sql`now()` },
+      set: { userId, sessionId, p256dh, auth, welcomedAt: null, waitingSeen: seen, waitingPushedAt: null, noticesSince: sql`now()`, createdAt: sql`now()` },
     })
   // Con más equipos que el tope, se olvidan los más antiguos de esa persona.
   await tx.execute(sql`delete from push_subscription where organization_id = ${orgId} and user_id = ${userId} and id not in (
@@ -124,11 +132,17 @@ export async function savePushSubscription(tx: Db, orgId: string, userId: string
   return { active: true }
 }
 
-/** Si este equipo recibe hoy los avisos de quien mira (otra persona pudo activarlo después). */
-export async function getPushSubscription(tx: Db, orgId: string, userId: string, endpoint: string) {
-  const [row] = await tx.select({ id: pushSubscription.id }).from(pushSubscription)
+/**
+ * Si este equipo recibe hoy los avisos de quien mira (otra persona pudo activarlo después). Un
+ * equipo activado antes de atar los avisos a la sesión queda atado a la de quien lo revisa: es
+ * su mismo navegador, el único que conoce esa dirección.
+ */
+export async function getPushSubscription(tx: Db, orgId: string, userId: string, endpoint: string, sessionId: string | null = null) {
+  const [row] = await tx.select({ id: pushSubscription.id, sessionId: pushSubscription.sessionId }).from(pushSubscription)
     .where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.userId, userId), eq(pushSubscription.endpoint, endpoint)))
     .limit(1)
+  if (row && !row.sessionId && sessionId)
+    await tx.update(pushSubscription).set({ sessionId }).where(and(eq(pushSubscription.organizationId, orgId), eq(pushSubscription.id, row.id)))
   return { active: Boolean(row) }
 }
 
@@ -200,7 +214,10 @@ export async function collectOrgPushes(tx: Db, orgId: string, now: Date = new Da
   }>(sql`select id, user_id as "userId", endpoint, p256dh, auth, welcomed_at::text as "welcomedAt",
       waiting_seen as "waitingSeen", waiting_pushed_at::text as "waitingPushedAt", notices_since::text as "noticesSince",
       arrivals_since::text as "arrivalsSince"
-    from push_subscription where organization_id = ${orgId} order by created_at for update skip locked`)
+    from push_subscription ps where organization_id = ${orgId}
+      -- Con su sesión cerrada se borra sola (en cascada); vencida sin cerrar, no recibe nada.
+      and (ps.session_id is null or exists (select 1 from session s where s.id = ps.session_id and s.expires_at > now()))
+    order by created_at for update of ps skip locked`)
   if (rows.length === 0) return []
   const [clinic] = await tx.select({ name: organization.name, product: orgProfile.product }).from(organization)
     .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id)).where(eq(organization.id, orgId)).limit(1)

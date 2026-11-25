@@ -112,6 +112,7 @@ function Shell({ children }: { children: ReactNode }) {
       brand={<Brand />}
       brandIcon={<Brand compact />}
       onSignOut={() => {}}
+      signOutHint="Cierra tu sesión aquí y en las apps que abriste desde aquí"
     >
       {children}
     </AppShell>
