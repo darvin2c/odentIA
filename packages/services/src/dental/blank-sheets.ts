@@ -150,7 +150,7 @@ function legend(kit: DocumentKit, children: boolean): void {
   legendLine(
     kit,
     "Otros",
-    "RR remanente radicular · S sellante · FFP fosas y fisuras profundas · IMP implante.",
+    "RR remanente radicular · S sellante · FFP fosas y fisuras profundas · IMP implante · I impactada (sin aspa).",
   )
   if (children) {
     legendLine(
