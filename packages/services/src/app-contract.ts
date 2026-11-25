@@ -15,6 +15,7 @@ import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { openSupportCaseFromHelp } from "./admin-support.js"
 import { type ExternalAccount, externalAccountOf, toExternalAccount } from "./app-accounts.js"
+import { applyTeamChanged } from "./app-places.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
 import {
@@ -373,6 +374,20 @@ async function applyReceipt(
 }
 
 /**
+ * Quién está en una cuenta de la app: lo guarda la cuenta única (la copia de sus lugares,
+ * `app-places.ts`). No hace falta que la administración ya conozca la cuenta: si la conoce,
+ * la clave queda con ella.
+ */
+async function applyTeam(
+  tx: Db,
+  app: SaasAccountExternalApp,
+  event: Extract<AppEvent, { type: "equipo.cambiado" }>,
+): Promise<string | null> {
+  await applyTeamChanged(tx, app, event)
+  return (await findAccount(tx, app, event.data.account))?.id ?? null
+}
+
+/**
  * Recibe un aviso de una app. La clave (`messageId`, el `webhook-id` firmado) y su efecto van
  * juntos: si la clave ya estaba, no hace nada y lo dice. Si el efecto falla (una cuenta que no
  * existe), no queda la clave y la app puede reintentar con la misma.
@@ -392,12 +407,10 @@ export async function receiveAppEvent(
       .onConflictDoNothing()
       .returning({ id: appContractMessage.id })
     if (!fresh) return { repeated: true }
-    // El equipo de una cuenta lo guarda la cuenta única en su propio cambio: mientras tanto no se
-    // acepta (409, sin la clave), y la app lo reintenta con la misma.
-    if (event.type === "equipo.cambiado")
-      throw new ServiceError("CONFLICT", 409, "Todavía no se guarda el equipo de una cuenta")
     const accountId =
-      event.type === "cuenta.abierta"
+      event.type === "equipo.cambiado"
+        ? await applyTeam(tx, app, event)
+        : event.type === "cuenta.abierta"
         ? await applyAccountOpened(tx, app, event, now)
         : event.type === "uso.contado"
           ? await applyUsage(tx, app, event)

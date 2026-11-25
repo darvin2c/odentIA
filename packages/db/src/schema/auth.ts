@@ -1,5 +1,17 @@
 import { sql } from "drizzle-orm"
-import { boolean, check, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  check,
+  foreignKey,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
 import { authSchema } from "./schemas.js"
 
 /**
@@ -226,5 +238,62 @@ export const accountEvent = authSchema.table(
       "account_event_type_check",
       sql.raw(`type IN (${ACCOUNT_EVENT_TYPES.map((type) => `'${type}'`).join(",")})`),
     ),
+  ],
+)
+
+/**
+ * Las apps que son otro sistema cuyos lugares guarda la cuenta (`app_place`): hoy, las tiendas
+ * de gestorIA. Las clínicas no van aquí: sus equipos son `member`.
+ */
+export const APP_PLACE_APPS = ["gestoria"] as const
+export type AppPlaceApp = (typeof APP_PLACE_APPS)[number]
+/** Los roles del acuerdo (`TEAM_ROLES` de `@odentia/contract`): dueño, administrador y quien atiende. */
+export const APP_PLACE_ROLES = ["owner", "admin", "sales"] as const
+
+const listIn = (column: string, values: readonly string[]) =>
+  sql.raw(`${column} IN (${values.map((value) => `'${value}'`).join(",")})`)
+
+/**
+ * Los lugares de una app que es otro sistema (las tiendas de gestorIA) y quién está en cada uno:
+ * la copia que la cuenta guarda de lo que la app le avisa (`equipo.cambiado` del acuerdo). La
+ * app es la dueña del dato; aquí nadie lo edita. Sirve para el selector de lugares y para no
+ * cerrar la cuenta del único dueño. `synced_at` es la hora del último aviso aplicado: uno más
+ * viejo no la pisa. Sin `GRANT`: la escribe y la lee la conexión propietaria.
+ */
+export const appPlace = authSchema.table(
+  "app_place",
+  {
+    app: text("app").notNull(),
+    ref: text("ref").notNull(),
+    name: text("name").notNull(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ name: "app_place_pkey", columns: [table.app, table.ref] }),
+    check("app_place_app_check", listIn("app", APP_PLACE_APPS)),
+  ],
+)
+
+/**
+ * Quién está en cada lugar de `app_place`, con su rol del acuerdo. `user_id` no es clave
+ * foránea, como en `account_event`: es lo que dijo la app, no una relación de la cuenta.
+ */
+export const appPlaceMember = authSchema.table(
+  "app_place_member",
+  {
+    app: text("app").notNull(),
+    ref: text("ref").notNull(),
+    userId: text("user_id").notNull(),
+    role: text("role").notNull(),
+  },
+  (table) => [
+    primaryKey({ name: "app_place_member_pkey", columns: [table.app, table.ref, table.userId] }),
+    foreignKey({
+      name: "app_place_member_place_fk",
+      columns: [table.app, table.ref],
+      foreignColumns: [appPlace.app, appPlace.ref],
+    }).onDelete("cascade"),
+    index("app_place_member_user_idx").on(table.userId),
+    check("app_place_member_role_check", listIn("role", APP_PLACE_ROLES)),
   ],
 )

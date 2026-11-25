@@ -832,7 +832,7 @@ function CloseAccountCard() {
         body: JSON.stringify({ confirm: true }),
       })
     } catch (failure) {
-      // Única propietaria de una clínica (409), cuenta bloqueada (403): dentro del diálogo.
+      // Única propietaria de una clínica o único Dueño de una tienda (409), cuenta bloqueada (403): dentro del diálogo.
       setError(actionErrorMessage(failure))
       setPending(false)
       return
@@ -848,8 +848,9 @@ function CloseAccountCard() {
       <div className="flex flex-col gap-1.5">
         <div className="font-heading text-base font-medium">Cerrar cuenta</div>
         <p className="text-sm text-muted-foreground">
-          Sales de tus clínicas y se bloquea tu acceso. Tu trabajo previo conserva tu autoría.
-          Si eres la única propietaria de alguna clínica, nombra antes a otra persona.
+          Sales de tus clínicas y tiendas y se bloquea tu acceso. Tu trabajo previo conserva tu
+          autoría. Si eres la única propietaria de alguna clínica o el único Dueño de una tienda de
+          gestorIA, nombra antes a otra persona.
         </p>
       </div>
       <div>
@@ -860,7 +861,7 @@ function CloseAccountCard() {
       <ConfirmDialog
         open={open}
         title="Cerrar tu cuenta"
-        description="Perderás el acceso a tus clínicas. Esta acción bloquea tu cuenta de inmediato."
+        description="Perderás el acceso a tus clínicas y tiendas. Esta acción bloquea tu cuenta de inmediato."
         confirmLabel="Cerrar cuenta"
         variant="destructive"
         pending={pending}

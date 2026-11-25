@@ -269,8 +269,22 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "paso-otra-clinica",
         q: "¿Cómo paso a otra de mis clínicas?",
-        a: "Toca el nombre de la clínica, arriba a la izquierda: debajo dice qué es y tu rol ahí. Se abre con lo de esta clínica arriba (como «Plan y pagos», si la administras) y, debajo, tus clínicas, con la que estás marcada. Si tienes de más de un tipo, por ejemplo una clínica dental y un consultorio médico, van agrupadas con su nombre y su color. Con Ctrl+clic se abre en otra pestaña. Una de otra app abre en su propia dirección con tu misma sesión, sin pedirte la clave. «Cambiar de clínica» lleva a la lista completa, donde también aceptas una invitación o creas otra clínica.",
+        a: "Toca el nombre de la clínica, arriba a la izquierda: debajo dice qué es y tu rol ahí. Se abre con lo de esta clínica arriba (como «Plan y pagos», si la administras) y, debajo, tus clínicas, con la que estás marcada. Si tienes de más de un tipo, por ejemplo una clínica dental y un consultorio médico, van agrupadas con su nombre y su color. Con Ctrl+clic se abre en otra pestaña. Una de otra app abre en su propia dirección con tu misma sesión, sin pedirte la clave. Tus tiendas de gestorIA también salen ahí, en su propio grupo. «Cambiar de clínica» lleva a la lista completa, donde también aceptas una invitación o creas otra clínica.",
         forms: ["cambiar de clinica", "pasar a otra clinica", "tengo dos clinicas", "abrir mi otra clinica", "como entro a mi otro consultorio"],
+        general: true,
+      },
+      {
+        id: "abrir-mi-tienda",
+        q: "¿Puedo abrir mi tienda de gestorIA desde aquí?",
+        a: "Sí. Toca el nombre de la clínica, arriba a la izquierda: tus tiendas van abajo, en su propio grupo de gestorIA, con tu rol en cada una. También están en «Elige tu clínica». Se abre en gestoria24.com con tu misma sesión, sin pedirte la clave. Una tienda nueva, o una a la que acabas de entrar, aparece al rato: gestorIA avisa quién está en cada tienda y tarda unos segundos.",
+        forms: ["abrir mi tienda", "ir a gestoria", "mi tienda de gestoria", "no veo mi tienda", "pasar a mi tienda"],
+        general: true,
+      },
+      {
+        id: "cerrar-mi-cuenta",
+        q: "¿Cómo cierro mi cuenta?",
+        a: "En «Mi perfil», al final, «Cerrar mi cuenta». Sales de todas tus clínicas y tiendas y ya no puedes entrar; lo que hiciste sigue con tu nombre. Si eres la única propietaria de una clínica, o el único Dueño de una tienda de gestorIA, antes nombra a otra persona: si no, te dice cuál falta y no se cierra.",
+        forms: ["cerrar mi cuenta", "borrar mi cuenta", "eliminar mi cuenta", "darme de baja", "no me deja cerrar mi cuenta"],
         general: true,
       },
       {
