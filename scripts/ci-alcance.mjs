@@ -29,8 +29,26 @@
 import { execFileSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
 
-const BASE = process.env.BASE ?? ""
 const SHA = process.env.SHA || "HEAD"
+const BASE = baseDelCambio()
+
+// En un PR, GitHub prueba la unión del PR con la punta de main de ahora (SHA), pero
+// `pull_request.base.sha` puede ser una punta anterior: todo lo que main sumó después
+// contaba como cambio del PR (otro PR tocaba el lockfile y este corría todo). La base
+// justa es el primer padre de esa unión: el main contra el que se unió de verdad.
+function baseDelCambio() {
+  const base = process.env.BASE ?? ""
+  if (process.env.GITHUB_EVENT_NAME !== "pull_request") return base
+  try {
+    const padres = git(["rev-list", "--parents", "-n", "1", SHA]).trim().split(" ")
+    if (padres.length === 3) {
+      if (padres[1] !== base)
+        console.log(`Base: ${padres[1]} (el main de la unión; el evento decía ${base})`)
+      return padres[1]
+    }
+  } catch {}
+  return base
+}
 
 // Nada que probar: no se compilan, no se prueban ni se despliegan. Documentación; skills, subagentes
 // y configuración de Claude; lo del editor; `skills-lock.json` (lo lee solo Claude); `.gitignore`;

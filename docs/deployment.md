@@ -525,7 +525,10 @@ suscritos hasta que cada persona los vuelva a activar. Vacías, no se ofrecen.
 documentación, skills, subagentes y configuración de Claude, lo del editor,
 `skills-lock.json`, `.gitignore`, el compose de desarrollo y el propio
 `ci-alcance.mjs`. Ese script se prueba a sí mismo cada vez que corre: antes de decidir,
-comprueba sus reglas con ejemplos y, si una da otra cosa, falla el job `alcance`. Un cambio de código prueba los paquetes afectados según el grafo de Turbo,
+comprueba sus reglas con ejemplos y, si una da otra cosa, falla el job `alcance`. En un PR compara
+contra el primer padre de la unión que prueba GitHub (el `main` de ahora), no contra
+`pull_request.base.sha`, que puede ser una punta anterior y sumar como propio lo que
+otros PR unieron después. Un cambio de código prueba los paquetes afectados según el grafo de Turbo,
 y las reglas que leen el repositorio entero corren siempre en el job `arquitectura`.
 La imagen de la app se construye solo si cambian `api` o `worker`, y E2E solo si el
 cambio toca algo más que la web de marketing. Un archivo fuera de `apps/`, `packages/`
