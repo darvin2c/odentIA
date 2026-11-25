@@ -748,7 +748,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
     .from(organization)
     .where(inArray(organization.id, DEMO_WAITLIST.flatMap((row) => (row.entered ? [row.entered.organizationId] : []))))
   for (const row of DEMO_WAITLIST) {
-    const { ageDays: _ageDays, invite, entered, discardReason, status, ...data } = row
+    const { ageDays: _ageDays, invite, entered, discardReason, status, sourcePage, ...data } = row
     const org = entered ? orgs.find((item) => item.id === entered.organizationId) : undefined
     const planId = entered ? planOf(entered.planCode) : invite ? foundersPlanId : undefined
     // Sin su clínica (la semilla corrió sin la demo de la clínica) no entró a ninguna.
@@ -759,6 +759,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
       ...(planId ? { planId } : {}),
       ...(tokenHash ? { tokenHash } : {}),
       ...(org ? { organizationId: org.id } : {}),
+      ...(sourcePage ? { sourcePage } : {}),
     }
     const [found] = await db
       .select({ id: saasWaitlistRequest.id })
