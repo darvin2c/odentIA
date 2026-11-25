@@ -253,10 +253,14 @@ test("latidIA: desde el panel de odentIA se pasa al consultorio con la misma ses
 
   // Es la misma sesión: cerrarla en latidIA la cierra también en odentIA.
   const latidiaSession = await request<{ session: { id: string } } | null>(page, latidiaUrl("api"), "GET", "/api/auth/get-session")
+  await gotoHydrated(page, hostUrl("app", "/login"))
   const odentiaSession = await request<{ session: { id: string } } | null>(page, hostUrl("api"), "GET", "/api/auth/get-session")
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
   expect(latidiaSession.body?.session.id).toBeTruthy()
   expect(latidiaSession.body?.session.id).toBe(odentiaSession.body?.session.id)
   expect((await request(page, latidiaUrl("api"), "POST", "/api/auth/sign-out", undefined, {})).status).toBe(200)
+  // Se pregunta desde una página de odentIA: entre dominios de producción la cookie no viajaría.
+  await gotoHydrated(page, hostUrl("app", "/login"))
   const after = await request<{ session: { id: string } } | null>(page, hostUrl("api"), "GET", "/api/auth/get-session")
   expect(after.body).toBeNull()
   await context.close()

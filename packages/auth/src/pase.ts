@@ -31,8 +31,9 @@ import { z } from "zod"
 
 export const PASE_TTL_SECONDS = 60
 /** La marca del navegador que pidió el pase: solo de la API de destino, la lee solo el servidor. */
-export const PASE_COOKIE = "odentia_pase"
-const PASE_PATH = "/api/auth/pase"
+// `__Host-`: ningún subdominio hermano (una clínica, la web) puede plantarla.
+export const PASE_COOKIE = "__Host-odentia_pase"
+const PASE_PATH = "/"
 const PREFIX = "pase:"
 const MARK = /^[A-Za-z0-9_-]{32}$/
 
@@ -47,6 +48,11 @@ export interface PaseOptions {
   domain: string
   /** Todas las instancias (esta también): solo a ellas se manda y de ellas se recibe. */
   sisters: readonly PaseSister[]
+  /**
+   * Antes de cerrar la sesión anterior de este dominio cuando era de la misma persona: lo que
+   * colgaba de ella (los avisos del equipo) pasa a la que llega.
+   */
+  onSessionReplaced?: (fromSessionId: string, toSessionId: string) => Promise<void>
 }
 
 type Stored = { session: string; mark: string; domain: string }
@@ -233,8 +239,12 @@ export const pase = (options: PaseOptions) => {
             ctx.context.authCookies.sessionToken.name,
             ctx.context.secret,
           )
-          if (previous && previous !== found.session.token)
+          if (previous && previous !== found.session.token) {
+            const before = await adapter.findSession(previous).catch(() => null)
+            if (before && before.session.userId === found.session.userId)
+              await options.onSessionReplaced?.(before.session.id, found.session.id).catch(() => undefined)
             await adapter.deleteSession(previous).catch(() => undefined)
+          }
           await setSessionCookie(ctx, found)
           throw ctx.redirect(target)
         },

@@ -26,11 +26,15 @@ const instance = (domain: string) =>
     emailAndPassword: { enabled: true, autoSignIn: false },
     advanced: { crossSubDomainCookies: { enabled: true, domain } },
     rateLimit: { enabled: false },
-    plugins: [pase({ domain, sisters })],
+    plugins: [
+      pase({ domain, sisters, onSessionReplaced: async (from, to) => void replaced.push([from, to]) }),
+    ],
   })
 let auths: Record<string, ReturnType<typeof instance>>
+let replaced: [string, string][] = []
 
 beforeEach(() => {
+  replaced = []
   db = { user: [], session: [], account: [], verification: [] }
   auths = { [ODENTIA]: instance(ODENTIA), [LATIDIA]: instance(LATIDIA) }
 })
@@ -209,6 +213,18 @@ describe("el pase entre dominios", () => {
     const left = (db.session ?? []).map((row) => row.userId)
     const doctora = db.user?.find((row) => row.email === "doctora@test.dev")?.id
     expect(left).not.toContain(doctora)
+    expect(replaced).toEqual([])
+  })
+
+  it("si en el destino estaba la misma persona con otra sesión, lo suyo pasa a la que llega", async () => {
+    const rosa = new Browser()
+    await signIn(rosa, LATIDIA, "rosa@test.dev")
+    const before = (db.session ?? [])[0]?.id
+    await signIn(rosa, ODENTIA, "rosa@test.dev")
+    const arriving = (db.session ?? [])[1]?.id
+    expect(await rosa.follow(goTo(clinic))).toBe(clinic)
+    expect(replaced).toEqual([[before, arriving]])
+    expect((db.session ?? []).map((row) => row.id)).toEqual([arriving])
   })
 
   it("sin sesión en el origen llega igual, sin sesión: la app pide entrar", async () => {

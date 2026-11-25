@@ -18,6 +18,7 @@ import { accessLink } from "./access-link.js"
 import { ACCOUNT_APP_INFO, type AccountApp, BASE_ACCOUNT_APP } from "./apps.js"
 import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
 import { type PaseSister, pase } from "./pase.js"
+import { keepPushOnPasswordChange } from "./push-session.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
 import { legalAcceptance } from "./terms.js"
@@ -228,7 +229,15 @@ export function createAuth({
       }),
       keepTwoFactorWhileRequired(ownerDb),
       accessLink({ mailer, webURL, brand }),
-      pase({ domain: cookieDomain, sisters }),
+      pase({
+        domain: cookieDomain,
+        sisters,
+        // Los avisos del equipo van con la sesión (ADR 0215): si la misma persona llega con otra, la siguen.
+        onSessionReplaced: async (from, to) => {
+          await ownerDb.execute(sql`update push_subscription set session_id = ${to} where session_id = ${from}`)
+        },
+      }),
+      keepPushOnPasswordChange(ownerDb),
       passwordBreachCheck({ enabled: breachCheck }),
       legalAcceptance(),
       forgetAdminDeviceOnSignOut(ownerDb),
