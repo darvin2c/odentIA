@@ -18,6 +18,7 @@ import { AUTH_NETWORK, authError, authErrorMessage, authFailureOf, authFormMessa
 import { AuthAlert, AuthLegal, WelcomeAside } from "../lib/auth-screens"
 import { countdown } from "../lib/countdown"
 import { GoogleAuthButton } from "../lib/google-auth"
+import { crossDomainHref } from "../lib/host"
 import { safeNext } from "../lib/safe-next"
 import {
   forgetUser,
@@ -74,6 +75,12 @@ function LoginPage() {
     validators: { onSubmit: known ? knownCredentials : credentials },
     onSubmit: async ({ value }) => {
       setProblem(null)
+      // Si este navegador tenía abierta la cuenta de otra persona, se cierra antes: su sesión
+      // pudo pasar a otras apps con el pase y ahí seguiría a su nombre (ADR 0215).
+      const current = await authClient.getSession().catch(() => null)
+      const currentEmail = current?.data?.user.email
+      if (currentEmail && currentEmail.toLowerCase() !== value.email.trim().toLowerCase())
+        await authClient.signOut().catch(() => undefined)
       const result = await authClient.signIn.email({ email: value.email, password: value.password })
       if (result.error) {
         const { code, status } = authFailureOf(result.error)
@@ -115,7 +122,8 @@ function LoginPage() {
       }
       const target = safeNext(next)
       if (target) {
-        window.location.assign(target)
+        // A otro dominio del grupo, con el pase: llega con esta misma sesión.
+        window.location.assign(crossDomainHref(target))
         return
       }
       await navigate({ to: orgs && orgs.length === 0 ? "/onboarding" : "/" })
@@ -125,7 +133,10 @@ function LoginPage() {
   const submitError = useFormSubmitError(form)
   const typedEmail = useStore(form.store, (state) => state.values.email)
 
-  const notMe = () => {
+  // «Entrar con otra cuenta» cierra antes la de quien estaba: también en las apps que abrió desde
+  // aquí, que usan su misma sesión.
+  const notMe = async () => {
+    await authClient.signOut().catch(() => undefined)
     forgetUser()
     setKnown(null)
     setProblem(null)
@@ -161,12 +172,20 @@ function LoginPage() {
       legal={<AuthLegal />}
       footer={
         known ? (
-          <>
-            {known.email} ·{" "}
-            <button type="button" className="underline" onClick={notMe}>
-              ¿No eres tú?
-            </button>
-          </>
+          <span className="flex flex-col gap-1">
+            <span className="break-all">{known.email}</span>
+            <span>
+              <button
+                type="button"
+                className="font-medium text-foreground underline"
+                onClick={() => void notMe()}
+                aria-describedby="otra-cuenta-cierra"
+              >
+                Entrar con otra cuenta
+              </button>
+            </span>
+            <span id="otra-cuenta-cierra">Se cerrará la cuenta de {known.name} en este navegador.</span>
+          </span>
         ) : (
           <>
             ¿Aún no tienes cuenta?{" "}

@@ -2,8 +2,8 @@
  * Lo que la pantalla de entrar recuerda de la última persona que entró desde
  * este navegador (decisión 6 del lienzo de acceso): nombre, clínica y correo
  * para saludarla y pedirle solo la contraseña. Nunca la contraseña ni datos de
- * pacientes. «¿No eres tú?» lo borra. Si el navegador no deja guardar, no pasa
- * nada: se pide todo.
+ * pacientes. «Entrar con otra cuenta» lo borra y cierra la sesión de este
+ * navegador. Si el navegador no deja guardar, no pasa nada: se pide todo.
  */
 import { personInitials } from "@odentia/ui-patterns"
 
