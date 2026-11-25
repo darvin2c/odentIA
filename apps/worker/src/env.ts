@@ -32,6 +32,18 @@ const envSchema = z.object({
    */
   GESTORIA_CONTRACT_URL: z.string().trim().default(""),
   GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
+  /**
+   * El dominio de gestorIA, el mismo de la API (ADR 0216): la respuesta a un caso de soporte
+   * pedido desde gestorIA lleva a su app y sale con su marca. Vacío: al panel.
+   */
+  GESTORIA_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.-]*$/, "Un dominio, p. ej. gestoria24.com")
+    .default(""),
+  // El remitente de los correos de gestorIA; vacío, el de SMTP_FROM con su nombre.
+  GESTORIA_SMTP_FROM: z.string().optional(),
   /** El dominio de vistIA, como el de latidIA. Vacío: sus ópticas van en el de la plataforma. */
   OPTICAL_DOMAIN: z
     .string()

@@ -18,7 +18,7 @@ import {
   SUPPORT_ATTACHMENT_MAX_BYTES,
   sniffFileContent,
 } from "@odentia/services"
-import { Hono } from "hono"
+import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import type { ApiDeps } from "../lib/context.js"
 import { requireSession } from "../lib/context.js"
@@ -31,6 +31,13 @@ export interface AccountSupportDeps {
   auth: ApiDeps["auth"]
   storage: Storage
   appVersion?: string | null
+  /**
+   * En el dominio de una app que es otro sistema (gestorIA, ADR 0216): solo los casos de la
+   * cuenta, sin los que se abrieron en una clínica ni el acceso diagnóstico a ella.
+   */
+  accountCasesOnly?: boolean
+  /** Desde dónde se pidió ayuda (`/panel`, `/gestoria`): el aviso de la respuesta lleva ahí. */
+  screen?: string
 }
 
 const accessInput = z.object({
@@ -61,9 +68,24 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
   const app = new Hono<{ Variables: { userId: string; sessionId: string } }>()
   app.use(requireSession({ auth: deps.auth }))
 
+  // Fuera de las clínicas, un caso abierto en una clínica no existe: ni su conversación ni sus
+  // adjuntos. Se mira antes de cada ruta de un caso.
+  if (deps.accountCasesOnly) {
+    const onlyAccountCase = async (c: Context<{ Variables: { userId: string; sessionId: string } }>, next: Next) => {
+      const kase = await getAccountSupportCase(deps.ownerDb, c.get("userId"), c.req.param("id") ?? "").catch(() => null)
+      if (!kase || kase.organizationId !== null) return c.json(errorBody(c, "NOT_FOUND", "Caso no encontrado"), 404)
+      return next()
+    }
+    app.use("/cases/:id", onlyAccountCase)
+    app.use("/cases/:id/*", onlyAccountCase)
+  }
+
   app.get("/cases", async (c) => {
     const userId = c.get("userId") as string
-    return runService(c, 200, () => listAccountSupportCases(deps.ownerDb, userId))
+    return runService(c, 200, async () => {
+      const cases = await listAccountSupportCases(deps.ownerDb, userId)
+      return deps.accountCasesOnly ? cases.filter((kase) => kase.organizationId === null) : cases
+    })
   })
 
   /** Abrir un caso de acceso: sin clínica, desde el panel. */
@@ -77,6 +99,7 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
         question: input.question,
         detail: input.detail,
         appVersion: deps.appVersion ?? null,
+        ...(deps.screen ? { screen: deps.screen } : {}),
       }),
     )
   })
@@ -197,6 +220,8 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
   })
+
+  if (deps.accountCasesOnly) return app
 
   /**
    * Autorizar acceso diagnóstico a la clínica del caso: solo si quien pide es

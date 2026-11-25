@@ -20,15 +20,18 @@
     "@odentia/ui": "workspace:*",
     "@tanstack/charts": "0.18.0",
     "@tanstack/react-form": "1.33.5",
+    "@tanstack/react-query": "5.102.8",
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-table": "^8.21.3",
     "date-fns": "^4.4.0",
     "libphonenumber-js": "1.13.13",
     "lucide-react": "^0.468.0",
+    "qrcode": "1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-easy-crop": "6.2.3",
-    "react-image-crop": "11.1.2"
+    "react-image-crop": "11.1.2",
+    "zod": "4.6.2"
   },
   "peerDependencies": {
     "react": "^19.0.0"
@@ -41,6 +44,7 @@
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "14.6.1",
+    "@types/qrcode": "1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "jsdom": "^30.0.1",

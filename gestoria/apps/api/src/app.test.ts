@@ -332,6 +332,13 @@ describe("los permisos de cada rol (decisión 7)", () => {
     expect(lastOwner.status).toBe(409)
     expect(lastOwner.json.error.code).toBe("LAST_OWNER")
     expect((await call("rosa", "DELETE", `/api/tiendas/${storeId}/equipo/u-rosa`)).status).toBe(409)
+    // Antes de cerrar su cuenta, la pantalla sabe que Rosa es la única con el rol de Dueño.
+    expect((await call("rosa", "GET", "/api/yo")).json.stores).toEqual([
+      expect.objectContaining({ id: storeId, role: "owner", onlyOwner: true }),
+    ])
+    expect((await call("mario", "GET", "/api/yo")).json.stores).toEqual([
+      expect.objectContaining({ id: storeId, onlyOwner: false }),
+    ])
   })
 
   it("quien no es del equipo no sabe si la tienda existe", async () => {

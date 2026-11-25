@@ -11,7 +11,7 @@ import {
   storeMember,
   withPerson,
 } from "@gestoria/db"
-import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { noteStoreAccount } from "./acuerdo.js"
 import type { Person } from "./cuenta.js"
@@ -146,6 +146,17 @@ export async function myStores(appDb: Db, person: Person) {
       )
       .orderBy(desc(storeInvitation.createdAt))
     const mine = new Set(stores.map((s) => s.id))
+    // Las tiendas donde es el único Dueño: antes de cerrar su cuenta, que le dé el rol a otra
+    // persona (la cuenta no conoce las tiendas; se lo pregunta a gestorIA).
+    const owned = stores.filter((s) => s.role === "owner").map((s) => s.id)
+    const owners = owned.length
+      ? await tx
+          .select({ storeId: storeMember.storeId, owners: count() })
+          .from(storeMember)
+          .where(and(inArray(storeMember.storeId, owned), eq(storeMember.role, "owner")))
+          .groupBy(storeMember.storeId)
+      : []
+    const ownersOf = new Map(owners.map((row) => [row.storeId, row.owners]))
     // Las que soporte de gestorIA puede mirar ahora (la tienda la dejó entrar), solo a mirar.
     const support = (await supportStoresOf(tx, person.userId)).filter((s) => !mine.has(s.id))
     return {
@@ -154,12 +165,14 @@ export async function myStores(appDb: Db, person: Person) {
           ...s,
           permissions: ROLE_PERMISSIONS[s.role],
           supportUntil: null as Date | null,
+          onlyOwner: s.role === "owner" && (ownersOf.get(s.id) ?? 0) <= 1,
         })),
         ...support.map(({ until, ...s }) => ({
           ...s,
           role: "support" as const,
           permissions: ROLE_PERMISSIONS.support,
           supportUntil: until,
+          onlyOwner: false,
         })),
       ],
       // Una invitación a una tienda donde ya está no se ofrece.

@@ -15,7 +15,13 @@ import type { AppDeps } from "../app.js"
 import { errorBody } from "../lib/error.js"
 import { runService, validationError } from "./helpers.js"
 
-export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {}
+export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {
+  /**
+   * Solo lo de la persona (dos pasos y cerrar la cuenta), sin sus clínicas ni sus invitaciones:
+   * el dominio de una app que es otro sistema (gestorIA, ADR 0216).
+   */
+  personOnly?: boolean
+}
 
 /**
  * Tras cerrar, bloquear o reabrir una cuenta, el aviso a las apps que son otro sistema sale en el momento
@@ -56,27 +62,29 @@ export function createAccountRoute(deps: AccountDeps) {
     return { userId: session.user.id, email: session.user.email }
   }
 
-  app.get("/invitations/pending", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => owner((tx) => listMyInvitations(tx, who.email)))
-  })
+  if (!deps.personOnly) {
+    app.get("/invitations/pending", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () => owner((tx) => listMyInvitations(tx, who.email)))
+    })
 
-  app.get("/organizations", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () => owner((tx) => listMyOrganizations(tx, who.userId)))
-  })
+    app.get("/organizations", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () => owner((tx) => listMyOrganizations(tx, who.userId)))
+    })
 
-  app.post("/organizations/:id/leave", async (c) => {
-    const who = await accountSession(c)
-    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, () =>
-      owner((tx) => leaveOrganization(tx, who.userId, c.req.param("id"))).then(() => ({
-        ok: true,
-      })),
-    )
-  })
+    app.post("/organizations/:id/leave", async (c) => {
+      const who = await accountSession(c)
+      if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+      return runService(c, 200, () =>
+        owner((tx) => leaveOrganization(tx, who.userId, c.req.param("id"))).then(() => ({
+          ok: true,
+        })),
+      )
+    })
+  }
 
   // Verificación en dos pasos (ADR 0107): activar, cambiar de teléfono y los
   // códigos son de Better Auth; aquí, lo que Mi perfil dice y olvidar los

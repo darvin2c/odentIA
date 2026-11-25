@@ -16,3 +16,6 @@ export type Who = keyof typeof PEOPLE
 
 /** La contraseña de todas en la cuenta de mentira. */
 export const CLAVE = "clave-de-prueba"
+
+/** El código de la app de autenticación que acepta la cuenta de mentira al activar los dos pasos. */
+export const CODIGO_TOTP = "246810"

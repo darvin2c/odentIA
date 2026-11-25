@@ -203,6 +203,11 @@ export interface ClaimedSupportNotice {
   caseKind: "pregunta" | "problema" | "acceso" | "cobro"
   /** «Automatizaciones › Recordar la cita», o la ruta si la guía no la conoce. */
   screen: string
+  /**
+   * La ruta tal como se guardó: en un caso de la cuenta dice desde qué app se pidió ayuda
+   * (`/panel`, o `/gestoria`: `accountSupportScreen`).
+   */
+  openedFrom: string
   /** El nombre corto de la pantalla: «Pregunta · Automatizaciones». */
   topic: string
   /** Quien abrió el caso, con el rol con que lo abrió. */
@@ -373,6 +378,7 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     clinicProduct,
     caseKind,
     screen: topic ? helpTopicLabel(topic) : kase.screen,
+    openedFrom: kase.screen,
     topic: topic?.title ?? kase.screen,
     who: row.openerName ?? "odentIA",
     role: kase.role,

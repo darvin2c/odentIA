@@ -14,6 +14,8 @@ export interface MyStore {
   permissions: string[]
   /** Hasta cuándo puede mirar soporte; null si es del equipo. */
   supportUntil: string | null
+  /** Es la única persona con el rol de Dueño: antes de cerrar su cuenta, se lo da a otra. */
+  onlyOwner: boolean
 }
 
 /** La entrada de soporte de gestorIA a la tienda, como la ve el equipo. */

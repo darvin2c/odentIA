@@ -141,6 +141,57 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
     expect((await preflight("https://app.odentia.test")).headers.get("access-control-allow-origin")).toBeNull()
   })
 
+  it("la cuenta de la persona también responde ahí, sin sus clínicas y solo desde sus pantallas (ADR 0216)", async () => {
+    const on = appWith(sessionOf("gestorIA"))
+    const at = (path: string, init?: RequestInit) =>
+      on.request(`https://api.gestoria.test${path}`, init)
+    // Lo de la persona pide su sesión (la de su dominio, que aquí no hay).
+    expect((await at("/api/account/two-factor")).status).toBe(401)
+    expect((await at("/api/account/support/cases")).status).toBe(401)
+    // Sus clínicas, sus invitaciones y lo que es de una clínica no existen en ese dominio.
+    expect((await at("/api/account/organizations")).status).toBe(404)
+    expect((await at("/api/account/invitations/pending")).status).toBe(404)
+    expect(
+      (
+        await at("/api/account/organizations/org-1/leave", {
+          method: "POST",
+          headers: { origin: "https://app.gestoria.test" },
+        })
+      ).status,
+    ).toBe(404)
+    expect((await at("/api/account/billing/notices")).status).toBe(404)
+    expect((await at("/api/account/admin-access")).status).toBe(404)
+    // Una escritura que no viene de sus pantallas no entra, ni con la sesión.
+    const close = (origin?: string) =>
+      at("/api/account/close", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
+        body: JSON.stringify({ confirm: true }),
+      })
+    expect((await close()).status).toBe(403)
+    expect((await close("https://app.odentia.test")).status).toBe(403)
+    expect((await close("https://app.gestoria.test")).status).toBe(401)
+    expect(
+      (
+        await at("/api/uploads/avatar", {
+          method: "POST",
+          headers: { origin: "https://app.gestoria.test" },
+        })
+      ).status,
+    ).toBe(401)
+    const preflight = (origin: string) =>
+      at("/api/account/two-factor", {
+        method: "OPTIONS",
+        headers: { Origin: origin, "Access-Control-Request-Method": "GET" },
+      })
+    expect(
+      (await preflight("https://app.gestoria.test")).headers.get("access-control-allow-origin"),
+    ).toBe("https://app.gestoria.test")
+    expect(
+      (await preflight("https://app.odentia.test")).headers.get("access-control-allow-origin"),
+    ).toBeNull()
+  })
+
   describe("la revisión diaria de su copia de las cuentas", () => {
     const SECRET = `whsec_${Buffer.alloc(32, 5).toString("base64")}`
     const asked: string[][] = []

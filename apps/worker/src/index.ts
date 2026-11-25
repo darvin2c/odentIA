@@ -27,6 +27,7 @@ import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   accountEventSendersFromEnv,
+  accountSupportScreen,
   appContractSendersFromEnv,
   adminChannelsFromEnv,
   askGuideForSale,
@@ -119,7 +120,19 @@ configureDocumentChecks(secretsKey)
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA y la de vistIA, en su dominio.
-configureMailLinks(env.WEB_URL, mailBrandDomains(publicLinks.productDomains))
+configureMailLinks(env.WEB_URL, {
+  ...mailBrandDomains(publicLinks.productDomains),
+  ...(env.GESTORIA_DOMAIN ? { gestoria: env.GESTORIA_DOMAIN } : {}),
+})
+/** El soporte de la cuenta en gestorIA (ADR 0216): la respuesta lleva a su app, con su marca. */
+const accountSupportApps = env.GESTORIA_DOMAIN
+  ? {
+      [accountSupportScreen("gestoria")]: {
+        url: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, env.GESTORIA_DOMAIN).replace(/\/+$/, ""),
+        brand: "gestoria" as const,
+      },
+    }
+  : {}
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -129,6 +142,7 @@ const mailer = createMailer({
   fromByBrand: {
     ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
     ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+    ...(env.GESTORIA_SMTP_FROM ? { gestoria: env.GESTORIA_SMTP_FROM } : {}),
   },
 })
 const storage: Storage = createStorage({
@@ -355,6 +369,7 @@ queues.push(
         supportInbox: env.SUPPORT_INBOX_EMAIL,
         adminUrl: env.ADMIN_URL,
         webUrl: env.WEB_URL,
+        accountApps: accountSupportApps,
       })
       return result.mailed > 0
     },

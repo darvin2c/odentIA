@@ -7,30 +7,21 @@ import {
   Input,
   toast,
 } from "@odentia/ui"
-import {
-  common,
-  FormDrawer,
-  groupedSecret,
-  RECOMMENDED_AUTHENTICATORS,
-  submitErrorMessage,
-  submitForm,
-  totpDigits,
-  totpSecret,
-  useAppForm,
-  useFormSurface,
-} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, ChevronDown } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../lib/api"
-import { authClient } from "../lib/auth-client"
-import { type AuthErrorRoute, authError, authFormMessage } from "../lib/auth-error"
-import { panelWords } from "../lib/brand"
-import { totpQrDataUrl } from "../lib/totp"
-import { TwoFactorSkeleton } from "./skeletons/profile"
+import { common } from "../common.js"
+import { submitForm, useAppForm, useFormSurface } from "../form/app-form.js"
+import { FormDrawer } from "../form/form-drawer.js"
+import { submitErrorMessage } from "../form/submit-error.js"
+import { groupedSecret, RECOMMENDED_AUTHENTICATORS, totpDigits, totpSecret } from "../totp.js"
+import { type AuthErrorRoute, authError, authFormMessage } from "./auth-error.js"
+import { useAccount, useAccountFetch } from "./context.js"
+import { totpQrDataUrl } from "./qr.js"
+import { TwoFactorSkeleton } from "./skeletons.js"
 
 /**
  * Verificación en dos pasos de la persona (ADR 0107): solo app autenticadora.
@@ -50,13 +41,14 @@ const statusSchema = z.object({
     trustedBrowsers: z.number(),
   }),
 })
-type TwoFactorStatus = z.infer<typeof statusSchema>["data"]
+export type TwoFactorStatus = z.infer<typeof statusSchema>["data"]
 export const TWO_FACTOR_KEY = ["account-two-factor"] as const
 
 export function useTwoFactorStatus() {
+  const request = useAccountFetch()
   return useQuery({
     queryKey: TWO_FACTOR_KEY,
-    queryFn: async () => statusSchema.parse(await apiFetch<unknown>("/api/account/two-factor")).data,
+    queryFn: async () => statusSchema.parse(await request<unknown>("/api/account/two-factor")).data,
   })
 }
 
@@ -88,17 +80,19 @@ const savedSchema = z.object({
 
 /** La fila de Seguridad en Mi perfil. */
 export function TwoFactorRow() {
+  const { profilePath, knownStaff, twoFactorSelf = "Ninguna de tus clínicas: la activaste tú" } = useAccount()
+  const request = useAccountFetch()
   const status = useTwoFactorStatus()
   const queryClient = useQueryClient()
   const forget = useMutation({
-    mutationFn: () => apiFetch("/api/account/two-factor/forget-browsers", { method: "POST" }),
+    mutationFn: () => request("/api/account/two-factor/forget-browsers", { method: "POST" }),
     onSuccess: async () => {
       toast.success("Listo: tus navegadores volverán a pedir el código")
       await queryClient.invalidateQueries({ queryKey: TWO_FACTOR_KEY })
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
-  if (status.isPending) return <TwoFactorSkeleton />
+  if (status.isPending) return <TwoFactorSkeleton staff={knownStaff} />
   if (status.isError) return <p className="text-sm text-muted-foreground">No pudimos cargar tu verificación en dos pasos.</p>
   const value = status.data
   const badge = (
@@ -126,7 +120,7 @@ export function TwoFactorRow() {
             <p className="text-sm font-medium text-foreground">{value.requiredBy.join(", ")} la pide a su equipo.</p>
           ) : null}
         </div>
-        <Button render={<Link to="/profile" search={{ edit: "two-factor" }} />} className="self-start">
+        <Button render={<Link to={profilePath} search={{ edit: "two-factor" }} />} className="self-start">
           Activar
         </Button>
       </div>
@@ -138,7 +132,7 @@ export function TwoFactorRow() {
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div className="flex flex-col gap-0.5">
           <dt className="text-muted-foreground">La pide</dt>
-          <dd className="font-medium">{value.requiredBy.length > 0 ? value.requiredBy.join(", ") : "Ninguna de tus clínicas: la activaste tú"}</dd>
+          <dd className="font-medium">{value.requiredBy.length > 0 ? value.requiredBy.join(", ") : twoFactorSelf}</dd>
         </div>
         <div className="flex flex-col gap-0.5">
           <dt className="text-muted-foreground">Navegadores que no piden el código</dt>
@@ -146,10 +140,10 @@ export function TwoFactorRow() {
         </div>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" render={<Link to="/profile" search={{ edit: "two-factor-phone" }} />}>
+        <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-phone" }} />}>
           Cambiar de teléfono
         </Button>
-        <Button variant="outline" render={<Link to="/profile" search={{ edit: "two-factor-codes" }} />}>
+        <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-codes" }} />}>
           Nuevos códigos de respaldo
         </Button>
         {value.trustedBrowsers > 0 ? (
@@ -162,7 +156,7 @@ export function TwoFactorRow() {
             Desactivar
           </Button>
         ) : (
-          <Button variant="outline" render={<Link to="/profile" search={{ edit: "two-factor-off" }} />}>
+          <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-off" }} />}>
             Desactivar
           </Button>
         )}
@@ -200,6 +194,7 @@ function RecommendedApps() {
 
 /** El QR (o la clave a mano) de un enlace `otpauth://`. */
 function ScanCode({ uri }: { uri: string }) {
+  const { appName } = useAccount()
   const [qr, setQr] = useState<string | null>(null)
   const secret = groupedSecret(totpSecret(uri))
   useEffect(() => {
@@ -214,7 +209,7 @@ function ScanCode({ uri }: { uri: string }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
       <div className="size-44 shrink-0 rounded-xl border bg-white p-1.5">
-        {qr ? <img src={qr} alt={`Código QR para agregar ${panelWords.name} a tu app`} className="size-full" /> : <div className="size-full animate-pulse rounded-lg bg-muted" />}
+        {qr ? <img src={qr} alt={`Código QR para agregar ${appName} a tu app`} className="size-full" /> : <div className="size-full animate-pulse rounded-lg bg-muted" />}
       </div>
       <div className="flex min-w-0 flex-col gap-2 text-sm text-muted-foreground">
         <span>¿No puedes escanear? Escribe esta clave en la app («Ingresar una clave», tipo «Basada en el tiempo»):</span>
@@ -242,12 +237,13 @@ function ScanCode({ uri }: { uri: string }) {
 
 /** La casilla «Los guardé…» va como `children`: es el campo del formulario del cajón. */
 function BackupCodes({ email, codes, children }: { email: string; codes: string[]; children: ReactNode }) {
-  const text = [`Códigos de respaldo de ${panelWords.name}`, `Cuenta: ${email}`, "", "Cada código sirve una sola vez. Úsalo si no tienes tu app de autenticación.", "", ...codes, ""].join("\n")
+  const { appName } = useAccount()
+  const text = [`Códigos de respaldo de ${appName}`, `Cuenta: ${email}`, "", "Cada código sirve una sola vez. Úsalo si no tienes tu app de autenticación.", "", ...codes, ""].join("\n")
   const download = () => {
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }))
     const link = document.createElement("a")
     link.href = url
-    link.download = `${panelWords.name.toLowerCase()}-codigos-de-respaldo.txt`
+    link.download = `${appName.toLowerCase()}-codigos-de-respaldo.txt`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -303,6 +299,7 @@ export function TwoFactorSetupDrawer({
   /** `activated`: cerró ya activada (tras guardar los códigos). */
   onClose: (activated: boolean) => void
 }) {
+  const { client } = useAccount()
   const queryClient = useQueryClient()
   const hasPassword = Boolean(status?.hasPassword)
   const [enroll, setEnroll] = useState<{ uri: string; codes: string[] } | null>(null)
@@ -312,7 +309,7 @@ export function TwoFactorSetupDrawer({
     defaultValues: { password: "" },
     validators: { onSubmit: passwordSchema(hasPassword) },
     onSubmit: async ({ value }) => {
-      const { data, error } = await authClient.twoFactor.enable({ password: hasPassword ? value.password : "", method: "totp" })
+      const { data, error } = await client.twoFactor.enable({ password: hasPassword ? value.password : "", method: "totp" })
       if (error) throw authError(error, TWO_FACTOR_ROUTE)
       if (data?.method !== "totp") throw new Error(common.errors.generic)
       setEnroll({ uri: data.totpURI, codes: data.backupCodes ?? [] })
@@ -323,7 +320,7 @@ export function TwoFactorSetupDrawer({
     defaultValues: { code: "" },
     validators: { onSubmit: codeSchema },
     onSubmit: async ({ value }) => {
-      const { error } = await authClient.twoFactor.verifyTotp({ code: value.code })
+      const { error } = await client.twoFactor.verifyTotp({ code: value.code })
       if (error) throw authError(error, TWO_FACTOR_ROUTE)
       toast.success("Verificación en dos pasos activada")
       setStep("codes")
@@ -461,13 +458,14 @@ export function TwoFactorSetupDrawer({
  * persona lo borre de su app, y nadie queda fuera si deja esto a medias.
  */
 export function TwoFactorPhoneDrawer({ open, status, onClose }: { open: boolean; status: TwoFactorStatus | undefined; onClose: () => void }) {
+  const { client } = useAccount()
   const hasPassword = Boolean(status?.hasPassword)
   const [uri, setUri] = useState<string | null>(null)
   const form = useAppForm({
     defaultValues: { password: "" },
     validators: { onSubmit: passwordSchema(hasPassword) },
     onSubmit: async ({ value }) => {
-      const { data, error } = await authClient.twoFactor.getTotpUri({ password: hasPassword ? value.password : "" })
+      const { data, error } = await client.twoFactor.getTotpUri({ password: hasPassword ? value.password : "" })
       if (error) throw authError(error, TWO_FACTOR_ROUTE)
       if (!data?.totpURI) throw new Error(common.errors.generic)
       setUri(data.totpURI)
@@ -516,13 +514,14 @@ export function TwoFactorPhoneDrawer({ open, status, onClose }: { open: boolean;
 
 /** Códigos de respaldo nuevos: anulan los anteriores. */
 export function TwoFactorCodesDrawer({ open, email, status, onClose }: { open: boolean; email: string; status: TwoFactorStatus | undefined; onClose: () => void }) {
+  const { client } = useAccount()
   const hasPassword = Boolean(status?.hasPassword)
   const [codes, setCodes] = useState<string[] | null>(null)
   const passwordForm = useAppForm({
     defaultValues: { password: "" },
     validators: { onSubmit: passwordSchema(hasPassword) },
     onSubmit: async ({ value }) => {
-      const { data, error } = await authClient.twoFactor.generateBackupCodes({ password: hasPassword ? value.password : "" })
+      const { data, error } = await client.twoFactor.generateBackupCodes({ password: hasPassword ? value.password : "" })
       if (error) throw authError(error, TWO_FACTOR_ROUTE)
       if (!data?.backupCodes) throw new Error(common.errors.generic)
       setCodes(data.backupCodes)
@@ -573,13 +572,14 @@ export function TwoFactorCodesDrawer({ open, email, status, onClose }: { open: b
  * exige). Si alguna la pide, el cajón no se abre, tampoco con el enlace.
  */
 export function TwoFactorOffDrawer({ open, status, onClose }: { open: boolean; status: TwoFactorStatus | undefined; onClose: () => void }) {
+  const { client } = useAccount()
   const queryClient = useQueryClient()
   const hasPassword = Boolean(status?.hasPassword)
   const form = useAppForm({
     defaultValues: { password: "" },
     validators: { onSubmit: passwordSchema(hasPassword) },
     onSubmit: async ({ value }) => {
-      const { error } = await authClient.twoFactor.disable({ password: hasPassword ? value.password : "" })
+      const { error } = await client.twoFactor.disable({ password: hasPassword ? value.password : "" })
       if (error) throw authError(error, TWO_FACTOR_ROUTE)
       toast.success("Verificación en dos pasos desactivada")
       await queryClient.invalidateQueries({ queryKey: TWO_FACTOR_KEY })
