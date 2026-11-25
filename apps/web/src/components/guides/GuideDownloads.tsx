@@ -213,7 +213,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                       </>
                     ) : phase === "recent" ? (
                       <>
-                        <b>Hoy ya pediste esta plantilla para {sentTo}.</b> Si no las ves, revisa la carpeta de spam.
+                        <b>Hoy ya pediste las plantillas de esta guía para {sentTo}.</b> Si no las ves, revisa la carpeta de spam.
                       </>
                     ) : (
                       <>

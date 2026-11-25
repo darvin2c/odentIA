@@ -57,34 +57,56 @@ export function parseFeed(xml: string): GuideVideo[] {
   return videos.sort((a, b) => b.published.localeCompare(a.published))
 }
 
+/** Lo leído: los videos y hasta cuándo valen (la falla vale menos). Se guarda igual en el proceso y en la caché. */
+interface Kept {
+  until: number
+  videos: GuideVideo[]
+}
+
 /** Lo leído en este proceso, para no ir a YouTube en cada visita (en Node; en Workers, además, la caché). */
-const memory = new Map<string, { at: number; videos: GuideVideo[] }>()
+const memory = new Map<string, Kept>()
+
+/** La clave de la caché: la del feed, con su propio nombre (lo guardado no es el XML de YouTube). */
+const keyOf = (playlist: string) => `${feedUrl(playlist)}&odentia=videos`
+
+async function remember(playlist: string, kept: Kept): Promise<void> {
+  memory.set(playlist, kept)
+  const seconds = Math.max(1, Math.round((kept.until - Date.now()) / 1000))
+  try {
+    await edgeCache()?.put(
+      keyOf(playlist),
+      new Response(JSON.stringify(kept), { headers: { "Content-Type": "application/json", "Cache-Control": `s-maxage=${seconds}` } }),
+    )
+  } catch (error) {
+    // Sin caché la página sigue: lo leído vale igual en este proceso.
+    console.error("web: no se guardó la lista de videos en la caché", error)
+  }
+}
 
 async function playlistVideos(playlist: string): Promise<GuideVideo[]> {
   const kept = memory.get(playlist)
-  if (kept && Date.now() - kept.at < FRESH_SECONDS * 1000) return kept.videos
-  const url = feedUrl(playlist)
-  const edge = edgeCache()
-  const hit = await edge?.match(url)
+  if (kept && Date.now() < kept.until) return kept.videos
+  const hit = await edgeCache()?.match(keyOf(playlist))
   if (hit) {
-    const videos = parseFeed(await hit.text())
-    memory.set(playlist, { at: Date.now(), videos })
-    return videos
+    // Vale hasta cuando decía al guardarse, no desde ahora: una falla sigue durando 10 minutos.
+    const cached = (await hit.json()) as Kept
+    if (Date.now() < cached.until) {
+      memory.set(playlist, cached)
+      return cached.videos
+    }
   }
+  let videos: GuideVideo[]
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+    const response = await fetch(feedUrl(playlist), { signal: AbortSignal.timeout(TIMEOUT_MS) })
     if (!response.ok) throw new Error(`YouTube respondió ${response.status}`)
-    const xml = await response.text()
-    const videos = parseFeed(xml)
-    memory.set(playlist, { at: Date.now(), videos })
-    await edge?.put(url, new Response(xml, { headers: { "Cache-Control": `s-maxage=${FRESH_SECONDS}` } }))
-    return videos
+    videos = parseFeed(await response.text())
   } catch (error) {
     // La falla se recuerda un rato (lista vacía: va el video fijo), para que cada visita no espere otra vez.
-    memory.set(playlist, { at: Date.now() - (FRESH_SECONDS - FAILED_SECONDS) * 1000, videos: [] })
-    await edge?.put(url, new Response("", { headers: { "Cache-Control": `s-maxage=${FAILED_SECONDS}` } }))
+    await remember(playlist, { until: Date.now() + FAILED_SECONDS * 1000, videos: [] })
     throw error
   }
+  await remember(playlist, { until: Date.now() + FRESH_SECONDS * 1000, videos })
+  return videos
 }
 
 /** Los videos de la guía: el primero es el principal. Nunca falla: sin YouTube, el fijo o ninguno. */

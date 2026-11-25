@@ -98,7 +98,7 @@ export function dayWords(iso: string): string {
 /** Lo que trae la guía, en su tarjeta: «6 min · 2 plantillas en PDF · Video». */
 export function cardMeta(guide: Guide): string {
   const sheets = guide.sheets.length === 1 ? "Plantilla en PDF" : `${guide.sheets.length} plantillas en PDF`
-  return [`${readingMinutes(guide)} min`, sheets, guide.video || guide.playlist ? "Video" : null].filter(Boolean).join(" · ")
+  return [`${readingMinutes(guide)} min`, sheets, guide.video ? "Video" : null].filter(Boolean).join(" · ")
 }
 
 /**

@@ -26,10 +26,24 @@ export default function ConsentDemo() {
   const canvas = useRef<HTMLCanvasElement>(null)
   const strokes = useRef<Point[][]>([])
   const drawing = useRef(false)
+  /** Al cambiar de paso, el foco va al botón del paso nuevo: el anterior desaparece. */
+  const next = useRef<HTMLButtonElement>(null)
+  const check = useRef<HTMLInputElement>(null)
   const [understood, setUnderstood] = useState(false)
   const [signed, setSigned] = useState(false)
   /** «paciente»: lee, marca y firma; «profesional»: confirma quien informó; «listo». */
   const [step, setStep] = useState<"paciente" | "profesional" | "listo">("paciente")
+  const moved = useRef(false)
+  useEffect(() => {
+    if (!moved.current) return
+    moved.current = false
+    if (step === "paciente") check.current?.focus()
+    else next.current?.focus()
+  }, [step])
+  const go = (to: typeof step) => {
+    moved.current = true
+    setStep(to)
+  }
 
   const paint = () => {
     const el = canvas.current
@@ -105,6 +119,7 @@ export default function ConsentDemo() {
 
         <label className="cd-check">
           <input
+            ref={check}
             type="checkbox"
             disabled={step !== "paciente"}
             checked={understood}
@@ -121,7 +136,13 @@ export default function ConsentDemo() {
             ref={canvas}
             tabIndex={0}
             role="button"
-            aria-label={signed ? "Firma puesta. Borrar para firmar otra vez." : "Recuadro de la firma: firma con el dedo o el ratón; con el teclado, Enter pone una firma de ejemplo."}
+            aria-label={
+              step !== "paciente"
+                ? "La firma del paciente."
+                : signed
+                  ? "Firma puesta. Borrar para firmar otra vez."
+                  : "Recuadro de la firma: firma con el dedo o el ratón; con el teclado, Enter pone una firma de ejemplo."
+            }
             onKeyDown={(event) => {
               if (step === "paciente" && (event.key === "Enter" || event.key === " ")) {
                 event.preventDefault()
@@ -156,7 +177,7 @@ export default function ConsentDemo() {
         </fieldset>
 
         {step === "paciente" ? (
-          <button type="button" className="cd-save" disabled={!ready} onClick={() => setStep("profesional")}>
+          <button type="button" className="cd-save" disabled={!ready} onClick={() => go("profesional")}>
             Listo
           </button>
         ) : step === "profesional" ? (
@@ -165,17 +186,18 @@ export default function ConsentDemo() {
               <b>Profesional que informa</b>
               Dra. Lucía Paredes · Colegiatura 12345
             </span>
-            <button type="button" className="cd-save" onClick={() => setStep("listo")}>
+            <button ref={next} type="button" className="cd-save" onClick={() => go("listo")}>
               Guardar y confirmar
             </button>
           </div>
         ) : (
           <button
             type="button"
+            ref={next}
             className="cd-again"
             onClick={() => {
               setUnderstood(false)
-              setStep("paciente")
+              go("paciente")
               clear()
             }}
           >

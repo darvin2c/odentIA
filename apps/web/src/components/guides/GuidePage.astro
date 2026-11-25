@@ -55,7 +55,8 @@ const jsonLd = [
   guideArticleJsonLd(Astro.site, guide, organization),
   breadcrumbJsonLd(Astro.site, trail),
   faqJsonLd(guide.faq),
-  ...videoJsonLd(videos, guide),
+  // Solo el que se ve en la página: los de «Más videos» son enlaces a YouTube.
+  ...videoJsonLd(video ? [video] : [], guide),
 ]
 const minutes = readingMinutes(guide)
 const firstSheet = guide.sheets[0]
