@@ -109,10 +109,10 @@ export function ReportsPage() {
             />
           </div>
           <section aria-labelledby="reporte-sofi" className="flex flex-col gap-3">
-            <h3 id="reporte-sofi" className="flex items-center gap-2 text-lg font-bold">
+            <h2 id="reporte-sofi" className="flex items-center gap-2 text-lg font-bold">
               <AgentMark size="sm" />
               Sofi
-            </h3>
+            </h2>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <KpiCard
                 title="Atendió"
@@ -155,7 +155,7 @@ function Table({
 }) {
   return (
     <section className="elevated overflow-hidden rounded-xl border bg-card">
-      <h3 className="border-b px-4 py-3 font-bold">{title}</h3>
+      <h2 className="border-b px-4 py-3 font-bold">{title}</h2>
       {rows.length === 0 ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">{empty}</p>
       ) : (
@@ -206,9 +206,9 @@ function Argos() {
       <div className="flex items-start gap-3">
         <AgentMark />
         <div className="flex flex-col gap-0.5">
-          <h3 id="argos" className="text-lg font-bold">
+          <h2 id="argos" className="text-lg font-bold">
             Argos · lo que hizo y lo que te toca
-          </h3>
+          </h2>
           <p className="text-sm text-muted-foreground">
             Lo de rutina se lo encarga a Sofi sin preguntar. A ti solo te trae lo delicado.
           </p>
@@ -220,7 +220,7 @@ function Argos() {
       {b ? (
         <>
           <div className="flex flex-col gap-2">
-            <h4 className="text-sm font-semibold">Te toca</h4>
+            <h3 className="text-sm font-semibold">Te toca</h3>
             {b.toDo.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nada te toca por ahora.</p>
             ) : (
@@ -266,7 +266,7 @@ function Argos() {
             )}
           </div>
           <div className="flex flex-col gap-2">
-            <h4 className="text-sm font-semibold">Hecho esta semana</h4>
+            <h3 className="text-sm font-semibold">Hecho esta semana</h3>
             {b.done.length === 0 ? (
               <p className="text-sm text-muted-foreground">Todavía no le encargó nada a Sofi.</p>
             ) : (

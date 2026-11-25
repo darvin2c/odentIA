@@ -108,9 +108,9 @@ function Settings({ settings }: { settings: AgentSettings }) {
       className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
     >
       <div className="flex flex-col gap-1">
-        <h3 id="sofi-ajustes" className="text-lg font-bold">
+        <h2 id="sofi-ajustes" className="text-lg font-bold">
           Cómo vende
-        </h3>
+        </h2>
         <p className="text-sm text-muted-foreground">
           Sofi usa tu catálogo, tus precios mínimos y tus formas de pago y de entrega. Aquí va lo
           demás.{canEdit ? "" : " Lo cambia el dueño o un administrador."}
@@ -273,9 +273,9 @@ function TestChat({ overview }: { overview: SofiOverview }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h3 id="sofi-prueba" className="text-lg font-bold">
+          <h2 id="sofi-prueba" className="text-lg font-bold">
             Probar a Sofi
-          </h3>
+          </h2>
           <p className="text-sm text-muted-foreground">
             Sus pedidos son de prueba: no mueven el stock, no crean un link de pago real y no
             cuentan en Reportes.

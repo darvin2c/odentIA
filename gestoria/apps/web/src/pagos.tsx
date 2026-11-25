@@ -166,9 +166,9 @@ function Section({
   return (
     <section aria-labelledby={id} className="elevated overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <h3 id={id} className="text-base font-semibold">
+        <h2 id={id} className="text-base font-semibold">
           {title}
-        </h3>
+        </h2>
         {action ? (
           <Button onClick={onAdd}>
             <Plus aria-hidden />

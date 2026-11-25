@@ -678,7 +678,7 @@ function Team({ store, meId }: { store: MyStore; meId: string }) {
             </ul>
             {team.data.invitations.length > 0 ? (
               <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold">Invitaciones pendientes</h3>
+                <h2 className="text-sm font-semibold">Invitaciones pendientes</h2>
                 <ul className="flex flex-col divide-y rounded-lg border">
                   {team.data.invitations.map((invitation) => (
                     <PendingRow
@@ -752,9 +752,9 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
       aria-labelledby={`soporte-${only}`}
       className={only === "todo" ? "flex flex-col gap-2" : "rounded-xl border bg-card p-4"}
     >
-      <h3 id={`soporte-${only}`} className="text-sm font-semibold">
+      <h2 id={`soporte-${only}`} className="text-sm font-semibold">
         Soporte de gestorIA
-      </h3>
+      </h2>
       <ul className="flex flex-col divide-y">
         {rows.map((row) => (
           <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">

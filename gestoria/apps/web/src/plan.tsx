@@ -184,9 +184,9 @@ function Charges({ state, connected }: { state: Known; connected: boolean }) {
   const canSend = connected && state.paymentMethods.length > 0
   return (
     <section aria-labelledby="plan-cobros" className="flex flex-col gap-3">
-      <h3 id="plan-cobros" className="text-lg font-bold">
+      <h2 id="plan-cobros" className="text-lg font-bold">
         Lo que se te cobró
-      </h3>
+      </h2>
       {state.charges.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no hay cobros.</p>
       ) : (
@@ -387,9 +387,9 @@ function ReceiptSheet({
 function Payments({ state, view }: { state: Known; view: PlanView }) {
   return (
     <section aria-labelledby="plan-pagos" className="flex flex-col gap-3">
-      <h3 id="plan-pagos" className="text-lg font-bold">
+      <h2 id="plan-pagos" className="text-lg font-bold">
         Tus pagos
-      </h3>
+      </h2>
       {view.pendingReceipts.length > 0 ? (
         <ul className="flex flex-col divide-y rounded-xl border bg-card">
           {view.pendingReceipts.map((receipt) => (
@@ -481,9 +481,9 @@ function Support({ view }: { view: PlanView }) {
       className="elevated flex scroll-mt-4 flex-col gap-4 rounded-xl border bg-card p-5"
     >
       <div className="flex flex-col gap-1">
-        <h3 id="plan-ayuda" tabIndex={-1} className="text-lg font-bold outline-none">
+        <h2 id="plan-ayuda" tabIndex={-1} className="text-lg font-bold outline-none">
           Pedir ayuda
-        </h3>
+        </h2>
         <p className="text-sm text-muted-foreground">
           {view.connected
             ? "Escríbenos sobre tu plan, un cobro o algo que no funciona. Te respondemos aquí."

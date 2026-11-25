@@ -80,9 +80,9 @@ function Card({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
-          <h3 id={id} className="text-base font-semibold">
+          <h2 id={id} className="text-base font-semibold">
             {title}
-          </h3>
+          </h2>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
         {action}
@@ -1065,7 +1065,7 @@ function KardexSheet({
           </FieldGroup>
         ) : null}
         <div className="flex flex-col gap-2">
-          <h4 className="text-sm font-semibold">Movimientos</h4>
+          <h3 className="text-sm font-semibold">Movimientos</h3>
           {kardex.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
           {kardex.isError ? (
             <ErrorState error={kardex.error} onRetry={() => void kardex.refetch()} />

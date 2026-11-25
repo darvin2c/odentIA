@@ -582,6 +582,9 @@ export function TwoFactorPage() {
         )
         return
       }
+      // Con el segundo paso, la cuenta dice quién es recién aquí: la entrada la recuerda igual.
+      const user = (result.data as { user?: { name: string; email: string } } | null)?.user
+      if (user) rememberUser({ name: user.name, email: user.email })
       forgetToken()
       window.location.assign(next ?? "/")
     } finally {
