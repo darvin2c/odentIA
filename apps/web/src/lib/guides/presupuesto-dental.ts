@@ -31,7 +31,7 @@ export const guide: Guide = {
         kind: "tabla",
         head: ["Jorge, 42 años", "Lo que encontramos"],
         rows: [
-          ["15", "Caries de esmalte en oclusal"],
+          ["15", "Caries de dentina en oclusal"],
           ["36", "Caries de dentina en mesial y oclusal"],
           ["16", "Resina filtrada en oclusal y distal"],
           ["47", "Falta: se extrajo por caries"],
@@ -49,7 +49,7 @@ export const guide: Guide = {
       title: "Ordénalo por fases, con la alternativa dentro de su fase",
       text: [
         "Las fases van en el orden en que se atiende: **urgencia** (dolor o infección), **básica** (limpieza y caries), **quirúrgica** (extracciones e implantes), **rehabilitadora** (coronas, puentes, prótesis) y **mantenimiento** (controles). La corona de un diente va después de su endodoncia.",
-        "Si hay dos caminos para lo mismo, como reponer el 47 con un implante o con un puente, ponlos lado a lado **dentro de esa fase**, cada uno con su total: el paciente elige uno y **no se suman**. Lo demás va igual en los dos.",
+        "Si hay dos caminos para lo mismo, como reponer el 47 con un implante o con un puente, marca cada renglón con su opción, **A o B**, **dentro de su fase**: el implante es quirúrgico; su corona y el puente, rehabilitadores. Cada opción tiene su total: el paciente elige una y **no se suman**. Lo demás va igual en las dos.",
       ],
       figure: {
         kind: "tabla",
@@ -60,7 +60,8 @@ export const guide: Guide = {
           ["Básica", "36 (MO)", "Resina de dos caras", "1", "S/ 200"],
           ["Básica", "16 (OD)", "Cambio de resina, dos caras", "1", "S/ 200"],
           ["", "", "**Subtotal básica**", "", "**S/ 670**"],
-          ["Rehabilitadora, **opción A**", "47", "Implante y corona sobre implante", "4, en 3 a 6 meses", "S/ 5 000"],
+          ["Quirúrgica, **opción A**", "47", "Implante", "1, y de 3 a 6 meses de espera", "S/ 3 500"],
+          ["Rehabilitadora, **opción A**", "47", "Corona sobre implante", "3", "S/ 1 500"],
           ["Rehabilitadora, **opción B**", "46–47–48", "Puente fijo de 3 piezas (S/ 900 c/u)", "3", "S/ 2 700"],
           ["Mantenimiento", "Toda la boca", "Control y limpieza a los 6 meses", "1", "S/ 120"],
           ["", "", "**Total con la opción A**", "", "**S/ 5 790**"],

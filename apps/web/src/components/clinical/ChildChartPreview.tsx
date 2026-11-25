@@ -26,8 +26,11 @@ const PATIENTS: Patient[] = [
     name: "Mateo, 7 años",
     suggested: "mixta",
     examples: {
+      // Los mismos cinco de su tabla en la guía de niños.
+      21: { kind: "saliendo", finding: "Está saliendo", detail: "El incisivo central permanente: la flecha en zigzag azul, en su fila de arriba." },
+      36: { kind: "sigla", finding: "Fosas y fisuras profundas", detail: "Solo la sigla FFP en el recuadro, en azul: no es una caries." },
+      46: { kind: "sellante", finding: "Sellante en buen estado", detail: "El sellante en la cara oclusal y la sigla S, en azul." },
       75: { kind: "caries", finding: "Caries que llega a la pulpa", detail: "En el molar de leche de abajo: la oclusal en rojo y CDP." },
-      85: { kind: "caries", finding: "Caries de dentina en oclusal", detail: "En el otro molar de leche de abajo." },
       84: { kind: "ausente", finding: "Ausente", detail: "Extraído por caries a los 5 años, antes de tiempo: aspa azul y DEX en su fila de leche." },
     },
   },
@@ -106,7 +109,9 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
         <span className={`cp-chip ${tone}`}>{example?.finding ?? "Sin hallazgos"}</span>
         <span className="cp-detail">{example?.detail ?? "No hay hallazgos registrados en esta pieza."}</span>
         <span className="cp-note">
-          En la mixta se ven los 52 dientes; marcas lo que encuentras en los que tiene en la boca. Ejemplo con datos inventados.
+          {dentition === "mixta"
+            ? "En la mixta se ven los 52 dientes; marcas lo que encuentras en los que tiene en la boca. Ejemplo con datos inventados."
+            : "Ejemplo con datos inventados."}
         </span>
       </div>
     </div>

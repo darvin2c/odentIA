@@ -110,7 +110,7 @@ function legendLine(kit: DocumentKit, label: string, text: string): void {
       { text: `${label}: `, face: "sansSemi" },
       { text, tone: "gray" },
     ],
-    { size: SIZE.label, leading: 1.45 },
+    { size: SIZE.label, leading: 1.38 },
   )
 }
 
@@ -120,8 +120,8 @@ function legendLine(kit: DocumentKit, label: string, text: string): void {
  */
 function legend(kit: DocumentKit, children: boolean): void {
   // La leyenda va entera en una hoja: partida no se lee.
-  kit.ensure(children ? 175 : 140)
-  kit.subheading("CÓMO SE MARCA", { size: SIZE.label, before: 10, after: 2 })
+  kit.ensure(children ? 175 : 125)
+  kit.subheading("CÓMO SE MARCA", { size: SIZE.label, before: children ? 10 : 6, after: 2 })
   legendLine(
     kit,
     "Rojo",
@@ -135,7 +135,7 @@ function legend(kit: DocumentKit, children: boolean): void {
   legendLine(
     kit,
     "Dibujos",
-    "el aspa azul es el diente que falta (DEX se extrajo por caries, DAO por otra causa, DNE no erupcionado); el cuadrado alrededor de la corona, una corona; la línea vertical en la raíz, una endodoncia (TC).",
+    "el aspa azul es el diente que falta (DEX se extrajo por caries, DAO por otra causa, DNE no erupcionado); el cuadrado alrededor de la corona, una corona; una línea vertical en cada raíz, una endodoncia (TC).",
   )
   legendLine(
     kit,
@@ -156,12 +156,12 @@ function legend(kit: DocumentKit, children: boolean): void {
     legendLine(
       kit,
       "En niños",
-      "PP pulpotomía · PC pulpectomía · la corona de acero se marca CM · la flecha en zigzag azul es el diente que está saliendo. «Temporal» en una corona o una restauración quiere decir provisional, no de leche.",
+      "PP pulpotomía (la pulpa de la corona pintada) · PC pulpectomía (una línea vertical en cada raíz) · la corona de acero se marca CM · la flecha en zigzag azul es el diente que está saliendo. «Temporal» en una corona o una restauración quiere decir provisional, no de leche.",
     )
   }
 }
 
-/** Qué dientes suele tener a cada edad (AAPD, Dental Growth and Development, 2026). */
+/** Qué dientes suele tener a cada edad (AAPD, Reference Manual, «Dental Growth and Development», 2026, p. 675). */
 const ERUPTION: Array<[string, string]> = [
   ["2½ a 5 años", "Los 20 de leche (51 a 85)"],
   [
@@ -206,8 +206,9 @@ async function blankOdontogram(children: boolean): Promise<Uint8Array> {
   drawChart(kit, odontogramSheetScene([]).rows)
   kit.gap(2)
   kit.text(NTS_SOURCE, { size: SIZE.label, tone: "gray", align: "center", leading: 1.35 })
-  ruledBoxes(kit, ["Especificaciones", "Observaciones"], 4)
-  kit.gap(8)
+  // En adultos, la hoja y su leyenda caben en una sola A4: se imprime una hoja por paciente.
+  ruledBoxes(kit, ["Especificaciones", "Observaciones"], children ? 4 : 2)
+  kit.gap(children ? 8 : 4)
   kit.blankLines([[{ label: "Examinó", span: 2 }, { label: "Colegiatura" }, { label: "Firma" }]])
   legend(kit, children)
   if (children) {
@@ -222,7 +223,7 @@ async function blankOdontogram(children: boolean): Promise<Uint8Array> {
       "Las edades son aproximadas: muchos niños sanos no siguen el calendario al pie de la letra. Marca cada diente que está en la boca, en su fila: las del medio son los de leche.",
       { size: SIZE.label, tone: "gray", leading: 1.4 },
     )
-    kit.text("Fuente de las edades: AAPD, «Dental Growth and Development».", {
+    kit.text("Fuente de las edades: AAPD, Reference Manual of Pediatric Dentistry, «Dental Growth and Development» (2026), p. 675.", {
       size: SIZE.label,
       tone: "gray",
       leading: 1.4,
@@ -233,10 +234,10 @@ async function blankOdontogram(children: boolean): Promise<Uint8Array> {
 
 /** Las fases en el orden en que se atiende, como las de la app (`treatment-templates.ts`), con sus renglones. */
 const PHASES: Array<[string, number]> = [
-  ["Urgencia", 1],
-  ["Básica", 3],
-  ["Quirúrgica", 1],
-  ["Rehabilitadora", 2],
+  ["Urgencia", 2],
+  ["Básica", 5],
+  ["Quirúrgica", 2],
+  ["Rehabilitadora", 3],
   ["Mantenimiento", 1],
 ]
 
@@ -256,7 +257,7 @@ async function blankBudget(): Promise<Uint8Array> {
   kit.titleWithDetails("Presupuesto de tratamiento", [], SIZE.titleBudget)
   kit.gap(6)
   kit.blankLines([
-    [{ label: "N.°" }, { label: "Fecha" }, { label: "Vale hasta" }],
+    [{ label: "N.°" }, { label: "Fecha" }, { label: "Vale hasta" }, { label: "Moneda" }],
     [{ label: "Paciente", span: 2 }, { label: "Edad" }, { label: "Historia clínica" }],
     [{ label: "Le atiende", span: 3 }, { label: "Colegiatura" }],
   ])
@@ -277,7 +278,7 @@ async function blankBudget(): Promise<Uint8Array> {
 
   kit.subheading("EL PLAN, POR FASES", { size: SIZE.label, before: 12, after: 2 })
   kit.text(
-    "Un renglón por tratamiento, con su diente (y sus caras, si es una restauración). La corona de un diente va después de su endodoncia.",
+    "Un renglón por tratamiento, con su diente (y sus caras, si es una restauración). Si hay dos caminos para lo mismo, escribe A o B en «Opción», cada renglón en su fase: no se suman. La corona de un diente va después de su endodoncia.",
     {
       size: SIZE.label,
       tone: "gray",
@@ -290,46 +291,23 @@ async function blankBudget(): Promise<Uint8Array> {
     kit.heading(phase, { size: SIZE.table, face: "sansBold", before: 8, after: 2 })
     kit.table({
       columns: [
-        { label: "Diente (caras)", width: 90 },
+        { label: "Diente (caras)", width: 84 },
         { label: "Tratamiento" },
-        { label: "Sesiones", width: 58, align: "center" },
-        { label: "Importe", width: 78, align: "right" },
+        { label: "Opción", width: 46, align: "center" },
+        { label: "Sesiones", width: 54, align: "center" },
+        { label: "Importe", width: 74, align: "right" },
       ],
       rows: [
-        ...Array.from({ length: lines }, () => [EMPTY, EMPTY, EMPTY, EMPTY]),
-        [EMPTY, `Subtotal ${phase.toLocaleLowerCase("es")}`, EMPTY, EMPTY],
+        ...Array.from({ length: lines }, () => [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]),
+        [EMPTY, `Subtotal ${phase.toLocaleLowerCase("es")}, sin las opciones`, EMPTY, EMPTY, EMPTY],
       ],
       rowPad: 4,
       size: SIZE.dense,
     })
   }
 
-  kit.subheading("OTRO CAMINO (ELIJA UNO; NO SE SUMAN)", { size: SIZE.label, before: 12, after: 2 })
-  kit.text(
-    "Dos formas de resolver lo mismo, cada una con su total. Lo demás del plan va igual en las dos.",
-    {
-      size: SIZE.label,
-      tone: "gray",
-      leading: 1.4,
-    },
-  )
-  kit.table({
-    columns: [
-      { label: "Opción A", pad: 9 },
-      { label: "Importe", width: 70, align: "right", pad: 18 },
-      { label: "Opción B", pad: 9 },
-      { label: "Importe", width: 70, align: "right" },
-    ],
-    rows: [
-      ...Array.from({ length: 2 }, () => [EMPTY, EMPTY, EMPTY, EMPTY]),
-      ["Subtotal A", EMPTY, "Subtotal B", EMPTY],
-    ],
-    rowPad: 4,
-    size: SIZE.dense,
-  })
-
   kit.gap(8)
-  kit.blankLines([[{ label: "Total" }, { label: "Total con la A" }, { label: "Total con la B" }]])
+  kit.blankLines([[{ label: "Total, si no hay opciones" }, { label: "Total con la A" }, { label: "Total con la B" }]])
 
   kit.subheading("CÓMO SE PAGA", { size: SIZE.label, before: 12, after: 2 })
   kit.blankLines([[{ label: "Adelanto" }, { label: "Para", span: 2 }]])
@@ -402,6 +380,8 @@ export function blankSheetBytes(sheet: BlankSheet): Promise<Uint8Array> {
 
 /** Las plantillas de las guías de odentIA, para el aviso (`guideSheetsFor` en `products.ts`). */
 export const DENTAL_GUIDE_SHEETS: GuideSheets = {
+  // Las de `apps/web/src/pages/guias/` (`blank-sheets.test.ts` lo comprueba).
+  pages: ["/guias/como-llenar-un-odontograma", "/guias/odontograma-en-ninos", "/guias/presupuesto-dental"],
   sheets: BLANK_SHEETS,
   bytes: (key) =>
     Object.hasOwn(BLANK_SHEETS, key)

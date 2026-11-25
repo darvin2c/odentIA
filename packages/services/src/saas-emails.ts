@@ -283,6 +283,8 @@ export function webContactEmail(input: {
   guideUrl: string
   /** Cómo se hace en la app, en una línea. */
   pitch: string
+  /** La demo de la guía («Pruébalo aquí»), donde se ve cómo se hace sin crear una cuenta. */
+  tryUrl?: string | null
   /** La puerta para empezar, como el botón de la web; nula si no hay. */
   start: { label: string; url: string } | null
   /** Lo que promete el plan que se muestra («los primeros USD 100 de tus agentes los pagamos nosotros»); nulo si nada. */
@@ -301,6 +303,7 @@ export function webContactEmail(input: {
       `${one ? "Va adjunta" : "Van adjuntas"} en PDF, ${one ? "lista" : "listas"} para imprimir en A4: ${input.sheets.join(" y ")}.`,
       `Los pasos para ${one ? "llenarla" : "llenarlas"} siguen en la guía: ${input.guideUrl}`,
       input.pitch,
+      ...(input.tryUrl ? [`Míralo funcionando, sin crear una cuenta: ${input.tryUrl}`] : []),
       ...(input.offer ? [input.offer] : []),
     ],
     ...(input.start ? action(input.start.label, input.start.url) : {}),

@@ -66,7 +66,7 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
           Actualizada el <time datetime={guide.updated}>{dayWords(guide.updated)}</time> · Lectura de {minutes} minutos{guide.video ? " · Con video" : ""}
         </p>
         <div class="gh-ctas rise d3">
-          <a class="btn btn-p" href="#descargar">
+          <a class="btn btn-p" href="#descargar" data-guide-download>
             <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></svg>
             {guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : `Descarga ${firstSheet?.label === "Presupuesto en blanco" ? "el presupuesto" : "la plantilla"} en PDF`}
           </a>
@@ -108,9 +108,9 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
 
     <section id="descargar" class="gstep gdown" aria-labelledby="descargar-t">
       <h2 class="gstep-t" id="descargar-t">{guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : "Descarga la plantilla en PDF"}</h2>
-      <p>Para imprimir en A4 y llenar a mano. Llevan al pie «Plantilla gratis de odentIA · odentia32.com».</p>
+      <p>Para imprimir en A4 y llenar a mano. {guide.sheets.length > 1 ? "Llevan" : "Lleva"} al pie «Plantilla gratis de odentIA · odentia32.com».</p>
       <GuideDownloads
-        client:visible
+        client:idle
         sheets={sheets}
         page={path}
         ask={invitation ? "correo" : "boton"}
@@ -120,7 +120,7 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
     </section>
   </article>
 
-  <section class="section section-white gtry" aria-labelledby="pruebalo-t">
+  <section id="pruebalo" class="section section-white gtry" aria-labelledby="pruebalo-t">
     <div class="wrap gtry-in">
       <div class="gtry-copy">
         <span class="tag">[ Pruébalo aquí ]</span>
@@ -151,6 +151,19 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
   </section>
 
   <GuideStart title={startTitle} page={path} />
+  <script>
+    // El botón de arriba (sin JavaScript, solo baja a las plantillas): con una sola plantilla la
+    // descarga ahí mismo, con su aviso; con varias, lleva a elegir. El foco queda en la plantilla.
+    document.querySelector("[data-guide-download]")?.addEventListener("click", (event) => {
+      const cards = [...document.querySelectorAll<HTMLAnchorElement>(".gd-card")]
+      const first = cards[0]
+      if (!first) return
+      event.preventDefault()
+      if (cards.length === 1) first.click()
+      first.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
+      first.focus({ preventScroll: true })
+    })
+  </script>
 </Base>
 
 <style>

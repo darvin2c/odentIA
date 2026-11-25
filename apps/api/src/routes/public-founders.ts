@@ -55,6 +55,20 @@ const MAX_CONTACTS = 3
  * - `GET /invitation/:token`: lo que muestra «Crea tu cuenta» con una
  *   invitación. Sin invitación vigente responde 404 sin decir por qué.
  */
+/** Los correos de la solicitud que siguen saliendo después de responder. */
+const pendingMail = new Set<Promise<void>>()
+
+function track(work: () => Promise<void>): void {
+  const done = work().catch(() => undefined)
+  pendingMail.add(done)
+  void done.finally(() => pendingMail.delete(done))
+}
+
+/** Espera los correos que quedaron saliendo (las pruebas, antes de mirar el buzón). */
+export async function settleFounderMail(): Promise<void> {
+  while (pendingMail.size) await Promise.all([...pendingMail])
+}
+
 export function createPublicFoundersRoute(deps: {
   ownerDb: Db
   mailer: Mailer
@@ -191,8 +205,9 @@ export function createPublicFoundersRoute(deps: {
     // API de antes la ignora mientras la web nueva ya se publicó (ADR 0215).
     const sourcePage = webPageOf(c.req.query("desde"))
     const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product, { sourcePage }))
-    // La copia sale una sola vez: si ya estaba en la lista, no se repite.
-    if (!result.existing) {
+    // La copia sale una sola vez: si ya estaba en la lista, no se repite. Los correos salen después
+    // de responder: si la respuesta esperara por ellos, lo que tarda diría si el correo ya pidió.
+    if (!result.existing) track(async () => {
       try {
         await deps.mailer.send({
           to: parsed.data.email,
@@ -212,7 +227,7 @@ export function createPublicFoundersRoute(deps: {
       // Aparte de la copia: que la de quien pidió rebote no deja al equipo sin saberlo.
       const team = deps.teamEmailOf?.(product)
       if (team) await noticeTeam(team, result.id, result.clientId, product, parsed.data)
-    }
+    })
     // La misma respuesta si ya estaba en la lista: la web no dice si un correo ya pidió entrar,
     // ni promete la copia (ADR 0215).
     return c.json({ ok: true, answerDays: result.answerDays }, 201)
@@ -288,6 +303,7 @@ export function createPublicFoundersRoute(deps: {
           sheets: result.sheets.map((sheet) => sheet.title),
           guideUrl: `${site ?? ""}${parsed.data.page}`,
           pitch: guide.pitch(result.sheets.map((sheet) => sheet.key)),
+          tryUrl: site ? `${site}${parsed.data.page}#pruebalo` : null,
           start,
           offer,
           replyTo: deps.replyToOf?.(product),

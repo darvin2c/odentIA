@@ -105,6 +105,7 @@ export async function submitWebContact(
 ): Promise<WebContactResult> {
   const guide = guideSheetsFor(product)
   if (!guide) throw new ServiceError("NOT_FOUND", 404, "Esta web no tiene guías")
+  if (!guide.pages.includes(input.page)) throw invalidField("page", "Esa guía no existe")
   const sheets: WebContactSheet[] = []
   for (const key of input.sheets) {
     const sheet = Object.hasOwn(guide.sheets, key) ? guide.sheets[key] : undefined

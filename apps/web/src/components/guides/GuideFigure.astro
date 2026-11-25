@@ -88,11 +88,15 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
 ) : (
   <figure class="gf gf-table">
     <div class="gf-scroll" tabindex="0" role="region" aria-label={figure.head.join(" · ")}>
-      <table>
+      <table class:list={{ "gf-stack": figure.head.length > 3 }}>
         <thead><tr>{figure.head.map((cell) => <th scope="col">{cell}</th>)}</tr></thead>
         <tbody>
           {figure.rows.map((row) => (
-            <tr>{row.map((cell) => <td><RichText text={cell} /></td>)}</tr>
+            <tr>
+              {row.map((cell, index) => (
+                <td data-label={figure.head[index]} data-empty={cell.trim() ? undefined : ""}><RichText text={cell} /></td>
+              ))}
+            </tr>
           ))}
         </tbody>
       </table>
@@ -164,7 +168,13 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
   @media (max-width: 640px) {
     table { font-size: 14.5px; }
     th, td { padding: 10px 12px; }
-    /* Las de muchas columnas (el presupuesto) piden su ancho y se desplazan dentro. */
-    table:has(th:nth-child(4)) { min-width: 620px; }
+    /* Las de muchas columnas (el presupuesto): cada renglón es una ficha con el nombre de cada dato,
+       para que el importe se vea sin desplazar de lado. */
+    .gf-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .gf-stack tr { display: block; border-top: 1px solid var(--line); padding: 8px 0; }
+    .gf-stack tbody tr:first-child { border-top: 0; }
+    .gf-stack td { display: grid; grid-template-columns: 6.5em 1fr; gap: 10px; border-top: 0; padding: 4px 14px; }
+    .gf-stack td::before { content: attr(data-label); font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .gf-stack td[data-empty] { display: none; }
   }
 </style>

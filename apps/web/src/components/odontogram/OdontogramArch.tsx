@@ -15,7 +15,8 @@ import { Fragment, type KeyboardEvent, useId, useLayoutEffect, useRef, useState 
 import "./odontogram.css"
 
 /** Los hallazgos que muestra la web de ejemplo, con su dibujo de la norma. */
-export type ExampleFinding = "caries" | "ausente" | "corona" | "restauracion"
+/** Lo que dibuja el ejemplo: «sigla» es lo que solo lleva su sigla en el recuadro (FFP), con una marca. */
+export type ExampleFinding = "caries" | "ausente" | "corona" | "restauracion" | "sellante" | "saliendo" | "sigla"
 
 /** Rojo y azul de la norma (NTS 188), los mismos de la app. */
 const RED = "#dc2626"
@@ -74,7 +75,8 @@ function Tooth({ tooth, finding }: { tooth: number; finding?: ExampleFinding }) 
       <path d={silhouette.crown} fill="#fff" stroke="#8a97ab" strokeLinejoin="round" />
       <g clipPath={`url(#${clipId})`}>
         {zones.map((zone) => {
-          const filled = paint && zone === central && (finding === "caries" || finding === "restauracion")
+          const filled =
+            paint && zone === central && (finding === "caries" || finding === "restauracion" || finding === "sellante")
           return (
             <polygon
               key={zone.surface}
@@ -94,6 +96,11 @@ function Tooth({ tooth, finding }: { tooth: number; finding?: ExampleFinding }) 
         </g>
       ) : null}
       {finding === "corona" ? <rect {...CROWN_SQUARE} fill="none" stroke={BLUE} strokeWidth={1} /> : null}
+      {/* El diente que sale: la flecha en zigzag azul, como en la hoja. */}
+      {finding === "saliendo" ? (
+        <polyline points="5,12.5 8,9.5 11,12.5 14,9.5 17,12.5" fill="none" stroke={BLUE} strokeWidth={1} strokeLinejoin="round" />
+      ) : null}
+      {finding === "sigla" ? <circle cx={17.5} cy={2.5} r={1.4} fill={BLUE} /> : null}
       {groovesFor(type).map((d) => (
         <path key={d} d={d} fill="none" stroke="#9ca3af" strokeWidth={0.45} opacity={0.7} />
       ))}

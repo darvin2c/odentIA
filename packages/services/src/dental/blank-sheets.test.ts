@@ -1,5 +1,5 @@
 /** Las plantillas de las guías: A4, sin datos de nadie, siempre el mismo archivo y al día en la web. */
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { PDFDocument } from "pdf-lib"
 import { describe, expect, it } from "vitest"
 import { guideSheetsFor } from "../products.js"
@@ -16,6 +16,8 @@ describe("las plantillas en blanco", () => {
     for (const sheet of BLANK_SHEET_KEYS) {
       const pdf = await PDFDocument.load(await renderBlankSheet(sheet))
       expect(pdf.getPageCount(), sheet).toBeLessThanOrEqual(2)
+      // El odontograma de adultos, con su leyenda, en una sola hoja: se imprime una por paciente.
+      if (sheet === "odontograma") expect(pdf.getPageCount()).toBe(1)
       const { width, height } = pdf.getPage(0).getSize()
       expect([Math.round(width), Math.round(height)], sheet).toEqual([595, 842])
       expect(pdf.getTitle(), sheet).toBe(BLANK_SHEETS[sheet].title)
@@ -48,6 +50,11 @@ describe("las plantillas en blanco", () => {
     expect(guideSheetsFor("medical")).toBeNull()
     expect(guideSheetsFor("optical")).toBeNull()
     await expect(DENTAL_GUIDE_SHEETS.bytes("../secreto")).rejects.toThrow()
+    // Las páginas que se aceptan de origen son las guías que tiene la web.
+    const pages = readdirSync(new URL("../../../../apps/web/src/pages/guias/", import.meta.url))
+      .filter((file) => file.endsWith(".astro") && file !== "index.astro")
+      .map((file) => `/guias/${file.replace(/\.astro$/, "")}`)
+    expect([...DENTAL_GUIDE_SHEETS.pages].sort()).toEqual(pages.sort())
     await expect(DENTAL_GUIDE_SHEETS.bytes("constructor")).rejects.toThrow()
   })
 })

@@ -4,6 +4,8 @@
  * que no tiene guías, ninguna.
  */
 export interface GuideSheets {
+  /** Las páginas de las guías de su web: lo único que el aviso y la solicitud guardan de origen. */
+  readonly pages: readonly string[]
   /** Cada plantilla por su clave («odontograma»): el archivo adjunto y su nombre en el correo. */
   readonly sheets: Readonly<Record<string, { readonly file: string; readonly title: string }>>
   /** El PDF de una plantilla, dibujado una sola vez por proceso. */

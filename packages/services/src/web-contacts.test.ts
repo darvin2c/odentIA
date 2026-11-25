@@ -158,6 +158,10 @@ describe("el correo del aviso", () => {
     await expect(
       submitWebContact(ownerDb, contact("qa.nada@example.com", { sheets: ["receta"] }), "dental"),
     ).rejects.toMatchObject({ status: 400, fields: { sheets: expect.any(String) } })
+    // Una guía que la web no tiene: no se manda un enlace roto ni queda de origen.
+    await expect(
+      submitWebContact(ownerDb, contact("qa.otra@example.com", { page: "/guias/no-existe" }), "dental"),
+    ).rejects.toMatchObject({ status: 400, fields: { page: expect.any(String) } })
   })
 
   it("una vez por buzón al día, aunque se escriba de otra forma", async () => {
@@ -324,6 +328,11 @@ describe("la solicitud con su página", () => {
     const { id } = await submitWaitlistRequest(ownerDb, request("qa.rara@example.com"), "dental", {
       sourcePage: "<script>",
     })
+    const { id: other } = await submitWaitlistRequest(ownerDb, request("qa.otra.guia@example.com"), "dental", {
+      sourcePage: "/guias/llama-urgente",
+    })
+    const [unknown] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, other))
+    expect(unknown?.sourcePage).toBeNull()
     const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
     expect(row?.sourcePage).toBeNull()
   })

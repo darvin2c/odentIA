@@ -75,7 +75,7 @@ export const guide: Guide = {
           ],
           [
             "Falta el 47",
-            "Un **aspa azul**, de la corona a la raíz. En el recuadro, por qué falta: **DEX** (se extrajo por caries) o **DAO** (por otra causa). Si nunca salió, **DNE**.",
+            "Un **aspa azul**, de la corona a la raíz. En el recuadro, por qué falta: **DEX** (se extrajo por caries) o **DAO** (por otra causa). Si no salió, **DNE**; si la radiografía la muestra retenida en el hueso pasada su edad, es una **impactación**: solo **I** en el recuadro, sin aspa.",
           ],
           [
             "Corona en el 11",

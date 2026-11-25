@@ -262,16 +262,30 @@ function arrowHead(tip: SheetPoint, from: SheetPoint, paint: string): SheetShape
   }
 }
 
-/** Lo propio de cada hallazgo sobre su pieza: ausente, corona, endodoncia, giro… */
+/** El centro de cada raíz de la pieza, como se dibujan: triángulos iguales bajo la corona. */
+function rootCenters(g: CrownGeom, roots: number): number[] {
+  return Array.from({ length: roots }, (_, r) => g.x + ((r + 0.5) * CROWN_W) / roots)
+}
+
+/**
+ * Lo propio de cada hallazgo sobre su pieza: ausente, corona, endodoncia, giro… Lo que va «en la
+ * raíz» va dentro de cada una (NTS 188: la endodoncia, una línea vertical en la raíz): con dos
+ * raíces, el centro de la pieza es la furca, entre las dos.
+ */
 function crownSymbols(
   graphic: GraphicEntry[],
   g: CrownGeom,
   upper: boolean,
   mesialOnRight: boolean,
+  roots: number,
 ): SheetShape[] {
   const { x, y, cx } = g
   const yb = y + CROWN_H
   const mid = y + CROWN_H / 2
+  const centers = rootCenters(g, roots)
+  // El espigo va en una sola raíz: la del centro con una o tres, la distal con dos (la de la
+  // muela de abajo que lo recibe).
+  const postX = roots === 2 ? (centers[mesialOnRight ? 0 : 1] ?? cx) : cx
   const out: SheetShape[] = []
   for (const { entry, paint } of graphic) {
     switch (entry.condition) {
@@ -313,9 +327,9 @@ function crownSymbols(
         out.push(
           {
             kind: "line",
-            x1: cx,
+            x1: postX,
             y1: upper ? y - ROOT_LEN : y,
-            x2: cx,
+            x2: postX,
             y2: upper ? yb : yb + ROOT_LEN,
             stroke: paint,
             strokeWidth: 1.8,
@@ -332,15 +346,16 @@ function crownSymbols(
         )
         break
       case "root_canal_treatment":
-        out.push({
-          kind: "line",
-          x1: cx,
-          y1: upper ? y - ROOT_LEN : y,
-          x2: cx,
-          y2: upper ? yb : yb + ROOT_LEN,
-          stroke: paint,
-          strokeWidth: 2,
-        })
+        for (const rx of centers)
+          out.push({
+            kind: "line",
+            x1: rx,
+            y1: upper ? y - ROOT_LEN : y,
+            x2: rx,
+            y2: upper ? yb : yb + ROOT_LEN,
+            stroke: paint,
+            strokeWidth: 2,
+          })
         break
       case "pulpotomy":
         out.push({
@@ -740,7 +755,7 @@ export function odontogramSheetRow(
         stroke: paint,
         strokeWidth: 2,
       })
-    shapes.push(...crownSymbols(graphic, g, upper, i < n / 2))
+    shapes.push(...crownSymbols(graphic, g, upper, i < n / 2, roots))
     shapes.push(...drawingStrokes(graphic, g, upper))
     for (const { entry, paint } of graphic) {
       if (entry.condition !== "extruded_tooth" && entry.condition !== "intruded_tooth") continue

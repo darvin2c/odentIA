@@ -106,15 +106,15 @@ const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = {
 }
 
 /** Las plantillas en blanco de las guías de la web de cada producto (ADR 0215); sin guías, ninguna. */
-const GUIDE_SHEETS: Record<ClinicalProduct, GuideSheets | null> = {
-  dental: DENTAL_GUIDE_SHEETS,
-  medical: null,
-  optical: null,
-}
-
 /** Las plantillas que adjunta el aviso de las guías de la web de un producto, si tiene guías. */
 export function guideSheetsFor(product: ClinicalProduct): GuideSheets | null {
-  return GUIDE_SHEETS[product]
+  // El mapa se arma al pedirlo: las plantillas importan el kit, que vuelve a pasar por aquí.
+  const sheets: Record<ClinicalProduct, GuideSheets | null> = {
+    dental: DENTAL_GUIDE_SHEETS,
+    medical: null,
+    optical: null,
+  }
+  return sheets[product]
 }
 
 /** La guía de la Ayuda de un producto, sin clínica (las mediciones). */

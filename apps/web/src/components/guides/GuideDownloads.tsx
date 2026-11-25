@@ -27,14 +27,20 @@ type Props = {
  */
 type Phase = "form" | "sending" | "sent" | "recent" | "doubt"
 
-const FAILED = "No pudimos enviarte el correo. Intenta nuevamente en unos minutos."
+const FAILED = "No pudimos enviarte el correo. Intenta nuevamente en unos minutos; tus plantillas ya bajaron."
+const BUSY = "Ahora no pudimos enviarlo: hay muchos pedidos. Prueba de nuevo en unos minutos; tus plantillas ya bajaron."
+
+/** Lo que se dice bajo el campo: un error del correo (`field`) o algo que no es suyo. */
+type Problem = { text: string; field: boolean }
+
+const ERROR_ID = "gd-email-error"
 
 export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: Props) {
   const [downloaded, setDownloaded] = useState<Sheet | null>(null)
   const [phase, setPhase] = useState<Phase>("form")
   const [email, setEmail] = useState("")
   const [sentTo, setSentTo] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Problem | null>(null)
   const [trap, setTrap] = useState("")
   const inputRef = useRef<HTMLInputElement | null>(null)
   const doneRef = useRef<HTMLParagraphElement | null>(null)
@@ -54,12 +60,12 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
     if (phase === "sending") return
     const value = email.trim()
     if (!value) {
-      setError("Escribe tu correo")
+      setError({ text: "Escribe tu correo", field: true })
       inputRef.current?.focus()
       return
     }
     if (!EMAIL.test(value)) {
-      setError("Escribe un correo válido, como nombre@clinica.com")
+      setError({ text: "Escribe un correo válido, como nombre@clinica.com", field: true })
       inputRef.current?.focus()
       return
     }
@@ -74,8 +80,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
       })
     } catch {
       setPhase("form")
-      setError("No hay conexión. Revisa tu internet e intenta nuevamente.")
-      inputRef.current?.focus()
+      setError({ text: "No hay conexión. Revisa tu internet e intenta nuevamente.", field: false })
       return
     }
     const payload = (await res.json().catch(() => null)) as {
@@ -97,15 +102,21 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
       return
     }
     setPhase("form")
-    // Lo que dice el servidor de un dato o de un límite; lo demás (una API que todavía no tiene
-    // el aviso, un error), el mensaje de siempre.
-    setError(
-      payload?.error?.fields?.email ??
-        (res.status === 400 || res.status === 429 ? payload?.error?.message : undefined) ??
-        FAILED,
-    )
-    inputRef.current?.focus()
+    // Un correo que el servidor rechaza es del campo; un tope o un error no son de la persona: no
+    // se marcan en el campo ni lo llevan ahí (lo que escribió está bien, y sus plantillas, bajadas).
+    const rejected = payload?.error?.fields?.email
+    if (rejected) {
+      setError({ text: rejected, field: true })
+      inputRef.current?.focus()
+      return
+    }
+    setError({ text: res.status === 429 ? BUSY : FAILED, field: false })
   }
+
+  // En el teléfono el error queda bajo el botón: se trae a la vista cuando aparece.
+  useEffect(() => {
+    if (error) document.getElementById(ERROR_ID)?.scrollIntoView({ block: "nearest" })
+  }, [error])
 
   function change() {
     changing.current = true
@@ -113,7 +124,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
   }
 
   const showForm = phase === "form" || phase === "sending"
-  const errorId = "gd-email-error"
+  const errorId = ERROR_ID
   return (
     <div className="gd">
       <div className="gd-cards">
@@ -167,7 +178,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                         setEmail(event.target.value)
                         if (error) setError(null)
                       }}
-                      aria-invalid={error ? true : undefined}
+                      aria-invalid={error?.field ? true : undefined}
                       aria-describedby={error ? errorId : undefined}
                     />
                   </label>
@@ -181,7 +192,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                   <input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} />
                 </label>
                 <p className="gd-error" id={errorId} role="alert">
-                  {error ?? ""}
+                  {error?.text ?? ""}
                 </p>
               </form>
               {showForm ? null : (
@@ -189,7 +200,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                   <p ref={doneRef} tabIndex={-1}>
                     {phase === "sent" ? (
                       <>
-                        <b>Listo, te escribimos a {sentTo}.</b> Te llegan en unos minutos, con los PDF adjuntos.
+                        <b>Listo, te escribimos a {sentTo}.</b> En unos minutos te llegan las plantillas de esta guía en PDF y cómo se hace en odentIA.
                       </>
                     ) : phase === "recent" ? (
                       <>

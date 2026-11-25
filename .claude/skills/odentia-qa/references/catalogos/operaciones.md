@@ -475,6 +475,9 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Un correo a una dirección que escribió el visitante sale una vez por buzón y día (la «+etiqueta» y los puntos de Gmail no cuentan como otro), con los topes guardados en la base; el cuerpo es solo JSON.
 - [ ] La respuesta y la pantalla son las mismas si ese correo ya es cliente o ya pidió entrar.
 - [ ] Un correo que no se sabe si salió no se ofrece reintentar.
+- [ ] La respuesta tarda lo mismo si el correo ya es cliente o ya pidió entrar: los correos que dependen de eso salen después de responder. Ya falló (25 nov 2026): 20 ms si ya había pedido, 290 ms si era nuevo.
+- [ ] La página que manda el navegador se acepta solo si existe (las guías que la API conoce); un texto con forma de ruta que no es una página no llega a un correo ni a la ficha.
+- [ ] Un límite o un fallo del servidor se muestra como mensaje de la caja, no como error del campo.
 - [ ] La pantalla dice «te enviamos» solo si el servidor dice que salió; una solicitud que ya estaba no promete una copia.
 - [ ] Nada de la persona va en la dirección de una página (caché del borde, registros): lo que se prellena va en el fragmento y se borra al leerlo.
 - [ ] Lo que manda el navegador como origen (la página) se guarda comprobado y corto; nunca un texto libre que se muestre como título o llegue a un modelo.
@@ -489,7 +492,7 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 **Dónde:** `apps/web/astro.config.mjs` (mapa del sitio), `apps/web/src/lib/product-pages.json`, `apps/web/src/lib/product.ts` (`servesPage`), `apps/web/src/lib/guides/`.
 
 - [ ] Cada guía sale en el mapa del sitio con su dirección real y la fecha de su archivo, nunca como `/[slug]`.
-- [ ] Una página que es solo de un producto da 404 en las otras webs y no sale en su mapa; lo de `public/` se sirve en todas.
+- [ ] Una página que es solo de un producto da 404 en las otras webs y no sale en su mapa; lo de `public/` se sirve en todas. En local, la otra web se arma con su producto: un Host distinto contra el mismo servidor sirve siempre la de odentIA y no prueba nada.
 
 ## O-FRM-01 Formularios: plantilla, respuesta y lo que declara el paciente
 

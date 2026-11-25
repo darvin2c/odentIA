@@ -13,7 +13,7 @@ import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app.js"
-import { createPublicFoundersRoute } from "./public-founders.js"
+import { createPublicFoundersRoute, settleFounderMail } from "./public-founders.js"
 
 /**
  * Fundadores contra la app real (`createApp`, issue 165): la solicitud de la
@@ -63,6 +63,13 @@ function buildApp(auth: Auth, mailer = recordingMailer()): Hono {
     productDomains: { medical: "latidia.localhost", optical: "vistia.localhost" },
     registrationRemoteAddress: () => `10.0.0.${Math.floor(Math.random() * 250)}`,
   })
+}
+
+/** La respuesta, después de que salen los correos que la ruta manda al terminar. */
+async function withMail(res: Response | Promise<Response>): Promise<Response> {
+  const done = await res
+  await settleFounderMail()
+  return done
 }
 
 function recordingMailer() {
@@ -151,11 +158,11 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   const mailer = recordingMailer()
   const app = buildApp(authFor(null, { calls: 0 }), mailer)
   const send = (payload: unknown) =>
-    app.request("/api/public/founders/waitlist", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
-      body: JSON.stringify(payload),
-    })
+    withMail(app.request("/api/public/founders/waitlist", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+        body: JSON.stringify(payload),
+      }))
   const res = await send(request("ana@sonrisa.test"))
   expect(res.status).toBe(201)
   expect(res.headers.get("access-control-allow-origin")).toBe("https://www.odentia.localhost")
@@ -187,7 +194,7 @@ describe("el aviso al equipo de cada solicitud nueva", () => {
     })
   }
   const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>
-    route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+    withMail(route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }))
   const idOf = async (email: string) =>
     (await ownerDb.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.id
   const clientOf = async (email: string) =>
@@ -361,11 +368,11 @@ it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", 
 describe("las guías de la web (ADR 0215)", () => {
   const GUIDE = "/guias/como-llenar-un-odontograma"
   const post = (app: Hono, path: string, payload: unknown) =>
-    app.request(path, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
-      body: JSON.stringify(payload),
-    })
+    withMail(app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+        body: JSON.stringify(payload),
+      }))
 
   it("la solicitud enviada desde una guía guarda su página; si ya estaba en la lista, la respuesta es la misma", async () => {
     const mailer = recordingMailer()
@@ -405,6 +412,8 @@ describe("las guías de la web (ADR 0215)", () => {
     expect(mail.html).toContain("Pide tus USD 100")
     expect(mail.html).toContain("https://www.odentia.localhost/solicitar-invitacion#correo=qa.milagros%40example.com")
     expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}`)
+    // Lo que promete el aviso («te mostramos cómo»): la demo de la guía, sin cuenta.
+    expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}#pruebalo`)
     const again = await post(app, "/api/public/founders/contact", body)
     expect(again.status).toBe(200)
     expect(await again.json()).toEqual({ ok: true, sent: false, reason: "reciente" })

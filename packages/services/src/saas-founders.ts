@@ -28,6 +28,7 @@ import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { orgProduct } from "./locale.js"
+import { guideSheetsFor } from "./products.js"
 import { limaDate } from "./peru-business-days.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 
@@ -201,7 +202,9 @@ export async function submitWaitlistRequest(
     .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
     .limit(1)
   if (alive) return { id: alive.id, clientId: alive.clientId, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
-  const sourcePage = webPageOf(options.sourcePage)
+  // Solo una guía que existe: la administración la muestra como enlace (ADR 0215).
+  const page = webPageOf(options.sourcePage)
+  const sourcePage = page && guideSheetsFor(product)?.pages.includes(page) ? page : null
   const clientId = await clientForWaitlistRequest(tx, { ...data, product, sourcePage })
   const [row] = await tx
     .insert(saasWaitlistRequest)

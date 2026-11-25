@@ -52,7 +52,7 @@ export const guide: Guide = {
           ["12 a 14 años", "Salen los segundos molares (17, 27, 37, 47)"],
           ["17 años en adelante", "Pueden salir los terceros molares (18, 28, 38, 48)"],
         ],
-        caption: "Fuente de las edades: AAPD, «Dental Growth and Development».",
+        caption: "Fuente de las edades: AAPD, Reference Manual of Pediatric Dentistry, «Dental Growth and Development» (2026), p. 675.",
       },
     },
     {
@@ -70,7 +70,7 @@ export const guide: Guide = {
       title: "Marca como en adultos, con lo propio de los niños",
       text: ["Los colores y las siglas son los mismos que en adultos. En los niños verás además:"],
       list: [
-        "la **pulpotomía** (PP) y la **pulpectomía** (PC) en dientes de leche;",
+        "la **pulpotomía**: la pulpa de la corona pintada y **PP**; la **pulpectomía**: una línea vertical en cada raíz, como la endodoncia, y **PC** (en azul si está bien, en rojo si no);",
         "la **corona de acero** en un molar de leche, que se marca como corona metálica (**CM**), en azul si está bien;",
         "el **sellante** (S) y las **fosas y fisuras profundas** (FFP);",
         "el diente que **está saliendo**: una flecha en zigzag, en azul, hacia donde sale.",
