@@ -424,7 +424,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-firmar-sin-decidir",
         q: "¿Cómo firmo si Clío dejó algo sin confirmar?",
-        a: "Como siempre, con «Finalizar y firmar»: trae lo que propone Clío en «Lo que propone Clío», marcado, y lo de cada ficha en el bloque de esa ficha. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que cambia lo que ya escribiste viene desmarcado: márcalo solo si va. Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). Cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; desmárcala para terminarla después.",
+        a: "Como siempre, con «Finalizar y firmar»: trae lo que propone Clío en «Lo que propone Clío», marcado, y lo de cada ficha en el bloque de esa ficha. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que cambia lo que ya escribiste viene desmarcado: márcalo solo si va. Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). Cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; desmárcala para terminarla después. Lo que dijo de su salud y una alergia que nombró no se pierden si firmas sin revisarlos: siguen avisándose con su fecha («dijo metamizol el 25 nov, sin confirmar») hasta que alguien los revise en su ficha («Registrar» o «No la registro»).",
         forms: ["como firmo si clio dejo algo sin confirmar", "firmar con propuestas de clio pendientes", "clio dejo sugerencias y quiero firmar", "que pasa con lo propuesto si firmo"],
         area: "clinica",
         needs: "clinical.write",
