@@ -366,7 +366,7 @@ describe("la franja avisa lo dicho sin confirmar", () => {
           rows: [{ key: "allergies", label: "Alergias", value: "no sabe" }],
         },
       ],
-      [{ substance: "Ibuprofeno", substanceSystem: "atc", substanceCode: "M01AE01", name: "ibuprofeno", severity: null, at: "2026-11-25T15:00:00.000Z", open: true }],
+      [{ suggestionId: "s-1", substance: "Ibuprofeno", substanceSystem: "atc", substanceCode: "M01AE01", name: "ibuprofeno", severity: null, at: "2026-11-25T15:00:00.000Z", open: true }],
     )
     expect(alerts.map((alert) => [alert.label, alert.tone])).toEqual([["Alergias: dijo ibuprofeno, sin confirmar", "warning"]])
   })

@@ -113,6 +113,8 @@ export async function saidHealthRisks(
 
 /** Una alergia que propuso Clío y nadie confirmó: la sustancia como la dijo. */
 export interface SaidAllergy {
+  /** Su propuesta: con ella se registra o se deja de avisar en una atención firmada. */
+  suggestionId: string
   /** Lo que se compara con la receta: la sustancia de la lista, o como la dijo. */
   substance: string
   substanceSystem: string | null
@@ -133,7 +135,7 @@ export interface SaidAllergy {
  */
 export async function saidAllergies(tx: Db, orgId: string, patientId: string): Promise<SaidAllergy[]> {
   const rows = await tx
-    .select({ payload: encounterDictationSuggestion.payload, updatedAt: encounterDictationSuggestion.updatedAt, encounterStatus: encounter.status })
+    .select({ id: encounterDictationSuggestion.id, payload: encounterDictationSuggestion.payload, updatedAt: encounterDictationSuggestion.updatedAt, encounterStatus: encounter.status })
     .from(encounterDictationSuggestion)
     .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
     .where(
@@ -156,6 +158,7 @@ export async function saidAllergies(tx: Db, orgId: string, patientId: string): P
     if (!substance || seen.has(key)) continue
     seen.add(key)
     out.push({
+      suggestionId: row.id,
       substance,
       substanceSystem: text(payload["substanceSystem"]) || null,
       substanceCode: text(payload["substanceCode"]) || null,

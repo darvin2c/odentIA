@@ -3922,7 +3922,9 @@ export async function finalizeEncounter(
   if (!row) throw notFound("Atención")
   // Lo que Clío proponía y nadie confirmó al firmar ya no tiene dónde entrar: se descarta, para que
   // ninguna propuesta quede «lista» en una atención firmada (QA del 21 nov). Lo de su salud no: lo
-  // dicho sigue a la vista, sin revisar, hasta que alguien lo revise con la persona.
+  // dicho sigue a la vista, sin revisar, hasta que alguien lo revise con la persona. Tampoco una
+  // alergia con su sustancia: perderla dejaba la próxima visita en «Niega alergias» y la receta del
+  // mismo medicamento sin aviso (QA del 25 nov).
   await tx
     .update(encounterDictationSuggestion)
     .set({ status: "descartada", note: "La atención se firmó sin confirmarla.", decidedBy: actorUserId, decidedAt: now, updatedAt: now })
@@ -3932,6 +3934,7 @@ export async function finalizeEncounter(
         eq(encounterDictationSuggestion.encounterId, encounterId),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
         ne(encounterDictationSuggestion.kind, "salud"),
+        sql`not (${encounterDictationSuggestion.kind} = 'alergia' and coalesce(${encounterDictationSuggestion.payload}->>'substance', '') <> '')`,
       ),
     )
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,

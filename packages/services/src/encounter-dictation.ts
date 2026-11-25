@@ -3540,6 +3540,58 @@ export async function discardSaidHealth(tx: Db, orgId: string, actorUserId: stri
 }
 
 /**
+ * La alergia que oyó Clío en una atención ya firmada y nadie confirmó (QA del 25 nov): sigue
+ * avisándose con su fecha hasta que alguien la registre o diga que no la registra, como lo dicho de
+ * su salud. Lo decide quien escribe en la historia (`clinical.write`, la guarda de la ruta).
+ */
+async function lockSignedSaidAllergy(tx: Db, orgId: string, patientId: string, id: string) {
+  const [row] = await tx
+    .select({ suggestion: encounterDictationSuggestion, encounterStatus: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.kind, "alergia"),
+      ),
+    )
+    .for("update", { of: encounterDictationSuggestion })
+    .limit(1)
+  if (!row || typeof row.suggestion.payload["substance"] !== "string") throw notFound("La alergia que dijo")
+  if (row.suggestion.status !== "lista" && row.suggestion.status !== "por_revisar") throw conflict("SUGGESTION_DECIDED", "Esto ya se revisó o se descartó")
+  if (row.encounterStatus !== "finalizada") throw conflict("ENCOUNTER_STILL_OPEN", "Esto se revisa en su atención, que sigue abierta")
+  return row.suggestion
+}
+
+/** «Registrar» la alergia que dijo en una atención ya firmada: entra a sus alergias como dicha. */
+export async function confirmSaidAllergy(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
+  const row = await lockSignedSaidAllergy(tx, orgId, patientId, id)
+  const payload = splitMeta(row.payload).data
+  const created = await addPatientAllergy(tx, orgId, actorUserId, patientId, {
+    substance: String(payload["substance"]),
+    substanceSystem: (payload["substanceSystem"] as string | undefined) ?? null,
+    substanceCode: (payload["substanceCode"] as string | undefined) ?? null,
+    severity: (payload["severity"] as string | undefined) ?? null,
+    reaction: (payload["reaction"] as string | undefined) ?? null,
+  })
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "confirmada", entityId: created.id, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, row.id))
+}
+
+/** «No la registro»: la alergia que dijo en una atención firmada deja de avisarse. */
+export async function discardSaidAllergy(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
+  const row = await lockSignedSaidAllergy(tx, orgId, patientId, id)
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, row.id))
+}
+
+/**
  * Lo que oyó Clío de su salud, con las claves de la entrevista de su producto (la anestesia, el
  * corazón, el embarazo, lo de un niño; en latidIA, sus hábitos): la misma regla que la declaración
  * al confirmarla (`ProductInterview.declared`). «Corregir algo» deja eso puesto en Antecedentes.

@@ -10,6 +10,7 @@ import { addDeclaredAllergies, anesthesiaRisksOf, extractionRisksOf, getPatientH
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { finalizeEncounter } from "./encounters.js"
 import {
+  confirmSaidAllergy,
   confirmDictationHealth,
   confirmSaidHealth,
   discardPendingDictation,
@@ -820,6 +821,27 @@ describe("revisión del 25 nov · lo registrado corrige lo pendiente, no lo deja
     })
     const [said] = await health()
     expect(said?.payload["anticoagulants"]).toMatchObject({ state: "recorded", detail: "apixabán" })
+    await enable(false)
+  })
+})
+
+describe("QA del 25 nov · la alergia dicha no se pierde al firmar", () => {
+  it("firmada sin confirmar, sigue avisando con su fecha; «Registrar» la deja en sus alergias", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "metamizol", reaction: "se le cerró la garganta" }, sourceText: "con el metamizol se le cerró la garganta" }],
+      transcript: "Con el metamizol se le cerró la garganta.",
+    })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const [said] = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said).toMatchObject({ open: false })
+    expect(said?.name.toLocaleLowerCase("es")).toBe("metamizol")
+    await fx.run((tx) => confirmSaidAllergy(tx, ...fx.args, said!.suggestionId))
+    expect(await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))).toEqual([])
+    const allergies = await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.patientId, fx.patient.id))
+    expect(allergies.map((row) => row.substance.toLocaleLowerCase("es"))).toContain("metamizol")
     await enable(false)
   })
 })

@@ -334,6 +334,7 @@ export interface PatientHealth {
 
 /** Una alergia que propuso Clío y nadie confirmó (`saidAllergies` del servidor). */
 export interface SaidAllergy {
+  suggestionId: string
   substance: string
   substanceSystem: string | null
   substanceCode: string | null
