@@ -3,7 +3,7 @@
 import { Tabs, TabsTrigger } from "@odentia/ui"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ScrollingTabsList } from "./scrolling-tabs-list.js"
+import { revealActiveTab, ScrollingTabsList } from "./scrolling-tabs-list.js"
 
 afterEach(() => {
   cleanup()
@@ -49,9 +49,60 @@ describe("ScrollingTabsList", () => {
     HTMLElement.prototype.scrollBy = scrollBy
     const { container } = render(<Strip />)
 
-    const arrow = container.querySelector("button[aria-hidden]")
+    const arrow = container.querySelector('button[data-edge="after"]')
     expect(arrow).not.toBeNull()
+    expect(container.querySelector('button[data-edge="before"]')).toBeNull()
     fireEvent.click(arrow as Element)
     expect(scrollBy).toHaveBeenCalledWith({ left: 210, behavior: "smooth" })
+  })
+
+  it("si quedó algo escondido a la izquierda, también hay flecha hacia ese lado", () => {
+    stubStrip(300, 700)
+    vi.spyOn(HTMLElement.prototype, "scrollLeft", "get").mockReturnValue(120)
+    const scrollBy = vi.fn()
+    HTMLElement.prototype.scrollBy = scrollBy
+    const { container } = render(<Strip />)
+
+    const back = container.querySelector('button[data-edge="before"]')
+    expect(back).not.toBeNull()
+    fireEvent.click(back as Element)
+    expect(scrollBy).toHaveBeenCalledWith({ left: -210, behavior: "smooth" })
+  })
+})
+
+/** Una franja de 300 px que empieza en 0 y se ve desde `scrollLeft`; la pestaña elegida ocupa `left..right`. */
+function stripWith(tab: { left: number; right: number }, scrollLeft: number) {
+  const list = document.createElement("div")
+  const active = document.createElement("button")
+  active.dataset.slot = "tabs-trigger"
+  active.dataset.active = ""
+  list.append(active)
+  list.getBoundingClientRect = () => ({ left: 0, right: 300 }) as DOMRect
+  active.getBoundingClientRect = () => ({ left: tab.left, right: tab.right }) as DOMRect
+  Object.defineProperty(list, "scrollLeft", { value: scrollLeft, writable: true })
+  Object.defineProperty(list, "clientWidth", { value: 300 })
+  Object.defineProperty(list, "scrollWidth", { value: 800 })
+  const scrollTo = vi.fn()
+  list.scrollTo = scrollTo as unknown as typeof list.scrollTo
+  return { list, scrollTo }
+}
+
+describe("revealActiveTab", () => {
+  it("trae entera la elegida que quedó cortada a la derecha, fuera de la flecha", () => {
+    const { list, scrollTo } = stripWith({ left: 250, right: 360 }, 0)
+    revealActiveTab(list, "auto")
+    expect(scrollTo).toHaveBeenCalledWith({ left: 104, behavior: "auto" })
+  })
+
+  it("trae la elegida que quedó cortada a la izquierda («0» suelto de «Abiertos · 0»)", () => {
+    const { list, scrollTo } = stripWith({ left: -60, right: 20 }, 200)
+    revealActiveTab(list, "smooth")
+    expect(scrollTo).toHaveBeenCalledWith({ left: 96, behavior: "smooth" })
+  })
+
+  it("si ya se ve entera, no mueve nada", () => {
+    const { list, scrollTo } = stripWith({ left: 60, right: 200 }, 0)
+    revealActiveTab(list, "auto")
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 })

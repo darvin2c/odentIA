@@ -75,3 +75,27 @@ export const NoCaben: Story = {
     </div>
   ),
 }
+
+/**
+ * La vista elegida al final de una franja que no cabe (los pedidos de una tienda): al abrir ya
+ * se ve entera, y la flecha «‹» anuncia lo que quedó a la izquierda.
+ */
+export const ElegidaAlFinal: Story = {
+  args: {
+    label: "Qué pedidos ver",
+    value: "entregar",
+    onValueChange: () => {},
+    options: [
+      { value: "abiertos", label: "Abiertos", count: 0 },
+      { value: "hoy", label: "Para entregar hoy", count: 1 },
+      { value: "confirmar", label: "Pago por confirmar", count: 1 },
+      { value: "pagar", label: "Por pagar", count: 0 },
+      { value: "entregar", label: "Para entregar", count: 1 },
+    ],
+  },
+  render: (args) => (
+    <div className="max-w-[343px]">
+      <Live {...args} />
+    </div>
+  ),
+}
