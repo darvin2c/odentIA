@@ -17,7 +17,6 @@ import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
-import { PaymentLinkSection } from "./link-de-pago"
 import { api } from "./lib/api"
 import {
   COLLECTIONS,
@@ -34,6 +33,7 @@ import {
   type PaymentTypeCode,
   readMoney,
 } from "./lib/tienda"
+import { PaymentLinkSection } from "./link-de-pago"
 import {
   FormAlert,
   FormSheet,
@@ -44,7 +44,7 @@ import {
   TextField,
   useDirty,
 } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Pagos y entregas» (lienzo B, tablero 6): con qué le pagan a la tienda y cómo llega el pedido.
@@ -71,12 +71,10 @@ export function PaymentsPage() {
 
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">Pagos y entregas</h2>
-        <p className="text-sm text-muted-foreground">
-          Con qué te pagan y cómo llega el pedido. Lo que apagues, Sofi deja de ofrecerlo.
-        </p>
-      </div>
+      <StoreHeader
+        title="Pagos y entregas"
+        subtitle="Con qué te pagan y cómo llega el pedido. Lo que apagues, Sofi deja de ofrecerlo."
+      />
       {lists.isError ? (
         <ErrorBlock error={lists.error} onRetry={() => void lists.refetch()} />
       ) : null}
@@ -168,9 +166,9 @@ function Section({
   return (
     <section aria-labelledby={id} className="elevated overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
-        <h3 id={id} className="text-base font-semibold">
+        <h2 id={id} className="text-base font-semibold">
           {title}
-        </h3>
+        </h2>
         {action ? (
           <Button onClick={onAdd}>
             <Plus aria-hidden />

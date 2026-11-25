@@ -53,7 +53,7 @@ import {
   TextField,
   useDirty,
 } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Pedidos» (lienzo B, tablero 5): qué falta cobrar y qué sale hoy. Una lista con filtros por
@@ -98,16 +98,15 @@ export function OrdersPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-bold">Pedidos</h2>
-          <p className="text-sm text-muted-foreground">Qué falta cobrar y qué sale hoy.</p>
-        </div>
-        <Button onClick={() => setAdding(true)}>
-          <Plus aria-hidden />
-          Anotar un pedido
-        </Button>
-      </div>
+      <StoreHeader
+        title="Pedidos"
+        subtitle="Qué falta cobrar y qué sale hoy."
+        primary={{
+          label: "Anotar un pedido",
+          icon: <Plus aria-hidden />,
+          onClick: () => setAdding(true),
+        }}
+      />
       <ViewTabs
         label="Qué pedidos ver"
         value={filter}
