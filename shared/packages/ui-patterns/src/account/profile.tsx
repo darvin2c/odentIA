@@ -18,7 +18,7 @@ import { PageShell } from "../page-shell.js"
 import { PASSWORD_MIN_LENGTH, usePasswordRequirements } from "../password-requirements.js"
 import { PersonAvatar } from "../person-avatar.js"
 import { AUTH_NETWORK, authError, authErrorMessage, authFormMessage } from "./auth-error.js"
-import { useAccount, useAccountFetch } from "./context.js"
+import { editSearch, useAccount, useAccountFetch } from "./context.js"
 import { SessionsSkeleton } from "./skeletons.js"
 import {
   TWO_FACTOR_EDITS,
@@ -305,7 +305,7 @@ export function AccountProfilePage({
             <Button
               variant="outline"
               size="sm"
-              render={<Link to={profilePath} search={{ edit: "profile" }} />}
+              render={<Link to={profilePath} search={editSearch("profile")} />}
             >
               Editar
             </Button>
@@ -318,7 +318,7 @@ export function AccountProfilePage({
             <Button
               variant="outline"
               size="sm"
-              render={<Link to={profilePath} search={{ edit: "email" }} />}
+              render={<Link to={profilePath} search={editSearch("email")} />}
             >
               Cambiar
             </Button>
@@ -335,7 +335,7 @@ export function AccountProfilePage({
         <div>
           <Button
             variant="outline"
-            render={<Link to={profilePath} search={{ edit: "password" }} />}
+            render={<Link to={profilePath} search={editSearch("password")} />}
           >
             Cambiar contraseña
           </Button>

@@ -142,3 +142,11 @@ export function useAccountFetch() {
   const { apiUrl } = useAccount()
   return <T,>(path: string, init?: RequestInit) => accountFetch<T>(apiUrl, path, init)
 }
+
+/**
+ * La búsqueda que abre un cajón de Mi perfil (`?edit=`). Cada app registra su propio enrutador
+ * con sus búsquedas; aquí no se conoce, así que va sin tipo.
+ */
+export function editSearch(edit: string): never {
+  return { edit } as never
+}

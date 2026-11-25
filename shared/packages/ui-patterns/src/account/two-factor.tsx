@@ -19,7 +19,7 @@ import { FormDrawer } from "../form/form-drawer.js"
 import { submitErrorMessage } from "../form/submit-error.js"
 import { groupedSecret, RECOMMENDED_AUTHENTICATORS, totpDigits, totpSecret } from "../totp.js"
 import { type AuthErrorRoute, authError, authFormMessage } from "./auth-error.js"
-import { useAccount, useAccountFetch } from "./context.js"
+import { editSearch, useAccount, useAccountFetch } from "./context.js"
 import { totpQrDataUrl } from "./qr.js"
 import { TwoFactorSkeleton } from "./skeletons.js"
 
@@ -120,7 +120,7 @@ export function TwoFactorRow() {
             <p className="text-sm font-medium text-foreground">{value.requiredBy.join(", ")} la pide a su equipo.</p>
           ) : null}
         </div>
-        <Button render={<Link to={profilePath} search={{ edit: "two-factor" }} />} className="self-start">
+        <Button render={<Link to={profilePath} search={editSearch("two-factor")} />} className="self-start">
           Activar
         </Button>
       </div>
@@ -140,10 +140,10 @@ export function TwoFactorRow() {
         </div>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-phone" }} />}>
+        <Button variant="outline" render={<Link to={profilePath} search={editSearch("two-factor-phone")} />}>
           Cambiar de teléfono
         </Button>
-        <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-codes" }} />}>
+        <Button variant="outline" render={<Link to={profilePath} search={editSearch("two-factor-codes")} />}>
           Nuevos códigos de respaldo
         </Button>
         {value.trustedBrowsers > 0 ? (
@@ -156,7 +156,7 @@ export function TwoFactorRow() {
             Desactivar
           </Button>
         ) : (
-          <Button variant="outline" render={<Link to={profilePath} search={{ edit: "two-factor-off" }} />}>
+          <Button variant="outline" render={<Link to={profilePath} search={editSearch("two-factor-off")} />}>
             Desactivar
           </Button>
         )}
