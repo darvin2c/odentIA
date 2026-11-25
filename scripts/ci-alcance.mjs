@@ -6,7 +6,11 @@
 // SHA (commit probado, por defecto HEAD). Requiere `turbo` en el PATH o `pnpm exec turbo`.
 //
 // Reglas, de lo más seguro a lo más preciso:
-// - Solo documentación, skills o subagentes (lista blanca abajo): no corre nada.
+// - Nada que probar (lista blanca abajo): documentación, skills y lo demás de Claude, lo del
+//   editor, lo que solo usa el desarrollo local y este mismo script. No corre nada.
+// - Este script se prueba a sí mismo cada vez que corre (`comprobarReglas`, abajo): si una
+//   regla deja de dar lo esperado en sus ejemplos, falla el job `alcance` y con él todo el CI.
+//   Por eso un cambio solo suyo no corre las apps: lo que lo prueba es esa comprobación.
 // - Un archivo fuera de apps/, packages/, e2e/, admin/ y shared/ (CI, Dockerfile, compose,
 //   infra, raíz, turbo.json, lockfile): corre todo. No se sabe qué toca.
 // - Si no hay base comparable: corre todo.
@@ -28,12 +32,16 @@ import { appendFileSync } from "node:fs"
 const BASE = process.env.BASE ?? ""
 const SHA = process.env.SHA || "HEAD"
 
-// Solo documentación, skills y los subagentes de la QA: no se compilan, no se prueban ni se despliegan.
+// Nada que probar: no se compilan, no se prueban ni se despliegan. Documentación; skills, subagentes
+// y configuración de Claude; lo del editor; `skills-lock.json` (lo lee solo Claude); `.gitignore`;
+// el compose de desarrollo (el CI y E2E no lo usan; la base de pruebas sí, y por eso
+// infra/dev/postgres no está aquí); y este script, que se prueba solo.
 const SOLO_DOCS =
-  /^(docs\/|\.agents\/|\.claude\/skills\/|\.claude\/agents\/|AGENTS\.md$|README\.md$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
+  /^(docs\/|\.agents\/|\.claude\/|\.vscode\/|AGENTS\.md$|README\.md$|skills-lock\.json$|\.gitignore$|infra\/dev\/compose\.yaml$|scripts\/ci-alcance\.mjs$|gestoria\/AGENTS\.md$|(apps|packages|admin\/apps|shared\/packages|gestoria\/apps|gestoria\/packages)\/[^/]+\/AGENTS\.md$)/
 // Donde turbo sabe qué paquete cambió.
 // En admin/ y shared/, solo dentro de un paquete: lo suelto en esas carpetas corre todo.
-const EN_PAQUETES = /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
+const EN_PAQUETES =
+  /^((apps|packages|e2e)\/|admin\/(apps\/[^/]+|e2e)\/|shared\/packages\/[^/]+\/|gestoria\/(apps|packages)\/[^/]+\/)/
 // Lo suelto de gestorIA (Dockerfile, compose, infra): es de su servidor.
 const GESTORIA_SUELTO = /^gestoria\//
 const ES_GESTORIA = (nombre) => nombre.startsWith("@gestoria/")
@@ -117,30 +125,44 @@ function archivosCambiados() {
   return git(["diff", "--name-only", "--no-renames", BASE, SHA]).split("\n").filter(Boolean)
 }
 
+// Qué clase de cambio es, solo por sus archivos (sin git ni turbo), para poder comprobarlo.
+function clasificar(archivos) {
+  const codigo = archivos.filter((f) => !SOLO_DOCS.test(f))
+  if (codigo.length === 0) return { tipo: "nada" }
+  const fuera = codigo.find((f) => !EN_PAQUETES.test(f) && !GESTORIA_SUELTO.test(f))
+  if (fuera) return { tipo: "todo", fuera }
+  return {
+    tipo: "paquetes",
+    gestoriaSuelto: codigo.some((f) => GESTORIA_SUELTO.test(f) && !EN_PAQUETES.test(f)),
+    soloAdmin: codigo.every((f) => SOLO_ADMIN.test(f)),
+  }
+}
+
 function decidir() {
   const todos = turbo(["ls"])
   if (!baseComparable()) {
     return { motivo: "sin base comparable: se prueba todo", soloDocs: false, afectados: todos }
   }
-  const archivos = archivosCambiados()
-  const codigo = archivos.filter((f) => !SOLO_DOCS.test(f))
-  if (codigo.length === 0) {
-    return { motivo: "solo documentación o skills", soloDocs: true, afectados: [] }
-  }
-  if (codigo.some((f) => !EN_PAQUETES.test(f) && !GESTORIA_SUELTO.test(f))) {
-    const fuera = codigo.find((f) => !EN_PAQUETES.test(f) && !GESTORIA_SUELTO.test(f))
+  const clase = clasificar(archivosCambiados())
+  if (clase.tipo === "nada") {
     return {
-      motivo: `cambia ${fuera} fuera de los paquetes: se prueba todo`,
+      motivo: "nada que probar (documentación, skills o configuración local)",
+      soloDocs: true,
+      afectados: [],
+    }
+  }
+  if (clase.tipo === "todo") {
+    return {
+      motivo: `cambia ${clase.fuera} fuera de los paquetes: se prueba todo`,
       soloDocs: false,
       afectados: todos,
     }
   }
   const afectados = turbo(["ls", `--filter=...[${BASE}]`])
-  if (codigo.some((f) => GESTORIA_SUELTO.test(f) && !EN_PAQUETES.test(f)))
+  if (clase.gestoriaSuelto)
     for (const nombre of VPS_GESTORIA) if (!afectados.includes(nombre)) afectados.push(nombre)
-  const soloAdmin = codigo.every((f) => SOLO_ADMIN.test(f))
-  const motivo = `${afectados.length} paquete(s) afectado(s)${soloAdmin ? ", solo de la administración" : ""}`
-  return { motivo, soloDocs: false, afectados, soloAdmin }
+  const motivo = `${afectados.length} paquete(s) afectado(s)${clase.soloAdmin ? ", solo de la administración" : ""}`
+  return { motivo, soloDocs: false, afectados, soloAdmin: clase.soloAdmin }
 }
 
 function filtros(nombres) {
@@ -201,30 +223,131 @@ function partesDeE2e(soloAdmin) {
   return [1, 2, 3].map((k) => ({ parte: `${k}/3`, nombre: String(k), opciones: `--shard=${k}/3` }))
 }
 
-const decision = decidir()
-const { afectados } = decision
-const partes = partesDeCheck(afectados)
-const salidas = {
-  solo_docs: String(decision.soloDocs),
-  afectados: JSON.stringify(afectados),
-  hay_check: String(partes.length > 0),
-  // GitHub no acepta una matriz vacía: sin partes, una entrada neutra que los pasos ignoran.
-  check: JSON.stringify({
-    include:
-      partes.length > 0
-        ? partes
-        : [{ parte: "ninguna", tipos: "", pruebas: "", postgres: false, opciones: "" }],
-  }),
-  // E2E prueba la app completa de las clínicas; el marketing (web) y gestorIA no la usan.
-  e2e: String(afectados.some((n) => n !== "@odentia/web" && !ES_GESTORIA(n))),
-  // Las partes de E2E: los de la administración solos, o todos en tres partes.
-  e2e_partes: JSON.stringify(partesDeE2e(decision.soloAdmin === true)),
-  vps: String(afectados.some((n) => VPS.includes(n))),
-  gestoria_vps: String(afectados.some((n) => VPS_GESTORIA.includes(n))),
-  cloudflare: JSON.stringify(afectados.filter((n) => CLOUDFLARE.includes(n))),
-  // Las pruebas que leen el repositorio entero corren en cada cambio de código.
-  arquitectura: String(!decision.soloDocs),
+// Lo que leen los demás jobs, según lo decidido.
+function salidasDe(decision) {
+  const { afectados } = decision
+  const partes = partesDeCheck(afectados)
+  return {
+    solo_docs: String(decision.soloDocs),
+    afectados: JSON.stringify(afectados),
+    hay_check: String(partes.length > 0),
+    // GitHub no acepta una matriz vacía: sin partes, una entrada neutra que los pasos ignoran.
+    check: JSON.stringify({
+      include:
+        partes.length > 0
+          ? partes
+          : [{ parte: "ninguna", tipos: "", pruebas: "", postgres: false, opciones: "" }],
+    }),
+    // E2E prueba la app completa de las clínicas; el marketing (web) y gestorIA no la usan.
+    e2e: String(afectados.some((n) => n !== "@odentia/web" && !ES_GESTORIA(n))),
+    // Las partes de E2E: los de la administración solos, o todos en tres partes.
+    e2e_partes: JSON.stringify(partesDeE2e(decision.soloAdmin === true)),
+    vps: String(afectados.some((n) => VPS.includes(n))),
+    gestoria_vps: String(afectados.some((n) => VPS_GESTORIA.includes(n))),
+    cloudflare: JSON.stringify(afectados.filter((n) => CLOUDFLARE.includes(n))),
+    // Las pruebas que leen el repositorio entero corren en cada cambio de código.
+    arquitectura: String(!decision.soloDocs),
+  }
 }
+
+// Los ejemplos que deben seguir dando lo mismo. Si una regla cambia a propósito, se cambia su ejemplo.
+function comprobarReglas() {
+  const fallos = []
+  const espera = (nombre, obtenido, esperado) => {
+    if (JSON.stringify(obtenido) !== JSON.stringify(esperado))
+      fallos.push(
+        `${nombre}: da ${JSON.stringify(obtenido)}, se esperaba ${JSON.stringify(esperado)}`,
+      )
+  }
+  const tipo = (archivos) => clasificar(archivos).tipo
+  espera(
+    "skills, subagentes y docs",
+    tipo([".claude/skills/odentia-qa/SKILL.md", ".claude/agents/voz-ux.md", "docs/development.md"]),
+    "nada",
+  )
+  espera("este script con docs", tipo(["scripts/ci-alcance.mjs", "gestoria/AGENTS.md"]), "nada")
+  espera(
+    "configuración local",
+    tipo([
+      "apps/api/AGENTS.md",
+      "skills-lock.json",
+      ".gitignore",
+      ".vscode/settings.json",
+      "infra/dev/compose.yaml",
+    ]),
+    "nada",
+  )
+  espera("una app", tipo(["apps/panel/src/main.tsx"]), "paquetes")
+  espera(
+    "este script con una app",
+    tipo(["scripts/ci-alcance.mjs", "apps/api/src/index.ts"]),
+    "paquetes",
+  )
+  espera("lo suelto de gestorIA", clasificar(["gestoria/Dockerfile"]), {
+    tipo: "paquetes",
+    gestoriaSuelto: true,
+    soloAdmin: false,
+  })
+  espera(
+    "solo la administración",
+    clasificar(["admin/apps/web/src/x.ts", "admin/e2e/x.spec.ts"]).soloAdmin,
+    true,
+  )
+  espera(
+    "administración y API",
+    clasificar(["admin/apps/web/src/x.ts", "apps/api/src/x.ts"]).soloAdmin,
+    false,
+  )
+  for (const f of [
+    "Dockerfile",
+    ".github/workflows/ci.yml",
+    "pnpm-lock.yaml",
+    "package.json",
+    "turbo.json",
+    "biome.json",
+    "patches/portless@0.15.6.patch",
+    "scripts/local-network.mjs",
+    "scripts/static-files.mjs",
+    "infra/dev/postgres/Dockerfile",
+    "infra/dev/storage-init.sh",
+    "compose.prod.yaml",
+    "portless.json",
+    "assets/brand/logo.svg",
+  ])
+    espera(f, tipo([f, "docs/x.md"]), "todo")
+  const salidas = (afectados) => salidasDe({ soloDocs: false, afectados })
+  espera("la web no corre E2E", salidas(["@odentia/web"]).e2e, "false")
+  espera("el panel corre E2E", salidas(["@odentia/panel"]).e2e, "true")
+  espera("gestorIA no corre E2E", salidas(["@gestoria/api"]).e2e, "false")
+  espera("la API va al VPS", salidas(["@odentia/api"]).vps, "true")
+  espera(
+    "el panel va a Cloudflare",
+    salidas(["@odentia/panel"]).cloudflare,
+    JSON.stringify(["@odentia/panel"]),
+  )
+  espera("nada que probar", salidasDe({ soloDocs: true, afectados: [] }), {
+    solo_docs: "true",
+    afectados: "[]",
+    hay_check: "false",
+    check: JSON.stringify({
+      include: [{ parte: "ninguna", tipos: "", pruebas: "", postgres: false, opciones: "" }],
+    }),
+    e2e: "false",
+    e2e_partes: JSON.stringify(partesDeE2e(false)),
+    vps: "false",
+    gestoria_vps: "false",
+    cloudflare: "[]",
+    arquitectura: "false",
+  })
+  if (fallos.length > 0) {
+    console.error(`Las reglas del alcance no dan lo esperado:\n- ${fallos.join("\n- ")}`)
+    process.exit(1)
+  }
+}
+
+comprobarReglas()
+const decision = decidir()
+const salidas = salidasDe(decision)
 
 if (process.env.GITHUB_OUTPUT) {
   appendFileSync(

@@ -521,8 +521,11 @@ suscritos hasta que cada persona los vuelva a activar. Vacías, no se ofrecen.
 ## CI y despliegue automático
 
 `.github/workflows/ci.yml` decide primero qué corre el cambio (job `alcance`, con
-`scripts/ci-alcance.mjs`; ver ADR 0140). Un cambio solo de documentación o skills no
-corre nada. Un cambio de código prueba los paquetes afectados según el grafo de Turbo,
+`scripts/ci-alcance.mjs`; ver ADR 0140). Un cambio sin nada que probar no corre nada:
+documentación, skills, subagentes y configuración de Claude, lo del editor,
+`skills-lock.json`, `.gitignore`, el compose de desarrollo y el propio
+`ci-alcance.mjs`. Ese script se prueba a sí mismo cada vez que corre: antes de decidir,
+comprueba sus reglas con ejemplos y, si una da otra cosa, falla el job `alcance`. Un cambio de código prueba los paquetes afectados según el grafo de Turbo,
 y las reglas que leen el repositorio entero corren siempre en el job `arquitectura`.
 La imagen de la app se construye solo si cambian `api` o `worker`, y E2E solo si el
 cambio toca algo más que la web de marketing. Un archivo fuera de `apps/`, `packages/`

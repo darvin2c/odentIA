@@ -194,7 +194,7 @@ Unir con `gh pr merge <número> --squash`.
 
 ### 11. Seguir hasta producción
 
-Unir no es llegar. `main` corre todo y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
+Unir no es llegar. `main` corre lo afectado desde lo último que quedó en producción y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
 
 - `deploy` en `skipped`: falló algo en `main` y no llegó nada. Decirlo enseguida en palabras simples y corregirlo con un PR de arreglo, desde la etapa 4. Es el único otro PR que abre la entrega, y no termina hasta que ese arreglo despliega.
 - `deploy` en `success` no basta: si `main` avanzó, la corrida termina bien sin desplegar y lo hace la del commit más nuevo. Mirar que el paso «Desplegar el commit verificado» haya corrido en un commit que incluya el tuyo.
