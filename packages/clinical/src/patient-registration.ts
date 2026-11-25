@@ -461,6 +461,8 @@ export const registrationAnswersSchema = z.strictObject({
   respondent: z.enum(["patient", "representative", "staff"]),
   representative: z.strictObject({
     displayName: text(200).min(1), relationship: z.enum(["guardian", "family", "other"]),
+    /** Sus nombres y apellidos por separado, si se escribieron así (la persona nueva del cajón). */
+    givenNames: text(100).optional(), familyName: text(200).optional(),
     relationshipDetail: text(100), phone: text(50).optional(), email: email.optional(),
     /** Documento del representante: obligatorio cuando representa a un menor. */
     docType: z.enum(DOC_TYPES).optional(), docNumber: text(20).optional(), docCountry: text(2).optional(),
@@ -919,7 +921,15 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     if (!data.representative) errors.representative = "Escribe los datos del responsable"
     else {
       if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Escribe el teléfono o el correo del responsable"
-      if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
+      // Su celular, con la misma regla que el del paciente: el error va en su campo (mesa del 25 nov).
+      if (data.representative.phone && !normalizePhone(data.representative.phone, context.countryCode))
+        errors["representative.phone"] = phoneFormatError(context.countryCode)
+      // En la clínica, un menor puede venir con otro familiar (su abuela) que lo acompaña y recibe sus
+      // avisos sin representarlo (mesa del 25 nov, decisión 2). Desde fuera, quien registra a un menor
+      // es su madre, padre o tutor.
+      const companion = context.mode === "internal" && data.respondent === "staff" && data.representative.relationship === "family"
+      if (minor && data.representative.relationship !== "guardian" && !companion)
+        errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
       // En la clínica, el documento de quien lo representa no frena registrar al menor: se pide al
       // firmar un consentimiento (la firma lo exige y lo deja escribir). Desde fuera sí: es lo que
       // identifica a quien registra (QA de la ficha del 9 nov; lo legal, NTS 139, queda por validar).

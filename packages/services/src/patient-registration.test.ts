@@ -1986,3 +1986,76 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
   expect(words.entries).toContainEqual(expect.objectContaining({ label: "Biberón o pecho para dormir", value: "Ya no toma biberón" }))
   expect(JSON.stringify(words.entries)).not.toContain("4_o_mas")
 })
+// Mesa del 25 nov («salud y familia», entrega 1): un menor con su responsable nuevo, escrito en el
+// mismo cajón. La persona nace con sus nombres y le llegan sus avisos; la privacidad y los mensajes
+// van a su nombre, no al del niño; la abuela que lo trae lo acompaña sin representarlo.
+async function registerMinorWith(representative: NonNullable<RegistrationAnswers["representative"]>, extra: Partial<RegistrationAnswers> = {}) {
+  await seedActor()
+  return withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(
+      tx,
+      "org_a",
+      { kind: "internal", userId: ACTOR, scope: "essentials" },
+      {
+        submissionId: randomUUID(),
+        answers: {
+          demographics: { displayName: "Camila Quispe Rojas", givenNames: "Camila", familyName: "Quispe Rojas", birthDate: MINOR_BIRTH },
+          respondent: "staff",
+          privacyAccepted: true,
+          acceptsReminders: true,
+          acceptsMessages: true,
+          representative,
+          ...extra,
+        },
+      },
+    ),
+  )
+}
+
+it("el responsable nuevo de un menor nace con sus nombres, le llegan sus avisos y la privacidad queda a su nombre", async () => {
+  const created = await registerMinorWith({
+    displayName: "Rosa Quispe Vega",
+    givenNames: "Rosa",
+    familyName: "Quispe Vega",
+    relationship: "guardian",
+    relationshipDetail: "Madre",
+    phone: "+51977555810",
+  })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  const rosa = detail.contacts.find((row) => row.relationship === "guardian")
+  expect(rosa).toMatchObject({ isPreferred: true })
+  expect(detail.contacts.filter((row) => row.isPreferred)).toHaveLength(1)
+  const [person] = await ownerDb.select().from(contact).where(eq(contact.id, rosa!.contactId))
+  expect(person).toMatchObject({ givenNames: "Rosa", familyName: "Quispe Vega" })
+  const responsibilities = await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", created.id))
+  expect(responsibilities.map((row) => row.kind)).toContain("representante_legal")
+  const consents = await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", created.id))
+  expect(consents[0]).toMatchObject({ grantedByName: "Rosa Quispe Vega" })
+  // Sus permisos de mensajes van a Rosa, no a la niña.
+  const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, rosa!.contactId))
+  expect(permissions.map((row) => row.purpose).sort()).toEqual(["novedades", "recordatorio"])
+})
+
+it("la abuela que lo trae lo acompaña: recibe sus avisos y la información, pero no es su representante legal", async () => {
+  const created = await registerMinorWith({
+    displayName: "Doña Rosa Vega",
+    givenNames: "Rosa",
+    familyName: "Vega",
+    relationship: "family",
+    relationshipDetail: "abuela",
+    phone: "+51977555811",
+  })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  expect(detail.contacts.find((row) => row.relationship === "family")).toMatchObject({ isPreferred: true, relationshipDetail: "abuela" })
+  const responsibilities = await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", created.id))
+  expect(responsibilities.map((row) => row.kind)).toEqual(["autorizado_informacion"])
+})
+
+it("un adulto con un responsable escrito no se registra: lo escrito se perdía en silencio", async () => {
+  await expect(
+    registerMinorWith(
+      { displayName: "Rosa Vega", relationship: "guardian", relationshipDetail: "Madre", phone: "+51977555812" },
+      { demographics: { displayName: "Camila Adulta", givenNames: "Camila", familyName: "Adulta", birthDate: ADULT_BIRTH, phone: "+51977555813" } },
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+})
