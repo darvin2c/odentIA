@@ -37,7 +37,7 @@ import { z } from "zod"
 import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
-import { appointmentLine, isUpcoming, usePatientAppointments } from "../../lib/patient-appointments"
+import { appointmentWhat, isUpcoming, usePatientAppointments } from "../../lib/patient-appointments"
 import { useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
@@ -923,7 +923,12 @@ export function BookingDrawer({
 
           {ahead[0] ? (
             <p className="-mt-2 text-sm text-muted-foreground">
-              Ya tiene cita: <span className="text-foreground">{appointmentLine(ahead[0], new Date(now), timeZone)}</span>
+              Ya tiene cita{" "}
+              <span className="text-foreground">
+                {[whenSaid(ahead[0].startsAt, timeZone, today), appointmentWhat(ahead[0]), ahead[0].professionalName]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
               {ahead.length > 1 ? ` y ${ahead.length - 1} más` : ""}
               {" · "}
               <Button

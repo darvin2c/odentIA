@@ -96,18 +96,54 @@ function expiresAtOf(token: string): number {
 }
 
 /**
+ * La cuenta no respondió (caída, error del servidor, sin red). No es «sin sesión»: quien ya
+ * entró no tiene que volver a entrar por eso (ADR 0203).
+ */
+export class AccountUnavailable extends Error {
+  constructor() {
+    super(
+      "Tu cuenta no responde en este momento. Reintenta en unos segundos.",
+    )
+  }
+}
+
+/** Solo un 401 o 403 de la cuenta quiere decir «sin sesión»; lo demás es que no respondió. */
+function accountSaysSignedOut(status: number | undefined): boolean {
+  return status === 401 || status === 403
+}
+
+/**
  * El token firmado de la cuenta para el servidor de gestorIA (15 minutos). Se guarda en memoria
- * (nunca en el navegador) y se pide otro un minuto antes de vencer. Null si no hay sesión.
+ * (nunca en el navegador) y se pide otro un minuto antes de vencer. Null si no hay sesión. Si la
+ * cuenta no responde, sigue el token que ya había mientras no venza; sin él, `AccountUnavailable`.
  */
 export async function accountToken(force = false): Promise<string | null> {
   if (!force && cached && cached.expiresAt - Date.now() > 60_000) return cached.token
-  const { data, error } = await authClient.$fetch<{ token: string }>("/token", { method: "GET" })
-  if (error || !data?.token) {
+  const result = await authClient
+    .$fetch<{ token: string }>("/token", { method: "GET" })
+    .catch(() => null)
+  if (!result || (result.error && !accountSaysSignedOut(result.error.status))) {
+    if (cached && cached.expiresAt > Date.now()) return cached.token
+    throw new AccountUnavailable()
+  }
+  if (result.error || !result.data?.token) {
     cached = null
     return null
   }
-  cached = { token: data.token, expiresAt: expiresAtOf(data.token) }
-  return data.token
+  cached = { token: result.data.token, expiresAt: expiresAtOf(result.data.token) }
+  return result.data.token
+}
+
+/**
+ * ¿Hay sesión en la cuenta? `true` o `false` cuando la cuenta lo dice; si no responde,
+ * `AccountUnavailable`, para que la pantalla no mande a entrar a quien ya entró.
+ */
+export async function hasSession(): Promise<boolean> {
+  const result = await authClient.getSession().catch(() => null)
+  if (!result || (result.error && !accountSaysSignedOut(result.error.status))) {
+    throw new AccountUnavailable()
+  }
+  return Boolean(result.data?.session)
 }
 
 export function forgetToken(): void {

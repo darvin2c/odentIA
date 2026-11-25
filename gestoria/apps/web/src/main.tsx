@@ -9,6 +9,7 @@ import {
   Outlet,
   RouterProvider,
   redirect,
+  useRouter,
 } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
@@ -21,7 +22,7 @@ import {
   VerifyEmailSentPage,
 } from "./entrada"
 import { SignedOut } from "./lib/api"
-import { authClient, authFetch, safeNext } from "./lib/cuenta"
+import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { PaymentsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
 import { PlanPage } from "./plan"
@@ -45,16 +46,18 @@ const queryClient = new QueryClient({
   },
 })
 
-/** Con sesión de la cuenta sigue; sin ella, a entrar, volviendo después aquí. */
+/**
+ * Con sesión de la cuenta sigue; sin ella, a entrar, volviendo después aquí. Si la cuenta no
+ * responde, la pantalla lo dice y deja reintentar: no manda a entrar a quien ya entró.
+ */
 async function requireSession({ location }: { location: { href: string } }) {
-  const { data } = await authClient.getSession().catch(() => ({ data: null }))
-  if (!data?.session) throw redirect({ to: "/login", search: { next: location.href } })
+  if (!(await hasSession())) throw redirect({ to: "/login", search: { next: location.href } })
 }
 
-/** Quien ya entró no ve las pantallas de entrar. */
+/** Quien ya entró no ve las pantallas de entrar. Si la cuenta no responde, se queda aquí. */
 async function skipIfSignedIn({ search }: { search: Record<string, unknown> }) {
-  const { data } = await authClient.getSession().catch(() => ({ data: null }))
-  if (data?.session) {
+  const signedIn = await hasSession().catch(() => false)
+  if (signedIn) {
     const next = safeNext(typeof search.next === "string" ? search.next : null) ?? "/"
     throw redirect({ href: next })
   }
@@ -137,6 +140,25 @@ const storeChildren = [
   createRoute({ getParentRoute: () => storeRoute, path: "/plan", component: PlanPage }),
 ]
 
+/**
+ * Una página que no se pudo abrir (también si la cuenta no respondió al entrar). Reintentar
+ * vuelve a comprobar la sesión: `reset` solo limpia el error, `invalidate` vuelve a cargar.
+ */
+function RouteError({ error, reset }: { error: unknown; reset: () => void }) {
+  const router = useRouter()
+  return (
+    <div className="mx-auto max-w-md p-6">
+      <ErrorState
+        error={error instanceof Error ? error : "No se pudo abrir esta página"}
+        onRetry={() => {
+          reset()
+          void router.invalidate()
+        }}
+      />
+    </div>
+  )
+}
+
 const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
@@ -188,14 +210,7 @@ const routeTree = rootRoute.addChildren([
 
 const router = createRouter({
   routeTree,
-  defaultErrorComponent: ({ error, reset }) => (
-    <div className="mx-auto max-w-md p-6">
-      <ErrorState
-        error={error instanceof Error ? error : "No se pudo abrir esta página"}
-        onRetry={reset}
-      />
-    </div>
-  ),
+  defaultErrorComponent: RouteError,
 })
 
 // Si la sesión de la cuenta vence a mitad, cualquier pantalla manda a entrar.
