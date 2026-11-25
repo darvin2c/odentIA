@@ -2,10 +2,12 @@
 // odontograma a la izquierda y, a la derecha, la pieza elegida con su hallazgo. Ejemplo con datos
 // inventados; tocar una pieza solo cambia lo que se ve.
 import { useState } from "react"
-import OdontogramArch, { type ExampleFinding } from "../odontogram/OdontogramArch"
+import OdontogramArch, { type ExampleFinding, rowsOf } from "../odontogram/OdontogramArch"
+import OdontogramFront, { exampleEntries } from "../odontogram/OdontogramFront"
 import "./chart-preview.css"
 
-type Example = { finding: string; detail: string; kind: ExampleFinding }
+/** `also`: lo que el arco no muestra y de frente sí (la endodoncia bajo la corona). */
+type Example = { finding: string; detail: string; kind: ExampleFinding; also?: string[] }
 
 /** Los hallazgos de Carlos, el paciente de ejemplo de la web. */
 const EXAMPLES: Record<number, Example> = {
@@ -15,7 +17,9 @@ const EXAMPLES: Record<number, Example> = {
     detail: "Dictado por la Dra. Paredes y confirmado. Diagnóstico CIE-10 K02.1, caries de la dentina. En el plan: resina oclusal, o si no una incrustación.",
   },
   46: { kind: "ausente", finding: "Ausente", detail: "Registrado en la atención del 12 de marzo." },
-  11: { kind: "corona", finding: "Corona en buen estado", detail: "Corona metal-cerámica (CMC), sobre una endodoncia. Registrada en 2024." },
+  11: { kind: "corona", finding: "Corona en buen estado", detail: "Corona metal-cerámica (CMC), sobre una endodoncia: de frente se ve el conducto en la raíz. Registrada en 2024.",
+    also: ["root_canal_treatment"],
+  },
   26: { kind: "restauracion", finding: "Restauración en buen estado", detail: "Resina oclusal del 3 de junio." },
 }
 
@@ -28,6 +32,7 @@ export default function ChartPreview({ names }: { names: Record<number, string> 
   const [tooth, setTooth] = useState(36)
   const example = EXAMPLES[tooth]
   const tone = !example ? "none" : example.kind === "caries" ? "red" : "blue"
+  const labelOf = (n: number) => `Pieza ${n}, ${names[n] ?? ""}: ${EXAMPLES[n]?.finding ?? "sin hallazgos"}`
   return (
     <div className="cp">
       <div className="cp-arch">
@@ -35,7 +40,17 @@ export default function ChartPreview({ names }: { names: Record<number, string> 
           findings={FINDINGS}
           selected={tooth}
           onPick={setTooth}
-          labelOf={(n) => `Pieza ${n}, ${names[n] ?? ""}: ${EXAMPLES[n]?.finding ?? "sin hallazgos"}`}
+          labelOf={labelOf}
+        />
+      </div>
+      <div className="cp-front">
+        <span className="cp-cap">De frente, cada pieza con su raíz</span>
+        <OdontogramFront
+          rows={rowsOf("permanente")}
+          entriesOf={(n) => exampleEntries(n, EXAMPLES[n]?.kind, EXAMPLES[n]?.also)}
+          selected={tooth}
+          onPick={setTooth}
+          labelOf={labelOf}
         />
       </div>
       <div className="cp-panel" aria-live="polite">

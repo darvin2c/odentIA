@@ -3,11 +3,13 @@
 // Mateo, 7, con hallazgos clínicamente coherentes. Es un ejemplo con datos inventados: tocar una
 // pieza solo cambia lo que se ve.
 import { useState } from "react"
-import OdontogramArch, { type Dentition, type ExampleFinding, teethOf } from "../odontogram/OdontogramArch"
+import OdontogramArch, { type Dentition, type ExampleFinding, rowsOf, teethOf } from "../odontogram/OdontogramArch"
+import OdontogramFront, { exampleEntries } from "../odontogram/OdontogramFront"
 import "./chart-preview.css"
 import "./child-chart.css"
 
-type Example = { finding: string; detail: string; kind: ExampleFinding }
+/** `also`: lo que el arco no muestra y de frente sí (la pulpotomía bajo la corona). */
+type Example = { finding: string; detail: string; kind: ExampleFinding; also?: string[] }
 type Patient = { key: string; name: string; suggested: Dentition; examples: Record<number, Example> }
 
 const PATIENTS: Patient[] = [
@@ -18,7 +20,12 @@ const PATIENTS: Patient[] = [
     examples: {
       54: { kind: "caries", finding: "Caries de dentina en oclusal", detail: "Un molar de leche: se trata como en adultos, con su sigla CD." },
       64: { kind: "caries", finding: "Caries de dentina en oclusal", detail: "La misma lesión en el otro lado." },
-      75: { kind: "corona", finding: "Corona en buen estado", detail: "Corona metálica (CM) sobre una pulpotomía (PP): la de acero de un molar de leche." },
+      75: {
+        kind: "corona",
+        finding: "Corona en buen estado",
+        detail: "Corona metálica (CM) sobre una pulpotomía (PP): la de acero de un molar de leche. De frente se ve la pulpotomía dentro de la corona.",
+        also: ["pulpotomy"],
+      },
     },
   },
   {
@@ -53,6 +60,7 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
   >
   const example = patient.examples[tooth]
   const tone = !example ? "none" : example.kind === "caries" ? "red" : "blue"
+  const labelOf = (n: number) => `Pieza ${n}, ${names[n] ?? ""}: ${patient.examples[n]?.finding ?? "sin hallazgos"}`
 
   const pick = (next: Patient) => {
     setPatient(next)
@@ -102,7 +110,17 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
           dentition={dentition}
           selected={tooth}
           onPick={setTooth}
-          labelOf={(n) => `Pieza ${n}, ${names[n] ?? ""}: ${patient.examples[n]?.finding ?? "sin hallazgos"}`}
+          labelOf={labelOf}
+        />
+      </div>
+      <div className="cp-front">
+        <span className="cp-cap">De frente, cada pieza con su raíz</span>
+        <OdontogramFront
+          rows={rowsOf(dentition)}
+          entriesOf={(n) => exampleEntries(n, patient.examples[n]?.kind, patient.examples[n]?.also)}
+          selected={tooth}
+          onPick={setTooth}
+          labelOf={labelOf}
         />
       </div>
       <div className="cp-panel" aria-live="polite">

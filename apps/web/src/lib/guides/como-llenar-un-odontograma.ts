@@ -83,7 +83,7 @@ export const guide: Guide = {
           ],
           [
             "Endodoncia en el 11",
-            "Una **línea vertical** que baja por el centro del diente hasta la raíz: azul si está bien, rojo si está mal. En el recuadro, **TC**.",
+            "Una **línea vertical** por dentro de la raíz; si la pieza tiene dos o tres raíces, una en cada una, nunca entre ellas. Azul si está bien, rojo si está mal. En el recuadro, **TC**.",
           ],
           ["Una corona o una restauración provisional", "Siempre en **rojo**: la corona provisional lleva **CT**."],
         ],
@@ -104,7 +104,7 @@ export const guide: Guide = {
   tryIt: {
     demo: "odontograma",
     title: "En odentIA, el odontograma se llena en la pantalla.",
-    text: "Tocas el diente, eliges lo que ves y queda dibujado con su color y su sigla. O dictas «36, caries de dentina en oclusal» y Clío la deja lista con su diagnóstico; tú la confirmas, y queda con su fecha en la historia del paciente.",
+    text: "Tocas el diente, eliges lo que ves y queda dibujado con su color y su sigla, en el arco y de frente, con su raíz. O dictas «36, caries de dentina en oclusal» y Clío la deja lista con su diagnóstico; tú la confirmas, y queda con su fecha en la historia del paciente.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [

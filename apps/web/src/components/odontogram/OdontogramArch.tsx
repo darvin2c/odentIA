@@ -41,6 +41,11 @@ export function teethOf(dentition: Dentition): number[] {
   return archOf(dentition).rows.flat()
 }
 
+/** Las filas de una dentición, de arriba abajo como se ven: las mismas de la vista de frente. */
+export function rowsOf(dentition: Dentition): (readonly number[])[] {
+  return archOf(dentition).rows
+}
+
 function archOf(dentition: Dentition): { outer: ArchRows; inner?: ArchRows; rows: (readonly number[])[] } {
   if (dentition === "temporal") return { outer: CHILD, rows: [CHILD.upper, CHILD.lower] }
   if (dentition === "mixta") return { outer: ADULT, inner: CHILD, rows: [ADULT.upper, CHILD.upper, CHILD.lower, ADULT.lower] }
