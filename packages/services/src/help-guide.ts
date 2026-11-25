@@ -255,8 +255,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "pasar-a-otra-clinica",
         q: "¿Cómo paso a mi otra clínica sin poner la clave otra vez?",
-        a: "Ábrela desde el menú de la clínica, arriba a la izquierda, o desde «Elige tu clínica»: se abre con tu misma sesión, sin pedirte la clave ni el código de dos pasos, aunque sea de otra app (odentIA, latidIA o vistIA). Lo mismo con «Administración», si eres del equipo de odentIA: ahí te pide su propio código, como siempre. Si la abres directo, desde un favorito o escribiendo su dirección, te pide entrar una vez en ese navegador. Si en esa compu estaba entrada otra persona, queda tu sesión y la suya se cierra; si eras tú, tus avisos siguen llegando.",
-        forms: ["cambiar de clinica sin contrasena", "me pide la contrasena otra vez", "abrir mi otra clinica", "pasar a latidia", "entrar a otra app sin clave"],
+        a: "Ábrela desde el nombre de la clínica, arriba a la izquierda, o desde «Elige tu clínica»: se abre con tu misma sesión, sin pedirte la clave ni el código de dos pasos, aunque sea de otra app (odentIA, latidIA o vistIA). Lo mismo con «Administración», si eres del equipo de odentIA: ahí te pide su propio código, como siempre. Si la abres directo, desde un favorito o escribiendo su dirección, te pide entrar una vez en ese navegador. Si en esa compu estaba entrada otra persona, queda tu sesión y la suya se cierra; si eras tú, tus avisos siguen llegando.",
+        forms: ["cambiar de clinica sin contrasena", "me pide la contrasena otra vez", "pasar a latidia sin clave", "entrar a otra app sin clave"],
         general: true,
       },
       {
@@ -269,7 +269,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "paso-otra-clinica",
         q: "¿Cómo paso a otra de mis clínicas?",
-        a: "Toca el nombre de la clínica, arriba a la izquierda: debajo dice qué es y tu rol ahí. Se abre con lo de esta clínica arriba (como «Plan y pagos», si la administras) y, debajo, tus clínicas, con la que estás marcada. Si tienes de más de un tipo, por ejemplo una clínica dental y un consultorio médico, van agrupadas con su nombre y su color. Con Ctrl+clic se abre en otra pestaña. Una de otra app abre en su propia dirección y puede pedirte entrar la primera vez en ese navegador. «Cambiar de clínica» lleva a la lista completa, donde también aceptas una invitación o creas otra clínica.",
+        a: "Toca el nombre de la clínica, arriba a la izquierda: debajo dice qué es y tu rol ahí. Se abre con lo de esta clínica arriba (como «Plan y pagos», si la administras) y, debajo, tus clínicas, con la que estás marcada. Si tienes de más de un tipo, por ejemplo una clínica dental y un consultorio médico, van agrupadas con su nombre y su color. Con Ctrl+clic se abre en otra pestaña. Una de otra app abre en su propia dirección con tu misma sesión, sin pedirte la clave. «Cambiar de clínica» lleva a la lista completa, donde también aceptas una invitación o creas otra clínica.",
         forms: ["cambiar de clinica", "pasar a otra clinica", "tengo dos clinicas", "abrir mi otra clinica", "como entro a mi otro consultorio"],
         general: true,
       },
