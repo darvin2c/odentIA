@@ -3,6 +3,7 @@ import {
   type AllergenEntry,
   type ClinicalProduct,
   allergenName,
+  sameAllergyOnRecord,
   allergyWarnings,
   duplicateWarnings,
   appendDictated,
@@ -120,6 +121,7 @@ import { clinicToday } from "./inventory-stock.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
 import { patientAge } from "./responsibilities.js"
 import { everydayServiceVariants } from "./search-text.js"
+import { discardableWhenSigning } from "./said-health-risks.js"
 
 /*
  * ---------- Asistente clínico: lo dictado se vuelve sugerencias que el profesional confirma ----------
@@ -3569,7 +3571,13 @@ async function lockSignedSaidAllergy(tx: Db, orgId: string, patientId: string, i
 export async function confirmSaidAllergy(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
   const row = await lockSignedSaidAllergy(tx, orgId, patientId, id)
   const payload = splitMeta(row.payload).data
-  const created = await addPatientAllergy(tx, orgId, actorUserId, patientId, {
+  // Ya registrada (a mano, mientras esperaba): queda esa, sin otra igual ni error (QA del 25 nov).
+  const said = { ...dictatedAllergy(payload), name: typeof payload["name"] === "string" ? payload["name"] : null }
+  const onFile = (await tx
+    .select()
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId), eq(patientAllergy.isActive, true), ne(patientAllergy.verification, "descartada")))).find((existing) => sameAllergyOnRecord(said, [existing]))
+  const created = onFile ?? await addPatientAllergy(tx, orgId, actorUserId, patientId, {
     substance: String(payload["substance"]),
     substanceSystem: (payload["substanceSystem"] as string | undefined) ?? null,
     substanceCode: (payload["substanceCode"] as string | undefined) ?? null,
@@ -4125,7 +4133,7 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
         eq(encounterDictationSuggestion.organizationId, orgId),
         eq(encounterDictationSuggestion.encounterId, encounterId),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
-        ne(encounterDictationSuggestion.kind, "salud"),
+        discardableWhenSigning(),
       ),
     )
     .returning({ id: encounterDictationSuggestion.id })

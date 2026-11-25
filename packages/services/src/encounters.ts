@@ -184,6 +184,7 @@ import {
   TO_SCHEDULE_STATUSES,
 } from "./to-schedule.js"
 import { type EncounterVisitAnswer, encounterVisitAnswer } from "./visit-answers.js"
+import { discardableWhenSigning } from "./said-health-risks.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect & SiteFields
@@ -3933,8 +3934,7 @@ export async function finalizeEncounter(
         eq(encounterDictationSuggestion.organizationId, orgId),
         eq(encounterDictationSuggestion.encounterId, encounterId),
         inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
-        ne(encounterDictationSuggestion.kind, "salud"),
-        sql`not (${encounterDictationSuggestion.kind} = 'alergia' and coalesce(${encounterDictationSuggestion.payload}->>'substance', '') <> '')`,
+        discardableWhenSigning(),
       ),
     )
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,

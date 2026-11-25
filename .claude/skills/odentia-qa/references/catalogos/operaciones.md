@@ -153,12 +153,12 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 **Ya falló:** la cita «Reevaluación postoperatoria» de S/ 0 se firmó con «Evaluación odontológica · S/ 50» marcada (19 nov).
 
 **Sumado por la mesa de Clío y la conversación (21 nov 2026):**
-- [ ] Lo que deja el repaso al abrir el cierre se ve en el cierre («Clío propone…») y se decide antes de firmar; ninguna sugerencia queda `lista` en una atención firmada.
+- [ ] Lo que deja el repaso al abrir el cierre se ve en el cierre («Clío propone…») y se decide antes de firmar; ninguna sugerencia queda `lista` en una atención firmada, salvo lo dicho de su salud y una alergia con su sustancia, que siguen avisándose con su fecha hasta que alguien las revise (por la firma y por el cierre; QA del 25 nov).
 - [ ] La receta y la anestesia avisan también lo dicho de su salud que aún no se confirmó (anticoagulante, alergia), como «dijo, sin confirmar».
 
 **Ya falló:** (21 nov) el repaso propuso «anestesia infiltrativa con lidocaína en la 36» y el cierre firmó sin mostrarla; se recetó ibuprofeno sin aviso con «dijo apixabán, sin confirmar». Se corrigieron en la rama `fix/clio-lee-la-conversacion`.
 
-**Caso:** CO34 · Escrita de punta a punta y continuada al día siguiente: apixabán dicho y no confirmado, ibuprofeno recetado, una pausa que el repaso completa (anestesia), un reintento de «No lo usé» y «Descartar» en otra atención con lo que se dijo. → La receta avisa del anticoagulante; el cierre muestra lo del repaso antes de firmar; ninguna sugerencia queda lista en la firmada; la frase reintentada sigue en «No lo usé»; el descarte avisa qué se pierde.
+**Caso:** CO34 · Escrita de punta a punta y continuada al día siguiente: apixabán dicho y no confirmado, ibuprofeno recetado, una pausa que el repaso completa (anestesia), un reintento de «No lo usé» y «Descartar» en otra atención con lo que se dijo. → La receta avisa del anticoagulante; el cierre muestra lo del repaso antes de firmar; ninguna sugerencia queda lista en la firmada, salvo la salud y la alergia dichas, que avisan con su fecha; la frase reintentada sigue en «No lo usé»; el descarte avisa qué se pierde.
 
 ## O-ATE-03 Anular una atención
 

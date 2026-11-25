@@ -6,7 +6,7 @@ import {
   type MedicineClassAnswer,
   medicationAlertWords,
   medicationClassOf,
-  normalizeDrugText,
+  sameAllergyOnRecord,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -1125,7 +1125,5 @@ function unregisteredSaid(
   said: readonly SaidAllergy[] | undefined,
   registered: ReadonlyArray<{ substance: string; substanceCode?: string | null; verification?: string | null }>,
 ): SaidAllergy[] {
-  const key = (row: { substance: string; substanceCode?: string | null }) => (row.substanceCode ?? normalizeDrugText(row.substance)).toLocaleLowerCase("es")
-  const known = new Set(registered.filter((row) => row.verification !== "descartada").map(key))
-  return (said ?? []).filter((row) => !known.has(key(row)))
+  return (said ?? []).filter((row) => !sameAllergyOnRecord(row, registered))
 }

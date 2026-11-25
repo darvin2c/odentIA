@@ -701,11 +701,22 @@ export function saidAllergyWarnings(
   registered: readonly AllergyOnRecord[],
   catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
 ): string[] {
-  const key = (row: AllergyOnRecord) => (row.substanceCode ?? normalizeDrugText(row.substance)).toLocaleLowerCase("es")
   // Una descartada no avisa (`allergyWarnings`): no puede callar la que se dijo hoy (revisión del 25 nov).
-  const known = new Set(registered.filter((row) => row.verification !== "descartada").map(key))
-  const fresh = said.filter((row) => !known.has(key(row)))
+  const fresh = said.filter((row) => !sameAllergyOnRecord(row, registered))
   return allergyWarnings(dci, fresh, catalog).map((line) => `${line} Lo dijo en la consulta y nadie lo confirmó.`)
+}
+
+/**
+ * ¿Ya está entre sus alergias vigentes? Por su código, si las dos lo tienen, o por el nombre: la que
+ * dijo trae el código de la lista y la anotada a mano a veces no («Metamizol»; verificación del 25 nov).
+ */
+export function sameAllergyOnRecord(said: AllergyOnRecord & { name?: string | null }, registered: readonly AllergyOnRecord[]): boolean {
+  const names = [said.substance, said.name].filter((value): value is string => !!value).map(normalizeDrugText)
+  return registered.some(
+    (row) =>
+      row.verification !== "descartada" &&
+      ((!!row.substanceCode && !!said.substanceCode && row.substanceCode === said.substanceCode) || names.includes(normalizeDrugText(row.substance))),
+  )
 }
 
 /** Lo que ya toma, de sus antecedentes: el nombre que se ve y su código ATC, si lo tiene. */

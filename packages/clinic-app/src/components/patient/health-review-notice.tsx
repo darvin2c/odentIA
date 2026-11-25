@@ -394,7 +394,9 @@ export function HealthReviewNotice({
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   // Las que ya tenía, anotadas o revisadas por el equipo: revisar las alergias también las cubre.
   const others = active.filter((allergy) => !declaredAllergyIds.has(allergy.id))
-  const allergyRow = allergiesDue && !allergiesSaid
+  // Con una alergia que dijo esperando revisión, la fila no dice «no se le preguntó» ni ofrece «No tiene
+  // alergias»: se revisa en su propia fila (QA del 25 nov).
+  const allergyRow = allergiesDue && !allergiesSaid && (health.saidAllergies ?? []).length === 0
   const saidUnknownAllergies = allergyRow ? allergiesSaidUnknown(health) : null
   // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
   const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)

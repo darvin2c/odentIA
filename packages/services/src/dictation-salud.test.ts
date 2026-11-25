@@ -845,3 +845,26 @@ describe("QA del 25 nov · la alergia dicha no se pierde al firmar", () => {
     await enable(false)
   })
 })
+
+describe("verificación del 25 nov · el cierre tampoco pierde la alergia dicha", () => {
+  it("«Descartar lo pendiente» del cierre deja la alergia; registrada a mano, deja de pedirse y «Registrar» no la duplica", async () => {
+    await enable(true)
+    const { fx, segment } = await session()
+    await segment({
+      drafts: [{ kind: "alergia", payload: { substance: "metamizol", reaction: "se le cerró la garganta" }, sourceText: "con el metamizol se le cerró la garganta" }],
+      transcript: "Con el metamizol se le cerró la garganta.",
+    })
+    await fx.run((tx) => discardPendingDictation(tx, ...fx.args, fx.encounter.id))
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const [said] = await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))
+    expect(said?.name.toLocaleLowerCase("es")).toBe("metamizol")
+    // Alguien la registra a mano mientras esperaba: deja de pedirse, y «Registrar» no hace otra.
+    await ownerDb.insert(patientAllergy).values({ organizationId: ORG, patientId: fx.patient.id, substance: "Metamizol", severity: "severa" })
+    expect(await fx.run((tx) => saidAllergies(tx, ORG, fx.patient.id))).toEqual([])
+    await fx.run((tx) => confirmSaidAllergy(tx, ...fx.args, said!.suggestionId))
+    const rows = await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.patientId, fx.patient.id))
+    expect(rows.filter((row) => row.substance.toLocaleLowerCase("es") === "metamizol")).toHaveLength(1)
+    await enable(false)
+  })
+})
