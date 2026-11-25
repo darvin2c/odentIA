@@ -331,7 +331,7 @@ function OrgSwitcher() {
         }>("/api/account/organizations")
       ).data,
   })
-  // Las tiendas de gestorIA de la persona (ADR 0216): la copia que la cuenta guarda de sus equipos.
+  // Las tiendas de gestorIA de la persona (ADR 0217): la copia que la cuenta guarda de sus equipos.
   // Si no responde, el selector sigue con las clínicas.
   const { data: stores } = useQuery({
     queryKey: ["account", "places"],

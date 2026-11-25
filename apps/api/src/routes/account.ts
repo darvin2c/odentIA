@@ -70,7 +70,7 @@ export function createAccountRoute(deps: AccountDeps) {
   })
 
   // Los lugares de la persona en las apps que son otro sistema (las tiendas de gestorIA, ADR
-  // 0216): la copia que la cuenta guarda de lo que la app avisa. Cada app arma su dirección.
+  // 0217): la copia que la cuenta guarda de lo que la app avisa. Cada app arma su dirección.
   app.get("/places", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)

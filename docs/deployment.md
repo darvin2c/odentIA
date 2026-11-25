@@ -380,7 +380,7 @@ un procedimiento explícito; no regenerarlos para corregir un deploy.
 Las `VITE_*` de las pantallas ya no son del proyecto de OpenShip: van en el job `deploy-web`
 del CI, por producto. `VITE_GESTORIA_DOMAIN=gestoria24.com` va en el panel y las clínicas de
 los tres productos: con él, sus tiendas de gestorIA salen en el selector y abren con el pase
-(ADR 0216); sin él, no salen. Las variables de runtime requieren **Apply/refresh**,
+(ADR 0217); sin él, no salen. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
 `ADMIN_URL` es el origen HTTPS exacto de administración y forma parte de la

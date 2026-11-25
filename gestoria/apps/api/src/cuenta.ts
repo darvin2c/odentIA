@@ -289,7 +289,7 @@ async function closeCopy(tx: Db, userId: string, now: Date): Promise<void> {
     // eslint-disable-next-line no-await-in-loop
     await noteStoreAccount(tx, m.storeId, now)
   }
-  // La cuenta sabe quién quedó en cada tienda (ADR 0216).
+  // La cuenta sabe quién quedó en cada tienda (ADR 0217).
   for (const m of memberships) {
     // eslint-disable-next-line no-await-in-loop
     await noteStoreTeam(tx, m.storeId)

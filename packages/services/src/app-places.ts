@@ -7,7 +7,7 @@ import { alias } from "drizzle-orm/pg-core"
 import { ServiceError } from "./errors.js"
 
 /**
- * Los lugares de la persona en las apps que son otro sistema (ADR 0216): las tiendas de gestorIA.
+ * Los lugares de la persona en las apps que son otro sistema (ADR 0217): las tiendas de gestorIA.
  * La cuenta no lee la base de gestorIA: guarda la copia de lo que gestorIA le avisa por el
  * acuerdo (`equipo.cambiado`, el equipo entero de una tienda) y con ella arma el selector de
  * lugares de las clínicas y frena el cierre de la cuenta del único Dueño de una tienda.

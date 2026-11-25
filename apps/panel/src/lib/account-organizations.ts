@@ -15,7 +15,7 @@ const invitationSchema = z.object({
   role: z.string().nullable(), roleLabel: z.string(), expiresAt: z.string(), provisioning: provisioningSchema,
   product: z.string(),
 })
-/** Un lugar de una app que es otro sistema: una tienda de gestorIA (ADR 0216). */
+/** Un lugar de una app que es otro sistema: una tienda de gestorIA (ADR 0217). */
 const placeSchema = z.object({ app: z.string(), id: z.string(), name: z.string(), role: z.string(), roleLabel: z.string() })
 export type AccountOrganization = z.infer<typeof organizationSchema>
 export type AccountPlace = z.infer<typeof placeSchema>

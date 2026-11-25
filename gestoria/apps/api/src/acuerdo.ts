@@ -168,7 +168,7 @@ async function teamOf(tx: Db, storeId: string) {
 }
 
 /**
- * Le avisa a la cuenta quién está en la tienda (ADR 0216), si cambió desde lo último que se le
+ * Le avisa a la cuenta quién está en la tienda (ADR 0217), si cambió desde lo último que se le
  * avisó: al crearla, al entrar alguien, al cambiar un rol, al sacar a alguien y al cerrarse la
  * cuenta de alguien del equipo. Va el equipo entero, en la transacción del cambio. Con `force`,
  * aunque no haya cambiado.

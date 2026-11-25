@@ -94,7 +94,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Todo aviso va por `apps/api/src/acuerdo.ts` a `contract_outbox`, en la misma transacción que lo
   que lo causó; nunca se envía directo. Su id es su clave y no cambia al reintentar. Un cambio de
   nombre, país o Dueño de la tienda llama a `noteStoreAccount`; todo cambio del equipo (alta,
-  baja, rol) o del nombre, también a `noteStoreTeam` (ADR 0216): el equipo entero, que la cuenta
+  baja, rol) o del nombre, también a `noteStoreTeam` (ADR 0217): el equipo entero, que la cuenta
   usa para el selector de las clínicas y para no cerrar la cuenta del único Dueño.
 - Lo que usó Sofi se cuenta con `countConversation`: una vez por conversación cada 24 horas, y sube
   a «pedido» si tomó uno. Lo de prueba nunca se cuenta. Solo el agente anota uso (`0009_reglas_acuerdo.sql`).

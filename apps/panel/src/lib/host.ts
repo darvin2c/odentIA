@@ -58,7 +58,7 @@ export function crossDomainHref(target: string): string {
  */
 export const GESTORIA_DOMAIN: string | undefined = import.meta.env.VITE_GESTORIA_DOMAIN || undefined
 
-/** La dirección de una tienda de gestorIA, con el pase (ADR 0215 y 0216); sin su dominio, nula. */
+/** La dirección de una tienda de gestorIA, con el pase (ADR 0215 y 0217); sin su dominio, nula. */
 export const storeUrl = (id: string): string | null =>
   GESTORIA_DOMAIN ? crossDomainHref(`https://app.${GESTORIA_DOMAIN}${BASE_PORT}/tiendas/${encodeURIComponent(id)}`) : null
 

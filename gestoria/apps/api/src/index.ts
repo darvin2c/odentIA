@@ -90,7 +90,7 @@ async function agreement() {
       await refreshStates(ownerDb, contract)
       // Una vez por hora (la primera, al arrancar): lo que ya salió hace más de una semana se borra
       // (la administración ya lo tiene) y el equipo de cada tienda se revisa contra lo último que
-      // se le avisó a la cuenta. La primera vuelta tras desplegar es la carga inicial (ADR 0216).
+      // se le avisó a la cuenta. La primera vuelta tras desplegar es la carga inicial (ADR 0217).
       if (Date.now() >= nextPurge) {
         nextPurge = Date.now() + HOUR
         await purgeOutbox(ownerDb)

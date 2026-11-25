@@ -615,7 +615,7 @@ describe("el orden de cada tienda", () => {
   })
 })
 
-describe("gestorIA avisa a la cuenta quién está en cada tienda (ADR 0216)", () => {
+describe("gestorIA avisa a la cuenta quién está en cada tienda (ADR 0217)", () => {
   const teamsOf = async (shopId: string) =>
     (
       await db.ownerDb

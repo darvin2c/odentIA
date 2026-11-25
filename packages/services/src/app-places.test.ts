@@ -10,7 +10,7 @@ import { listMyAppPlaces } from "./app-places.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * La copia de los lugares de las otras apps en la cuenta (ADR 0216): gestorIA avisa el equipo
+ * La copia de los lugares de las otras apps en la cuenta (ADR 0217): gestorIA avisa el equipo
  * entero de cada tienda; la cuenta lo guarda, lo muestra en el selector y no cierra la cuenta del
  * único Dueño de una tienda.
  */
