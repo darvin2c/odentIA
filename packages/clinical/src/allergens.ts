@@ -390,6 +390,9 @@ export const HABITUAL_MEDICATIONS: readonly HabitualMedicationEntry[] = [
   { dci: "acenocumarol", atc: "B01AA07", names: ["Sintrom"] },
   { dci: "enoxaparina", atc: "B01AB05" },
   { dci: "clopidogrel", atc: "B01AC04", names: ["Plavix"] },
+  // La aspirina de todos los días es un antiagregante (B01AC06), no el analgésico (N02BA01): sin
+  // ella, «aspirina» se guardaba con el código del grupo y el aviso pedía el INR (mesa del 25 nov, H4).
+  { dci: "ácido acetilsalicílico", atc: "B01AC06", names: ["aspirina"] },
   { dci: "dabigatrán etexilato", atc: "B01AE07", names: ["dabigatrán", "Pradaxa"] },
   { dci: "rivaroxabán", atc: "B01AF01", names: ["Xarelto"] },
   { dci: "apixabán", atc: "B01AF02", names: ["Eliquis"] },
