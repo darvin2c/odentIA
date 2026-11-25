@@ -5,6 +5,7 @@ import {
   forgetTrustedBrowsers,
   getMyTwoFactor,
   leaveOrganization,
+  listMyAppPlaces,
   listMyInvitations,
   listMyOrganizations,
 } from "@odentia/services"
@@ -18,7 +19,7 @@ import { runService, validationError } from "./helpers.js"
 export interface AccountDeps extends Pick<AppDeps, "auth" | "ownerDb" | "accountEventSenders"> {
   /**
    * Solo lo de la persona (dos pasos y cerrar la cuenta), sin sus clínicas ni sus invitaciones:
-   * el dominio de una app que es otro sistema (gestorIA, ADR 0216).
+   * el dominio de una app que es otro sistema (gestorIA, ADR 0218).
    */
   personOnly?: boolean
 }
@@ -86,6 +87,15 @@ export function createAccountRoute(deps: AccountDeps) {
     })
   }
 
+  // Los lugares de la persona en las apps que son otro sistema (las tiendas de gestorIA, ADR
+  // 0217): la copia que la cuenta guarda de lo que la app avisa. Cada app arma su dirección.
+  // Es de la persona: también responde en el dominio de gestorIA.
+  app.get("/places", async (c) => {
+    const who = await accountSession(c)
+    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+    return runService(c, 200, () => owner((tx) => listMyAppPlaces(tx, who.userId)))
+  })
+
   // Verificación en dos pasos (ADR 0107): activar, cambiar de teléfono y los
   // códigos son de Better Auth; aquí, lo que Mi perfil dice y olvidar los
   // navegadores recordados.
@@ -98,7 +108,8 @@ export function createAccountRoute(deps: AccountDeps) {
       // Fuera de las clínicas no se nombra ninguna: se dice cuántas la piden, para que se
       // entienda por qué no se puede desactivar.
       const count = status.requiredBy.length
-      const requiredBy = count === 0 ? [] : [count === 1 ? "Una de tus clínicas" : `${count} de tus clínicas`]
+      const requiredBy =
+        count === 0 ? [] : [count === 1 ? "Una de tus clínicas" : `${count} de tus clínicas`]
       return { ...status, requiredBy }
     })
   })
@@ -106,7 +117,9 @@ export function createAccountRoute(deps: AccountDeps) {
   app.post("/two-factor/forget-browsers", async (c) => {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
-    return runService(c, 200, async () => ({ forgotten: await forgetTrustedBrowsers(deps.ownerDb, who.userId) }))
+    return runService(c, 200, async () => ({
+      forgotten: await forgetTrustedBrowsers(deps.ownerDb, who.userId),
+    }))
   })
 
   app.post("/close", async (c) => {

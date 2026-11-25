@@ -163,7 +163,7 @@ mientras no se configure:
 - `GESTORIA_DOMAIN` (API y worker): en ese dominio solo responde su entrada a la cuenta
   (`api.<dominio>/api/auth/*`, sin las rutas de organizaciones), lo de la persona que usan Mi
   perfil y Soporte de la cuenta en gestorIA (`/api/account/two-factor`, `/api/account/close`,
-  `/api/account/support/*` sin los casos de una clínica, `/api/uploads/avatar`; ADR 0216) y nada
+  `/api/account/support/*` sin los casos de una clínica, `/api/uploads/avatar`; ADR 0218) y nada
   de las clínicas. Con él, el worker manda la respuesta a un caso pedido desde gestorIA a
   `https://app.<dominio>/cuenta/soporte`, con su marca.
   `/api/auth/token` da a quien entró un JWT de 15 minutos firmado (EdDSA) y
@@ -382,7 +382,9 @@ contexto Docker. Los secretos se generan una vez, se conservan y se rotan median
 un procedimiento explícito; no regenerarlos para corregir un deploy.
 
 Las `VITE_*` de las pantallas ya no son del proyecto de OpenShip: van en el job `deploy-web`
-del CI, por producto. Las variables de runtime requieren **Apply/refresh**,
+del CI, por producto. `VITE_GESTORIA_DOMAIN=gestoria24.com` va en el panel y las clínicas de
+los tres productos: con él, sus tiendas de gestorIA salen en el selector y abren con el pase
+(ADR 0217); sin él, no salen. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
 `ADMIN_URL` es el origen HTTPS exacto de administración y forma parte de la

@@ -555,6 +555,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la administración
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/admin')
@@ -572,6 +573,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar el panel de odentIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
@@ -589,6 +591,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
           VITE_PRODUCT: medical
           CLOUDFLARE_ENV: latidia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
@@ -609,6 +612,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
           VITE_PRODUCT: optical
           CLOUDFLARE_ENV: vistia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
@@ -630,6 +634,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de odentIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/dental-clinic')
@@ -647,6 +652,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
           VITE_PRODUCT: medical
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de latidIA
@@ -665,6 +671,7 @@ jobs:
           VITE_DENTAL_DOMAIN: odentia32.com
           VITE_MEDICAL_DOMAIN: latidia72.com
           VITE_OPTICAL_DOMAIN: vistia20.com
+          VITE_GESTORIA_DOMAIN: gestoria24.com
           VITE_PRODUCT: optical
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las ópticas de vistIA

@@ -41,7 +41,7 @@ function actionErrorMessage(error: unknown): string {
 }
 
 /**
- * Mi perfil: la pantalla común de la cuenta (ADR 0216) con lo propio del panel, sus clínicas y
+ * Mi perfil: la pantalla común de la cuenta (ADR 0218) con lo propio del panel, sus clínicas y
  * sus invitaciones.
  */
 function ProfilePage() {
@@ -70,8 +70,9 @@ function ProfilePage() {
         profileDescription={`Tu información personal en ${panelWords.name}.`}
         close={{
           description:
-            "Sales de tus clínicas y se bloquea tu acceso. Tu trabajo previo conserva tu autoría. Si eres la única propietaria de alguna clínica, nombra antes a otra persona.",
-          confirm: "Perderás el acceso a tus clínicas. Esta acción bloquea tu cuenta de inmediato.",
+            "Sales de tus clínicas y tiendas y se bloquea tu acceso. Tu trabajo previo conserva tu autoría. Si eres la única propietaria de alguna clínica o el único Dueño de una tienda de gestorIA, nombra antes a otra persona.",
+          confirm:
+            "Perderás el acceso a tus clínicas y tiendas. Esta acción bloquea tu cuenta de inmediato.",
           onClosed: async () => {
             // La cuenta ya está cerrada: a la entrada aunque cerrar la sesión falle por la red.
             await authClient.signOut().catch(() => undefined)

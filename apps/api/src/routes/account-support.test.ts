@@ -41,7 +41,7 @@ const routeOf = (accountCasesOnly: boolean) =>
     ...(accountCasesOnly ? { accountCasesOnly, screen: "/gestoria" } : {}),
   })
 
-describe("soporte de la cuenta en el dominio de una app que es otro sistema (ADR 0216)", () => {
+describe("soporte de la cuenta en el dominio de una app que es otro sistema (ADR 0218)", () => {
   it("solo ve los casos de la cuenta: los de una clínica no existen ahí", async () => {
     const route = routeOf(true)
     const list = (await (await route.request("/cases")).json()) as { data: Array<{ id: string }> }

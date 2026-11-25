@@ -33,7 +33,7 @@ const envSchema = z.object({
   GESTORIA_CONTRACT_URL: z.string().trim().default(""),
   GESTORIA_CONTRACT_SECRET: z.string().trim().default(""),
   /**
-   * El dominio de gestorIA, el mismo de la API (ADR 0216): la respuesta a un caso de soporte
+   * El dominio de gestorIA, el mismo de la API (ADR 0218): la respuesta a un caso de soporte
    * pedido desde gestorIA lleva a su app y sale con su marca. Vacío: al panel.
    */
   GESTORIA_DOMAIN: z

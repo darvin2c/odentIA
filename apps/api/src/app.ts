@@ -510,7 +510,7 @@ export function createApp(deps: AppDeps) {
     path === "/api/uploads/avatar" || path === "/api/account" || path.startsWith("/api/account/")
 
   /**
-   * Lo de la cuenta que la app de otro sistema sirve en su dominio (ADR 0216): los dos pasos,
+   * Lo de la cuenta que la app de otro sistema sirve en su dominio (ADR 0218): los dos pasos,
    * cerrar la cuenta, la foto y los casos de soporte de la cuenta. Con la sesión de su entrada y
    * solo desde sus pantallas: una escritura que no viene de ellas no se acepta.
    */
@@ -607,7 +607,7 @@ export function createApp(deps: AppDeps) {
     app.use("*", async (c, next) => {
       if (!isOnDomain(c.req.url, entry.domain)) return next()
       const path = c.req.path
-      // Mi perfil y Soporte de la cuenta en la app (ADR 0216): solo lo de la persona, con la
+      // Mi perfil y Soporte de la cuenta en la app (ADR 0218): solo lo de la persona, con la
       // sesión de su dominio. Nada de sus clínicas.
       if (isExternalAccountPath(path))
         return entryCors(c, async () => {

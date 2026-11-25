@@ -18,7 +18,7 @@ import { ACCOUNT_API, authClient, forgetToken, forgetUser, safeNext } from "./li
 import { Shell, useMe } from "./tiendas"
 
 /**
- * La cuenta dentro de gestorIA (lienzo «Una cuenta, todas las apps», decisión 7; ADR 0216): las
+ * La cuenta dentro de gestorIA (lienzo «Una cuenta, todas las apps», decisión 7; ADR 0218): las
  * mismas pantallas del panel de las clínicas, Mi perfil y Soporte de la cuenta, en gestoria24.com
  * y con su marca. Hablan con la cuenta en su dominio (`api.gestoria24.com`), que ahí solo
  * responde lo de la persona.

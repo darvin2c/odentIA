@@ -23,6 +23,7 @@ import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, notExists, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { recordAccountBlocked, recordAccountClosed, recordAccountReopened } from "./account-events.js"
+import { assertKeepsAppPlaceOwners } from "./app-places.js"
 import { clientReadyForAccount, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -1349,6 +1350,8 @@ export async function closeAccountByAdmin(
   for (const m of memberships) {
     if (m.role === "owner") await assertKeepsOwner(tx, m.organizationId, args.userId)
   }
+  // Ni una tienda de gestorIA sin Dueño (la copia de sus equipos, ADR 0217).
+  await assertKeepsAppPlaceOwners(tx, args.userId)
   await deactivateStaffOnClose(tx, staff, args.userId)
   await tx.delete(member).where(eq(member.userId, args.userId))
   await tx.delete(session).where(eq(session.userId, args.userId))
@@ -1590,6 +1593,8 @@ export async function closeMyAccount(tx: Db, userId: string): Promise<void> {
   for (const m of memberships) {
     if (m.role === "owner") await assertKeepsOwner(tx, m.organizationId, userId)
   }
+  // Ni una tienda de gestorIA sin Dueño (la copia de sus equipos, ADR 0217).
+  await assertKeepsAppPlaceOwners(tx, userId)
   await tx.delete(member).where(eq(member.userId, userId))
   await tx.delete(session).where(eq(session.userId, userId))
   await tx

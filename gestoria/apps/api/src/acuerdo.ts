@@ -96,7 +96,9 @@ async function enqueue(
   const payload = appEvent.parse(event) as OutboxEvent
   await tx
     .insert(contractOutbox)
-    .values({ storeId, type: payload.type, payload, ...extra })
+    // La hora al anotarlo, no la del inicio de la transacción: dos avisos de la misma (la tienda
+    // abierta y su equipo) salen en el orden en que se anotaron.
+    .values({ storeId, type: payload.type, payload, createdAt: sql`clock_timestamp()`, ...extra })
     .onConflictDoNothing({ target: [contractOutbox.storeId, contractOutbox.dedupe] })
 }
 
@@ -146,6 +148,81 @@ export async function noteStoreAccount(
       return
   }
   await enqueue(tx, storeId, { type: "cuenta.abierta", timestamp: now.toISOString(), data })
+}
+
+/** El equipo entero de la tienda para la cuenta: su nombre y cada persona con su rol, en orden estable. */
+async function teamOf(tx: Db, storeId: string) {
+  const [shop] = await tx.select({ name: store.name }).from(store).where(eq(store.id, storeId))
+  if (!shop) return null
+  const members = await tx
+    .select({ userId: storeMember.userId, role: storeMember.role })
+    .from(storeMember)
+    .where(eq(storeMember.storeId, storeId))
+    .orderBy(asc(storeMember.userId))
+  // Recortado como lo guarda el acuerdo: así se compara igual con lo último que se avisó.
+  return {
+    account: storeId,
+    name: shop.name.trim(),
+    members: members.map((one) => ({ userId: one.userId.trim(), role: one.role })),
+  }
+}
+
+/**
+ * Le avisa a la cuenta quién está en la tienda (ADR 0217), si cambió desde lo último que se le
+ * avisó: al crearla, al entrar alguien, al cambiar un rol, al sacar a alguien y al cerrarse la
+ * cuenta de alguien del equipo. Va el equipo entero, en la transacción del cambio. Con `force`,
+ * aunque no haya cambiado.
+ *
+ * Dos cambios del mismo equipo a la vez se avisan uno después del otro: el candado de la tienda
+ * se toma antes de leer el equipo y dura hasta el final de la transacción, y la hora del aviso es
+ * la de la base ya con el candado. Así el que avisa después lee lo del otro y lleva la hora más
+ * nueva, que es la que la cuenta guarda.
+ */
+export async function noteStoreTeam(tx: Db, storeId: string, force = false): Promise<boolean> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`equipo:${storeId}`}, 0))`)
+  const [clock] = (await tx.execute(sql`select clock_timestamp() as at`)) as unknown as Array<{
+    at: Date | string
+  }>
+  const now = new Date(clock?.at ?? Date.now())
+  const data = await teamOf(tx, storeId)
+  if (!data) return false
+  if (!force) {
+    const [last] = await tx
+      .select({ payload: contractOutbox.payload })
+      .from(contractOutbox)
+      .where(and(eq(contractOutbox.storeId, storeId), eq(contractOutbox.type, "equipo.cambiado")))
+      .orderBy(desc(contractOutbox.createdAt))
+      .limit(1)
+    if (last && sameTeam(last.payload.data, data)) return false
+  }
+  await enqueue(tx, storeId, { type: "equipo.cambiado", timestamp: now.toISOString(), data })
+  return true
+}
+
+/** ¿Lo último que se avisó dice lo mismo? (jsonb no guarda el orden de las claves). */
+function sameTeam(before: unknown, now: NonNullable<Awaited<ReturnType<typeof teamOf>>>): boolean {
+  const said = before as { name?: unknown; members?: Array<{ userId?: unknown; role?: unknown }> }
+  if (said?.name !== now.name || !Array.isArray(said.members)) return false
+  if (said.members.length !== now.members.length) return false
+  return now.members.every(
+    (member, i) =>
+      said.members?.[i]?.userId === member.userId && said.members[i]?.role === member.role,
+  )
+}
+
+/**
+ * Revisa el equipo de cada tienda contra lo último que se le avisó a la cuenta y avisa lo que
+ * no coincide. Es la carga inicial (las tiendas de antes de este aviso) y lo que arregla un
+ * aviso que dos cambios a la vez dejaron atrás. Corre en el trabajo del acuerdo, una vez por hora.
+ */
+export async function reviewStoreTeams(ownerDb: Db): Promise<number> {
+  const stores = await ownerDb.select({ id: store.id }).from(store).orderBy(asc(store.id))
+  let noted = 0
+  for (const one of stores) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await ownerDb.transaction((tx) => noteStoreTeam(tx, one.id))) noted++
+  }
+  return noted
 }
 
 /** El canal como lo nombra el acuerdo; uno que no nombra va sin canal. */
@@ -416,8 +493,8 @@ export async function sendReceipt(
 
 /**
  * Borra de la bandeja lo que salió o se rechazó hace más del plazo (la administración ya lo tiene;
- * el Dueño ya vio por qué no se aceptó), menos el último aviso de que se abrió cada tienda: con él
- * se sabe si cambió algo que avisar. Lo que no salió no se toca.
+ * el Dueño ya vio por qué no se aceptó), menos el último aviso de que se abrió cada tienda y el
+ * último de su equipo: con ellos se sabe si cambió algo que avisar. Lo que no salió no se toca.
  */
 export async function purgeOutbox(ownerDb: Db, now = new Date()): Promise<number> {
   const before = new Date(now.getTime() - OUTBOX_KEEP_MS)
@@ -426,10 +503,10 @@ export async function purgeOutbox(ownerDb: Db, now = new Date()): Promise<number
     .where(
       and(
         or(lt(contractOutbox.sentAt, before), lt(contractOutbox.rejectedAt, before)),
-        sql`(${contractOutbox.type} <> 'cuenta.abierta' or exists (
+        sql`(${contractOutbox.type} not in ('cuenta.abierta', 'equipo.cambiado') or exists (
           select 1 from contract_outbox later
           where later.store_id = ${contractOutbox.storeId}
-            and later.type = 'cuenta.abierta'
+            and later.type = ${contractOutbox.type}
             and (later.created_at, later.id) > (${contractOutbox.createdAt}, ${contractOutbox.id})
         ))`,
       ),
@@ -515,7 +592,8 @@ export async function deliverOutbox(
     )
   const waiting = new Set(opening.map((row) => row.storeId))
   for (const row of due) {
-    if (waiting.has(row.storeId)) continue
+    // El equipo es para la cuenta, no para la cuenta de cobro: no espera a que se abra.
+    if (waiting.has(row.storeId) && row.type !== "equipo.cambiado") continue
     // eslint-disable-next-line no-await-in-loop
     const [full] = await ownerDb
       .select({ payload: contractOutbox.payload })

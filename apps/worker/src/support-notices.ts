@@ -24,7 +24,7 @@ export interface SupportNoticeWorkerDeps {
   /** Origen del panel: casos de acceso, que no son de una clínica. */
   webUrl: string
   /**
-   * Las apps que son otro sistema con su soporte de la cuenta (ADR 0216), por la ruta desde la
+   * Las apps que son otro sistema con su soporte de la cuenta (ADR 0218), por la ruta desde la
    * que se pidió ayuda (`/gestoria`): el aviso de la respuesta lleva a su app y con su marca.
    * Sin ella, al panel.
    */

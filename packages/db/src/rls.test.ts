@@ -1090,18 +1090,21 @@ it("una tabla nueva nace cerrada al rol app y lo que este alcanza de una clínic
     { tabla: "saas_plan", escribe: false },
   ])
   // La cuenta (ADR 0201): Better Auth lee y agrega las llaves del token firmado, sin
-  // cambiarlas ni borrarlas, y los avisos a las apps son solo de la conexión propietaria.
+  // cambiarlas ni borrarlas; los avisos a las apps y la copia de sus lugares (las tiendas de
+  // gestorIA) son solo de la conexión propietaria.
   const cuenta = (await ownerDb.execute(sql`
     select c.relname as "tabla",
       has_table_privilege(${APP_ROLE}, c.oid, 'select') as "lee",
       has_table_privilege(${APP_ROLE}, c.oid, 'insert') as "agrega",
       has_table_privilege(${APP_ROLE}, c.oid, 'update, delete') as "cambia"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'auth' and c.relname in ('jwks', 'account_event')
+    where n.nspname = 'auth' and c.relname in ('jwks', 'account_event', 'app_place', 'app_place_member')
     order by 1
   `)) as unknown as { tabla: string; lee: boolean; agrega: boolean; cambia: boolean }[]
   expect(cuenta).toEqual([
     { tabla: "account_event", lee: false, agrega: false, cambia: false },
+    { tabla: "app_place", lee: false, agrega: false, cambia: false },
+    { tabla: "app_place_member", lee: false, agrega: false, cambia: false },
     { tabla: "jwks", lee: true, agrega: true, cambia: false },
   ])
   const catalogo = (await ownerDb.execute(sql`

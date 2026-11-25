@@ -13,7 +13,7 @@ const reply = {
   clinicProduct: null,
 }
 
-describe("el enlace del aviso de un caso de la cuenta (ADR 0216)", () => {
+describe("el enlace del aviso de un caso de la cuenta (ADR 0218)", () => {
   it("pedido desde gestorIA, lleva a su soporte en su app", () => {
     expect(supportNoticeLink({ ...reply, openedFrom: "/gestoria" }, urls)).toBe(
       "https://app.gestoria.test/cuenta/soporte?caso=caso%201",

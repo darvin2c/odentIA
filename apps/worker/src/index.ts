@@ -124,7 +124,7 @@ configureMailLinks(env.WEB_URL, {
   ...mailBrandDomains(publicLinks.productDomains),
   ...(env.GESTORIA_DOMAIN ? { gestoria: env.GESTORIA_DOMAIN } : {}),
 })
-/** El soporte de la cuenta en gestorIA (ADR 0216): la respuesta lleva a su app, con su marca. */
+/** El soporte de la cuenta en gestorIA (ADR 0218): la respuesta lleva a su app, con su marca. */
 const accountSupportApps = env.GESTORIA_DOMAIN
   ? {
       [accountSupportScreen("gestoria")]: {

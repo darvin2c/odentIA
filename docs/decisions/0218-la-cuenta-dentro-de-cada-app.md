@@ -1,4 +1,4 @@
-# 0216 · La cuenta dentro de cada app: las mismas pantallas, servidas por cada una
+# 0218 · La cuenta dentro de cada app: las mismas pantallas, servidas por cada una
 
 Fecha: 2026-11-25 · Estado: aceptada · Paso 4 del lienzo «Una cuenta, todas las apps» (decisión 7)
 

@@ -32,7 +32,7 @@ export interface AccountSupportDeps {
   storage: Storage
   appVersion?: string | null
   /**
-   * En el dominio de una app que es otro sistema (gestorIA, ADR 0216): solo los casos de la
+   * En el dominio de una app que es otro sistema (gestorIA, ADR 0218): solo los casos de la
    * cuenta, sin los que se abrieron en una clínica ni el acceso diagnóstico a ella.
    */
   accountCasesOnly?: boolean

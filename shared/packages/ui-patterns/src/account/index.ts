@@ -1,5 +1,5 @@
 /**
- * Las pantallas de la cuenta, las mismas en todas las apps del grupo (ADR 0216): Mi perfil
+ * Las pantallas de la cuenta, las mismas en todas las apps del grupo (ADR 0218): Mi perfil
  * (nombre, foto, correo, contraseña, dos pasos, sesiones y cerrar la cuenta) y Soporte de la
  * cuenta. Cada app las sirve en su dominio con `AccountProvider`.
  */

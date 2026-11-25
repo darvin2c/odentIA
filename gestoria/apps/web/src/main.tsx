@@ -213,7 +213,7 @@ const routeTree = rootRoute.addChildren([
       path: "/invitacion/$id",
       component: InvitationPage,
     }),
-    // La cuenta de la persona, la misma de todas sus apps (ADR 0216): `?edit=` abre su cajón,
+    // La cuenta de la persona, la misma de todas sus apps (ADR 0218): `?edit=` abre su cajón,
     // `?tienda=` deja volver a la tienda desde la que se llegó y `?caso=` abre un caso de soporte.
     createRoute({
       getParentRoute: () => signedIn,

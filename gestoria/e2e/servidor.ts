@@ -7,7 +7,7 @@
  *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
- * También lo de Mi perfil que usa el recorrido de la cuenta (ADR 0216): cambiar la contraseña
+ * También lo de Mi perfil que usa el recorrido de la cuenta (ADR 0218): cambiar la contraseña
  * (la actual es `CLAVE`; la nueva no se guarda) y activar los dos pasos con el código
  * `CODIGO_TOTP`. `GET /__cuenta` dice lo que pidió la pantalla. Sin la red: ningún proveedor real.
  */
@@ -248,7 +248,7 @@ const account = createServer(async (request, response) => {
       },
       user: { id: p.id, email: p.email, name: p.name, emailVerified: true, image: null },
     })
-  // Mi perfil (ADR 0216): los dos pasos, las sesiones y la contraseña de quien entró.
+  // Mi perfil (ADR 0218): los dos pasos, las sesiones y la contraseña de quien entró.
   if (request.method === "GET" && url.pathname === "/api/account/two-factor")
     return json(200, {
       data: {

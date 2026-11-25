@@ -202,7 +202,7 @@ function ProfilePhotoDrawer({
 }
 
 /**
- * Mi perfil, la misma en todas las apps (ADR 0216): la persona, su seguridad, sus sesiones, lo
+ * Mi perfil, la misma en todas las apps (ADR 0218): la persona, su seguridad, sus sesiones, lo
  * propio de cada app y cerrar la cuenta. Los cajones se abren con `?edit=` en la dirección.
  */
 export function AccountProfilePage({

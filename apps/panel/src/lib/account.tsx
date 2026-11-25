@@ -6,7 +6,7 @@ import { panelWords } from "./brand"
 
 /**
  * Las pantallas de la cuenta (Mi perfil y Soporte) son comunes a todas las apps
- * (`@odentia/ui-patterns`, ADR 0216): el panel les pasa su cliente de la cuenta, su API y su
+ * (`@odentia/ui-patterns`, ADR 0218): el panel les pasa su cliente de la cuenta, su API y su
  * marca.
  */
 export function PanelAccount({ children }: { children: ReactNode }) {

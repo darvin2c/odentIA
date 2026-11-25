@@ -141,7 +141,7 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
     expect((await preflight("https://app.odentia.test")).headers.get("access-control-allow-origin")).toBeNull()
   })
 
-  it("la cuenta de la persona también responde ahí, sin sus clínicas y solo desde sus pantallas (ADR 0216)", async () => {
+  it("la cuenta de la persona también responde ahí, sin sus clínicas y solo desde sus pantallas (ADR 0218)", async () => {
     const on = appWith(sessionOf("gestorIA"))
     const at = (path: string, init?: RequestInit) =>
       on.request(`https://api.gestoria.test${path}`, init)

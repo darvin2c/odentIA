@@ -1,6 +1,6 @@
 import { createAppDb, createOwnerDb, withSessionLock } from "@gestoria/db"
 import { serve } from "@hono/node-server"
-import { deliverOutbox, purgeOutbox, refreshStates } from "./acuerdo.js"
+import { deliverOutbox, purgeOutbox, refreshStates, reviewStoreTeams } from "./acuerdo.js"
 import { createApp } from "./app.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
@@ -88,10 +88,14 @@ async function agreement() {
     const run = await withSessionLock(ownerDb, "gestoria_acuerdo", async () => {
       const delivered = await deliverOutbox(ownerDb, contract)
       await refreshStates(ownerDb, contract)
-      // Lo que ya salió hace más de una semana se borra (una vez por hora): la administración ya lo tiene.
+      // Una vez por hora (la primera, al arrancar): lo que ya salió hace más de una semana se borra
+      // (la administración ya lo tiene) y el equipo de cada tienda se revisa contra lo último que
+      // se le avisó a la cuenta. La primera vuelta tras desplegar es la carga inicial (ADR 0217).
       if (Date.now() >= nextPurge) {
         nextPurge = Date.now() + HOUR
         await purgeOutbox(ownerDb)
+        const teams = await reviewStoreTeams(ownerDb)
+        if (teams) console.log(`gestoria-api: ${teams} equipo(s) de tienda por avisar a la cuenta`)
       }
       return delivered
     })

@@ -13,7 +13,7 @@ export const ACCOUNT_URL = (import.meta.env.VITE_ACCOUNT_URL as string | undefin
 /**
  * La API de la cuenta en el dominio de gestorIA, sin `/api/auth`: ahí también responde lo de la
  * persona que usan Mi perfil y Soporte de la cuenta (`/api/account/*`, la foto), nunca lo de sus
- * clínicas (ADR 0216).
+ * clínicas (ADR 0218).
  */
 export const ACCOUNT_API = ACCOUNT_URL.replace(/\/api\/auth\/?$/, "").replace(/\/+$/, "")
 

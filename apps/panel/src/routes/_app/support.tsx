@@ -34,7 +34,7 @@ const grantSchema = z.object({
   minutes: z.enum(["15", "30", "60"], { error: "Elige cuánto dura el acceso." }),
 })
 
-/** Soporte de la cuenta: la pantalla común (ADR 0216) con el acceso diagnóstico a una clínica. */
+/** Soporte de la cuenta: la pantalla común (ADR 0218) con el acceso diagnóstico a una clínica. */
 function SupportPage() {
   const linkedCase = Route.useSearch().caso ?? null
   return (

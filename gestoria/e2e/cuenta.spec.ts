@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { ACCOUNT, CLAVE, CODIGO_TOTP, PEOPLE, STORE_ID, type Who } from "./entorno"
 
 /**
- * La cuenta dentro de gestorIA (ADR 0216): desde el menú de la persona en la tienda, Mi perfil con
+ * La cuenta dentro de gestorIA (ADR 0218): desde el menú de la persona en la tienda, Mi perfil con
  * la marca de gestorIA y «← la tienda» para volver; cambiar la contraseña (la equivocada se dice
  * en su campo) y activar la verificación en dos pasos hasta guardar los códigos. Cerrar la cuenta
  * no se ofrece mientras sea la única con el rol de Dueño. En escritorio y a 390 px.
