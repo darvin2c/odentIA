@@ -11,11 +11,11 @@ export const guide: Guide = {
   accent: "en niños.",
   name: "Cómo llenar un odontograma en niños",
   menu: "Odontograma en niños",
-  seoTitle: "Odontograma en niños: dientes de leche y dentición mixta, con PDF",
+  seoTitle: "Odontograma infantil: dientes de leche y dentición mixta, con PDF",
   description:
-    "Cómo llenar el odontograma de un niño: los dientes de leche del 51 al 85, la dentición mixta y el molar de los 6 años, que no es de leche. Con PDF para imprimir.",
-  lead: "Los dientes de leche del 51 al 85, la dentición mixta y el molar de los 6 años, que no es de leche. Con el odontograma de niños en PDF.",
-  updated: "2026-11-24",
+    "Cómo llenar el odontograma infantil: dientes de leche del 51 al 85, dentición mixta y el molar de los 6 años. Odontograma de niños en PDF para imprimir.",
+  lead: "Los dientes de leche del 51 al 85, la dentición mixta y el molar de los 6 años, que no es de leche. Con el odontograma infantil en PDF.",
+  updated: "2026-11-25",
   short: [
     "Los dientes de leche se numeran del 51 al 85: cuadrantes 5 a 8 y dientes 1 a 5 desde el centro.",
     "A los 4 años tiene sus 20 dientes de leche. De los 6 a los 12 conviven con los permanentes, y el molar de los 6 años ya es permanente.",

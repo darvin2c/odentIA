@@ -13,7 +13,7 @@ export const guide: Guide = {
   menu: "Presupuesto dental",
   seoTitle: "Cómo hacer un presupuesto dental, con plantilla en PDF",
   description:
-    "Cómo hacer un presupuesto dental: un renglón por tratamiento, ordenado por fases, con la forma de pago, el adelanto y hasta cuándo vale. Con plantilla en PDF.",
+    "Cómo hacer un presupuesto dental por fases: un renglón por tratamiento, forma de pago, adelanto y vigencia. Plantilla de presupuesto dental en PDF gratis.",
   lead: "Del odontograma al presupuesto: un renglón por tratamiento, ordenado por fases y con su forma de pago. Con el presupuesto en blanco en PDF.",
   updated: "2026-11-24",
   short: [

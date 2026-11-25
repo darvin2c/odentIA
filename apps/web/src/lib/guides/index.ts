@@ -37,6 +37,22 @@ export const SHEET_FILES: Record<GuideSheet, string> = {
   presupuesto: "/guias/presupuesto-dental.pdf",
 }
 
+/** Qué es cada plantilla, en palabras: el texto de su imagen. */
+export const SHEET_NAMES: Record<GuideSheet, string> = {
+  odontograma: "odontograma de adultos en blanco",
+  "odontograma-ninos": "odontograma de niños en blanco",
+  presupuesto: "presupuesto dental en blanco, por fases",
+}
+
+/**
+ * Las dos imágenes de cada plantilla, que escribe el mismo comando junto al PDF: la hoja (la tarjeta
+ * de descarga, Google Imágenes) y la de compartir el enlace (1200 × 630).
+ */
+export function sheetImages(sheet: GuideSheet): { page: string; share: string } {
+  const base = SHEET_FILES[sheet].replace(/\.pdf$/, "")
+  return { page: `${base}.webp`, share: `${base}-og.png` }
+}
+
 /** Todo el texto de la guía, sin marcas. */
 function textOf(guide: Guide): string {
   return [
@@ -92,6 +108,11 @@ export function guideArticleJsonLd(site: URL | undefined, guide: Guide, publishe
     inLanguage: "es",
     mainEntityOfPage: url,
     url,
+    // Google pide una imagen para mostrar el artículo con foto: la hoja que se descarga.
+    image: guide.sheets.flatMap((item) => {
+      const images = sheetImages(item.sheet)
+      return [new URL(images.share, site).toString(), new URL(images.page, site).toString()]
+    }),
     author: { "@id": publisher },
     publisher: { "@id": publisher },
   }

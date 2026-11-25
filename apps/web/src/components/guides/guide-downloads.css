@@ -9,7 +9,8 @@
 .gd-card:hover { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--teal); }
 @media (hover: hover) { .gd-card:hover { transform: translateY(-1px); } }
 .gd-card:focus-visible { outline: 3px solid rgba(14, 116, 144, .45); outline-offset: 2px; }
-.gd-icon { flex: none; width: 48px; height: 48px; border-radius: 12px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; }
+.gd-thumb { flex: none; width: 68px; height: auto; border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 4px 10px rgba(15, 23, 42, .08); background: #fff; }
+.gd-icon { flex: none; margin-left: auto; width: 48px; height: 48px; border-radius: 12px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; }
 .gd-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .gd-what b { font-size: 18px; }
 .gd-what span { color: var(--muted); font-size: 15px; line-height: 1.4; }

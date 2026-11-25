@@ -20,7 +20,10 @@ describe("las plantillas en blanco", () => {
       if (sheet === "odontograma") expect(pdf.getPageCount()).toBe(1)
       const { width, height } = pdf.getPage(0).getSize()
       expect([Math.round(width), Math.round(height)], sheet).toEqual([595, 842])
-      expect(pdf.getTitle(), sheet).toBe(BLANK_SHEETS[sheet].title)
+      // El título que muestra Google: lo que es, con «PDF» y la marca, y el idioma para leerlo.
+      expect(pdf.getTitle(), sheet).toMatch(/\(PDF\) · odentIA$/)
+      expect(pdf.getTitle()?.toLowerCase(), sheet).toContain(BLANK_SHEETS[sheet].title.toLowerCase().split(" ")[0])
+      expect(pdf.getSubject(), sheet).toBeTruthy()
     }
   })
 

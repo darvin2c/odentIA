@@ -19,9 +19,14 @@ interface Props {
   noindex?: boolean
   /** El botón de la cabecera, si la página lo cambia (en una guía baja a su solicitud). */
   cta?: { href: string; label: string }
+  /**
+   * La imagen al compartir el enlace, si la página tiene la suya (una guía: su plantilla), y si es un
+   * artículo, con sus fechas.
+   */
+  share?: { image: string; alt: string; article?: { published: string; modified: string } }
 }
 
-const { title, description, jsonLd, header = "dark", footer = "full", noindex = false, cta } = Astro.props
+const { title, description, jsonLd, header = "dark", footer = "full", noindex = false, cta, share } = Astro.props
 // Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
 // la del mapa del sitio y los enlaces, va sin .html.
 const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
@@ -50,7 +55,7 @@ const identity = ofProduct({
   optical: { key: "vistia", alternateName: ["vistia20", "Vistia", "vistIA 20"], sameAs: [] },
 })
 const siteUrl = Astro.site?.toString()
-const ogImage = new URL(`/img/marca/${identity.key}-og.png`, Astro.site).toString()
+const ogImage = new URL(share?.image ?? `/img/marca/${identity.key}-og.png`, Astro.site).toString()
 const org = {
   "@context": "https://schema.org",
   "@type": "Organization",
@@ -83,7 +88,9 @@ const ld = [...(isHome ? [site] : []), org, ...(Array.isArray(jsonLd) ? jsonLd :
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     {noindex && <meta name="robots" content="noindex, follow" />}
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={share?.article ? "article" : "website"} />
+    {share?.article && <meta property="article:published_time" content={share.article.published} />}
+    {share?.article && <meta property="article:modified_time" content={share.article.modified} />}
     <meta property="og:locale" content="es_419" />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
@@ -92,7 +99,7 @@ const ld = [...(isHome ? [site] : []), org, ...(Array.isArray(jsonLd) ? jsonLd :
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content={`${WORDS.name}: más que un CRM, un chatbot o un software tradicional. Somos un ARM.`} />
+    <meta property="og:image:alt" content={share?.alt ?? `${WORDS.name}: más que un CRM, un chatbot o un software tradicional. Somos un ARM.`} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={fullTitle} />
     <meta name="twitter:description" content={description} />

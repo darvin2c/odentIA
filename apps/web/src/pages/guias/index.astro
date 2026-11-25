@@ -6,7 +6,7 @@ import GuideCards from "../../components/guides/GuideCards.astro"
 import GuideStart from "../../components/guides/GuideStart.astro"
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd } from "../../lib/faq"
-import { GUIDES, GUIDES_PATH, guidePath } from "../../lib/guides"
+import { GUIDES, GUIDES_PATH, guidePath, sheetImages } from "../../lib/guides"
 import { ctaOf } from "../../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -33,7 +33,7 @@ const jsonLd = [
   },
 ]
 ---
-<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta}>
+<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma y presupuesto dental, para imprimir y llenar a mano." }}>
   <section class="hero gi">
     <div class="grain" aria-hidden="true"></div>
     <div class="wrap gi-wrap">

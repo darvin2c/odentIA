@@ -9,7 +9,8 @@ import { type FormEvent, useEffect, useRef, useState } from "react"
 import { EMAIL } from "../../lib/form"
 import "./guide-downloads.css"
 
-type Sheet = { sheet: string; label: string; detail: string; href: string }
+/** `image`: la hoja vista de frente, para saber qué baja (y la que lee Google Imágenes). */
+type Sheet = { sheet: string; label: string; detail: string; href: string; image: { src: string; alt: string } }
 
 type Props = {
   sheets: Sheet[]
@@ -136,16 +137,17 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
       <div className="gd-cards">
         {sheets.map((item) => (
           <a key={item.sheet} className="gd-card" href={item.href} download onClick={() => setDownloaded(item)}>
+            <img className="gd-thumb" src={item.image.src} alt={item.image.alt} width={620} height={877} loading="lazy" decoding="async" />
+            <span className="gd-what">
+              <b>{item.label}</b>
+              <span>{item.detail}</span>
+            </span>
             <span className="gd-icon" aria-hidden="true">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 4v11" />
                 <path d="M7 10l5 5 5-5" />
                 <path d="M5 20h14" />
               </svg>
-            </span>
-            <span className="gd-what">
-              <b>{item.label}</b>
-              <span>{item.detail}</span>
             </span>
           </a>
         ))}

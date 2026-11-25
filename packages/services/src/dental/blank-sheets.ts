@@ -21,6 +21,28 @@ export const BLANK_SHEETS = {
   presupuesto: { file: "presupuesto-dental.pdf", title: "Presupuesto dental" },
 } as const
 
+/**
+ * Lo que Google lee del PDF (ya lo indexa como una página): el título que muestra en los resultados,
+ * el tema y las palabras con que lo buscan. Sin esto mostraba el nombre del archivo.
+ */
+const SEARCH: Record<keyof typeof BLANK_SHEETS, { title: string; subject: string; keywords: string[] }> = {
+  odontograma: {
+    title: "Odontograma en blanco para imprimir (PDF) · odentIA",
+    subject: "Odontograma de adultos con notación FDI, del 11 al 48, con su leyenda de colores y siglas, para llenar a mano en A4.",
+    keywords: ["odontograma", "odontograma para imprimir", "odontograma en blanco", "odontograma PDF", "notación FDI"],
+  },
+  "odontograma-ninos": {
+    title: "Odontograma de niños para imprimir (PDF) · odentIA",
+    subject: "Odontograma infantil con dientes de leche del 51 al 85 y dentición mixta, con las edades de erupción, para llenar a mano en A4.",
+    keywords: ["odontograma infantil", "odontograma de niños", "dientes de leche", "dentición mixta", "odontograma PDF"],
+  },
+  presupuesto: {
+    title: "Plantilla de presupuesto dental (PDF) · odentIA",
+    subject: "Presupuesto dental por fases, con opciones, forma de pago, adelanto, vigencia y firmas, para llenar a mano en A4.",
+    keywords: ["presupuesto dental", "plantilla de presupuesto dental", "formato de presupuesto odontológico", "presupuesto dental PDF"],
+  },
+}
+
 export type BlankSheet = keyof typeof BLANK_SHEETS
 export const BLANK_SHEET_KEYS = Object.keys(BLANK_SHEETS) as BlankSheet[]
 
@@ -46,7 +68,7 @@ const TEMPLATE: DocumentClinic = {
   receiptWidth: "80",
 }
 
-async function openTemplate(title: string): Promise<DocumentKit> {
+async function openTemplate(title: string, sheet: keyof typeof BLANK_SHEETS): Promise<DocumentKit> {
   const kit = await DocumentKit.open(TEMPLATE, sheetFormat("A4"), {
     title,
     docLabel: title,
@@ -56,6 +78,11 @@ async function openTemplate(title: string): Promise<DocumentKit> {
   })
   kit.pdf.setProducer("odentIA")
   kit.pdf.setCreator("odentIA")
+  kit.pdf.setAuthor("odentIA")
+  kit.pdf.setTitle(SEARCH[sheet].title, { showInWindowTitleBar: true })
+  kit.pdf.setSubject(SEARCH[sheet].subject)
+  kit.pdf.setKeywords(SEARCH[sheet].keywords)
+  kit.pdf.setLanguage("es")
   return kit
 }
 
@@ -182,9 +209,8 @@ const ERUPTION: Array<[string, string]> = [
 ]
 
 async function blankOdontogram(children: boolean): Promise<Uint8Array> {
-  const kit = await openTemplate(
-    children ? BLANK_SHEETS["odontograma-ninos"].title : BLANK_SHEETS.odontograma.title,
-  )
+  const sheet = children ? "odontograma-ninos" : "odontograma"
+  const kit = await openTemplate(BLANK_SHEETS[sheet].title, sheet)
   kit.gap(10)
   kit.titleWithDetails(children ? "Odontograma de niños" : "Odontograma", [])
   kit.gap(6)
@@ -252,7 +278,7 @@ const SITE_ROWS: number[][] = [
 const EMPTY = ""
 
 async function blankBudget(): Promise<Uint8Array> {
-  const kit = await openTemplate(BLANK_SHEETS.presupuesto.title)
+  const kit = await openTemplate(BLANK_SHEETS.presupuesto.title, "presupuesto")
   kit.gap(10)
   kit.titleWithDetails("Presupuesto de tratamiento", [], SIZE.titleBudget)
   kit.gap(6)

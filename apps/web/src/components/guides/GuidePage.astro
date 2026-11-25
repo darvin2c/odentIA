@@ -16,6 +16,8 @@ import {
   readingMinutes,
   relatedOf,
   SHEET_FILES,
+  SHEET_NAMES,
+  sheetImages,
 } from "../../lib/guides"
 import { ctaOf, guideContactApiUrl } from "../../lib/site"
 import BudgetDemo from "../budgets/BudgetDemo"
@@ -47,12 +49,24 @@ const organization = `${Astro.site?.toString() ?? ""}#organizacion`
 const jsonLd = [guideArticleJsonLd(Astro.site, guide, organization), breadcrumbJsonLd(Astro.site, trail), faqJsonLd(guide.faq)]
 const minutes = readingMinutes(guide)
 const firstSheet = guide.sheets[0]
-const sheets = guide.sheets.map((item) => ({ ...item, href: SHEET_FILES[item.sheet] }))
+const sheets = guide.sheets.map((item) => ({
+  ...item,
+  href: SHEET_FILES[item.sheet],
+  image: { src: sheetImages(item.sheet).page, alt: `Plantilla: ${SHEET_NAMES[item.sheet]}, para imprimir en A4` },
+}))
+// Al compartir el enlace, la imagen de su primera plantilla.
+const share = firstSheet
+  ? {
+      image: sheetImages(firstSheet.sheet).share,
+      alt: `Plantilla gratis en PDF: ${SHEET_NAMES[firstSheet.sheet]}, para imprimir y llenar a mano.`,
+      article: { published: guide.updated, modified: guide.updated },
+    }
+  : undefined
 // Los nombres de las piezas se arman aquí, en el servidor: la isla no carga el dominio dental entero.
 const names = Object.fromEntries([...FDI_ADULT, ...FDI_CHILD].map((tooth) => [tooth, toothNameOf(tooth)]))
 const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel." : "Tu odontograma, sin papel."
 ---
-<Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} cta={headerCta}>
+<Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} cta={headerCta} share={share}>
   <section class="hero gh">
     <div class="grain" aria-hidden="true"></div>
     <div class:list={["wrap", "gh-in", { video: guide.video }]}>
