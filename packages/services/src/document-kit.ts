@@ -471,6 +471,11 @@ export interface KitOptions {
   legalNote?: string | null
   /** Fecha de creación del PDF (la de firma, en lo firmado). */
   createdAt?: Date
+  /**
+   * Una plantilla para llenar a mano (las de las guías de la web): el membrete va en
+   * blanco, con un recuadro para el logo o el sello y los renglones de la clínica.
+   */
+  blankLetterhead?: boolean
 }
 
 const TOP = 42
@@ -945,6 +950,37 @@ export class DocumentKit {
       cursor -= line.height
     }
     this.y = top - height
+  }
+
+  /**
+   * Renglones para llenar a mano (las plantillas): cada fila reparte su ancho entre sus
+   * datos, cada uno con su nombre en gris y la línea donde se escribe.
+   */
+  blankLines(rows: Array<Array<{ label: string; span?: number }>>, options: { height?: number } = {}): void {
+    const height = options.height ?? 24
+    const gapX = 15
+    for (const row of rows) {
+      this.ensure(height)
+      const spans = row.reduce((sum, cell) => sum + (cell.span ?? 1), 0)
+      const unit = (this.width - gapX * (row.length - 1)) / spans
+      const baseline = this.y - height + 5
+      let x = this.left
+      for (const cell of row) {
+        const width = unit * (cell.span ?? 1)
+        const label = this.lay(cell.label, width, { size: SIZE.second, tone: "gray", leading: 1.2 })[0]
+        if (label) {
+          this.drawLineAt(label, x, baseline + label.height - 2, width)
+          this.page.drawLine({
+            start: { x: x + label.width + 5, y: baseline - 1 },
+            end: { x: x + width, y: baseline - 1 },
+            thickness: 0.6,
+            color: FIELD,
+          })
+        }
+        x += width + gapX
+      }
+      this.y -= height
+    }
   }
 
   /** Datos en rejilla entre dos reglas: «Paciente», «DNI», «Edad». */
@@ -1848,6 +1884,10 @@ export class DocumentKit {
       this.thermalLetterhead()
       return
     }
+    if (this.options.blankLetterhead) {
+      this.blankLetterhead()
+      return
+    }
     if (this.sheetArt) {
       this.sheetLetterhead()
       return
@@ -1927,6 +1967,37 @@ export class DocumentKit {
       thickness: 1.5,
       color: this.brandInk,
     })
+    this.y -= 1.5
+  }
+
+  /**
+   * El membrete de una plantilla: el recuadro del logo o el sello y dos renglones para
+   * la clínica, con la línea de siempre debajo. La clínica los llena a mano o con su sello.
+   */
+  private blankLetterhead(): void {
+    const box = 39
+    const top = this.y
+    const bottom = top - box
+    this.page.drawRectangle({ x: this.left, y: bottom, width: box, height: box, borderColor: RULE, borderWidth: 0.75 })
+    const caption = this.lay("Logo o sello", box - 4, { size: SIZE.label, tone: "gray", leading: 1.2, align: "center" })
+    let cursor = bottom + box / 2 + caption.reduce((sum, line) => sum + line.height, 0) / 2
+    for (const line of caption) {
+      this.drawLineAt(line, this.left + 2, cursor, box - 4)
+      cursor -= line.height
+    }
+    const x = this.left + box + 10.5
+    const rows = ["Clínica", "Dirección y teléfono"]
+    rows.forEach((label, index) => {
+      const lineTop = top - 4 - index * 19.5
+      const laid = this.lay(label, this.width, { size: SIZE.second, tone: "gray", leading: 1.3 })[0]
+      if (!laid) return
+      this.drawLineAt(laid, x, lineTop, this.width)
+      const start = x + laid.width + 6
+      const baseline = lineTop - laid.height + 2
+      this.page.drawLine({ start: { x: start, y: baseline }, end: { x: this.right, y: baseline }, thickness: 0.6, color: RULE })
+    })
+    this.y = bottom - 10.5
+    this.page.drawLine({ start: { x: this.left, y: this.y }, end: { x: this.right, y: this.y }, thickness: 1.5, color: this.tones.ink })
     this.y -= 1.5
   }
 

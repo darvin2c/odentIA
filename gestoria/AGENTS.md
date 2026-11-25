@@ -114,7 +114,10 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 
 ## Trabajo
 
-- Sin mesa de voces: es una app más simple. Del plan a construir, con pruebas y revisión.
+- La mesa y la QA llevan las voces de gestorIA: comercial (la experta en vender), novato, desarrollo,
+  auditor y diseño UX; nunca clínica (`.claude/skills/odentia-qa/references/mesa.md`, «Quién entra»).
+  Su recorrido base: subir un producto con tallas y stock, venderlo en «Probar a Sofi», anotar un
+  pedido, cobrarlo con captura y entregarlo.
 - La tienda de ejemplo es Calzados Rosa (`apps/api/src/semilla.ts`, `seed:dev`): cada entrega le
   suma lo suyo. Nunca se importa en pruebas ni corre en producción.
 - Local: `gestoria/infra/dev/.env` (desde `.env.example`), `pnpm --filter @gestoria/db migrate`,

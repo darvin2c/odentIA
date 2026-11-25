@@ -14,17 +14,17 @@ import { useSteadyHeight } from "../../../lib/steady"
 /** Lo que dicta la Dra. Paredes, frase a frase (datos de ejemplo). */
 const SAID = [
   "Carlos viene por dolor al frío en una muela de abajo, desde hace una semana.",
-  "En la 36 hay caries oclusal profunda; la percusión es negativa.",
-  "Le hacemos una resina, o si no, una corona.",
+  "En la 36 hay una caries de dentina en oclusal; la percusión es negativa.",
+  "Le hacemos una resina oclusal, o si no, una incrustación.",
   "Y control en seis meses.",
 ]
 
 /** Lo que propone Clío y desde qué paso aparece. */
 const PROPOSED = [
   { block: "Nota", text: "Dolor al frío hace una semana", from: 1 },
-  { block: "Odontograma", text: "36 · caries oclusal profunda", from: 2 },
+  { block: "Odontograma", text: "36 · caries de dentina en oclusal", from: 2 },
   { block: "Diagnóstico", text: "K02.1 · caries de la dentina", from: 2 },
-  { block: "Presupuesto", text: "Resina o corona, con tus precios", from: 3 },
+  { block: "Presupuesto", text: "Resina o incrustación, con tus precios", from: 3 },
   { block: "Control", text: "En 6 meses, con recordatorio", from: 4 },
 ]
 

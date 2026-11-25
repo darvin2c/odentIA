@@ -46,6 +46,7 @@ import {
   saasOutreach,
   saasProposal,
   saasTask,
+  saasWebContact,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
@@ -129,6 +130,7 @@ import { limaDate } from "./peru-business-days.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID } from "./seed-admin-core.js"
+import { markWebContactSent, submitWebContact, webContactInputSchema } from "./web-contacts.js"
 import { ensureFinishedSignupOrg } from "./seed-saas-billing.js"
 import type { Storage } from "./storage.js"
 
@@ -172,6 +174,30 @@ class Clock {
 }
 
 /* ---------- Clientes ---------- */
+
+/**
+ * Quien solo dejó su correo en el aviso de una guía (ADR 0216): un cliente de nombre su correo,
+ * con la guía de origen y la fila «Dejó su correo en una guía de la web» en su historial, sin
+ * venta. Por el mismo camino que la web; una sola vez.
+ */
+async function seedGuideContact(tx: Db, clock: Clock): Promise<boolean> {
+  const email = "guia-demo@example.test"
+  const [found] = await tx
+    .select({ id: saasWebContact.id })
+    .from(saasWebContact)
+    .where(eq(saasWebContact.email, email))
+    .limit(1)
+  if (found) return false
+  const at = clock.ago(1, 3)
+  const input = webContactInputSchema.parse({
+    email,
+    page: "/guias/odontograma-en-ninos",
+    sheets: ["odontograma-ninos"],
+  })
+  const result = await submitWebContact(tx, input, "dental", at)
+  if (result.send) await markWebContactSent(tx, result.contactId, at)
+  return result.send
+}
 
 interface ProspectSpec {
   name: string
@@ -1183,6 +1209,9 @@ export async function seedAdminArm(
 
   /* --- Horarios, sala y una ausencia del equipo (Kairós agenda presentaciones con ellos) --- */
   await seedStaffSchedules(tx, clock, sonrisa)
+
+  /* --- Quien solo dejó su correo en una guía de la web: sin venta, con su guía de origen --- */
+  if (await seedGuideContact(tx, clock)) clients += 1
 
   /* --- Kairós: su pasada, sus borradores, lo que ya se decidió, sus resúmenes y la semana --- */
   const pass = await kairosRulesPass(tx, now)

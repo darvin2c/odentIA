@@ -9,12 +9,14 @@
 import { LOGO } from "../lib/logos"
 import { WORDS } from "../lib/product"
 import { ctaOf, loginUrl, mainNav, type NavEntry } from "../lib/site"
-const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
   variant?: "dark" | "light"
+  /** El botón de una página que lo cambia: en una guía, baja a la solicitud de la misma página. */
+  cta?: { href: string; label: string }
 }
 const { variant = "dark" } = Astro.props
+const cta = Astro.props.cta ?? ctaOf(Astro.locals.pricing)
 const path = Astro.url.pathname.replace(/\/$/, "") || "/"
 const current = (href: string) => path === href || path.startsWith(`${href}/`)
 // En la página a la que lleva el botón principal (pedir la invitación) el botón sobra: ya está ahí.

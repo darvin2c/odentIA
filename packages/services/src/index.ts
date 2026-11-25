@@ -222,6 +222,7 @@ export type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 export {
   agentTextsFor,
   dictationFor,
+  guideSheetsFor,
   productHooksFor,
   helpTopicsFor,
   productAgentTexts,
@@ -260,6 +261,8 @@ export * from "./saas-cost.js"
 export * from "./saas-cost-detail.js"
 export * from "./saas-demos.js"
 export * from "./saas-founders.js"
+export * from "./guide-sheets.js"
+export * from "./web-contacts.js"
 export * from "./saas-included.js"
 export * from "./saas-invoicing.js"
 export * from "./saas-terms.js"

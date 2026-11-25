@@ -472,6 +472,16 @@ export function createApp(deps: AppDeps) {
     return domain ? onDomain(deps.webURL, deps.cookieDomain, domain) : deps.webURL
   }
   /**
+   * La web de un producto (ADR 0046): el dominio raíz en producción y, en local, www. con el
+   * puerto del proxy. Sale del panel llevado a su dominio.
+   */
+  const siteUrlOf = (product: ClinicalProduct): string => {
+    const site = new URL(panelUrlOf(product))
+    const domain = site.hostname.replace(/^app\./, "")
+    site.hostname = domain.endsWith(".localhost") ? `www.${domain}` : domain
+    return site.origin
+  }
+  /**
    * hola@ de la marca (ADR 0186): recibe el aviso de cada cliente nuevo y las respuestas a la
    * confirmación y a la invitación, y entra al ARM; desde ahí se responde con quien escribe.
    */
@@ -772,6 +782,8 @@ export function createApp(deps: AppDeps) {
       // El aviso «Cliente nuevo»: a hola@ de la marca de la solicitud, con el enlace a su ficha.
       adminURL: deps.adminURL,
       teamEmailOf: holaOf,
+      siteUrlOf,
+      panelUrlOf,
     }),
   )
   // Libro de Reclamaciones de odentIA.
