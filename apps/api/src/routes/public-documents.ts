@@ -3,6 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { readDocumentCheck, readDocumentCheckToken } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { type CrmDeps, runService } from "./helpers.js"
 
 const WINDOW_MS = 60_000
@@ -39,7 +40,7 @@ export function createPublicDocumentsRoute(deps: {
       if (buckets.size >= MAX_BUCKETS)
         return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
     }
-    const key = address(c) ?? "shared"
+    const key = rateKeyOf(address(c))
     const bucket = buckets.get(key)
     if (!bucket || bucket.resetAt <= now) {
       buckets.set(key, { count: 1, resetAt: now + WINDOW_MS })

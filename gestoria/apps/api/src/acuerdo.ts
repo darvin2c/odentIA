@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import {
+  type ContractEventType,
   type ConversationChannel,
   contractOutbox,
   contractState,
@@ -78,6 +79,9 @@ export const OUTBOX_KEEP_MS = 7 * 86_400_000
 
 /* ---------- Lo que se avisa ---------- */
 
+/** Lo que la bandeja guarda: los avisos del acuerdo que su tabla conoce (`CONTRACT_EVENT_TYPES`). */
+type OutboxEvent = Extract<AppEvent, { type: ContractEventType }>
+
 /**
  * Guarda un aviso en la bandeja de salida, dentro de la transacción de lo que lo causó. Se
  * comprueba contra el acuerdo antes de guardarlo: lo que sale es lo que la administración lee.
@@ -86,10 +90,10 @@ export const OUTBOX_KEEP_MS = 7 * 86_400_000
 async function enqueue(
   tx: Db,
   storeId: string,
-  event: AppEvent,
+  event: OutboxEvent,
   extra: { dedupe?: string; conversationId?: string } = {},
 ): Promise<void> {
-  const payload = appEvent.parse(event)
+  const payload = appEvent.parse(event) as OutboxEvent
   await tx
     .insert(contractOutbox)
     .values({ storeId, type: payload.type, payload, ...extra })
@@ -535,7 +539,10 @@ export async function deliverOutbox(
         // Un comprobante que la administración no acepta por lo que dice (el cobro ya está pagado,
         // es más de lo que falta, el archivo no es lo que dice) no se reintenta: repetirlo no lo
         // arregla. El Dueño ve por qué, con las palabras de la administración.
-        if (row.type === "pago.comprobante" && (response.status === 400 || response.status === 409)) {
+        if (
+          row.type === "pago.comprobante" &&
+          (response.status === 400 || response.status === 409)
+        ) {
           rejected = true
           // eslint-disable-next-line no-await-in-loop
           const body = (await response.json().catch(() => null)) as {

@@ -21,3 +21,6 @@ export const platformUrl = (slug: string, path = "/", product?: string | null) =
 export const loginUrl = () => panelUrl(`/login?next=${encodeURIComponent(adminUrl())}`)
 /** Web de marketing (Astro), donde vive el formulario del Libro de Reclamaciones. */
 export const webUrl = (path = "/") => `https://www.${BASE_DOMAIN}${BASE_PORT}${path}`
+/** La web de un producto, en su dominio: «Llegó desde» abre la guía de la que llegó una solicitud. */
+export const siteUrl = (product: string | null | undefined, path = "/") =>
+  `https://www.${domainOf(product)}${BASE_PORT}${path}`

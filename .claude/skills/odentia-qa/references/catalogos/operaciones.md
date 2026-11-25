@@ -463,8 +463,36 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Tampoco cuando la escena pasa sola a una variante que no es la que se arma en el servidor (otro rol, otra pregunta, otro caso, «escribiendo…»).
 - [ ] En pausa y con movimiento reducido, cada demostración se ve completa; sin JavaScript nada queda oculto ni apartado.
 - [ ] Nada que se pueda tocar desaparece solo mientras la persona está encima.
+- [ ] Cambiar lo que muestra una demostración (la dentición de adultos, mixta o de leche) no cambia el alto de su caja.
 
 **Ya falló:** las demostraciones crecían y se encogían y corrían hasta 384 enlaces y botones por web; al girar, el alto se volvía a medir a mitad de camino; la entrada de las secciones bajaba 16 px al cargar; en pausa, el chat de Sofi quedaba en blanco (2026-11-11).
+
+## O-WEB-02 Formularios públicos de la web (la solicitud y el aviso de una guía)
+
+**Dónde:** `S/saas-founders.ts` (`submitWaitlistRequest`), `S/web-contacts.ts` (`submitWebContact`), `S/admin-clients.ts` (`clientForWaitlistRequest`, `clientForWebContact`), `API/public-founders.ts`, `apps/web/src/components/founders/` y `apps/web/src/components/guides/GuideDownloads.tsx`.
+
+- [ ] La web se publica antes que la API: un dato nuevo del envío no hace que la API anterior lo rechace (con `strictObject`, va en la dirección o la API lo acepta en una entrega previa).
+- [ ] Un correo a una dirección que escribió el visitante sale una vez por buzón y día (la «+etiqueta» y los puntos de Gmail no cuentan como otro), con los topes guardados en la base; el cuerpo es solo JSON.
+- [ ] La respuesta y la pantalla son las mismas si ese correo ya es cliente o ya pidió entrar.
+- [ ] Un correo que no se sabe si salió no se ofrece reintentar.
+- [ ] La respuesta tarda lo mismo si el correo ya es cliente o ya pidió entrar: los correos que dependen de eso salen después de responder. Ya falló (25 nov 2026): 20 ms si ya había pedido, 290 ms si era nuevo.
+- [ ] La página que manda el navegador se acepta solo si existe (las guías que la API conoce); un texto con forma de ruta que no es una página no llega a un correo ni a la ficha.
+- [ ] Un límite o un fallo del servidor se muestra como mensaje de la caja, no como error del campo.
+- [ ] La pantalla dice «te enviamos» solo si el servidor dice que salió; una solicitud que ya estaba no promete una copia.
+- [ ] Nada de la persona va en la dirección de una página (caché del borde, registros): lo que se prellena va en el fragmento y se borra al leerlo.
+- [ ] Lo que manda el navegador como origen (la página) se guarda comprobado y corto; nunca un texto libre que se muestre como título o llegue a un modelo.
+- [ ] Un primer contacto de poco compromiso (solo un correo) no abre venta ni pone tareas de Kairós.
+- [ ] Lo provisional que dejó un paso (el nombre, el país, el contacto sin celular) lo completa el siguiente con los datos de la persona.
+- [ ] Un correo que ya es de un cliente, o de una solicitud viva, no crea otro cliente.
+
+**Caso:** CO32 · De otro día y repetido: deja su correo en el aviso de una guía ayer, lo manda otra vez hoy con doble clic y después manda la solicitud desde Chile. → Un cliente, ya con el nombre, el país y el celular de la solicitud; un solo correo de plantillas; ninguna venta ni tarea antes de la solicitud.
+
+## O-WEB-03 Páginas de la web armadas desde datos (guías)
+
+**Dónde:** `apps/web/astro.config.mjs` (mapa del sitio), `apps/web/src/lib/product-pages.json`, `apps/web/src/lib/product.ts` (`servesPage`), `apps/web/src/lib/guides/`.
+
+- [ ] Cada guía sale en el mapa del sitio con su dirección real y la fecha de su archivo, nunca como `/[slug]`.
+- [ ] Una página que es solo de un producto da 404 en las otras webs y no sale en su mapa; lo de `public/` se sirve en todas. En local, la otra web se arma con su producto: un Host distinto contra el mismo servidor sirve siempre la de odentIA y no prueba nada.
 
 ## O-FRM-01 Formularios: plantilla, respuesta y lo que declara el paciente
 

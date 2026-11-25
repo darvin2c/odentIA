@@ -272,6 +272,49 @@ export function waitlistReceivedEmail(input: {
 }
 
 /**
+ * Las plantillas que pidió quien dejó su correo en una guía de la web (ADR 0216): van
+ * adjuntas en PDF, con el enlace a la guía y la puerta para empezar (con Fundadores, «Pide
+ * tus USD 100» con su correo ya puesto). Las cifras llegan de los precios publicados.
+ */
+export function webContactEmail(input: {
+  /** Los nombres de las plantillas adjuntas: «Odontograma», «Odontograma de niños». */
+  sheets: readonly string[]
+  /** La guía donde lo dejó, en la web. */
+  guideUrl: string
+  /** Cómo se hace en la app, en una línea. */
+  pitch: string
+  /** La demo de la guía («Pruébalo aquí»), donde se ve cómo se hace sin crear una cuenta. */
+  tryUrl?: string | null
+  /** La puerta para empezar, como el botón de la web; nula si no hay. */
+  start: { label: string; url: string } | null
+  /** Lo que promete el plan que se muestra («los primeros USD 100 de tus agentes los pagamos nosotros»); nulo si nada. */
+  offer: string | null
+  replyTo?: string | undefined
+  brand?: MailBrand
+}): MailTemplate {
+  const name = mailBrandName(input.brand)
+  const one = input.sheets.length === 1
+  return renderEmail({
+    brand: input.brand,
+    subject: one ? `Tu plantilla para imprimir: ${input.sheets[0]}` : "Tus plantillas para imprimir",
+    preview: one ? "Va adjunta en PDF, lista para imprimir en A4." : "Van adjuntas en PDF, listas para imprimir en A4.",
+    title: one ? "Aquí tienes tu plantilla" : "Aquí tienes tus plantillas",
+    // Con enlaces de verdad (la guía y su demo): por eso va con formato y no en párrafos sueltos.
+    formatted: [
+      `${one ? "Va adjunta" : "Van adjuntas"} en PDF, ${one ? "lista" : "listas"} para imprimir en A4: ${input.sheets.join(" y ")}.`,
+      `Los pasos para ${one ? "llenarla" : "llenarlas"} siguen en [la guía](${input.guideUrl}).`,
+      input.pitch,
+      ...(input.tryUrl ? [`[Míralo funcionando](${input.tryUrl}), sin crear una cuenta.`] : []),
+      ...(input.offer ? [input.offer] : []),
+    ].join("\n\n"),
+    paragraphs: [],
+    ...(input.start ? action(input.start.label, input.start.url) : {}),
+    reason: `Te escribimos porque dejaste tu correo en una guía de la web de ${name}.`,
+    ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
+  })
+}
+
+/**
  * Aviso a hola@ de la marca de la solicitud (ADR 0186) de
  * cada cliente nuevo que pidió entrar desde la web: qué clínica, de qué
  * producto y de dónde, con el botón a su ficha en la administración. Es

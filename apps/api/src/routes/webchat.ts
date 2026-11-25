@@ -31,6 +31,7 @@ import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface WebchatPublicDeps {
@@ -53,8 +54,7 @@ const UNAVAILABLE = "No disponible"
 
 function addressOf(deps: WebchatPublicDeps, c: Context): string {
   try {
-    if (deps.remoteAddress) return deps.remoteAddress(c) ?? "shared"
-    return getConnInfo(c).remote.address ?? "shared"
+    return rateKeyOf(deps.remoteAddress ? deps.remoteAddress(c) : getConnInfo(c).remote.address)
   } catch {
     return "shared"
   }

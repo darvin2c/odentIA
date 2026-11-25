@@ -11,6 +11,7 @@ import { WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
+import TopicGuides from "../guides/TopicGuides.astro"
 import BudgetDemo from "./BudgetDemo"
 
 const page = PAGES.presupuestos
@@ -38,12 +39,12 @@ const jsonLd = [
 const board: Array<{ step: string; when: string; who: string; what: string; note: string; tone?: "won" }> = [
   { step: "Interesado", when: "Preguntó por un precio", who: "Jorge", what: "Ortodoncia", note: "Lo pidió por WhatsApp hoy" },
   { step: "Evaluación agendada", when: "Al agendar su cita", who: "Rosa", what: "Implante · pieza 46", note: "Jueves 29 · 16:30" },
-  { step: "Presupuesto enviado", when: "Al presentarle el presupuesto", who: "Carlos", what: "Resina o corona · pieza 36", note: "Tarea: llamar el viernes" },
+  { step: "Presupuesto enviado", when: "Al presentarle el presupuesto", who: "Carlos", what: "Resina o incrustación · pieza 36", note: "Tarea: llamar el viernes" },
   { step: "Decidió", when: "Al aceptarlo o rechazarlo", who: "Andrea", what: "Resina y limpieza", note: "Ganada · S/ 300", tone: "won" },
 ]
 
 const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; title: string; text: string }> = [
-  { n: "01", who: "Clío", tone: "clio", title: "Dictas el plan", text: "«Resina en la 36, o si no una corona.»" },
+  { n: "01", who: "Clío", tone: "clio", title: "Dictas el plan", text: "«Resina oclusal en la 36, o si no una incrustación.»" },
   { n: "02", who: "Tú", tone: "team", title: "Confirmas las opciones", text: "Con los precios de tu tarifario; puedes ajustar una línea con su motivo." },
   { n: "03", who: "Al cerrar", tone: "team", title: "«¿Enviárselo ahora?»", text: "Le llega por WhatsApp con su enlace." },
   { n: "04", who: "El paciente", tone: "team", title: "Elige desde su celular", text: "Una opción o solo una parte, y elige el horario ahí mismo." },
@@ -98,14 +99,14 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
         <p class="lead">En Su enlace, sin contraseña. Si prefiere escribir, Sofi anota su sí o su no en la conversación.</p>
       </div>
       {/* Ilustración de la pantalla del paciente: no son controles de esta página. */}
-      <div class="phone" role="img" aria-label="Ejemplo de Su enlace: el presupuesto con la opción A recomendada, por S/ 300, y la opción B, por S/ 1.070">
+      <div class="phone" role="img" aria-label="Ejemplo de Su enlace: el presupuesto con la opción A recomendada, por S/ 300, y la opción B, por S/ 770">
         <span class="ph-org">Clínica Sonrisa Norte · Su enlace</span>
         <b class="ph-t">Tu presupuesto</b>
         <div class="ph-opt ph-pick">
           <span class="ph-row"><b>Opción A · Resina</b><b>S/ 300</b></span>
           <span class="ph-sub">Recomendada por la Dra. Paredes</span>
         </div>
-        <div class="ph-opt"><span class="ph-row"><b>Opción B · Corona</b><b>S/ 1.070</b></span></div>
+        <div class="ph-opt"><span class="ph-row"><b>Opción B · Incrustación</b><b>S/ 770</b></span></div>
         <span class="ph-sub">Puedes aceptar solo una parte.</span>
         <span class="ph-btn">Aceptar la opción A</span>
         <span class="ph-link">Elegir horario</span>
@@ -139,6 +140,8 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
   </section>
 
   <div class="faqwrap"><Faq items={faq} /></div>
+
+  <TopicGuides slugs={["presupuesto-dental"]} />
 
   <CtaBand title="Presupuestos que se entienden y no se olvidan.">
     <Fragment slot="text">

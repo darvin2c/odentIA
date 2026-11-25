@@ -19,8 +19,8 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
-// La 0150 y la 0157 (la aspirina, revisión del 25 nov): juntas dicen los mismos nombres que el código.
-const migration = ["0150_medicinas_por_su_nombre.sql", "0157_aspirina_antiagregante.sql"]
+// La 0150 y la 0158 (la aspirina, revisión del 25 nov): juntas dicen los mismos nombres que el código.
+const migration = ["0150_medicinas_por_su_nombre.sql", "0158_aspirina_antiagregante.sql"]
   .map((file) => readFileSync(fileURLToPath(new URL(`../../db/drizzle/${file}`, import.meta.url)), "utf8"))
   .join(String.fromCharCode(10))
 
@@ -59,7 +59,7 @@ it("lo escrito a mano antes recibe el código de su DCI y conserva su texto; lo 
         // La dosis y la frecuencia, sí.
         { name: "alendronato 70 mg/semana" },
         { name: "Xarelto 20 mg mañana y noche" },
-        // La aspirina (0157): la escrita a mano y la que quedó con el código del grupo.
+        // La aspirina (0158): la escrita a mano y la que quedó con el código del grupo.
         { name: "Aspirina 100 mg" },
         { name: "aspirina", atcCode: "B01A" },
       ].map((row) => ({ organizationId: "org_a", patientId: f.patient.id, ...row })),

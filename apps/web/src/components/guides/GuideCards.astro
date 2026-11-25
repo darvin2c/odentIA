@@ -1,0 +1,44 @@
+---
+// Las tarjetas de las guías: el índice, «Sigue con» al final de cada guía y «Guías de este tema» en su
+// página de producto. Una por guía, en filas parejas; todo sale del archivo de cada guía.
+import { cardMeta, type Guide, guidePath } from "../../lib/guides"
+
+interface Props {
+  guides: Guide[]
+  /** Sin su descripción ni lo que trae: solo el tema y el título (la página de producto). */
+  compact?: boolean
+  /** Sobre una sección blanca, las tarjetas van en gris. */
+  white?: boolean
+  /** El nivel del título de cada tarjeta. */
+  level?: "h2" | "h3"
+}
+const { guides, compact = false, white = false, level = "h3" } = Astro.props
+const Title = level
+---
+<ul class:list={["gc", { white, compact }]}>
+  {guides.map((guide) => (
+    <li>
+      <a class="gc-card" href={guidePath(guide)}>
+        <span class="tag">{guide.topic}</span>
+        <Title class="gc-t">{guide.name}</Title>
+        {compact ? null : <span class="gc-text">{guide.card}</span>}
+        {compact ? null : <span class="gc-meta">{cardMeta(guide)}</span>}
+        <span class="gc-go">Leer la guía <span aria-hidden="true">→</span></span>
+      </a>
+    </li>
+  ))}
+</ul>
+
+<style>
+  .gc { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  .gc-card { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 22px 24px; border-radius: 20px; background: var(--paper); color: var(--ink); text-decoration: none; box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow .2s ease, transform .2s ease; }
+  .white .gc-card { background: var(--bg); }
+  .gc-card:hover { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--teal); }
+  @media (hover: hover) { .gc-card:hover { transform: translateY(-1px); } }
+  .gc-t { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 800; letter-spacing: -0.01em; }
+  .gc-text { color: var(--muted); font-size: 15.5px; line-height: 1.5; }
+  .gc-meta { font-family: var(--mono); font-size: 12.5px; color: var(--soft); }
+  /* «Leer la guía» va abajo: las tarjetas de una fila terminan a la misma altura. */
+  .gc-go { margin-top: auto; padding-top: 6px; font-weight: 700; color: var(--teal); min-height: 32px; display: flex; align-items: center; gap: 6px; }
+  .compact .gc-card { padding: 18px 20px; }
+</style>
