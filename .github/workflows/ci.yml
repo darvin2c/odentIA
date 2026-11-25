@@ -420,7 +420,8 @@ jobs:
     env:
       OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
       OPENSHIP_PROJECT_ID: ${{ vars.GESTORIA_OPENSHIP_PROJECT_ID }}
-      OPENSHIP_DEPLOY_TOKEN: ${{ secrets.GESTORIA_OPENSHIP_DEPLOY_TOKEN }}
+      # La misma llave de OpenShip que las clínicas, si no hay una propia de gestorIA.
+      OPENSHIP_DEPLOY_TOKEN: ${{ secrets.GESTORIA_OPENSHIP_DEPLOY_TOKEN || secrets.OPENSHIP_DEPLOY_TOKEN }}
     steps:
       - name: Comprobar que es la punta de main
         id: punta

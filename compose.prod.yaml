@@ -29,6 +29,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?}
+    # El puerto que el servidor ofrece a los otros proyectos de OpenShip: gestorIA llega a su
+    # base (`gestoria`, con sus propios usuarios) por un enlace de OpenShip a este servicio,
+    # sin pasar por la red de las clínicas. Sin `expose`, el enlace no tiene a qué apuntar.
+    expose:
+      - "5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
