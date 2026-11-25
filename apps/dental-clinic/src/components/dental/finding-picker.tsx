@@ -3,7 +3,7 @@ import { Button, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput 
 import { common, EmptyState } from "@odentia/ui-patterns"
 import { Search, SearchX, X } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { searchFindings } from "./finding-search"
+import { foundBySaying, searchFindings } from "./finding-search"
 import { useOdontogramNotation } from "./odontogram-notation"
 import { ToothSVG } from "./tooth-svg"
 
@@ -208,6 +208,10 @@ export function FindingPicker({
                   className={`flex min-h-36 w-full flex-col items-center justify-end gap-1 rounded-lg border px-2 pb-3 pt-24 text-center text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${value === finding.code ? "border-primary bg-primary/10 ring-1 ring-primary" : "bg-background hover:bg-muted"}`}
                 >
                   {finding.label}
+                  {/* «perno» trajo el «Espigo-muñón»: la tarjeta dice que es lo que se buscó. */}
+                  {foundBySaying(finding.code, search) ? (
+                    <span className="text-muted-foreground">({search.trim()})</span>
+                  ) : null}
                   {value === finding.code && <span className="font-semibold">Seleccionado</span>}
                 </button>
                 <div

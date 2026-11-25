@@ -123,6 +123,18 @@ export interface FindingSearch {
   elsewhere: boolean
 }
 
+/**
+ * Si el hallazgo salió por cómo se dice en la clínica y no por su nombre: «perno» trae el «Espigo-muñón»
+ * y la tarjeta lo dice, para no dudar si son lo mismo (QA de voces del 24 nov).
+ */
+export function foundBySaying(code: string, text: string): boolean {
+  const query = normalizeSearchText(text.trim()).replace(/\s+/g, " ")
+  if (query.length < ELSEWHERE_MIN) return false
+  const finding = FINDINGS.find((item) => item.code === code)
+  if (!finding || normalizeSearchText(finding.label).includes(query)) return false
+  return findingsSaidAs(query).has(code)
+}
+
 /** Lo escrito, en el orden en que se ofrece: por el nombre desde el inicio de una palabra, por cómo se dice, y por el medio de una palabra. */
 function matchFindings(query: string): { findings: FindingDefinition[]; byName: number } {
   const startsWord = (label: string) => ` ${label}`.includes(` ${query}`)
