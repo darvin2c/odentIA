@@ -113,6 +113,11 @@ export function CatalogPage() {
               ? "Agrega tus productos uno por uno o súbelos de una vez con una hoja. Sofi solo ofrece lo que está aquí."
               : "Cuando el dueño o un administrador agregue productos, aparecen aquí."
           }
+          // En el celular la cabecera deja solo íconos: las dos formas de empezar, aquí con su nombre.
+          actionLabel={canEdit ? "Agregar producto" : undefined}
+          onAction={canEdit ? () => setAdding(true) : undefined}
+          secondaryActionLabel={canEdit ? "Subir una hoja" : undefined}
+          onSecondaryAction={canEdit ? () => setUploading(true) : undefined}
         />
       ) : null}
       {products.length > 0 ? (

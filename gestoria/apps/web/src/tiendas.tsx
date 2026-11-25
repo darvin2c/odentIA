@@ -156,9 +156,25 @@ function AskForHelp({ store }: { store: MyStore }) {
   )
 }
 
-/** La franja de soporte de gestorIA mirando la tienda: no se cierra y dice hasta cuándo. */
+/**
+ * La franja de soporte de gestorIA mirando la tienda: no se cierra y dice hasta cuándo. Como la
+ * de las clínicas, sigue al permiso: cada medio minuto y al vencer vuelve a preguntar, así lo que
+ * estaba a la vista no queda abierto después de que la tienda lo saca o de que vence.
+ */
 function SupportStrip({ until }: { until: string }) {
-  const end = when(until).replace(/\.$/, "")
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    const check = () => void queryClient.invalidateQueries({ queryKey: ["yo"] })
+    const timer = window.setInterval(check, 30_000)
+    const left = new Date(until).getTime() - Date.now()
+    const atEnd = left > 0 ? window.setTimeout(check, left + 1_000) : undefined
+    return () => {
+      window.clearInterval(timer)
+      if (atEnd) window.clearTimeout(atEnd)
+    }
+  }, [until, queryClient])
+  // «p. m.» termina en punto: en la frase larga no se repite antes del siguiente.
+  const end = when(until)
   return (
     <NoticeStrip
       label="Soporte de gestorIA"
@@ -166,7 +182,7 @@ function SupportStrip({ until }: { until: string }) {
         {
           id: "soporte-mirando",
           tone: "alarma",
-          message: `Entraste como soporte de gestorIA, solo a mirar, hasta el ${end}. No puedes cambiar nada.`,
+          message: `Entraste como soporte de gestorIA, solo a mirar, hasta el ${end.replace(/\.$/, "")}. No puedes cambiar nada.`,
           short: `Solo mirar · hasta el ${end}`,
         },
       ]}
@@ -218,11 +234,16 @@ function StoreSwitcher({ me, store }: { me: Me; store: MyStore }) {
               },
             ]
           : []),
-        {
-          label: "Crear otra tienda",
-          icon: <Plus aria-hidden />,
-          onSelect: () => void navigate({ to: "/tiendas/nueva" }),
-        },
+        // Soporte mirando una tienda ajena no viene a crear la suya.
+        ...(store.role === "support"
+          ? []
+          : [
+              {
+                label: "Crear otra tienda",
+                icon: <Plus aria-hidden />,
+                onSelect: () => void navigate({ to: "/tiendas/nueva" }),
+              },
+            ]),
       ]}
       menuLabel="Menú de la tienda"
     />

@@ -121,6 +121,8 @@ export function LoginPage() {
     form.setErrors({})
     form.setProblem(null)
     setUnverified(false)
+    // El botón desaparece: el foco pasa al correo, que es lo que sigue (WCAG 2.4.3).
+    window.requestAnimationFrame(() => document.getElementById("email")?.focus())
   }
 
   return (

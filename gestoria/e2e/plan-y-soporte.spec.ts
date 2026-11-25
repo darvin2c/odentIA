@@ -141,6 +141,7 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await expect(page.getByRole("link", { name: "Pedir ayuda" })).toHaveCount(0)
   await page.getByRole("button", { name: /^Calzados Rosa, Tienda, Soporte\./ }).click()
   await expect(page.getByRole("menuitem", { name: "Plan y pagos" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Crear otra tienda" })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await noSideScroll(page)
   await shot(page, "soporte-mirando-escritorio")
@@ -232,6 +233,7 @@ test("la entrada recuerda a quien entró, con su correo entero, y deja entrar co
   // «Entrar con otra cuenta» la olvida y vuelve a pedir el correo.
   await page.getByRole("button", { name: "Entrar con otra cuenta" }).click()
   await expect(page.getByLabel("Correo")).toHaveValue("")
+  await expect(page.getByLabel("Correo")).toBeFocused()
   await page.reload()
   await expect(page.getByLabel("Correo")).toBeVisible()
   await expect(page.getByText(rosa.email, { exact: true })).toHaveCount(0)
