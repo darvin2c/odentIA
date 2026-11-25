@@ -424,6 +424,23 @@ function StudioBody({
   })
   // Dos columnas solo con la pieza al lado: «Evolución» va debajo del odontograma (lienzo del 23 nov).
   const twoColumns = !compactRow && showInlinePanel
+  // El panel al lado se pega arriba, pero solo dentro de la boca: con la página bajada, su título («Pieza
+  // 15 — …» y su «×») quedaba bajo la línea del paciente (QA del 24 nov). Al abrirlo, baja lo que la
+  // página se pasó; la boca no se mueve.
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [panelDrop, setPanelDrop] = useState(0)
+  const opened = showInlinePanel ? selection.join("-") : ""
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!opened || !grid) {
+      setPanelDrop(0)
+      return
+    }
+    const root = getComputedStyle(document.documentElement)
+    const px = (name: string) => Number.parseFloat(root.getPropertyValue(name)) || 0
+    const line = px("--notice-strip-h") + px("--patient-line-h") + 16
+    setPanelDrop(Math.max(0, Math.round(line - grid.getBoundingClientRect().top)))
+  }, [opened])
   // En la atención, con la pieza al lado, el acomodo es el que cabe con ella abierta: abrirla no
   // reacomoda la boca ni corre lo que estaba bajo el dedo (QA del 23 nov).
   const stable = compact && wide && detailMode === "panel"
@@ -694,6 +711,7 @@ function StudioBody({
   return (
     <div ref={containerRef} className="flex min-w-0 flex-col gap-4">
       <div
+        ref={gridRef}
         // Con la pieza al lado, la boca no baja de 600 px: así caben una arcada de arriba y su vista de
         // frente (mesa del 23 nov, diseño UX). Sin `overflow` aquí: la boca y el panel se pegan a la ventana.
         className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(40.5rem,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
@@ -922,6 +940,7 @@ function StudioBody({
           <section
             data-tooth-panel=""
             aria-label="Registro clínico dental"
+            style={showInlinePanel && panelDrop > 0 ? { marginTop: `${panelDrop}px` } : undefined}
             className={
               showInlinePanel
                 ? // La cabecera del panel («Pieza 46…» y su «×») queda debajo de la línea fija, y su botón

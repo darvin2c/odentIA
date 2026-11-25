@@ -1008,9 +1008,12 @@ export function ToothDrawer({
             {previewContent}
             {/* La pieza ya lo tiene: avisa y no frena. Al registrar, el nuevo reemplaza al anterior,
                 que queda en la historia (lienzo del 24 nov). */}
-            {teeth.map((toothNumber) => {
-              const before = findingReplaced(entriesOf(toothNumber), toothNumber, condition)
+            {/* Lo de varias piezas (un puente rehecho), una vez, con las piezas elegidas. */}
+            {(def && ["span", "arch", "pair"].includes(def.scope) ? teeth.slice(0, 1) : teeth).map((toothNumber) => {
+              const multi = teeth.length > 1 && !!def && ["span", "arch", "pair"].includes(def.scope)
+              const before = findingReplaced(entriesOf(toothNumber), toothNumber, condition, multi ? teeth : undefined)
               if (!before) return null
+              const where = multi ? `Las ${teethPhrase(teeth)} ya tienen` : `La ${toothNumber} ya tiene`
               const quality =
                 before.details?.quality === "good"
                   ? " en buen estado"
@@ -1023,7 +1026,7 @@ export function ToothDrawer({
                   role="status"
                   className="rounded-md border border-info/30 bg-info-soft px-3 py-2 text-sm"
                 >
-                  La {toothNumber} ya tiene {conditionLabel(before.condition).toLowerCase()}
+                  {where} {conditionLabel(before.condition).toLowerCase()}
                   {quality}
                   {before.createdAt ? ` desde el ${shortDay(before.createdAt).replace(/\.$/, "")}` : ""}. Al registrar,
                   este reemplaza al anterior, que queda en su historia.
