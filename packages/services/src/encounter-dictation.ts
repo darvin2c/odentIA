@@ -11,7 +11,9 @@ import {
   DIAGNOSIS_SYSTEM_INFO,
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
+  findHabitualMedication,
   findMedication,
+  medicationClassOf,
   type HealthDeclarant,
   isDiagnosisVerification,
   type MedicationCatalog,
@@ -33,6 +35,8 @@ import {
   encounterDictationSuggestion,
   encounterProcedure,
   patientAllergy,
+  patientCondition,
+  patientMedication,
   patientRegistration,
   prescription,
   serviceCatalog,
@@ -1984,6 +1988,37 @@ async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounte
  * una frase de duda, va a lo de su salud como que no sabe, que se revisa con la persona y nunca
  * entra de un toque.
  */
+/**
+ * Lo que ya está vigente en sus Antecedentes, con la forma de lo que propone Clío de su salud: lo
+ * dicho que ya está ahí no se propone otra vez. «Después de hablar con su cardiólogo por el
+ * apixabán», dicho por la doctora con el apixabán ya registrado, se volvía otro «dijo apixabán, sin
+ * confirmar» junto al registrado (mesa del 25 nov, H3).
+ */
+async function healthOnFile(tx: Db, orgId: string, patientId: string): Promise<Array<Record<string, unknown>>> {
+  const today = await clinicToday(tx, orgId)
+  const [medicines, conditions] = await Promise.all([
+    tx
+      .select({ name: patientMedication.name, genericName: patientMedication.genericName, atcCode: patientMedication.atcCode, endDate: patientMedication.endDate })
+      .from(patientMedication)
+      .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId))),
+    tx
+      .select({ name: patientCondition.name })
+      .from(patientCondition)
+      .where(and(eq(patientCondition.organizationId, orgId), eq(patientCondition.patientId, patientId), eq(patientCondition.status, "activa"))),
+  ])
+  const out: Array<Record<string, unknown>> = []
+  const others: Array<{ name: string }> = []
+  for (const row of medicines) {
+    if (row.endDate && row.endDate < today) continue
+    const group = medicationClassOf(row.atcCode ?? findHabitualMedication(row.genericName ?? row.name)?.atc)
+    if (group) out.push({ [group]: { state: "recorded", detail: row.genericName ?? row.name } })
+    else others.push({ name: row.name })
+  }
+  if (others.length) out.push({ medications: { state: "recorded", items: others } })
+  if (conditions.length) out.push({ conditions: { state: "recorded", items: conditions.map((row) => ({ name: row.name })) } })
+  return out
+}
+
 export function doubtfulAllergy(draft: DictationDraft): DictationDraft {
   if (draft.kind !== "alergia" || draft.payload["none"] !== true || !saidInDoubt(draft.sourceText)) return draft
   return { kind: "salud", payload: { declarante: "no_se_sabe", allergies: { state: "unknown" } }, ...(draft.sourceText ? { sourceText: draft.sourceText } : {}) }
@@ -2386,6 +2421,7 @@ export async function saveDictationSegment(
   let newNote: (typeof rows)[number] | undefined
   // Lo de su salud también es uno solo en la atención (mesa del 20 nov 2026, P3): se suma igual.
   let pendingHealthId = pendingNow.filter((item) => item.kind === "salud").at(-1)?.id
+  let onFile: Array<Record<string, unknown>> | undefined
   let newHealth: (typeof rows)[number] | undefined
   const added: string[] = [...addedByVoice]
   const joinSource = (before: string, now: string | undefined) => {
@@ -2400,7 +2436,7 @@ export async function saveDictationSegment(
     if (segment.review && draft.kind !== "nota" && draft.kind !== "salud" && saidBefore(draft.kind, draft.sourceText)) continue
     const kept = settled.length ? unsettled(draft.kind, checked.payload) : checked.payload
     if (!kept) continue
-    const ready = kept === checked.payload ? checked : { ...checked, payload: kept }
+    let ready = kept === checked.payload ? checked : { ...checked, payload: kept }
     if (draft.kind === "nota" && pendingNoteId) {
       const row = await pendingRow(pendingNoteId)
       if (!row) pendingNoteId = undefined
@@ -2429,6 +2465,13 @@ export async function saveDictationSegment(
           continue
         }
       }
+    }
+    if (draft.kind === "salud") {
+      // Lo que ya está en sus Antecedentes no vuelve como dicho (mesa del 25 nov, H3).
+      onFile ??= await healthOnFile(tx, orgId, patientId)
+      const fresh = onFile.length ? withoutSettledHealth(ready.payload, onFile) : ready.payload
+      if (!fresh) continue
+      if (fresh !== ready.payload) ready = { ...ready, payload: fresh }
     }
     if (draft.kind === "salud" && pendingHealthId) {
       const row = await pendingRow(pendingHealthId)

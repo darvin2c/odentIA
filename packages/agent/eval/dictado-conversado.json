@@ -476,6 +476,31 @@
         "salud": [],
         "saludNo": [{ "ruta": "anticoagulants" }]
       }
+    },
+    {
+      "id": "od-elena-una-pausa",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (H1), tal como se dijo en la QA: la paciente y la hija responden en la misma pausa, una «no que ella sepa» y la otra con la reacción al ibuprofeno; en la misma pausa, la hermana con cáncer de boca.",
+      "pausas": [
+        "buenos dias señora elena que le trae por aqui. la señora dice que se le rompio una muela abajo a la izquierda hace un mes y ahora le molesta",
+        "toma alguna medicina señora. la señora dice solo la de la presion, losartan cincuenta en la mañana. la hija agrega que tambien toma apixaban",
+        "y alergias señora. la señora dice que no que ella sepa. la hija dice que con el ibuprofeno se le hincharon los ojos hace dos años. y su hermana tuvo cancer de boca",
+        "a ver abra la boca. en la treinta y seis hay resto radicular"
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["muela|rompio"],
+          "motivoSin": ["losartan", "apixaban"],
+          "tiempo": "un mes|1 mes",
+          "relato": [],
+          "relatoSin": ["losartan", "apixaban", "ibuprofeno", "cancer"]
+        },
+        "salud": [
+          { "ruta": "medications", "valor": { "state": "recorded" }, "con": ["losartan"] },
+          { "ruta": "anticoagulants", "valor": { "state": "recorded" }, "con": ["apixaban"] }
+        ],
+        "propone": [{ "tipo": "alergia", "con": ["ibuprofeno"] }]
+      }
     }
   ]
 }

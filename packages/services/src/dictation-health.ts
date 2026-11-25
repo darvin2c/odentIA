@@ -579,7 +579,9 @@ export function withoutSettledHealth(
     }
     if (!LISTS.includes(group) || now["state"] !== "recorded") continue
     const decided = before.flatMap((item) => (item["state"] === "recorded" && Array.isArray(item["items"]) ? (item["items"] as Array<Record<string, unknown>>) : []))
-    const items = (Array.isArray(now["items"]) ? (now["items"] as Array<Record<string, unknown>>) : []).filter((item) => !decided.some((one) => sameName(one["name"], item["name"])))
+    // Una medicina ya decidida con otra dosis («losartán» y «Losartán 50 mg») es la misma (mesa del 25 nov, H3).
+    const same = (a: unknown, b: unknown) => sameName(a, b) || (group === "medications" && drugHead(a) !== "" && drugHead(a) === drugHead(b))
+    const items = (Array.isArray(now["items"]) ? (now["items"] as Array<Record<string, unknown>>) : []).filter((item) => !decided.some((one) => same(one["name"], item["name"])))
     if (items.length) kept[group] = { ...now, items }
     else delete kept[group]
   }

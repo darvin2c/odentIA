@@ -780,3 +780,27 @@ describe("H2 (mesa del 25 nov) · la alergia que oyó Clío avisa antes de confi
     await enable(false)
   })
 })
+
+describe("H3 (mesa del 25 nov) · lo que ya está en Antecedentes no vuelve como dicho", () => {
+  it("con apixabán y losartán registrados, «por el apixabán» y «losartán» no se proponen; la metformina nueva, sí", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await ownerDb.insert(patientMedication).values([
+      { organizationId: ORG, patientId: fx.patient.id, name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" },
+      { organizationId: ORG, patientId: fx.patient.id, name: "Losartán 50 mg", genericName: "losartán", atcCode: "C09CA01" },
+    ])
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "no_se_sabe", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "después de hablar con su cardiólogo por el apixabán" }],
+      transcript: "La exodoncia la hacemos la próxima semana después de hablar con su cardiólogo por el apixabán.",
+    })
+    expect(await health()).toEqual([])
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "losartán" }, { name: "metformina" }] } }, sourceText: "tomo losartán y metformina" }],
+      transcript: "Tomo losartán y metformina.",
+    })
+    const [said] = await health()
+    expect(said?.payload["medications"]).toEqual({ state: "recorded", items: [{ name: "metformina" }] })
+    expect(said?.payload).not.toHaveProperty("anticoagulants")
+    await enable(false)
+  })
+})
