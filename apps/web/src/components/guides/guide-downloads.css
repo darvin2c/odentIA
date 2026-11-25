@@ -19,7 +19,7 @@
 .gd-status { margin: 0; font-size: 15px; color: var(--ink-2); }
 .gd-status a { font-weight: 700; white-space: nowrap; }
 .gd-offer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
-.gd-offer p, .gd-form > p { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+.gd-offer p, .gd-form > p:not(.gd-error) { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
 
 /* Los estados del correo en la misma celda: la caja mide lo del más alto y no empuja nada al cambiar. */
 .gd-stage { display: grid; }

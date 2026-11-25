@@ -113,6 +113,12 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
     setError({ text: res.status === 429 ? BUSY : FAILED, field: false })
   }
 
+  // Al tocar un PDF, el aviso que aparece debajo queda a la vista.
+  const noticeRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (downloaded) noticeRef.current?.scrollIntoView({ block: "nearest" })
+  }, [downloaded])
+
   // En el teléfono el error queda bajo el botón: se trae a la vista cuando aparece.
   useEffect(() => {
     if (error) document.getElementById(ERROR_ID)?.scrollIntoView({ block: "nearest" })
@@ -146,7 +152,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
       </div>
       <p className="gd-free">Descarga directa, sin pedir tu correo.</p>
       {downloaded ? (
-        <div className="gd-notice">
+        <div className="gd-notice" ref={noticeRef}>
           <p className="gd-status" role="status">
             Se está descargando «{downloaded.label}».{" "}
             <a href={downloaded.href} target="_blank" rel="noopener">

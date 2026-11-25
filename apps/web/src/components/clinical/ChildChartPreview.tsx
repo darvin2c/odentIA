@@ -38,7 +38,7 @@ const PATIENTS: Patient[] = [
 
 const DENTITIONS: Array<[Dentition, string]> = [
   ["temporal", "Temporal (20)"],
-  ["mixta", "Mixta"],
+  ["mixta", "Mixta (52)"],
   ["permanente", "Permanente (32)"],
 ]
 const DENTITION_WORDS: Record<Dentition, string> = { temporal: "temporal", mixta: "mixta", permanente: "permanente" }
@@ -74,6 +74,7 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
     <div className="cp cc">
       <div className="cc-top">
         <div className="cc-group" role="group" aria-label="Paciente del ejemplo">
+          <span className="cc-label">Paciente</span>
           {PATIENTS.map((item) => (
             <button key={item.key} type="button" className="cc-pill" aria-pressed={item.key === patient.key} onClick={() => pick(item)}>
               {item.name}
@@ -81,6 +82,7 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
           ))}
         </div>
         <div className="cc-group" role="group" aria-label="Dentición">
+          <span className="cc-label">Dentición</span>
           {DENTITIONS.map(([value, label]) => (
             <button key={value} type="button" className="cc-pill" aria-pressed={value === dentition} onClick={() => show(value)}>
               {label}

@@ -94,7 +94,7 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
           {figure.rows.map((row) => (
             <tr>
               {row.map((cell, index) => (
-                <td data-label={figure.head[index]} data-empty={cell.trim() ? undefined : ""}><RichText text={cell} /></td>
+                <td data-label={figure.head[index]} data-empty={cell.trim() ? undefined : ""}><span><RichText text={cell} /></span></td>
               ))}
             </tr>
           ))}
@@ -163,6 +163,7 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
   table { width: 100%; border-collapse: collapse; font-size: 15.5px; line-height: 1.5; }
   th { background: #eef2f7; text-align: left; padding: 12px 18px; font-size: 14px; color: var(--ink-2); white-space: nowrap; }
   td { padding: 12px 18px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  .gf-stack td:last-child { white-space: nowrap; }
   td :global(b) { color: var(--ink); }
   .gf-table figcaption { padding: 0 18px 16px; }
   @media (max-width: 640px) {
@@ -173,8 +174,10 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
     .gf-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     .gf-stack tr { display: block; border-top: 1px solid var(--line); padding: 8px 0; }
     .gf-stack tbody tr:first-child { border-top: 0; }
-    .gf-stack td { display: grid; grid-template-columns: 6.5em 1fr; gap: 10px; border-top: 0; padding: 4px 14px; }
+    .gf-stack td { display: grid; grid-template-columns: 5.5em 1fr; gap: 10px; border-top: 0; padding: 2px 14px; white-space: normal; }
     .gf-stack td::before { content: attr(data-label); font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .gf-stack td:first-child { display: block; padding-top: 4px; font-weight: 700; color: var(--ink); }
+    .gf-stack td:first-child::before { content: none; }
     .gf-stack td[data-empty] { display: none; }
   }
 </style>

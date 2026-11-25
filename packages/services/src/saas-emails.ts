@@ -299,13 +299,15 @@ export function webContactEmail(input: {
     subject: one ? `Tu plantilla para imprimir: ${input.sheets[0]}` : "Tus plantillas para imprimir",
     preview: one ? "Va adjunta en PDF, lista para imprimir en A4." : "Van adjuntas en PDF, listas para imprimir en A4.",
     title: one ? "Aquí tienes tu plantilla" : "Aquí tienes tus plantillas",
-    paragraphs: [
+    // Con enlaces de verdad (la guía y su demo): por eso va con formato y no en párrafos sueltos.
+    formatted: [
       `${one ? "Va adjunta" : "Van adjuntas"} en PDF, ${one ? "lista" : "listas"} para imprimir en A4: ${input.sheets.join(" y ")}.`,
-      `Los pasos para ${one ? "llenarla" : "llenarlas"} siguen en la guía: ${input.guideUrl}`,
+      `Los pasos para ${one ? "llenarla" : "llenarlas"} siguen en [la guía](${input.guideUrl}).`,
       input.pitch,
-      ...(input.tryUrl ? [`Míralo funcionando, sin crear una cuenta: ${input.tryUrl}`] : []),
+      ...(input.tryUrl ? [`[Míralo funcionando](${input.tryUrl}), sin crear una cuenta.`] : []),
       ...(input.offer ? [input.offer] : []),
-    ],
+    ].join("\n\n"),
+    paragraphs: [],
     ...(input.start ? action(input.start.label, input.start.url) : {}),
     reason: `Te escribimos porque dejaste tu correo en una guía de la web de ${name}.`,
     ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),

@@ -106,7 +106,7 @@ const startTitle = guide.topic === "Presupuestos" ? "Tus presupuestos, sin papel
       </section>
     ))}
 
-    <section id="descargar" class="gstep gdown" aria-labelledby="descargar-t">
+    <section id="descargar" class="gstep gdown" aria-labelledby="descargar-t" tabindex="-1">
       <h2 class="gstep-t" id="descargar-t">{guide.sheets.length > 1 ? "Descarga las plantillas en PDF" : "Descarga la plantilla en PDF"}</h2>
       <p>Para imprimir en A4 y llenar a mano. {guide.sheets.length > 1 ? "Llevan" : "Lleva"} al pie «Plantilla gratis de odentIA · odentia32.com».</p>
       <GuideDownloads

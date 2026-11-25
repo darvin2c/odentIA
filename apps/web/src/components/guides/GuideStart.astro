@@ -20,7 +20,7 @@ const founder = pricing.signupMode === "invitacion" ? pricing.founders : null
 const noFee = founder ? founder.plan === 0 : false
 ---
 {pricing.signupMode === "invitacion" ? (
-  <section id="pide" class="gs" aria-labelledby="gs-t">
+  <section id="pide" class="gs" aria-labelledby="gs-t" tabindex="-1">
     <div class="grain" aria-hidden="true"></div>
     <div class="wrap gs-in">
       <div class="gs-copy">

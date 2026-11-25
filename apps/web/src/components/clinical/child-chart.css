@@ -9,3 +9,4 @@
 .cc-pill[aria-pressed="true"] { background: var(--teal); color: #fff; box-shadow: none; }
 .cc-pill:focus-visible { outline: 3px solid rgba(14, 116, 144, .45); outline-offset: 2px; }
 .cc-hint { margin: 0; font-size: 14px; color: var(--muted); }
+.cc-label { align-self: center; min-width: 5.5em; font-size: 13px; font-weight: 700; color: var(--ink-2); }
