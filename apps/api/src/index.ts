@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server"
 import type { Context } from "hono"
 import { createKairosWriter, decisionKeyStartProblem, embedderFromEnv, kairosModelNotice, platformLlmFromEnv } from "@odentia/agent"
-import { type Auth, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS } from "@odentia/auth"
+import { type Auth, appOfProduct, createAuth, EXTERNAL_ACCOUNT_APPS, type PaseSister } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
@@ -68,20 +68,43 @@ const authOptions = {
   passwordBreachCheck: env.PASSWORD_BREACH_CHECK !== "false",
   clientIpHeader: env.CLIENT_IP_HEADER,
 }
+// Cada dominio con su instancia de la cuenta (ADR 0087) y el pase entre ellas (ADR 0215): la de
+// odentIA, la de cada producto y la de cada app que es otro sistema. Un dominio de otra app que
+// pise el de las clínicas no entra (se avisa más abajo, al armar su entrada).
+const bareDomain = (value: string) => value.trim().toLowerCase().replace(/^\./, "")
+const clinicDomainList = [env.COOKIE_DOMAIN, ...Object.values(env.productDomains)].filter(
+  (taken): taken is string => Boolean(taken),
+)
+const overlaps = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`)
+const authURLOn = (domain: string) => `${onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain).replace(/\/$/, "")}/api/auth`
+const sisters: PaseSister[] = [
+  { domain: bareDomain(env.COOKIE_DOMAIN), authURL: `${env.BETTER_AUTH_URL.replace(/\/$/, "")}/api/auth` },
+  ...Object.values(env.productDomains)
+    .filter((domain): domain is string => Boolean(domain))
+    .map((domain) => ({ domain: bareDomain(domain), authURL: authURLOn(domain) })),
+  ...EXTERNAL_ACCOUNT_APPS.flatMap((app) => {
+    const domain = env.externalAppDomains[app]
+    if (!domain || clinicDomainList.some((taken) => overlaps(bareDomain(taken), bareDomain(domain)))) return []
+    return [{ domain: bareDomain(domain), authURL: authURLOn(domain) }]
+  }),
+]
 const auth = createAuth({
   ...authOptions,
+  sisters,
   baseURL: env.BETTER_AUTH_URL,
   webURL: env.WEB_URL,
   cookieDomain: env.COOKIE_DOMAIN,
   trustedOrigins: env.trustedOrigins,
 })
 // Cada producto en su dominio (decisión 9 del issue 229; latidIA en el suyo): misma base y
-// mismo secreto, su propia cookie. Quien trabaja en varios productos entra una vez en cada uno.
+// mismo secreto, su propia cookie. Quien pasa de uno a otro desde la app lleva su sesión con el
+// pase (ADR 0215); quien abre otro dominio directo, entra una vez en ese navegador.
 const productAuth: Partial<Record<DomainProduct, Auth>> = {}
 for (const [product, domain] of Object.entries(env.productDomains) as [DomainProduct, string | undefined][]) {
   if (!domain) continue
   productAuth[product] = createAuth({
     ...authOptions,
+    sisters,
     app: appOfProduct(product),
     baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
     webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
@@ -97,12 +120,7 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
   const domain = env.externalAppDomains[app]
   if (!domain) continue
   // Un dominio de las clínicas no puede ser el de otra app: ahí dejarían de responder.
-  const clinicDomains = [env.COOKIE_DOMAIN, ...Object.values(env.productDomains)].filter(
-    (taken): taken is string => Boolean(taken),
-  )
-  const bare = (value: string) => value.trim().toLowerCase().replace(/^\./, "")
-  const overlaps = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`)
-  if (clinicDomains.some((taken) => overlaps(bare(taken), bare(domain)))) {
+  if (clinicDomainList.some((taken) => overlaps(bareDomain(taken), bareDomain(domain)))) {
     console.error(`api: el dominio de ${app} (${domain}) es o contiene uno de las clínicas: su entrada queda apagada.`)
     continue
   }
@@ -115,6 +133,7 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
       ...authOptions,
       app,
       signedTokens: true,
+      sisters,
       baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
       webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
       cookieDomain: domain,

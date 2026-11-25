@@ -17,6 +17,7 @@ import { sql } from "drizzle-orm"
 import { accessLink } from "./access-link.js"
 import { ACCOUNT_APP_INFO, type AccountApp, BASE_ACCOUNT_APP } from "./apps.js"
 import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
+import { type PaseSister, pase } from "./pase.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
 import { legalAcceptance } from "./terms.js"
@@ -54,6 +55,11 @@ export interface CreateAuthOptions {
    * persona sin leer esta base. Apagado, esas rutas no existen y la sesión no firma nada.
    */
   signedTokens?: boolean
+  /**
+   * Las instancias de la cuenta de cada dominio (ADR 0215), esta también: el pase lleva la
+   * sesión de una a otra al abrir un lugar de otro dominio. Sin ellas, el pase no sale de aquí.
+   */
+  sisters?: readonly PaseSister[]
 }
 
 /**
@@ -101,6 +107,7 @@ export function createAuth({
   clientIpHeader,
   app = BASE_ACCOUNT_APP,
   signedTokens = false,
+  sisters = [],
 }: CreateAuthOptions) {
   const { name: appName, mailBrand: brand } = ACCOUNT_APP_INFO[app]
   return betterAuth({
@@ -221,6 +228,7 @@ export function createAuth({
       }),
       keepTwoFactorWhileRequired(ownerDb),
       accessLink({ mailer, webURL, brand }),
+      pase({ domain: cookieDomain, sisters }),
       passwordBreachCheck({ enabled: breachCheck }),
       legalAcceptance(),
       forgetAdminDeviceOnSignOut(ownerDb),
@@ -347,6 +355,7 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
 export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
+export { PASE_TTL_SECONDS, type PaseSister } from "./pase.js"
 export { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "./email-verification.js"
 export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
 export { termsState } from "./terms.js"

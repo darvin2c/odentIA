@@ -276,6 +276,8 @@ type NavDefinition =
 
 /** Lo que cambia cuántas personas esperan sin pasar por el agente: alguien escribe o se le responde. */
 const WAITING_EVENTS = ["message.created", "message.updated", "conversation.updated"]
+/** Lo que cierra «Cerrar sesión»: la misma sesión de las apps abiertas desde aquí. */
+const SIGN_OUT_HINT = "Cierra tu sesión aquí y en las apps que abriste desde aquí"
 
 const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
@@ -570,6 +572,8 @@ function OrgLayout() {
       brand={<Brand />}
       brandIcon={<Brand compact />}
       switcher={support ? undefined : <OrgSwitcher />}
+      // La sesión es la misma en las apps abiertas desde aquí con el pase (ADR 0215): se cierra en todas.
+      signOutHint={support ? undefined : SIGN_OUT_HINT}
       onSignOut={async () => {
         if (support) {
           await endSupportSession().catch(() => undefined)

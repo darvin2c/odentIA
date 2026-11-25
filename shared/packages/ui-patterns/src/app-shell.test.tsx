@@ -95,6 +95,28 @@ describe("AppShell userMenu", () => {
     expect(onSignOut).toHaveBeenCalledTimes(1)
   })
 
+  it("«Cerrar sesión» dice lo que cierra cuando se le pasa", async () => {
+    const onSignOut = vi.fn()
+    render(
+      <AppShell
+        items={[]}
+        LinkComponent={AnchorLink}
+        pathname="/"
+        user={{ name: "Ada" }}
+        onSignOut={onSignOut}
+        signOutHint="Cierra tu sesión aquí y en las apps que abriste desde aquí"
+        brand={<Brand />}
+      >
+        <p>contenido</p>
+      </AppShell>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Ada/ }))
+    const signOut = await screen.findByRole("menuitem", { name: /^Cerrar sesión/ })
+    expect(signOut.textContent).toContain("Cierra tu sesión aquí y en las apps que abriste desde aquí")
+    fireEvent.click(signOut)
+    expect(onSignOut).toHaveBeenCalledTimes(1)
+  })
+
   it("el selector de tema aplica .dark y persiste sin cerrar el menú", async () => {
     localStorage.clear()
     document.documentElement.classList.remove("dark")

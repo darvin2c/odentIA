@@ -544,6 +544,7 @@ function ChangePasswordDrawer({ open, onClose }: { open: boolean; onClose: () =>
       {...useFormSurface(form, { formMessage: authFormMessage })}
       open={open}
       title="Cambiar contraseña"
+      description="Es la de tu cuenta: vale para todas tus apps. Al cambiarla, se cierra tu cuenta en los otros navegadores; en este sigues adentro."
       onClose={close}
     >
       <FieldGroup>

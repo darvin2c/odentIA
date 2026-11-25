@@ -248,8 +248,22 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "cambio-contrasena",
         q: "¿Cómo cambio mi contraseña?",
-        a: "En el menú con tu nombre, abajo a la izquierda, «Cambiar contraseña». Ahí mismo, «Mi perfil» tiene tu nombre, tu foto y la verificación en dos pasos.",
-        forms: ["olvide mi contrasena", "cambiar contrasena", "mi perfil", "cambiar mi foto"],
+        a: "En el menú con tu nombre, abajo a la izquierda, «Cambiar contraseña». Es la de tu cuenta: vale para todas tus apps, y al cambiarla se cierra tu cuenta en los otros navegadores (en este sigues adentro). En gestorIA, otro navegador puede seguir abierto hasta 15 minutos. Ahí mismo, «Mi perfil» tiene tu nombre, tu foto y la verificación en dos pasos.",
+        forms: ["olvide mi contrasena", "cambiar contrasena", "mi perfil", "cambiar mi foto", "la contrasena vale para todas las apps"],
+        general: true,
+      },
+      {
+        id: "pasar-a-otra-clinica",
+        q: "¿Cómo paso a mi otra clínica sin poner la clave otra vez?",
+        a: "Ábrela desde el menú de la clínica, arriba a la izquierda, o desde «Elige tu clínica»: se abre con tu misma sesión, sin pedirte la clave ni el código de dos pasos, aunque sea de otra app (odentIA, latidIA o vistIA). Lo mismo con «Administración», si eres del equipo de odentIA: ahí te pide su propio código, como siempre. Si la abres directo, desde un favorito o escribiendo su dirección, te pide entrar una vez en ese navegador. Si en esa compu estaba entrada otra persona, queda tu sesión y la suya se cierra.",
+        forms: ["cambiar de clinica sin contrasena", "me pide la contrasena otra vez", "abrir mi otra clinica", "pasar a latidia", "entrar a otra app sin clave"],
+        general: true,
+      },
+      {
+        id: "cerrar-sesion-todas",
+        q: "¿Se cierra todo si cierro sesión?",
+        a: "En este navegador, sí: «Cerrar sesión» cierra tu sesión aquí y en las apps que abriste desde aquí (tu otra clínica, la administración), y este equipo deja de recibir tus avisos. En tus otros equipos sigues adentro: para cerrarlos, en «Mi perfil», «Sesiones activas» › «Cerrar otras sesiones». «Entrar con otra cuenta», en la pantalla de entrar, también cierra antes la cuenta que estaba abierta en este navegador.",
+        forms: ["cerrar sesion en todas las apps", "si cierro sesion se cierra todo", "salir de todas las clinicas", "cerrar sesion en otro equipo", "entrar con otra cuenta"],
         general: true,
       },
       {
