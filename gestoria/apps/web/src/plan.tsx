@@ -14,8 +14,9 @@ import {
 import { Textarea } from "@odentia/ui/components/textarea"
 import { EmptyState, KpiCard, PageNotice, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useLocation } from "@tanstack/react-router"
 import { ChevronDown, CreditCard, Upload } from "lucide-react"
-import { type FormEvent, useId, useRef, useState } from "react"
+import { type FormEvent, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
 import { when } from "./lib/pedidos"
 import {
@@ -43,7 +44,7 @@ import {
   TextField,
   useDirty,
 } from "./piezas"
-import { ErrorBlock, useStoreContext } from "./tiendas"
+import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
 
 /**
  * «Plan y pagos» (lienzo B, paso B7): lo que la administración dice de la tienda (su plan, lo que
@@ -67,12 +68,10 @@ export function PlanPage() {
   })
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <h2 className="text-xl font-bold">Plan y pagos</h2>
-        <p className="text-sm text-muted-foreground">
-          Tu plan con gestorIA, lo que se te cobró y tus pagos.
-        </p>
-      </div>
+      <StoreHeader
+        title="Plan y pagos"
+        subtitle="Tu plan con gestorIA, lo que se te cobró y tus pagos."
+      />
       {plan.isPending ? <p className="text-sm text-muted-foreground">Cargando…</p> : null}
       {plan.isError ? <ErrorBlock error={plan.error} onRetry={() => void plan.refetch()} /> : null}
       {plan.data ? <PlanBody view={plan.data} /> : null}
@@ -185,9 +184,9 @@ function Charges({ state, connected }: { state: Known; connected: boolean }) {
   const canSend = connected && state.paymentMethods.length > 0
   return (
     <section aria-labelledby="plan-cobros" className="flex flex-col gap-3">
-      <h3 id="plan-cobros" className="text-lg font-bold">
+      <h2 id="plan-cobros" className="text-lg font-bold">
         Lo que se te cobró
-      </h3>
+      </h2>
       {state.charges.length === 0 ? (
         <p className="text-sm text-muted-foreground">Todavía no hay cobros.</p>
       ) : (
@@ -217,9 +216,7 @@ function Charges({ state, connected }: { state: Known; connected: boolean }) {
                   <ChevronDown aria-hidden className="size-4 text-muted-foreground" />
                   <span className="sr-only">Ver el detalle</span>
                 </CollapsibleTrigger>
-                {canSend &&
-                charge.paidCents < charge.amountCents &&
-                charge.status !== "anulada" ? (
+                {canSend && charge.paidCents < charge.amountCents && charge.status !== "anulada" ? (
                   <div className="px-4 pb-3">
                     <Button size="sm" variant="outline" onClick={() => setPaying(charge)}>
                       <Upload aria-hidden />
@@ -345,7 +342,9 @@ function ReceiptSheet({
             ))}
           </select>
           {method?.instructions ? (
-            <FieldDescription className="whitespace-pre-wrap">{method.instructions}</FieldDescription>
+            <FieldDescription className="whitespace-pre-wrap">
+              {method.instructions}
+            </FieldDescription>
           ) : null}
           {errors.methodCode ? <FieldError>{errors.methodCode}</FieldError> : null}
         </Field>
@@ -388,9 +387,9 @@ function ReceiptSheet({
 function Payments({ state, view }: { state: Known; view: PlanView }) {
   return (
     <section aria-labelledby="plan-pagos" className="flex flex-col gap-3">
-      <h3 id="plan-pagos" className="text-lg font-bold">
+      <h2 id="plan-pagos" className="text-lg font-bold">
         Tus pagos
-      </h3>
+      </h2>
       {view.pendingReceipts.length > 0 ? (
         <ul className="flex flex-col divide-y rounded-xl border bg-card">
           {view.pendingReceipts.map((receipt) => (
@@ -465,15 +464,26 @@ function Support({ view }: { view: PlanView }) {
     ask.mutate()
   }
   const cases = view.state?.found ? view.state.support : []
+  // «Pedir ayuda» de la cabecera llega aquí (`#plan-ayuda`): se ve la ayuda y el foco queda en
+  // su primer campo, también si ya estaba en esta página (cada clic es otra navegación).
+  const location = useLocation()
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (location.hash !== "plan-ayuda") return
+    sectionRef.current?.scrollIntoView({ block: "start" })
+    const first = view.connected ? document.getElementById(kindId) : null
+    ;(first ?? document.getElementById("plan-ayuda"))?.focus({ preventScroll: true })
+  }, [location, view.connected, kindId])
   return (
     <section
+      ref={sectionRef}
       aria-labelledby="plan-ayuda"
-      className="elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
+      className="elevated flex scroll-mt-4 flex-col gap-4 rounded-xl border bg-card p-5"
     >
       <div className="flex flex-col gap-1">
-        <h3 id="plan-ayuda" className="text-lg font-bold">
+        <h2 id="plan-ayuda" tabIndex={-1} className="text-lg font-bold outline-none">
           Pedir ayuda
-        </h3>
+        </h2>
         <p className="text-sm text-muted-foreground">
           {view.connected
             ? "Escríbenos sobre tu plan, un cobro o algo que no funciona. Te respondemos aquí."
