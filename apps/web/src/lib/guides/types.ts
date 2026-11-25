@@ -49,6 +49,8 @@ export interface Guide {
   lead: string
   /** Cuándo se revisó el texto por última vez (AAAA-MM-DD): la página, Google y el mapa del sitio. */
   updated: string
+  /** Cuándo salió por primera vez: no cambia al editarla (Google la lee como la fecha del artículo). */
+  published: string
   /** El video de YouTube, cuando esté publicado; sin él, la guía no muestra esa parte. */
   video?: { youtubeId: string; title: string }
   /** «En corto»: la respuesta en tres líneas. */

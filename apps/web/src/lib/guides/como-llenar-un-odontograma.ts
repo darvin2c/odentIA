@@ -15,6 +15,7 @@ export const guide: Guide = {
     "Cómo llenar un odontograma con la notación FDI: numera cada diente, ubica la cara y marca lo que ves con colores y siglas. Odontograma en PDF gratis.",
   lead: "Con la notación FDI: cómo se numera cada diente, cómo se nombran sus caras y cómo se marca lo que encuentras. Con el odontograma en PDF para descargar.",
   updated: "2026-11-25",
+  published: "2026-11-25",
   short: [
     "Cada diente tiene dos cifras: la primera es el cuadrante y la segunda, su lugar desde el centro. El 36 se lee «tres-seis».",
     "Cada diente tiene cinco caras. Lo que está en una cara se pinta en esa cara; lo que es de todo el diente (si falta, una corona, una endodoncia) se dibuja sobre el diente, y al lado va su sigla.",

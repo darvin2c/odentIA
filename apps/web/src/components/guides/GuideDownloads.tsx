@@ -10,7 +10,7 @@ import { EMAIL } from "../../lib/form"
 import "./guide-downloads.css"
 
 /** `image`: la hoja vista de frente, para saber qué baja (y la que lee Google Imágenes). */
-type Sheet = { sheet: string; label: string; detail: string; href: string; image: { src: string; alt: string } }
+type Sheet = { sheet: string; label: string; detail: string; href: string; image: { src: string } }
 
 type Props = {
   sheets: Sheet[]
@@ -137,7 +137,8 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
       <div className="gd-cards">
         {sheets.map((item) => (
           <a key={item.sheet} className="gd-card" href={item.href} download onClick={() => setDownloaded(item)}>
-            <img className="gd-thumb" src={item.image.src} alt={item.image.alt} width={620} height={877} loading="lazy" decoding="async" />
+            {/* Sin texto: el enlace ya dice qué baja; Google la lee por el artículo. */}
+            <img className="gd-thumb" src={item.image.src} alt="" width={620} height={877} loading="lazy" decoding="async" />
             <span className="gd-what">
               <b>{item.label}</b>
               <span>{item.detail}</span>

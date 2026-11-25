@@ -8,6 +8,7 @@ import { archNeighbor } from "@odentia/dental/odontogram-arch"
 import {
   canalPaths,
   crownPath,
+  type FrontRow,
   type FrontTooth,
   frontRow,
   frontRowWidthMm,
@@ -16,7 +17,7 @@ import {
   rootPaths,
 } from "@odentia/dental/tooth-front"
 import { type FrontEntry, type FrontMarks, frontMarksOf, type Paint } from "@odentia/dental/tooth-front-marks"
-import { type KeyboardEvent, useId, useRef, useState } from "react"
+import { type KeyboardEvent, useId, useLayoutEffect, useRef, useState } from "react"
 import type { ExampleFinding } from "./OdontogramArch"
 
 /** Lo que es cada hallazgo de los ejemplos en la app: la condición, su cara y que está en buen estado. */
@@ -56,6 +57,9 @@ const INK: Record<Paint, string> = { red: "#dc2626", blue: "#2563eb" }
 /** Unidades del SVG por mm de dibujo, y px de pantalla por mm: el mismo tamaño que en la app. */
 const S = 5
 const PX_PER_MM = 3.5
+/** Solo con temporales va más grande, como en la app; en el teléfono, hasta 5,2. */
+const PRIMARY_PX_PER_MM = 4.4
+const PHONE_MAX_PX_PER_MM = 5.2
 /** Las de leche en su propia fila, junto a las permanentes: a este tanto de su tamaño. */
 const PRIMARY_OWN_ROW = 0.88
 const NUMBER_BAND = 24
@@ -75,17 +79,29 @@ function layoutRows(rows: readonly (readonly number[])[]) {
   const width = Math.max(...widths) + 2 * 2.6 * S + 8
   // En la mixta, cada pieza de leche va bajo la permanente que la reemplaza (la 55 bajo la 15).
   const slots = new Map<number, { x: number; w: number }>()
+  /** La fila de cada reemplazo: la de leche va bajo ella solo si todas caen en la misma. */
+  const rowOf = new Map<number, number>()
   rows.forEach((teeth, i) => {
     if (isPrimaryRow(teeth)) return
-    for (const t of frontRow(teeth, { scale: S, left: (width - widths[i]!) / 2, yOcc: 0 }).teeth)
+    for (const t of frontRow(teeth, { scale: S, left: (width - widths[i]!) / 2, yOcc: 0 }).teeth) {
       slots.set(t.tooth + 40, { x: t.x, w: t.w })
+      rowOf.set(t.tooth + 40, i)
+    }
   })
+  /** Dos filas van juntas si una es la de leche de la otra, con todas sus temporales bajo ella. */
+  const together = (a: readonly number[], b: readonly number[]) => {
+    if (isPrimaryRow(a) === isPrimaryRow(b)) return false
+    const primary = isPrimaryRow(a) ? a : b
+    const pair = rows.indexOf(isPrimaryRow(a) ? b : a)
+    return primary.every((tooth) => rowOf.get(tooth) === pair)
+  }
   let cursor = 4
-  const placed = rows.map((teeth, i) => {
+  const placed: Placed[] = rows.map((teeth, i) => {
+    // Entre una fila y la de leche que va con ella, poco; entre grupos, más (como la app).
     const prev = rows[i - 1]
-    // Entre una fila y la de leche que va con ella, poco; entre las dos de leche, más (como la app).
-    if (prev && isPrimaryRow(prev) && isPrimaryRow(teeth)) cursor += GROUP_GAP
-    const aligned = isPrimaryRow(teeth) && teeth.every((tooth) => slots.has(tooth))
+    if (prev && !together(prev, teeth) && (isPrimaryRow(prev) || isPrimaryRow(teeth))) cursor += GROUP_GAP
+    const aligned =
+      isPrimaryRow(teeth) && teeth.every((tooth) => slots.has(tooth) && rowOf.get(tooth) === rowOf.get(teeth[0]!))
     const left = (width - widths[i]!) / 2
     const opts = aligned ? { slots } : {}
     const scale = scaleOf(teeth, aligned)
@@ -103,6 +119,47 @@ function layoutRows(rows: readonly (readonly number[])[]) {
     return { row, numberY: top + NUMBER_BAND / 2 + 2, top, bottom: row.bottom }
   })
   return { width, height: cursor - ROW_GAP + 4, placed }
+}
+
+interface Placed {
+  row: FrontRow
+  /** Dónde van los números (centro de la franja). */
+  numberY: number
+  /** Lo que ocupa la fila con sus números: lo que se toca de cada pieza. */
+  top: number
+  bottom: number
+}
+
+/**
+ * ↑ ↓: la pieza de la fila de al lado que está justo arriba o abajo en el dibujo. Por posición en
+ * la fila no sirve en la mixta: la 55 va bajo la 15, no repartida a lo ancho (como la app).
+ */
+function aboveOrBelow(placed: readonly Placed[], tooth: number, step: -1 | 1): number | null {
+  const r = placed.findIndex((p) => p.row.teeth.some((t) => t.tooth === tooth))
+  const next = placed[r + step]?.row.teeth
+  if (r < 0 || !next || next.length === 0) return null
+  const from = placed[r]!.row.teeth.find((t) => t.tooth === tooth)!
+  const center = from.x + from.w / 2
+  let best = next[0]!
+  for (const t of next) if (Math.abs(t.x + t.w / 2 - center) < Math.abs(best.x + best.w / 2 - center)) best = t
+  return best.tooth
+}
+
+/**
+ * En el teléfono, como la app (`singleArchRows`): las permanentes en dos filas de 8 y las de leche
+ * enteras del lado de las coronas (solas, también en dos). Así, a 360 px, ninguna pieza baja de 24 px.
+ */
+function phoneRows(rows: readonly (readonly number[])[]): number[][] {
+  const halves = (row: readonly number[]) => [row.slice(0, row.length / 2), row.slice(row.length / 2)]
+  const upper = (row: readonly number[]) => [1, 2, 5, 6].includes(Math.trunc(row[0]! / 10))
+  const arch = (isUpper: boolean) => {
+    const permanent = rows.find((row) => row.length > 0 && upper(row) === isUpper && !isPrimaryRow(row))
+    const primary = rows.find((row) => row.length > 0 && upper(row) === isUpper && isPrimaryRow(row))
+    if (!permanent) return primary ? halves(primary) : []
+    if (!primary) return halves(permanent)
+    return isUpper ? [...halves(permanent), [...primary]] : [[...primary], ...halves(permanent)]
+  }
+  return [...arch(true), ...arch(false)]
 }
 
 /** Una cara vista de frente: el borde (oclusal o incisal), un lado o el centro. */
@@ -200,6 +257,23 @@ function ToothFront({ t, yOcc, reach, marks }: { t: FrontTooth; yOcc: number; re
   return <g transform={transform}>{body}</g>
 }
 
+/** El ancho donde va la vista: `null` hasta medirlo (en el servidor, a su tamaño). */
+function useAvailableWidth(ref: React.RefObject<HTMLDivElement | null>): number | null {
+  const [width, setWidth] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => {
+      if (el.clientWidth > 100) setWidth(el.clientWidth)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+  return width
+}
+
 /**
  * La boca de frente. Cada pieza es un botón (una sola parada de Tab y las flechas), con el mismo
  * elegido que el arco de al lado.
@@ -219,9 +293,17 @@ export default function OdontogramFront({
   labelOf: (tooth: number) => string
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const hintId = useId()
-  const shown = rows.filter((row) => row.length > 0)
-  const { width: W, height: H, placed } = layoutRows(shown)
+  const available = useAvailableWidth(wrapRef)
+  const whole = rows.filter((row) => row.length > 0)
+  const wide = layoutRows(whole)
+  const base = whole.every(isPrimaryRow) ? PRIMARY_PX_PER_MM : PX_PER_MM
+  // Si no cabe a su tamaño, la arcada en dos filas, que llenan el ancho (como la app en el celular).
+  const phone = available !== null && (wide.width * base) / S > available
+  const shown = phone ? phoneRows(whole) : whole
+  const { width: W, height: H, placed } = phone ? layoutRows(shown) : wide
+  const px = phone ? Math.min(PHONE_MAX_PX_PER_MM, ((available ?? 0) * S) / W) : base
   const [visited, setVisited] = useState<number | null>(null)
   const visible = shown.flat()
   const tabStop =
@@ -232,7 +314,11 @@ export default function OdontogramFront({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const el = (event.target as HTMLElement).closest<HTMLElement>("[data-front-tooth]")
     if (!el) return
-    const next = archNeighbor(shown, Number(el.dataset.frontTooth), event.key)
+    const tooth = Number(el.dataset.frontTooth)
+    const next =
+      event.key === "ArrowUp" || event.key === "ArrowDown"
+        ? aboveOrBelow(placed, tooth, event.key === "ArrowUp" ? -1 : 1)
+        : archNeighbor(shown, tooth, event.key)
     if (next === null) return
     event.preventDefault()
     setVisited(next)
@@ -240,10 +326,11 @@ export default function OdontogramFront({
   }
 
   return (
+    <div ref={wrapRef} className="of-wrap">
     <div
       ref={ref}
       className="of"
-      style={{ width: `${n((W * PX_PER_MM) / S)}px` }}
+      style={{ width: `${n((W * px) / S)}px` }}
       role="group"
       aria-label="De frente, cada pieza con su raíz"
       aria-describedby={hintId}
@@ -326,6 +413,7 @@ export default function OdontogramFront({
           />
         )),
       )}
+    </div>
     </div>
   )
 }

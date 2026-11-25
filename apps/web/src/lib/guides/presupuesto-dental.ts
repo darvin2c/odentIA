@@ -15,7 +15,8 @@ export const guide: Guide = {
   description:
     "Cómo hacer un presupuesto dental por fases: un renglón por tratamiento, forma de pago, adelanto y vigencia. Plantilla de presupuesto dental en PDF gratis.",
   lead: "Del odontograma al presupuesto: un renglón por tratamiento, ordenado por fases y con su forma de pago. Con el presupuesto en blanco en PDF.",
-  updated: "2026-11-24",
+  updated: "2026-11-25",
+  published: "2026-11-25",
   short: [
     "Parte de lo que encontraste: un renglón por tratamiento, con su diente, sus caras y sus sesiones.",
     "Ordénalo por fases. Si hay dos caminos, van lado a lado dentro de su fase y no se suman.",

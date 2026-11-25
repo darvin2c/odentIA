@@ -52,14 +52,14 @@ const firstSheet = guide.sheets[0]
 const sheets = guide.sheets.map((item) => ({
   ...item,
   href: SHEET_FILES[item.sheet],
-  image: { src: sheetImages(item.sheet).page, alt: `Plantilla: ${SHEET_NAMES[item.sheet]}, para imprimir en A4` },
+  image: { src: sheetImages(item.sheet).page },
 }))
 // Al compartir el enlace, la imagen de su primera plantilla.
 const share = firstSheet
   ? {
       image: sheetImages(firstSheet.sheet).share,
       alt: `Plantilla gratis en PDF: ${SHEET_NAMES[firstSheet.sheet]}, para imprimir y llenar a mano.`,
-      article: { published: guide.updated, modified: guide.updated },
+      article: { published: guide.published, modified: guide.updated },
     }
   : undefined
 // Los nombres de las piezas se arman aquí, en el servidor: la isla no carga el dominio dental entero.

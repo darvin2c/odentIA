@@ -34,7 +34,7 @@ const PATIENTS: Patient[] = [
     suggested: "mixta",
     examples: {
       // Los mismos cinco de su tabla en la guía de niños.
-      21: { kind: "saliendo", finding: "Está saliendo", detail: "El incisivo central permanente: la flecha en zigzag azul, en su fila de arriba." },
+      21: { kind: "saliendo", finding: "Está saliendo", detail: "El incisivo central permanente: la flecha en zigzag azul, en su fila de arriba. La 61, la de leche que estaba ahí, ya se cayó: en la fila de leche no se marca nada." },
       36: { kind: "sigla", finding: "Fosas y fisuras profundas", detail: "Solo la sigla FFP en el recuadro, en azul: no es una caries." },
       46: { kind: "sellante", finding: "Sellante en buen estado", detail: "El sellante en la cara oclusal y la sigla S, en azul." },
       75: { kind: "caries", finding: "Caries que llega a la pulpa", detail: "En el molar de leche de abajo: la oclusal en rojo y CDP." },

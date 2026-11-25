@@ -17,6 +17,7 @@ button.oa-tooth:hover { box-shadow: 0 0 0 2px var(--teal); }
 .oa-legend span { display: flex; align-items: center; gap: 6px; }
 .oa-legend i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 /* La boca de frente (OdontogramFront): de su tamaño, como en la app; más angosta, se achica. */
+.of-wrap { width: 100%; min-width: 0; }
 .of { position: relative; max-width: 100%; margin: 0 auto; }
 .of-svg { display: block; width: 100%; height: auto; user-select: none; }
 .of-tooth { position: absolute; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }

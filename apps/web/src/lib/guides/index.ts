@@ -103,7 +103,7 @@ export function guideArticleJsonLd(site: URL | undefined, guide: Guide, publishe
     "@type": "Article",
     headline: plainText(`${guide.title} ${guide.accent}`).replace(/[,.]\s*$/, ""),
     description: guide.description,
-    datePublished: guide.updated,
+    datePublished: guide.published,
     dateModified: guide.updated,
     inLanguage: "es",
     mainEntityOfPage: url,

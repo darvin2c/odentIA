@@ -43,16 +43,23 @@ async function shareImage(page: Buffer, title: string): Promise<Buffer> {
   const shown = await sharp(sheet)
     .extract({ left: 0, top: 0, width: 420, height: Math.min(height, 570) })
     .toBuffer()
-  const words = escape(title)
+  // El nombre en dos renglones si es de dos o más palabras («Odontograma / de niños»): en uno se
+  // metía bajo la hoja. Cada renglón mide como mucho 12 letras a 64 px, unos 560 px de ancho.
+  const [first = "", ...rest] = title.split(" ")
+  const lines = rest.length ? [first, rest.join(" ")] : [first]
+  const name = lines
+    .map((line, i) => `<text x="80" y="${lines.length > 1 ? 222 + i * 72 : 250}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="64" font-weight="700" fill="#ffffff">${escape(line)}</text>`)
+    .join("\n  ")
+  const below = lines.length > 1 ? 72 : 0
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
   <rect width="1200" height="630" fill="#0a2129"/>
   <rect x="690" y="40" width="460" height="620" rx="18" fill="#123844"/>
-  <text x="80" y="150" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="600" fill="#5eead4" letter-spacing="3">PLANTILLA GRATIS EN PDF</text>
-  <text x="80" y="250" font-family="Segoe UI, Arial, sans-serif" font-size="68" font-weight="700" fill="#ffffff">${words}</text>
-  <text x="80" y="330" font-family="Segoe UI, Arial, sans-serif" font-size="34" fill="#cbd5e1">Para imprimir en A4 y llenar a mano,</text>
-  <text x="80" y="376" font-family="Segoe UI, Arial, sans-serif" font-size="34" fill="#cbd5e1">con la guía paso a paso.</text>
-  <text x="80" y="540" font-family="Segoe UI, Arial, sans-serif" font-size="36" font-weight="700" fill="#ffffff">odentIA</text>
-  <text x="80" y="582" font-family="Segoe UI, Arial, sans-serif" font-size="26" fill="#94a3b8">odentia32.com/guias</text>
+  <text x="80" y="150" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#5eead4" letter-spacing="3">PLANTILLA GRATIS EN PDF</text>
+  ${name}
+  <text x="80" y="${330 + below}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="34" fill="#cbd5e1">Para imprimir en A4 y llenar a mano,</text>
+  <text x="80" y="${376 + below}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="34" fill="#cbd5e1">con la guía paso a paso.</text>
+  <text x="80" y="540" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#ffffff">odentIA</text>
+  <text x="80" y="582" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="26" fill="#94a3b8">odentia32.com/guias</text>
 </svg>`
   return sharp(Buffer.from(svg))
     .composite([{ input: shown, left: 710, top: 60 }])
