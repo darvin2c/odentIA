@@ -31,6 +31,7 @@ import {
   PersonAvatar,
   useAppForm,
   useFormSurface,
+  useDraftSaved,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -715,6 +716,7 @@ export function NewPatientDrawer({
     >
       {stage === "form" ? (
         <div className="flex min-w-0 flex-col gap-5">
+          {target.kind !== "person" ? <KeptInTab signature={JSON.stringify(values)} /> : null}
           {resumed && !picked ? (
             <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
               <span>Seguías con {[resumed.givenNames, resumed.surnames].filter(Boolean).join(" ") || "lo que escribiste"}.</span>
@@ -1179,6 +1181,12 @@ export function NewPatientDrawer({
           {permissionNote}
         </p>
       ) : null}
+      {/* La persona nueva que lo trae también quedó registrada: se dice, para no buscarla (QA del 25 nov). */}
+      {stage === "done" && created && values.guardianNew && values.guardianGivenNames.trim() ? (
+        <p role="status" className="mb-4 rounded-xl bg-success-soft p-3 text-sm text-success">
+          {`${[values.guardianGivenNames.trim(), values.guardianSurnames.trim()].filter(Boolean).join(" ")} también quedó en la clínica: le llegan los avisos de ${created.displayName.split(" ")[0]}.`}
+        </p>
+      ) : null}
       {stage === "done" && created ? (
         <DoneStage
           created={created}
@@ -1470,4 +1478,16 @@ function writeSavedDraft(key: string, draft: SavedDraft): void {
 /** El foco en un campo que aparece en el próximo cuadro (el que lo tenía se desmontó). */
 function focusSoon(id: string): void {
   window.requestAnimationFrame(() => document.getElementById(id)?.focus())
+}
+
+/**
+ * Lo escrito ya quedó en la pestaña: el panel lateral no pregunta «¿Salir sin guardar?» al ir a otra
+ * pantalla, porque no se pierde (QA del 25 nov: decía «Si sales, se pierde», y no era cierto).
+ */
+function KeptInTab({ signature }: { signature: string }): null {
+  const report = useDraftSaved()
+  useEffect(() => {
+    report(true)
+  }, [signature, report])
+  return null
 }

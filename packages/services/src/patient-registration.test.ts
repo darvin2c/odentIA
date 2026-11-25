@@ -38,7 +38,7 @@ import {
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
-import { listPersonNotes } from "./people.js"
+import { listPersonNotes, updatePersonIdentity } from "./people.js"
 import { createTask, updateTask } from "./tasks.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { listDecisionRecipients, listResponsibilities } from "./responsibilities.js"
@@ -2073,4 +2073,19 @@ it("sin marcar la privacidad, lo que dijo de sus mensajes igual queda a nombre d
     ["recordatorio", "granted"],
   ])
   expect(await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", created.id))).toEqual([])
+})
+
+it("con su abuela que la acompaña, corregir la fecha de la niña se guarda: no pide nombrarla representante legal", async () => {
+  const created = await registerMinorWith({
+    displayName: "Rosa Abuela Fecha",
+    givenNames: "Rosa",
+    familyName: "Abuela Fecha",
+    relationship: "family",
+    relationshipDetail: "abuela",
+    phone: "+51977555815",
+  })
+  const updated = await withOrgContext(appDb, "org_a", (tx) =>
+    updatePersonIdentity(tx, "org_a", { userId: ACTOR }, created.personId!, { birthDate: "2021-04-12" }),
+  )
+  expect(updated).toBeTruthy()
 })
