@@ -1182,9 +1182,9 @@ export function NewPatientDrawer({
         </p>
       ) : null}
       {/* La persona nueva que lo trae también quedó registrada: se dice, para no buscarla (QA del 25 nov). */}
-      {stage === "done" && created && values.guardianNew && values.guardianGivenNames.trim() ? (
+      {stage === "done" && created && !guardian && values.guardianNew && values.who === "equipo" && minor && values.guardianGivenNames.trim() ? (
         <p role="status" className="mb-4 rounded-xl bg-success-soft p-3 text-sm text-success">
-          {`${[values.guardianGivenNames.trim(), values.guardianSurnames.trim()].filter(Boolean).join(" ")} también quedó en la clínica: le llegan los avisos de ${created.displayName.split(" ")[0]}.`}
+          {`${[values.guardianGivenNames.trim(), values.guardianSurnames.trim()].filter(Boolean).join(" ")} también quedó en la clínica, como quien trae a ${created.displayName.split(" ")[0]}.`}
         </p>
       ) : null}
       {stage === "done" && created ? (
