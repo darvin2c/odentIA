@@ -31,6 +31,7 @@ import {
   PersonAvatar,
   useAppForm,
   useFormSurface,
+  useDraftSaved,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -39,7 +40,7 @@ import { Check } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { brandedQrDataUrl } from "../../lib/branded-qr"
-import { useCan } from "../../lib/crm"
+import { useCan, useMyUserId } from "../../lib/crm"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { fetchRegistrationConfig } from "../../lib/patient-registration"
 import { hcLabel } from "../../lib/patients"
@@ -114,6 +115,16 @@ interface Draft {
   privacy: boolean
   /** Novedades y promociones: se le pregunta siempre; vacío mientras no responda. */
   promotions: "" | "si" | "no"
+  /**
+   * Su responsable no está registrado y se escribe aquí (mesa del 25 nov, entrega 1): nace con el
+   * niño, en el mismo registro. Sus nombres, apellidos y celular.
+   */
+  guardianNew: boolean
+  guardianGivenNames: string
+  guardianSurnames: string
+  guardianPhone: string | null
+  /** Con «Otro familiar», qué es para él o ella («abuela»), si se dijo. */
+  relationDetail: string
 }
 
 const EMPTY: Draft = {
@@ -131,6 +142,11 @@ const EMPTY: Draft = {
   guardianDocCountry: "",
   privacy: false,
   promotions: "",
+  guardianNew: false,
+  guardianGivenNames: "",
+  guardianSurnames: "",
+  guardianPhone: null,
+  relationDetail: "",
 }
 
 /**
@@ -150,6 +166,13 @@ const FIELD_OF: Record<string, keyof Draft> = {
   docNumber: "docNumber",
   docCountry: "docCountry",
   "representative.relationship": "relation",
+  // El responsable nuevo: cada error en su campo, no en los del niño (mesa del 25 nov).
+  representative: "guardianGivenNames",
+  "representative.givenNames": "guardianGivenNames",
+  "representative.familyName": "guardianSurnames",
+  "representative.displayName": "guardianSurnames",
+  "representative.phone": "guardianPhone",
+  "representative.relationshipDetail": "relationDetail",
   "representative.docType": "guardianDocNumber",
   "representative.docNumber": "guardianDocNumber",
   "representative.docCountry": "guardianDocCountry",
@@ -269,7 +292,19 @@ export function NewPatientDrawer({
   const [created, setCreated] = useState<Created | null>(null)
   // No se pudo anotar lo que dijo de sus mensajes: se dice al terminar, sin deshacer el registro.
   const [permissionNote, setPermissionNote] = useState<string | null>(null)
-  const submission = useRef(crypto.randomUUID())
+  const submission = useRef<string>(crypto.randomUUID())
+  const myUserId = useMyUserId()
+  // De quién y para qué: «Nuevo paciente», o a cargo de una persona (otra pestaña o persona no lo ve).
+  const draftKey = `odentia:nuevo-paciente:${myUserId}:${target.kind === "new" ? "nuevo" : `${target.kind}:${target.person.id}`}`
+  const [resumed, setResumed] = useState<Partial<Draft> | null>(null)
+  const clearSavedDraft = () => {
+    try {
+      window.sessionStorage.removeItem(draftKey)
+    } catch {
+      // Sin almacenamiento no había nada guardado.
+    }
+    setResumed(null)
+  }
 
 
   const config = useQuery({
@@ -288,7 +323,8 @@ export function NewPatientDrawer({
   const docTypeOf = (current: Draft) => current.docType || docTypes[0]?.value || ""
   const guardianDocTypeOf = (current: Draft) => current.guardianDocType || docTypes[0]?.value || ""
   const minorOf = (current: Draft) => isRealDate(current.birthDate) && isMinor(current.birthDate, today)
-  const needsGuardianDocOf = (current: Draft) => dependent && minorOf(current) && !guardian?.docNumber
+  // Quien solo lo acompaña («Otro familiar») no firma por él: su documento no se pide.
+  const needsGuardianDocOf = (current: Draft) => dependent && minorOf(current) && !guardian?.docNumber && current.relation !== "otro"
 
   function answersFrom(current: Draft): {
     answers: RegistrationAnswers
@@ -322,12 +358,38 @@ export function NewPatientDrawer({
       demographics,
       respondent: "staff",
       privacyAccepted: current.privacy,
+      // Lo que dijo de sus mensajes lo guarda el servidor a nombre de quien otorga: el responsable
+      // de un menor, no el menor (mesa del 25 nov). Antes se anotaba después, en la persona del niño.
+      // Se le dijo que le escribiremos sobre sus citas y respondió a las promociones: se guarda
+      // aunque la privacidad no se marque, como antes (revisión del 25 nov).
+      acceptsReminders: true,
+      ...(current.promotions ? { acceptsMessages: current.promotions === "si" } : {}),
+    }
+    // El menor con su responsable solo cuando recepción completa sus datos ahora: con «El paciente,
+    // en su celular» no se manda su fecha y el servidor lo vería adulto (revisión del 25 nov).
+    const minorHere = (showDetails || !!guardian) && minorOf(current)
+    // Otro familiar (su abuela) lo acompaña y recibe sus avisos, sin representarlo (decisión 2).
+    const relationshipOf = (relation: Relation | null) =>
+      relation === "otro" ? (minorOf(current) ? "family" : "other") : minorOf(current) || relation === "tutor" ? "guardian" : "family"
+    const detailOf = (relation: Relation | null) =>
+      relation === "otro" ? trimmed(current.relationDetail) || "Familiar" : relation ? RELATION_WORDS[relation] : "Familiar"
+    if (!guardian && current.guardianNew && minorHere) {
+      const givenNames = trimmed(current.guardianGivenNames)
+      const surnames = trimmed(current.guardianSurnames)
+      answers.representative = {
+        displayName: composeDisplayName({ givenNames, familyName: surnames }),
+        ...(givenNames ? { givenNames } : {}),
+        ...(surnames ? { familyName: surnames } : {}),
+        relationship: relationshipOf(current.relation),
+        relationshipDetail: detailOf(current.relation),
+        ...(current.guardianPhone ? { phone: current.guardianPhone } : {}),
+      } as RegistrationAnswers["representative"]
+      return { answers }
     }
     if (guardian) {
       const relation = current.relation
-      const word = relation ? RELATION_WORDS[relation] : "Familiar"
-      const relationship =
-        minorOf(current) || relation === "tutor" ? "guardian" : relation === "otro" ? "other" : "family"
+      const word = detailOf(relation)
+      const relationship = relationshipOf(relation)
       const guardianDocType = guardianDocTypeOf(current)
       answers.representative = {
         displayName: guardian.displayName,
@@ -385,6 +447,17 @@ export function NewPatientDrawer({
     // avisa que no le llegarán sus avisos, sin frenar. Un número a medias sí lo dice el
     // campo («le faltan dígitos»): ese no se guarda a medias.
     if (dependent && !current.relation) found.relation = `Elige qué es ${guardianFirst} para él o ella`
+    // Un menor sin responsable: se elige o se escribe aquí mismo (mesa del 25 nov).
+    if (!dependent && current.who === "equipo" && minorOf(current)) {
+      if (!current.guardianNew) found.guardianGivenNames = "Busca a quien viene con él o ella, o regístrala aquí"
+      else {
+        const newFirst = current.guardianGivenNames.trim() || "esta persona"
+        if (!current.guardianGivenNames.trim()) found.guardianGivenNames = "Escribe sus nombres"
+        if (!current.guardianSurnames.trim()) found.guardianSurnames = "Escribe sus apellidos"
+        if (!current.guardianPhone) found.guardianPhone = "Escribe su celular: ahí le avisamos las citas"
+        if (!current.relation) found.relation = `Elige qué es ${newFirst} para él o ella`
+      }
+    }
     if (!current.promotions) found.promotions = "Pregúntale y elige una opción"
     if (config.data) {
       const server = validateRegistrationAnswers(config.data.data, answersFrom(current).answers, {
@@ -422,24 +495,8 @@ export function NewPatientDrawer({
     },
     onSubmit: async ({ value }) => {
       const result = await register.mutateAsync(value)
-      // Se anota en su persona, como en Datos › Mensajes y en la Agenda, diciendo que lo dijo en persona:
-      // los mensajes de sus citas (se le informó) y su respuesta a novedades y promociones.
-      setPermissionNote(null)
-      try {
-        const personId =
-          result.data.personId ??
-          picked?.id ??
-          (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${result.data.id}`)).data.personId
-        const permission = (tipo: "recordatorio" | "novedades", recibir: boolean) =>
-          apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
-            method: "POST",
-            body: JSON.stringify({ tipo, recibir, source: "presencial" }),
-          })
-        await permission("recordatorio", true)
-        if (value.promotions) await permission("novedades", value.promotions === "si")
-      } catch {
-        setPermissionNote("No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes.")
-      }
+      // Lo que dijo de sus mensajes ya quedó con el registro, a nombre de quien otorga.
+      clearSavedDraft()
       setCreated(result.data)
       setStage("done")
       toast.success(`${result.data.displayName} ya es paciente`)
@@ -451,6 +508,8 @@ export function NewPatientDrawer({
   })
   const surface = useFormSurface(form, { fieldMap: draftField })
   const values = useStore(form.store, (state) => state.values)
+  // Un «Registrar» con errores vuelve a armar el aviso del panel: se dice otra vez que está guardado.
+  const submissionAttempts = useStore(form.store, (state) => state.submissionAttempts)
 
   // Cada vez que se abre empieza de cero, con lo que ya se sabe. Solo al
   // abrir: si la persona se vuelve a leer mientras se escribe, no se pierde nada.
@@ -460,12 +519,35 @@ export function NewPatientDrawer({
     setStage("form")
     setPicked(target.kind === "person" ? target.person : null)
     setTypedBeforePick(null)
-    form.reset(initialDraft(target))
     setShowNotice(false)
     setCreated(null)
     setPermissionNote(null)
-    submission.current = crypto.randomUUID()
+    // Lo que se había escrito y no se registró (sonó el teléfono): sigue ahí, con el mismo envío,
+    // para que «Registrar» no cree a otro igual (mesa del 25 nov, C3 y D5).
+    // Con un nombre buscado («Crear paciente «Zoila Torres»»), lo nuevo gana a lo de antes.
+    const saved = target.kind === "new" && target.name?.trim() ? null : readSavedDraft(draftKey)
+    setResumed(saved ? saved.values : null)
+    form.reset(saved ? { ...initialDraft(target), ...saved.values } : initialDraft(target))
+    submission.current = saved?.submissionId ?? crypto.randomUUID()
+    // Si se archivó mientras tanto, `pickGuardian` lo deja sin elegir y vuelve el buscador.
+    if (saved?.guardian && target.kind !== "dependent") pickGuardian(saved.guardian)
+    // Quien ya era de la clínica («Es esta persona»): se vuelve a leer, así no se registra a otra igual.
+    if (saved?.pickedId)
+      void fetchPerson(saved.pickedId)
+        .then((page) => {
+          if (openRef.current) setPicked(page.data)
+        })
+        .catch(() => undefined)
   }, [open])
+  // Se guarda en la pestaña mientras se escribe: de esta clínica, de quien escribe y de este destino.
+  useEffect(() => {
+    // Para una persona que ya existe no se guarda: lo que se sabe de ella viene de su página, y lo
+    // guardado pisaba lo que se corrigió ahí (revisión del 25 nov).
+    if (!open || stage !== "form" || created || target.kind === "person") return
+    const touched = values.givenNames || values.surnames || values.phone || values.guardianGivenNames
+    if (touched)
+      writeSavedDraft(draftKey, { values, submissionId: submission.current, guardian: guardianPick, pickedId: picked?.id ?? null })
+  }, [open, stage, created, values, draftKey, guardianPick, picked, target.kind])
 
   // Mientras se escribe se busca si ya existe: por el nombre, el celular y el
   // documento. Solo al registrar a alguien nuevo (no desde una persona).
@@ -531,9 +613,69 @@ export function NewPatientDrawer({
     setStage("form")
   }
 
+  /** Escribir aquí a su responsable, con lo que se buscó como sus nombres y apellidos. */
+  const startNewGuardian = (query: string) => {
+    const [first = "", ...rest] = query.trim().split(/\s+/)
+    setGuardianPick(null)
+    setChosenGuardian(null)
+    form.setFieldValue("guardianNew", true)
+    if (first) form.setFieldValue("guardianGivenNames", first)
+    if (rest.length) form.setFieldValue("guardianSurnames", rest.join(" "))
+    // El control que tenía el foco se va: el foco sigue en lo que hay que escribir.
+    focusSoon("np-guardian-given")
+  }
+  // La persona nueva también se busca antes de crearla, por nombre y celular: el mismo celular de
+  // un contacto de WhatsApp no la vuelve la misma persona, pero se pregunta (mesa del 25 nov, D3).
+  const guardianFirstSurname = values.guardianSurnames.trim().split(/\s+/)[0] ?? ""
+  const guardianNameProbe =
+    values.guardianGivenNames.trim().length >= 2 && guardianFirstSurname.length >= 2
+      ? `${values.guardianGivenNames.trim()} ${guardianFirstSurname}`
+      : ""
+  const guardianDigits = (values.guardianPhone ?? "").replace(/\D/g, "")
+  // Con el número completo: con un dígito de menos, los últimos 8 traían a gente ajena (QA del 25 nov).
+  const guardianPhoneProbe = values.guardianPhone && guardianDigits.length >= 9 ? guardianDigits : ""
+  const [guardianProbes, setGuardianProbes] = useState<string[]>([])
+  useEffect(() => {
+    const next = values.guardianNew ? [guardianNameProbe, guardianPhoneProbe].filter(Boolean) : []
+    const timer = setTimeout(() => setGuardianProbes(next), 350)
+    return () => clearTimeout(timer)
+  }, [values.guardianNew, guardianNameProbe, guardianPhoneProbe])
+  const guardianMatches = useQuery({
+    queryKey: ["people", "new-guardian-matches", guardianProbes],
+    queryFn: async () => {
+      const lists = await Promise.all(
+        guardianProbes.map((probe) =>
+          apiFetch<{ data: PersonListItem[] }>(`/api/people?ver=todos&limit=4&q=${encodeURIComponent(probe)}`).then((r) => r.data),
+        ),
+      )
+      const unique = new Map<string, PersonListItem>()
+      for (const row of lists.flat()) if (!unique.has(row.id)) unique.set(row.id, row)
+      return [...unique.values()].slice(0, 4)
+    },
+    enabled: open && guardianProbes.length > 0,
+    placeholderData: keepPreviousData,
+  })
+
   const name = values.givenNames.trim() || "esta persona"
   const tradeName = orgProfile.data?.tradeName?.trim()
-  const promotionsQuestion = `¿Acepta recibir novedades y promociones${tradeName ? ` de ${tradeName}` : ""} por WhatsApp?`
+  /** Con «Otro familiar», qué es de él o ella: «abuela», «tía». Opcional. */
+  const relationDetailField = (
+    <form.AppField name="relationDetail">
+      {(field) => (
+        <field.TextField
+          label={`¿Qué es de ${name}? (opcional)`}
+          id="np-relation-detail"
+          maxLength={60}
+          placeholder="abuela, tía…"
+        />
+      )}
+    </form.AppField>
+  )
+  // Con un menor, se le pregunta a quien lo trae y queda a su nombre (mesa del 25 nov).
+  const responsibleName = minor
+    ? (guardian?.displayName.split(" ")[0] ?? (values.guardianNew ? values.guardianGivenNames.trim().split(/\s+/)[0] || null : null))
+    : null
+  const promotionsQuestion = `¿${responsibleName ? `${responsibleName} acepta` : "Acepta"} recibir novedades y promociones${tradeName ? ` de ${tradeName}` : ""} por WhatsApp?`
   const title =
     stage === "done" && created
       ? `${created.displayName} ya es paciente`
@@ -567,19 +709,37 @@ export function NewPatientDrawer({
             }
       }
       isSubmitting={surface.isSubmitting}
-      isDirty={
-        stage === "form" &&
-        !created &&
-        (surface.isDirty || Boolean(values.givenNames || values.surnames || values.phone))
-      }
+      // Lo escrito queda en la pestaña: cerrar no pierde nada y ya no pregunta (mesa del 25 nov, decisión 3).
+      isDirty={false}
       error={stage === "form" ? surface.error : null}
       hideSubmit={stage !== "form"}
       cancelLabel={stage === "done" ? "Listo" : "Cancelar"}
-      submitLabel={guardian ? `Registrar a ${name}` : "Registrar"}
+      submitLabel={guardian || (minor && values.guardianNew) ? `Registrar a ${name}` : "Registrar"}
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(32rem,calc(100vw-2rem))]"
     >
       {stage === "form" ? (
         <div className="flex min-w-0 flex-col gap-5">
+          {target.kind !== "person" ? <KeptInTab signature={`${submissionAttempts}:${JSON.stringify(values)}`} /> : null}
+          {resumed && !picked ? (
+            <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
+              <span>Seguías con {[resumed.givenNames, resumed.surnames].filter(Boolean).join(" ") || "lo que escribiste"}.</span>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0"
+                onClick={() => {
+                  clearSavedDraft()
+                  setChosenGuardian(null)
+                  setGuardianPick(null)
+                  form.reset(initialDraft(target))
+                  submission.current = crypto.randomUUID()
+                  focusSoon("np-given")
+                }}
+              >
+                Empezar de cero
+              </Button>
+            </p>
+          ) : null}
           {picked && typedBeforePick ? (
             <p className="flex flex-wrap items-center gap-x-2 rounded-2xl bg-muted px-3 py-2 text-sm" role="status">
               <span>Registras a {picked.displayName}, que ya estaba en la clínica.</span>
@@ -618,6 +778,7 @@ export function NewPatientDrawer({
               )}
             </form.AppField>
           ) : null}
+          {guardian && values.relation === "otro" ? relationDetailField : null}
 
           <form.AppField name="givenNames">
             {(field) => <field.TextField label="Nombres" id="np-given" autoFocus maxLength={100} />}
@@ -666,6 +827,8 @@ export function NewPatientDrawer({
                 description={
                   guardian && !field.state.value
                     ? `Si no tiene celular propio, sus avisos le llegan a ${guardian.displayName}.`
+                    : minor && values.guardianNew && !field.state.value
+                      ? "Si no tiene celular propio, déjalo vacío: sus avisos le llegan a quien lo trae."
                     : field.state.value
                       ? "Aquí le avisamos sus citas por WhatsApp."
                       : // Avisa sin frenar: sin celular también se registra.
@@ -808,10 +971,108 @@ export function NewPatientDrawer({
                     Es menor de edad: regístralo desde la página de su madre, padre o tutor, con «Registrar a alguien a su cargo».
                   </p>
                 ) : target.kind !== "dependent" && minor ? (
-                  <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
-                    <p>Es menor de edad: decide por él o ella su madre, padre o tutor. ¿Quién es?</p>
-                    <PersonPicker label="Su responsable" value={guardianPick} onChange={pickGuardian} />
-                    <p className="text-muted-foreground">Si aún no está registrado, regístralo antes con «Nuevo contacto».</p>
+                  <div className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
+                    <p>Es menor de edad. ¿Quién viene con él o ella?</p>
+                    {values.guardianNew ? (
+                      <>
+                        <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
+                          Persona nueva
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="h-auto p-0"
+                            onClick={() => {
+                              form.setFieldValue("guardianNew", false)
+                              focusSoon("np-guardian")
+                            }}
+                          >
+                            Mejor buscarla
+                          </Button>
+                        </p>
+                        <form.AppField name="guardianGivenNames">
+                          {(field) => <field.TextField label="Nombres de quien lo trae" id="np-guardian-given" maxLength={100} />}
+                        </form.AppField>
+                        <form.AppField name="guardianSurnames">
+                          {(field) => <field.TextField label="Apellidos de quien lo trae" id="np-guardian-surnames" maxLength={200} />}
+                        </form.AppField>
+                        <form.AppField name="guardianPhone">
+                          {(field) => (
+                            <field.PhoneField
+                              label="Celular de quien lo trae"
+                              id="np-guardian-phone"
+                              defaultCountry={defaultCountry}
+                              description={`A este número le avisamos las citas de ${name}.`}
+                            />
+                          )}
+                        </form.AppField>
+                        {guardianProbes.length > 0 ? (
+                          <MatchesNote
+                            searching={guardianMatches.isFetching && !guardianMatches.data}
+                            refreshing={guardianMatches.isFetching && !!guardianMatches.data}
+                            asked={guardianMatches.isSuccess || guardianMatches.isPlaceholderData}
+                            rows={guardianMatches.data ?? []}
+                            alwaysPick
+                            onPick={(row) => {
+                              form.setFieldValue("guardianNew", false)
+                              pickGuardian({ id: row.id, name: row.displayName, phone: row.phone })
+                            }}
+                          />
+                        ) : null}
+                        <form.AppField name="relation">
+                          {(field) => (
+                            <field.Group legend={`¿Qué es ${values.guardianGivenNames.trim().split(/\s+/)[0] || "esta persona"} para él o ella?`}>
+                              {(control) => (
+                                <ChoiceButtons
+                                  id={control.id}
+                                  aria-describedby={control.describedBy}
+                                  invalid={control.invalid}
+                                  onBlur={control.onBlur}
+                                  value={field.state.value}
+                                  options={RELATIONS}
+                                  onChange={(next) => field.handleChange(next)}
+                                />
+                              )}
+                            </field.Group>
+                          )}
+                        </form.AppField>
+                        {values.relation === "otro" ? relationDetailField : null}
+                        <p className="text-muted-foreground">
+                          {values.relation === "otro"
+                            ? "Lo acompaña y recibe sus avisos. Los consentimientos y presupuestos los firma su madre, padre o tutor."
+                            : "Decide por él o ella y recibe sus avisos."}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <form.AppField name="guardianGivenNames">
+                          {(field) => (
+                            <field.Control label="Su responsable" id="np-guardian">
+                              {(control) => (
+                                <PersonPicker
+                                  id={control.id}
+                                  label="Su responsable"
+                                  invalid={control.invalid}
+                                  onBlur={control.onBlur}
+                                  value={guardianPick}
+                                  onChange={pickGuardian}
+                                  {...(can("patients.write")
+                                    ? {
+                                        onCreate: (query: string) => startNewGuardian(query),
+                                        createLabel: (query: string) => `Registrar a «${query}» aquí`,
+                                      }
+                                    : {})}
+                                />
+                              )}
+                            </field.Control>
+                          )}
+                        </form.AppField>
+                        {can("patients.write") && !guardianPick ? (
+                          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => startNewGuardian("")}>
+                            No está: registrarla aquí
+                          </Button>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 ) : null}
                 {asksDocument ? (
@@ -872,7 +1133,11 @@ export function NewPatientDrawer({
             <form.AppField name="privacy">
               {(field) => (
                 <field.CheckboxField
-                  label="Le informé cómo usamos sus datos y que le escribiremos por WhatsApp sobre sus citas."
+                  label={
+                    responsibleName
+                      ? `Le informé a ${responsibleName} cómo usamos los datos de ${name} y que le escribiremos por WhatsApp sobre sus citas.`
+                      : "Le informé cómo usamos sus datos y que le escribiremos por WhatsApp sobre sus citas."
+                  }
                   id="np-privacy"
                 />
               )}
@@ -923,6 +1188,12 @@ export function NewPatientDrawer({
           {permissionNote}
         </p>
       ) : null}
+      {/* La persona nueva que lo trae también quedó registrada: se dice, para no buscarla (QA del 25 nov). */}
+      {stage === "done" && created && !guardian && values.guardianNew && values.who === "equipo" && minor && values.guardianGivenNames.trim() ? (
+        <p role="status" className="mb-4 rounded-xl bg-success-soft p-3 text-sm text-success">
+          {`${[values.guardianGivenNames.trim(), values.guardianSurnames.trim()].filter(Boolean).join(" ")} también quedó en la clínica, como quien trae a ${created.displayName.split(" ")[0]}.`}
+        </p>
+      ) : null}
       {stage === "done" && created ? (
         <DoneStage
           created={created}
@@ -958,6 +1229,7 @@ function MatchesNote({
   asked,
   rows,
   onPick,
+  alwaysPick = false,
 }: {
   searching: boolean
   /** Vuelve a buscar con lo nuevo que se escribió: lo anterior sigue a la vista, atenuado. */
@@ -965,6 +1237,8 @@ function MatchesNote({
   asked: boolean
   rows: PersonListItem[]
   onPick: (row: PersonListItem) => void
+  /** Elegirla siempre (el responsable de un menor), aunque ya sea paciente: no se abre su página. */
+  alwaysPick?: boolean
 }) {
   // Mientras se escribe, el recuadro no se achica: lo que viene debajo no salta y un clic
   // para salir del campo no cae en «Es esta persona» (QA del 8 nov: cambió el formulario por
@@ -983,7 +1257,7 @@ function MatchesNote({
   })
   return (
     <div ref={box} style={active && minHeight ? { minHeight } : undefined} className="min-w-0">
-      <MatchesNoteBody searching={searching} refreshing={refreshing} asked={asked} rows={rows} onPick={onPick} />
+      <MatchesNoteBody searching={searching} refreshing={refreshing} asked={asked} rows={rows} onPick={onPick} alwaysPick={alwaysPick} />
     </div>
   )
 }
@@ -994,12 +1268,14 @@ function MatchesNoteBody({
   asked,
   rows,
   onPick,
+  alwaysPick,
 }: {
   searching: boolean
   refreshing: boolean
   asked: boolean
   rows: PersonListItem[]
   onPick: (row: PersonListItem) => void
+  alwaysPick: boolean
 }) {
   if (searching) {
     return (
@@ -1048,7 +1324,7 @@ function MatchesNoteBody({
           <ItemActions className="ms-auto">
             {/* Los dos iguales: el aviso no empuja a elegir a nadie. */}
             <Button type="button" size="sm" variant="secondary" onClick={() => onPick(row)}>
-              {row.patient ? "Abrir" : "Es esta persona"}
+              {row.patient && !alwaysPick ? "Abrir" : "Es esta persona"}
             </Button>
           </ItemActions>
         </Item>
@@ -1174,4 +1450,58 @@ function DoneStage({
       ) : null}
     </div>
   )
+}
+
+/** Lo escrito en «Nuevo paciente» que no se registró: en la pestaña, con su envío (mesa del 25 nov). */
+interface SavedDraft {
+  values: Partial<Draft>
+  submissionId: string
+  /** La persona ya registrada que se eligió como su responsable: se vuelve a leer al recuperar. */
+  guardian?: PickedPerson | null
+  /** «Es esta persona»: quien ya estaba en la clínica y se registra como paciente. */
+  pickedId?: string | null
+}
+
+function readSavedDraft(key: string): SavedDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as SavedDraft
+    return parsed && typeof parsed.submissionId === "string" && parsed.values ? parsed : null
+  } catch {
+    // Sin almacenamiento del navegador, empieza en blanco, como antes.
+    return null
+  }
+}
+
+function writeSavedDraft(key: string, draft: SavedDraft): void {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(draft))
+  } catch {
+    // Sin almacenamiento no se guarda: no traba el registro.
+  }
+}
+
+/** El foco en un campo que aparece en el próximo cuadro (el que lo tenía se desmontó). */
+function focusSoon(id: string): void {
+  window.requestAnimationFrame(() => document.getElementById(id)?.focus())
+}
+
+/**
+ * Lo escrito ya quedó en la pestaña: el panel lateral no pregunta «¿Salir sin guardar?» al ir a otra
+ * pantalla, porque no se pierde (QA del 25 nov: decía «Si sales, se pierde», y no era cierto).
+ */
+function KeptInTab({ signature }: { signature: string }): null {
+  const report = useDraftSaved()
+  useEffect(() => {
+    report(true)
+  }, [signature, report])
+  // Un «Registrar» rechazado vuelve a armar el aviso del panel después de esto: se dice otra vez, en
+  // el turno siguiente (QA del 25 nov, auditor: tras un error, salir decía «Si sales, se pierde»).
+  useEffect(() => {
+    const again = () => window.setTimeout(() => report(true), 0)
+    document.addEventListener("odentia:submit-rejected", again)
+    return () => document.removeEventListener("odentia:submit-rejected", again)
+  }, [report])
+  return null
 }

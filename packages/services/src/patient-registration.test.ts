@@ -38,7 +38,7 @@ import {
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
-import { listPersonNotes } from "./people.js"
+import { listPersonNotes, updatePersonIdentity } from "./people.js"
 import { createTask, updateTask } from "./tasks.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { listDecisionRecipients, listResponsibilities } from "./responsibilities.js"
@@ -1985,4 +1985,108 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
   const words = await withOrgContext(appDb, "org_a", (tx) => getAnamnesisVersion(tx, "org_a", result.patient!.id, version!.id))
   expect(words.entries).toContainEqual(expect.objectContaining({ label: "Biberón o pecho para dormir", value: "Ya no toma biberón" }))
   expect(JSON.stringify(words.entries)).not.toContain("4_o_mas")
+})
+// Mesa del 25 nov («salud y familia», entrega 1): un menor con su responsable nuevo, escrito en el
+// mismo cajón. La persona nace con sus nombres y le llegan sus avisos; la privacidad y los mensajes
+// van a su nombre, no al del niño; la abuela que lo trae lo acompaña sin representarlo.
+async function registerMinorWith(representative: NonNullable<RegistrationAnswers["representative"]>, extra: Partial<RegistrationAnswers> = {}) {
+  await seedActor()
+  return withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(
+      tx,
+      "org_a",
+      { kind: "internal", userId: ACTOR, scope: "essentials" },
+      {
+        submissionId: randomUUID(),
+        answers: {
+          demographics: { displayName: "Camila Quispe Rojas", givenNames: "Camila", familyName: "Quispe Rojas", birthDate: MINOR_BIRTH },
+          respondent: "staff",
+          privacyAccepted: true,
+          acceptsReminders: true,
+          acceptsMessages: true,
+          representative,
+          ...extra,
+        },
+      },
+    ),
+  )
+}
+
+it("el responsable nuevo de un menor nace con sus nombres, le llegan sus avisos y la privacidad queda a su nombre", async () => {
+  const created = await registerMinorWith({
+    displayName: "Rosa Quispe Vega",
+    givenNames: "Rosa",
+    familyName: "Quispe Vega",
+    relationship: "guardian",
+    relationshipDetail: "Madre",
+    phone: "+51977555810",
+  })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  const rosa = detail.contacts.find((row) => row.relationship === "guardian")
+  expect(rosa).toMatchObject({ isPreferred: true })
+  expect(detail.contacts.filter((row) => row.isPreferred)).toHaveLength(1)
+  const [person] = await ownerDb.select().from(contact).where(eq(contact.id, rosa!.contactId))
+  expect(person).toMatchObject({ givenNames: "Rosa", familyName: "Quispe Vega" })
+  const responsibilities = await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", created.id))
+  expect(responsibilities.map((row) => row.kind)).toContain("representante_legal")
+  const consents = await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", created.id))
+  expect(consents[0]).toMatchObject({ grantedByName: "Rosa Quispe Vega" })
+  // Sus permisos de mensajes van a Rosa, no a la niña.
+  const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, rosa!.contactId))
+  expect(permissions.map((row) => row.purpose).sort()).toEqual(["novedades", "recordatorio"])
+})
+
+it("la abuela que lo trae lo acompaña: recibe sus avisos y la información, pero no es su representante legal", async () => {
+  const created = await registerMinorWith({
+    displayName: "Doña Rosa Vega",
+    givenNames: "Rosa",
+    familyName: "Vega",
+    relationship: "family",
+    relationshipDetail: "abuela",
+    phone: "+51977555811",
+  })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  expect(detail.contacts.find((row) => row.relationship === "family")).toMatchObject({ isPreferred: true, relationshipDetail: "abuela" })
+  const responsibilities = await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", created.id))
+  expect(responsibilities.map((row) => row.kind)).toEqual(["autorizado_informacion"])
+})
+
+it("un adulto con un responsable escrito no se registra: lo escrito se perdía en silencio", async () => {
+  await expect(
+    registerMinorWith(
+      { displayName: "Rosa Vega", relationship: "guardian", relationshipDetail: "Madre", phone: "+51977555812" },
+      { demographics: { displayName: "Camila Adulta", givenNames: "Camila", familyName: "Adulta", birthDate: ADULT_BIRTH, phone: "+51977555813" } },
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+})
+
+it("sin marcar la privacidad, lo que dijo de sus mensajes igual queda a nombre de quien lo trae", async () => {
+  const created = await registerMinorWith(
+    { displayName: "Rosa Sin Aviso", givenNames: "Rosa", familyName: "Sin Aviso", relationship: "guardian", relationshipDetail: "Madre", phone: "+51977555814" },
+    { privacyAccepted: false, acceptsMessages: false },
+  )
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  const rosa = detail.contacts.find((row) => row.relationship === "guardian")
+  const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, rosa!.contactId))
+  expect(permissions.map((row) => [row.purpose, row.status]).sort()).toEqual([
+    ["novedades", "revoked"],
+    ["recordatorio", "granted"],
+  ])
+  expect(await withOrgContext(appDb, "org_a", (tx) => listDataConsents(tx, "org_a", created.id))).toEqual([])
+})
+
+it("con su abuela que la acompaña, corregir la fecha de la niña se guarda: no pide nombrarla representante legal", async () => {
+  const created = await registerMinorWith({
+    displayName: "Rosa Abuela Fecha",
+    givenNames: "Rosa",
+    familyName: "Abuela Fecha",
+    relationship: "family",
+    relationshipDetail: "abuela",
+    phone: "+51977555815",
+  })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    updatePersonIdentity(tx, "org_a", { userId: ACTOR }, created.personId!, { birthDate: "2021-04-12" }),
+  )
+  const [camila] = await ownerDb.select({ birthDate: contact.birthDate }).from(contact).where(eq(contact.id, created.personId!))
+  expect(camila?.birthDate).toBe("2021-04-12")
 })

@@ -28,7 +28,7 @@ import { contact } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { screenBeforePatient } from "./contact-screen.js"
 import { requireContact } from "./contacts.js"
 import { endPairAccess } from "./pair-access.js"
@@ -1169,7 +1169,10 @@ export async function updatePatient(
   for (const key of ["docCountry", "insuranceType", "addressCountry", "referralKind", "referralSource"])
     if ((merged[key] ?? null) !== (demographics[key] ?? null)) derived[key] = merged[key]
   patch = { ...patch, ...derived }
-  // Un paciente que pasa a ser menor necesita a su representante legal vigente.
+  // Un paciente que pasa a ser menor necesita a su representante legal vigente; quien solo lo acompaña
+  // («Otro familiar», autorizado a recibir información) también deja guardar la fecha: no se traba el
+  // trabajo diario, y lo que firma por él se pide al firmar (QA del 25 nov: la fecha de la nieta no se
+  // podía corregir sin nombrar a la abuela representante legal).
   if (patch.birthDate && patch.birthDate !== current.birthDate) {
     const today = await patientOrganizationToday(tx, orgId)
     if (isMinor(patch.birthDate, today)) {
@@ -1180,7 +1183,7 @@ export async function updatePatient(
           and(
             eq(patientResponsibility.organizationId, orgId),
             eq(patientResponsibility.patientId, id),
-            eq(patientResponsibility.kind, "representante_legal"),
+            inArray(patientResponsibility.kind, ["representante_legal", "autorizado_informacion"]),
             isNull(patientResponsibility.revokedAt),
             lte(patientResponsibility.startsAt, today),
             or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),

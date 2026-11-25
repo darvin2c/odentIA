@@ -77,6 +77,7 @@ import { createContactNote } from "./crm-workspace.js"
 import { applyMessagePermissions, MESSAGE_PERMISSION_OF } from "./data-consents.js"
 import {
   fieldsError,
+  invalidField,
   issueFields,
   notFound,
   ServiceError,
@@ -235,7 +236,8 @@ async function registrationGrantor(
 function registrationPurposes(answers: RegistrationAnswers, config: RegistrationConfig): { asked: string[]; purposes: string[] } {
   const asked = [
     ...(answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
-    ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
+    // En la clínica se le pregunta siempre, en persona: su respuesta se guarda aunque el formulario no la pida.
+    ...((config.askMessages || answers.respondent === "staff") && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
   ]
   const purposes = [
     "atencion",
@@ -1477,26 +1479,51 @@ export async function registerPatient(
   // la fecha de quien ya existía, así que una fecha escrita no la vuelve menor.
   const minorPatient = !!created.birthDate && isRealDate(created.birthDate) && isMinor(created.birthDate, today)
   let representativePending = false
+  // En la clínica, el otro familiar que lo trae (su abuela) lo acompaña y recibe sus avisos sin
+  // representarlo: queda autorizado a recibir información, no como representante legal (mesa del
+  // 25 nov, decisión 2). A quien el equipo registra con un menor le llegan sus avisos (preferente).
+  const companion = !isPublic && answers.respondent === "staff" && answers.representative?.relationship === "family"
+  let representativeId: string | null = null
   if (answers.representative && minorPatient) {
-    const linkedGuardian = links.find((l) => l.relationship === "guardian")
-    const representativeId = await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
+    const linkedGuardian = links.find((l) => l.relationship === (companion ? "family" : "guardian"))
+    representativeId = await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
       existingContactId: linkedGuardian?.contactId ?? null,
       representative: answers.representative,
       countryCode,
       today,
+      companion,
+      preferred: !isPublic && answers.respondent === "staff",
     })
     representativePending = representativeId === null
+  } else if (
+    answers.representative &&
+    !isPublic &&
+    answers.respondent === "staff" &&
+    !links.some((l) => l.relationship === "guardian" || l.relationship === "family")
+  ) {
+    // Ya no es menor y nadie quedó elegido: lo escrito del responsable se perdía en silencio (mesa del 25 nov, D2).
+    throw invalidField(
+      "answers.representative",
+      "Es mayor de edad: regístrala sin responsable, o revisa su fecha de nacimiento",
+    )
   }
 
   // 7. Consentimiento de datos (la ley de cada país; en Perú, la Ley 29733) con la versión del aviso aceptada y
   // quién lo otorga; se atribuye en servidor (operador interno o null público).
-  if (answers.privacyAccepted) {
-    const { asked, purposes } = registrationPurposes(answers, config)
+  // En la clínica, el de un menor lo otorga quien lo trae, no el menor: el consentimiento y sus permisos
+  // de mensajes van a esa persona, con su nombre (mesa del 25 nov). Lo que llega con un enlace sigue
+  // como estaba: con el nombre que escribió quien lo llenó, no el de su contacto de WhatsApp.
+  const staffPath = !isPublic && answers.respondent === "staff"
+  const staffGrantor = staffPath ? representativeId : null
+  const { asked, purposes } = registrationPurposes(answers, config)
+  // En la clínica, lo que dijo de sus mensajes se guarda aunque no se marque la privacidad: se le
+  // preguntó en persona, como lo anotaba el cajón antes (revisión del 25 nov).
+  if (answers.privacyAccepted || staffPath) {
     // Con el representante por confirmar no se escribe a nombre de nadie: el
     // consentimiento queda como lo dijo el formulario (M1).
     const grantorId = representativePending
       ? null
-      : await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
+      : (staffGrantor ?? (await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")))
     // Lo que ya respondió no se pisa: haberle dicho que le escribiremos sobre su cita no
     // vuelve a encender los recordatorios que apagó (ni los de quien no quiere ningún mensaje).
     const keepsReminders =
@@ -1509,6 +1536,15 @@ export async function registerPatient(
         channel: isPublic ? "formulario_publico" : "presencial",
       })
     }
+  }
+  if (answers.privacyAccepted) {
+    const [grantor] = staffGrantor
+      ? await tx
+          .select({ displayName: contact.displayName })
+          .from(contact)
+          .where(and(eq(contact.organizationId, orgId), eq(contact.id, staffGrantor)))
+          .limit(1)
+      : []
     await tx.insert(patientDataConsent).values({
       organizationId: orgId,
       patientId: created.id,
@@ -1516,9 +1552,10 @@ export async function registerPatient(
       noticeText: config.privacyNotice || "Aviso de privacidad de la organización.",
       purposes,
       grantedByName:
-        answers.respondent === "representative" && answers.representative
+        grantor?.displayName ??
+        (answers.respondent === "representative" && answers.representative
           ? answers.representative.displayName
-          : created.displayName,
+          : created.displayName),
       channel: isPublic ? "formulario_publico" : "presencial",
       recordedBy: actorUserId,
     })
@@ -1564,13 +1601,19 @@ export async function attachLegalRepresentative(
     existingContactId?: string | null
     representative: Pick<
       NonNullable<RegistrationAnswers["representative"]>,
-      "displayName" | "phone" | "email" | "docType" | "docNumber" | "docCountry" | "relationshipDetail"
+      "displayName" | "phone" | "email" | "docType" | "docNumber" | "docCountry" | "relationshipDetail" | "givenNames" | "familyName"
     >
     countryCode: string | null
     today: string
+    /** Lo acompaña (otro familiar): recibe información, no lo representa. */
+    companion?: boolean
+    /** Le llegan sus avisos: el contacto preferente del menor. */
+    preferred?: boolean
   },
 ): Promise<string | null> {
   let representativeId = input.existingContactId ?? null
+  // La persona que nace aquí, si nace: su celular pasa a ser su WhatsApp.
+  let createdHere: { id: string; phone: string | null } | null = null
   // Ya existía y no tiene documento: el que escribió el equipo se le guarda (solo lo vacío). Sin él,
   // firmar por el menor se rechazaba al final y la firma se perdía. Desde fuera no: lo escrito no prueba quién es.
   if (representativeId && actorUserId !== null && input.representative.docNumber) {
@@ -1607,23 +1650,35 @@ export async function attachLegalRepresentative(
       await leavePendingRepresentative(tx, orgId, patientId, existing, rep.relationshipDetail || null)
       return null
     }
-    representativeId =
-      existing ??
-      (
-        await createPerson(
-          tx,
-          orgId,
-          { userId: actorUserId },
-          {
-            displayName: rep.displayName,
-            phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
-            email: rep.email || null,
-            docType: rep.docType ?? null,
-            docNumber: rep.docNumber || null,
-            docCountry,
-          },
-        )
-      ).id
+    const phone = rep.phone ? normalizePhone(rep.phone, input.countryCode) : null
+    if (!existing)
+      createdHere = {
+        phone,
+        ...(await createPerson(
+        tx,
+        orgId,
+        { userId: actorUserId },
+        {
+          displayName: rep.displayName,
+          ...(rep.givenNames ? { givenNames: rep.givenNames } : {}),
+          ...(rep.familyName ? { familyName: rep.familyName } : {}),
+          phone,
+          email: rep.email || null,
+          docType: rep.docType ?? null,
+          docNumber: rep.docNumber || null,
+          docCountry,
+        },
+        )),
+      }
+    representativeId = existing ?? createdHere!.id
+  }
+  // Su celular es su WhatsApp, como el del paciente que registra el equipo (ADR 0027): sin él no le
+  // llegaban los avisos que le promete el cajón (revisión del 25 nov). Si ya es de otra persona o es
+  // un fijo, el registro sigue igual.
+  if (createdHere && actorUserId !== null && createdHere.phone && (await hasActiveWhatsApp(tx, orgId))) {
+    await claimWhatsAppNumber(tx, orgId, actorUserId, createdHere.id, createdHere.phone).catch((error: unknown) => {
+      if (!(error instanceof ServiceError) || !["NOT_WHATSAPP_NUMBER", "IDENTITY_IN_USE"].includes(error.code)) throw error
+    })
   }
   const relationshipDetail = input.existingContactId ? null : input.representative.relationshipDetail || null
   await linkLegalRepresentative(tx, orgId, actorUserId, patientId, representativeId, {
@@ -1631,6 +1686,8 @@ export async function attachLegalRepresentative(
     kinship: kinshipFromWords(relationshipDetail),
     linked: !!input.existingContactId,
     today: input.today,
+    companion: input.companion === true,
+    preferred: input.preferred === true,
   })
   return representativeId
 }
@@ -1663,29 +1720,44 @@ async function linkLegalRepresentative(
   actorUserId: string | null,
   patientId: string,
   representativeId: string,
-  options: { relationshipDetail: string | null; kinship: string | null; linked: boolean; today: string },
+  options: {
+    relationshipDetail: string | null
+    kinship: string | null
+    linked: boolean
+    today: string
+    companion?: boolean
+    preferred?: boolean
+  },
 ): Promise<void> {
   if (!options.linked) {
+    // Le llegan sus avisos: deja de serlo cualquier otro (el propio niño, sin celular).
+    if (options.preferred)
+      await tx
+        .update(patientContact)
+        .set({ isPreferred: false })
+        .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId)))
     await tx
       .insert(patientContact)
       .values({
         organizationId: orgId,
         patientId,
         contactId: representativeId,
-        relationship: "guardian",
+        relationship: options.companion ? "family" : "guardian",
         relationshipDetail: options.relationshipDetail,
         kinship: options.kinship,
-        isPreferred: false,
+        isPreferred: options.preferred === true,
         createdBy: actorUserId,
       })
       // Ya vinculada (como familiar, por ejemplo): conserva su vínculo y recibe el rol.
-      .onConflictDoNothing({
+      .onConflictDoUpdate({
         target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+        // Ya vinculada: conserva su vínculo; si le llegan los avisos, queda preferente (nadie queda sin serlo).
+        set: { isPreferred: sql`${patientContact.isPreferred} or ${options.preferred === true}` },
       })
   }
   await grantResponsibility(tx, orgId, actorUserId, patientId, {
     contactId: representativeId,
-    kind: "representante_legal",
+    kind: options.companion ? "autorizado_informacion" : "representante_legal",
     startsAt: options.today,
   })
 }

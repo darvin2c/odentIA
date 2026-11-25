@@ -189,7 +189,9 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
       isLoading={hold.isPending && !!taskId}
       isSubmitting={busy}
       error={problem}
-      showClose={false}
+      // Se puede salir sin decidir: en una pantalla ancha el panel queda al costado, donde Escape y el
+      // clic afuera no lo cierran, y sin «×» solo se salía con un botón que decide (uno, «Descartar»)
+      // o recargando (mesa del 25 nov, novato C4). Decidirlo después sigue en Inicio.
       actions={
         data ? (
           <>
