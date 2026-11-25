@@ -19,6 +19,7 @@ import {
   type MedicineClassAnswer,
   medicineClassAnswers,
   medicationClassOf,
+  specificAtc,
   type RegistrationFieldKey,
   saidWhenWords,
   DOSE_UNITS,
@@ -1602,7 +1603,9 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
   }
   const lines: string[] = []
   for (const row of health.medications) {
-    const group = medicationClassOf(row.atcCode)
+    // La aspirina guardada con el código del grupo se lee como lo que es (revisión del 25 nov).
+    const atcCode = specificAtc(row)
+    const group = medicationClassOf(atcCode)
     if (!group) continue
     const ended = !!row.endDate && row.endDate < today
     // Lo que ya no toma no cambia el sangrado de hoy; la medicina para los huesos, sí (B3).
@@ -1612,14 +1615,14 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
         ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
         : drugMidSentence(row.name)
     const vitaminK =
-      row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || isVitaminKAntagonistName(row.name)
+      atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || isVitaminKAntagonistName(row.name)
     // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
     const advice =
       group === "boneMedicines"
         ? "riesgo de osteonecrosis de los maxilares"
         : vitaminK
           ? "pide su INR del día"
-          : row.atcCode === MEDICATION_CLASSES.anticoagulants.atc
+          : atcCode === MEDICATION_CLASSES.anticoagulants.atc
             ? "riesgo de sangrado; si es warfarina o acenocumarol, pide su INR del día"
             : "riesgo de sangrado"
     lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: ${advice}.`)

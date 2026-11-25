@@ -4,7 +4,7 @@
  * «No se le preguntó» de «dijo que no». Una sola regla para el servidor, «Su
  * enlace» y la atención; aquí no se lee la base: recibe lo que ya cargó.
  */
-import { type MedicationClass, MEDICATION_CLASSES, medicationClassOf } from "./allergens.js"
+import { type MedicationClass, MEDICATION_CLASSES, medicationClassOf, specificAtc } from "./allergens.js"
 import {
   REGISTRATION_FIELDS,
   type RegistrationAnswers,
@@ -208,13 +208,26 @@ export function medicationAlertWords(row: { name: string; dose?: string | null; 
   group: MedicationClass | null
 } {
   const what = [row.name, row.dose].filter(Boolean).join(" ")
-  const group = medicationClassOf(row.atcCode)
+  const atcCode = specificAtc(row)
+  const group = medicationClassOf(atcCode)
   if (!group) return { label: `Toma ${what}`, group: null }
   const { label, unnamed } = MEDICATION_CLASSES[group]
   // La aspirina y el clopidogrel (B01AC) son antiagregantes, no anticoagulantes: se manejan distinto
   // antes de una extracción (SDCEP 2022). La pregunta es una sola; la marca dice cuál es.
-  const named = group === "anticoagulants" && row.atcCode?.startsWith("B01AC") ? "Antiagregante" : label
+  const named = group === "anticoagulants" && atcCode?.startsWith("B01AC") ? "Antiagregante" : label
   return { label: row.name === unnamed ? unnamed : `${named}: ${what}`, group }
+}
+
+/**
+ * Cómo se llama la clase de una medicina registrada: «Anticoagulante», «Antiagregante» (B01AC: la
+ * aspirina, el clopidogrel) o «Medicina para los huesos»; null si no es de ninguna. La misma palabra
+ * en la franja, la ficha y la copia de la historia (revisión del 25 nov).
+ */
+export function medicationKindLabel(row: { name: string; atcCode?: string | null }): string | null {
+  const atcCode = specificAtc(row)
+  const group = medicationClassOf(atcCode)
+  if (!group) return null
+  return group === "anticoagulants" && atcCode?.startsWith("B01AC") ? "Antiagregante" : MEDICATION_CLASSES[group].label
 }
 
 /** Lo que va junto con un dato: las semanas, con el embarazo; cuántos al día, con el tabaco. */

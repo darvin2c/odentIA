@@ -543,25 +543,64 @@ export function healthOfPayload(payload: Record<string, unknown>): NonNullable<z
 }
 
 const sameName = (a: unknown, b: unknown) => normalizeDrugText(text(a)) === normalizeDrugText(text(b))
+/** La medicina, sin dosis ni frecuencia: «apixabán 5 mg dos veces al día» → «apixaban». */
+/**
+ * La medicina, sin dosis ni frecuencia, para saber si dos frases nombran la misma: por su código ATC
+ * si las dos están en la lista de todos los días («Eliquis» y «apixabán»), y si no, por las palabras
+ * antes de la dosis («apixabán 5 mg dos veces al día» → «apixaban»). Nunca por la primera palabra
+ * sola: «ácido fólico» y «ácido zoledrónico» son dos medicinas (revisión del 25 nov).
+ */
+const DOSE_WORD = /^(\d|mg$|g$|ml$|mcg$|ui$|cada$|una?$|uno$|dos$|tres$|cuatro$|cinco$|diez$|veinte$|cincuenta$|cien$|quinientos$|mil$|al$|por$|en$|veces?$|diari[oa]$|todos$|semanal$|noche$|manana$|tableta|pastilla|capsula|gota)/
+const drugHead = (value: unknown) => {
+  const said = text(value)
+  const atc = said ? findHabitualMedication(said)?.atc : undefined
+  if (atc) return `atc:${atc}`
+  const words = normalizeDrugText(said).split(" ").filter(Boolean)
+  const cut = words.findIndex((word, index) => index > 0 && DOSE_WORD.test(word))
+  const kept = (cut === -1 ? words : words.slice(0, cut)).filter((word, index, all) => !(index === all.length - 1 && ["de", "del"].includes(word)))
+  return kept.join(" ")
+}
 
 /**
  * El repaso al terminar (mesa del 20 nov 2026, P4): lo de su salud que no repite lo ya decidido
  * (confirmado con la persona o descartado). Un grupo igual se quita entero; de una lista, la
  * enfermedad o la medicina ya decidida. `null` si no queda nada nuevo.
  */
-export function withoutSettledHealth(payload: Record<string, unknown>, settled: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> | null {
+export function withoutSettledHealth(
+  payload: Record<string, unknown>,
+  settled: ReadonlyArray<Record<string, unknown>>,
+  /** Ya hay una alergia con su sustancia, propuesta o decidida: su «no sabe» o su «no» no vuelve. */
+  namedAllergy = false,
+): Record<string, unknown> | null {
   const kept = { ...payload }
   for (const group of GROUPS) {
     const now = kept[group]
     if (!isRecord(now)) continue
+    // Con la alergia ya nombrada (la hija: «con el ibuprofeno se le hincharon los ojos»), el «no que
+    // ella sepa» de la paciente no vuelve en el repaso a contradecirla (mesa del 25 nov, H3).
+    if (group === "allergies" && namedAllergy && now["state"] !== "recorded") {
+      delete kept[group]
+      continue
+    }
     const before = settled.map((item) => item[group]).filter(isRecord)
-    if (before.some((item) => JSON.stringify(item) === JSON.stringify(now))) {
+    // El anticoagulante y la medicina para los huesos son una respuesta: la misma medicina dicha con
+    // otra dosis («apixabán» y «apixabán cinco miligramos dos veces al día») ya está decidida (H3).
+    const sameAnswer = (item: Record<string, unknown>) =>
+      JSON.stringify(item) === JSON.stringify(now) ||
+      (DIRECTED.includes(group) &&
+        item["state"] === now["state"] &&
+        // «Ya no la toma» no es lo mismo que tomarla: no se quita (revisión del 25 nov).
+        (item["now"] ?? true) === (now["now"] ?? true) &&
+        (now["state"] !== "recorded" || drugHead(item["detail"]) === drugHead(now["detail"])))
+    if (before.some(sameAnswer)) {
       delete kept[group]
       continue
     }
     if (!LISTS.includes(group) || now["state"] !== "recorded") continue
     const decided = before.flatMap((item) => (item["state"] === "recorded" && Array.isArray(item["items"]) ? (item["items"] as Array<Record<string, unknown>>) : []))
-    const items = (Array.isArray(now["items"]) ? (now["items"] as Array<Record<string, unknown>>) : []).filter((item) => !decided.some((one) => sameName(one["name"], item["name"])))
+    // Una medicina ya decidida con otra dosis («losartán» y «Losartán 50 mg») es la misma (mesa del 25 nov, H3).
+    const same = (a: unknown, b: unknown) => sameName(a, b) || (group === "medications" && drugHead(a) !== "" && drugHead(a) === drugHead(b))
+    const items = (Array.isArray(now["items"]) ? (now["items"] as Array<Record<string, unknown>>) : []).filter((item) => !decided.some((one) => same(one["name"], item["name"])))
     if (items.length) kept[group] = { ...now, items }
     else delete kept[group]
   }
