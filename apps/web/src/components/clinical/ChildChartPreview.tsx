@@ -3,7 +3,7 @@
 // Mateo, 7, con hallazgos clínicamente coherentes. Es un ejemplo con datos inventados: tocar una
 // pieza solo cambia lo que se ve.
 import { useState } from "react"
-import OdontogramArch, { type Dentition, type ExampleFinding } from "../odontogram/OdontogramArch"
+import OdontogramArch, { type Dentition, type ExampleFinding, teethOf } from "../odontogram/OdontogramArch"
 import "./chart-preview.css"
 import "./child-chart.css"
 
@@ -57,6 +57,16 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
     setTooth(Number(Object.keys(next.examples)[0]))
   }
 
+  // La pieza elegida tiene que estar en el dibujo: al pasar a otra dentición, si no se dibuja,
+  // queda elegida la primera con hallazgo que sí se ve (o la primera del dibujo).
+  const show = (next: Dentition) => {
+    setDentition(next)
+    const drawn = teethOf(next)
+    if (drawn.includes(tooth)) return
+    const marked = Object.keys(patient.examples).map(Number).find((n) => drawn.includes(n))
+    setTooth(marked ?? drawn[0] ?? tooth)
+  }
+
   return (
     <div className="cp cc">
       <div className="cc-top">
@@ -69,7 +79,7 @@ export default function ChildChartPreview({ names }: { names: Record<number, str
         </div>
         <div className="cc-group" role="group" aria-label="Dentición">
           {DENTITIONS.map(([value, label]) => (
-            <button key={value} type="button" className="cc-pill" aria-pressed={value === dentition} onClick={() => setDentition(value)}>
+            <button key={value} type="button" className="cc-pill" aria-pressed={value === dentition} onClick={() => show(value)}>
               {label}
             </button>
           ))}

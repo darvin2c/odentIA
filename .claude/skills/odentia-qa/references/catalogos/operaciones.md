@@ -472,7 +472,9 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 **Dónde:** `S/saas-founders.ts` (`submitWaitlistRequest`), `S/web-contacts.ts` (`submitWebContact`), `S/admin-clients.ts` (`clientForWaitlistRequest`, `clientForWebContact`), `API/public-founders.ts`, `apps/web/src/components/founders/` y `apps/web/src/components/guides/GuideDownloads.tsx`.
 
 - [ ] La web se publica antes que la API: un dato nuevo del envío no hace que la API anterior lo rechace (con `strictObject`, va en la dirección o la API lo acepta en una entrega previa).
-- [ ] Un correo a una dirección que escribió el visitante sale una vez por dirección y día, con el tope guardado en la base; el cuerpo es solo JSON.
+- [ ] Un correo a una dirección que escribió el visitante sale una vez por buzón y día (la «+etiqueta» y los puntos de Gmail no cuentan como otro), con los topes guardados en la base; el cuerpo es solo JSON.
+- [ ] La respuesta y la pantalla son las mismas si ese correo ya es cliente o ya pidió entrar.
+- [ ] Un correo que no se sabe si salió no se ofrece reintentar.
 - [ ] La pantalla dice «te enviamos» solo si el servidor dice que salió; una solicitud que ya estaba no promete una copia.
 - [ ] Nada de la persona va en la dirección de una página (caché del borde, registros): lo que se prellena va en el fragmento y se borra al leerlo.
 - [ ] Lo que manda el navegador como origen (la página) se guarda comprobado y corto; nunca un texto libre que se muestre como título o llegue a un modelo.

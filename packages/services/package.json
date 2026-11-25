@@ -24,7 +24,7 @@
     "import:clinica": "tsx src/clinic-import-cli.ts setup",
     "import:informe": "tsx src/clinic-import-cli.ts report",
     "import:produccion": "tsx src/clinic-import-remote.ts",
-    "plantillas": "tsx src/blank-sheets.cli.ts"
+    "plantillas": "tsx src/dental/blank-sheets.cli.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1131.0",

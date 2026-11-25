@@ -2,11 +2,12 @@
 import { readFileSync } from "node:fs"
 import { PDFDocument } from "pdf-lib"
 import { describe, expect, it } from "vitest"
+import { guideSheetsFor } from "../products.js"
 import {
   BLANK_SHEET_KEYS,
   BLANK_SHEETS,
   blankSheetBytes,
-  isBlankSheet,
+  DENTAL_GUIDE_SHEETS,
   renderBlankSheet,
 } from "./blank-sheets.js"
 
@@ -31,7 +32,7 @@ describe("las plantillas en blanco", () => {
   it("los PDF de la web están al día (si cambió el dibujo: pnpm --filter @odentia/services plantillas)", async () => {
     for (const sheet of BLANK_SHEET_KEYS) {
       const published = readFileSync(
-        new URL(`../../../apps/web/public/guias/${BLANK_SHEETS[sheet].file}`, import.meta.url),
+        new URL(`../../../../apps/web/public/guias/${BLANK_SHEETS[sheet].file}`, import.meta.url),
       )
       expect(
         Buffer.from(await renderBlankSheet(sheet)).equals(published),
@@ -42,8 +43,11 @@ describe("las plantillas en blanco", () => {
 
   it("se dibuja una vez por proceso, y solo acepta las que existen", async () => {
     expect(await blankSheetBytes("presupuesto")).toBe(await blankSheetBytes("presupuesto"))
-    expect(isBlankSheet("odontograma-ninos")).toBe(true)
-    expect(isBlankSheet("../secreto")).toBe(false)
-    expect(isBlankSheet("constructor")).toBe(false)
+    // Las de odentIA son las de su web; latidIA y vistIA no tienen guías.
+    expect(guideSheetsFor("dental")).toBe(DENTAL_GUIDE_SHEETS)
+    expect(guideSheetsFor("medical")).toBeNull()
+    expect(guideSheetsFor("optical")).toBeNull()
+    await expect(DENTAL_GUIDE_SHEETS.bytes("../secreto")).rejects.toThrow()
+    await expect(DENTAL_GUIDE_SHEETS.bytes("constructor")).rejects.toThrow()
   })
 })

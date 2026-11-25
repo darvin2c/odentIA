@@ -609,10 +609,13 @@ interface DemoRequest {
   /** Entró: la clínica de la semilla que abrió (entró el día en que se creó) y el plan con que se la invitó. */
   entered?: { organizationId: string; planCode: string }
   discardReason?: string
+  /** La página de la web desde la que la envió: la ficha dice «Llegó desde» (ADR 0214). */
+  sourcePage?: string
 }
 
 const DEMO_WAITLIST: readonly DemoRequest[] = [
-  { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0 },
+  // La pidió al terminar la guía del odontograma.
+  { email: "sonrisa-demo@example.test", firstName: "Ana", lastName: "Quispe (ficticia)", clinicName: "Clínica Sonrisa (ficticia)", countryCode: "PE", city: "Arequipa", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+51987654321", status: "por_revisar", ageDays: 0, sourcePage: "/guias/como-llenar-un-odontograma" },
   { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 2 },
   { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", professionals: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
   // Vence dentro de 3 días: Inicio la muestra, y el cajón ofrece «Reenviar por correo…».
@@ -811,6 +814,7 @@ async function linkDemoRequestsToClients(db: Db, now: Date): Promise<void> {
         professionals: request.professionals,
         currentTool: request.currentTool,
         product: isClinicalProduct(request.product) ? request.product : "dental",
+        sourcePage: request.sourcePage,
       },
       request.createdAt,
     )

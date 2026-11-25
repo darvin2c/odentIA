@@ -3,29 +3,57 @@
  * quiere, y le llegan las plantillas con la puerta para pedir entrar. Entra al ARM como un
  * cliente con su contacto y la guía de la que llegó, sin abrir una venta.
  *
- * Una vez por dirección al día: ni el aviso repetido ni alguien que use la web para
- * escribirle a otro manda más de un correo. Con una solicitud viva no se hace nada: ya
- * está en la lista.
+ * Los topes viven en la base, para todos los procesos: un correo por buzón al día (el buzón
+ * sin la «+etiqueta» ni, en Gmail, los puntos: `mailboxOf`) y unos pocos por hora entre
+ * todos. Así nadie usa la web para mandarle muchos correos a otro. Un correo que no se sabe
+ * si salió también cuenta: no se invita a reintentarlo. La respuesta no dice si ese correo
+ * ya es cliente o ya pidió entrar.
  */
 import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { saasWebContact } from "@odentia/db/schema/admin-arm"
-import { saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
-import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, eq, gt, isNull, lte, sql } from "drizzle-orm"
 import { z } from "zod"
 import { clientForWebContact } from "./admin-clients.js"
-import { BLANK_SHEET_KEYS, type BlankSheet } from "./blank-sheets.js"
+import { invalidField, ServiceError } from "./errors.js"
+import { guideSheetsFor } from "./products.js"
 import { webPageOf } from "./saas-founders.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-/** Un correo que está saliendo cuenta como enviado: dos pestañas a la vez no mandan dos. */
-const IN_FLIGHT_MS = 2 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+
+/**
+ * Correos con plantillas por hora entre todos: de sobra para quien baja plantillas, poco para
+ * quien quiera abusar del aviso cambiando de dirección. Pasado el tope, el aviso pide volver luego.
+ */
+export const WEB_CONTACTS_PER_HOUR = 20
+
+/** Los dominios donde los puntos de la dirección no cambian el buzón. */
+const DOTLESS_DOMAINS = new Set(["gmail.com", "googlemail.com"])
+
+/**
+ * El buzón al que llega una dirección: sin la «+etiqueta» y, en Gmail, sin los puntos.
+ * `ana.perez+guias@gmail.com` y `anaperez@gmail.com` son el mismo buzón.
+ */
+export function mailboxOf(email: string): string {
+  const address = email.trim().toLowerCase()
+  const at = address.lastIndexOf("@")
+  if (at <= 0) return address
+  let local = address.slice(0, at).split("+")[0] || address.slice(0, at)
+  let domain = address.slice(at + 1)
+  if (DOTLESS_DOMAINS.has(domain)) {
+    local = local.replaceAll(".", "") || local
+    domain = "gmail.com"
+  }
+  return `${local}@${domain}`
+}
 
 export const webContactInputSchema = z.strictObject({
   email: z
     .string({ error: "Escribe tu correo" })
     .trim()
     .toLowerCase()
+    .max(254, "Ese correo es demasiado largo")
     .pipe(z.email("Escribe un correo válido, como nombre@clinica.com")),
   /** La guía donde lo dejó: solo una página de las guías. */
   page: z.string({ error: "Falta la guía" }).transform((value, ctx) => {
@@ -36,28 +64,38 @@ export const webContactInputSchema = z.strictObject({
     }
     return page
   }),
-  /** Las plantillas de esa guía, que le llegan adjuntas. */
+  /** Las plantillas de esa guía, que le llegan adjuntas: las de su producto (`guideSheetsFor`). */
   sheets: z
-    .array(z.enum(BLANK_SHEET_KEYS as [BlankSheet, ...BlankSheet[]]), {
-      error: "Faltan las plantillas",
-    })
+    .array(z.string().regex(/^[a-z0-9-]{1,40}$/), { error: "Faltan las plantillas" })
     .min(1)
-    .max(BLANK_SHEET_KEYS.length)
+    .max(5)
     .transform((sheets) => [...new Set(sheets)]),
   /** El campo trampa: una persona no lo ve ni lo llena. */
   website: z.string().max(200).optional(),
 })
 export type WebContactInput = z.input<typeof webContactInputSchema>
 
+/** Una plantilla para adjuntar: su clave, su archivo y su nombre en el correo. */
+export type WebContactSheet = { key: string; file: string; title: string }
+
 export type WebContactResult =
-  | { send: true; contactId: string; clientId: string; sheets: BlankSheet[] }
-  /** «solicitud»: ya tiene una solicitud viva; «reciente»: ya se le mandó hoy (o está saliendo). */
-  | { send: false; reason: "solicitud" | "reciente" }
+  | {
+      send: true
+      contactId: string
+      /** Nulo si el correo es de varios clientes: no se elige uno. */
+      clientId: string | null
+      /** Ese correo ya es de una clínica con cuenta: el correo no la invita a pedir entrar. */
+      hasAccount: boolean
+      sheets: WebContactSheet[]
+    }
+  /** «reciente»: ese buzón ya pidió las plantillas hoy; «ocupado»: se llegó al tope de la hora. */
+  | { send: false; reason: "reciente" | "ocupado" }
 
 /**
- * Deja el correo del aviso: con el mismo candado que la solicitud de ese correo, así una y
- * otra no se cruzan. Si hay que mandarle las plantillas, la fila queda sin `sent_at` hasta
- * que el correo sale (`markWebContactSent`).
+ * Deja el correo del aviso. Con el candado del correo (el mismo de su solicitud: una y otra no
+ * se cruzan) y uno de todos los avisos (los topes se cuentan sin carreras). Si hay que mandarle
+ * las plantillas, la fila queda sin `sent_at` hasta que el correo sale (`markWebContactSent`);
+ * si nunca sale, igual cuenta para el día.
  */
 export async function submitWebContact(
   tx: Db,
@@ -65,57 +103,41 @@ export async function submitWebContact(
   product: ClinicalProduct,
   now = new Date(),
 ): Promise<WebContactResult> {
+  const guide = guideSheetsFor(product)
+  if (!guide) throw new ServiceError("NOT_FOUND", 404, "Esta web no tiene guías")
+  const sheets: WebContactSheet[] = []
+  for (const key of input.sheets) {
+    const sheet = Object.hasOwn(guide.sheets, key) ? guide.sheets[key] : undefined
+    if (!sheet) throw invalidField("sheets", "Esa plantilla no existe")
+    sheets.push({ key, file: sheet.file, title: sheet.title })
+  }
   const email = input.email
+  const mailbox = mailboxOf(email)
+  const since = (ms: number) =>
+    and(gt(saasWebContact.createdAt, new Date(now.getTime() - ms)), lte(saasWebContact.createdAt, now))
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${email}`}, 0))`)
-  const [alive] = await tx
-    .select({ id: saasWaitlistRequest.id })
-    .from(saasWaitlistRequest)
-    .where(
-      and(
-        eq(saasWaitlistRequest.email, email),
-        inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"]),
-      ),
-    )
-    .limit(1)
-  if (alive) return { send: false, reason: "solicitud" }
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('saas-web-contact', 0))`)
   const [recent] = await tx
     .select({ id: saasWebContact.id })
     .from(saasWebContact)
-    .where(
-      and(
-        eq(saasWebContact.email, email),
-        or(
-          gt(saasWebContact.sentAt, new Date(now.getTime() - DAY_MS)),
-          and(
-            isNull(saasWebContact.sentAt),
-            gt(saasWebContact.createdAt, new Date(now.getTime() - IN_FLIGHT_MS)),
-          ),
-        ),
-      ),
-    )
+    .where(and(eq(saasWebContact.mailbox, mailbox), since(DAY_MS)))
     .limit(1)
   if (recent) return { send: false, reason: "reciente" }
-  const { clientId } = await clientForWebContact(
-    tx,
-    { email, product, sourcePage: input.page },
-    now,
-  )
+  const [hour] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(saasWebContact)
+    .where(since(HOUR_MS))
+  if ((hour?.n ?? 0) >= WEB_CONTACTS_PER_HOUR) return { send: false, reason: "ocupado" }
+  const { clientId, hasAccount } = await clientForWebContact(tx, { email, product, sourcePage: input.page }, now)
   const [row] = await tx
     .insert(saasWebContact)
-    .values({
-      email,
-      product,
-      sourcePage: input.page,
-      sheets: input.sheets,
-      clientId,
-      createdAt: now,
-    })
+    .values({ email, mailbox, product, sourcePage: input.page, sheets: input.sheets, clientId, createdAt: now })
     .returning({ id: saasWebContact.id })
   if (!row) throw new Error("No se pudo guardar el correo del aviso")
-  return { send: true, contactId: row.id, clientId, sheets: input.sheets }
+  return { send: true, contactId: row.id, clientId, hasAccount, sheets }
 }
 
-/** El correo con las plantillas salió: desde ahora cuenta para el tope del día. */
+/** El correo con las plantillas salió: queda en su historial como enviado. */
 export async function markWebContactSent(tx: Db, id: string, now = new Date()): Promise<void> {
   await tx
     .update(saasWebContact)

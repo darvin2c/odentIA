@@ -10,8 +10,9 @@
  * (`pnpm --filter @odentia/services plantillas` los vuelve a escribir en la web).
  */
 import { odontogramSheetScene } from "@odentia/dental/odontogram-sheet"
-import { drawChart, NTS_SOURCE } from "./dental/odontogram-pdf.js"
-import { type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "./document-kit.js"
+import { type DocumentClinic, DocumentKit, SIZE, sheetFormat } from "../document-kit.js"
+import type { GuideSheets } from "../guide-sheets.js"
+import { drawChart, NTS_SOURCE } from "./odontogram-pdf.js"
 
 /** Las plantillas, con su archivo en la web (`apps/web/public/guias/`). */
 export const BLANK_SHEETS = {
@@ -23,12 +24,8 @@ export const BLANK_SHEETS = {
 export type BlankSheet = keyof typeof BLANK_SHEETS
 export const BLANK_SHEET_KEYS = Object.keys(BLANK_SHEETS) as BlankSheet[]
 
-export function isBlankSheet(value: unknown): value is BlankSheet {
-  return typeof value === "string" && Object.hasOwn(BLANK_SHEETS, value)
-}
-
 /** El pie de toda plantilla. */
-export const BLANK_SHEET_FOOTER = "Plantilla gratis de odentIA · odentia32.com"
+const BLANK_SHEET_FOOTER = "Plantilla gratis de odentIA · odentia32.com"
 
 /** Una fecha fija: el PDF no cambia de un armado a otro. */
 const MADE_AT = new Date("2026-11-24T12:00:00.000Z")
@@ -183,9 +180,6 @@ const ERUPTION: Array<[string, string]> = [
   ["12 a 14 años", "Salen los segundos molares (17, 27, 37, 47)"],
   ["17 años en adelante", "Pueden salir los terceros molares (18, 28, 38, 48)"],
 ]
-
-/** Las edades de la guía de niños, para tenerlas al lado de la hoja. */
-export const ERUPTION_BY_AGE: ReadonlyArray<readonly [string, string]> = ERUPTION
 
 async function blankOdontogram(children: boolean): Promise<Uint8Array> {
   const kit = await openTemplate(
@@ -404,4 +398,17 @@ export function blankSheetBytes(sheet: BlankSheet): Promise<Uint8Array> {
     rendered.set(sheet, bytes)
   }
   return bytes
+}
+
+/** Las plantillas de las guías de odentIA, para el aviso (`guideSheetsFor` en `products.ts`). */
+export const DENTAL_GUIDE_SHEETS: GuideSheets = {
+  sheets: BLANK_SHEETS,
+  bytes: (key) =>
+    Object.hasOwn(BLANK_SHEETS, key)
+      ? blankSheetBytes(key as BlankSheet)
+      : Promise.reject(new Error("Esa plantilla no existe")),
+  pitch: (keys) =>
+    keys.every((key) => key === "presupuesto")
+      ? "En odentIA, el presupuesto sale del plan, con los precios de tu lista y hasta tres opciones, y el paciente lo recibe en su celular."
+      : "En odentIA, el odontograma se llena en la pantalla: tocas el diente, eliges lo que ves y queda dibujado con su fecha en la historia del paciente.",
 }

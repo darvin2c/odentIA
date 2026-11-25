@@ -35,6 +35,11 @@ const CHILD: ArchRows = {
 /** La dentición que se dibuja, como en la app: en la mixta, los de leche en un arco por dentro. */
 export type Dentition = "permanente" | "temporal" | "mixta"
 
+/** Las piezas que se dibujan en una dentición: lo que la demo puede tener elegido. */
+export function teethOf(dentition: Dentition): number[] {
+  return archOf(dentition).rows.flat()
+}
+
 function archOf(dentition: Dentition): { outer: ArchRows; inner?: ArchRows; rows: (readonly number[])[] } {
   if (dentition === "temporal") return { outer: CHILD, rows: [CHILD.upper, CHILD.lower] }
   if (dentition === "mixta") return { outer: ADULT, inner: CHILD, rows: [ADULT.upper, CHILD.upper, CHILD.lower, ADULT.lower] }

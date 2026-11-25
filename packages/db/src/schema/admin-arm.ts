@@ -446,29 +446,39 @@ export const saasClientContact = adminSchema.table(
 /**
  * El correo que dejó alguien en el aviso de una guía de la web (ADR 0214): a quién se le
  * mandaron las plantillas, desde qué página y cuándo salió. Es el rastro del contacto en su
- * ficha y el tope de un correo por dirección al día. Se agrega una fila por aviso; después
- * solo se anota `sent_at`, cuando el correo salió.
+ * ficha y los topes del aviso (uno por buzón al día y unos pocos por hora entre todos). Se
+ * agrega una fila por aviso; después solo se anota `sent_at`, cuando el correo salió.
  */
 export const saasWebContact = adminSchema.table(
   "saas_web_contact",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     email: text("email").notNull(),
+    /**
+     * El buzón al que llega (`mailboxOf`): sin la «+etiqueta» y, en Gmail, sin los puntos. El tope
+     * de un correo al día cuenta por buzón, no por cómo se escribió la dirección.
+     */
+    mailbox: text("mailbox").notNull(),
     product: text("product").notNull(),
     /** La página de la guía, comprobada: «/guias/como-llenar-un-odontograma». */
     sourcePage: text("source_page").notNull(),
-    /** Las plantillas que se le mandaron (`BLANK_SHEETS` de los servicios). */
-    sheets: text("sheets").array().notNull().default(sql`'{}'::text[]`),
+    /** Las plantillas que se le mandaron, por su clave (las de su producto: `guideSheetsFor`). */
+    sheets: text("sheets").array().notNull(),
     clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [
-    index("saas_web_contact_email_idx").on(table.email, table.createdAt),
+    index("saas_web_contact_mailbox_idx").on(table.mailbox, table.createdAt),
+    index("saas_web_contact_created_idx").on(table.createdAt),
     index("saas_web_contact_client_idx").on(table.clientId),
     check(
       "saas_web_contact_email_check",
       sql`${table.email} = lower(${table.email}) AND length(${table.email}) BETWEEN 3 AND 254`,
+    ),
+    check(
+      "saas_web_contact_mailbox_check",
+      sql`${table.mailbox} = lower(${table.mailbox}) AND length(${table.mailbox}) BETWEEN 3 AND 254`,
     ),
     check("saas_web_contact_product_check", oneOf(table.product, SAAS_CLIENT_PRODUCTS)),
     check(
@@ -477,7 +487,7 @@ export const saasWebContact = adminSchema.table(
     ),
     check(
       "saas_web_contact_sheets_check",
-      sql`${table.sheets} <@ ARRAY['odontograma','odontograma-ninos','presupuesto']::text[]`,
+      sql`cardinality(${table.sheets}) BETWEEN 1 AND 5 AND array_to_string(${table.sheets}, ',') ~ '^[a-z0-9-]{1,40}(,[a-z0-9-]{1,40})*$'`,
     ),
   ],
 )

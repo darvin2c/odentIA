@@ -79,10 +79,6 @@ export type WaitlistSent = {
   phone: string
   email: string
   answerDays: number
-  /** Ya tenía una solicitud viva con ese correo: no se creó otra ni salió otra copia. */
-  existing: boolean
-  /** Salió la copia por correo; falso si no salió (o si ya estaba en la lista). */
-  copySent: boolean
 }
 
 /** Los campos se llaman como en el cuerpo de la API: lo que rechaza el servidor cae en su campo. */
@@ -255,8 +251,6 @@ export default function WaitlistForm({ gift, answerDays, variant, sourcePage, on
       const payload = (await res.json().catch(() => null)) as {
         data?: { answerDays?: number }
         answerDays?: number
-        existing?: boolean
-        copySent?: boolean
       } | null
       // Un 400 dice en `fields` qué dato rechazó: cada uno va a su campo.
       if (!res.ok) throw rejectionOf(payload, SAVE_FAILED)
@@ -266,9 +260,6 @@ export default function WaitlistForm({ gift, answerDays, variant, sourcePage, on
         phone: body.phone,
         email: body.email,
         answerDays: payload?.data?.answerDays ?? payload?.answerDays ?? answerDays,
-        existing: payload?.existing === true,
-        // La API de antes no lo decía: entonces salió como siempre.
-        copySent: payload?.copySent ?? payload?.existing !== true,
       }
       writeDraft(null)
       setSent(done)
@@ -328,22 +319,17 @@ export default function WaitlistForm({ gift, answerDays, variant, sourcePage, on
         <Heading className="wl-h" ref={nextRef} tabIndex={-1}>
           Qué sigue
         </Heading>
-        {sent.existing ? (
-          <p className="wl-note">Ya tenías una solicitud con este correo: la estamos revisando. No hace falta que la envíes otra vez.</p>
-        ) : null}
         <ol className="wl-steps">
           <li>Revisamos tu solicitud en {businessDays(sent.answerDays)}.</li>
           <li>Te escribimos por WhatsApp al {sent.phone} para una llamada corta.</li>
-          <li>Te llega tu invitación por correo y abres {WORDS.yourClinic} como Fundadora.</li>
+          <li>
+            Te llega tu invitación a {sent.email} y abres {WORDS.yourClinic} como Fundadora.
+          </li>
         </ol>
-        {sent.copySent ? (
-          <p className="wl-note">Te enviamos una copia a {sent.email}. Si te equivocaste en un dato, responde ese correo.</p>
-        ) : sent.existing ? null : (
-          <p className="wl-note">
-            Tu solicitud quedó guardada, pero no pudimos enviarte la copia por correo. Si te equivocaste en un dato, escríbenos a{" "}
-            <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.
-          </p>
-        )}
+        {/* Lo mismo si ese correo ya había pedido entrar: la web no lo dice (ADR 0214). */}
+        <p className="wl-note">
+          Si te equivocaste en un dato, escríbenos a <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.
+        </p>
         {variant === "page" ? (
           <a className="btn btn-g wl-back" href="/">
             Volver al inicio

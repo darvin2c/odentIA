@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cardMeta, dayWords, GUIDES, guidePath, readingMinutes, relatedOf, SHEET_FILES } from "./index"
 import { plainText, richParts } from "./rich"
+import type { GuideFigure } from "./types"
 
 const PAGES = fileURLToPath(new URL("../../pages/guias/", import.meta.url))
+const ALL_PAGES = fileURLToPath(new URL("../../pages", import.meta.url))
 const PUBLIC = fileURLToPath(new URL("../../../public", import.meta.url))
 const HERE = fileURLToPath(new URL(".", import.meta.url))
 
@@ -47,12 +49,25 @@ describe("cada guía", () => {
 
   it("los enlaces del texto van a la propia web y a páginas que existen", () => {
     const pages = new Set(GUIDES.map(guidePath))
+    // Una página de la web: su archivo en src/pages (o la de una guía), sin el «#».
+    const exists = (href: string) => {
+      const path = href.split("#")[0] ?? ""
+      return path === "/" || pages.has(path) || existsSync(`${ALL_PAGES}${path}.astro`) || existsSync(`${ALL_PAGES}${path}/index.astro`)
+    }
+    const figureTexts = (figure?: GuideFigure) =>
+      !figure ? [] : figure.kind === "tabla" ? [...figure.rows.flat(), figure.caption ?? ""] : [figure.caption]
     for (const guide of GUIDES) {
+      // Todo lo que la página arma con enlaces (`RichText`).
       const texts = [
         ...guide.short,
-        ...guide.steps.flatMap((step) => [...step.text, ...(step.list ?? []), ...(step.after ?? []), step.figure?.caption ?? ""]),
+        guide.tryIt.text,
+        ...guide.steps.flatMap((step) => [...step.text, ...(step.list ?? []), ...(step.after ?? []), ...figureTexts(step.figure)]),
       ]
-      for (const part of texts.flatMap(richParts)) if (part.href?.startsWith("/guias/")) expect(pages.has(part.href), part.href).toBe(true)
+      for (const part of texts.flatMap(richParts))
+        if (part.href) expect(exists(part.href), `${guide.slug}: ${part.href}`).toBe(true)
+      // Lo que se muestra sin marcas (la portada y las preguntas) no las lleva: se verían tal cual.
+      for (const plain of [guide.lead, ...guide.faq.flatMap((item) => [item.q, item.a])])
+        expect(plain, `${guide.slug}: ${plain}`).not.toMatch(/\*\*|\]\(/)
     }
   })
 

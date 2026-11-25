@@ -3,9 +3,8 @@ import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
-  BLANK_SHEETS,
-  blankSheetBytes,
   getPublicPricing,
+  guideSheetsFor,
   markWaitlistConfirmationSent,
   markWebContactSent,
   moneyText,
@@ -16,6 +15,7 @@ import {
   waitlistInputSchemaFor,
   waitlistReceivedEmail,
   newClientNoticeEmail,
+  WEB_CONTACTS_PER_HOUR,
   webContactEmail,
   webContactInputSchema,
   webPageOf,
@@ -23,6 +23,7 @@ import {
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { validationError } from "./helpers.js"
 import type { RegistrationRemoteAddress } from "./public-patient-registration.js"
 
@@ -41,13 +42,6 @@ const TEAM_NOTICES_PER_HOUR = 20
 const HOUR_MS = 60 * 60 * 1000
 /** Correos que deja el aviso de las guías por dirección y ventana: de sobra para quien baja plantillas. */
 const MAX_CONTACTS = 3
-/**
- * Correos con plantillas por hora en este proceso: el tope de todo lo que puede salir aunque
- * alguien cambie de dirección para abusar del aviso (ADR 0214). Pasado, el aviso pide volver luego.
- */
-const CONTACT_EMAILS_PER_HOUR = 60
-/** Los productos que tienen guías en su web (ADR 0214): hoy, solo odentIA. */
-const GUIDE_PRODUCTS: readonly ClinicalProduct[] = ["dental"]
 
 /**
  * Lo público de Fundadores (issue 165), terminal: nunca sigue hacia
@@ -81,8 +75,6 @@ export function createPublicFoundersRoute(deps: {
   const app = new Hono()
   const defaultBuckets = new Map<string, { expiresAt: number; posts: number }>()
   const contactBuckets = new Map<string, { expiresAt: number; posts: number }>()
-  /** Cuándo salió cada correo con plantillas de la última hora, del más viejo al más nuevo. */
-  const contactEmailsSent: number[] = []
   /** Cuándo salió cada aviso al equipo de la última hora, del más viejo al más nuevo. */
   const noticesSent: number[] = []
   const address: RegistrationRemoteAddress =
@@ -99,7 +91,10 @@ export function createPublicFoundersRoute(deps: {
     if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
     // Sin el error: podría llevar los datos de quien pidió.
     console.error("Fundadores: error en la ruta pública")
-    return c.json(errorBody(c, "INTERNAL", "No pudimos guardar tu solicitud. Intenta nuevamente."), 500)
+    const message = c.req.path.endsWith("/contact")
+      ? "No pudimos enviarte el correo. Intenta nuevamente en unos minutos."
+      : "No pudimos guardar tu solicitud. Intenta nuevamente."
+    return c.json(errorBody(c, "INTERNAL", message), 500)
   })
 
   app.get("/pricing", async (c) => {
@@ -138,7 +133,7 @@ export function createPublicFoundersRoute(deps: {
   const limited = (c: Context, buckets: Map<string, { expiresAt: number; posts: number }> = defaultBuckets, max = MAX_POSTS): Response | null => {
     const now = Date.now()
     for (const [key, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(key)
-    const key = address(c) ?? "shared"
+    const key = rateKeyOf(address(c))
     let bucket = buckets.get(key)
     if (!bucket) {
       if (buckets.size >= MAX_BUCKETS) {
@@ -196,7 +191,6 @@ export function createPublicFoundersRoute(deps: {
     // API de antes la ignora mientras la web nueva ya se publicó (ADR 0214).
     const sourcePage = webPageOf(c.req.query("desde"))
     const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product, { sourcePage }))
-    let copySent = false
     // La copia sale una sola vez: si ya estaba en la lista, no se repite.
     if (!result.existing) {
       try {
@@ -211,7 +205,6 @@ export function createPublicFoundersRoute(deps: {
             brand: productWords(product).brand,
           }),
         })
-        copySent = true
         await deps.ownerDb.transaction((tx) => markWaitlistConfirmationSent(tx, result.id)).catch(() => undefined)
       } catch {
         console.error(`Fundadores: no salió la copia de la solicitud ${result.id}`)
@@ -220,21 +213,24 @@ export function createPublicFoundersRoute(deps: {
       const team = deps.teamEmailOf?.(product)
       if (team) await noticeTeam(team, result.id, result.clientId, product, parsed.data)
     }
-    // La pantalla dice «Te enviamos una copia» solo si salió, y si ya estaba en la lista, lo dice.
-    return c.json({ ok: true, answerDays: result.answerDays, existing: result.existing, copySent }, 201)
+    // La misma respuesta si ya estaba en la lista: la web no dice si un correo ya pidió entrar,
+    // ni promete la copia (ADR 0214).
+    return c.json({ ok: true, answerDays: result.answerDays }, 201)
   })
 
   /**
    * El aviso de una guía (ADR 0214): quien bajó una plantilla deja su correo y le llegan
-   * las plantillas adjuntas. Solo JSON (un formulario de otra página no lo puede enviar sin
-   * permiso de CORS), con su campo trampa, 3 por dirección IP cada 10 minutos, uno por
-   * correo al día (`submitWebContact`) y un tope por hora. No avisa al equipo: el contacto
-   * queda en Clientes con su guía.
+   * las plantillas adjuntas. Solo JSON, con su campo trampa y 3 por red cada 10 minutos; los
+   * topes que frenan el abuso viven en la base (`submitWebContact`): uno por buzón al día y
+   * unos pocos por hora entre todos. No dice si ese correo ya es cliente o ya pidió entrar, y
+   * un correo que no se sabe si salió no se reintenta. No avisa al equipo: el contacto queda
+   * en Clientes con su guía.
    */
   app.post("/contact", async (c) => {
     c.header("Cache-Control", "no-store")
     const product = deps.productOf?.(c) ?? "dental"
-    if (!GUIDE_PRODUCTS.includes(product)) return c.json(errorBody(c, "NOT_FOUND", "Esta web no tiene guías"), 404)
+    const guide = guideSheetsFor(product)
+    if (!guide) return c.json(errorBody(c, "NOT_FOUND", "Esta web no tiene guías"), 404)
     if (!(c.req.header("content-type") ?? "").toLowerCase().startsWith("application/json"))
       return c.json(errorBody(c, "UNSUPPORTED_MEDIA_TYPE", "Envía el correo desde la guía"), 415)
     const blocked = limited(c, contactBuckets, MAX_CONTACTS)
@@ -243,48 +239,55 @@ export function createPublicFoundersRoute(deps: {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     // Quien llena el campo que nadie ve no es una persona: no se guarda ni se envía nada.
     if (parsed.data.website?.trim()) return c.json({ ok: true, sent: true }, 201)
-    const now = Date.now()
-    while ((contactEmailsSent[0] ?? now) <= now - HOUR_MS) contactEmailsSent.shift()
-    if (contactEmailsSent.length >= CONTACT_EMAILS_PER_HOUR) {
-      console.error(`Guías: pasó el tope de ${CONTACT_EMAILS_PER_HOUR} correos con plantillas por hora`)
-      c.header("Retry-After", "600")
-      return c.json(errorBody(c, "RATE_LIMITED", "Ahora no pudimos enviarte el correo. Intenta nuevamente en unos minutos."), 429)
-    }
+    // Lo que lleva el correo se arma antes de guardar el aviso: si algo de esto falla, no queda
+    // un aviso que cuente para el día sin que haya salido nada.
+    const pricing = await deps.ownerDb.transaction((tx) => getPublicPricing(tx, product))
+    const pdfs = new Map<string, Uint8Array>()
+    for (const key of parsed.data.sheets) if (Object.hasOwn(guide.sheets, key)) pdfs.set(key, await guide.bytes(key))
     const result = await deps.ownerDb.transaction((tx) => submitWebContact(tx, parsed.data, product))
+    if (!result.send && result.reason === "ocupado") {
+      console.error(`Guías: pasó el tope de ${WEB_CONTACTS_PER_HOUR} correos con plantillas por hora`)
+      c.header("Retry-After", "900")
+      return c.json(errorBody(c, "RATE_LIMITED", "Ahora no pudimos enviarte el correo. Intenta nuevamente en un rato."), 429)
+    }
     if (!result.send) return c.json({ ok: true, sent: false, reason: result.reason }, 200)
-    contactEmailsSent.push(now)
+    const shown = (pricing.signupMode === "invitacion" ? pricing.founders : null) ?? pricing.list ?? pricing.founders
+    const gift = shown && shown.trialCreditCents > 0 ? moneyText(shown.currency, shown.trialCreditCents) : null
+    const site = deps.siteUrlOf?.(product)
+    const panel = deps.panelUrlOf?.(product)
+    const email = parsed.data.email
+    const name = productWords(product).name
+    // A quien ya es de una clínica con cuenta no se lo invita a pedir entrar: se le abre su entrada.
+    const start = result.hasAccount
+      ? panel
+        ? { label: `Entrar a ${name}`, url: `${panel}/login` }
+        : null
+      : pricing.signupMode === "invitacion"
+        ? site
+          ? { label: gift ? `Pide tus ${gift}` : "Solicita tu invitación", url: `${site}/solicitar-invitacion#correo=${encodeURIComponent(email)}` }
+          : null
+        : panel
+          ? { label: gift ? `Obtén ${gift} de crédito` : "Crear mi cuenta", url: `${panel}/register` }
+          : null
+    const offer =
+      !result.hasAccount && pricing.signupMode === "invitacion" && gift
+        ? `Mientras dure el programa Fundadores, los primeros ${gift} de tus agentes los pagamos nosotros.`
+        : null
+    const attachments = await Promise.all(
+      result.sheets.map(async (sheet) => ({
+        filename: sheet.file,
+        content: pdfs.get(sheet.key) ?? (await guide.bytes(sheet.key)),
+        contentType: "application/pdf",
+      })),
+    )
     try {
-      const pricing = await deps.ownerDb.transaction((tx) => getPublicPricing(tx, product))
-      const shown = (pricing.signupMode === "invitacion" ? pricing.founders : null) ?? pricing.list ?? pricing.founders
-      const gift = shown && shown.trialCreditCents > 0 ? moneyText(shown.currency, shown.trialCreditCents) : null
-      const site = deps.siteUrlOf?.(product)
-      const email = parsed.data.email
-      const start =
-        pricing.signupMode === "invitacion"
-          ? site
-            ? { label: gift ? `Pide tus ${gift}` : "Solicita tu invitación", url: `${site}/solicitar-invitacion#correo=${encodeURIComponent(email)}` }
-            : null
-          : deps.panelUrlOf
-            ? { label: gift ? `Obtén ${gift} de crédito` : "Crear mi cuenta", url: `${deps.panelUrlOf(product)}/register` }
-            : null
-      const offer =
-        pricing.signupMode === "invitacion" && gift ? `Mientras dure el programa Fundadores, los primeros ${gift} de tus agentes los pagamos nosotros.` : null
-      const attachments = await Promise.all(
-        result.sheets.map(async (sheet) => ({
-          filename: BLANK_SHEETS[sheet].file,
-          content: await blankSheetBytes(sheet),
-          contentType: "application/pdf",
-        })),
-      )
       await deps.mailer.send({
         to: email,
         attachments,
         ...webContactEmail({
-          sheets: result.sheets.map((sheet) => BLANK_SHEETS[sheet].title),
+          sheets: result.sheets.map((sheet) => sheet.title),
           guideUrl: `${site ?? ""}${parsed.data.page}`,
-          pitch: result.sheets.every((sheet) => sheet === "presupuesto")
-            ? `En ${productWords(product).name}, el presupuesto sale del plan, con los precios de tu lista y hasta tres opciones, y el paciente lo recibe en su celular.`
-            : `En ${productWords(product).name}, el odontograma se llena en la pantalla: tocas el diente, eliges lo que ves y queda dibujado con su fecha en la historia del paciente.`,
+          pitch: guide.pitch(result.sheets.map((sheet) => sheet.key)),
           start,
           offer,
           replyTo: deps.replyToOf?.(product),
@@ -292,11 +295,14 @@ export function createPublicFoundersRoute(deps: {
         }),
       })
     } catch {
-      // Sin los datos de la persona en el registro. Puede volver a intentarlo en unos minutos.
-      console.error(`Guías: no salió el correo con plantillas del aviso ${result.contactId}`)
-      return c.json(errorBody(c, "MAIL_FAILED", "No pudimos enviarte el correo. Intenta nuevamente en unos minutos."), 502)
+      // Sin los datos de la persona en el registro. No se sabe si el proveedor lo entregó: el
+      // aviso cuenta para el día y la web no invita a reintentarlo, para no mandarlo dos veces.
+      console.error(`Guías: no se confirmó el correo con plantillas del aviso ${result.contactId}`)
+      return c.json(errorBody(c, "MAIL_UNCONFIRMED", "No pudimos confirmar que salió el correo."), 502)
     }
-    await deps.ownerDb.transaction((tx) => markWebContactSent(tx, result.contactId)).catch(() => undefined)
+    await deps.ownerDb
+      .transaction((tx) => markWebContactSent(tx, result.contactId))
+      .catch(() => console.error(`Guías: salió el correo del aviso ${result.contactId}, pero no quedó anotado`))
     return c.json({ ok: true, sent: true }, 201)
   })
 

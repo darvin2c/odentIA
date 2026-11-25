@@ -3,7 +3,8 @@
 // Ábrelo aquí» y, con Fundadores, el correo opcional: le llegan las plantillas adjuntas con la puerta
 // para pedir entrar (`POST /api/public/founders/contact`, ADR 0214). Con el alta abierta no se pide
 // nada: el botón de toda la web. Los estados van en la misma caja, del alto del más alto, y un
-// segundo PDF no vuelve a pedir el correo.
+// segundo PDF no vuelve a pedir el correo. Nunca dice si ese correo ya pidió entrar, y si no se
+// sabe si el correo salió no invita a reintentarlo: el servidor no lo manda dos veces.
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { EMAIL } from "../../lib/form"
 import "./guide-downloads.css"
@@ -20,8 +21,11 @@ type Props = {
   contactUrl: string
 }
 
-/** Lo que pasó con el correo: lo que se ve en la caja del aviso. */
-type Phase = "form" | "sending" | "sent" | "recent" | "request"
+/**
+ * Lo que pasó con el correo: lo que se ve en la caja del aviso. «recent»: ese buzón ya las
+ * pidió hoy; «doubt»: no se pudo confirmar que salió.
+ */
+type Phase = "form" | "sending" | "sent" | "recent" | "doubt"
 
 const FAILED = "No pudimos enviarte el correo. Intenta nuevamente en unos minutos."
 
@@ -38,7 +42,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
 
   // Al cambiar de estado, el foco va a lo que hay que leer o escribir: nunca queda perdido.
   useEffect(() => {
-    if (phase === "sent" || phase === "recent" || phase === "request") doneRef.current?.focus()
+    if (phase === "sent" || phase === "recent" || phase === "doubt") doneRef.current?.focus()
     else if (phase === "form" && changing.current) {
       changing.current = false
       inputRef.current?.focus()
@@ -71,30 +75,35 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
     } catch {
       setPhase("form")
       setError("No hay conexión. Revisa tu internet e intenta nuevamente.")
+      inputRef.current?.focus()
       return
     }
     const payload = (await res.json().catch(() => null)) as {
       sent?: boolean
       reason?: string
-      error?: { message?: string; fields?: Record<string, string> }
+      error?: { code?: string; message?: string; fields?: Record<string, string> }
     } | null
-    if (res.ok && payload?.sent) {
+    const done: Phase | null =
+      res.ok && payload?.sent
+        ? "sent"
+        : res.ok && payload?.reason === "reciente"
+          ? "recent"
+          : payload?.error?.code === "MAIL_UNCONFIRMED"
+            ? "doubt"
+            : null
+    if (done) {
       setSentTo(value)
-      setPhase("sent")
-      return
-    }
-    if (res.ok && payload?.reason === "reciente") {
-      setSentTo(value)
-      setPhase("recent")
-      return
-    }
-    if (res.ok && payload?.reason === "solicitud") {
-      setSentTo(value)
-      setPhase("request")
+      setPhase(done)
       return
     }
     setPhase("form")
-    setError(payload?.error?.fields?.email ?? payload?.error?.message ?? FAILED)
+    // Lo que dice el servidor de un dato o de un límite; lo demás (una API que todavía no tiene
+    // el aviso, un error), el mensaje de siempre.
+    setError(
+      payload?.error?.fields?.email ??
+        (res.status === 400 || res.status === 429 ? payload?.error?.message : undefined) ??
+        FAILED,
+    )
     inputRef.current?.focus()
   }
 
@@ -162,7 +171,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                       aria-describedby={error ? errorId : undefined}
                     />
                   </label>
-                  <button className="btn btn-d btn-sm" type="submit" disabled={phase === "sending"}>
+                  <button className="btn btn-d btn-sm" type="submit" aria-disabled={phase === "sending" ? true : undefined}>
                     {phase === "sending" ? "Enviando…" : "Quiero verlo"}
                   </button>
                 </div>
@@ -171,7 +180,7 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                   Tu sitio web
                   <input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} />
                 </label>
-                <p className="gd-error" id={errorId}>
+                <p className="gd-error" id={errorId} role="alert">
                   {error ?? ""}
                 </p>
               </form>
@@ -184,19 +193,18 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
                       </>
                     ) : phase === "recent" ? (
                       <>
-                        <b>Ya te lo enviamos hoy a {sentTo}.</b> Revisa tu bandeja de entrada o la de spam.
+                        <b>Hoy ya pediste las plantillas para {sentTo}.</b> Si no las ves, revisa la carpeta de spam.
                       </>
                     ) : (
                       <>
-                        <b>Ya tienes una solicitud con {sentTo}.</b> La estamos revisando: te escribimos pronto.
+                        <b>No pudimos confirmar que salió el correo a {sentTo}.</b> Si no te llega en unos minutos,
+                        las plantillas están aquí arriba.
                       </>
                     )}
                   </p>
-                  {phase === "request" ? null : (
-                    <button type="button" className="gd-change" onClick={change}>
-                      Cambiar correo
-                    </button>
-                  )}
+                  <button type="button" className="gd-change" onClick={change}>
+                    Cambiar correo
+                  </button>
                 </div>
               )}
             </div>
