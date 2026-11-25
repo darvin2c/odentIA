@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { isUpperTooth } from "./anatomy.js"
 import {
+  odontogramSheetRow,
   odontogramSheetScene,
   SHEET_INK,
   type SheetEntry,
@@ -212,5 +214,64 @@ describe("odontogramSheetScene", () => {
     )
     expect(scene.specifications).toEqual(["Control en 6 meses", "Pieza 16 CD: Profunda"])
     expect(scene.observations).toEqual(["Pieza 21: Sensible al frío"])
+  })
+})
+
+describe("las raíces de la hoja", () => {
+  /** Cuántas raíces dibuja una pieza sola: los trazos en «V» de tinta antes de su corona. */
+  function rootsOf(tooth: number): number {
+    const row = odontogramSheetRow([tooth], isUpperTooth(tooth), [])
+    return row.shapes.filter(
+      (shape) => shape.kind === "path" && shape.stroke === SHEET_INK.ink && shape.strokeWidth === 1.6 && /^M[^M]*L[^M]*L[^M]*$/.test(shape.d),
+    ).length
+  }
+
+  it("dibuja cada pieza con sus raíces, como la vista de frente", () => {
+    // Molares de arriba con tres; los de abajo, también los de leche, con dos.
+    expect([16, 26, 55, 65].map(rootsOf)).toEqual([3, 3, 3, 3])
+    expect([36, 46, 75, 85].map(rootsOf)).toEqual([2, 2, 2, 2])
+    // El primer premolar de arriba, dos; los demás premolares, una.
+    expect([14, 24, 15, 34, 45].map(rootsOf)).toEqual([2, 2, 1, 1, 1])
+    expect([11, 13, 31, 51].map(rootsOf)).toEqual([1, 1, 1, 1])
+  })
+
+  /** Las líneas verticales de un hallazgo en una pieza sola, y los tramos de cada raíz dibujada. */
+  function linesIn(tooth: number, condition: string) {
+    // En buen estado: azul (el color sale de su calidad).
+    const row = odontogramSheetRow([tooth], isUpperTooth(tooth), [entry(tooth, condition, { details: { quality: "good" } })])
+    const roots = row.shapes.flatMap((shape) => {
+      if (shape.kind !== "path" || shape.stroke !== SHEET_INK.ink) return []
+      const xs = [...shape.d.matchAll(/[ML]([\d.]+),/g)].map((match) => Number(match[1]))
+      return xs.length === 3 ? [[Math.min(...xs), Math.max(...xs)] as const] : []
+    })
+    const lines = row.shapes.flatMap((shape) =>
+      shape.kind === "line" && shape.x1 === shape.x2 && shape.stroke !== SHEET_INK.ink ? [shape.x1] : [],
+    )
+    return { roots, lines }
+  }
+
+  it("la endodoncia va por dentro de cada raíz, nunca por la furca", () => {
+    for (const [tooth, count] of [
+      [36, 2],
+      [14, 2],
+      [75, 2],
+      [16, 3],
+      [11, 1],
+    ] as const) {
+      const { roots, lines } = linesIn(tooth, "root_canal_treatment")
+      expect(lines, String(tooth)).toHaveLength(count)
+      // Cada línea cae dentro de una raíz distinta.
+      const homes = lines.map((lx) => roots.findIndex(([from, to]) => lx > from && lx < to))
+      expect(homes.every((home) => home >= 0), String(tooth)).toBe(true)
+      expect(new Set(homes).size, String(tooth)).toBe(count)
+    }
+  })
+
+  it("el espigo va en una sola raíz, dentro de ella", () => {
+    for (const tooth of [36, 46, 14, 16, 11]) {
+      const { roots, lines } = linesIn(tooth, "post_and_core")
+      expect(lines, String(tooth)).toHaveLength(1)
+      expect(roots.some(([from, to]) => (lines[0] ?? 0) > from && (lines[0] ?? 0) < to), String(tooth)).toBe(true)
+    }
   })
 })

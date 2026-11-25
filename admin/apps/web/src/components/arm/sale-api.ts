@@ -119,6 +119,8 @@ export const requestDetailSchema = z.object({
     city: z.string(),
     professionals: z.string(),
     currentTool: z.string(),
+    /** La guía de la web desde la que pidió (ADR 0216); falta mientras la API es la de antes. */
+    sourcePage: z.string().nullable().optional(),
     status: z.string(),
     stage: z.string(),
     planName: z.string().nullable(),

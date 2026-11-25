@@ -8,6 +8,7 @@ import { type Context, Hono, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const submissionSchema = z.strictObject({
@@ -40,7 +41,7 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
     const [org] = await deps.db.select({ id: organization.id, name: organization.name, logo: organization.logo }).from(organization).where(eq(organization.slug, c.req.param("slug"))).limit(1)
     const now = Date.now()
     for (const [key, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(key)
-    const key = `${org?.id ?? "unknown"}:${address(c) ?? "shared"}`
+    const key = `${org?.id ?? "unknown"}:${rateKeyOf(address(c))}`
     let bucket = buckets.get(key)
     if (!bucket) {
       if (buckets.size >= MAX_BUCKETS) {

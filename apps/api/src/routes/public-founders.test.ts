@@ -2,17 +2,18 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
+import { saasClient, saasClientContact, saasWebContact } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import type { MailMessage } from "@odentia/mail"
-import { createSaasPlan, inviteFromWaitlist, type Storage, secretsKeyFromEnv } from "@odentia/services"
-import { eq, sql } from "drizzle-orm"
+import { createSaasPlan, inviteFromWaitlist, type Storage, secretsKeyFromEnv, WEB_CONTACTS_PER_HOUR } from "@odentia/services"
+import { eq, like, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app.js"
-import { createPublicFoundersRoute } from "./public-founders.js"
+import { createPublicFoundersRoute, settleFounderMail } from "./public-founders.js"
 
 /**
  * Fundadores contra la app real (`createApp`, issue 165): la solicitud de la
@@ -62,6 +63,13 @@ function buildApp(auth: Auth, mailer = recordingMailer()): Hono {
     productDomains: { medical: "latidia.localhost", optical: "vistia.localhost" },
     registrationRemoteAddress: () => `10.0.0.${Math.floor(Math.random() * 250)}`,
   })
+}
+
+/** La respuesta, después de que salen los correos que la ruta manda al terminar. */
+async function withMail(res: Response | Promise<Response>): Promise<Response> {
+  const done = await res
+  await settleFounderMail()
+  return done
 }
 
 function recordingMailer() {
@@ -150,11 +158,11 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   const mailer = recordingMailer()
   const app = buildApp(authFor(null, { calls: 0 }), mailer)
   const send = (payload: unknown) =>
-    app.request("/api/public/founders/waitlist", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
-      body: JSON.stringify(payload),
-    })
+    withMail(app.request("/api/public/founders/waitlist", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+        body: JSON.stringify(payload),
+      }))
   const res = await send(request("ana@sonrisa.test"))
   expect(res.status).toBe(201)
   expect(res.headers.get("access-control-allow-origin")).toBe("https://www.odentia.localhost")
@@ -186,7 +194,7 @@ describe("el aviso al equipo de cada solicitud nueva", () => {
     })
   }
   const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>
-    route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+    withMail(route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }))
   const idOf = async (email: string) =>
     (await ownerDb.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.id
   const clientOf = async (email: string) =>
@@ -355,4 +363,165 @@ it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", 
   const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-latido"))
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / 86_400_000)).toBe(45)
   await ownerDb.update(saasSignupPolicy).set({ medicalMode: "invitacion" })
+})
+
+describe("las guías de la web (ADR 0216)", () => {
+  const GUIDE = "/guias/como-llenar-un-odontograma"
+  const post = (app: Hono, path: string, payload: unknown) =>
+    withMail(app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+        body: JSON.stringify(payload),
+      }))
+
+  it("la solicitud enviada desde una guía guarda su página; si ya estaba en la lista, la respuesta es la misma", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const res = await post(app, `/api/public/founders/waitlist?desde=${encodeURIComponent(GUIDE)}`, request("qa.guia@example.com"))
+    expect(res.status).toBe(201)
+    const first = await res.json()
+    expect(first).toEqual({ ok: true, answerDays: expect.any(Number) })
+    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, "qa.guia@example.com"))
+    expect(row?.sourcePage).toBe(GUIDE)
+    const copies = () => mailer.sent.filter((mail) => mail.to === "qa.guia@example.com").length
+    expect(copies()).toBe(1)
+    // Otra vez el mismo correo: no sale otra copia, y la web no se entera de que ya había pedido.
+    const again = await post(app, "/api/public/founders/waitlist", request("qa.guia@example.com"))
+    expect(again.status).toBe(201)
+    expect(await again.json()).toEqual(first)
+    expect(copies()).toBe(1)
+  })
+
+  it("el aviso manda las plantillas adjuntas una vez al día, con la puerta para pedir entrar", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const body = { email: "QA.Milagros@example.com", page: GUIDE, sheets: ["odontograma", "odontograma-ninos"] }
+    const res = await post(app, "/api/public/founders/contact", body)
+    expect(res.status).toBe(201)
+    expect(await res.json()).toEqual({ ok: true, sent: true })
+    expect(mailer.sent).toHaveLength(1)
+    const mail = mailer.sent[0]!
+    expect(mail.to).toBe("qa.milagros@example.com")
+    expect(mail.subject).toBe("Tus plantillas para imprimir")
+    expect(mail.replyTo).toBe("hola@odentia32.com")
+    expect(mail.attachments?.map((file) => [file.filename, file.contentType])).toEqual([
+      ["odontograma.pdf", "application/pdf"],
+      ["odontograma-ninos.pdf", "application/pdf"],
+    ])
+    // Con Fundadores, «Pide tus USD 100» con su correo en el fragmento: nunca en la consulta.
+    expect(mail.html).toContain("Pide tus USD 100")
+    expect(mail.html).toContain("https://www.odentia.localhost/solicitar-invitacion#correo=qa.milagros%40example.com")
+    expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}`)
+    // Lo que promete el aviso («te mostramos cómo»): la demo de la guía, sin cuenta.
+    expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}#pruebalo`)
+    const again = await post(app, "/api/public/founders/contact", body)
+    expect(again.status).toBe(200)
+    expect(await again.json()).toEqual({ ok: true, sent: false, reason: "reciente" })
+    expect(mailer.sent).toHaveLength(1)
+  })
+
+  it("solo JSON y solo páginas de las guías; quien llena el campo trampa no guarda nada", async () => {
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const form = await app.request("/api/public/founders/contact", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "email=qa.form%40example.com",
+    })
+    expect(form.status).toBe(415)
+    expect((await post(app, "/api/public/founders/contact", { email: "qa.precios@example.com", page: "/precios", sheets: ["odontograma"] })).status).toBe(400)
+    const trap = await post(app, "/api/public/founders/contact", {
+      email: "qa.trampa@example.com",
+      page: GUIDE,
+      sheets: ["odontograma"],
+      website: "http://spam.example",
+    })
+    expect(trap.status).toBe(201)
+    expect(mailer.sent).toHaveLength(0)
+    expect(await ownerDb.select().from(saasWebContact).where(eq(saasWebContact.email, "qa.trampa@example.com"))).toEqual([])
+  })
+
+  it("si no se confirma que salió, responde 502 sin invitar a reintentar, y el repetido no manda otro", async () => {
+    let calls = 0
+    const app = buildApp(authFor(null, { calls: 0 }), {
+      sent: [],
+      send: async () => {
+        calls += 1
+        throw new Error("el proveedor no respondió")
+      },
+    } as unknown as ReturnType<typeof recordingMailer>)
+    const body = { email: "qa.dudoso@example.com", page: GUIDE, sheets: ["presupuesto"] }
+    const res = await post(app, "/api/public/founders/contact", body)
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({ error: { code: "MAIL_UNCONFIRMED" } })
+    const again = await post(app, "/api/public/founders/contact", body)
+    expect(await again.json()).toEqual({ ok: true, sent: false, reason: "reciente" })
+    expect(calls).toBe(1)
+  })
+
+  it("a quien ya es de una clínica con cuenta, el correo le abre su entrada y no le pide entrar", async () => {
+    await ownerDb.execute(sql`insert into "organization" ("id","name","slug","created_at") values ('org-guias-cuenta', 'Clínica con Cuenta', 'guias-cuenta', now()) on conflict do nothing`)
+    const [client] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica con Cuenta", product: "dental", origin: "web", organizationId: "org-guias-cuenta" })
+      .returning({ id: saasClient.id })
+    await ownerDb.insert(saasClientContact).values({
+      clientId: client!.id,
+      name: "Dra. Lucía Rojas",
+      email: "qa.cuenta@example.com",
+      roles: [],
+      rolesConfirmed: false,
+      isPrimary: true,
+    })
+    const mailer = recordingMailer()
+    const app = buildApp(authFor(null, { calls: 0 }), mailer)
+    const res = await post(app, "/api/public/founders/contact", { email: "qa.cuenta@example.com", page: GUIDE, sheets: ["odontograma"] })
+    expect(res.status).toBe(201)
+    const html = mailer.sent[0]?.html ?? ""
+    expect(html).toContain("Entrar a odentIA")
+    expect(html).toContain("https://app.odentia.localhost/login")
+    expect(html).not.toContain("Pide tus")
+    expect(html).not.toContain("Fundadores")
+  })
+
+  it("cuenta por red de IPv6: cambiar de dirección dentro de la misma red no pasa el tope", async () => {
+    let n = 0
+    const route = createPublicFoundersRoute({ ownerDb, mailer: recordingMailer(), remoteAddress: () => `2001:db8:77:1::${(n++).toString(16)}` })
+    const send = () => route.request("/contact", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+    for (let i = 0; i < 3; i++) expect((await send()).status).toBe(400)
+    expect((await send()).status).toBe(429)
+  })
+
+  it("pasado el tope de la hora entre todos, responde 429 y no manda nada", async () => {
+    const at = new Date(Date.now() - 10 * 60 * 1000)
+    await ownerDb.insert(saasWebContact).values(
+      Array.from({ length: WEB_CONTACTS_PER_HOUR }, (_, index) => ({
+        email: `qa.tope${index}@example.com`,
+        mailbox: `qa.tope${index}@example.com`,
+        product: "dental",
+        sourcePage: GUIDE,
+        sheets: ["odontograma"],
+        createdAt: at,
+      })),
+    )
+    try {
+      const mailer = recordingMailer()
+      const app = buildApp(authFor(null, { calls: 0 }), mailer)
+      const res = await post(app, "/api/public/founders/contact", { email: "qa.tope.otro@example.com", page: GUIDE, sheets: ["odontograma"] })
+      expect(res.status).toBe(429)
+      expect(mailer.sent).toHaveLength(0)
+    } finally {
+      await ownerDb.delete(saasWebContact).where(like(saasWebContact.email, "qa.tope%"))
+    }
+  })
+
+  it("latidIA y vistIA no tienen guías: el aviso responde 404 en su dominio", async () => {
+    const app = buildApp(authFor(null, { calls: 0 }))
+    const res = await app.request("https://api.latidia.localhost/api/public/founders/contact", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "qa.latidia@example.com", page: GUIDE, sheets: ["odontograma"] }),
+    })
+    expect(res.status).toBe(404)
+  })
 })

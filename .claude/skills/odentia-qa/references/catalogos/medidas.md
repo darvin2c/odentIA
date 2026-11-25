@@ -413,6 +413,40 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Una escena que se repite se detiene sola o tiene su pausa al lado.
 **Ya falló:** la página empujada 250 px por una caja que cambiaba de alto; la respuesta del chat antes que la pregunta.
 
+### M-WEB-04 Pedir los USD 100 sin salir de la página (solicitud dentro de una guía)
+**Quién:** odontóloga que llegó a una guía desde Google, en el teléfono y en la computadora.
+**Dónde:** `apps/web/src/components/founders/WaitlistForm.tsx`, `waitlist.css`, el bloque final de la guía y el botón de la cabecera que baja a él.
+**Medida (24 nov 2026, antes, desde una página de producto):** 1440: 8 Tab hasta el botón de la cabecera, salto a `/solicitar-invitacion` y 14 Tab hasta enviar (22 Tab, 9 datos, 1 salto). **Con la guía (25 nov 2026):** 19 Tab, 9 datos, sin salto. **A mantener.**
+- [ ] El botón de la cabecera que baja a la solicitud deja el foco en esa sección, no en `BODY`.
+- [ ] Al enviar, «Qué sigue» aparece en el mismo lugar, sin subir la página, y su título recibe el foco.
+- [ ] Dentro de una página, sin «Volver al inicio» ni «¿Te invitó…?».
+- [ ] Un error en un campo no baja la caja del campo de al lado.
+- [ ] Recargar a medias conserva lo escrito.
+**Ya falló:** la fila se desalineaba con un error en el par (390, 24 nov); recargar borraba los 9 datos.
+
+### M-WEB-05 Bajar una plantilla y dejar el correo
+**Quién:** quien llega buscando «odontograma pdf».
+**Dónde:** la sección de descarga de cada guía y su aviso «¿Tienes una clínica?» (`apps/web/src/components/guides/GuideDownloads.tsx`).
+**Medida (24 nov 2026):** bajar, 1 toque; dejar el correo, 1 toque, 1 tecleo y 1 toque; corregir un correo mal escrito, 1 toque.
+- [ ] El aviso aparece junto a lo que se tocó, una sola vez por visita.
+- [ ] No dice «ya se descargó»: dice que se está descargando y ofrece abrirlo si no bajó.
+- [ ] Sus estados (pedir, enviando, listo, no se pudo) van en la misma caja, sin cambiar de alto.
+- [ ] Tras «Quiero verlo», el foco queda en «Listo, te escribimos a…», con «Cambiar correo».
+- [ ] Un segundo PDF no borra lo escrito ni vuelve a pedirlo.
+- [ ] El error del aviso se ve como el del formulario de al lado (rojo), no como la pregunta; un tope o un fallo no marcan el campo.
+- [ ] Al aparecer, el aviso queda a la vista aunque la tarjeta tocada esté al pie de la pantalla.
+**Ya falló (QA del 25 nov 2026):** el error salía en negrita negra porque la regla de la pregunta lo alcanzaba; el aviso aparecía bajo el borde a 1440.
+
+### M-WEB-06 Leer una tabla de la guía en el teléfono
+**Quién:** la odontóloga que llega desde Google, en el celular.
+**Dónde:** `apps/web/src/components/guides/GuideFigure.astro` (`.gf-stack`).
+**Medida (25 nov 2026, 390):** la tabla de fases del presupuesto pasó de desplazarse de lado (620 px en 343) a fichas con el primer dato de título.
+- [ ] Ninguna tabla desplaza de lado a 390.
+- [ ] Una celda con texto y negrita («Quirúrgica, **opción A**») queda entera en su columna.
+- [ ] Ningún importe se parte en dos renglones, a ningún ancho.
+
+Gira nueva, **el teclado hacia atrás:** con Shift+Tab desde el final hasta arriba, ninguna parada queda debajo de la cabecera fija. Gira nueva, **la promesa de la demo:** por cada «Pruébalo» o «Toca…», hacer en la demo exactamente lo que dice el texto; si no se puede, es un hallazgo. Y **el botón que desaparece:** tras un envío o un reemplazo dentro de la página, el foco va al título del estado nuevo, nunca a `BODY`.
+
 ## Mostrador de óptica
 
 ### M-OPT-01 Vender en el mostrador y cobrar el adelanto

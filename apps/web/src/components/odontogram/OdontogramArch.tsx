@@ -15,7 +15,8 @@ import { Fragment, type KeyboardEvent, useId, useLayoutEffect, useRef, useState 
 import "./odontogram.css"
 
 /** Los hallazgos que muestra la web de ejemplo, con su dibujo de la norma. */
-export type ExampleFinding = "caries" | "ausente" | "corona" | "restauracion"
+/** Lo que dibuja el ejemplo: «sigla» es lo que solo lleva su sigla en el recuadro (FFP), con una marca. */
+export type ExampleFinding = "caries" | "ausente" | "corona" | "restauracion" | "sellante" | "saliendo" | "sigla"
 
 /** Rojo y azul de la norma (NTS 188), los mismos de la app. */
 const RED = "#dc2626"
@@ -26,7 +27,30 @@ const ADULT: ArchRows = {
   upper: [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28],
   lower: [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38],
 }
-const ROWS = [ADULT.upper, ADULT.lower]
+/** Los 20 de leche, igual de frente: la 55 a la izquierda. */
+const CHILD: ArchRows = {
+  upper: [55, 54, 53, 52, 51, 61, 62, 63, 64, 65],
+  lower: [85, 84, 83, 82, 81, 71, 72, 73, 74, 75],
+}
+
+/** La dentición que se dibuja, como en la app: en la mixta, los de leche en un arco por dentro. */
+export type Dentition = "permanente" | "temporal" | "mixta"
+
+/** Las piezas que se dibujan en una dentición: lo que la demo puede tener elegido. */
+export function teethOf(dentition: Dentition): number[] {
+  return archOf(dentition).rows.flat()
+}
+
+/** Las filas de una dentición, de arriba abajo como se ven: las mismas de la vista de frente. */
+export function rowsOf(dentition: Dentition): (readonly number[])[] {
+  return archOf(dentition).rows
+}
+
+function archOf(dentition: Dentition): { outer: ArchRows; inner?: ArchRows; rows: (readonly number[])[] } {
+  if (dentition === "temporal") return { outer: CHILD, rows: [CHILD.upper, CHILD.lower] }
+  if (dentition === "mixta") return { outer: ADULT, inner: CHILD, rows: [ADULT.upper, CHILD.upper, CHILD.lower, ADULT.lower] }
+  return { outer: ADULT, rows: [ADULT.upper, ADULT.lower] }
+}
 
 /** Ancho con el que se dibuja en el servidor, antes de medir el contenedor (como la app). */
 const FALLBACK_WIDTH = 360
@@ -56,7 +80,8 @@ function Tooth({ tooth, finding }: { tooth: number; finding?: ExampleFinding }) 
       <path d={silhouette.crown} fill="#fff" stroke="#8a97ab" strokeLinejoin="round" />
       <g clipPath={`url(#${clipId})`}>
         {zones.map((zone) => {
-          const filled = paint && zone === central && (finding === "caries" || finding === "restauracion")
+          const filled =
+            paint && zone === central && (finding === "caries" || finding === "restauracion" || finding === "sellante")
           return (
             <polygon
               key={zone.surface}
@@ -76,6 +101,11 @@ function Tooth({ tooth, finding }: { tooth: number; finding?: ExampleFinding }) 
         </g>
       ) : null}
       {finding === "corona" ? <rect {...CROWN_SQUARE} fill="none" stroke={BLUE} strokeWidth={1} /> : null}
+      {/* El diente que sale: la flecha en zigzag azul, como en la hoja. */}
+      {finding === "saliendo" ? (
+        <polyline points="5,12.5 8,9.5 11,12.5 14,9.5 17,12.5" fill="none" stroke={BLUE} strokeWidth={1} strokeLinejoin="round" />
+      ) : null}
+      {finding === "sigla" ? <circle cx={17.5} cy={2.5} r={1.4} fill={BLUE} /> : null}
       {groovesFor(type).map((d) => (
         <path key={d} d={d} fill="none" stroke="#9ca3af" strokeWidth={0.45} opacity={0.7} />
       ))}
@@ -110,6 +140,7 @@ export default function OdontogramArch({
   onPick,
   labelOf,
   description,
+  dentition = "permanente",
 }: {
   findings: Partial<Record<number, ExampleFinding>>
   selected?: number | null
@@ -118,19 +149,23 @@ export default function OdontogramArch({
   labelOf?: (tooth: number) => string
   /** Descripción del dibujo cuando no se puede tocar. */
   description?: string
+  /** Qué dientes se dibujan; sin decirlo, los 32 permanentes. */
+  dentition?: Dentition
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const hintId = useId()
   const width = useArchWidth(ref)
-  const layout = archLayout(width, ADULT)
+  const arch = archOf(dentition)
+  const layout = archLayout(width, arch.outer, arch.inner)
   const [visited, setVisited] = useState<number | null>(null)
   const interactive = Boolean(onPick)
-  const tabStop = visited ?? selected ?? ADULT.upper[0]
+  const shown = arch.rows.flat()
+  const tabStop = (visited !== null && shown.includes(visited) ? visited : null) ?? (selected !== null && shown.includes(selected) ? selected : null) ?? arch.outer.upper[0]
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const el = (event.target as HTMLElement).closest<HTMLElement>("[data-tooth]")
     if (!el) return
-    const next = archNeighbor(ROWS, Number(el.dataset.tooth), event.key)
+    const next = archNeighbor(arch.rows, Number(el.dataset.tooth), event.key)
     if (next === null) return
     event.preventDefault()
     setVisited(next)
@@ -214,7 +249,7 @@ export default function OdontogramArch({
       <div className="oa-legend">
         <span>
           <i style={{ background: RED }} />
-          Patología, mal estado o temporal
+          Patología, mal estado o provisional
         </span>
         <span>
           <i style={{ background: BLUE }} />

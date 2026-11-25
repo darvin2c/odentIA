@@ -11,7 +11,7 @@ interface Props {
 const { legalOnly = false } = Astro.props
 ---
 <footer class:list={["foot", { short: legalOnly }]}>
-  {legalOnly ? null : <div class="wrap grid">
+  {legalOnly ? null : <div class="wrap grid" style={`--cols: ${Math.max(4, footerGroups.length)}`}>
     <div class="brand">
       <span class="name">{WORDS.name}</span>
       <span>El <abbr title="Agentic Relationship Management">ARM</abbr> para {WORDS.audience} de habla hispana: tus agentes atienden, agendan y hacen seguimiento.</span>
@@ -32,7 +32,8 @@ const { legalOnly = false } = Astro.props
 
 <style>
   .foot { background: var(--night-2); color: #9fb8bf; padding: 64px 0 40px; }
-  .grid { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr)); gap: 32px; }
+  /* Una columna por grupo, al menos cuatro como siempre: odentIA suma «Guías» y llega a cinco. */
+  .grid { display: grid; grid-template-columns: 1.4fr repeat(var(--cols, 4), minmax(0, 1fr)); gap: 32px; }
   .brand { display: flex; flex-direction: column; gap: 12px; font-size: 14.5px; line-height: 1.6; max-width: 320px; }
   .name { font-weight: 800; font-size: 20px; color: #eef6f8; }
   nav { display: flex; flex-direction: column; }

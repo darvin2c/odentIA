@@ -66,7 +66,7 @@ const CHART_WIDTH = (170 * 72) / 25.4
 /** Entre fila y fila, como el `gap-3` de la hoja en pantalla, a la escala del papel. */
 const ROW_GAP = 6
 /** La línea de la fuente que la norma pone al pie del gráfico. */
-const NTS_SOURCE =
+export const NTS_SOURCE =
   "Fuente: Dirección de Salud Bucal - Dirección General de Intervenciones Estratégicas en Salud Pública"
 
 function colorOf(value: string): RGB {
@@ -187,7 +187,7 @@ function drawShape(
 }
 
 /** Las cuatro filas del gráfico de la norma, centradas, cada una sin partirse entre dos hojas. */
-function drawChart(kit: DocumentKit, rows: SheetRow[]): void {
+export function drawChart(kit: DocumentKit, rows: SheetRow[]): void {
   const full = rows.reduce((max, row) => Math.max(max, row.width), 0)
   const s = Math.min(kit.width, CHART_WIDTH) / full
   rows.forEach((row, index) => {

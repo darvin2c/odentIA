@@ -961,12 +961,21 @@ export const saasWaitlistRequest = adminSchema.table(
     clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
     /** `web` (la pidió la clínica) o `administracion` (la creó el equipo al invitar a un cliente). */
     source: text("source").notNull().default("web"),
+    /**
+     * La página de la web desde la que se envió (ADR 0216): «/guias/como-llenar-un-odontograma».
+     * Nula en la página de la solicitud y en las de antes. Es una ruta comprobada, nunca un título.
+     */
+    sourcePage: text("source_page"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("saas_waitlist_request_token_uidx").on(table.tokenHash),
     index("saas_waitlist_request_client_idx").on(table.clientId),
     check("saas_waitlist_request_source_check", sql`${table.source} IN ('web','administracion')`),
+    check(
+      "saas_waitlist_request_source_page_check",
+      sql`${table.sourcePage} IS NULL OR ${table.sourcePage} ~ '^/[a-z0-9-]+(/[a-z0-9-]+)*$' AND length(${table.sourcePage}) <= 160`,
+    ),
     uniqueIndex("saas_waitlist_request_org_uidx").on(table.organizationId),
     index("saas_waitlist_request_status_idx").on(table.status, table.createdAt),
     index("saas_waitlist_request_email_idx").on(table.email),

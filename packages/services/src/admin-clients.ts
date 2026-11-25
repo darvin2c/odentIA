@@ -30,6 +30,7 @@ import {
   saasOutreach,
   saasProposal,
   saasTask,
+  saasWebContact,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
@@ -1180,6 +1181,16 @@ export interface WaitlistClientInput {
   professionals: string
   currentTool: string
   product: ClinicalProduct
+  /** La página de la web desde la que pidió, ya comprobada (`webPageOf`); el cliente nuevo la lleva de origen. */
+  sourcePage?: string | null
+}
+
+/** El nombre de una persona que todavía no lo dijo (un chat, un correo dejado en la web). */
+export const UNKNOWN_CONTACT_NAME = "Contacto (nombre por preguntar)"
+
+/** «Desde /guias/como-llenar-un-odontograma»: el detalle del origen de quien llegó por una página. */
+function originFromPage(page: string | null | undefined): string | null {
+  return page ? `Desde ${page}` : null
 }
 
 /** Dónde se encontró el cliente de un correo. */
@@ -1198,6 +1209,17 @@ export async function clientByEmail(
   email: string,
   options: { members?: boolean; withoutAccount?: boolean } = {},
 ): Promise<{ clientId: string; matchedBy: ClientEmailMatch } | null> {
+  const found = await clientsOfEmail(tx, email, options)
+  const only = found?.ids.length === 1 ? found.ids[0] : undefined
+  return found && only ? { clientId: only, matchedBy: found.matchedBy } : null
+}
+
+/** Los clientes de un correo en el primer lugar que tiene a alguien, hasta dos (`clientByEmail`). */
+async function clientsOfEmail(
+  tx: Db,
+  email: string,
+  options: { members?: boolean; withoutAccount?: boolean },
+): Promise<{ ids: string[]; matchedBy: ClientEmailMatch } | null> {
   const address = email.trim().toLowerCase()
   if (!address) return null
   const noAccount = options.withoutAccount ? sql`and c.organization_id is null` : sql``
@@ -1225,8 +1247,7 @@ export async function clientByEmail(
     })
   for (const level of levels) {
     const found = [...(await tx.execute<{ id: string }>(level.query))]
-    if (found.length > 1) return null
-    if (found[0]) return { clientId: found[0].id, matchedBy: level.matchedBy }
+    if (found.length) return { ids: found.map((row) => row.id), matchedBy: level.matchedBy }
   }
   return null
 }
@@ -1251,9 +1272,16 @@ export async function clientForWaitlistRequest(
   // cliente (Kairós propone fusionarlos si es la misma; `ruleDuplicates`).
   const reused = (await clientByEmail(tx, email, { withoutAccount: true }))?.clientId
   if (reused) {
+    // Quien solo había dejado su correo en una guía (ADR 0216) tiene de nombre su correo y
+    // el país por defecto: su solicitud trae los de verdad. Solo ese cliente provisional, el
+    // que creó el aviso: los datos de otro no se cambian con solo conocer su correo.
+    const provisional = sql`lower(${saasClient.name}) = ${email.slice(0, 160)} and ${saasClient.origin} = 'web' and exists (
+      select 1 from ${saasWebContact} w where w.client_id = ${saasClient.id} and w.email = ${email})`
     await tx
       .update(saasClient)
       .set({
+        name: sql`case when ${provisional} then ${input.clinicName.trim().slice(0, 160)} else ${saasClient.name} end`,
+        countryCode: sql`case when ${provisional} then ${input.countryCode.trim().toUpperCase()} else ${saasClient.countryCode} end`,
         city: sql`coalesce(${saasClient.city}, ${input.city.trim().slice(0, 120) || null})`,
         professionals: sql`coalesce(${saasClient.professionals}, ${input.professionals})`,
         currentTool: sql`coalesce(${saasClient.currentTool}, ${input.currentTool})`,
@@ -1261,10 +1289,29 @@ export async function clientForWaitlistRequest(
       })
       .where(eq(saasClient.id, reused))
     const [known] = await tx
-      .select({ id: saasClientContact.id })
+      .select({ id: saasClientContact.id, name: saasClientContact.name, phone: saasClientContact.phone })
       .from(saasClientContact)
       .where(and(eq(saasClientContact.clientId, reused), eq(saasClientContact.email, email)))
       .limit(1)
+    // El contacto que dejó el aviso (sin nombre ni celular) toma los de la solicitud. El que
+    // cargó el equipo o llegó por un chat no se toca: quien envía la solicitud solo demostró
+    // conocer el correo, y su celular no debe reemplazar ni completar el de otra persona.
+    const fromGuide =
+      known && known.name === UNKNOWN_CONTACT_NAME && !known.phone
+        ? (
+            await tx
+              .select({ id: saasWebContact.id })
+              .from(saasWebContact)
+              .where(and(eq(saasWebContact.clientId, reused), eq(saasWebContact.email, email)))
+              .limit(1)
+          ).length > 0
+        : false
+    if (known && fromGuide) {
+      await tx
+        .update(saasClientContact)
+        .set({ name, ...(phone ? { phone } : {}), updatedAt: now })
+        .where(eq(saasClientContact.id, known.id))
+    }
     if (!known) {
       const [primary] = await tx
         .select({ id: saasClientContact.id })
@@ -1305,6 +1352,7 @@ export async function clientForWaitlistRequest(
       professionals,
       currentTool,
       origin: "web",
+      originDetail: originFromPage(input.sourcePage),
       createdAt: now,
       updatedAt: now,
     })
@@ -1324,6 +1372,56 @@ export async function clientForWaitlistRequest(
   })
   await openSaleIfNone(tx, client.id, null)
   return client.id
+}
+
+/**
+ * El cliente de quien dejó su correo en el aviso de una guía (ADR 0216): el que ya tiene
+ * ese correo, también si es de alguien del equipo de una clínica con cuenta, o uno nuevo, de
+ * nombre su correo, con su contacto y la guía de origen. Si el correo es de varios clientes,
+ * no elige (como `clientByEmail`): el aviso queda sin cliente. No abre una venta: dejar un
+ * correo no es pedir entrar, y la venta se abre si después manda la solicitud (que completa
+ * el nombre, el país y el celular). `hasAccount`: ese correo ya es de una clínica con cuenta.
+ */
+export async function clientForWebContact(
+  tx: Db,
+  input: { email: string; product: ClinicalProduct; sourcePage: string },
+  now = new Date(),
+): Promise<{ clientId: string | null; hasAccount: boolean }> {
+  const email = input.email.trim().toLowerCase()
+  const found = await clientsOfEmail(tx, email, { members: true })
+  if (found) {
+    const accounts = await tx
+      .select({ organizationId: saasClient.organizationId })
+      .from(saasClient)
+      .where(inArray(saasClient.id, found.ids))
+    return {
+      clientId: found.ids.length === 1 ? (found.ids[0] ?? null) : null,
+      hasAccount: accounts.some((row) => row.organizationId !== null),
+    }
+  }
+  const [client] = await tx
+    .insert(saasClient)
+    .values({
+      name: email.slice(0, 160),
+      product: input.product,
+      origin: "web",
+      originDetail: originFromPage(input.sourcePage),
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: saasClient.id })
+  if (!client) throw new ServiceError("INTERNAL", 500, "No se pudo guardar el contacto")
+  await tx.insert(saasClientContact).values({
+    clientId: client.id,
+    name: UNKNOWN_CONTACT_NAME,
+    email,
+    roles: [],
+    rolesConfirmed: false,
+    isPrimary: true,
+    createdAt: now,
+    updatedAt: now,
+  })
+  return { clientId: client.id, hasAccount: false }
 }
 
 /**
@@ -2302,6 +2400,8 @@ export async function mergeClients(
       .where(eq(saasWaitlistRequest.clientId, dropId))
       .returning({ id: saasWaitlistRequest.id }),
   )
+  // El correo que dejó en una guía sigue en el historial del que queda (ADR 0216).
+  await tx.update(saasWebContact).set({ clientId: keepId }).where(eq(saasWebContact.clientId, dropId))
   await tx
     .update(saasClient)
     .set({ referredByClientId: keepId })
@@ -3123,6 +3223,30 @@ export async function clientTimeline(
       adminOnly: false,
       link: tab("resumen"),
     })
+  }
+
+  // El correo que dejó en el aviso de una guía (ADR 0216), y si le llegaron las plantillas.
+  if (wants("venta")) {
+    const contacts = await tx
+      .select()
+      .from(saasWebContact)
+      .where(eq(saasWebContact.clientId, clientId))
+    for (const contact of contacts) {
+      push({
+        id: `aviso:${contact.id}`,
+        at: contact.createdAt,
+        who: { kind: "clinica", name: contact.email },
+        category: "venta",
+        icon: "solicitud",
+        title: "Dejó su correo en una guía de la web",
+        detail: [
+          `Desde ${contact.sourcePage}`,
+          contact.sentAt ? "le enviamos las plantillas" : "sin confirmar que salió el correo con las plantillas",
+        ].join(" · "),
+        adminOnly: false,
+        link: tab("resumen"),
+      })
+    }
   }
 
   // La solicitud de la web (o la que creó el equipo para invitarla).

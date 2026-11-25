@@ -10,6 +10,7 @@ import { signatureFaq } from "../../lib/signature-faq"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
+import TopicGuides from "../guides/TopicGuides.astro"
 import ChartPreview from "./ChartPreview"
 
 const page = PAGES.historia
@@ -125,6 +126,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <div class="faqwrap">
     <Faq items={faq} />
   </div>
+  <TopicGuides slugs={["como-llenar-un-odontograma", "odontograma-en-ninos"]} />
   <CtaBand title="Tu historia clínica, en orden desde hoy." />
 </Base>
 

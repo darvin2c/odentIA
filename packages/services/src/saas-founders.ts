@@ -28,6 +28,7 @@ import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { orgProduct } from "./locale.js"
+import { guideSheetsFor } from "./products.js"
 import { limaDate } from "./peru-business-days.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 
@@ -48,7 +49,7 @@ export const FOUNDER_INVITATION_DAYS = 14
 
 export type { SaasSignupMode, SaasWaitlistStatus }
 export { SAAS_WAITLIST_PROFESSIONALS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
-export { founderInvitationEmail, moneyText, newClientNoticeEmail, waitlistReceivedEmail } from "./saas-emails.js"
+export { founderInvitationEmail, moneyText, newClientNoticeEmail, waitlistReceivedEmail, webContactEmail } from "./saas-emails.js"
 
 /* ---------- Cómo se abren clínicas ---------- */
 
@@ -111,6 +112,19 @@ export async function setSignupMode(
 }
 
 /* ---------- Solicitudes de la web ---------- */
+
+/** Una página de la web, como se guarda (ADR 0216): «/guias/como-llenar-un-odontograma». */
+const WEB_PAGE = /^\/[a-z0-9-]+(\/[a-z0-9-]+)*$/
+
+/**
+ * La página desde la que se envió algo, comprobada: una ruta de la web y nada más (nunca
+ * un título que mande el navegador). Lo que no lo es se deja fuera, sin rechazar el envío.
+ */
+export function webPageOf(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const page = value.trim()
+  return page.length <= 160 && WEB_PAGE.test(page) ? page : null
+}
 
 const text = (min: number, max: number, what: string) =>
   z
@@ -176,6 +190,7 @@ export async function submitWaitlistRequest(
   tx: Db,
   input: WaitlistInput,
   product: ClinicalProduct = "dental",
+  options: { sourcePage?: string | null } = {},
 ): Promise<WaitlistSubmitResult> {
   const parsed = waitlistInputSchemaFor(product).safeParse(input)
   if (!parsed.success) throw validation(parsed.error.issues[0]?.message ?? "Revisa los datos de la solicitud")
@@ -187,10 +202,13 @@ export async function submitWaitlistRequest(
     .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
     .limit(1)
   if (alive) return { id: alive.id, clientId: alive.clientId, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
-  const clientId = await clientForWaitlistRequest(tx, { ...data, product })
+  // Solo una guía que existe: la administración la muestra como enlace (ADR 0216).
+  const page = webPageOf(options.sourcePage)
+  const sourcePage = page && guideSheetsFor(product)?.pages.includes(page) ? page : null
+  const clientId = await clientForWaitlistRequest(tx, { ...data, product, sourcePage })
   const [row] = await tx
     .insert(saasWaitlistRequest)
-    .values({ ...data, product, clientId, source: "web" })
+    .values({ ...data, product, clientId, source: "web", sourcePage })
     .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
   return { id: row.id, clientId, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
@@ -352,6 +370,8 @@ export interface WaitlistRow {
   currentTool: string
   /** odentIA o latidIA: la clínica nace con él y la invitación abre su panel. */
   product: ClinicalProduct
+  /** La página de la web desde la que se envió, si no fue la de la solicitud: «Llegó desde». */
+  sourcePage: string | null
   status: SaasWaitlistStatus
   /** La etapa, calculada al leer (`waitlistStage`). */
   stage: WaitlistStage
@@ -567,6 +587,7 @@ function toWaitlistRow(
     professionals: row.professionals,
     currentTool: row.currentTool,
     product: isClinicalProduct(row.product) ? row.product : "dental",
+    sourcePage: row.sourcePage,
     status: row.status as SaasWaitlistStatus,
     stage: waitlistStage(row, found.paid, now),
     discardReason: row.discardReason,

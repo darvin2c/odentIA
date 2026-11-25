@@ -11,6 +11,7 @@ import {
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { errorBody } from "../lib/error.js"
+import { rateKeyOf } from "../lib/rate-key.js"
 import { validationError } from "./helpers.js"
 import type { RegistrationRemoteAddress } from "./public-patient-registration.js"
 
@@ -80,7 +81,7 @@ export function createPublicConsumerComplaintsRoute(deps: {
   app.post("/", async (c) => {
     const now = Date.now()
     for (const [key, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(key)
-    const key = address(c) ?? "shared"
+    const key = rateKeyOf(address(c))
     let bucket = buckets.get(key)
     if (!bucket) {
       if (buckets.size >= MAX_BUCKETS) {
