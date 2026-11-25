@@ -34,8 +34,8 @@ afterEach(() => vi.unstubAllGlobals())
 describe("los videos de una guía", () => {
   it("lee la lista del más reciente al más viejo, sin los que no son un video", () => {
     expect(parseFeed(FEED)).toEqual([
-      { youtubeId: "bbbbbbbbbbb", title: "El odontograma de niños", published: "2026-11-20", description: undefined },
-      { youtubeId: "aaaaaaaaaaa", title: "Cómo llenar el odontograma & sus colores", published: "2026-11-10", description: "Paso a paso." },
+      { youtubeId: "bbbbbbbbbbb", title: "El odontograma de niños", published: "2026-11-20T08:00:00+00:00", description: undefined },
+      { youtubeId: "aaaaaaaaaaa", title: "Cómo llenar el odontograma & sus colores", published: "2026-11-10T08:00:00+00:00", description: "Paso a paso." },
     ])
   })
 
@@ -44,9 +44,13 @@ describe("los videos de una guía", () => {
     const videos = await guideVideos(guide({ playlist: "PLaaaaaaaaaaaaaaaa", video: FIXED }))
     expect(videos.map((video) => video.youtubeId)).toEqual(["bbbbbbbbbbb", "aaaaaaaaaaa"])
 
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })))
+    const failing = vi.fn(async () => new Response("", { status: 500 }))
+    vi.stubGlobal("fetch", failing)
     vi.spyOn(console, "error").mockImplementation(() => {})
     expect(await guideVideos(guide({ playlist: "PLbbbbbbbbbbbbbbbb", video: FIXED }))).toEqual([FIXED])
+    // La falla se recuerda: la visita siguiente no espera otra vez a YouTube.
+    expect(await guideVideos(guide({ playlist: "PLbbbbbbbbbbbbbbbb", video: FIXED }))).toEqual([FIXED])
+    expect(failing).toHaveBeenCalledTimes(1)
   })
 
   it("sin lista no va a YouTube, y una lista que no es de YouTube no se lee", async () => {
@@ -65,7 +69,7 @@ describe("los videos de una guía", () => {
       name: "El fijo",
       description: "La guía.",
       uploadDate: "2026-11-01",
-      thumbnailUrl: ["https://i.ytimg.com/vi/ccccccccccc/hqdefault.jpg"],
+      thumbnailUrl: ["https://i.ytimg.com/vi/ccccccccccc/sddefault.jpg"],
       embedUrl: "https://www.youtube-nocookie.com/embed/ccccccccccc",
     })
   })

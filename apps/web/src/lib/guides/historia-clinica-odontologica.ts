@@ -10,7 +10,7 @@ export const guide: Guide = {
   accent: "parte por parte.",
   name: "Cómo llenar una historia clínica odontológica",
   menu: "Historia clínica",
-  seoTitle: "Historia clínica odontológica: cómo llenarla, con formato en PDF",
+  seoTitle: "Historia clínica odontológica: formato PDF y cómo llenarla",
   description:
     "Cómo llenar una historia clínica odontológica: datos, motivo, antecedentes, examen, odontograma, diagnóstico y evolución. Formato en PDF gratis.",
   lead: "Qué va en cada parte, en el orden en que atiendes: de los datos del paciente a la evolución de cada visita. Con el formato en blanco en PDF.",
@@ -19,11 +19,11 @@ export const guide: Guide = {
   video: {
     youtubeId: "ngFPnBO64ZE",
     title: "La primera atención de un paciente en odentIA: anamnesis, consulta, cobro y presupuesto",
-    published: "2026-11-21",
+    published: "2026-11-21T06:35:18+00:00",
   },
   short: [
     "Arriba, quién es: sus datos y, si es menor, quién lo acompaña. Un número de historia por paciente, para siempre.",
-    "Después, por qué vino con sus palabras, sus antecedentes marcados con Sí o No, el examen y el odontograma.",
+    "Después, por qué vino con sus palabras, sus antecedentes marcados uno por uno, el examen y el odontograma.",
     "Cierra con el diagnóstico, el plan y una línea de evolución por cada visita, con su firma.",
   ],
   steps: [
@@ -53,7 +53,7 @@ export const guide: Guide = {
     {
       title: "Sus antecedentes, todos con Sí o No",
       text: [
-        "Pregunta uno por uno y marca **Sí o No** en cada uno: un casillero vacío no dice si lo preguntaste. Lo que sea Sí lleva su detalle (qué medicamento, a qué es alérgico).",
+        "Pregunta uno por uno y marca **Sí, No o No sabe** en cada uno: un casillero vacío no dice si lo preguntaste. Lo que sea Sí lleva su detalle (qué medicamento, a qué es alérgico).",
       ],
       figure: {
         kind: "tabla",
@@ -62,7 +62,9 @@ export const guide: Guide = {
           ["¿Alergias? (anestesia, penicilina, látex)", "Cambia lo que le pones o le recetas"],
           ["¿Toma medicamentos? (anticoagulantes, para los huesos)", "Pueden hacerlo sangrar más o cambiar una extracción"],
           ["¿Diabetes, presión alta, algo del corazón?", "Cambian la anestesia y cómo cicatriza"],
-          ["¿Está embarazada?", "Cambia las radiografías y los medicamentos"],
+          ["¿Algo del riñón o del hígado, gastritis o úlcera?", "Cambian los analgésicos y antibióticos que le recetas"],
+          ["¿Defensas bajas, tuberculosis o VIH?", "Cambian los cuidados y cómo cicatriza"],
+          ["¿Está embarazada o dando de lactar?", "Cambian los medicamentos; la radiografía se toma con protección y solo si hace falta"],
           ["¿Sangra mucho cuando se corta?", "Te prepara antes de una extracción"],
         ],
         caption: "Lo que cambia el plan se repasa antes de cada anestesia, no solo el primer día.",
@@ -71,7 +73,7 @@ export const guide: Guide = {
     {
       title: "El examen y el odontograma",
       text: [
-        "Anota los **signos vitales** que tomes (presión y pulso, como mínimo antes de una anestesia) y el **examen**: lo que ves fuera de la boca (cara, ganglios, articulación) y dentro (encía, lengua, mucosas, higiene).",
+        "Anota los **signos vitales** que tomes (presión y pulso, como mínimo antes de una anestesia) y el **examen**: lo que ves fuera de la boca (cara, ganglios, articulación) y dentro (encía, lengua, mucosas, higiene). También las **pruebas** que sostienen el diagnóstico: la radiografía y lo que viste en ella, y la prueba de frío o la percusión de la pieza.",
         "El estado de cada pieza va en el **odontograma**: cómo se llena, paso a paso, está en la [guía del odontograma](/guias/como-llenar-un-odontograma) (y en la de [niños](/guias/odontograma-en-ninos)).",
       ],
     },
@@ -91,8 +93,8 @@ export const guide: Guide = {
         kind: "tabla",
         head: ["Fecha", "Lo que se hizo", "Firma"],
         rows: [
-          ["03/11", "36: resina de dos caras (MO), con lidocaína al 2 %, un cartucho. Sin molestias. Vuelve en 6 meses al control.", "Dra. Paredes"],
-          ["10/11", "Corrige la línea del 03/11: la resina fue en el 46, no en el 36.", "Dra. Paredes"],
+          ["03/11", "15: resina de una cara (O), con lidocaína al 2 % con epinefrina, infiltrativa, un cartucho. Sin molestias. Vuelve en 6 meses al control.", "Dra. Paredes"],
+          ["10/11", "Corrige la línea del 03/11: la resina fue en el 14, no en el 15.", "Dra. Paredes"],
         ],
       },
     },
@@ -102,7 +104,7 @@ export const guide: Guide = {
     demo: "historia",
     title: "En odentIA, la historia se llena mientras atiendes.",
     text: "Dictas y Clío lo ordena en su lugar: el motivo, los hallazgos de cada pieza y lo que hiciste. El paciente puede dejar sus datos y su salud desde su enlace antes de llegar, y sus alergias te avisan antes de la anestesia.",
-    note: "El odontograma de la historia: toca una pieza para ver lo que tiene.",
+    note: "Aquí puedes tocar el odontograma de su historia: elige una pieza y mira lo que tiene, en el arco y de frente.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [

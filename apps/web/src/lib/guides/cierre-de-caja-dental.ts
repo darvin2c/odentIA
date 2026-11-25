@@ -1,23 +1,23 @@
 // «Cómo hacer el cierre de caja en una clínica dental». Las cuentas son las del cierre de la app
 // («Cerrar caja» y la hoja «CIERRE DE CAJA», como en `components/billing/CloseSheet.tsx`): debe haber
 // = lo que quedó + los cobros en efectivo − los gastos pagados con la caja. Los otros medios no se
-// cuentan: se comparan con su reporte. Montos de ejemplo, en soles.
+// cuentan: se comparan con su reporte. Montos de ejemplo, en soles. Sin video hasta que haya uno del
+// cierre: el de registrar un cobro no enseña a cerrar.
 import type { Guide } from "./types"
 
 export const guide: Guide = {
   slug: "cierre-de-caja-dental",
   topic: "Caja",
   title: "Cómo hacer el cierre de caja en tu clínica dental,",
-  accent: "sin que falte un sol.",
+  accent: "sin que falte nada.",
   name: "Cómo hacer el cierre de caja en una clínica dental",
   menu: "Cierre de caja",
-  seoTitle: "Cierre de caja en una clínica dental: cómo hacerlo, con formato en PDF",
+  seoTitle: "Cierre y arqueo de caja dental: formato PDF y cómo hacerlo",
   description:
     "Cómo hacer el cierre de caja de una clínica dental: lo que debe haber, el arqueo del efectivo, la diferencia y lo que se entrega. Formato en PDF gratis.",
   lead: "Cuánto debe haber, cómo contar el efectivo y qué hacer si no cuadra, para entregar la caja con su hoja firmada. Con el formato en blanco en PDF.",
   updated: "2026-11-25",
   published: "2026-11-25",
-  video: { youtubeId: "7djjtoueozk", title: "Cómo registrar un cobro en odentIA (paso a paso)", published: "2026-11-13" },
   short: [
     "Debe haber lo que quedó del cierre anterior, más los cobros en efectivo, menos los gastos que pagaste con la caja.",
     "Cuenta el efectivo, billete por billete, y anota la diferencia: no la tapes. Tarjeta y transferencias no se cuentan: se comparan con su reporte.",
@@ -39,10 +39,12 @@ export const guide: Guide = {
     },
     {
       title: "Cuánto debe haber",
-      text: ["Solo cuenta el efectivo:"],
+      text: [
+        "Solo cuenta el efectivo. Si en el día pusiste efectivo en la caja (más sencillo), sacaste (para el banco) o devolviste a un paciente, súmalo o réstalo: la plantilla trae un renglón para cada uno.",
+      ],
       figure: {
         kind: "tabla",
-        head: ["", "Ejemplo"],
+        head: ["Cuenta", "Ejemplo"],
         rows: [
           ["Quedó del cierre anterior", "S/ 50,00"],
           ["Más los cobros en efectivo", "S/ 220,00"],
@@ -70,7 +72,7 @@ export const guide: Guide = {
     {
       title: "Tarjeta y transferencias: se comparan, no se cuentan",
       text: [
-        "Lo cobrado con tarjeta se compara con el **reporte del POS**; las transferencias y billeteras, con lo que llegó a la cuenta. Si un cobro no aparece, se revisa ese día, no a fin de mes.",
+        "Lo cobrado con tarjeta se compara con el **reporte del POS** (la máquina de la tarjeta); las transferencias y billeteras, con lo que llegó a la cuenta. Si un cobro no aparece, se revisa ese día, no a fin de mes.",
       ],
     },
     {

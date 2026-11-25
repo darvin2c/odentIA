@@ -21,7 +21,7 @@ export type GuideSheet =
 export interface GuideVideo {
   youtubeId: string
   title: string
-  /** Cuándo se publicó (AAAA-MM-DD): Google lo pide para mostrar el video. */
+  /** Cuándo se publicó, con su hora y zona (ISO 8601, como lo da YouTube): Google lo pide para mostrar el video. */
   published: string
   /** Su primera línea en YouTube, para Google; sin ella, la descripción de la guía. */
   description?: string

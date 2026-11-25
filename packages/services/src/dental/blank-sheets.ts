@@ -453,7 +453,7 @@ function questions(kit: DocumentKit, rows: Array<[string, string]>): void {
 
 /** Las preguntas de salud del registro de la app (`registration-questionnaire.tsx`), dichas a quien responde. */
 const HEALTH_QUESTIONS: Array<[string, string]> = [
-  ["¿Tiene alergia a algún medicamento o material?", "¿A qué? ¿Qué le pasó?"],
+  ["¿Tiene alergia a algún medicamento o material, como la anestesia, la penicilina o el látex?", "¿A qué? ¿Qué le pasó?"],
   [
     "¿Tiene una válvula del corazón operada, nació con un problema del corazón o tuvo una infección en el corazón (endocarditis)?",
     "",
@@ -474,12 +474,59 @@ const PERSONAL_QUESTIONS: Array<[string, string]> = [
   ["¿Le han hecho una transfusión de sangre?", "¿Cuándo?"],
   ["¿Fuma?", "¿Cuántos cigarrillos al día?"],
   ["¿Toma alcohol?", "¿De vez en cuando o con frecuencia?"],
-  ["¿Usa hilo dental?", ""],
-  ["¿Aprieta o rechina los dientes, por ejemplo al dormir?", ""],
 ]
 
-/** Los hábitos que pregunta la app, en palabras del paciente. */
-const HABITS = ["Morderse las uñas", "Morder lápices u objetos", "Respirar por la boca", "Chuparse el dedo"]
+/**
+ * Las enfermedades que se marcan: las de la lista de la app (`DECLARED_CONDITION_OPTIONS`), con sus
+ * palabras, y las que una historia en papel también pregunta porque cambian la atención (los
+ * riñones y el hígado en los medicamentos, la úlcera en los antiinflamatorios, las defensas
+ * bajas, la tuberculosis y el VIH en el cuidado y en la cicatrización).
+ */
+const DISEASES = [
+  ...DECLARED_CONDITION_OPTIONS,
+  "Enfermedad de los riñones",
+  "Enfermedad del hígado",
+  "Gastritis o úlcera",
+  "Defensas bajas",
+  "Tuberculosis",
+  "VIH",
+]
+
+/** Lo de su boca que pregunta la app (`antecedentesOdontologicos`): el hilo, el bruxismo y sus hábitos. */
+const MOUTH_HABITS = [
+  "¿Usa hilo dental?",
+  "¿Aprieta o rechina los dientes?",
+  "¿Se muerde las uñas?",
+  "¿Muerde lápices u objetos?",
+  "¿Respira por la boca?",
+  "¿Se chupa el dedo?",
+]
+
+/**
+ * Cada cosa con su «Sí» y su «No», de dos en dos por fila: lo que no se marcó queda sin
+ * responder, no se lee como un «No».
+ */
+function yesNoPairs(kit: DocumentKit, title: string, items: readonly string[]): void {
+  const box: Cell = [{ checkbox: true, size: 11 }]
+  const rows: Cell[][] = []
+  for (let index = 0; index < items.length; index += 2) {
+    const second = items[index + 1]
+    rows.push([items[index] ?? EMPTY, box, box, second ?? EMPTY, second ? box : EMPTY, second ? box : EMPTY])
+  }
+  kit.table({
+    columns: [
+      { label: title, pad: 8 },
+      { label: "Sí", width: 26, align: "center" },
+      { label: "No", width: 44, align: "center", pad: 18 },
+      { label: title, pad: 8 },
+      { label: "Sí", width: 26, align: "center" },
+      { label: "No", width: 26, align: "center" },
+    ],
+    rows,
+    rowPad: 2,
+    size: SIZE.label,
+  })
+}
 
 /** Las fases del plan en el orden en que se atiende, como las nombra la app. */
 const PHASE_WORDS = Object.values(TREATMENT_PHASE_LABELS)
@@ -526,23 +573,25 @@ async function blankHistory(): Promise<Uint8Array> {
   kit.blankLines([[{ label: "Tiempo de enfermedad" }, { label: "¿Le duele ahora? De 0 a 10" }]])
   ruledBoxes(kit, ["Relato de la enfermedad: cómo empezó y siguió, qué lo alivia o empeora y qué tomó"], 3)
 
-  section(kit, "Antecedentes odontológicos", 24 + 40)
+  // Entra entero bajo el relato, en la primera hoja.
+  section(kit, "Antecedentes odontológicos", 24 + 40 + 3 * 17 + 16, 6)
   kit.blankLines([[{ label: "Última visita al dentista", span: 2 }, { label: "Cepillados al día" }]])
   kit.choiceRow("¿Cómo le fue esa vez?", ["Positiva", "Regular", "Traumática"])
   kit.choiceRow("Ansiedad dental", ["Ninguna", "Leve", "Moderada", "Alta"])
+  yesNoPairs(kit, "Su boca y sus hábitos", MOUTH_HABITS)
 
   // Lo de su salud empieza en una hoja nueva: sus dos tablas van juntas.
   kit.newPage()
   kit.subheading("ANTECEDENTES: SU SALUD", { size: SIZE.label, before: 2, after: 3 })
   questions(kit, HEALTH_QUESTIONS)
   kit.gap(6)
-  kit.choiceRow("Enfermedades", [...DECLARED_CONDITION_OPTIONS])
+  kit.gap(4)
+  yesNoPairs(kit, "Enfermedad", DISEASES)
   kit.blankLines([[{ label: "Otra enfermedad", span: 3 }, { label: "Grupo sanguíneo" }]])
 
-  section(kit, "Antecedentes personales y hábitos", 10 * 24)
+  section(kit, "Antecedentes personales y hábitos", 7 * 19 + 40)
   questions(kit, PERSONAL_QUESTIONS)
-  kit.gap(6)
-  kit.choiceRow("Hábitos", HABITS)
+  kit.gap(4)
   kit.blankLines([[{ label: "Antecedentes familiares" }]])
 
   section(kit, "Signos vitales", 3 * 24)
@@ -569,7 +618,9 @@ async function blankHistory(): Promise<Uint8Array> {
 
   // El diagnóstico, el plan y la evolución, juntos en la última hoja.
   kit.newPage()
-  kit.subheading("DIAGNÓSTICO", { size: SIZE.label, before: 2, after: 3 })
+  kit.subheading("EXÁMENES AUXILIARES", { size: SIZE.label, before: 2, after: 0 })
+  ruledBoxes(kit, ["Radiografías y pruebas (frío, percusión)"], 3)
+  section(kit, "Diagnóstico", 5 * 22)
   const box: Cell = [{ checkbox: true, size: 11 }]
   kit.table({
     columns: [
@@ -579,7 +630,7 @@ async function blankHistory(): Promise<Uint8Array> {
       { label: DIAGNOSIS_VERIFICATION_LABELS.provisional, width: 62, align: "center" },
       { label: DIAGNOSIS_VERIFICATION_LABELS.confirmed, width: 62, align: "center" },
     ],
-    rows: Array.from({ length: 5 }, () => [EMPTY, EMPTY, EMPTY, box, box]),
+    rows: Array.from({ length: 4 }, () => [EMPTY, EMPTY, EMPTY, box, box]),
     rowPad: 4,
     size: SIZE.dense,
   })
@@ -593,13 +644,13 @@ async function blankHistory(): Promise<Uint8Array> {
       { label: "Fase", width: 100 },
       { label: "Sesiones", width: 54, align: "center" },
     ],
-    rows: Array.from({ length: 8 }, () => blankRow(4)),
+    rows: Array.from({ length: 6 }, () => blankRow(4)),
     rowPad: 4,
     size: SIZE.dense,
   })
 
   section(kit, "Evolución", 4 * 22)
-  hint(kit, "Cada atención: lo que se hizo, en qué diente, y lo que sigue. Firma quien atendió.")
+  hint(kit, "Cada atención: lo que se hizo, en qué diente, y lo que sigue. Firma quien atendió. Si se acaba, sigue en una hoja aparte.")
   // Los renglones que caben hasta la firma de la historia: la hoja se llena, sin pasar a otra.
   const signature = 24 + 14
   const rowHeight = SIZE.dense * 1.45 + 8 + 0.4
@@ -633,8 +684,10 @@ async function blankConsent(): Promise<Uint8Array> {
   kit.titleWithDetails("Consentimiento informado", [], SIZE.titleBudget)
   kit.gap(6)
   kit.blankLines([
-    [{ label: "Tratamiento", span: 3 }, { label: "Fecha" }],
+    // La pieza escrita evita tratar la que no es.
+    [{ label: "Tratamiento", span: 3 }, { label: "Pieza(s)" }, { label: "Fecha" }],
     [{ label: "Paciente", span: 2 }, { label: "Documento" }, { label: "Historia clínica" }],
+    [{ label: "Representante, si es menor", span: 4 }, { label: "Documento", span: 2 }, { label: "Parentesco", span: 2 }],
   ])
   ruledBoxes(kit, [CONSENT_SECTION_LABELS.procedure], 2)
   kit.gap(6)
@@ -642,13 +695,13 @@ async function blankConsent(): Promise<Uint8Array> {
   ruledBoxes(kit, [CONSENT_SECTION_LABELS.benefits, CONSENT_SECTION_LABELS.risks], 4)
   ruledBoxes(kit, [CONSENT_PERSONAL_RISKS_LABEL, CONSENT_SECTION_LABELS.alternatives], 3)
   ruledBoxes(kit, [CONSENT_SECTION_LABELS.consequences, CONSENT_SECTION_LABELS.notes], 3)
-  kit.gap(8)
+  kit.gap(6)
   const signatures = [
     {
       heading: "Paciente o representante legal",
       strokes: null,
-      // Lo que la app dice en la hoja de un menor: «Firma su representante legal».
-      lines: [{ text: "Nombre, documento y fecha" }, { text: "Si es menor de edad, firma su representante legal" }],
+      // De un menor firma su representante legal, como dice la hoja de la app: su nombre va arriba.
+      lines: [{ text: "Nombre, documento y fecha" }],
     },
     { heading: "Huella digital", strokes: null, lines: [{ text: "Si no sabe firmar" }], width: 84 },
     {
@@ -657,7 +710,7 @@ async function blankConsent(): Promise<Uint8Array> {
       lines: [{ text: "Nombre y colegiatura" }, { text: "Fecha y hora" }],
     },
   ]
-  const boxHeight = 56
+  const boxHeight = 50
   // La declaración pasa de hoja con las firmas: una firma sola no dice qué se firmó.
   const declaration = { title: "Declaración", body: CONSENT_DECLARATION, size: SIZE.read }
   kit.ensure(kit.panelHeight(declaration) + 16 + kit.penSignaturesHeight(signatures, { boxHeight }))
@@ -829,7 +882,12 @@ async function blankCashClose(): Promise<Uint8Array> {
         rows: [["Tarjeta", ""], ["Transferencia", ""], ["Billetera digital", ""], ["Otro:", ""]],
       },
       {
-        columns: [{ label: "Gastos pagados con la caja" }, { label: "Importe", width: 78, align: "right" }],
+        columns: [
+          // «Gastos pagados con la caja» no cabe en una línea junto al comprobante.
+          { label: "Gastos con la caja" },
+          { label: "Comprobante", width: 72 },
+          { label: "Importe", width: 64, align: "right" },
+        ],
         rows: [[""], [""], [""], [""]],
       },
     ],
@@ -900,14 +958,15 @@ export function blankSheetBytes(sheet: BlankSheet): Promise<Uint8Array> {
 /**
  * Lo que el correo cuenta de la app según la plantilla, solo lo que la app hace: Clío ordena
  * lo conversado o dictado (`help-guide/clinica.ts`), el consentimiento se firma en la clínica,
- * por enlace o en papel (`consent-pdf.ts`) y el cierre calcula lo que debe haber y la
+ * en papel o por enlace, y el del enlace espera la confirmación del profesional
+ * (`CONSENT_SIGNATURE_NOTES.enlace`, `consent-pdf.ts`), y el cierre calcula lo que debe haber y la
  * diferencia (`cash-close-drawer.tsx`).
  */
 const SHEET_PITCH = {
   "historia-clinica":
     "En odentIA, la historia se llena mientras atiendes: conversas con el paciente o dictas, y Clío deja cada cosa en su lugar (el motivo, el relato, su salud y el examen) para que tú lo confirmes.",
   consentimiento:
-    "En odentIA, el consentimiento sale de la plantilla del tratamiento con los riesgos propios de su caso, y el paciente lo firma en la tablet, desde su celular o en papel: queda en su historia con la fecha y la hora.",
+    "En odentIA, los tratamientos que más lo piden traen su consentimiento sugerido, y le sumas los riesgos propios de su caso. El paciente lo firma en la tablet o en papel y queda en su historia con la fecha y la hora; si lo firma desde su celular, queda pendiente hasta que el profesional lo confirma con él.",
   "cierre-de-caja":
     "En odentIA, la caja suma sola lo que debe haber: cuentas el efectivo, te dice si cuadra, sobra o falta, y la hoja de cierre sale lista para firmar.",
 } as const satisfies Partial<Record<BlankSheet, string>>

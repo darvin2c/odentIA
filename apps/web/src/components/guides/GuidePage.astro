@@ -106,8 +106,8 @@ const startTitle = START_TITLES[guide.topic]
       {video ? (
         <div class="gh-video rise d2">
           {/* La imagen del video: YouTube carga recién al tocarla, aquí mismo. Sin JavaScript, abre YouTube. */}
-          <a class="gh-play" href={watchUrl(video.youtubeId)} target="_blank" rel="noopener" data-embed={embedUrl(video.youtubeId)} aria-label={`Ver el video: ${video.title}`}>
-            <img src={thumbUrl(video.youtubeId)} alt="" width="480" height="360" loading="lazy" decoding="async" />
+          <a class="gh-play" href={watchUrl(video.youtubeId)} target="_blank" rel="noopener" data-embed={embedUrl(video.youtubeId)} data-title={video.title} aria-label={`Ver el video: ${video.title}`}>
+            <img src={thumbUrl(video.youtubeId)} alt="" width="640" height="480" fetchpriority="high" decoding="async" />
             <span class="gh-badge" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z" /></svg></span>
           </a>
           {/* El título va debajo: la miniatura ya trae su propio texto. */}
@@ -232,9 +232,8 @@ const startTitle = START_TITLES[guide.topic]
         event.preventDefault()
         const frame = document.createElement("iframe")
         frame.src = `${link.dataset.embed}?autoplay=1&rel=0`
-        frame.title = link.getAttribute("aria-label") ?? "Video"
+        frame.title = link.dataset.title ?? "Video"
         frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen"
-        frame.allowFullscreen = true
         frame.className = "gh-frame"
         link.replaceWith(frame)
         frame.focus()
@@ -260,7 +259,7 @@ const startTitle = START_TITLES[guide.topic]
   .gh-play { position: relative; display: block; border-radius: 22px; overflow: hidden; background: #000; color: #fff; text-decoration: none; aspect-ratio: 16 / 9; }
   .gh-play img { width: 100%; height: 100%; object-fit: cover; }
   /* El botón en la esquina: la miniatura trae su título en el centro y no se tapa. */
-  .gh-badge { position: absolute; right: 14px; bottom: 14px; width: 56px; height: 56px; border-radius: 999px; background: var(--teal); display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); transition: transform .15s ease; }
+  .gh-badge { position: absolute; right: 12px; bottom: 12px; width: 48px; height: 48px; border-radius: 999px; background: var(--teal); display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); transition: transform .15s ease; }
   .gh-play:hover .gh-badge, .gh-play:focus-visible .gh-badge { transform: scale(1.08); }
   @media (prefers-reduced-motion: reduce) { .gh-badge { transition: none; } }
   .gh-vt { margin: 14px 4px 0; font-weight: 700; font-size: 16px; line-height: 1.4; color: #fff; }

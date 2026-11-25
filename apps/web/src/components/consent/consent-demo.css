@@ -21,6 +21,11 @@
 .cd-save { min-height: 48px; border: 0; border-radius: 12px; background: var(--teal); color: #fff; font: 700 15px var(--font); cursor: pointer; }
 .cd-save:disabled { background: #cbd5e1; color: #475569; cursor: default; }
 .cd-save:focus-visible, .cd-clear:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.cd-pro { display: flex; flex-direction: column; gap: 10px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.cd-pro span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--muted); }
+.cd-pro b { color: var(--ink); font-size: 15px; }
+.cd-again { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); font: 600 14px var(--font); cursor: pointer; }
+.cd-again:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .cd-status { margin: 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
 .cd-status.ok { color: #166534; font-weight: 600; }
 

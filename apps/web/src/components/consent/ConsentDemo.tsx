@@ -1,16 +1,20 @@
 // La firma del consentimiento en la tablet (guía del consentimiento, «Pruébalo aquí»), con las palabras
 // de la app (`consent-signing.tsx` y `@odentia/clinical/consent`): la hoja con sus secciones, «Entendí
-// lo que me explicaron y acepto» y «Firma aquí con el dedo». Se firma de verdad con el dedo o el ratón;
-// con el teclado, Enter en el recuadro pone una firma de ejemplo. No guarda nada: es un ejemplo.
+// lo que me explicaron y acepto» y «Firma aquí con el dedo». Como en la app, son dos pasos: firma el
+// paciente («Listo») y después confirma el profesional que informó, con su perfil. Se firma de verdad
+// con el dedo o el ratón; con el teclado, Enter en el recuadro pone una firma de ejemplo. No guarda nada.
 import { useEffect, useRef, useState } from "react"
 import "./consent-demo.css"
 
 const SECTIONS: Array<[string, string]> = [
   ["Procedimiento propuesto", "Extracción del 38 (tercera molar de abajo, a la izquierda), con anestesia local."],
-  ["Diagnóstico que lo motiva", "Tercera molar impactada, con dolor e inflamación a repetición."],
-  ["Riesgos y molestias", "Dolor e hinchazón unos días, sangrado leve, alveolitis; rara vez, adormecimiento del labio que suele pasar solo."],
+  ["Diagnóstico que lo motiva", "Tercera molar que salió a medias; la encía de encima se inflama a repetición."],
+  ["Beneficios esperados", "Que no vuelva el dolor ni la inflamación."],
+  ["Riesgos y molestias", "Dolor e hinchazón unos días, boca que abre poco, sangrado leve, alveolitis, daño a la muela de al lado; rara vez, labio o lengua adormecidos unas semanas, y muy rara vez para siempre."],
+  ["Riesgos propios de su caso", "Toma un anticoagulante: puede sangrar más."],
   ["Alternativas", "Controlarla y tratar cada inflamación, sabiendo que puede volver."],
   ["Consecuencias de no tratarse", "Más inflamaciones, caries de la muela de al lado o infección."],
+  ["Información adicional", "Los cuidados de después y a quién llamar si algo no va bien."],
 ]
 
 const DECLARATION =
@@ -24,7 +28,8 @@ export default function ConsentDemo() {
   const drawing = useRef(false)
   const [understood, setUnderstood] = useState(false)
   const [signed, setSigned] = useState(false)
-  const [saved, setSaved] = useState(false)
+  /** «paciente»: lee, marca y firma; «profesional»: confirma quien informó; «listo». */
+  const [step, setStep] = useState<"paciente" | "profesional" | "listo">("paciente")
 
   const paint = () => {
     const el = canvas.current
@@ -64,7 +69,6 @@ export default function ConsentDemo() {
   const clear = () => {
     strokes.current = []
     setSigned(false)
-    setSaved(false)
     paint()
   }
 
@@ -88,7 +92,7 @@ export default function ConsentDemo() {
           <b>Firma del consentimiento</b>
           <span>Rosa Quispe · Historia clínica 000124</span>
         </div>
-        <div className="cd-sheet" aria-label="La hoja del consentimiento">
+        <div className="cd-sheet" role="region" aria-label="La hoja del consentimiento">
           <b className="cd-title">CONSENTIMIENTO INFORMADO · EXTRACCIÓN DENTAL</b>
           {SECTIONS.map(([label, text]) => (
             <p key={label}>
@@ -102,10 +106,10 @@ export default function ConsentDemo() {
         <label className="cd-check">
           <input
             type="checkbox"
+            disabled={step !== "paciente"}
             checked={understood}
             onChange={(event) => {
               setUnderstood(event.target.checked)
-              setSaved(false)
             }}
           />
           <strong>Entendí lo que me explicaron y acepto</strong>
@@ -116,18 +120,19 @@ export default function ConsentDemo() {
           <canvas
             ref={canvas}
             tabIndex={0}
-            aria-label="Recuadro de la firma. Con el teclado, Enter pone una firma de ejemplo."
+            role="button"
+            aria-label={signed ? "Firma puesta. Borrar para firmar otra vez." : "Recuadro de la firma: firma con el dedo o el ratón; con el teclado, Enter pone una firma de ejemplo."}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (step === "paciente" && (event.key === "Enter" || event.key === " ")) {
                 event.preventDefault()
                 sample()
               }
             }}
             onPointerDown={(event) => {
+              if (step !== "paciente") return
               event.currentTarget.setPointerCapture(event.pointerId)
               drawing.current = true
               strokes.current.push([at(event)])
-              setSaved(false)
             }}
             onPointerMove={(event) => {
               if (!drawing.current) return
@@ -142,22 +147,51 @@ export default function ConsentDemo() {
               drawing.current = false
             }}
           />
-          <button type="button" className="cd-clear" onClick={clear} disabled={!signed}>
+          <button type="button" className="cd-clear" onClick={() => {
+              clear()
+              canvas.current?.focus()
+            }} disabled={!signed || step !== "paciente"}>
             Borrar
           </button>
         </fieldset>
 
-        <button type="button" className="cd-save" disabled={!ready} onClick={() => setSaved(true)}>
-          Guardar y confirmar
-        </button>
-        <p className={`cd-status${saved ? " ok" : ""}`} role="status">
-          {saved
-            ? "Consentimiento firmado. Queda en su historia clínica como PDF, con la fecha y la hora."
-            : !understood
-              ? "Marca la casilla y firma para seguir."
-              : !signed
-                ? "Ahora firma en el recuadro."
-                : "Listo para guardar."}
+        {step === "paciente" ? (
+          <button type="button" className="cd-save" disabled={!ready} onClick={() => setStep("profesional")}>
+            Listo
+          </button>
+        ) : step === "profesional" ? (
+          <div className="cd-pro">
+            <span>
+              <b>Profesional que informa</b>
+              Dra. Lucía Paredes · Colegiatura 12345
+            </span>
+            <button type="button" className="cd-save" onClick={() => setStep("listo")}>
+              Guardar y confirmar
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="cd-again"
+            onClick={() => {
+              setUnderstood(false)
+              setStep("paciente")
+              clear()
+            }}
+          >
+            Volver a empezar
+          </button>
+        )}
+        <p className={`cd-status${step === "listo" ? " ok" : ""}`} role="status">
+          {step === "listo"
+            ? "Consentimiento firmado. El PDF queda en su historia clínica, con la fecha y la hora."
+            : step === "profesional"
+              ? "El paciente ya firmó. Ahora confirma el profesional que le explicó."
+              : !understood
+                ? "Marca la casilla y firma para seguir."
+                : !signed
+                  ? "Ahora firma en el recuadro."
+                  : "Toca «Listo» para pasar al profesional."}
         </p>
       </div>
     </div>

@@ -7,6 +7,8 @@ import type { Guide, GuideVideo } from "./types"
 
 /** Lo que dura la lista leída: un video nuevo se ve en la guía en unas horas. */
 const FRESH_SECONDS = 6 * 60 * 60
+/** Si YouTube falla, no se vuelve a intentar en cada visita: se espera este rato con el video fijo. */
+const FAILED_SECONDS = 10 * 60
 /** Si YouTube tarda, la página no espera: sale con el video fijo. */
 const TIMEOUT_MS = 1500
 /** Los que se muestran como mucho: el principal y los de «Más videos de este tema». */
@@ -18,7 +20,8 @@ export const CHANNEL_URL = "https://www.youtube.com/@odentIA32"
 export const PLAYLIST_ID = /^PL[\w-]{10,64}$/
 
 export const watchUrl = (id: string) => `https://www.youtube.com/watch?v=${id}`
-export const thumbUrl = (id: string) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+/** La miniatura de 640 × 480 (la de 480 se veía borrosa en la portada). */
+export const thumbUrl = (id: string) => `https://i.ytimg.com/vi/${id}/sddefault.jpg`
 export const embedUrl = (id: string) => `https://www.youtube-nocookie.com/embed/${id}`
 
 const feedUrl = (playlist: string) => `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlist}`
@@ -49,7 +52,7 @@ export function parseFeed(xml: string): GuideVideo[] {
     const published = tag(entry, "published")
     if (!youtubeId || !/^[\w-]{11}$/.test(youtubeId) || !title || !published) continue
     const description = tag(entry, "media:description")
-    videos.push({ youtubeId, title, published: published.slice(0, 10), description: description?.split("\n")[0] || undefined })
+    videos.push({ youtubeId, title, published, description: description?.split("\n")[0] || undefined })
   }
   return videos.sort((a, b) => b.published.localeCompare(a.published))
 }
@@ -62,18 +65,26 @@ async function playlistVideos(playlist: string): Promise<GuideVideo[]> {
   if (kept && Date.now() - kept.at < FRESH_SECONDS * 1000) return kept.videos
   const url = feedUrl(playlist)
   const edge = edgeCache()
-  let xml: string | undefined
   const hit = await edge?.match(url)
-  if (hit) xml = await hit.text()
-  else {
+  if (hit) {
+    const videos = parseFeed(await hit.text())
+    memory.set(playlist, { at: Date.now(), videos })
+    return videos
+  }
+  try {
     const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
     if (!response.ok) throw new Error(`YouTube respondió ${response.status}`)
-    xml = await response.text()
+    const xml = await response.text()
+    const videos = parseFeed(xml)
+    memory.set(playlist, { at: Date.now(), videos })
     await edge?.put(url, new Response(xml, { headers: { "Cache-Control": `s-maxage=${FRESH_SECONDS}` } }))
+    return videos
+  } catch (error) {
+    // La falla se recuerda un rato (lista vacía: va el video fijo), para que cada visita no espere otra vez.
+    memory.set(playlist, { at: Date.now() - (FRESH_SECONDS - FAILED_SECONDS) * 1000, videos: [] })
+    await edge?.put(url, new Response("", { headers: { "Cache-Control": `s-maxage=${FAILED_SECONDS}` } }))
+    throw error
   }
-  const videos = parseFeed(xml)
-  memory.set(playlist, { at: Date.now(), videos })
-  return videos
 }
 
 /** Los videos de la guía: el primero es el principal. Nunca falla: sin YouTube, el fijo o ninguno. */

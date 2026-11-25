@@ -11,7 +11,7 @@ export const guide: Guide = {
   accent: "que el paciente entienda.",
   name: "Cómo hacer un consentimiento informado dental",
   menu: "Consentimiento informado",
-  seoTitle: "Consentimiento informado dental: cómo hacerlo, con formato en PDF",
+  seoTitle: "Consentimiento informado dental: formato PDF y cómo hacerlo",
   description:
     "Cómo hacer un consentimiento informado odontológico: qué va en cada parte, cómo explicarlo y quién firma si es menor. Formato en PDF gratis.",
   lead: "Qué se escribe en cada parte, cómo se explica antes de firmar y quién firma cuando es un niño. Con el formato en blanco en PDF.",
@@ -20,10 +20,10 @@ export const guide: Guide = {
   video: {
     youtubeId: "gj8FwYiV59k",
     title: "Consentimiento informado: todas las formas de firmarlo en odentIA (celular, código o papel)",
-    published: "2026-11-16",
+    published: "2026-11-16T06:02:00+00:00",
   },
   short: [
-    "Uno por procedimiento: qué se va a hacer y por qué, qué se espera, sus riesgos, las alternativas y qué pasa si no se trata.",
+    "Uno por procedimiento: qué se va a hacer y en qué pieza, por qué, qué se espera, sus riesgos (también los propios de su caso), las alternativas y qué pasa si no se trata.",
     "Se explica con palabras simples antes de firmar, con sus riesgos propios, y se responden sus preguntas.",
     "Firma el paciente o, si es menor, su representante; y firma el profesional que informó. Va a su historia.",
   ],
@@ -36,25 +36,28 @@ export const guide: Guide = {
     },
     {
       title: "Lo que va en cada parte",
-      text: ["Siete partes, cada una en pocas líneas y con palabras que el paciente entienda. Un ejemplo, para una extracción:"],
+      text: [
+        "Ocho partes, cada una en pocas líneas y con palabras que el paciente entienda. En el procedimiento, **la pieza escrita**: es lo que evita sacar la equivocada. Si usas los códigos CIE-10, el del diagnóstico va al lado. Un ejemplo, para una extracción:",
+      ],
       figure: {
         kind: "tabla",
         head: ["Parte", "Ejemplo: extracción del 38"],
         rows: [
           ["**Procedimiento propuesto**", "Sacar la muela del juicio de abajo a la izquierda, con anestesia local"],
-          ["**Diagnóstico que lo motiva**", "Está atrapada en el hueso y se inflama a repetición"],
+          ["**Diagnóstico que lo motiva**", "Salió a medias y la encía de encima se inflama a repetición"],
           ["**Beneficios esperados**", "Que no vuelva el dolor ni la inflamación"],
-          ["**Riesgos y molestias**", "Dolor e hinchazón unos días, sangrado leve, alveolitis; rara vez, el labio adormecido unas semanas"],
+          ["**Riesgos y molestias**", "Dolor e hinchazón unos días, boca que abre poco, sangrado leve, alveolitis, daño a la muela de al lado; rara vez, el labio o la lengua adormecidos unas semanas, y muy rara vez para siempre"],
+          ["**Riesgos propios de su caso**", "Toma un anticoagulante: puede sangrar más; se le explica cómo cuidarse"],
           ["**Alternativas**", "Controlarla y tratar cada inflamación, sabiendo que puede volver"],
           ["**Consecuencias de no tratarse**", "Más inflamaciones, caries en la muela de al lado o infección"],
-          ["**Información adicional**", "Lo propio de su caso y los cuidados de después"],
+          ["**Información adicional**", "Los cuidados de después y a quién llamar si algo no va bien"],
         ],
       },
     },
     {
       title: "Explícalo antes de que firme, con sus riesgos propios",
       text: [
-        "Léelo con él, no se lo des a firmar sin hablar. Dile **lo que es propio de su caso**: si toma anticoagulantes, puede sangrar más; si fuma, cicatriza más lento. Eso se escribe en «Información adicional».",
+        "Léelo con él, no se lo des a firmar sin hablar. Dile **lo que es propio de su caso**: si toma anticoagulantes, puede sangrar más; si tiene diabetes, cicatriza más lento. Eso va en «Riesgos propios de su caso».",
         "Pregúntale si tiene dudas y respóndelas. Al firmar, declara justamente eso:",
       ],
       list: [
@@ -64,7 +67,7 @@ export const guide: Guide = {
     {
       title: "Quién firma",
       text: [
-        "Firma el **paciente**. Si es menor de edad, o no puede decidir solo, firma su **representante**: su mamá, su papá o su tutor, con su nombre, su documento y su parentesco.",
+        "Firma el **paciente**. Si es menor de edad, o no puede decidir solo, firma su **representante**: su mamá, su papá o su tutor, con su nombre, su documento y su parentesco. Si no sabe firmar, pone su huella.",
         "Firma también el **profesional que informó**, con su colegiatura, y va la fecha.",
       ],
     },
@@ -79,8 +82,8 @@ export const guide: Guide = {
   tryIt: {
     demo: "consentimiento",
     title: "En odentIA, se firma en la tablet, en su celular o en papel.",
-    text: "Cada tratamiento trae su consentimiento sugerido y lo ajustas a tu clínica. Se suman sus riesgos propios, firma él o su representante, y el PDF firmado queda en su historia.",
-    note: "Marca la casilla y firma con el dedo o con el ratón, como en la tablet de la clínica.",
+    text: "Los tratamientos que más lo piden (extracciones, endodoncias, implantes, cirugías) traen su consentimiento sugerido, y lo ajustas a tu clínica. Se suman los riesgos propios de lo que está en su ficha, firma él o su representante, y el PDF firmado queda en su historia. Si firma en su celular, queda pendiente hasta que lo confirmas.",
+    note: "Firma con el dedo o con el ratón como el paciente, y después confirma como el profesional.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [

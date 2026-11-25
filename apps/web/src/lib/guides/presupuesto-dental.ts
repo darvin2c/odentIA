@@ -20,7 +20,7 @@ export const guide: Guide = {
   video: {
     youtubeId: "ngFPnBO64ZE",
     title: "La primera atención de un paciente en odentIA: anamnesis, consulta, cobro y presupuesto",
-    published: "2026-11-21",
+    published: "2026-11-21T06:35:18+00:00",
   },
   short: [
     "Parte de lo que encontraste: un renglón por tratamiento, con su diente, sus caras y sus sesiones.",
