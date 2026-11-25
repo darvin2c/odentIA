@@ -2084,8 +2084,9 @@ it("con su abuela que la acompaña, corregir la fecha de la niña se guarda: no 
     relationshipDetail: "abuela",
     phone: "+51977555815",
   })
-  const updated = await withOrgContext(appDb, "org_a", (tx) =>
+  await withOrgContext(appDb, "org_a", (tx) =>
     updatePersonIdentity(tx, "org_a", { userId: ACTOR }, created.personId!, { birthDate: "2021-04-12" }),
   )
-  expect(updated).toBeTruthy()
+  const [camila] = await ownerDb.select({ birthDate: contact.birthDate }).from(contact).where(eq(contact.id, created.personId!))
+  expect(camila?.birthDate).toBe("2021-04-12")
 })
