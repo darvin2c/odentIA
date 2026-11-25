@@ -1,0 +1,16 @@
+---
+// La página que no existe (lienzo B8, tablero 5): quien buscaba su tienda la encuentra en la app.
+import Base from "../layouts/Base.astro"
+import { APP_URL, LOGIN_URL } from "../lib/sitio"
+---
+<Base title="Esta página no existe" description="La dirección que abriste no existe en gestoria24.com." noindex>
+  <div class="wrap not-found">
+    <p class="mono">[404]</p>
+    <h1>Esta página no existe</h1>
+    <p>¿Buscabas tu tienda? Está en <a href={APP_URL}>{APP_URL.replace("https://", "")}</a>.</p>
+    <div class="row">
+      <a class="btn btn-primary" href={LOGIN_URL}>Entrar a mi tienda</a>
+      <a class="btn btn-ghost" href="/">Ir al inicio</a>
+    </div>
+  </div>
+</Base>

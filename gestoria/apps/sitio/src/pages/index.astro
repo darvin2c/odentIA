@@ -1,0 +1,140 @@
+---
+// La portada de gestorIA (lienzo B8, tableros 2 y 3): vende lo que gestorIA ya hace, en la voz de
+// quien vende por chat. Sin precios hasta que haya planes (decisión 4).
+import Base from "../layouts/Base.astro"
+import { cta } from "../lib/sitio"
+
+const features = [
+  [
+    "Contesta al instante",
+    "Foto, precio y tallas que quedan, de tu catálogo. Nunca inventa un precio ni un stock.",
+  ],
+  [
+    "Negocia sin regalar",
+    "Tú pones el precio mínimo. Sofi usa ese margen para cerrar: descuento, envío gratis o los dos. Nunca baja del mínimo.",
+  ],
+  [
+    "Cobra con link",
+    "El link de pago se confirma solo. ¿Mandaron captura de Yape o transferencia? La confirmas tú con un toque.",
+  ],
+  [
+    "Stock que cuadra",
+    "Baja al confirmar el pago y vuelve si se anula. Cada movimiento queda en el kardex: quién, cuándo y cuánto queda.",
+  ],
+  [
+    "Entregas del día",
+    "«Para entregar hoy» en una lista. Tocas «Salió» y «Entregado»; si es contra entrega, anotas lo cobrado.",
+  ],
+  [
+    "Tus números, claros",
+    "Argos te muestra lo vendido, lo que falta cobrar y lo que hoy necesita a una persona.",
+  ],
+]
+
+const steps = [
+  ["Carla escribe", "Desde el anuncio, por WhatsApp, Instagram o Messenger."],
+  ["Sofi responde", "Con la foto, el precio y lo que queda en su talla."],
+  ["Arma el pedido", "Con el envío a su distrito y el total a la vista."],
+  ["Cobra", "Link de pago, captura o contra entrega, en ese orden."],
+  ["Tú despachas", "Carla recibe «va en camino» y, al día siguiente, «¿te llegó bien?»."],
+]
+
+const facts = [
+  [
+    "Pruébala antes de abrirla.",
+    "«Probar a Sofi» la pone a vender con tu catálogo sin tocar tu stock.",
+  ],
+  ["Tu equipo, con su rol.", "Dueño, Administrador y Ventas: cada uno ve lo suyo."],
+  ["Pausa cuando quieras.", "La conversación pasa a una persona y no se pierde nada."],
+  [
+    "Todo queda escrito.",
+    "Lo que se cedió en cada pedido, quién confirmó cada pago y cada movimiento de stock.",
+  ],
+]
+---
+<Base
+  title="gestorIA: tu tienda vende en los chats a toda hora"
+  description="gestorIA contesta por WhatsApp, Instagram y Messenger con tu catálogo y tu stock reales, negocia sin bajar de tu precio mínimo, arma el pedido y manda el link de pago."
+  header="dark"
+>
+  <div class="night">
+    <section class="wrap hero" aria-labelledby="titulo">
+      <div class="hero-copy">
+        <p class="pill"><b>24 h</b>Ventas por WhatsApp, Instagram y Messenger</p>
+        <h1 id="titulo">Tu tienda vende en los chats a toda hora. <span class="hl">Tú confirmas y despachas.</span></h1>
+        <p class="lead">gestorIA contesta con tu catálogo y tu stock reales, negocia sin bajar de tu precio mínimo, arma el pedido y manda el link de pago. Mientras tú duermes, también.</p>
+        <dl class="roles">
+          <div><dt class="mono">Ventas</dt><dd><b class="sofi">Sofi</b> responde, negocia y cierra el pedido.</dd></div>
+          <div><dt class="mono">Administración</dt><dd><b class="argos">Argos</b> te dice qué toca hoy y cuánto vendiste.</dd></div>
+        </dl>
+        <div class="ctas">
+          <a class="btn btn-big" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-ghost" href="#como">Mira cómo vende</a>
+        </div>
+      </div>
+
+      <figure class="hero-chat" aria-label="Ejemplo de una venta por WhatsApp">
+        <div class="chat">
+          <div class="chat-head"><b>Calzados Rosa</b><span>WhatsApp · 11:48 p. m.</span></div>
+          <ol>
+            <li class="in">Hola, ¿tienen la zapatilla blanca en 38?</li>
+            <li class="out">¡Sí, Carla! Quedan 2 en talla 38, a S/ 129. ¿Te la enviamos? A Surco el envío es S/ 10.</li>
+            <li class="in">Sí, porfa. ¿Me haces precio?</li>
+            <li class="out">Te dejo el envío gratis: total S/ 129. Aquí tienes tu link de pago.</li>
+          </ol>
+        </div>
+        <div class="order">
+          <div><b>Pedido 0142 · S/ 129</b><span>Pagado con el link · sale mañana</span></div>
+          <span class="badge">Pagado</span>
+        </div>
+        <figcaption class="caption">Una venta de ejemplo, con la tienda de muestra.</figcaption>
+      </figure>
+    </section>
+  </div>
+
+  <section id="como" class="wrap section" aria-labelledby="como-t">
+    <div class="section-head">
+      <p class="mono">Lo que hace por tu tienda</p>
+      <h2 id="como-t" class="h2">Vende como tu mejor vendedora. Sin regalar tu margen.</h2>
+    </div>
+    <ul class="cards">
+      {features.map(([title, text]) => (
+        <li class="card"><h3>{title}</h3><p>{text}</p></li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="cream" aria-labelledby="venta-t">
+    <div class="wrap section">
+      <h2 id="venta-t" class="h2">Una venta, del primer mensaje al «¿te llegó?»</h2>
+      <ol class="steps">
+        {steps.map(([title, text], i) => (
+          <li><span class="n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span><b>{title}</b><p>{text}</p></li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section id="agentes" class="wrap section split" aria-labelledby="agentes-t">
+    <div class="section-head">
+      <p class="mono">Tú mandas</p>
+      <h2 id="agentes-t" class="h2">Dos agentes que trabajan para ti, con tus reglas.</h2>
+      <p>Sofi es la única que le habla a tu cliente. Argos cuida los números y le pasa a Sofi lo que hay que recordar. Lo delicado, como una captura de pago, siempre lo decide una persona.</p>
+    </div>
+    <ul class="facts">
+      {facts.map(([title, text]) => (
+        <li><b>{title}</b> <span>{text}</span></li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="night" aria-labelledby="cierre-t">
+    <div class="wrap closing">
+      <div>
+        <h2 id="cierre-t" class="h2">Abre tu tienda las <span class="hl">24 horas.</span></h2>
+        <p>¿Ya usas odentIA, latidIA o vistIA? Entras con la misma cuenta.</p>
+      </div>
+      <a class="btn btn-big" href={cta.href}>{cta.label}</a>
+    </div>
+  </section>
+</Base>
