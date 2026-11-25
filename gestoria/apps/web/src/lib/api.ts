@@ -1,4 +1,4 @@
-import { accountToken } from "./cuenta"
+import { AccountUnavailable, accountToken } from "./cuenta"
 
 /** El servidor de gestorIA (`https://servidor.gestoria24.com`). */
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? ""
@@ -93,8 +93,16 @@ export async function api<T>(
   } = {},
 ): Promise<T> {
   for (const force of [false, true]) {
-    // eslint-disable-next-line no-await-in-loop
-    const token = await accountToken(force)
+    let token: string | null
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      token = await accountToken(force)
+    } catch (error) {
+      // La cuenta no respondió: se dice y se reintenta, sin mandar a entrar.
+      if (error instanceof AccountUnavailable)
+        throw new ApiError(503, "ACCOUNT_UNAVAILABLE", error.message)
+      throw error
+    }
     if (!token) throw new SignedOut("Entra con tu cuenta para seguir.")
     let response: Response
     try {
