@@ -24,9 +24,9 @@ function stubStrip(client: number, scroll: number) {
   vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scroll)
 }
 
-function Strip() {
+function Strip({ count = 0 }: { count?: number }) {
   return (
-    <Tabs value="atender">
+    <Tabs value="atender" data-count={count}>
       <ScrollingTabsList aria-label="Vista de la bandeja">
         <TabsTrigger value="atender">Por atender</TabsTrigger>
         <TabsTrigger value="sofi">Las atiende Sofi</TabsTrigger>
@@ -37,6 +37,24 @@ function Strip() {
 }
 
 describe("ScrollingTabsList", () => {
+  it("un nuevo dibujo del padre (un recuento que llega) no devuelve la franja a la elegida", async () => {
+    stubStrip(300, 700)
+    const scrollTo = vi.fn()
+    HTMLElement.prototype.scrollTo = scrollTo as unknown as typeof HTMLElement.prototype.scrollTo
+    // La elegida queda fuera de la vista: al montar se trae (Base UI la marca justo después).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return (this.dataset.slot === "tabs-trigger" ? { left: 400, right: 480 } : { left: 0, right: 300 }) as DOMRect
+    })
+    const { rerender } = render(<Strip />)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const atMount = scrollTo.mock.calls.length
+    expect(atMount).toBeGreaterThan(0)
+    rerender(<Strip count={1} />)
+    rerender(<Strip count={2} />)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(scrollTo).toHaveBeenCalledTimes(atMount)
+  })
+
   it("si caben todas, no dibuja la flecha", () => {
     stubStrip(400, 400)
     const { container } = render(<Strip />)

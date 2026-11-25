@@ -60,6 +60,8 @@ describe("PlaceSwitcher", () => {
     expect(other.getAttribute("href")).toBe(sonrisa.href)
     const here = screen.getByRole("menuitem", { name: "Dental Smile, Recepción, lugar actual" })
     expect(here.getAttribute("aria-current")).toBe("true")
+    // Tocar el lugar actual solo cierra el menú: no recarga la página.
+    expect(here.tagName).not.toBe("A")
     expect(screen.queryByText(/Clínicas dentales · odentIA/)).toBeNull()
   })
 
@@ -86,7 +88,7 @@ describe("PlaceSwitcher", () => {
     ])
     expect(
       within(groups[2] as HTMLElement)
-        .getByRole("menuitem", { name: "Rosita Moda, Dueña" })
+        .getByRole("menuitem", { name: "Rosita Moda, Tienda, Dueña" })
         .getAttribute("href"),
     ).toBe(tienda.href)
   })
@@ -113,7 +115,7 @@ describe("PlaceSwitcher", () => {
     open()
     const items = await screen.findAllByRole("menuitem")
     expect(items.map((item) => item.textContent)).toEqual([
-      "Plan y pagosPago pendiente",
+      "Plan y pagos, Pago pendiente",
       "Cambiar de clínica",
     ])
     expect(items[1]?.getAttribute("href")).toBe("https://app.odentia.test/?cambiar=1")

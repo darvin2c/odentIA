@@ -27,7 +27,8 @@ export function revealActiveTab(list: HTMLElement, behavior: ScrollBehavior): vo
  * teléfono). La pestaña elegida queda siempre a la vista: al montarse y cada vez
  * que cambia. Mientras queden pestañas a un lado, ese borde se desvanece y una
  * flecha («‹» o «›») lo anuncia: tocarla mueve la franja. Con el teclado no hace
- * falta: las flechas del grupo ya llevan cada pestaña a la vista.
+ * falta: las flechas del grupo llevan cada pestaña a la vista, fuera de las flechas
+ * (`scroll-padding`).
  */
 export function ScrollingTabsList({
   className,
@@ -36,6 +37,42 @@ export function ScrollingTabsList({
 }: React.ComponentProps<typeof TabsList>) {
   const listRef = React.useRef<HTMLDivElement>(null)
   const [more, setMore] = React.useState({ before: false, after: false })
+  // La persona movió la franja a mano (dedo, rueda o flechas): lo que cambie de ancho después no
+  // la devuelve a la elegida. Elegir otra pestaña vuelve a dejarla a cargo de la franja.
+  const movedByHand = React.useRef(false)
+
+  // Una sola vez: al montar y cada vez que cambia la elegida. No depende de `children`, que es
+  // otro objeto en cada dibujo del padre (un recuento nuevo en la Bandeja no mueve la franja).
+  React.useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    // Al montar, sin animación: la franja ya aparece con la elegida a la vista.
+    revealActiveTab(list, "auto")
+    // Elegir otra pestaña (con el dedo, el ratón o desde fuera, como una dirección) la trae entera.
+    const active =
+      typeof MutationObserver === "undefined"
+        ? undefined
+        : new MutationObserver(() => {
+            movedByHand.current = false
+            revealActiveTab(list, reduced ? "auto" : "smooth")
+          })
+    active?.observe(list, { subtree: true, attributes: true, attributeFilter: ["data-active"] })
+    const byHand = () => {
+      movedByHand.current = true
+    }
+    for (const event of ["wheel", "touchstart", "pointerdown"] as const) {
+      list.addEventListener(event, byHand, { passive: true })
+    }
+    return () => {
+      active?.disconnect()
+      for (const event of ["wheel", "touchstart", "pointerdown"] as const) {
+        list.removeEventListener(event, byHand)
+      }
+    }
+  }, [])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: con otras pestañas hay que observar las nuevas.
   React.useLayoutEffect(() => {
@@ -46,23 +83,13 @@ export function ScrollingTabsList({
       const after = list.scrollLeft + list.clientWidth < list.scrollWidth - 1
       setMore((now) => (now.before === before && now.after === after ? now : { before, after }))
     }
-    const reduced =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    // Al montar, sin animación: la franja ya aparece con la elegida a la vista.
-    revealActiveTab(list, "auto")
-    // Elegir otra pestaña (con el dedo, el ratón o desde fuera, como una dirección) la trae entera.
-    const active =
-      typeof MutationObserver === "undefined"
-        ? undefined
-        : new MutationObserver(() => revealActiveTab(list, reduced ? "auto" : "smooth"))
-    active?.observe(list, { subtree: true, attributes: true, attributeFilter: ["data-active"] })
-    // Los recuentos llegan después: también cambia el ancho de cada pestaña.
+    // Los recuentos llegan después: también cambia el ancho de cada pestaña. Si nadie movió la
+    // franja a mano, la elegida sigue a la vista.
     const observer =
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => {
-            revealActiveTab(list, "auto")
+            if (!movedByHand.current) revealActiveTab(list, "auto")
             check()
           })
     observer?.observe(list)
@@ -70,7 +97,6 @@ export function ScrollingTabsList({
     list.addEventListener("scroll", check, { passive: true })
     check()
     return () => {
-      active?.disconnect()
       observer?.disconnect()
       list.removeEventListener("scroll", check)
     }
@@ -78,6 +104,7 @@ export function ScrollingTabsList({
 
   const scrollBy = (direction: 1 | -1) => {
     const list = listRef.current
+    movedByHand.current = true
     list?.scrollBy({ left: direction * list.clientWidth * 0.7, behavior: "smooth" })
   }
 
@@ -86,7 +113,8 @@ export function ScrollingTabsList({
       <TabsList
         ref={listRef}
         className={cn(
-          "max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          // El margen de las flechas: con el teclado, la pestaña enfocada no queda debajo de ellas.
+          "max-w-full scroll-px-11 justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
           className,
         )}
         {...props}

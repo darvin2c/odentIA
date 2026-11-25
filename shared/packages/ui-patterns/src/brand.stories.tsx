@@ -93,7 +93,19 @@ export const MarcaGestoria: Story = {
           <section key={String(dark)} className={dark ? "dark" : ""}>
             <div
               className="flex flex-col gap-6 rounded-xl bg-background p-6 text-foreground"
-              style={{ "--identity-ink": dark ? "#fafafa" : "#18181b" } as CSSProperties}
+              // El oscuro de la marca vive en `:root.dark[data-brand]`: aquí, que pone `.dark` en una
+              // sección, se repiten sus valores para que la historia muestre lo mismo que la app.
+              style={
+                (dark
+                  ? {
+                      "--identity-ink": "#fafafa",
+                      "--identity-accent": "#ea580c",
+                      "--primary": "#fb923c",
+                      "--primary-fill": "#cc4604",
+                      "--primary-fill-foreground": "#ffffff",
+                    }
+                  : { "--identity-ink": "#18181b" }) as unknown as CSSProperties
+              }
             >
               <h2>gestorIA · {dark ? "oscuro" : "claro"}</h2>
               <Brand />

@@ -86,9 +86,10 @@ const ALERT_DOT: Record<PlaceAlert["tone"], string> = {
   danger: "bg-destructive",
   warning: "bg-warning-strong",
 }
+// `!`: el ítem enfocado pinta todo su contenido en gris, y sobre el rojo no se leería.
 const ALERT_BADGE: Record<PlaceAlert["tone"], string> = {
-  danger: "bg-destructive text-destructive-foreground",
-  warning: "bg-warning-strong text-warning-strong-foreground",
+  danger: "bg-destructive text-destructive-foreground!",
+  warning: "bg-warning-strong text-warning-strong-foreground!",
 }
 
 function ActionItem({ action }: { action: PlaceAction }) {
@@ -96,6 +97,7 @@ function ActionItem({ action }: { action: PlaceAction }) {
     <>
       {action.icon}
       <span className="flex-1">{action.label}</span>
+      {action.badge ? <span className="sr-only">, </span> : null}
       {action.badge ? (
         <span
           className={cn(
@@ -126,20 +128,25 @@ function ActionItem({ action }: { action: PlaceAction }) {
   return <DropdownMenuItem onClick={action.onSelect}>{content}</DropdownMenuItem>
 }
 
-function PlaceItem({ place, current }: { place: Place; current: boolean }) {
-  // El nombre accesible dice lo mismo que la fila: el lugar, su rol y si es el actual. Qué es
-  // el lugar lo dice el nombre del grupo, o el botón cuando todos son del mismo tipo.
-  const label = `${place.name}, ${place.role}${current ? ", lugar actual" : ""}`
+function PlaceItem({ place, current, withKind }: { place: Place; current: boolean; withKind: boolean }) {
+  // El nombre accesible dice lo que se ve: el lugar, su rol y si es el actual. Con grupos, también
+  // qué es: el título del grupo no se anuncia en cada fila.
+  const label = `${place.name}, ${withKind ? `${BRAND_PLACES[place.brand].one}, ` : ""}${place.role}${current ? ", lugar actual" : ""}`
   return (
     <DropdownMenuItem
       aria-label={label}
       aria-current={current ? "true" : undefined}
       className={cn("min-h-11 sm:min-h-9", current && "bg-primary-soft/60")}
-      render={(menuProps) => (
-        <a href={place.href} {...menuProps}>
-          {menuProps.children}
-        </a>
-      )}
+      // El lugar actual no es un enlace: tocarlo solo cierra el menú, sin recargar ni perder lo abierto.
+      render={
+        current
+          ? undefined
+          : (menuProps) => (
+              <a href={place.href} {...menuProps}>
+                {menuProps.children}
+              </a>
+            )
+      }
     >
       {/* El nombre entero, en dos líneas si hace falta: cortado, dos clínicas parecidas se confunden. */}
       <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{place.name}</span>
@@ -194,12 +201,12 @@ export function PlaceSwitcher({
                 {BRAND_PLACES[group.brand].many} · {BRAND_NAMES[group.brand]}
               </DropdownMenuLabel>
               {group.places.map((place) => (
-                <PlaceItem key={place.id} place={place} current={place.id === current.id} />
+                <PlaceItem key={place.id} place={place} current={place.id === current.id} withKind={grouped} />
               ))}
             </DropdownMenuGroup>
           ))
         : places.map((place) => (
-            <PlaceItem key={place.id} place={place} current={place.id === current.id} />
+            <PlaceItem key={place.id} place={place} current={place.id === current.id} withKind={grouped} />
           )),
     )
   }
