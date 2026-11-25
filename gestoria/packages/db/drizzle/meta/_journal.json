@@ -85,6 +85,13 @@
       "when": 1795451433571,
       "tag": "0011_reglas_soporte_y_pedidos",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795635841384,
+      "tag": "0012_el_equipo_de_cada_tienda",
+      "breakpoints": true
     }
   ]
 }

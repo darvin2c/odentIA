@@ -34,7 +34,9 @@ import {
   type ContractConfig,
   countConversation,
   deliverOutbox,
+  purgeOutbox,
   refreshStates,
+  reviewStoreTeams,
   saveState,
 } from "./acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "./agente.js"
@@ -258,12 +260,14 @@ describe("gestorIA avisa a la administración", () => {
     expect(pending?.sentAt).toBeNull()
     expect(pending?.attempts).toBe(1)
     expect(pending?.nextAttemptAt.getTime()).toBeGreaterThan(Date.now())
-    // A la hora del reintento sale con la misma clave: la administración ya lo tenía.
+    // A la hora del reintento sale con la misma clave: la administración ya lo tenía. Detrás, el
+    // equipo de la tienda para la cuenta.
     const later = new Date(Date.now() + 60_000)
-    expect(await deliverOutbox(db.ownerDb, contract, later)).toEqual({ sent: 1, failed: 0 })
-    expect(admin.deliveries).toBe(2)
+    expect(await deliverOutbox(db.ownerDb, contract, later)).toEqual({ sent: 2, failed: 0 })
+    expect(admin.deliveries).toBe(3)
     expect(counted("cuenta.abierta")).toHaveLength(1)
-    expect([...admin.received.keys()]).toEqual([pending!.id])
+    const [team] = await outbox("equipo.cambiado")
+    expect([...admin.received.keys()]).toEqual([pending!.id, team!.id])
     // Lo enviado no vuelve a salir.
     expect(await deliverOutbox(db.ownerDb, contract, later)).toEqual({ sent: 0, failed: 0 })
   })
@@ -603,6 +607,86 @@ describe("el orden de cada tienda", () => {
     // La administración la acepta: sale primero el aviso y después la pregunta.
     admin.reject.delete(shopId)
     await deliverOutbox(db.ownerDb, contract, new Date(t0.getTime() + 3_600_000))
-    expect(ofShop().map((e) => e.type)).toEqual(["cuenta.abierta", "soporte.pedido"])
+    expect(ofShop().map((e) => e.type)).toEqual([
+      "cuenta.abierta",
+      "equipo.cambiado",
+      "soporte.pedido",
+    ])
+  })
+})
+
+describe("gestorIA avisa a la cuenta quién está en cada tienda (ADR 0216)", () => {
+  const teamsOf = async (shopId: string) =>
+    (
+      await db.ownerDb
+        .select()
+        .from(contractOutbox)
+        .where(and(eq(contractOutbox.storeId, shopId), eq(contractOutbox.type, "equipo.cambiado")))
+        .orderBy(contractOutbox.createdAt)
+    ).map((row) => {
+      const event = appEvent.parse(row.payload)
+      if (event.type !== "equipo.cambiado") throw new Error(event.type)
+      return event.data
+    })
+
+  it("avisa el equipo entero al crear la tienda y en cada cambio, y nada si no cambió", async () => {
+    const created = await call("rosa", "POST", "/api/tiendas", {
+      name: "Equipo Rosa",
+      currency: "PEN",
+    })
+    const shopId = created.json.store.id as string
+    expect(await teamsOf(shopId)).toEqual([
+      { account: shopId, name: "Equipo Rosa", members: [{ userId: "u-rosa", role: "owner" }] },
+    ])
+    // Lucía ya estaba (de antes del aviso) y Rosa la hace Administradora: sale el equipo entero.
+    await db.ownerDb
+      .insert(storeMember)
+      .values({ storeId: shopId, userId: "u-lucia", role: "sales" })
+    const toAdmin = () =>
+      call("rosa", "PATCH", `/api/tiendas/${shopId}/equipo/u-lucia`, { role: "admin" })
+    expect((await toAdmin()).status).toBe(204)
+    // El mismo rol otra vez no cambia nada: no se avisa.
+    expect((await toAdmin()).status).toBe(204)
+    expect((await call("rosa", "DELETE", `/api/tiendas/${shopId}/equipo/u-lucia`)).status).toBe(204)
+    expect((await teamsOf(shopId)).map((team) => team.members)).toEqual([
+      [{ userId: "u-rosa", role: "owner" }],
+      [
+        { userId: "u-lucia", role: "admin" },
+        { userId: "u-rosa", role: "owner" },
+      ],
+      [{ userId: "u-rosa", role: "owner" }],
+    ])
+  })
+
+  it("la revisión avisa lo que no coincide (la carga inicial) y nada más; la limpieza deja el último", async () => {
+    const created = await call("rosa", "POST", "/api/tiendas", {
+      name: "De antes",
+      currency: "PEN",
+    })
+    const shopId = created.json.store.id as string
+    // Como una tienda de antes de este aviso: su equipo nunca se avisó.
+    await db.ownerDb
+      .delete(contractOutbox)
+      .where(and(eq(contractOutbox.storeId, shopId), eq(contractOutbox.type, "equipo.cambiado")))
+    await db.ownerDb
+      .insert(storeMember)
+      .values({ storeId: shopId, userId: "u-mario", role: "sales" })
+    expect(await reviewStoreTeams(db.ownerDb)).toBeGreaterThanOrEqual(1)
+    expect((await teamsOf(shopId)).map((team) => team.members)).toEqual([
+      [
+        { userId: "u-mario", role: "sales" },
+        { userId: "u-rosa", role: "owner" },
+      ],
+    ])
+    // Otra vuelta: nada que avisar de ninguna tienda.
+    expect(await reviewStoreTeams(db.ownerDb)).toBe(0)
+    // Salió hace más de una semana: la limpieza lo deja, porque es el último de su equipo.
+    await db.ownerDb
+      .update(contractOutbox)
+      .set({ sentAt: new Date(Date.now() - 8 * 86_400_000) })
+      .where(eq(contractOutbox.storeId, shopId))
+    await purgeOutbox(db.ownerDb)
+    expect(await teamsOf(shopId)).toHaveLength(1)
+    expect(await reviewStoreTeams(db.ownerDb)).toBe(0)
   })
 })

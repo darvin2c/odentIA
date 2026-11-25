@@ -5,6 +5,7 @@ import {
   forgetTrustedBrowsers,
   getMyTwoFactor,
   leaveOrganization,
+  listMyAppPlaces,
   listMyInvitations,
   listMyOrganizations,
 } from "@odentia/services"
@@ -66,6 +67,14 @@ export function createAccountRoute(deps: AccountDeps) {
     const who = await accountSession(c)
     if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
     return runService(c, 200, () => owner((tx) => listMyOrganizations(tx, who.userId)))
+  })
+
+  // Los lugares de la persona en las apps que son otro sistema (las tiendas de gestorIA, ADR
+  // 0216): la copia que la cuenta guarda de lo que la app avisa. Cada app arma su dirección.
+  app.get("/places", async (c) => {
+    const who = await accountSession(c)
+    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+    return runService(c, 200, () => owner((tx) => listMyAppPlaces(tx, who.userId)))
   })
 
   app.post("/organizations/:id/leave", async (c) => {

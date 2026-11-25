@@ -15,12 +15,20 @@ const invitationSchema = z.object({
   role: z.string().nullable(), roleLabel: z.string(), expiresAt: z.string(), provisioning: provisioningSchema,
   product: z.string(),
 })
+/** Un lugar de una app que es otro sistema: una tienda de gestorIA (ADR 0216). */
+const placeSchema = z.object({ app: z.string(), id: z.string(), name: z.string(), role: z.string(), roleLabel: z.string() })
 export type AccountOrganization = z.infer<typeof organizationSchema>
+export type AccountPlace = z.infer<typeof placeSchema>
 export type AccountInvitation = z.infer<typeof invitationSchema>
 
 export const accountOrganizationsQuery = queryOptions({
   queryKey: ["account", "organizations"],
   queryFn: async () => z.object({ data: z.array(organizationSchema) }).parse(await apiFetch<unknown>("/api/account/organizations")).data,
+})
+/** Las tiendas de gestorIA de la persona: la copia que la cuenta guarda de sus equipos. */
+export const accountPlacesQuery = queryOptions({
+  queryKey: ["account", "places"],
+  queryFn: async () => z.object({ data: z.array(placeSchema) }).parse(await apiFetch<unknown>("/api/account/places")).data,
 })
 export const accountInvitationsQuery = queryOptions({
   queryKey: ["account", "invitations"],

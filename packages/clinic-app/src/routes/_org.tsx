@@ -69,7 +69,7 @@ import {
   ssrFetchOptions,
 } from "../lib/guards"
 import { ApiError, apiFetch } from "../lib/api"
-import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, storeUrl, tenantUrl } from "../lib/host"
 import { activeOrgLocale, activeOrgTimeZone, notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
@@ -331,6 +331,13 @@ function OrgSwitcher() {
         }>("/api/account/organizations")
       ).data,
   })
+  // Las tiendas de gestorIA de la persona (ADR 0216): la copia que la cuenta guarda de sus equipos.
+  // Si no responde, el selector sigue con las clínicas.
+  const { data: stores } = useQuery({
+    queryKey: ["account", "places"],
+    queryFn: async () =>
+      (await apiFetch<{ data: Array<{ app: string; id: string; name: string; roleLabel: string }> }>("/api/account/places")).data,
+  })
   // Lo de cobro que pide actuar marca el nombre de la clínica (ADR 0065).
   const notices = useClinicNotices()
   const billingNotice = billing
@@ -349,6 +356,10 @@ function OrgSwitcher() {
     href: tenantUrl(item.slug, "/home", item.product),
     logo: item.logo ?? null,
   }))
+  for (const store of stores ?? []) {
+    const href = store.app === "gestoria" ? storeUrl(store.id) : null
+    if (href) places.push({ id: `${store.app}:${store.id}`, name: store.name, brand: "gestoria", role: store.roleLabel, href })
+  }
 
   return (
     <PlaceSwitcher

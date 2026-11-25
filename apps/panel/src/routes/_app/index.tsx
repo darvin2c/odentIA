@@ -6,7 +6,7 @@ import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react
 import { ChevronRight, LogOut, Plus, Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema, clinicNoticeSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
+import { accountInvitationsQuery, accountOrganizationsQuery, accountPlacesQuery, billingStatusSchema, clinicNoticeSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
 import { adminAccessQuery } from "../../lib/admin-access"
 import { OrganizationsPageSkeleton, OrganizationsSkeleton } from "../../components/skeletons/home"
 import { StaffEntry } from "../../components/staff-entry"
@@ -14,7 +14,7 @@ import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
 import { authError } from "../../lib/auth-error"
 import { storedInvitation } from "../../lib/founders"
-import { domainOf, tenantUrl, webUrl } from "../../lib/host"
+import { domainOf, storeUrl, tenantUrl, webUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
 
 const appRouteApi = getRouteApi("/_app")
@@ -170,6 +170,7 @@ function OrgsPage() {
   const { session } = appRouteApi.useRouteContext()
   const search = Route.useSearch()
   const organizations = useQuery(accountOrganizationsQuery)
+  const places = useQuery(accountPlacesQuery)
   const invitations = useQuery(accountInvitationsQuery)
   const staff = useQuery(adminAccessQuery)
   const signUp = useQuery(signupModeQuery)
@@ -220,6 +221,11 @@ function OrgsPage() {
   const canCreate = founderToken !== null || (politicaLista && !invitationOnly)
 
   const todas = useMemo(() => organizations.data ?? [], [organizations.data])
+  // Las tiendas de gestorIA que se pueden abrir desde aquí (sin el dominio de gestorIA, ninguna).
+  const tiendas = (places.data ?? []).flatMap((place) => {
+    const href = place.app === "gestoria" ? storeUrl(place.id) : null
+    return href ? [{ ...place, href }] : []
+  })
   // Con clínicas de más de un tipo, cada fila dice qué es, como el selector de la clínica.
   const variosTipos = new Set(todas.map((org) => org.product)).size > 1
   const ordenadas = useMemo(() => {
@@ -247,11 +253,13 @@ function OrgsPage() {
     if (autoIdo.current || search.cambiar === 1 || bloquearAuto || !unicaLista) return
     if (!invitations.isSuccess || (invitations.data?.length ?? 0) > 0) return
     if (!staff.isSuccess || staff.data.staff) return
+    // Con una tienda además de la clínica hay dónde elegir: no se autoentra. Si no responden, sí.
+    if (places.isPending || tiendas.length > 0) return
     if (!puertasListas) return
     autoIdo.current = true
     recordarClinica(session.userId, unicaLista.organizationId)
     window.location.replace(tenantUrl(unicaLista.slug, "/home", unicaLista.product))
-  }, [search.cambiar, bloquearAuto, unicaLista, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, puertasListas, session.userId])
+  }, [search.cambiar, bloquearAuto, unicaLista, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, places.isPending, tiendas.length, puertasListas, session.userId])
 
   const pendientes = invitations.data ?? []
   return (
@@ -282,6 +290,12 @@ function OrgsPage() {
           </>
         )}
       </section>
+      {tiendas.length > 0 && (
+        <section aria-labelledby="stores-title" className="space-y-3">
+          <h2 id="stores-title" className="text-sm font-semibold">{BRAND_PLACES.gestoria.many} · gestorIA</h2>
+          <ul className="space-y-3">{tiendas.map((store) => <StoreItem key={store.id} name={store.name} roleLabel={store.roleLabel} href={store.href} />)}</ul>
+        </section>
+      )}
       <footer className="flex flex-col items-center gap-3 border-t pt-6">
         {canCreate && (founderToken ? (
           <Button render={<Link to="/onboarding" search={{ continue: undefined, invitacion: founderToken }} />}>Abrir mi clínica</Button>
@@ -368,6 +382,23 @@ function OrganizationItem({ org, conTipo, abiertaEl, userId, onLeave }: { org: A
         {!incomplete && <ChevronRight className="size-5 shrink-0 text-muted-foreground max-sm:hidden" aria-hidden />}
         {acciones.length > 0 && <RowActions label={`Acciones de ${org.organizationName}`} items={acciones} />}
       </div>
+    </li>
+  )
+}
+
+/** Una tienda de gestorIA: abre en su dominio con la misma sesión. Lo de la tienda se hace allá. */
+function StoreItem({ name, roleLabel, href }: { name: string; roleLabel: string; href: string }) {
+  const inicial = name.trim().charAt(0).toUpperCase() || "T"
+  return (
+    <li className="relative flex items-center gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring">
+      <Avatar className="size-11 shrink-0">
+        <AvatarFallback className="bg-muted font-semibold text-series-2">{inicial}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <a href={href} aria-label={`Entrar a ${name}`} className="font-medium break-words before:absolute before:inset-0 before:rounded-xl focus-visible:outline-none">{name}</a>
+        <p className="mt-0.5 text-sm text-muted-foreground">{BRAND_PLACES.gestoria.one} · {roleLabel}</p>
+      </div>
+      <ChevronRight className="size-5 shrink-0 text-muted-foreground max-sm:hidden" aria-hidden />
     </li>
   )
 }

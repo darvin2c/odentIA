@@ -1,0 +1,2 @@
+ALTER TABLE "contract_outbox" DROP CONSTRAINT "contract_outbox_type_check";--> statement-breakpoint
+ALTER TABLE "contract_outbox" ADD CONSTRAINT "contract_outbox_type_check" CHECK (type IN ('cuenta.abierta','uso.contado','soporte.pedido','pago.comprobante','equipo.cambiado'));

@@ -40,9 +40,9 @@ const PRODUCT_DOMAINS: Record<ClinicalProduct, string | undefined> = {
 /** El dominio de las clínicas de un producto; sin decir cuál, el de esta app. */
 export const domainOf = (product?: string | null): string => (isClinicalProduct(product) && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
 
-/** Los dominios del grupo que conoce esta app: el suyo y el de cada producto. */
+/** Los dominios del grupo que conoce esta app: el suyo, el de cada producto y el de gestorIA. */
 const KNOWN_DOMAINS: readonly string[] = [
-  ...new Set([BASE_DOMAIN, ...Object.values(PRODUCT_DOMAINS).filter((domain): domain is string => Boolean(domain))]),
+  ...new Set([BASE_DOMAIN, ...[...Object.values(PRODUCT_DOMAINS), import.meta.env.VITE_GESTORIA_DOMAIN].filter((domain): domain is string => Boolean(domain))]),
 ]
 
 /** La dirección de una clínica, en el dominio de su producto; en otro dominio, con el pase. */
@@ -70,6 +70,16 @@ export function crossDomainHref(target: string): string {
   pase.searchParams.set("next", target)
   return pase.href
 }
+
+/**
+ * El dominio de gestorIA (`VITE_GESTORIA_DOMAIN`, gestoria24.com): sus tiendas abren en
+ * `app.<dominio>/tiendas/<id>`, con el pase. Sin él, las tiendas no entran al selector.
+ */
+export const GESTORIA_DOMAIN: string | undefined = import.meta.env.VITE_GESTORIA_DOMAIN || undefined
+
+/** La dirección de una tienda de gestorIA, con el pase (ADR 0215 y 0216); sin su dominio, nula. */
+export const storeUrl = (id: string): string | null =>
+  GESTORIA_DOMAIN ? crossDomainHref(`https://app.${GESTORIA_DOMAIN}${BASE_PORT}/tiendas/${encodeURIComponent(id)}`) : null
 
 export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
 

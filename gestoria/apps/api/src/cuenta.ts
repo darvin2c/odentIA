@@ -12,7 +12,7 @@ import {
 import { and, asc, eq, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose"
 import { z } from "zod"
-import { noteStoreAccount } from "./acuerdo.js"
+import { noteStoreAccount, noteStoreTeam } from "./acuerdo.js"
 import { signMessage, verifyMessage } from "./firma.js"
 
 /**
@@ -288,6 +288,11 @@ async function closeCopy(tx: Db, userId: string, now: Date): Promise<void> {
     })
     // eslint-disable-next-line no-await-in-loop
     await noteStoreAccount(tx, m.storeId, now)
+  }
+  // La cuenta sabe quién quedó en cada tienda (ADR 0216).
+  for (const m of memberships) {
+    // eslint-disable-next-line no-await-in-loop
+    await noteStoreTeam(tx, m.storeId, now)
   }
 }
 
