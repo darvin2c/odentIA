@@ -420,6 +420,62 @@
           { "frase": "no se preocupe vamos a repetirlos", "quien": "dra" }
         ]
       }
+    },
+    {
+      "id": "od-elena-hija-alergia",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (H1): Elena, 78 años, con su hija. La paciente no sabe de alergias y la hija cuenta una reacción al ibuprofeno sin decir «alérgica». Voz de Chrome, sin puntuación.",
+      "pausas": [
+        "buenos días señora elena qué le trae por aquí",
+        "se me rompió una muela abajo a la izquierda hace un mes y ahora me molesta",
+        "toma alguna medicina señora",
+        "solo la de la presión losartán de cincuenta en la mañana",
+        "mi mamá también toma apixabán dice mi hija",
+        "y alergias señora",
+        "no que yo sepa doctora",
+        "con el ibuprofeno se le hincharon los ojos hace dos años mamá te acuerdas",
+        "a ver abra la boca en la treinta y seis hay resto radicular"
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["muela|rompio"],
+          "motivoSin": ["losartan", "apixaban"],
+          "tiempo": "un mes|1 mes",
+          "relato": [],
+          "relatoSin": ["losartan", "apixaban", "ibuprofeno"]
+        },
+        "salud": [
+          { "ruta": "medications", "valor": { "state": "recorded" }, "con": ["losartan"] },
+          { "ruta": "anticoagulants", "valor": { "state": "recorded" }, "con": ["apixaban"] }
+        ],
+        "propone": [
+          { "tipo": "alergia", "con": ["ibuprofeno"] },
+          { "tipo": "odontograma", "campos": { "toothNumber": 36 } }
+        ]
+      }
+    },
+    {
+      "id": "od-doctora-planea-apixaban",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (H3): la doctora nombra el apixabán al planear la exodoncia. Nadie dijo en esta consulta que lo toma: no es una declaración de salud.",
+      "pausas": [
+        "buenas tardes don julio cómo sigue esa muela",
+        "igual doctora me sigue molestando cuando mastico desde hace tres semanas",
+        "a ver la cuarenta y seis tiene una fractura que llega a la raíz hay que sacarla",
+        "la exodoncia la hacemos la próxima semana después de hablar con su cardiólogo por el apixabán",
+        "y para el dolor paracetamol de quinientos cada ocho horas por tres días"
+      ],
+      "espera": {
+        "consulta": {
+          "motivo": ["muela|mastico|molest"],
+          "motivoSin": ["apixaban", "cardiologo"],
+          "tiempo": "tres semanas|3 semanas",
+          "relato": [],
+          "relatoSin": ["apixaban"]
+        },
+        "salud": [],
+        "saludNo": [{ "ruta": "anticoagulants" }]
+      }
     }
   ]
 }
