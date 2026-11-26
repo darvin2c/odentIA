@@ -1,0 +1,1116 @@
+{
+  "source": "Lista CIE-10 del MINSA (2024-07), códigos odontológicos",
+  "codes": [
+    {
+      "code": "B00.2",
+      "title": "Gingivoestomatitis y faringoamigdalitis herpética",
+      "category": true
+    },
+    {
+      "code": "B00.2X",
+      "title": "Gingivoestomatitis herpética",
+      "category": false
+    },
+    {
+      "code": "B37.0",
+      "title": "Estomatitis candidiásica",
+      "category": true
+    },
+    {
+      "code": "B37.00",
+      "title": "Estomatitis candidiásica pseudomembranosa aguda",
+      "category": false
+    },
+    {
+      "code": "B37.01",
+      "title": "Estomatitis candidiásica eritematosa (atrófica) aguda",
+      "category": false
+    },
+    {
+      "code": "B37.02",
+      "title": "Estomatitis candidiásica hiperplásica crónica",
+      "category": false
+    },
+    {
+      "code": "B37.03",
+      "title": "Estomatitis candidiásica eritematosa (atrófica) crónica",
+      "category": false
+    },
+    {
+      "code": "B37.04",
+      "title": "Candidiasis mucocutánea",
+      "category": false
+    },
+    {
+      "code": "B37.05",
+      "title": "Granuloma candidiásico bucal",
+      "category": false
+    },
+    {
+      "code": "B37.06",
+      "title": "Queilitis angular",
+      "category": false
+    },
+    {
+      "code": "B37.08",
+      "title": "Otras manifestaciones bucales especificadas",
+      "category": false
+    },
+    {
+      "code": "B37.09",
+      "title": "Manifestaciones bucales, no especificadas",
+      "category": false
+    },
+    {
+      "code": "C00",
+      "title": "Tumor maligno del labio",
+      "category": true
+    },
+    {
+      "code": "C00.0",
+      "title": "Tumor maligno del labio superior, cara externa",
+      "category": false
+    },
+    {
+      "code": "C00.1",
+      "title": "Tumor maligno del labio inferior, cara externa",
+      "category": false
+    },
+    {
+      "code": "C00.2",
+      "title": "Tumor maligno del labio, cara externa, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "C00.3",
+      "title": "Tumor maligno del labio superior, cara interna",
+      "category": false
+    },
+    {
+      "code": "C00.4",
+      "title": "Tumor maligno del labio inferior, cara interna",
+      "category": false
+    },
+    {
+      "code": "C00.5",
+      "title": "Tumor maligno del labio, cara interna, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "C00.6",
+      "title": "Tumor maligno de la comisura labial",
+      "category": false
+    },
+    {
+      "code": "C00.8",
+      "title": "Lesión de sitios contiguos del labio",
+      "category": false
+    },
+    {
+      "code": "C00.9",
+      "title": "Tumor maligno del labio, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C01",
+      "title": "Tumor maligno de la base de la lengua",
+      "category": true
+    },
+    {
+      "code": "C01.X",
+      "title": "Tumor maligno de la base de la lengua",
+      "category": false
+    },
+    {
+      "code": "C02",
+      "title": "Tumor maligno de otras partes y de las no especificadas de la lengua",
+      "category": true
+    },
+    {
+      "code": "C02.0",
+      "title": "Tumor maligno de la cara dorsal de la lengua",
+      "category": false
+    },
+    {
+      "code": "C02.1",
+      "title": "Tumor maligno del borde de la lengua",
+      "category": false
+    },
+    {
+      "code": "C02.2",
+      "title": "Tumor maligno de la cara ventral de la lengua",
+      "category": false
+    },
+    {
+      "code": "C02.3",
+      "title": "Tumor maligno de los dos tercios anteriores de la lengua, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C02.4",
+      "title": "Tumor maligno de la amígdala lingual",
+      "category": false
+    },
+    {
+      "code": "C02.8",
+      "title": "Lesión de sitios contiguos de la lengua",
+      "category": false
+    },
+    {
+      "code": "C02.9",
+      "title": "Tumor maligno de la lengua, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C03",
+      "title": "Tumor maligno de la encía",
+      "category": true
+    },
+    {
+      "code": "C03.0",
+      "title": "Tumor maligno de la encía superior",
+      "category": false
+    },
+    {
+      "code": "C03.1",
+      "title": "Tumor maligno de la encía inferior",
+      "category": false
+    },
+    {
+      "code": "C03.9",
+      "title": "Tumor maligno de la encía, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C04",
+      "title": "Tumor maligno del piso de la boca",
+      "category": true
+    },
+    {
+      "code": "C04.0",
+      "title": "Tumor maligno de la parte anterior del piso de la boca",
+      "category": false
+    },
+    {
+      "code": "C04.1",
+      "title": "Tumor maligno de la parte lateral del piso de la boca",
+      "category": false
+    },
+    {
+      "code": "C04.8",
+      "title": "Lesión de sitios contiguos del piso de la boca",
+      "category": false
+    },
+    {
+      "code": "C04.9",
+      "title": "Tumor maligno del piso de la boca, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C05",
+      "title": "Tumor maligno del paladar",
+      "category": true
+    },
+    {
+      "code": "C05.0",
+      "title": "Tumor maligno del paladar duro",
+      "category": false
+    },
+    {
+      "code": "C05.1",
+      "title": "Tumor maligno del paladar blando",
+      "category": false
+    },
+    {
+      "code": "C05.2",
+      "title": "Tumor maligno de la úvula",
+      "category": false
+    },
+    {
+      "code": "C05.8",
+      "title": "Lesión de sitios contiguos del paladar",
+      "category": false
+    },
+    {
+      "code": "C05.9",
+      "title": "Tumor maligno del paladar, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "C06",
+      "title": "Tumor maligno de otras partes y de las no especificadas de la boca",
+      "category": true
+    },
+    {
+      "code": "C06.0",
+      "title": "Tumor maligno de la mucosa de la mejilla",
+      "category": false
+    },
+    {
+      "code": "C06.1",
+      "title": "Tumor maligno del vestíbulo de la boca",
+      "category": false
+    },
+    {
+      "code": "C06.2",
+      "title": "Tumor maligno del área retromolar",
+      "category": false
+    },
+    {
+      "code": "C06.8",
+      "title": "Lesión de sitios contiguos de otras partes y de las no especificadas de la boca",
+      "category": false
+    },
+    {
+      "code": "C06.9",
+      "title": "Tumor maligno de la boca, parte no especificada",
+      "category": false
+    },
+    {
+      "code": "D10.0",
+      "title": "Tumor benigno del labio",
+      "category": false
+    },
+    {
+      "code": "D10.1",
+      "title": "Tumor benigno de la lengua",
+      "category": false
+    },
+    {
+      "code": "D10.2",
+      "title": "Tumor benigno del piso de la boca",
+      "category": false
+    },
+    {
+      "code": "D10.3",
+      "title": "Tumor benigno de otras partes y de las no especificadas de la boca",
+      "category": false
+    },
+    {
+      "code": "K00",
+      "title": "Trastornos del desarrollo y de la erupción de los dientes",
+      "category": true
+    },
+    {
+      "code": "K00.0",
+      "title": "Anodoncia",
+      "category": false
+    },
+    {
+      "code": "K00.1",
+      "title": "Dientes supernumerarios",
+      "category": false
+    },
+    {
+      "code": "K00.2",
+      "title": "Anomalías del tamaño y de la forma del diente",
+      "category": false
+    },
+    {
+      "code": "K00.3",
+      "title": "Dientes moteados",
+      "category": false
+    },
+    {
+      "code": "K00.4",
+      "title": "Alteraciones en la formación dentaria",
+      "category": false
+    },
+    {
+      "code": "K00.5",
+      "title": "Alteraciones hereditarias de la estructura dentaria, no clasificadas en otra parte",
+      "category": false
+    },
+    {
+      "code": "K00.6",
+      "title": "Alteraciones en la erupción dentaria",
+      "category": false
+    },
+    {
+      "code": "K00.7",
+      "title": "Síndrome de la erupción dentaria",
+      "category": false
+    },
+    {
+      "code": "K00.8",
+      "title": "Otros trastornos del desarrollo de los dientes",
+      "category": false
+    },
+    {
+      "code": "K00.9",
+      "title": "Trastorno del desarrollo de los dientes, no especificado",
+      "category": false
+    },
+    {
+      "code": "K01",
+      "title": "Dientes incluidos e impactados",
+      "category": true
+    },
+    {
+      "code": "K01.0",
+      "title": "Dientes incluidos",
+      "category": false
+    },
+    {
+      "code": "K01.1",
+      "title": "Dientes impactados",
+      "category": false
+    },
+    {
+      "code": "K02",
+      "title": "Caries dental",
+      "category": true
+    },
+    {
+      "code": "K02.0",
+      "title": "Caries limitada al esmalte",
+      "category": false
+    },
+    {
+      "code": "K02.1",
+      "title": "Caries de la dentina",
+      "category": false
+    },
+    {
+      "code": "K02.2",
+      "title": "Caries del cemento",
+      "category": false
+    },
+    {
+      "code": "K02.3",
+      "title": "Caries dentaria detenida",
+      "category": false
+    },
+    {
+      "code": "K02.4",
+      "title": "Odontoclasia",
+      "category": false
+    },
+    {
+      "code": "K02.5",
+      "title": "Caries con exposición pulpar",
+      "category": false
+    },
+    {
+      "code": "K02.8",
+      "title": "Otras caries dentales",
+      "category": false
+    },
+    {
+      "code": "K02.9",
+      "title": "Caries dental, no especificada",
+      "category": false
+    },
+    {
+      "code": "K03",
+      "title": "Otras enfermedades de los tejidos duros de los dientes",
+      "category": true
+    },
+    {
+      "code": "K03.0",
+      "title": "Atrición excesiva de los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.1",
+      "title": "Abrasión de los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.2",
+      "title": "Erosión de los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.3",
+      "title": "Reabsorción patológica de los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.4",
+      "title": "Hipercementosis",
+      "category": false
+    },
+    {
+      "code": "K03.5",
+      "title": "Anquilosis dental",
+      "category": false
+    },
+    {
+      "code": "K03.6",
+      "title": "Depósitos [ACRECIONES] en los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.7",
+      "title": "Cambios posteruptivos del color de los tejidos dentales duros",
+      "category": false
+    },
+    {
+      "code": "K03.8",
+      "title": "Otras enfermedades especificadas de los tejidos duros de los dientes",
+      "category": false
+    },
+    {
+      "code": "K03.9",
+      "title": "Enfermedad no especificada de los tejidos dentales duros",
+      "category": false
+    },
+    {
+      "code": "K04",
+      "title": "Enfermedades de la pulpa y de los tejidos periapicales",
+      "category": true
+    },
+    {
+      "code": "K04.0",
+      "title": "Pulpitis",
+      "category": false
+    },
+    {
+      "code": "K04.1",
+      "title": "Necrosis de la pulpa",
+      "category": false
+    },
+    {
+      "code": "K04.2",
+      "title": "Degeneración de la pulpa",
+      "category": false
+    },
+    {
+      "code": "K04.3",
+      "title": "Formación anormal de tejido duro en la pulpa",
+      "category": false
+    },
+    {
+      "code": "K04.4",
+      "title": "Periodontitis apical aguda originada en la pulpa",
+      "category": false
+    },
+    {
+      "code": "K04.5",
+      "title": "Periodontitis apical crónica",
+      "category": false
+    },
+    {
+      "code": "K04.6",
+      "title": "Absceso periapical con fístula",
+      "category": false
+    },
+    {
+      "code": "K04.7",
+      "title": "Absceso periapical sin fístula",
+      "category": false
+    },
+    {
+      "code": "K04.8",
+      "title": "Quiste radicular",
+      "category": false
+    },
+    {
+      "code": "K04.9",
+      "title": "Otras enfermedades y las no especificadas de la pulpa y del tejido periapical",
+      "category": false
+    },
+    {
+      "code": "K05",
+      "title": "Gingivitis y enfermedades periodontales",
+      "category": true
+    },
+    {
+      "code": "K05.0",
+      "title": "Gingivitis aguda",
+      "category": false
+    },
+    {
+      "code": "K05.1",
+      "title": "Gingivitis crónica",
+      "category": false
+    },
+    {
+      "code": "K05.2",
+      "title": "Periodontitis aguda",
+      "category": false
+    },
+    {
+      "code": "K05.3",
+      "title": "Periodontitis crónica",
+      "category": false
+    },
+    {
+      "code": "K05.4",
+      "title": "Periodontosis",
+      "category": false
+    },
+    {
+      "code": "K05.5",
+      "title": "Otras enfermedades periodontales",
+      "category": false
+    },
+    {
+      "code": "K05.6",
+      "title": "Enfermedad del periodonto, no especificada",
+      "category": false
+    },
+    {
+      "code": "K06",
+      "title": "Otros trastornos de la encía y de la zona edéntula",
+      "category": true
+    },
+    {
+      "code": "K06.0",
+      "title": "Retracción gingival",
+      "category": false
+    },
+    {
+      "code": "K06.1",
+      "title": "Hiperplasia gingival",
+      "category": false
+    },
+    {
+      "code": "K06.2",
+      "title": "Lesiones de la encía y de la zona edéntula asociadas con traumatismo",
+      "category": false
+    },
+    {
+      "code": "K06.8",
+      "title": "Otros trastornos especificados de la encía y de la zona edéntula",
+      "category": false
+    },
+    {
+      "code": "K06.9",
+      "title": "Trastorno no especificado de la encía y de la zona edéntula",
+      "category": false
+    },
+    {
+      "code": "K07",
+      "title": "Anomalías dentofaciales [incluso la maloclusión]",
+      "category": true
+    },
+    {
+      "code": "K07.0",
+      "title": "Anomalías evidentes del tamaño de los maxilares",
+      "category": false
+    },
+    {
+      "code": "K07.1",
+      "title": "Anomalías de la relación maxilobasilar",
+      "category": false
+    },
+    {
+      "code": "K07.2",
+      "title": "Anomalías de la relación entre los arcos dentarios",
+      "category": false
+    },
+    {
+      "code": "K07.3",
+      "title": "Anomalías de la posición del diente",
+      "category": false
+    },
+    {
+      "code": "K07.4",
+      "title": "Maloclusión de tipo no especificado",
+      "category": false
+    },
+    {
+      "code": "K07.5",
+      "title": "Anomalías dentofaciales funcionales",
+      "category": false
+    },
+    {
+      "code": "K07.6",
+      "title": "Trastornos de la articulación temporomaxilar",
+      "category": false
+    },
+    {
+      "code": "K07.8",
+      "title": "Otras anomalías dentofaciales",
+      "category": false
+    },
+    {
+      "code": "K07.9",
+      "title": "Anomalía dentofacial, no especificada",
+      "category": false
+    },
+    {
+      "code": "K08",
+      "title": "Otros trastornos de los dientes y de sus estructuras de sostén",
+      "category": true
+    },
+    {
+      "code": "K08.0",
+      "title": "Exfoliación de los dientes debida a causas sistémicas",
+      "category": false
+    },
+    {
+      "code": "K08.1",
+      "title": "Pérdida de dientes debida a accidente, extracción o enfermedad periodontal local",
+      "category": false
+    },
+    {
+      "code": "K08.2",
+      "title": "Atrofia del reborde alveolar desdentado",
+      "category": false
+    },
+    {
+      "code": "K08.3",
+      "title": "Raíz dental retenida",
+      "category": false
+    },
+    {
+      "code": "K08.8",
+      "title": "Otras afecciones especificadas de los dientes y de sus estructuras de sostén",
+      "category": false
+    },
+    {
+      "code": "K08.9",
+      "title": "Trastorno de los dientes y de sus estruturas de sostén, no especificado",
+      "category": false
+    },
+    {
+      "code": "K09",
+      "title": "Quistes de la región bucal, no clasificados en otra parte",
+      "category": true
+    },
+    {
+      "code": "K09.0",
+      "title": "Quistes originados por el desarrollo de los dientes",
+      "category": false
+    },
+    {
+      "code": "K09.1",
+      "title": "Quistes de las fisuras de la región oral (no odontogénicos)",
+      "category": false
+    },
+    {
+      "code": "K09.2",
+      "title": "Otros quistes de los maxilares",
+      "category": false
+    },
+    {
+      "code": "K09.8",
+      "title": "Otros quistes de la región bucal, no clasificados en otra parte",
+      "category": false
+    },
+    {
+      "code": "K09.9",
+      "title": "Quiste de la región bucal, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "K10",
+      "title": "Otras enfermedades de los maxilares",
+      "category": true
+    },
+    {
+      "code": "K10.0",
+      "title": "Trastornos del desarrollo de los maxilares",
+      "category": false
+    },
+    {
+      "code": "K10.1",
+      "title": "Granuloma central de células gigantes",
+      "category": false
+    },
+    {
+      "code": "K10.2",
+      "title": "Afecciones inflamatorias de los maxilares",
+      "category": false
+    },
+    {
+      "code": "K10.3",
+      "title": "Alveolitis del maxilar",
+      "category": false
+    },
+    {
+      "code": "K10.8",
+      "title": "Otras enfermedades especificadas de los maxilares",
+      "category": false
+    },
+    {
+      "code": "K10.9",
+      "title": "Enfermedad de los maxilares, no especificada",
+      "category": false
+    },
+    {
+      "code": "K11",
+      "title": "Enfermedades de las glándulas salivales",
+      "category": true
+    },
+    {
+      "code": "K11.0",
+      "title": "Atrofia de glándula salival",
+      "category": false
+    },
+    {
+      "code": "K11.1",
+      "title": "Hipertrofia de glándula salival",
+      "category": false
+    },
+    {
+      "code": "K11.2",
+      "title": "Sialadenitis",
+      "category": false
+    },
+    {
+      "code": "K11.3",
+      "title": "Absceso de glándula salival",
+      "category": false
+    },
+    {
+      "code": "K11.4",
+      "title": "Fístula de glándula salival",
+      "category": false
+    },
+    {
+      "code": "K11.5",
+      "title": "Sialolitiasis",
+      "category": false
+    },
+    {
+      "code": "K11.6",
+      "title": "Mucocele de glándula salival",
+      "category": false
+    },
+    {
+      "code": "K11.7",
+      "title": "Alteraciones de la secreción salival",
+      "category": false
+    },
+    {
+      "code": "K11.8",
+      "title": "Otras enfermedades de las glándulas salivales",
+      "category": false
+    },
+    {
+      "code": "K11.9",
+      "title": "Enfermedad de glándula salival, no especificada",
+      "category": false
+    },
+    {
+      "code": "K12",
+      "title": "Estomatitis y lesiones afines",
+      "category": true
+    },
+    {
+      "code": "K12.0",
+      "title": "Estomatitis aftosa recurrente",
+      "category": false
+    },
+    {
+      "code": "K12.1",
+      "title": "Otras formas de estomatitis",
+      "category": false
+    },
+    {
+      "code": "K12.2",
+      "title": "Celulitis y absceso de boca",
+      "category": false
+    },
+    {
+      "code": "K12.3",
+      "title": "Mucositis oral (ulcerativa)",
+      "category": false
+    },
+    {
+      "code": "K13",
+      "title": "Otras enfermedades de los labios y de la mucosa bucal",
+      "category": true
+    },
+    {
+      "code": "K13.0",
+      "title": "Enfermedades de los labios",
+      "category": false
+    },
+    {
+      "code": "K13.1",
+      "title": "Mordedura del labio y de la mejilla",
+      "category": false
+    },
+    {
+      "code": "K13.2",
+      "title": "Leucoplasia y otras alteraciones del epitelio bucal, incluyendo la lengua",
+      "category": false
+    },
+    {
+      "code": "K13.3",
+      "title": "Leucoplasia pilosa",
+      "category": false
+    },
+    {
+      "code": "K13.4",
+      "title": "Granuloma y lesiones semejantes de la mucosa bucal",
+      "category": false
+    },
+    {
+      "code": "K13.5",
+      "title": "Fibrosis de la submucosa bucal",
+      "category": false
+    },
+    {
+      "code": "K13.6",
+      "title": "Hiperplasia irritativa de la mucosa bucal",
+      "category": false
+    },
+    {
+      "code": "K13.7",
+      "title": "Otras lesiones y las no especificadas de la mucosa bucal",
+      "category": false
+    },
+    {
+      "code": "K14",
+      "title": "Enfermedades de la lengua",
+      "category": true
+    },
+    {
+      "code": "K14.0",
+      "title": "Glositis",
+      "category": false
+    },
+    {
+      "code": "K14.1",
+      "title": "Lengua geográfica",
+      "category": false
+    },
+    {
+      "code": "K14.2",
+      "title": "Glositis romboidea mediana",
+      "category": false
+    },
+    {
+      "code": "K14.3",
+      "title": "Hipertrofia de las papilas linguales",
+      "category": false
+    },
+    {
+      "code": "K14.4",
+      "title": "Atrofia de las papilas linguales",
+      "category": false
+    },
+    {
+      "code": "K14.5",
+      "title": "Lengua plegada",
+      "category": false
+    },
+    {
+      "code": "K14.6",
+      "title": "Glosodinia",
+      "category": false
+    },
+    {
+      "code": "K14.8",
+      "title": "Otras enfermedades de la lengua",
+      "category": false
+    },
+    {
+      "code": "K14.9",
+      "title": "Enfermedad de la lengua, no especificada",
+      "category": false
+    },
+    {
+      "code": "Q35",
+      "title": "Fisura del paladar",
+      "category": true
+    },
+    {
+      "code": "Q35.0",
+      "title": "Fisura del paladar duro, bilateral",
+      "category": false
+    },
+    {
+      "code": "Q35.1",
+      "title": "Fisura del paladar duro",
+      "category": false
+    },
+    {
+      "code": "Q35.2",
+      "title": "Fisura del paladar blando, bilateral",
+      "category": false
+    },
+    {
+      "code": "Q35.3",
+      "title": "Fisura del paladar blando",
+      "category": false
+    },
+    {
+      "code": "Q35.4",
+      "title": "Fisura del paladar duro y del paladar blando, bilateral",
+      "category": false
+    },
+    {
+      "code": "Q35.5",
+      "title": "Fisura del paladar duro y del paladar blando",
+      "category": false
+    },
+    {
+      "code": "Q35.6",
+      "title": "Fisura del paladar, línea media",
+      "category": false
+    },
+    {
+      "code": "Q35.7",
+      "title": "Fisura de la úvula",
+      "category": false
+    },
+    {
+      "code": "Q35.8",
+      "title": "Fisura del paladar, bilateral sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "Q35.9",
+      "title": "Fisura del paladar, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "Q36",
+      "title": "Labio leporino",
+      "category": true
+    },
+    {
+      "code": "Q36.0",
+      "title": "Labio leporino, bilateral",
+      "category": false
+    },
+    {
+      "code": "Q36.1",
+      "title": "Labio leporino, línea media",
+      "category": false
+    },
+    {
+      "code": "Q36.9",
+      "title": "Labio leporino, unilateral",
+      "category": false
+    },
+    {
+      "code": "Q37",
+      "title": "Fisura del paladar con labio leporino",
+      "category": true
+    },
+    {
+      "code": "Q37.0",
+      "title": "Fisura del paladar duro con labio leporino bilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.1",
+      "title": "Fisura del paladar duro con labio leporino unilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.2",
+      "title": "Fisura del paladar blando con labio leporino bilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.3",
+      "title": "Fisura del paladar blando con labio leporino unilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.4",
+      "title": "Fisura del paladar duro y del paladar blando con labio leporino bilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.5",
+      "title": "Fisura del paladar duro y del paladar blando con labio leporino unilateral",
+      "category": false
+    },
+    {
+      "code": "Q37.8",
+      "title": "Fisura del paladar con labio leporino bilateral, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "Q37.9",
+      "title": "Fisura del paladar con labio leporino unilateral, sin otra especificación",
+      "category": false
+    },
+    {
+      "code": "S01.5",
+      "title": "Herida del labio y de la cavidad bucal",
+      "category": false
+    },
+    {
+      "code": "S02.5",
+      "title": "Fractura de los dientes",
+      "category": false
+    },
+    {
+      "code": "S02.6",
+      "title": "Fractura del maxilar inferior",
+      "category": false
+    },
+    {
+      "code": "S03.0",
+      "title": "Luxación del maxilar",
+      "category": false
+    },
+    {
+      "code": "S03.2",
+      "title": "Luxación de diente",
+      "category": false
+    },
+    {
+      "code": "Z01.2",
+      "title": "Examen odontológico",
+      "category": false
+    },
+    {
+      "code": "Z46.3",
+      "title": "Prueba y ajuste de prótesis dental",
+      "category": true
+    },
+    {
+      "code": "Z46.31",
+      "title": "Prótesis fija",
+      "category": false
+    },
+    {
+      "code": "Z46.32",
+      "title": "Prótesis removible",
+      "category": false
+    },
+    {
+      "code": "Z46.33",
+      "title": "Prótesis total",
+      "category": false
+    },
+    {
+      "code": "Z46.34",
+      "title": "Incrustracion",
+      "category": false
+    },
+    {
+      "code": "Z97.2",
+      "title": "Presencia de dispositivo protésico dental (completo) (parcial)",
+      "category": false
+    }
+  ],
+  "daily": [
+    "K02.0",
+    "K02.1",
+    "K02.5",
+    "K04.0",
+    "K04.1",
+    "K04.4",
+    "K04.5",
+    "K04.6",
+    "K04.7",
+    "K05.1",
+    "K05.2",
+    "K05.3",
+    "K03.6",
+    "K06.0",
+    "K08.1",
+    "K08.3",
+    "K01.1",
+    "K10.3",
+    "K07.6",
+    "K03.0",
+    "K12.0",
+    "S02.5",
+    "S03.2",
+    "Z01.2"
+  ]
+}

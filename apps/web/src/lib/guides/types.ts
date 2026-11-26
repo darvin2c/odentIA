@@ -16,6 +16,9 @@ export type GuideSheet =
   | "historia-clinica"
   | "consentimiento"
   | "cierre-de-caja"
+  | "plan-de-tratamiento"
+  | "periodontograma"
+  | "cie10-odontologia"
 
 /** Un video del canal de YouTube de odentIA. */
 export interface GuideVideo {
@@ -33,7 +36,8 @@ export type GuideFigure =
   | { kind: "fdi"; dentition: "permanente" | "temporal" | "mixta"; mark?: number; caption: Rich }
   /** Las cinco caras de un diente de arriba (el 26), como en la hoja. */
   | { kind: "caras"; caption: Rich }
-  | { kind: "tabla"; head: string[]; rows: Rich[][]; caption?: Rich }
+  /** `stack`: en el celular, cada fila en su bloque aunque tenga 3 columnas (lo hace solo con más de 3). */
+  | { kind: "tabla"; head: string[]; rows: Rich[][]; caption?: Rich; stack?: boolean }
 
 export interface GuideStep {
   title: string
@@ -50,7 +54,15 @@ export interface Guide {
   /** La dirección: `/guias/<slug>`. */
   slug: string
   /** Su tema, en la ruta («Guías › Odontograma») y en las tarjetas. */
-  topic: "Odontograma" | "Presupuestos" | "Historia clínica" | "Consentimiento" | "Caja"
+  topic:
+    | "Odontograma"
+    | "Periodontograma"
+    | "Presupuestos"
+    | "Plan de tratamiento"
+    | "Historia clínica"
+    | "CIE-10"
+    | "Consentimiento"
+    | "Caja"
   /** El título, en dos partes: la segunda va en color. */
   title: string
   accent: string
@@ -81,7 +93,16 @@ export interface Guide {
   sheets: Array<{ sheet: GuideSheet; label: string; detail: string }>
   /** «Pruébalo aquí»: la demo de su página de producto y cómo se hace en odentIA. */
   tryIt: {
-    demo: "odontograma" | "odontograma-ninos" | "presupuesto" | "historia" | "consentimiento" | "caja"
+    demo:
+      | "odontograma"
+      | "odontograma-ninos"
+      | "presupuesto"
+      | "historia"
+      | "consentimiento"
+      | "caja"
+      | "plan"
+      | "periodontograma"
+      | "cie10"
     title: string
     text: Rich
     /** Lo que se hace con la demo, si ella misma no lo dice. */

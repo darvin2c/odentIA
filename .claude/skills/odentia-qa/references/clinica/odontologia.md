@@ -259,6 +259,9 @@ Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compr
 - [ ] Cada fuente lleva su edición y su página (AAPD, Reference Manual 2026, p. 675).
 - [ ] El odontograma de adultos en blanco, con su leyenda, se imprime en una sola hoja.
 - [ ] Nada que no tenga fuente se enseña como regla (por ejemplo, qué se marca en la mixta con un diente que todavía no sale): queda por confirmar con una clínica real.
+- [ ] El periodontograma de la guía y de su plantilla anota la recesión con el signo de la app (positiva si se ve raíz, negativa si la encía cubre la corona) y avisa con un ejemplo qué pasa con el signo contrario.
+- [ ] La lista CIE-10 de la guía, de su plantilla y de su buscador sale del archivo oficial del MINSA que carga la app, con sus títulos y sus códigos; nunca de la semilla de desarrollo.
+- [ ] El plan por fases de la guía pone cada tratamiento donde lo propone la app: la endodoncia de una pulpitis en urgencia, el implante en la quirúrgica y lo que va sobre el implante en la rehabilitadora.
 
 **Fuentes:** AAPD, *Reference Manual of Pediatric Dentistry*, «Dental Growth and Development» (2026, p. 675); ISO 3950.
 **Caso:** C2 a C5 del banco de la mesa del 24 nov 2026 (Jorge, 42 años; Valentina, 4; Mateo, 7; el presupuesto por fases con implante o puente).
