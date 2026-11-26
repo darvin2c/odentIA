@@ -24,24 +24,10 @@ import { CurrencySelect, centsToMajor, majorToCents } from "./billing-fields"
 import { money } from "./billing-payments"
 import { OpenAppAccountDrawer } from "./app-requests"
 import type { AdminPlan } from "./plan-drawer"
+import { APP_NAMES, AppMark } from "./product"
 
-/** El nombre de cada app que es otro sistema, como lo ve el equipo. */
-export const APP_NAMES: Record<string, string> = { gestoria: "gestorIA" }
-
-/** «● gestorIA»: la app de una cuenta que no es una clínica, con el mismo trazo que el producto. */
-export function AppMark({ app, className = "" }: { app: string; className?: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-xs font-semibold text-foreground ${className}`}
-    >
-      <span
-        aria-hidden
-        className="inline-block size-2 shrink-0 rounded-full border border-foreground"
-      />
-      {APP_NAMES[app] ?? app}
-    </span>
-  )
-}
+// La marca de una app que es otro sistema vive con la del producto: también la usa la Bandeja.
+export { APP_NAMES, AppMark }
 
 /** El estado de la suscripción en palabras; sin suscripción, no se le cobra. */
 export const ACCOUNT_STATUS: Record<string, string> = {

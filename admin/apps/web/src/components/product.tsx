@@ -52,6 +52,34 @@ export function ProductMark({ product, kind = false, className }: { product: Cli
   )
 }
 
+/** El nombre de cada app que es otro sistema, como lo ve el equipo. */
+export const APP_NAMES: Record<string, string> = { gestoria: "gestorIA" }
+
+/** «● gestorIA»: la app de una cuenta que no es una clínica, con el mismo trazo que el producto. */
+export function AppMark({ app, className = "" }: { app: string; className?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs font-semibold text-foreground ${className}`}
+    >
+      <span
+        aria-hidden
+        className="inline-block size-2 shrink-0 rounded-full border border-foreground"
+      />
+      {APP_NAMES[app] ?? app}
+    </span>
+  )
+}
+
+/**
+ * La app a la que escribieron un correo: «● odentIA» por su producto o «● gestorIA» si es otro
+ * sistema. Una que esta pantalla no conoce no se dice.
+ */
+export function MailAppMark({ app, className }: { app: string | null; className?: string }) {
+  if (isClinicalProduct(app)) return <ProductMark product={app} {...(className ? { className } : {})} />
+  if (app && APP_NAMES[app]) return <AppMark app={app} {...(className ? { className } : {})} />
+  return null
+}
+
 /** El producto de cada clínica, para marcar y filtrar las filas que solo traen su id. */
 export function useOrgProducts() {
   return useQuery({

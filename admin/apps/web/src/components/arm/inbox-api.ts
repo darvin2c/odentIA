@@ -80,6 +80,8 @@ export const inboxItemSchema = z.object({
   /** Solo correo: el buzón y la dirección a la que llegó. */
   mailbox: z.string().nullable(),
   to: z.string().nullable(),
+  /** Solo correo: la app a la que escribieron (el producto de sus clínicas o `gestoria`). */
+  emailApp: z.string().nullable().default(null),
   attendedBy: z.object({ id: z.string(), name: z.string() }).nullable(),
   lastOutbound: z
     .object({ status: z.string(), byKairos: z.boolean(), at: z.string() })

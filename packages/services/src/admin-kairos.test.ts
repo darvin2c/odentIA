@@ -805,6 +805,21 @@ beforeAll(async () => {
     })
     .returning({ id: saasInboundEmail.id })
   ids.personEmail = toPerson?.id ?? ""
+  // A gestorIA (otro sistema), sin cliente y verificado: lo atiende una persona en la Bandeja.
+  const [toGestoria] = await ownerDb
+    .insert(saasInboundEmail)
+    .values({
+      mailbox: "hola",
+      product: "gestoria",
+      messageId: "<a-gestoria@kairos.test>",
+      fromAddress: "tienda@nadie.test",
+      toAddress: "hola@gestoria24.com",
+      subject: "Mi tienda",
+      senderVerified: true,
+      receivedAt: ago(0.5),
+    })
+    .returning({ id: saasInboundEmail.id })
+  ids.gestoriaEmail = toGestoria?.id ?? ""
 
   await seedAlta()
   first = await pass()
@@ -1012,6 +1027,13 @@ describe("la pasada de Kairós", () => {
     expect(toPerson?.reason).toContain("Llegó a ana.torres@ de odentIA")
     expect(toPerson?.reason).toContain("puede ser la carga de datos")
     expect(orphan?.reason).not.toContain("carga")
+    // Lo que llegó a gestorIA no lo liga ni lo responde Kairós: no hay nada suyo de ese correo.
+    const fromGestoria = await ownerDb
+      .select({ id: kairosItem.id })
+      .from(kairosItem)
+      .where(sql`${kairosItem.payload} ->> 'emailId' = ${ids.gestoriaEmail}`)
+    expect(ids.gestoriaEmail).not.toBe("")
+    expect(fromGestoria).toEqual([])
     ids.orphanItem = orphan?.id ?? ""
   })
 

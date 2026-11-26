@@ -1,6 +1,7 @@
 /**
- * Correo que llega a los buzones de cada producto (soporte@, contacto@, hola@,
- * fundadores@) o a la dirección de una persona del equipo (`persona`, por su
+ * Correo que llega a los buzones de cada app (soporte@, contacto@, hola@,
+ * fundadores@ de odentIA, latidIA, vistIA y gestorIA) o a la dirección de
+ * una persona del equipo (`persona`, por su
  * `mail_local`); lo manda firmado el worker de Cloudflare a
  * `/api/inbound/email`. Una dirección que no es de nadie no entra (404
  * `MAILBOX_UNKNOWN`: el worker la rechaza); la de una persona que ya no está
@@ -31,9 +32,9 @@
  */
 
 import { createHash } from "node:crypto"
-import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  SAAS_INBOUND_EMAIL_APPS,
   SAAS_INBOUND_MAILBOXES,
   type SaasInboundMailbox,
   type SaasInboundMatch,
@@ -62,7 +63,7 @@ import {
   settleRepliesOfEmail,
   threadMessageIds,
 } from "./admin-sales.js"
-import { outreachSenderPreview, staffByMailLocal } from "./admin-staff-mail.js"
+import { outreachSenderPreview, replyAppOf, staffByMailLocal } from "./admin-staff-mail.js"
 import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 
@@ -97,7 +98,8 @@ const inboundSchema = z
     /** Cabeceras del hilo, tal como llegaron. */
     inReplyTo: z.string().nullish(),
     references: z.string().nullish(),
-    product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
+    /** La app a la que escribieron: el producto de sus clínicas o `gestoria`. */
+    product: z.enum(SAAS_INBOUND_EMAIL_APPS, "Producto no válido"),
     messageId: z
       .string()
       .trim()
@@ -691,7 +693,8 @@ export async function getInboundEmail(
         .where(inArray(saasClientFile.id, replyFileIds))
     : []
   const fileName = new Map(replyFileRows.map((file) => [file.id, file.filename]))
-  // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
+  // La marca con que sale la respuesta (como al enviar, `replyAppOf`): la de gestorIA si le
+  // escribieron ahí; si no, la del cliente si ya es de uno, o la del buzón donde llegó.
   const [client] = row.clientId
     ? await tx
         .select({ product: saasClient.product })
@@ -699,12 +702,8 @@ export async function getInboundEmail(
         .where(eq(saasClient.id, row.clientId))
         .limit(1)
     : []
-  const product = [client?.product, row.product].find(
-    (value): value is (typeof CLINICAL_PRODUCTS)[number] => !!value && isClinicalProduct(value),
-  )
-  const sender = product
-    ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
-    : null
+  const app = replyAppOf(row.product, client?.product)
+  const sender = await outreachSenderPreview(tx, actor, app, row.mailbox as SaasInboundMailbox)
   const files: InboundEmailFile[] = (
     await tx
       .select()
@@ -748,7 +747,7 @@ export async function getInboundEmail(
     attachments: row.attachments.length,
     canReply: true,
     replyFrom: sender ? { name: sender.name, address: sender.address } : null,
-    replySignature: sender && product ? replySignature(sender, product) : null,
+    replySignature: sender ? replySignature(sender, app) : null,
     replySubject: replySubject(row.subject),
     replies: replies.map((reply) => ({
       id: reply.id,

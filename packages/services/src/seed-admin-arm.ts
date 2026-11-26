@@ -130,9 +130,9 @@ import { limaDate } from "./peru-business-days.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID } from "./seed-admin-core.js"
-import { markWebContactSent, submitWebContact, webContactInputSchema } from "./web-contacts.js"
 import { ensureFinishedSignupOrg } from "./seed-saas-billing.js"
 import type { Storage } from "./storage.js"
+import { markWebContactSent, submitWebContact, webContactInputSchema } from "./web-contacts.js"
 
 const DAY = 86_400_000
 const HOUR = 3_600_000
@@ -1110,7 +1110,7 @@ export async function seedAdminArm(
     })
   }
 
-  /* --- Correos que llegan: uno de un cliente y otro de nadie conocido --- */
+  /* --- Correos que llegan: de un cliente, de nadie conocido y a gestorIA --- */
   await ingestInboundEmail(
     tx,
     {
@@ -1140,6 +1140,25 @@ export async function seedAdminArm(
       text: "Somos una óptica en Moquegua y queremos saber precios. (ejemplo ficticio)",
       receivedAt: clock.ago(0, 1),
       attachments: [],
+    },
+    now,
+  )
+  // A hola@ de gestorIA (otro sistema): entra a la Bandeja marcado de gestorIA y se responde
+  // desde gestoria24.com.
+  await ingestInboundEmail(
+    tx,
+    {
+      mailbox: "hola",
+      product: "gestoria",
+      messageId: "<seed-arm-correo-gestoria@example.test>",
+      from: "bodega.lamerced@example.test",
+      fromName: "Bodega La Merced (ficticia)",
+      to: "hola@gestoria24.com",
+      subject: "¿gestorIA atiende los pedidos por WhatsApp?",
+      text: "Tenemos una bodega en Arequipa y vendemos por WhatsApp. ¿Cómo funciona? (ejemplo ficticio)",
+      receivedAt: clock.ago(0, 4),
+      attachments: [],
+      senderVerified: true,
     },
     now,
   )

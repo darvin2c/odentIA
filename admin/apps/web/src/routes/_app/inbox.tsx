@@ -22,7 +22,6 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { AtSign, Mail, MessageCircle, MessagesSquare, Paperclip } from "lucide-react"
 import { useRef, useState } from "react"
 import { momentWords } from "../../components/arm/chat-api"
-import { ChatAppMark } from "../../components/product"
 import { ChatPane } from "../../components/arm/chat-drawer"
 import { EmailThreadView } from "../../components/arm/email-thread"
 import {
@@ -38,6 +37,7 @@ import {
   inboxTargetOf,
   useInbox,
 } from "../../components/arm/inbox-api"
+import { ChatAppMark, MailAppMark } from "../../components/product"
 import { useIsAdmin } from "../../lib/session"
 
 /*
@@ -363,7 +363,11 @@ function InboxRow({
           <Badge variant={STATE_BADGE[item.state]}>{INBOX_STATE_WORDS[item.state]}</Badge>
           {item.stateWhy ? <span>{item.stateWhy}</span> : null}
           <span>{INBOX_CHANNEL_WORDS[item.channel]}</span>
-          {item.kind === "chat" ? <ChatAppMark app={item.app} /> : null}
+          {item.kind === "chat" ? (
+            <ChatAppMark app={item.app} />
+          ) : (
+            <MailAppMark app={item.emailApp} />
+          )}
           {item.client ? (
             <span className="truncate">
               {item.client.name} · {CLIENT_PHASE_WORDS[item.client.phase]}

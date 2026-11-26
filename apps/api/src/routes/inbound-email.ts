@@ -1,7 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { SAAS_INBOUND_MAILBOXES, saasInboundEmail } from "@odentia/db/schema/admin-arm"
+import {
+  SAAS_INBOUND_EMAIL_APPS,
+  SAAS_INBOUND_MAILBOXES,
+  saasInboundEmail,
+} from "@odentia/db/schema/admin-arm"
 import {
   INBOUND_ATTACHMENTS_MAX,
   inboundAttachmentKey,
@@ -19,8 +22,8 @@ import { errorBody } from "../lib/error.js"
 import { serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Correo que llega a los buzones de los tres productos (soporte@, contacto@,
- * hola@, fundadores@) y a la dirección de cada persona del equipo (`persona`,
+ * Correo que llega a los buzones de cada app (soporte@, contacto@, hola@,
+ * fundadores@ de odentIA, latidIA, vistIA y gestorIA) y a la dirección de cada persona del equipo (`persona`,
  * con su `localPart`). Lo recibe el worker de Cloudflare Email Routing
  * (`infra/cloudflare/email-inbound`), que lo reenvía y además lo manda aquí
  * firmado. Montaje público, sin cookie ni `Origin`: vale solo con la firma.
@@ -75,7 +78,8 @@ const emailBody = z.object({
   /** Las cabeceras del hilo, recortadas por el worker. */
   inReplyTo: z.string().max(998).nullish(),
   references: z.string().max(8000).nullish(),
-  product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
+  /** La app del dominio: el producto de sus clínicas o, en gestoria24.com, `gestoria`. */
+  product: z.enum(SAAS_INBOUND_EMAIL_APPS, "Producto no válido"),
   messageId: z.string().trim().min(1, "Falta el Message-ID").max(998, "Message-ID demasiado largo"),
   from: z.string().trim().min(3).max(254),
   fromName: z.string().max(500).nullish(),

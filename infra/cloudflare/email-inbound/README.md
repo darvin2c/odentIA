@@ -1,7 +1,8 @@
 # Correo entrante de Sallca
 
-Un Email Worker de Cloudflare Email Routing para `odentia32.com`, `latidia72.com` y
-`vistia20.com` (ADR 0185). Recibe, por reglas fijas, los buzones `soporte@`, `contacto@`,
+Un Email Worker de Cloudflare Email Routing para `odentia32.com`, `latidia72.com`,
+`vistia20.com` y `gestoria24.com` (ADR 0185 y 0220): lo que se le escribe a cualquier app del
+grupo entra a la administración y se responde desde ahí, con la marca de esa app. Recibe, por reglas fijas, los buzones `soporte@`, `contacto@`,
 `hola@` y `fundadores@`, y por el **atrapa todo** de cada dominio cualquier otra dirección, que
 es la de una persona del equipo (`<mail_local>@`, la que se ve en Equipo de la administración).
 Qué hace con cada correo lo decide `deliver` (`src/flow.ts`), con las reglas de `src/route.ts`:
@@ -39,7 +40,7 @@ Cuerpo JSON:
 {
   "mailbox": "soporte | contacto | hola | fundadores | persona",
   "localPart": "ada.lovelace",
-  "product": "dental | medical | optical",
+  "product": "dental | medical | optical | gestoria",
   "messageId": "<…>",
   "from": "quien@escribe.com",
   "fromName": "Su nombre",
@@ -58,8 +59,10 @@ Cuerpo JSON:
 
 - `mailbox` sale de la parte local del destinatario (`soporte+algo@` cuenta como `soporte@`);
   cualquier otra parte local es `persona` y va con `localPart` (solo entonces);
-  `product`, del dominio: `odentia32.com` → `dental`, `latidia72.com` → `medical`,
-  `vistia20.com` → `optical`. Otro dominio solo se reenvía.
+  `product` es la app del dominio (`APPS` en `src/route.ts`): `odentia32.com` → `dental`,
+  `latidia72.com` → `medical`, `vistia20.com` → `optical`, el producto de sus clínicas, y
+  `gestoria24.com` → `gestoria`, la clave de gestorIA, que es otro sistema y no un producto
+  clínico (la API lo guarda así, como los planes de gestorIA). Otro dominio solo se reenvía.
 - `inReplyTo` y `references` son las cabeceras del hilo, solo con sus Message-ID y recortadas
   (998 y 8000 caracteres): así la API reconoce la respuesta a un correo nuestro.
 - La respuesta de la API lleva `data.copyTo`: el buzón de la copia de esa persona, o `null`
@@ -134,7 +137,20 @@ Con una persona que tenga acceso a la cuenta de Cloudflare de las zonas.
    - crear `soporte@`, `contacto@`, `hola@` y `fundadores@` y el atrapa todo con «Send to a
      Worker» › `sallca-correo-entrante`, y `privacidad@` con «Send to an email» al buzón de
      siempre.
-5. **Probar**: escribir a `soporte@` de cada dominio desde una cuenta propia con un PDF chico.
+5. **`gestoria24.com`** (zona `gestoria24.com` › Email › Email Routing), igual que
+   `latidia72.com`:
+   - Enable: Cloudflare agrega sus registros MX y el SPF (`v=spf1 include:_spf.mx.cloudflare.net ~all`);
+     si la zona ya tenía otro SPF, se juntan en uno solo (un dominio con dos SPF falla), con el
+     `include` de ZeptoMail que ya tenga;
+   - Destination addresses: verificar el buzón de siempre (`FORWARD_TO`), si esta cuenta aún no
+     lo tiene;
+   - Routing rules: `soporte@`, `contacto@`, `hola@` y `fundadores@` con «Send to a Worker» ›
+     `sallca-correo-entrante`, el **Catch-all address** encendido con «Send to a Worker» ›
+     `sallca-correo-entrante`, y `privacidad@` con «Send to an email» al buzón de siempre.
+   - Para responder desde la administración, ZeptoMail tiene que tener `gestoria24.com`
+     verificado (sus registros DKIM y el `include` de su SPF en la zona): las respuestas salen
+     desde `hola@`, `soporte@` o la dirección de quien responde en ese dominio.
+6. **Probar**: escribir a `soporte@` de cada dominio desde una cuenta propia con un PDF chico.
    Tiene que llegar al buzón de siempre y aparecer en la administración (en la ficha del
    cliente si el correo es de uno, o en Kairós como «correo sin cliente»). Antes, revisar en el
    correo reenviado que Cloudflare deja arriba `ARC-Authentication-Results: i=1;
@@ -143,6 +159,9 @@ Con una persona que tenga acceso a la cuenta de Cloudflare de las zonas.
    `sallca-correo-entrante` › Logs se ve si la API respondió otra cosa. Después, escribir a
    la dirección de una persona (tiene que llegar a su copia y a la administración) y a una que
    no es de nadie (tiene que rebotar con «Esta dirección no existe»).
+
+En la administración, lo que llega a `gestoria24.com` se ve en la Bandeja marcado «gestorIA» y se
+responde desde ese dominio; Kairós no lo liga ni lo responde (sus clientes no están en el ARM).
 
 Para volver atrás, las reglas de Email Routing vuelven a «Send to an email» y el atrapa todo se
 apaga: el Worker deja de recibir y el correo sigue llegando como antes (las direcciones de las

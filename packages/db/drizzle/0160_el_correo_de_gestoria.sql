@@ -1,0 +1,2 @@
+ALTER TABLE "admin"."saas_inbound_email" DROP CONSTRAINT "saas_inbound_email_product_check";--> statement-breakpoint
+ALTER TABLE "admin"."saas_inbound_email" ADD CONSTRAINT "saas_inbound_email_product_check" CHECK ("admin"."saas_inbound_email"."product" IN ('dental','medical','optical','gestoria'));
