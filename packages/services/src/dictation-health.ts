@@ -574,11 +574,20 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
 /** Palabras de un nombre que no lo distinguen: «inhalador de salbutamol» se reconoce por «salbutamol». */
 const NAME_FILLER = new Set(["de", "del", "la", "las", "los", "el", "en", "con", "para", "por", "una", "uno", "mg", "ml", "cada", "dia", "dias", "pastilla", "tableta"])
 
+/** Cuántas letras del comienzo comparten dos palabras. */
+function sharedStart(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return i
+}
+
 /** ¿Esa palabra del nombre está en lo dicho, tal cual, por su raíz o por cómo suena (`groundHeard`)? */
 function wordHeard(word: string, said: string): boolean {
   const saidWords = plain(said).split(/[^a-z0-9ñ]+/).filter(Boolean)
   if (saidWords.includes(word)) return true
-  if (word.length >= 5 && saidWords.some((one) => one.length >= 5 && one.slice(0, 5) === word.slice(0, 5))) return true
+  // Por su raíz: comparten el comienzo hasta casi el final de la más corta («diabetes», «diabético»),
+  // no solo un prefijo («hipertiroidismo» no nombra «hipertensión»; revisión de código del 26 nov).
+  if (word.length >= 5 && saidWords.some((one) => one.length >= 5 && sharedStart(one, word) >= Math.max(5, Math.min(one.length, word.length) - 3))) return true
   // «Su papá es asmático»: el asma dicha de quien la tiene (QA clínica del 26 nov).
   if (adjectiveHeard(word, saidWords)) return true
   return groundHeard(word, said, heardVocabulary([word])) !== ""

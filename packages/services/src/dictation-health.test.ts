@@ -437,6 +437,11 @@ describe("quitar por voz lo de su salud, dato por dato (revisión de código del
     expect(named.names).toEqual(["diabetes"])
     expect(withoutHealthKeys(payload, named.keys)?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
   })
+  it("una palabra que solo empieza igual no nombra otra: «hipertiroidismo» no es la hipertensión", () => {
+    const withHta = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "Hipertensión arterial" }, { name: "diabetes" }] } }
+    expect(healthNamed(withHta, "quita el hipertiroidismo").names).toEqual([])
+    expect(healthNamed(withHta, "es diabético, quítalo").names).toEqual(["diabetes"])
+  })
   it("un nombre sin palabras que lo distingan no se da por nombrado", () => {
     expect(healthNamed({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "T4" }] } }, "quita eso").keys.size).toBe(0)
   })
