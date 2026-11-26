@@ -824,6 +824,53 @@
             },
             "additionalProperties": false
           },
+          "stopped": {
+            "description": "Lo que dijo que ya no toma («ya no toma apixabán», «dejó la metformina»), una por medicina. Suspenderla por unos días para un procedimiento no es dejarla: esa sigue en lo que toma.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "La medicina que dejó, en sus palabras («apixabán»)."
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "family": {
+            "description": "Lo que se dijo de la salud de un familiar del paciente («su papá es diabético», «su hermana tuvo cáncer de boca»), uno por familiar y enfermedad.",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "relation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60,
+                  "description": "Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "La enfermedad o la alergia de ese familiar, en sus palabras («diabetes», «cáncer de boca»)."
+                }
+              },
+              "required": [
+                "relation",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
           "medical": {
             "description": "Si da de lactar, si fuma (`cigarrillos`, cuántos al día, solo de quien fuma) y si toma alcohol.",
             "type": "object",
@@ -855,6 +902,21 @@
                 ]
               }
             },
+            "additionalProperties": false
+          },
+          "gyneco": {
+            "description": "La fecha de su última regla (FUR), solo si la dijo, contada desde la fecha de hoy si la dijo así («el 10 de junio»). Si además está embarazada (un control prenatal, «es mi segundo embarazo»), también `personal.embarazo`.",
+            "type": "object",
+            "properties": {
+              "fur": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+              }
+            },
+            "required": [
+              "fur"
+            ],
             "additionalProperties": false
           },
           "dicho": {
@@ -889,7 +951,7 @@
               "peso_dicho",
               "otro"
             ],
-            "description": "`familiar`: de la salud de un familiar; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
+            "description": "`familiar`: lo que quien acompaña cuenta de su propia salud; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
           }
         },
         "required": [

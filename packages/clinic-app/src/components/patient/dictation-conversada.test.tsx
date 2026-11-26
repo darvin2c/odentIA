@@ -73,6 +73,7 @@ function sessionWith(over: Partial<Record<keyof Session, unknown>> = {}): Sessio
     save: mutation(),
     confirmReady: mutation(),
     confirmHealth: mutation(),
+    confirmStopped: mutation(),
     discardHealth: mutation(),
     settleHealthGroups: mutation(),
     noteAddsTo: () => "",
@@ -200,8 +201,8 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
   it("lee las filas que arma el servidor, sin volver a leer el texto de la tarjeta: el valor, lo de antes y quién lo dijo", () => {
     expect(heardHealth(heard)).toEqual({
       rows: [
-        { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina", by: "el paciente", denied: false, said: null },
-        { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", before: null, by: "el paciente", denied: true, said: null },
+        { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", before: "warfarina", by: "el paciente", denied: false, stopped: false, said: null },
+        { key: "conditions", group: "conditions", label: "Enfermedades", value: "dijo que no", before: null, by: "el paciente", denied: true, stopped: false, said: null },
       ],
       by: "el paciente",
     })
@@ -812,5 +813,47 @@ describe("lo que vio el verificador 2", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmar: Profilaxis" }))
     rerender(view([]))
     await waitFor(() => expect(document.activeElement?.textContent).toBe("Plan y controles"))
+  })
+})
+
+/*
+ * Mesa del 25 nov («salud y familia», entrega 2): lo de su familia y lo que ya no toma en el mismo
+ * aviso. La familia se revisa con «Lo revisé con…»; lo que dejó, en su fila, con «Sí, lo dejó».
+ */
+describe("De su familia y «Ya no toma»", () => {
+  const elena = suggestion({
+    id: "salud-2",
+    payload: {
+      declarante: "acompanante",
+      vinculo: "hija",
+      anticoagulants: { state: "recorded", detail: "aspirina 100 mg" },
+      stopped: { state: "recorded", items: [{ name: "apixabán" }] },
+      family: { state: "recorded", items: [{ relation: "hermana", name: "cáncer de boca" }] },
+    },
+    sourceText: "el cardiólogo le cambió el apixabán por aspirina",
+    healthRows: [
+      { key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "aspirina 100 mg", by: { declarante: "acompanante", vinculo: "hija" }, before: null, denied: false },
+      { key: "stopped:apixaban", group: "stopped", label: "Ya no toma", value: "apixabán", by: { declarante: "acompanante", vinculo: "hija" }, before: null, denied: false, stopped: true },
+      { key: "family:SIB:hermana:cancer de boca", group: "family", label: "Hermana", value: "cáncer de boca", by: { declarante: "acompanante", vinculo: "hija" }, before: null, denied: false },
+    ],
+  })
+
+  it("cada familiar con su parentesco, y lo que dejó con su propio «Sí, lo dejó»", () => {
+    const session = sessionWith({ suggestions: [elena] })
+    renderNotice(session)
+    const family = screen.getByRole("heading", { name: "De su familia" }).closest("li") as HTMLElement
+    expect(family.textContent).toContain("Hermana: cáncer de boca")
+    const stopped = screen.getByRole("heading", { name: "Ya no toma" }).closest("li") as HTMLElement
+    expect(stopped.textContent).toContain("Apixabán")
+    fireEvent.click(within(stopped).getByRole("button", { name: "Sí, lo dejó" }))
+    expect(session.confirmStopped.mutate).toHaveBeenCalledWith({ item: elena, key: "stopped:apixaban" }, expect.anything())
+    expect(session.confirmHealth.mutate).not.toHaveBeenCalled()
+  })
+
+  it("si lo único que queda es lo que dejó, no se ofrece «Lo revisé con…»", () => {
+    const only = { ...elena, healthRows: elena.healthRows?.filter((row) => row.group === "stopped") }
+    renderNotice(sessionWith({ suggestions: [only] }))
+    expect(screen.queryByRole("button", { name: /^Lo revisé con/ })).toBeNull()
+    expect(screen.getByRole("button", { name: "Sí, lo dejó" })).toBeTruthy()
   })
 })

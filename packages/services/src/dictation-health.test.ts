@@ -1,15 +1,27 @@
 import { describe, expect, it } from "vitest"
 import {
+  familyKinshipOf,
+  familyRelationWords,
   groundHealthNames,
+  hasDeclaredHealth,
   healthByDeclarant,
+  healthOfPayload,
+  healthSupersedingKeysOf,
   healthRows,
   healthSaidBy,
   healthSaidOf,
   mergeHealth,
   prepareHealth,
+  saidFamilyOf,
   saidInDoubt,
+  saidStoppedOf,
+  sameDrug,
+  selfCorrectedHealth,
   splitHealthDenials,
   withoutSettledHealth,
+  withoutHealthKeys,
+  withoutMisspokenStopped,
+  withoutStopped,
   withSaidPhrases,
 } from "./dictation-health.js"
 import { doubtfulAllergy } from "./encounter-dictation.js"
@@ -232,5 +244,116 @@ describe("revisión del 25 nov · la misma medicina, no la misma primera palabra
     const stopped = { anticoagulants: { state: "recorded", detail: "apixabán", now: false } }
     expect(withoutSettledHealth(stopped, onFile)).toEqual(stopped)
     expect(withoutSettledHealth({ anticoagulants: { state: "recorded", detail: "Eliquis" } }, onFile)).toBeNull()
+  })
+})
+
+/*
+ * Mesa del 25 nov («salud y familia», entrega 2): lo de su familia y lo que ya no toma tienen su
+ * lugar, con su propia forma, separada de la del formulario público.
+ */
+describe("entrega 2 · su familia y lo que ya no toma", () => {
+  const MEDICAL = productHooksFor("medical").dictation!.health
+
+  it("C6 · «su hermana tuvo cáncer de boca» es de su familia, con el parentesco, nunca suyo", () => {
+    const ready = prepareHealth(
+      { declarante: "acompanante", vinculo: "hija", family: [{ relation: "hermana", name: "cáncer de boca" }] },
+      "y su hermana tuvo cáncer de boca",
+      DENTAL,
+    )
+    expect(ready?.payload["family"]).toEqual({ state: "recorded", items: [{ relation: "hermana", name: "cáncer de boca" }] })
+    expect(ready?.payload["conditions"]).toBeUndefined()
+    const rows = healthRows(ready!.payload)
+    expect(rows).toEqual([expect.objectContaining({ group: "family", label: "Hermana", value: "cáncer de boca" })])
+    // Se revisa con «Lo revisé con…», no espera en su fila; y no es una declaración de su salud.
+    const { kept } = splitHealthDenials(ready!.payload)
+    expect(kept["family"]).toBeDefined()
+    expect(saidFamilyOf(kept)).toEqual([{ relationship: "SIB", relation: "hermana", condition: "cáncer de boca" }])
+    expect(hasDeclaredHealth(kept)).toBe(false)
+    expect(healthOfPayload(kept)).toEqual({})
+  })
+
+  it("el parentesco va con su código; «abuela», sin decir de qué lado, es otro familiar", () => {
+    expect(familyKinshipOf("abuelo materno")).toBe("MGRPRN")
+    expect(familyKinshipOf("su papá")).toBe("FTH")
+    expect(familyKinshipOf("Madre")).toBe("MTH")
+    expect(familyKinshipOf("abuela")).toBe("FAMMEMB")
+    expect(familyKinshipOf("SIB")).toBe("SIB")
+  })
+
+  it("dos familiares con la misma enfermedad son dos filas, y la misma dicha otra vez no se repite", () => {
+    const first = prepareHealth({ declarante: "paciente", family: [{ relation: "padre", name: "diabetes" }] }, "mi papá es diabético", DENTAL)!.payload
+    const second = prepareHealth({ declarante: "paciente", family: [{ relation: "madre", name: "diabetes" }, { relation: "papá", name: "diabetes" }] }, "mi mamá también es diabética, como mi papá", DENTAL)!.payload
+    const { payload } = mergeHealth(first, second)
+    expect((payload["family"] as { items: unknown[] }).items).toHaveLength(2)
+    // Lo ya anotado en Antecedentes no vuelve en el repaso.
+    expect(withoutSettledHealth(payload, [{ family: { state: "recorded", items: [{ relation: "FTH", name: "Diabetes" }] } }])?.["family"]).toEqual({
+      state: "recorded",
+      items: [{ relation: "madre", name: "diabetes" }],
+    })
+  })
+
+  it("C7 · «ya no toma apixabán, ahora aspirina»: lo que toma se revisa; lo que dejó espera su «Sí, lo dejó»", () => {
+    const ready = prepareHealth(
+      { declarante: "acompanante", vinculo: "hija", anticoagulants: { state: "recorded", detail: "aspirina 100 mg" }, stopped: [{ name: "apixabán" }] },
+      "el cardiólogo le cambió el apixabán por aspirina cien",
+      DENTAL,
+    )!.payload
+    const rows = healthRows(ready)
+    const stopped = rows.find((row) => row.group === "stopped")
+    expect(stopped).toEqual(expect.objectContaining({ label: "Ya no toma", value: "apixabán", stopped: true, denied: false }))
+    const { kept, denied } = splitHealthDenials(ready)
+    expect(kept["stopped"]).toBeUndefined()
+    expect(denied["stopped"]).toBeDefined()
+    expect(saidStoppedOf(denied)).toEqual([{ key: stopped!.key, name: "apixabán" }])
+    // Confirmado lo que dejó, no queda nada de él.
+    expect(withoutStopped(denied, stopped!.key)).toBeNull()
+    expect(sameDrug("Apixabán 5 mg", "apixaban")).toBe(true)
+  })
+
+  it("una medicina que dejó y nadie nombró en la frase no se propone", () => {
+    const { payload, notHeard } = groundHealthNames({ declarante: "paciente", stopped: { state: "recorded", items: [{ name: "warfarina" }] } }, "ya no tomo la pastilla de la presión")
+    expect(payload).toBeNull()
+    expect(notHeard).toEqual(["warfarina"])
+  })
+
+  it("C8 · latidIA: con el embarazo y la FUR, sus semanas salen de la FUR al día en que se dijo", () => {
+    const ready = prepareHealth({ declarante: "paciente", personal: { embarazo: true }, gyneco: { fur: "2026-06-10" } }, "mi última regla fue el 10 de junio, es mi segundo embarazo", MEDICAL)!.payload
+    expect(ready["gyneco"]).toEqual({ fur: "2026-06-10" })
+    expect(healthRows(ready).find((row) => row.key === "gyneco.fur")?.value).toBe("10 jun 2026")
+    expect(healthOfPayload(ready, "2026-11-25").personal).toEqual({ embarazo: true, semanasEmbarazo: 24 })
+    // Sin el embarazo, la FUR sola no lo afirma.
+    expect(healthOfPayload({ gyneco: { fur: "2026-06-10" } }, "2026-11-25")).toEqual({})
+  })
+
+  it("«tomo warfarina, perdón, apixabán»: la warfarina la nombró mal, no la dejó", () => {
+    const payload = { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, stopped: { state: "recorded", items: [{ name: "warfarina" }] } }
+    expect(selfCorrectedHealth(payload, "tomo warfarina no perdón apixabán")).toEqual({ anticoagulants: "warfarina" })
+    expect(withoutMisspokenStopped(payload, ["warfarina"])).toEqual({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } })
+    expect(withoutMisspokenStopped({ declarante: "paciente", stopped: payload.stopped }, ["warfarina"])).toBeNull()
+  })
+
+  it("lo último que dijo de una medicina vale: «ya no toma» después de «toma» la saca de lo que toma, y al revés", () => {
+    const taking = prepareHealth({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, "tomo apixabán", DENTAL)!.payload
+    const stopped = prepareHealth({ declarante: "paciente", stopped: [{ name: "apixabán" }] }, "ya no tomo el apixabán", DENTAL)!.payload
+    const after = mergeHealth(taking, stopped).payload
+    expect(after["anticoagulants"]).toBeUndefined()
+    expect(after["stopped"]).toEqual({ state: "recorded", items: [{ name: "apixabán" }] })
+    const again = mergeHealth(after, taking).payload
+    expect(again["stopped"]).toBeUndefined()
+    expect(again["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán" })
+    // En la misma pausa, lo que dijo que dejó no queda también como que lo toma.
+    const both = prepareHealth({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" }, stopped: [{ name: "apixabán" }] }, "ya no tomo el apixabán", DENTAL)!.payload
+    expect(both["anticoagulants"]).toBeUndefined()
+    // Lo dicho otro día: «ya no toma apixabán» deja atrás el «toma apixabán» de antes.
+    expect(withoutHealthKeys(taking, healthSupersedingKeysOf(stopped))).toBeNull()
+  })
+
+  it("un familiar sin su código es el de sus palabras; «sus padres» no es solo el padre", () => {
+    const first = prepareHealth({ declarante: "paciente", family: [{ relation: "su abuela", name: "diabetes" }] }, "su abuela es diabética", DENTAL)!.payload
+    const second = prepareHealth({ declarante: "paciente", family: [{ relation: "abuelo", name: "diabetes" }] }, "y su abuelo también es diabético", DENTAL)!.payload
+    expect((mergeHealth(first, second).payload["family"] as { items: unknown[] }).items).toHaveLength(2)
+    expect(familyKinshipOf("sus padres")).toBe("FAMMEMB")
+    expect(familyKinshipOf("papás")).toBe("FAMMEMB")
+    expect(familyRelationWords("Su abuela")).toBe("abuela")
   })
 })

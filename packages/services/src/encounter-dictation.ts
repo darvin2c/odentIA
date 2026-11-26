@@ -23,7 +23,6 @@ import {
   normalizeDrugText,
   quantityWords,
   prescribingAlerts,
-  registrationAnswersSchema,
   type PrescribingSituation,
   suggestedQuantity,
 } from "@odentia/clinical"
@@ -37,6 +36,7 @@ import {
   encounterProcedure,
   patientAllergy,
   patientCondition,
+  patientFamilyHistory,
   patientMedication,
   patientRegistration,
   prescription,
@@ -54,6 +54,8 @@ import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import {
   addDeclaredHealth,
+  addSaidFamilyHistory,
+  endSaidMedication,
   getPatientHealth,
   initializeDeclaredPatientHealth,
   type PatientHealth,
@@ -62,9 +64,17 @@ import {
 } from "./clinical.js"
 import {
   groundHealthNames,
+  hasDeclaredHealth,
   hasHealth,
+  healthDrugKeysOf,
+  healthSupersedingKeysOf,
+  saidInterviewOf,
+  saidFamilyOf,
+  saidStoppedOf,
+  sameDrug,
+  withoutMisspokenStopped,
+  withoutStopped,
   healthByDeclarant,
-  healthKeysOf,
   healthDeclarantOf,
   healthModelLabel,
   healthOfPayload,
@@ -1998,7 +2008,7 @@ async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounte
  */
 async function healthOnFile(tx: Db, orgId: string, patientId: string): Promise<Array<Record<string, unknown>>> {
   const today = await clinicToday(tx, orgId)
-  const [medicines, conditions] = await Promise.all([
+  const [medicines, conditions, family] = await Promise.all([
     tx
       .select({ name: patientMedication.name, genericName: patientMedication.genericName, atcCode: patientMedication.atcCode, endDate: patientMedication.endDate })
       .from(patientMedication)
@@ -2007,9 +2017,24 @@ async function healthOnFile(tx: Db, orgId: string, patientId: string): Promise<A
       .select({ name: patientCondition.name })
       .from(patientCondition)
       .where(and(eq(patientCondition.organizationId, orgId), eq(patientCondition.patientId, patientId), eq(patientCondition.status, "activa"))),
+    tx
+      .select({ relationship: patientFamilyHistory.relationship, condition: patientFamilyHistory.condition, notes: patientFamilyHistory.notes })
+      .from(patientFamilyHistory)
+      .where(and(eq(patientFamilyHistory.organizationId, orgId), eq(patientFamilyHistory.patientId, patientId))),
   ])
   const out: Array<Record<string, unknown>> = []
   const others: Array<{ name: string }> = []
+  // Lo que ya dejó y está terminado en Antecedentes no se vuelve a proponer como «ya no toma».
+  const ended = medicines.filter((row) => row.endDate && row.endDate < today).map((row) => ({ name: row.genericName ?? row.name }))
+  if (ended.length) out.push({ stopped: { state: "recorded", items: ended } })
+  // Lo de su familia ya anotado tampoco (con «Otro familiar», por sus palabras).
+  if (family.length)
+    out.push({
+      family: {
+        state: "recorded",
+        items: family.map((row) => ({ relation: row.relationship === "FAMMEMB" ? (row.notes ?? "") : row.relationship, name: row.condition })),
+      },
+    })
   for (const row of medicines) {
     if (row.endDate && row.endDate < today) continue
     const group = medicationClassOf(row.atcCode ?? findHabitualMedication(row.genericName ?? row.name)?.atc)
@@ -2318,7 +2343,13 @@ export async function saveDictationSegment(
       draft = { ...said, payload: heard.payload }
       // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).
       const own = selfCorrectedHealth(heard.payload, scope.transcript ?? phrase)
-      if (Object.keys(own).length) healthEarlier.set(draft, own)
+      if (Object.keys(own).length) {
+        // Lo que nombró mal y corrigió ahí mismo no lo dejó: no va a «Ya no toma» (medición del 25 nov).
+        const kept = withoutMisspokenStopped(draft.payload, Object.values(own))
+        if (!kept) continue
+        if (kept !== draft.payload) draft = { ...draft, payload: kept }
+        healthEarlier.set(draft, own)
+      }
     }
     const prepared = await prepare(tx, draft, scope)
     outcomes.push({ draft, ready: prepared !== null })
@@ -3382,7 +3413,7 @@ async function confirmHealthRow(
   // De un dato vale lo último que dijo (QA del 21 nov, H3): lo que volvió a decir después, en otra
   // atención y sin revisar todavía, no se registra desde lo de antes como si siguiera vigente.
   const later = await otherSaidHealth(tx, orgId, patientId, row, "later")
-  const newerKeys = new Set(later.flatMap((other) => [...healthKeysOf(splitMeta(other.payload).data)]))
+  const newerKeys = new Set(later.flatMap((other) => [...healthSupersedingKeysOf(splitMeta(other.payload).data)]))
   const data = newerKeys.size ? withoutHealthKeys(dicho, newerKeys) : dicho
   if (!data) {
     const [settled] = await tx
@@ -3401,19 +3432,41 @@ async function confirmHealthRow(
       : { ...rest, declarante: review.declarante, ...(review.declarante === "acompanante" && review.vinculo?.trim() ? { vinculo: review.vinculo.trim().slice(0, 80) } : {}) }
   const { kept, denied } = splitHealthDenials(who)
   if (!hasHealth(kept))
-    throw conflict("HEALTH_ONLY_DENIALS", "Lo que dijo es un «No»: confírmalo en su fila. «Lo revisé con…» no guarda un «No» de paso.")
-  const health = healthOfPayload(kept)
+    throw conflict(
+      "HEALTH_ONLY_DENIALS",
+      !!denied["stopped"] && typeof denied["stopped"] === "object" && !hasDeclaredHealth(denied)
+        ? "Lo que ya no toma se confirma en su fila, con «Sí, lo dejó»."
+        : "Lo que dijo es un «No»: confírmalo en su fila. «Lo revisé con…» no guarda un «No» de paso.",
+    )
   const before = await getPatientHealth(tx, orgId, patientId)
   const clean = !before.reviewPending && before.declared.length === 0
   // La declaración lleva la hora en que se dijo, no la de la revisión (QA del 22 nov, H8).
   const saidAt = await healthSaidAt(tx, orgId, row, meta.segments)
-  for (const person of healthByDeclarant(kept))
-    await recordHealthDeclaration(tx, orgId, patientId, { via: "consulta", by: healthDeclarantOf(person.payload), health: healthOfPayload(person.payload), saidAt })
-  // La primera declaración (`initializeDeclaredPatientHealth`) es la de su registro; quien llega sin
-  // registro en línea (lo más común en la consulta) la tiene igual por aquí, sumada a lo que haya.
-  if (before.revision === 0 && (await hasRegistration(tx, orgId, patientId)))
-    await initializeDeclaredPatientHealth(tx, orgId, patientId, health, actorUserId)
-  else await addDeclaredHealth(tx, orgId, actorUserId, patientId, health, { entity: "encounter", entityId: row.encounterId, at: new Date() })
+  const saidOn = await clinicToday(tx, orgId, saidAt)
+  // Lo de su familia va a sus antecedentes familiares, sumado (mesa del 25 nov, entrega 2): no es una
+  // declaración de su propia salud.
+  await addSaidFamilyHistory(tx, orgId, actorUserId, patientId, saidFamilyOf(kept), { entity: "encounter", entityId: row.encounterId })
+  // La última regla (latidIA) va a su entrevista, como la anota el profesional.
+  const interviewSaid = saidInterviewOf(kept)
+  const origin = { entity: "encounter", entityId: row.encounterId, at: new Date() }
+  if (hasDeclaredHealth(kept)) {
+    const health = healthOfPayload(kept, saidOn)
+    for (const person of healthByDeclarant(kept)) {
+      if (!hasDeclaredHealth(person.payload)) continue
+      await recordHealthDeclaration(tx, orgId, patientId, {
+        via: "consulta",
+        by: healthDeclarantOf(person.payload),
+        health: healthOfPayload(person.payload, saidOn),
+        saidAt,
+      })
+    }
+    // La primera declaración (`initializeDeclaredPatientHealth`) es la de su registro; quien llega sin
+    // registro en línea (lo más común en la consulta) la tiene igual por aquí, sumada a lo que haya.
+    if (before.revision === 0 && (await hasRegistration(tx, orgId, patientId))) {
+      await initializeDeclaredPatientHealth(tx, orgId, patientId, health, actorUserId)
+      if (Object.keys(interviewSaid).length) await addDeclaredHealth(tx, orgId, actorUserId, patientId, {}, origin, interviewSaid)
+    } else await addDeclaredHealth(tx, orgId, actorUserId, patientId, health, origin, interviewSaid)
+  } else if (Object.keys(interviewSaid).length) await addDeclaredHealth(tx, orgId, actorUserId, patientId, {}, origin, interviewSaid)
   let after = await getPatientHealth(tx, orgId, patientId)
   if (clean && (after.reviewPending || after.declared.length > 0))
     after = await reviewDeclaredHealth(tx, orgId, actorUserId, patientId, { expectedRevision: after.revision })
@@ -3430,7 +3483,7 @@ async function confirmHealthRow(
   if (!updated) throw new Error("No se pudo confirmar lo que dijo de su salud")
   // Lo que dijo antes de lo mismo, en otra atención y sin revisar, queda resuelto: la franja no vuelve
   // a decir «dijo apixabán» después de confirmar que lo dejó (QA del 21 nov, H3).
-  const confirmedKeys = healthKeysOf(kept)
+  const confirmedKeys = healthSupersedingKeysOf(kept)
   for (const older of await otherSaidHealth(tx, orgId, patientId, row, "earlier")) {
     const parts = splitMeta(older.payload)
     const left = withoutHealthKeys(parts.data, confirmedKeys)
@@ -3532,6 +3585,83 @@ export async function confirmSaidHealth(
   return { health }
 }
 
+/**
+ * «Sí, lo dejó» (mesa del 25 nov, entrega 2): la medicina que dijo que ya no toma («ya no toma
+ * apixabán», lo dijo su hija) termina en sus antecedentes el día anterior al que se dijo, y sale de lo
+ * que espera revisión. Suspenderla para un procedimiento no es dejarla: eso Clío no lo propone aquí.
+ * Lo decide quien escribe en la historia (`clinical.write`, la guarda de la ruta del paciente): en una
+ * atención en borrador, solo quien la lleva; en una firmada, cualquiera con ese permiso.
+ */
+export async function confirmSaidStopped(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  id: string,
+  key: string,
+): Promise<{ health: PatientHealth }> {
+  const [found] = await tx
+    .select({ encounterId: encounterDictationSuggestion.encounterId, status: encounter.status })
+    .from(encounterDictationSuggestion)
+    .innerJoin(encounter, and(eq(encounter.organizationId, encounterDictationSuggestion.organizationId), eq(encounter.id, encounterDictationSuggestion.encounterId)))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.kind, "salud"),
+      ),
+    )
+    .limit(1)
+  if (!found) throw notFound("Lo que dijo de su salud")
+  let row: typeof encounterDictationSuggestion.$inferSelect
+  if (found.status === "borrador") {
+    await lockOwnDraft(tx, orgId, actorUserId, patientId, found.encounterId)
+    row = await lockSuggestion(tx, orgId, patientId, found.encounterId, id)
+  } else row = await lockSignedSaidHealth(tx, orgId, patientId, id)
+  if (row.status !== "lista" && row.status !== "por_revisar") throw conflict("SUGGESTION_DECIDED", "Esto ya se revisó o se descartó")
+  const { data, meta } = splitMeta(row.payload)
+  const item = saidStoppedOf(data).find((one) => one.key === key)
+  if (!item) throw conflict("STOPPED_NOT_FOUND", "Esa medicina ya no está entre lo que dijo")
+  // Si después dijo que la toma (otro día), lo de antes ya no vale (QA del 21 nov, H3).
+  const drug = healthDrugKeysOf({ stopped: { state: "recorded", items: [{ name: item.name }] } })
+  for (const later of await otherSaidHealth(tx, orgId, patientId, row, "later")) {
+    const { stopped: _stopped, ...taking } = splitMeta(later.payload).data
+    if ([...healthDrugKeysOf(taking)].some((key) => drug.has(key)))
+      throw conflict("STOPPED_SAID_LATER", "Después dijo que la toma: vale lo último. Revísalo en lo que dijo después.")
+  }
+  const saidOn = await clinicToday(tx, orgId, await healthSaidAt(tx, orgId, row, meta.segments))
+  await endSaidMedication(tx, orgId, actorUserId, patientId, item.name, saidOn, sameDrug, { entity: "encounter", entityId: row.encounterId })
+  // Lo que dijo antes de esa medicina (que la toma), en otra atención y sin revisar, queda atrás.
+  const settledKeys = new Set([key, ...drug])
+  for (const older of await otherSaidHealth(tx, orgId, patientId, row, "earlier")) {
+    const parts = splitMeta(older.payload)
+    const left = withoutHealthKeys(parts.data, settledKeys)
+    if (left && JSON.stringify(left) === JSON.stringify(parts.data)) continue
+    await tx
+      .update(encounterDictationSuggestion)
+      .set(
+        left
+          ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
+          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+      )
+      .where(eq(encounterDictationSuggestion.id, older.id))
+  }
+  // Con lo que dejó ya terminado, las recetas que esperaban en la atención avisan con eso.
+  if (found.status === "borrador") await refreshRecipes(tx, orgId, patientId, row.encounterId, await dictationScope(tx, orgId))
+  const left = withoutStopped(data, key)
+  const resolved = [...(meta.resolved ?? []), { stopped: { state: "recorded", items: [{ name: item.name }] } }]
+  await tx
+    .update(encounterDictationSuggestion)
+    .set(
+      left
+        ? { payload: withMeta(left, { ...meta, resolved }), updatedAt: new Date() }
+        : { payload: withMeta(data, { ...meta, resolved }), status: "confirmada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+    )
+    .where(eq(encounterDictationSuggestion.id, row.id))
+  return { health: await getPatientHealth(tx, orgId, patientId) }
+}
+
 /** «No lo registro»: lo que dijo en una atención firmada deja de avisarse y no entra a Antecedentes. */
 export async function discardSaidHealth(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string): Promise<void> {
   const row = await lockSignedSaidHealth(tx, orgId, patientId, id)
@@ -3606,9 +3736,17 @@ export async function discardSaidAllergy(tx: Db, orgId: string, actorUserId: str
  * Vacío si no dijo nada de la entrevista o si no se puede leer.
  */
 export async function dictatedHealthInterview(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const parsed = registrationAnswersSchema.shape.health.unwrap().safeParse(Object.fromEntries(Object.entries(splitMeta(payload).data).filter(([key]) => !["declarante", "vinculo", "quien"].includes(key))))
-  if (!parsed.success) return {}
-  return (await productHooks(tx, orgId)).interview.declared(parsed.data, await clinicToday(tx, orgId))
+  // Sin lo que solo se dice en la consulta (su familia, lo que ya no toma): no es de su registro, y
+  // con eso la entrevista llegaba vacía a «Corregir algo» (revisión del 25 nov). La última regla sí va.
+  const data = splitMeta(payload).data
+  const today = await clinicToday(tx, orgId)
+  let health: ReturnType<typeof healthOfPayload>
+  try {
+    health = healthOfPayload(data, today)
+  } catch {
+    return saidInterviewOf(data)
+  }
+  return { ...(await productHooks(tx, orgId)).interview.declared(health, today), ...saidInterviewOf(data) }
 }
 
 /** Lo que dijo de su salud en una atención y nadie confirmó todavía, dato por dato. */
@@ -3667,7 +3805,10 @@ export async function listSaidHealth(tx: Db, orgId: string, patientId: string): 
   return said.map((entry, index) => ({
     ...entry,
     rows: entry.rows.map((one) => {
-      const newer = said.slice(index + 1).find((later) => later.rows.some((other) => other.key === one.key))
+      // Una medicina dicha después en otro grupo («ya no toma apixabán») también deja atrás esta fila.
+      const newer = said
+        .slice(index + 1)
+        .find((later) => later.rows.some((other) => other.key === one.key) || (!!one.drugs?.length && one.drugs.every((drug) => later.rows.some((other) => other.drugs?.includes(drug)))))
       return newer ? { ...one, newer: newer.at } : one
     }),
   }))

@@ -57,6 +57,7 @@ import {
   saidHealthRisks,
   confirmSaidAllergy,
   confirmSaidHealth,
+  confirmSaidStopped,
   discardSaidAllergy,
   discardSaidHealth,
   getPlanNextStep,
@@ -266,6 +267,7 @@ const saidHealthReviewInput = z
   })
   .strict()
 const saidHealthParams = z.object({ id: z.uuid(), suggestionId: z.uuid() })
+const saidStoppedInput = z.object({ key: z.string().min(1).max(400) }).strict()
 // La ASA de un toque antes de anestesiar (QA del 16 nov): I a VI o nula; en qué atención se puso.
 const healthAsaInput = z
   .object({ asaClass: z.string().max(3).nullable(), encounterId: z.string().uuid().nullish() })
@@ -1178,6 +1180,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => confirmSaidHealth(tx, orgId, userId, at.data.id, at.data.suggestionId, parsed.data)),
+    )
+  })
+  /**
+   * «Sí, lo dejó» (mesa del 25 nov, entrega 2): la medicina que dijo que ya no toma termina en sus
+   * antecedentes el día anterior al que lo dijo. En la atención en borrador, solo quien la lleva (el
+   * servicio); escribe en la historia: `clinical.write`, la guarda de arriba.
+   */
+  app.post("/:id/health/said/:suggestionId/stopped", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = saidHealthParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    const parsed = saidStoppedInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => confirmSaidStopped(tx, orgId, userId, at.data.id, at.data.suggestionId, parsed.data.key)),
     )
   })
   app.post("/:id/health/said/:suggestionId/discard", async (c) => {

@@ -379,10 +379,10 @@ describe("los turnos de lo que se dijo", () => {
 })
 
 describe("lo que el repaso no usó", () => {
-  it("C4: lo de un familiar y el peso dicho quedan en «No lo usé» del tramo donde se dijeron, con su motivo, sin repetir lo que la pausa ya avisó", async () => {
+  it("C4: lo que quien acompaña dice de sí misma y el peso dicho quedan en «No lo usé» del tramo donde se dijeron, con su motivo, sin repetir lo que la pausa ya avisó", async () => {
     await enable(true)
     const { fx, pause, review, said } = await conversation()
-    await pause("Mi papá es diabético, por si acaso.")
+    await pause("Yo soy diabética, por si acaso.")
     const weight = randomUUID()
     await fx.run(async (tx) => {
       await startDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { segmentId: weight, transcript: "Debe pesar veinticuatro, más o menos. Y le gusta el fútbol." })
@@ -390,15 +390,15 @@ describe("lo que el repaso no usó", () => {
     })
     const result = await review({
       outOfPlace: [
-        { said: "Mi papá es diabético", why: "familiar" },
+        { said: "Yo soy diabética", why: "familiar" },
         { said: "Debe pesar veinticuatro", why: "peso_dicho" },
       ],
       unused: ["le gusta el fútbol"],
       omitted: 1,
     })
-    expect(result.unused.map((item) => item.said)).toEqual(["le gusta el fútbol", "Mi papá es diabético"])
+    expect(result.unused.map((item) => item.said)).toEqual(["le gusta el fútbol", "Yo soy diabética"])
     const [family, kid] = await said()
-    expect(family?.unused).toEqual([{ said: "Mi papá es diabético", why: "sin_lugar", detail: expect.stringContaining("familiar") }])
+    expect(family?.unused).toEqual([{ said: "Yo soy diabética", why: "sin_lugar", detail: expect.stringContaining("quien lo acompaña") }])
     // La frase que la pausa ya avisó sin motivo queda una vez, con el motivo del repaso (QA del 22 nov, H6).
     expect(kid?.unused).toEqual([
       { said: "Debe pesar veinticuatro", why: "sin_lugar", detail: expect.stringContaining("no medidos") },

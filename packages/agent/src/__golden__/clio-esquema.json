@@ -813,6 +813,53 @@
             },
             "additionalProperties": false
           },
+          "stopped": {
+            "description": "Lo que dijo que ya no toma («ya no toma apixabán», «dejó la metformina»), una por medicina. Suspenderla por unos días para un procedimiento no es dejarla: esa sigue en lo que toma.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "La medicina que dejó, en sus palabras («apixabán»)."
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "family": {
+            "description": "Lo que se dijo de la salud de un familiar del paciente («su papá es diabético», «su hermana tuvo cáncer de boca»), uno por familiar y enfermedad.",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "relation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60,
+                  "description": "Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "La enfermedad o la alergia de ese familiar, en sus palabras («diabetes», «cáncer de boca»)."
+                }
+              },
+              "required": [
+                "relation",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
           "dental": {
             "description": "Lo de su boca que contó: si tuvo problemas con la anestesia del dentista o sangró mucho tras una extracción (`problemaAnestesia`, cada uno con `si`, `no` o `no_sabe`), lo del corazón que pide antibiótico antes (`corazon`), el miedo al dentista, si rechina o aprieta los dientes, sus hábitos (morderse las uñas, morder lapiceros), cuándo fue su última visita y, de un niño, el biberón, el chupón, los dulces entre comidas, la pasta con flúor y quién le cepilla.",
             "type": "object",
@@ -994,7 +1041,7 @@
               "peso_dicho",
               "otro"
             ],
-            "description": "`familiar`: de la salud de un familiar; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
+            "description": "`familiar`: lo que quien acompaña cuenta de su propia salud; `peso_dicho`: un peso o una talla que alguien calcula o recuerda; `otro`."
           }
         },
         "required": [

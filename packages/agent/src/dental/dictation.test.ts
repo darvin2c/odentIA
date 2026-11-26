@@ -608,8 +608,8 @@ describe("lo de salud dicho en la conversación", () => {
   it("solo lo dicho: «no que yo sepa» es no sabe, el silencio no es «No» y lo de un familiar no es del paciente", () => {
     expect(fixed).toContain("«No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`")
     expect(fixed).toContain("Lo que no se preguntó ni se dijo no va: el silencio no es «No».")
-    expect(fixed).toContain("«mi papá es diabético»")
-    expect(fixed).toContain("no es del paciente: no va en `salud` ni en `alergias`")
+    expect(fixed).toContain("«su papá es diabético»")
+    expect(fixed).toContain("Nunca como del paciente: no va en sus enfermedades ni en `alergias`")
     expect(fixed).toContain("El peso o la talla que alguien calcula o recuerda («debe pesar 24», «pesaba 22 hace seis meses») no es una medida")
     // Lo de su salud no va al relato.
     expect(fixed).toContain("Sus medicinas de siempre, sus enfermedades y lo de la anestesia van en `salud`, no en el relato")

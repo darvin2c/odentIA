@@ -231,7 +231,7 @@ describe("Clío médica: lo de salud dicho en la consulta", () => {
   it("las mismas reglas: no sabe no es «No», lo de un familiar no es del paciente y el peso dicho no es una medida", () => {
     expect(fixed).toContain("«No que yo sepa», «creo que no», «no sé» o «no me acuerdo» son `unknown` (no sabe), nunca `none`")
     expect(fixed).toContain("Lo que no se preguntó ni se dijo no va: el silencio no es «No».")
-    expect(fixed).toContain("no es del paciente: no va en `salud` ni en `alergias`")
+    expect(fixed).toContain("Nunca como del paciente: no va en sus enfermedades ni en `alergias`")
     expect(fixed).toContain("no es una medida: no va en `signos` ni en ninguna parte")
   })
 })

@@ -326,6 +326,26 @@ export const CLINICA: readonly HelpMore[] = [
         area: "clinica",
         needs: "clinical.write",
       },
+      // Mesa del 25 nov («salud y familia», entrega 2): la familia y lo que ya no toma tienen su lugar.
+      {
+        id: "pacientes-dictado-familia",
+        q: "¿Dónde queda lo que dijo de la salud de su familia, o una medicina que ya no toma?",
+        a: "En el mismo aviso de la atención, «Revisa con … lo que dijo de su salud». Lo de un familiar sale en «De su familia», una línea por familiar con su parentesco con el paciente («Hermana: cáncer de boca», «Abuelo materno: diabetes») y quién lo dijo: nunca como del paciente, no avisa en la franja ni en la receta. Con «Lo revisé con…» se suma a sus antecedentes familiares, sin borrar los que ya tenía; después lo ves en su página › Clínica › Antecedentes, en «Familiares». Una medicina que dijo que dejó sale en «Ya no toma» («Ya no toma: apixabán · lo dijo su hija»), con su propio botón «Sí, lo dejó»: termina en sus antecedentes el día anterior al que se dijo y deja de avisar en lo que se hace y se receta hoy. «Lo revisé con…» no la da por dejada. Si solo la suspende unos días por un procedimiento, no la dejó: sigue vigente. Lo que quien lo acompaña cuenta de su propia salud («yo soy diabética») no se registra: queda en «No lo usé». En latidIA, la fecha de su última regla sale como «Última regla» y, si está embarazada, con «Embarazo: sí»: al revisarlo, sus semanas se cuentan desde esa fecha y la receta avisa el embarazo. Lo que se dice de sus vacunas queda escrito en la consulta, tal como se dijo.",
+        forms: [
+          "donde queda lo que dijo de su familia",
+          "el papa del paciente es diabetico donde lo anoto",
+          "antecedentes familiares dichos en la consulta",
+          "su hermana tuvo cancer",
+          "el paciente ya no toma una medicina",
+          "dejo el apixaban",
+          "si lo dejo",
+          "ya no toma",
+          "le cambiaron el anticoagulante por aspirina",
+          "fecha de ultima regla en la consulta",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
       // Lo nuevo de la consulta conversada, con los nombres de hoy (QA del 22 nov, H10 del auditor).
       {
         id: "pacientes-dictado-no-lo-registro",

@@ -137,12 +137,13 @@
         },
         "salud": [
           { "ruta": "conditions", "con": ["asma"] },
-          { "ruta": "medications", "con": ["salbutamol"] }
+          { "ruta": "medications", "con": ["salbutamol"] },
+          { "ruta": "family", "con": ["diabet", "abuel"] }
         ],
         "saludQuien": { "declarante": "acompanante", "vinculo": "madre|mama" },
         "saludNo": [{ "ruta": "conditions", "con": ["diabet"] }],
         "propone": [{ "tipo": "odontograma", "campos": { "toothNumber": 75 }, "con": ["caries"] }],
-        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "mi papá es diabético|mi papa es diabetico"],
+        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "yo soy diabética|yo soy diabetica"],
         "quien": [
           { "frase": "¿Cuántos años tienes ya?", "quien": "dra" },
           { "frase": "Tiene siete, doctora", "quien": "acompanante", "vinculo": "madre|mama" },
@@ -342,7 +343,8 @@
         },
         "salud": [
           { "ruta": "conditions", "con": ["asma"] },
-          { "ruta": "medications", "con": ["salbutamol"] }
+          { "ruta": "medications", "con": ["salbutamol"] },
+          { "ruta": "family", "con": ["diabet", "abuel"] }
         ],
         "saludQuien": { "declarante": "acompanante", "vinculo": "madre|mama" },
         "saludNo": [
@@ -351,7 +353,7 @@
         ],
         "propone": [{ "tipo": "examen", "con": ["sibilancia"] }],
         "noPropone": [{ "tipo": "signos", "con": ["peso"] }],
-        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "mi papá es diabético|mi papa es diabetico"],
+        "noLoUse": ["debe pesar veinticuatro|debe pesar 24", "rinitis"],
         "quien": [
           { "frase": "Tiene tos desde hace cinco días", "quien": "acompanante", "vinculo": "madre|mama" },
           { "frase": "Tiene asma", "quien": "acompanante" },
@@ -497,9 +499,80 @@
         },
         "salud": [
           { "ruta": "medications", "valor": { "state": "recorded" }, "con": ["losartan"] },
-          { "ruta": "anticoagulants", "valor": { "state": "recorded" }, "con": ["apixaban"] }
+          { "ruta": "anticoagulants", "valor": { "state": "recorded" }, "con": ["apixaban"] },
+          { "ruta": "family", "con": ["hermana", "cancer"] }
         ],
         "propone": [{ "tipo": "alergia", "con": ["ibuprofeno"] }]
+      }
+    },
+    {
+      "id": "od-elena-deja-apixaban",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (C7): Elena vuelve con su hija; el cardiólogo le cambió el apixabán por aspirina. «Ya no toma» va aparte, con su propio «Sí, lo dejó»; lo vigente es la aspirina.",
+      "pausas": [
+        "buenos dias señora elena como sigue de la muela",
+        "la señora dice que ya no le duele tanto. antes de sacarla doctora le cuento que el cardiologo le cambio el apixaban por aspirina cien hace tres dias. ya no toma el apixaban",
+        "ah que bien eso nos ayuda. a ver abra. el resto radicular de la treinta y seis sigue igual"
+      ],
+      "espera": {
+        "salud": [
+          { "ruta": "stopped", "con": ["apixab"] },
+          { "ruta": "anticoagulants", "con": ["aspirin"] }
+        ],
+        "saludNo": [
+          { "ruta": "anticoagulants", "con": ["apixab"] },
+          { "ruta": "medications", "con": ["apixab"] }
+        ]
+      }
+    },
+    {
+      "id": "od-suspende-para-extraccion",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (C7): suspender una medicina por un procedimiento no es dejarla. El apixabán sigue en lo que toma; nada va a «Ya no toma».",
+      "pausas": [
+        "don julio que medicinas toma",
+        "tomo apixaban cinco miligramos dos veces al dia por la arritmia",
+        "bien para la extraccion de la cuarenta y seis lo suspende dos dias antes como le indico su cardiologo y lo retoma al dia siguiente"
+      ],
+      "espera": {
+        "salud": [{ "ruta": "anticoagulants", "con": ["apixab"] }],
+        "saludNo": [{ "ruta": "stopped", "con": ["apixab"] }]
+      }
+    },
+    {
+      "id": "lat-control-prenatal",
+      "producto": "latidia",
+      "descripcion": "Mesa del 25 nov (C8): control prenatal. La FUR va con «Embarazo: sí»; «es mi segundo embarazo» queda en el relato como lo dijo; «mi mamá tuvo preeclampsia» es de su familia, no suyo.",
+      "pausas": [
+        "buenos dias señora lucia como se ha sentido",
+        "bien doctora un poco de nauseas en la mañana desde hace dos semanas. mi ultima regla fue el diez de junio y es mi segundo embarazo",
+        "alguna enfermedad en la familia",
+        "mi mama tuvo preeclampsia en sus dos embarazos",
+        "presion ciento diez con setenta"
+      ],
+      "espera": {
+        "consulta": { "motivo": ["nausea|control|embaraz"], "relato": ["segundo"], "relatoSin": ["preeclampsia"] },
+        "salud": [
+          { "ruta": "personal.embarazo", "valor": true },
+          { "ruta": "gyneco.fur", "con": ["06-10"] },
+          { "ruta": "family", "con": ["madre|mama", "preeclampsia"] }
+        ],
+        "saludNo": [{ "ruta": "conditions", "con": ["preeclampsia"] }],
+        "propone": [{ "tipo": "signos", "campos": { "presionSistolica": 110, "presionDiastolica": 70 } }]
+      }
+    },
+    {
+      "id": "lat-vacuna-sarampion",
+      "producto": "latidia",
+      "descripcion": "Mesa del 25 nov (C9): lo dicho de las vacunas queda escrito en la consulta, tal como se dijo; nada dice que se puso.",
+      "pausas": [
+        "hola señora que le pasa a sofia",
+        "tiene fiebre desde ayer doctora y esta con mocos. ah y le falta la vacuna del sarampion de los doce meses no se la pusieron",
+        "garganta congestiva sin placas"
+      ],
+      "espera": {
+        "consulta": { "motivo": ["fiebre"], "tiempo": "ayer", "relato": ["sarampion"] },
+        "noPropone": [{ "tipo": "procedimiento", "con": ["vacuna"] }]
       }
     }
   ]
