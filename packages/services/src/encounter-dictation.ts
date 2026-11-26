@@ -2044,6 +2044,8 @@ async function healthOnFile(tx: Db, orgId: string, patientId: string): Promise<A
   }
   if (others.length) out.push({ medications: { state: "recorded", items: others } })
   if (conditions.length) out.push({ conditions: { state: "recorded", items: conditions.map((row) => ({ name: row.name })) } })
+  // El embarazo ya anotado y vigente no vuelve como «dijo sí, sin confirmar» (revisión final del 25 nov).
+  if ((await getPatientHealth(tx, orgId, patientId)).pregnancy?.state === "vigente") out.push({ personal: { embarazo: true } })
   return out
 }
 

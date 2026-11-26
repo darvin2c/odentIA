@@ -3,6 +3,7 @@ import {
   allergiesSaidUnknownOf,
   anesthesiaAnswersOf,
   anesthesiaTroubleWords,
+  FAMILY_KINSHIP_LABELS,
   type FamilyKinship,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
@@ -1474,9 +1475,14 @@ export async function addSaidFamilyHistory(
   const kinWords = (notes: string | null) => normalizeDrugText((notes ?? "").replace(/^\s*(?:su|sus|mi|mis)\s+/i, ""))
   const seen = new Set(existing.map((row) => `${row.relationship}:${row.relationship === "FAMMEMB" ? kinWords(row.notes) : ""}:${normalizeDrugText(row.condition)}`))
   let added = 0
+  // El mismo tope que Antecedentes (50 familiares): lo que pasa de ahí no se suma de paso.
+  const room = Math.max(0, 50 - existing.length)
   for (const item of items) {
+    if (added >= room) break
     const words = item.relation.trim().replace(/^(?:su|sus|mi|mis)\s+/i, "")
-    const notes = item.relationship === "FAMMEMB" && words ? words.slice(0, 200) : null
+    // Sus palabras quedan en la nota cuando el código no las dice («Hermano(a)» de «hermana», «Abuelo(a)
+    // materno(a)» de «abuela materna»): Antecedentes muestra lo que se dijo.
+    const notes = words && (item.relationship === "FAMMEMB" || /\(/.test(FAMILY_KINSHIP_LABELS[item.relationship])) ? upperFirst(words).slice(0, 200) : null
     const key = `${item.relationship}:${item.relationship === "FAMMEMB" ? kinWords(notes) : ""}:${normalizeDrugText(item.condition)}`
     if (seen.has(key)) continue
     seen.add(key)

@@ -268,7 +268,7 @@ export function localAnesthesiaWords(input: {
   const impossible = weightForAgeAlert(weight, ageYears)
   if (impossible) return { cap, dose: null, warnings: [...warnings, impossible], weightIssue: true }
   const max = maxLocalAnestheticDose(weight, anesthetic)
-  if (cap) return { cap, dose: `Máximo por peso (${number(weight)} kg): ${number(max.cartridges)}`, warnings }
+  if (cap) return { cap, dose: `Máximo por peso (${number(weight)} kg): ${number(max.cartridges)} cartuchos`, warnings }
   const mg = max.capped ? `${number(max.mg)} mg (el tope)` : `${number(max.mg)} mg`
   return {
     cap,

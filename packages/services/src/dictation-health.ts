@@ -8,6 +8,7 @@ import {
   INTERVIEW_ANSWER_LABELS,
   kinSaid,
   kinshipFromWords,
+  medicationKindLabel,
   medicationClassOf,
   normalizeDrugText,
   registrationAnswersSchema,
@@ -78,9 +79,42 @@ const groupShape = (group: string): z.ZodType | undefined =>
 export function familyKinshipOf(words: string): FamilyKinship {
   const direct = (FAMILY_KINSHIP as readonly string[]).includes(words.trim()) ? (words.trim() as FamilyKinship) : null
   // «Sus padres», «sus abuelos»: son dos personas, no una con su código; quedan con sus palabras.
-  const known = direct ?? kinshipFromWords(familyRelationWords(words))
+  const said = familyRelationWords(words)
+  const known = direct ?? kinshipFromWords(said) ?? (/^tia (materna|paterna)$/.test(said) ? "AUNT" : /^tio (materno|paterno)$/.test(said) ? "UNCLE" : null)
   return known && (FAMILY_KINSHIP as readonly string[]).includes(known) ? (known as FamilyKinship) : "FAMMEMB"
 }
+
+/**
+ * El parentesco con el paciente de un familiar que nombra quien lo acompaña (`speaker`: su vínculo,
+ * «madre»): «mi papá» dicho por la madre es su abuelo materno; «mi hermana», dicho por la hija, es su
+ * hija. Lo que no se puede contar con certeza queda con sus palabras («hermana de su esposa»).
+ */
+export function familyFromPatient(item: Record<string, unknown>, speaker: string): Record<string, unknown> {
+  const { of, relation, ...rest } = item
+  const words = familyRelationWords(relation)
+  if (of !== "quien_habla" || !words) return { ...rest, relation: kinSaid(relation) }
+  const by = familyKinshipOf(speaker)
+  // «Papá» termina en «a» sin la tilde: el femenino se lee de la palabra, no de su última letra.
+  const female = /^(madre|mama|hermana|abuela|tia|hija|nieta|prima)$/.test(words.split(" ")[0] ?? "")
+  const side = by === "MTH" ? "materno" : by === "FTH" ? "paterno" : null
+  const parent = /^(madre|mama|padre|papa)$/.test(words)
+  const sibling = /^(hermana|hermano)$/.test(words)
+  const grand = /^(abuela|abuelo)$/.test(words)
+  let out: string | null = null
+  if (side && parent) out = `${female ? "abuela" : "abuelo"} ${female ? side.replace(/o$/, "a") : side}`
+  else if (side && sibling) out = `${female ? "tía" : "tío"} ${female ? side.replace(/o$/, "a") : side}`
+  else if (by === "CHILD" && sibling) out = female ? "hija" : "hijo"
+  else if (by === "CHILD" && /^(hija|hijo)$/.test(words)) out = female ? "nieta" : "nieto"
+  else if (by === "SIB" && (parent || sibling)) out = words
+  else if (by === "SIB" && grand) out = words
+  const own = speaker.trim() ? kinSaid(speaker).replace(/^(?:su|mi)\s+/i, "") : "quien lo acompaña"
+  return { ...rest, relation: out ?? `${kinSaid(relation)} de su ${own}`.replace("de su quien", "de quien") }
+}
+
+/** «Yo soy diabética», «eso es mío»: quien acompaña habla de sí misma, no del paciente. */
+const SELF_TALK = /(?<![\p{L}])(?:yo soy|yo tengo|yo tomo|yo sufro|eso es m[ií]o|es m[ií]o)(?![\p{L}])/u
+const ABOUT_PATIENT = /(?<![\p{L}])(?:él|ella|el niño|la niña|mi hij[oa]|le|lo|la toma|toma)(?![\p{L}])/u
+const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
 
 /** El parentesco dicho, sin «su» ni «mi», en minúsculas y sin tildes: «Su abuela» → «abuela». */
 export function familyRelationWords(words: unknown): string {
@@ -133,12 +167,12 @@ export function dictationHealthSchema(own: z.ZodRawShape) {
     family: z
       .array(
         z.strictObject({
-          relation: z
-            .string()
-            .trim()
-            .min(1)
-            .max(60)
-            .describe("Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."),
+          relation: z.string().trim().min(1).max(60).describe("El parentesco tal como se dijo, sin «su» ni «mi»: «papá», «hermana», «abuela materna»."),
+          of: z
+            .enum(["paciente", "quien_habla"])
+            .describe(
+              "De quién es familiar: `paciente` si es familiar del paciente («su papá», «la hermana de Elena», o «mi mamá» dicho por el propio paciente); `quien_habla` si es familiar de quien lo acompaña y habla («mi papá», dicho por la madre de un niño). El sistema cuenta el parentesco con el paciente.",
+            ),
           name: z.string().trim().min(1).max(200).describe("La enfermedad o la alergia de ese familiar, en sus palabras («diabetes», «cáncer de boca»)."),
         }),
       )
@@ -354,8 +388,15 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
   const health: Record<string, unknown> = {}
   for (const group of GROUPS) {
     if (!(group in shape) || payload[group] === undefined) continue
-    // Lo de su familia y lo que ya no toma llegan como una lista: se guardan como las demás listas.
-    const raw = Array.isArray(payload[group]) ? { state: "recorded", items: payload[group] } : payload[group]
+    // Lo de su familia y lo que ya no toma llegan como una lista: se guardan como las demás listas. El
+    // parentesco de su familia se cuenta desde el paciente aquí, no lo cuenta el modelo (revisión final
+    // del 25 nov: «su papá», dicho por la madre, quedaba «abuelo materno»).
+    const list = Array.isArray(payload[group])
+      ? group === "family"
+        ? (payload[group] as unknown[]).map((item) => (isRecord(item) ? familyFromPatient(item, declarante === "acompanante" ? vinculo : "") : item))
+        : payload[group]
+      : undefined
+    const raw = list ? { state: "recorded", items: list } : payload[group]
     let value =
       group === "allergies"
         ? isRecord(payload[group]) && payload[group]["state"] === "unknown"
@@ -374,6 +415,9 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
     const check = groupShape(group)?.safeParse(health[group])
     if (!check?.success) delete health[group]
   }
+  // Lo que quien acompaña cuenta de sí misma («yo soy diabética, eso es mío») no es del paciente: el
+  // repaso de toda la conversación se lo proponía al niño (revisión final del 25 nov). Su familia sí.
+  if (declarante === "acompanante" && companionSelfTalk(said)) for (const group of Object.keys(health)) if (group !== "family") delete health[group]
   // En la misma pausa, la medicina que dijo que dejó no queda también como que la toma.
   if (isRecord(health["stopped"])) {
     const kept = withoutContradictedDrugs(health, { stopped: healthDrugKeysOf({ stopped: health["stopped"] }), taking: new Set() })
@@ -1210,7 +1254,11 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
       const still = (name: string) =>
         items.some((item) => sameName(item["name"], name) || sameName([item["name"], item["dose"], item["frequency"]].filter(Boolean).join(" "), name))
       const drugs = [...healthDrugKeysOf({ [group]: value })]
-      push({ key: group, group, label: GROUP_LABEL[group], value: words, by, ...(drugs.length ? { drugs } : {}) }, value["state"] === "none", still)
+      // La aspirina es antiagregante, no anticoagulante: la fila lo dice como la franja (revisión final del 25 nov).
+      const head = drugHead(value["detail"])
+      const atcCode = head.startsWith("atc:") ? head.slice(4) : (findHabitualMedication(head)?.atc ?? null)
+      const label = group === "anticoagulants" && text(value["detail"]) ? (medicationKindLabel({ name: text(value["detail"]), atcCode }) ?? GROUP_LABEL[group]) : GROUP_LABEL[group]
+      push({ key: group, group, label, value: words, by, ...(drugs.length ? { drugs } : {}) }, value["state"] === "none", still)
       continue
     }
     for (const [key, item] of Object.entries(value)) {

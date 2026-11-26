@@ -648,6 +648,7 @@ export function EncounterEditor({
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
   // «Finalizar y firmar» ya está ordenando lo último que se dijo: otro clic no lo repite.
   const signRequestRef = useRef(false)
+  const examSeen = useRef(false)
   // Lo dictado que quien firma cambió de como venía: desmarcado no entra; lo que cambia lo escrito
   // viene desmarcado y entra solo si lo marca. Lo demás que se puede confirmar entra con la firma.
   const [signToggled, setSignToggled] = useState<string[]>([])
@@ -2517,8 +2518,10 @@ export function EncounterEditor({
   const examAlways = !productUi().site
   const examHasData =
     examination !== null || Object.values(vitals).some((value) => value.trim() !== "")
+  // Abierto una vez, sigue abierto: borrar el peso para corregirlo no esconde el bloque (revisión final del 25 nov).
+  if (examHasData) examSeen.current = true
   const showExam =
-    examAlways || examHasData || extras.has("examen") || dictationCount("examen") > 0 || dictationRemoved("examen")
+    examAlways || examHasData || examSeen.current || extras.has("examen") || dictationCount("examen") > 0 || dictationRemoved("examen")
   const showPrognosis = draftValues.prognosis.trim() !== "" || extras.has("pronostico")
   // Los bloques del producto: el odontograma, siempre; lo demás (el periodontograma), en «También» hasta que tenga algo.
   const everyday = product.blocks.filter((item) => item.key === "odontograma")

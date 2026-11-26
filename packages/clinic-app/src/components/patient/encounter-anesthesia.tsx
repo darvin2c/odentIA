@@ -49,7 +49,7 @@ const GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
  * nunca se le preguntó. «Niega alergias, enfermedades y medicación.»
  */
 export function anesthesiaHealthWords(
-  health: Pick<PatientHealth, "allergies" | "conditions" | "medications" | "reviewStatus"> | null,
+  health: (Pick<PatientHealth, "allergies" | "conditions" | "medications" | "reviewStatus"> & Partial<Pick<PatientHealth, "said">>) | null,
   gaps: readonly HealthGap[],
   risks: readonly string[],
   today: string,
@@ -76,7 +76,13 @@ export function anesthesiaHealthWords(
     if (denied.length > 0) parts.push(`Niega ${listWords(denied)}.`)
   }
   if (risks.length > 0) parts.push(`Dijo que ${listWords(risks)}.`)
-  const unasked = gaps.flatMap((gap) => (gap === "asa" ? [] : [GAP_WORDS[gap]]))
+  // Lo que dijo en la consulta y nadie revisó todavía cuenta como dicho, no como «falta preguntarle»
+  // (revisión final del 25 nov: «Falta preguntarle por su medicación» con el apixabán ya dicho).
+  const saidRows = (health?.said ?? []).flatMap((item) => item.rows).filter((row) => !row.denied && !row.stopped && !row.newer)
+  const saidGroups = new Set(saidRows.map((row) => (row.key === "anticoagulants" || row.key === "boneMedicines" ? "medications" : row.key)))
+  const saidNow = saidRows.filter((row) => ["medications", "anticoagulants", "boneMedicines", "conditions"].includes(row.key)).map((row) => midSentence(row.value))
+  if (saidNow.length > 0) parts.push(`Dijo ${listWords([...new Set(saidNow)])}, sin revisar.`)
+  const unasked = gaps.flatMap((gap) => (gap === "asa" || saidGroups.has(gap) ? [] : [GAP_WORDS[gap]]))
   if (unasked.length > 0) parts.push(`Falta preguntarle por ${listWords(unasked)}.`)
   return parts.join(" ")
 }
