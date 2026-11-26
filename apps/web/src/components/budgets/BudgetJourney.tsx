@@ -60,7 +60,7 @@ interface Card {
 }
 
 interface Props {
-  /** La llamada a la acción del sitio, al terminar el recorrido (en la guía no va: tiene la suya). */
+  /** La llamada a la acción del sitio, al terminar el recorrido. */
   cta?: { href: string; label: string }
 }
 
