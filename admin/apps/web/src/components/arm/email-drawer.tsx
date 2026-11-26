@@ -13,7 +13,6 @@
  * Desde Kairós (`responder_correo`) llega con su borrador y «Enviar» es el sí
  * del ítem (`onSend`): la misma respuesta, sin propuesta.
  */
-import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
   common,
@@ -33,7 +32,7 @@ import { z } from "zod"
 import { api } from "../../lib/api"
 import { useIsAdmin } from "../../lib/session"
 import { supportDayTime } from "../../lib/support-words"
-import { ProductMark } from "../product"
+import { MailAppMark } from "../product"
 import { deleteOnWords, useMarkCarga } from "./client-files-tab"
 import { FORMAT_HINT, FormatTools, FormattedText } from "./formatted-body"
 import { invalidateArm } from "./hoy-links"
@@ -209,9 +208,6 @@ export const canAttachFiles = (email: InboundEmail, fromKairos: boolean) =>
 const unsettled = (email: InboundEmail) =>
   email.replies.filter((reply) => reply.status === "incierto" || reply.status === "pendiente")
 
-const isProduct = (value: string): value is (typeof CLINICAL_PRODUCTS)[number] =>
-  (CLINICAL_PRODUCTS as readonly string[]).includes(value)
-
 export interface EmailDrawerProps {
   emailId: string
   open: boolean
@@ -335,7 +331,7 @@ function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: 
         <dt className="text-muted-foreground">A</dt>
         <dd className="flex flex-wrap items-center gap-x-2 [overflow-wrap:anywhere]">
           {mailboxWords(email)}
-          {isProduct(email.product) ? <ProductMark product={email.product} /> : null}
+          <MailAppMark app={email.product} />
           {email.staff ? <span className="text-muted-foreground">({email.staff.name})</span> : null}
         </dd>
         <dt className="text-muted-foreground">De</dt>

@@ -23,10 +23,10 @@
  * atiende lo dice la pausa de Kairós.
  */
 
-import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   kairosItem,
+  SAAS_CLIENT_PRODUCTS,
   type SaasInboundAttachment,
   type SaasInboundMailbox,
   saasChat,
@@ -49,9 +49,13 @@ import {
   outreachThreadKeySql,
   threadClientIdSql,
 } from "./admin-email-thread.js"
-import { inboundFileCarga, matchInboundClient } from "./admin-inbound-email.js"
+import {
+  inboundEmailHasClients,
+  inboundFileCarga,
+  matchInboundClient,
+} from "./admin-inbound-email.js"
 import { CHAT_OUTREACH_SETTLE_MS, replySignature, replySubject } from "./admin-sales.js"
-import { outreachSenderPreview } from "./admin-staff-mail.js"
+import { type MailApp, outreachSenderPreview, replyAppOf } from "./admin-staff-mail.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { kairosHandlesSql } from "./kairos-sells.js"
 
@@ -155,7 +159,7 @@ function chatConversationsSql(now: Date, chatId: string | null): SQL {
       jsonb_array_length(m.media)::int as attachments,
       m.received_at as last_inbound_at, m.created_at as since,
       greatest(m.received_at, coalesce(lo.sent_at, lo.created_at)) as last_activity_at,
-      c.client_id, null::text as mailbox, null::text as to_address,
+      c.client_id, null::text as mailbox, null::text as to_address, null::text as email_app,
       c.product as chat_product, c.product_source as chat_product_source,
       (case when c.kairos_paused_at is not null then c.kairos_paused_by end) as attended_by,
       mk.settled_at, (c.not_clinic_at is not null) as not_clinic,
@@ -242,7 +246,7 @@ function mailConversationsSql(
       : recent
   }
   return sql`with mail as (
-      select e.id, e.message_id, e.client_id, e.mailbox, e.to_address, e.from_address, e.from_name,
+      select e.id, e.message_id, e.client_id, e.mailbox, e.product, e.to_address, e.from_address, e.from_name,
         e.subject, e.text_body, e.attachments, e.received_at, ${emailThreadKeySql("e")} as thread_key
       from admin.saas_inbound_email e
       where ${inWindow("e", "received_at")}
@@ -330,7 +334,7 @@ function mailConversationsSql(
       jsonb_array_length(l.attachments)::int as attachments,
       l.received_at as last_inbound_at, l.received_at as since,
       greatest(l.received_at, coalesce(lo.sent_at, lo.created_at)) as last_activity_at,
-      tc.client_id, l.mailbox, l.to_address,
+      tc.client_id, l.mailbox, l.to_address, l.product as email_app,
       null::text as chat_product, null::text as chat_product_source,
       mk.attended_by, mk.settled_at, false as not_clinic, false as handed_over,
       null::text as handover_why, false as kairos_busy, (td.thread_key is not null) as draft_ready,
@@ -419,6 +423,7 @@ interface ConversationRow extends Record<string, unknown> {
   chat_product_source: string | null
   mailbox: string | null
   to_address: string | null
+  email_app: string | null
   attended_by: string | null
   attended_name: string | null
   settled_at: string | null
@@ -446,7 +451,7 @@ async function conversationRows(
       x.preview, x.attachments, ${iso(sql`x.last_inbound_at`)} as last_inbound_at,
       ${iso(sql`x.last_activity_at`)} as last_activity_at, x.client_id::text as client_id,
       x.client_name, x.client_product, x.client_has_app, x.client_phase, x.mailbox, x.to_address,
-      x.chat_product, x.chat_product_source, x.attended_by, au.name as attended_name,
+      x.email_app, x.chat_product, x.chat_product_source, x.attended_by, au.name as attended_name,
       (case when x.settled_at is null then null else ${iso(sql`x.settled_at`)} end) as settled_at,
       x.state, x.why_code, x.handover_why, x.reply_by_kairos, x.undelivered_by_kairos,
       x.draft_ready, x.last_out_status,
@@ -538,6 +543,8 @@ export interface InboxItem {
   /** Solo correo: el buzón y la dirección a la que llegó. */
   mailbox: string | null
   to: string | null
+  /** Solo correo: la app a la que escribieron (el producto de sus clínicas o `gestoria`). */
+  emailApp: string | null
   attendedBy: { id: string; name: string } | null
   lastOutbound: { status: string; byKairos: boolean; at: Date } | null
 }
@@ -590,6 +597,7 @@ function itemOf(row: ConversationRow): InboxItem {
         : null,
     mailbox: row.mailbox,
     to: row.to_address,
+    emailApp: row.kind === "correo" ? row.email_app : null,
     attendedBy: row.attended_by ? { id: row.attended_by, name: row.attended_name ?? "" } : null,
     lastOutbound:
       row.last_out_status && row.last_out_at
@@ -602,10 +610,17 @@ function itemOf(row: ConversationRow): InboxItem {
   }
 }
 
+/** Un chat, o un correo que llegó a una app de clínicas (el único que puede tener cliente). */
+const clinicOrChatSql = (alias: string) =>
+  sql.raw(
+    `(${alias}.email_app is null or ${alias}.email_app in (${SAAS_CLIENT_PRODUCTS.map((product) => `'${product}'`).join(",")}))`,
+  )
+
 function filterSql(filter: InboxFilter): SQL {
   const parts: SQL[] = []
   if (filter.estado && filter.estado !== "todas") parts.push(sql`x.state = ${filter.estado}`)
-  if (filter.cliente === "sin") parts.push(sql`x.client_id is null`)
+  // «Sin cliente» es lo que espera que alguien diga de quién es: lo de gestorIA no (ADR 0220).
+  if (filter.cliente === "sin") parts.push(sql`x.client_id is null and ${clinicOrChatSql("x")}`)
   else if (filter.cliente) parts.push(sql`x.client_id = ${filter.cliente}::uuid`)
   if (filter.fase) parts.push(sql`coalesce(x.client_phase, 'por_vender') = ${filter.fase}`)
   if (filter.canal) parts.push(sql`x.channel = ${filter.canal}`)
@@ -618,7 +633,8 @@ async function countsOf(tx: Db, now: Date): Promise<Inbox["counts"]> {
     ...(await tx.execute<{ te_toca: number; kairos: number; sin_cliente: number }>(
       sql`select count(*) filter (where s.state = 'te_toca')::int as te_toca,
         count(*) filter (where s.state = 'kairos')::int as kairos,
-        count(*) filter (where s.state = 'te_toca' and s.client_id is null)::int as sin_cliente
+        count(*) filter (where s.state = 'te_toca' and s.client_id is null
+          and ${clinicOrChatSql("s")})::int as sin_cliente
       from (${conversationsSql(now, { all: true })}) s`,
     )),
   ]
@@ -961,10 +977,8 @@ export async function getEmailThread(
     : null
   const suggestion = client ? null : await threadSuggestion(tx, replies, latest)
 
-  const product: ClinicalProduct =
-    [client?.product, latest.product].find(
-      (value): value is ClinicalProduct => !!value && isClinicalProduct(value),
-    ) ?? "dental"
+  // Con la app con que sale la respuesta (`replyAppOf`, la misma regla del envío).
+  const product: MailApp = replyAppOf(latest.product, client?.product)
   const mailbox = latest.mailbox as SaasInboundMailbox
   const sender = await outreachSenderPreview(tx, staff, product, mailbox)
 
@@ -1054,6 +1068,8 @@ async function threadSuggestion(
   replies: ReadonlyArray<{ row: typeof saasOutreach.$inferSelect }>,
   latest: typeof saasInboundEmail.$inferSelect,
 ): Promise<EmailThread["suggestion"]> {
+  // Lo de gestorIA no tiene cliente donde ligarse (ADR 0220): no se sugiere ninguno.
+  if (!inboundEmailHasClients(latest.product)) return null
   const unverified = latest.senderVerified
     ? ""
     : ", pero el remitente no está verificado: confírmalo antes de ligarlo"

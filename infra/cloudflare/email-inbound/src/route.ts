@@ -1,7 +1,9 @@
 /**
  * A dónde va cada correo que recibe el Worker, sin red ni dependencias (se prueba con
  * `node --test`). Las reglas fijas de Email Routing mandan aquí soporte@, contacto@, hola@ y
- * fundadores@, y el atrapa todo de cada dominio, cualquier otra dirección:
+ * fundadores@, y el atrapa todo de cada dominio, cualquier otra dirección. Cada dominio es de una
+ * app (`APPS`): las de clínicas y gestorIA, que es otro sistema y también se atiende desde la
+ * administración.
  *
  * - un buzón fijo (`buzon`) se reenvía al buzón de siempre y va a la API;
  * - cualquier otra parte local es de una persona del equipo (`persona`): la API dice si es de
@@ -15,19 +17,26 @@
  * solo se reenvía.
  */
 
-export type Product = "dental" | "medical" | "optical"
+/** El producto de una app de clínicas (`CLINICAL_PRODUCTS` de la API). */
+export type ClinicalProduct = "dental" | "medical" | "optical"
+/**
+ * La app a la que escribieron: el producto de sus clínicas o, si la app es otro sistema, su
+ * clave de app (`gestoria`). Es lo que la API recibe en `product` (`SAAS_INBOUND_EMAIL_APPS`).
+ */
+export type App = ClinicalProduct | "gestoria"
 export type Mailbox = "soporte" | "contacto" | "hola" | "fundadores"
 
 export type Route =
-  | { kind: "buzon"; mailbox: Mailbox; product: Product }
-  | { kind: "persona"; localPart: string; product: Product }
-  | { kind: "reenviar"; product: Product }
+  | { kind: "buzon"; mailbox: Mailbox; app: App }
+  | { kind: "persona"; localPart: string; app: App }
+  | { kind: "reenviar"; app: App }
 
-/** Cada dominio con su producto (`CLINICAL_PRODUCTS`). */
-export const PRODUCTS: Record<string, Product> = {
+/** Cada dominio con su app. */
+export const APPS: Record<string, App> = {
   "odentia32.com": "dental",
   "latidia72.com": "medical",
   "vistia20.com": "optical",
+  "gestoria24.com": "gestoria",
 }
 
 const MAILBOXES: readonly Mailbox[] = ["soporte", "contacto", "hola", "fundadores"]
@@ -65,12 +74,12 @@ function split(address: string): { local: string; domain: string } | null {
 export function routeOf(recipient: string): Route | null {
   const parts = split(recipient)
   if (!parts) return null
-  const product = PRODUCTS[parts.domain]
-  if (!product || !parts.local) return null
+  const app = APPS[parts.domain]
+  if (!app || !parts.local) return null
   const mailbox = MAILBOXES.find((name) => name === parts.local)
-  if (mailbox) return { kind: "buzon", mailbox, product }
-  if (FORWARD_ONLY.has(parts.local)) return { kind: "reenviar", product }
-  return { kind: "persona", localPart: parts.local, product }
+  if (mailbox) return { kind: "buzon", mailbox, app }
+  if (FORWARD_ONLY.has(parts.local)) return { kind: "reenviar", app }
+  return { kind: "persona", localPart: parts.local, app }
 }
 
 /**
@@ -86,7 +95,7 @@ export function skipReason(
   const sender = split(from)
   if (!sender?.local) return "automatico"
   if (DELIVERY_ROBOTS.has(sender.local)) return "automatico"
-  if (PRODUCTS[sender.domain] && OUR_ROBOTS.has(sender.local)) return "propio"
+  if (APPS[sender.domain] && OUR_ROBOTS.has(sender.local)) return "propio"
   const auto = header("auto-submitted")?.trim().toLowerCase()
   if (auto && !auto.startsWith("no")) return "automatico"
   if (header("x-autoreply") !== null || header("x-autorespond") !== null) return "automatico"

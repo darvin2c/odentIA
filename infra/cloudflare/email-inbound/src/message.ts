@@ -20,7 +20,7 @@
 import PostalMime from "postal-mime"
 import { CLOUDFLARE_AUTHSERV_ID, senderVerified } from "./auth.ts"
 import { type ApiOutcome, deliver } from "./flow.ts"
-import { type Mailbox, type Product, type Route, skipReason, threadHeaders } from "./route.ts"
+import { type App, type Mailbox, type Route, skipReason, threadHeaders } from "./route.ts"
 
 export interface Env {
   /** Origen de la API, sin barra final: `https://api.odentia32.com`. */
@@ -66,8 +66,8 @@ export const CONTENT_TYPE_MAX_CHARS = 200
 
 /** A dónde va a la API: un buzón fijo o la dirección de una persona. */
 type ApiRoute =
-  | { kind: "buzon"; mailbox: Mailbox; product: Product }
-  | { kind: "persona"; localPart: string; product: Product }
+  | { kind: "buzon"; mailbox: Mailbox; app: App }
+  | { kind: "persona"; localPart: string; app: App }
 
 /**
  * Lo que la API guarda (PDF, imagen, xlsx, csv, docx). La API lo vuelve a comprobar por sus
@@ -285,7 +285,8 @@ export async function inboundBody(
   return JSON.stringify({
     mailbox: route.kind === "persona" ? "persona" : route.mailbox,
     ...(route.kind === "persona" ? { localPart: route.localPart } : {}),
-    product: route.product,
+    // La API lo llama `product`: el de las clínicas o `gestoria`.
+    product: route.app,
     messageId: messageId.slice(0, 998),
     from: sender.address,
     fromName: sender.name,

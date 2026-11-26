@@ -1,7 +1,7 @@
 /**
  * La dirección de cada persona del equipo de Sallca en los dominios de las
- * marcas (`<mail_local>@odentia32.com`, `@latidia72.com`, `@vistia20.com`) y
- * quién firma cada correo que sale de la administración.
+ * marcas (`<mail_local>@odentia32.com`, `@latidia72.com`, `@vistia20.com`,
+ * `@gestoria24.com`) y quién firma cada correo que sale de la administración.
  *
  * La base pone la dirección sola al crear la fila del equipo
  * (`admin_staff_mail_local`): la parte local de su correo si ya es de un
@@ -16,16 +16,20 @@
  * del remitente.
  */
 
-import { type ClinicalProduct, productWords } from "@odentia/clinical"
+import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import type { SaasInboundMailbox } from "@odentia/db/schema/admin-arm"
+import {
+  SAAS_INBOUND_EMAIL_APPS,
+  type SaasInboundEmailApp,
+  type SaasInboundMailbox,
+} from "@odentia/db/schema/admin-arm"
 import {
   adminStaff,
   STAFF_MAIL_LOCAL_PATTERN,
   STAFF_MAIL_RESERVED,
 } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
-import { mailBrandName } from "@odentia/mail"
+import { type MailBrand, mailBrandName } from "@odentia/mail"
 import { and, eq, isNotNull, isNull, ne } from "drizzle-orm"
 import { z } from "zod"
 import { type AdminActor, withAdminStaffLock, writeAdminAudit } from "./admin-core.js"
@@ -72,21 +76,62 @@ export interface MailSender {
   staffUserId: string | null
 }
 
-/** «odentIA», «latidIA», «vistIA». */
-function brandName(product: ClinicalProduct): string {
-  return mailBrandName(productWords(product).brand)
+/**
+ * La app con cuya marca y dominio sale un correo de la administración: la de un producto de
+ * clínicas (`dental`, `medical`, `optical`) o una app que es otro sistema por su clave
+ * (`gestoria`), la misma lista con que llega un correo (`saas_inbound_email.product`).
+ */
+export type MailApp = SaasInboundEmailApp
+
+export function isMailApp(value: unknown): value is MailApp {
+  return typeof value === "string" && (SAAS_INBOUND_EMAIL_APPS as readonly string[]).includes(value)
 }
 
-/** soporte@ u hola@ de la marca. */
-export function brandMailbox(product: ClinicalProduct, mailbox: "soporte" | "hola"): MailSender {
-  const domain = productMailDomain(product)
-  return mailbox === "soporte"
-    ? { name: `Soporte · ${brandName(product)}`, address: `soporte@${domain}`, staffUserId: null }
-    : { name: brandName(product), address: `hola@${domain}`, staffUserId: null }
+/** Los dominios de producción de las apps que son otro sistema (los de clínicas: `productMailDomain`). */
+const EXTERNAL_APP_MAIL: Record<
+  Exclude<MailApp, ClinicalProduct>,
+  { brand: MailBrand; domain: string }
+> = {
+  gestoria: { brand: "gestoria", domain: "gestoria24.com" },
+}
+
+/** La marca de los correos de una app: «odentia», «latidia», «vistia» o «gestoria». */
+export function mailAppBrand(app: MailApp): MailBrand {
+  return isClinicalProduct(app) ? productWords(app).brand : EXTERNAL_APP_MAIL[app].brand
+}
+
+/** El dominio desde el que firma una app: odentia32.com, latidia72.com, vistia20.com o gestoria24.com. */
+export function mailAppDomain(app: MailApp): string {
+  return isClinicalProduct(app) ? productMailDomain(app) : EXTERNAL_APP_MAIL[app].domain
 }
 
 /**
- * Quién firma lo que escribe `actor` para un cliente de `product`: soporte@ si
+ * Con qué app sale la respuesta a un correo que llegó: si escribieron a una app que es otro
+ * sistema (gestorIA), esa, porque los clientes de la administración son de las clínicas y le
+ * escribieron a la otra app; si no, la de la ficha de su cliente y, sin cliente, la del dominio
+ * al que escribieron. Lo que no se reconoce sale como odentIA, como siempre.
+ */
+export function replyAppOf(emailApp: string, clientProduct: string | null | undefined): MailApp {
+  if (isMailApp(emailApp) && !isClinicalProduct(emailApp)) return emailApp
+  if (isClinicalProduct(clientProduct)) return clientProduct
+  return isClinicalProduct(emailApp) ? emailApp : "dental"
+}
+
+/** «odentIA», «latidIA», «vistIA», «gestorIA». */
+function brandName(app: MailApp): string {
+  return mailBrandName(mailAppBrand(app))
+}
+
+/** soporte@ u hola@ de la marca. */
+export function brandMailbox(app: MailApp, mailbox: "soporte" | "hola"): MailSender {
+  const domain = mailAppDomain(app)
+  return mailbox === "soporte"
+    ? { name: `Soporte · ${brandName(app)}`, address: `soporte@${domain}`, staffUserId: null }
+    : { name: brandName(app), address: `hola@${domain}`, staffUserId: null }
+}
+
+/**
+ * Quién firma lo que escribe `actor` para un cliente de `app`: soporte@ si
  * responde lo que llegó a soporte@ o si es de Soporte; si no, la persona con su dirección, o
  * hola@ si aún no tiene. La fila de la persona queda bloqueada hasta el final
  * de la transacción: nadie le cambia la dirección mientras sale con ella. Una
@@ -95,10 +140,10 @@ export function brandMailbox(product: ClinicalProduct, mailbox: "soporte" | "hol
 export async function outreachSender(
   tx: Db,
   actor: AdminActor,
-  product: ClinicalProduct,
+  app: MailApp,
   mailbox: SaasInboundMailbox | null = null,
 ): Promise<MailSender> {
-  return senderFor(tx, actor, product, mailbox, true)
+  return senderFor(tx, actor, app, mailbox, true)
 }
 
 /**
@@ -109,11 +154,11 @@ export async function outreachSender(
 export async function outreachSenderPreview(
   tx: Db,
   actor: AdminActor,
-  product: ClinicalProduct,
+  app: MailApp,
   mailbox: SaasInboundMailbox | null = null,
 ): Promise<MailSender | null> {
   try {
-    return await senderFor(tx, actor, product, mailbox, false)
+    return await senderFor(tx, actor, app, mailbox, false)
   } catch (error) {
     if (error instanceof ServiceError && error.code === "STAFF_INACTIVE") return null
     throw error
@@ -123,7 +168,7 @@ export async function outreachSenderPreview(
 async function senderFor(
   tx: Db,
   actor: AdminActor,
-  product: ClinicalProduct,
+  app: MailApp,
   mailbox: SaasInboundMailbox | null,
   lock: boolean,
 ): Promise<MailSender> {
@@ -135,16 +180,16 @@ async function senderFor(
   if (!staff?.active)
     throw new ServiceError("STAFF_INACTIVE", 403, "Tu acceso al equipo ya no está activo")
   // Soporte siempre sale desde soporte@ («Escribir» incluido): su dirección no queda fija.
-  if (mailbox === "soporte" || actor.role !== "admin") return brandMailbox(product, "soporte")
-  if (!staff.mailLocal) return brandMailbox(product, "hola")
+  if (mailbox === "soporte" || actor.role !== "admin") return brandMailbox(app, "soporte")
+  if (!staff.mailLocal) return brandMailbox(app, "hola")
   const [person] = await tx
     .select({ name: user.name })
     .from(user)
     .where(eq(user.id, actor.userId))
     .limit(1)
   return {
-    name: `${staffShortName(person?.name ?? "") || brandName(product)} · ${brandName(product)}`,
-    address: `${staff.mailLocal}@${productMailDomain(product)}`,
+    name: `${staffShortName(person?.name ?? "") || brandName(app)} · ${brandName(app)}`,
+    address: `${staff.mailLocal}@${mailAppDomain(app)}`,
     staffUserId: actor.userId,
   }
 }
@@ -153,14 +198,10 @@ async function senderFor(
  * El nombre que firma una dirección ya guardada en un envío: soporte@,
  * hola@ o la de una persona del equipo (por su `mail_local`).
  */
-export async function senderOfAddress(
-  tx: Db,
-  product: ClinicalProduct,
-  address: string,
-): Promise<MailSender> {
+export async function senderOfAddress(tx: Db, app: MailApp, address: string): Promise<MailSender> {
   const local = address.split("@")[0] ?? ""
-  if (local === "soporte") return brandMailbox(product, "soporte")
-  if (local === "hola") return brandMailbox(product, "hola")
+  if (local === "soporte") return brandMailbox(app, "soporte")
+  if (local === "hola") return brandMailbox(app, "hola")
   const [staff] = await tx
     .select({ userId: adminStaff.userId, name: user.name })
     .from(adminStaff)
@@ -168,7 +209,7 @@ export async function senderOfAddress(
     .where(eq(adminStaff.mailLocal, local))
     .limit(1)
   return {
-    name: `${staff ? staffShortName(staff.name) : local} · ${brandName(product)}`,
+    name: `${staff ? staffShortName(staff.name) : local} · ${brandName(app)}`,
     address,
     staffUserId: staff?.userId ?? null,
   }

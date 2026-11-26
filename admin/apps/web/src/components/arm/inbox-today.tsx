@@ -6,7 +6,7 @@
 import { Button } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { ChatAppMark } from "../product"
+import { ChatAppMark, MailAppMark } from "../product"
 import { momentWords } from "./chat-api"
 import { ConversationDrawer, type ConversationTarget } from "./conversation-drawer"
 import { CLIENT_PHASE_WORDS, INBOX_CHANNEL_WORDS, useInbox } from "./inbox-api"
@@ -52,6 +52,11 @@ export function InboxToday() {
                   <>
                     {" · "}
                     <ChatAppMark app={item.app} />
+                  </>
+                ) : item.emailApp ? (
+                  <>
+                    {" · "}
+                    <MailAppMark app={item.emailApp} />
                   </>
                 ) : null}
               </p>

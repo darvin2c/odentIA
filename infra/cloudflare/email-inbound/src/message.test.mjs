@@ -13,8 +13,8 @@ const base = [
   "Message-ID: <uno@clinica.test>",
   "Content-Type: text/plain; charset=utf-8",
 ]
-const buzon = { kind: "buzon", mailbox: "hola", product: "dental" }
-const persona = { kind: "persona", localPart: "ada.lovelace", product: "dental" }
+const buzon = { kind: "buzon", mailbox: "hola", app: "dental" }
+const persona = { kind: "persona", localPart: "ada.lovelace", app: "dental" }
 const envelope = { from: "rosa@clinica.test", to: "hola@odentia32.com" }
 const at = new Date("2026-11-13T15:00:00Z")
 
@@ -31,6 +31,21 @@ test("manda la primera dirección del Reply-To, recortada, y nada si no trae", a
   assert.equal(body.from, "rosa@clinica.test")
   const without = JSON.parse(await inboundBody(raw(base), envelope, buzon, at))
   assert.equal(without.replyTo, null)
+})
+
+test("la app del dominio va en product: la de las clínicas o gestoria", async () => {
+  assert.equal(JSON.parse(await inboundBody(raw(base), envelope, buzon, at)).product, "dental")
+  const gestoria = JSON.parse(
+    await inboundBody(
+      raw(base),
+      { from: "rosa@clinica.test", to: "hola@gestoria24.com" },
+      { kind: "buzon", mailbox: "hola", app: "gestoria" },
+      at,
+    ),
+  )
+  assert.equal(gestoria.product, "gestoria")
+  assert.equal(gestoria.mailbox, "hola")
+  assert.equal(gestoria.to, "hola@gestoria24.com")
 })
 
 test("el aviso de los adjuntos va aparte del texto y dice la verdad según el camino", async () => {

@@ -8,39 +8,56 @@ const headers = (pairs) => {
   return (name) => map.get(name.toLowerCase()) ?? null
 }
 
-test("los buzones fijos de cada dominio, con su producto; la etiqueta +algo no cuenta", () => {
+test("los buzones fijos de cada dominio, con su app; la etiqueta +algo no cuenta", () => {
   assert.deepEqual(routeOf("Soporte+urgente@OdentIA32.com"), {
     kind: "buzon",
     mailbox: "soporte",
-    product: "dental",
+    app: "dental",
   })
   assert.deepEqual(routeOf("hola@latidia72.com"), {
     kind: "buzon",
     mailbox: "hola",
-    product: "medical",
+    app: "medical",
   })
   assert.deepEqual(routeOf("fundadores@vistia20.com."), {
     kind: "buzon",
     mailbox: "fundadores",
-    product: "optical",
+    app: "optical",
   })
   assert.deepEqual(routeOf("contacto@odentia32.com"), {
     kind: "buzon",
     mailbox: "contacto",
-    product: "dental",
+    app: "dental",
   })
+})
+
+test("gestoria24.com es de gestorIA: sus buzones, su equipo y lo que solo se reenvía", () => {
+  for (const mailbox of ["hola", "soporte", "contacto", "fundadores"])
+    assert.deepEqual(routeOf(`${mailbox}@GestorIA24.com`), {
+      kind: "buzon",
+      mailbox,
+      app: "gestoria",
+    })
+  assert.deepEqual(routeOf("ada.lovelace@gestoria24.com"), {
+    kind: "persona",
+    localPart: "ada.lovelace",
+    app: "gestoria",
+  })
+  assert.deepEqual(routeOf("privacidad@gestoria24.com"), { kind: "reenviar", app: "gestoria" })
+  // Lo que mandamos desde no-reply@ de gestorIA tampoco entra al ARM.
+  assert.equal(skipReason(() => null, "no-reply@gestoria24.com"), "propio")
 })
 
 test("cualquier otra dirección de un dominio nuestro es de una persona", () => {
   assert.deepEqual(routeOf("Ada.Lovelace+x@odentia32.com"), {
     kind: "persona",
     localPart: "ada.lovelace",
-    product: "dental",
+    app: "dental",
   })
   assert.deepEqual(routeOf("darvin.cotrina@latidia72.com"), {
     kind: "persona",
     localPart: "darvin.cotrina",
-    product: "medical",
+    app: "medical",
   })
 })
 
@@ -54,7 +71,7 @@ test("lo que tiene su propia regla (o es del servidor) solo se reenvía; otro do
     "postmaster",
     "abuse",
   ])
-    assert.deepEqual(routeOf(`${local}@odentia32.com`), { kind: "reenviar", product: "dental" })
+    assert.deepEqual(routeOf(`${local}@odentia32.com`), { kind: "reenviar", app: "dental" })
   assert.equal(routeOf("hola@otra.test"), null)
   assert.equal(routeOf("sin-arroba"), null)
 })

@@ -335,6 +335,31 @@ describe("el correo", () => {
     expect(other?.clientId).toBeNull()
   })
 
+  it("lo que llegó a gestoria24.com entra como de gestorIA; una app que no es nuestra, no", async () => {
+    const response = await send(
+      email("<a-gestoria@test>", {
+        mailbox: "hola",
+        product: "gestoria",
+        from: "tienda@desconocida.test",
+        to: "hola@gestoria24.com",
+      }),
+    )
+    expect(response.status).toBe(201)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<a-gestoria@test>"))
+    expect(row).toMatchObject({
+      product: "gestoria",
+      mailbox: "hola",
+      toAddress: "hola@gestoria24.com",
+    })
+    const other = await send(email("<otra-app@test>", { product: "odentia" }))
+    expect(other.status).toBe(400)
+    const body = (await other.json()) as { error: { fields: Record<string, string> } }
+    expect(body.error.fields).toHaveProperty("product")
+  })
+
   it("un cuerpo que no cumple se rechaza con su campo, ya firmado", async () => {
     const response = await send(email("<malo@test>", { mailbox: "ventas" }))
     expect(response.status).toBe(400)

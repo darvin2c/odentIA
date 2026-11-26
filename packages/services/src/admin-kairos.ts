@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto"
-import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
+import {
+  CLINICAL_PRODUCTS,
+  type ClinicalProduct,
+  isClinicalProduct,
+  productWords,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   KAIROS_AI_PURPOSES,
@@ -234,6 +239,13 @@ function requireStaff(actor: AdminActor): void {
 
 const productOf = (value: string | null | undefined): ClinicalProduct =>
   value && isClinicalProduct(value) ? value : "dental"
+/**
+ * Los correos que Kairós mira para ligar y responder: los que llegaron a una app de clínicas.
+ * Lo que llegó a gestorIA (otro sistema) lo atiende una persona en la Bandeja: sus clientes no
+ * están en la administración y Kairós vende las apps de clínicas.
+ */
+const clinicEmailSql = (alias: string) =>
+  sql.raw(`${alias}.product in (${CLINICAL_PRODUCTS.map((product) => `'${product}'`).join(",")})`)
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null
 
@@ -2154,7 +2166,8 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     tx,
     sql`select id, mailbox, product, from_address, from_name, to_address, subject,
       ${iso(sql`received_at`)} as received_at, sender_verified, attachments
-    from saas_inbound_email where client_id is null order by received_at asc`,
+    from saas_inbound_email e where e.client_id is null and ${clinicEmailSql("e")}
+    order by e.received_at asc`,
   )
   for (const email of unassigned) {
     const who = email.from_name?.trim() || email.from_address
@@ -2563,6 +2576,7 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
       e.subject, ${iso(sql`e.received_at`)} as received_at
     from saas_inbound_email e
     where e.mailbox in ('hola', 'contacto', 'fundadores', 'persona')
+      and ${clinicEmailSql("e")}
       and e.sender_verified
       and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
       and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)

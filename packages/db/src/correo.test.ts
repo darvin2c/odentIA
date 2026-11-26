@@ -189,10 +189,14 @@ describe("correos y respuestas", () => {
     return row.id
   }
 
-  async function newEmail(mailbox: string, staffUserId: string | null = null): Promise<string> {
+  async function newEmail(
+    mailbox: string,
+    staffUserId: string | null = null,
+    product = "dental",
+  ): Promise<string> {
     const row = await one<{ id: string }>(sql`
       insert into "saas_inbound_email" ("mailbox", "product", "message_id", "from_address", "to_address", "received_at", "staff_user_id")
-      values (${mailbox}, 'dental', ${`<${crypto.randomUUID()}@gmail.com>`}, 'dra@gmail.com', 'hola@odentia32.com', now(), ${staffUserId})
+      values (${mailbox}, ${product}, ${`<${crypto.randomUUID()}@gmail.com>`}, 'dra@gmail.com', 'hola@odentia32.com', now(), ${staffUserId})
       returning "id"`)
     return row.id
   }
@@ -206,6 +210,14 @@ describe("correos y respuestas", () => {
     )
     await expect(newEmail("ventas")).rejects.toMatchObject(
       violates("saas_inbound_email_mailbox_check"),
+    )
+  })
+
+  it("llega a una app de clínicas o a gestorIA, por su clave; otra cosa, no", async () => {
+    await newEmail("hola", null, "gestoria")
+    await newEmail("soporte", null, "optical")
+    await expect(newEmail("hola", null, "odentia")).rejects.toMatchObject(
+      violates("saas_inbound_email_product_check"),
     )
   })
 

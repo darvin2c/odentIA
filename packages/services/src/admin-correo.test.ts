@@ -388,6 +388,59 @@ describe("responder un correo", () => {
     expect(entries).toContainEqual({ body: "Re: Precios\n\nHola, le cuento.", direction: "salio" })
   })
 
+  it("lo que llegó a gestorIA queda sin cliente y se responde desde gestorIA", async () => {
+    // Su remitente es contacto de una clínica: igual no se liga, ni solo ni a mano.
+    const toGestoria = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        product: "gestoria",
+        to: "hola@gestoria24.com",
+        from: "rosa@hilo.test",
+        subject: "Mi tienda",
+      }),
+    )
+    expect(toGestoria.clientId).toBeNull()
+    await expect(assignInboundEmail(ownerDb, admin, toGestoria.id, clientId)).rejects.toMatchObject(
+      {
+        code: "VALIDATION",
+        status: 400,
+      },
+    )
+    const detail = await getInboundEmail(ownerDb, admin, toGestoria.id)
+    expect(detail).toMatchObject({
+      product: "gestoria",
+      clientId: null,
+      replyFrom: { name: "Ada Lovelace · gestorIA", address: "ada.lovelace@gestoria24.com" },
+      replySignature: "Ada Lovelace · gestorIA",
+    })
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, toGestoria.id, { body: "Hola, le cuento de gestorIA." }),
+    )
+    expect(reply.from).toBe("ada.lovelace@gestoria24.com")
+    const email = await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))
+    expect(email.brand).toBe("gestoria")
+    expect(email.from).toEqual({
+      name: "Ada Lovelace · gestorIA",
+      address: "ada.lovelace@gestoria24.com",
+    })
+    expect(email.replyTo).toBe("ada.lovelace@gestoria24.com")
+    expect(email.messageId).toMatch(/^<[0-9a-f-]{36}@gestoria24\.com>$/)
+    expect(email.text).toContain("Ada Lovelace · gestorIA")
+    expect(email.text).toContain("Le respondemos el correo que nos escribió a hola@gestoria24.com")
+    // soporte@gestoria24.com sale desde soporte@ de gestorIA.
+    const toSupport = await ingestInboundEmail(
+      ownerDb,
+      mail({ mailbox: "soporte", product: "gestoria", to: "soporte@gestoria24.com" }),
+    )
+    const supportReply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, toSupport.id, { body: "Ya lo vemos." }),
+    )
+    expect((await ownerDb.transaction((tx) => outreachEmail(tx, supportReply.id))).from).toEqual({
+      name: "Soporte · gestorIA",
+      address: "soporte@gestoria24.com",
+    })
+  })
+
   it("lo de soporte@ sale desde soporte@; los correos los responde Administración", async () => {
     const toSupport = await ingestInboundEmail(
       ownerDb,

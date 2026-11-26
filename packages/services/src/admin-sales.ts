@@ -105,9 +105,13 @@ import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { emailThreadKeySql, outreachThreadKeySql } from "./admin-email-thread.js"
 import {
   brandMailbox,
+  type MailApp,
   type MailSender,
+  mailAppBrand,
+  mailAppDomain,
   markStaffMailUsed,
   outreachSender,
+  replyAppOf,
   senderOfAddress,
   staffShortName,
 } from "./admin-staff-mail.js"
@@ -2330,8 +2334,8 @@ function outreachRowOf(row: typeof saasOutreach.$inferSelect): OutreachRow {
 }
 
 /** Nuestro `Message-ID`: único, con el dominio de la marca que firma. */
-function newMessageId(product: ClinicalProduct): string {
-  return `<${randomUUID()}@${productMailDomain(product)}>`
+function newMessageId(app: MailApp): string {
+  return `<${randomUUID()}@${mailAppDomain(app)}>`
 }
 
 /**
@@ -2610,8 +2614,9 @@ export async function prepareEmailReply(
   if (actor.role !== "admin") throw forbidden("Solo el rol Administración puede hacer esto")
   const body = trimmed("body", input.body, 5000, "la respuesta")
   const client = email.clientId ? await lockClient(tx, email.clientId) : null
-  const product = productOf(client?.product ?? email.product)
-  const sender = await outreachSender(tx, actor, product, mailbox)
+  // Lo que llegó a gestorIA sale desde gestorIA, aunque su remitente sea cliente de una clínica.
+  const app = replyAppOf(email.product, client?.product)
+  const sender = await outreachSender(tx, actor, app, mailbox)
   let proposalId: string | null = null
   if (input.proposalId) {
     // Saldría firmada «Soporte · <marca>» y Soporte no vería esa respuesta: lo comercial va por «Escribir».
@@ -2726,7 +2731,7 @@ export async function prepareEmailReply(
       fileIds,
       inReplyToEmailId: email.id,
       fromAddress: sender.address,
-      messageId: newMessageId(product),
+      messageId: newMessageId(app),
       references: replyReferences(email, thread?.key ?? null),
       createdBy: actor.userId,
       createdAt: now,
@@ -3132,8 +3137,8 @@ const QUOTE_MAX = 4000
  * La firma de una respuesta: la de quien sale como remitente. «Ada Lovelace ·
  * odentIA», «Soporte · odentIA» o, desde hola@, «El equipo de odentIA».
  */
-export function replySignature(sender: MailSender, product: ClinicalProduct): string {
-  return sender.address === brandMailbox(product, "hola").address
+export function replySignature(sender: MailSender, app: MailApp): string {
+  return sender.address === brandMailbox(app, "hola").address
     ? `El equipo de ${sender.name}`
     : sender.name
 }
@@ -3199,16 +3204,19 @@ export async function outreachEmail(
   const { outreach, email } = row
   if (outreach.channel !== "correo" || !outreach.subject)
     throw new ServiceError("OUTREACH_NOT_EMAIL", 409, "Ese envío no es un correo")
-  const product = productOf(row.clientProduct ?? email?.product ?? "dental")
-  const brand = PRODUCT_BRAND[product]
+  // La respuesta a un correo, con la app de la respuesta (`replyAppOf`); lo demás, la del cliente.
+  const app: MailApp = email
+    ? replyAppOf(email.product, row.clientProduct)
+    : productOf(row.clientProduct ?? "dental")
+  const brand = mailAppBrand(app)
   const sender = outreach.fromAddress
-    ? await senderOfAddress(tx, product, outreach.fromAddress)
-    : brandMailbox(product, "hola")
+    ? await senderOfAddress(tx, app, outreach.fromAddress)
+    : brandMailbox(app, "hola")
   // Lo que escribió la persona va con su formato básico (`@odentia/mail/markdown`); la firma y la cita, como texto.
   const paragraphs: string[] = []
   if (email) {
     // Una respuesta firma con quien sale como remitente (el borrador de Kairós viene sin firma).
-    const signature = replySignature(sender, product)
+    const signature = replySignature(sender, app)
     if (!endsWithSignature(outreach.body, signature)) paragraphs.push(signature)
     paragraphs.push(...quotedEmail(email))
   }

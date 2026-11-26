@@ -1,6 +1,7 @@
 /**
- * Correo que llega a los buzones de cada producto (soporte@, contacto@, hola@,
- * fundadores@) o a la dirección de una persona del equipo (`persona`, por su
+ * Correo que llega a los buzones de cada app (soporte@, contacto@, hola@,
+ * fundadores@ de odentIA, latidIA, vistIA y gestorIA) o a la dirección de
+ * una persona del equipo (`persona`, por su
  * `mail_local`); lo manda firmado el worker de Cloudflare a
  * `/api/inbound/email`. Una dirección que no es de nadie no entra (404
  * `MAILBOX_UNKNOWN`: el worker la rechaza); la de una persona que ya no está
@@ -31,9 +32,10 @@
  */
 
 import { createHash } from "node:crypto"
-import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
+import { isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  SAAS_INBOUND_EMAIL_APPS,
   SAAS_INBOUND_MAILBOXES,
   type SaasInboundMailbox,
   type SaasInboundMatch,
@@ -62,7 +64,7 @@ import {
   settleRepliesOfEmail,
   threadMessageIds,
 } from "./admin-sales.js"
-import { outreachSenderPreview, staffByMailLocal } from "./admin-staff-mail.js"
+import { outreachSenderPreview, replyAppOf, staffByMailLocal } from "./admin-staff-mail.js"
 import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 
@@ -97,7 +99,8 @@ const inboundSchema = z
     /** Cabeceras del hilo, tal como llegaron. */
     inReplyTo: z.string().nullish(),
     references: z.string().nullish(),
-    product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
+    /** La app a la que escribieron: el producto de sus clínicas o `gestoria`. */
+    product: z.enum(SAAS_INBOUND_EMAIL_APPS, "Producto no válido"),
     messageId: z
       .string()
       .trim()
@@ -430,11 +433,13 @@ export async function ingestInboundEmail(
     }
   }
   // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo, si el
-  // correo entró en él (la regla de la Bandeja).
-  const threadClient = input.senderVerified ? await clientByThread(tx, created.id, thread) : null
+  // correo entró en él (la regla de la Bandeja). Lo que llegó a una app que es otro sistema
+  // (gestorIA) no se liga nunca: los clientes de la administración son de las clínicas.
+  const linkable = input.senderVerified && inboundEmailHasClients(input.product)
+  const threadClient = linkable ? await clientByThread(tx, created.id, thread) : null
   const match: { clientId: string; matchedBy: SaasInboundMatch } | null = threadClient
     ? { clientId: threadClient, matchedBy: "hilo" }
-    : input.senderVerified
+    : linkable
       ? await matchInboundClient(tx, input.from)
       : null
   let fileIds: string[] = []
@@ -489,6 +494,15 @@ export async function ingestInboundEmail(
   }
 }
 
+/**
+ * Si un correo puede ser de un cliente de la administración: solo lo que llegó a una app de
+ * clínicas. Lo de gestorIA (otro sistema) queda sin cliente hasta que el ARM tenga clientes de
+ * otras apps (ADR 0220): ni se liga solo, ni se sugiere, ni se liga a mano.
+ */
+export function inboundEmailHasClients(product: string): boolean {
+  return isClinicalProduct(product)
+}
+
 /** Los correos son de Administración (ADR 0196): Soporte, 403. */
 function requireAdmin(actor: AdminActor | null): AdminActor {
   if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
@@ -521,6 +535,13 @@ export async function assignInboundEmail(
   if (!email) throw notFound("Correo")
   if (email.clientId === clientId) return { id: email.id, clientId, fileIds: [] }
   if (email.clientId) throw new ServiceError("CONFLICT", 409, "Ese correo ya es de otro cliente")
+  if (!inboundEmailHasClients(email.product))
+    throw new ServiceError(
+      "VALIDATION",
+      400,
+      "Lo que llegó a gestorIA no se liga a un cliente de las clínicas",
+      { clientId: "Lo que llegó a gestorIA no se liga a un cliente de las clínicas" },
+    )
   const [client] = await tx
     .select({ id: saasClient.id })
     .from(saasClient)
@@ -691,7 +712,8 @@ export async function getInboundEmail(
         .where(inArray(saasClientFile.id, replyFileIds))
     : []
   const fileName = new Map(replyFileRows.map((file) => [file.id, file.filename]))
-  // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
+  // La marca con que sale la respuesta (como al enviar, `replyAppOf`): la de gestorIA si le
+  // escribieron ahí; si no, la del cliente si ya es de uno, o la del buzón donde llegó.
   const [client] = row.clientId
     ? await tx
         .select({ product: saasClient.product })
@@ -699,12 +721,8 @@ export async function getInboundEmail(
         .where(eq(saasClient.id, row.clientId))
         .limit(1)
     : []
-  const product = [client?.product, row.product].find(
-    (value): value is (typeof CLINICAL_PRODUCTS)[number] => !!value && isClinicalProduct(value),
-  )
-  const sender = product
-    ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
-    : null
+  const app = replyAppOf(row.product, client?.product)
+  const sender = await outreachSenderPreview(tx, actor, app, row.mailbox as SaasInboundMailbox)
   const files: InboundEmailFile[] = (
     await tx
       .select()
@@ -748,7 +766,7 @@ export async function getInboundEmail(
     attachments: row.attachments.length,
     canReply: true,
     replyFrom: sender ? { name: sender.name, address: sender.address } : null,
-    replySignature: sender && product ? replySignature(sender, product) : null,
+    replySignature: sender ? replySignature(sender, app) : null,
     replySubject: replySubject(row.subject),
     replies: replies.map((reply) => ({
       id: reply.id,
