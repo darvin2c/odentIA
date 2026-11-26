@@ -10,7 +10,8 @@ La administración es una sola para todas las apps y también es omnicanal: lo q
 
 - **gestoria24.com es un dominio más del Worker.** Sus buzones fijos (`hola@`, `soporte@`, `contacto@`, `fundadores@`), las direcciones del equipo por el atrapa todo y lo que solo se reenvía siguen las mismas reglas que en las clínicas. El Worker manda la app del dominio en `product`: el producto de sus clínicas o la clave `gestoria`.
 - **El correo guarda la app a la que escribieron en `saas_inbound_email.product`**, como los planes (`saas_plan.product = 'gestoria'`, ADR 0211): la lista es `SAAS_INBOUND_EMAIL_APPS`, las de clínicas más las que son otro sistema. Lo que razona por producto clínico sigue igual; lo que no lo es se ve con su clave.
-- **La respuesta sale con la marca y el dominio de la app (`MailApp`, `replyAppOf`).** Lo que llegó a gestorIA sale desde `gestoria24.com` («Ada Lovelace · gestorIA», «Soporte · gestorIA» o «gestorIA» desde `hola@`) con la marca de gestorIA, aunque se ligue a un cliente de una clínica: le escribieron a gestorIA. En las clínicas no cambia: manda la ficha del cliente y, sin cliente, el dominio. El remitente es el de quien responde, como siempre (`GESTORIA_SMTP_FROM` es el de los correos del sistema, no el de las conversaciones).
+- **Lo de gestorIA queda sin cliente** (`inboundEmailHasClients`): no se liga solo (ni por el hilo ni por el correo exacto), la Bandeja no sugiere ninguno ni ofrece elegirlo o crearlo, y ligarlo a mano responde 400. Los clientes del ARM son de las clínicas: ligarlo a uno pondría sus adjuntos en esa ficha, permitiría mandarle una propuesta de una clínica con la marca de gestorIA y le diría a Kairós que es de otra app. Tampoco cuenta en «Sin cliente», que es lo que espera que alguien diga de quién es.
+- **La respuesta sale con la marca y el dominio de la app (`MailApp`, `replyAppOf`).** Lo que llegó a gestorIA sale desde `gestoria24.com` («Ada Lovelace · gestorIA», «Soporte · gestorIA» o «gestorIA» desde `hola@`) con la marca de gestorIA. En las clínicas no cambia: manda la ficha del cliente y, sin cliente, el dominio. El remitente es el de quien responde, como siempre (`GESTORIA_SMTP_FROM` es el de los correos del sistema, no el de las conversaciones).
 - **Kairós no liga ni responde lo de gestorIA.** No pide «di de quién es» ni prepara la respuesta: los clientes del ARM son de las clínicas y Kairós vende esas apps. Lo atiende una persona en la Bandeja, donde el correo se marca «gestorIA».
 
 ## Alternativas descartadas
@@ -22,7 +23,7 @@ La administración es una sola para todas las apps y también es omnicanal: lo q
 ## Consecuencias
 
 - Cada correo a gestoria24.com queda en la Bandeja y se responde desde ahí, con hilo y con su marca. Necesita pasos a mano: publicar el Worker y encender Email Routing en la zona `gestoria24.com`; y, para que las respuestas lleguen, que ZeptoMail tenga verificado ese dominio (SPF y DKIM).
-- Un correo de gestorIA no tiene cliente de gestorIA donde ligarse hasta que el ARM tenga clientes de otras apps; se puede ligar a mano a un cliente de una clínica si es la misma persona. Revisar cuando el ARM sepa de clientes de gestorIA: entonces Kairós podría ligarlos y responderlos.
+- Un correo de gestorIA no tiene ficha: sin cliente no lleva propuestas ni documentos, y su historia vive solo en la Bandeja. Revisar cuando el ARM sepa de clientes de gestorIA: entonces se ligarían a esos, y Kairós podría ligarlos y responderlos.
 
 ## Referencias
 

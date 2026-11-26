@@ -1,3 +1,4 @@
+import { isClinicalProduct } from "@odentia/clinical"
 import {
   Badge,
   cn,
@@ -372,7 +373,7 @@ function InboxRow({
             <span className="truncate">
               {item.client.name} · {CLIENT_PHASE_WORDS[item.client.phase]}
             </span>
-          ) : (
+          ) : item.kind === "correo" && item.emailApp && !isClinicalProduct(item.emailApp) ? null : (
             <span className="font-medium text-warning">Sin cliente: elegir</span>
           )}
           {item.attendedBy ? <span>· {item.attendedBy.name.trim().split(/\s+/)[0]}</span> : null}

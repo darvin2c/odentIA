@@ -32,6 +32,7 @@
  */
 
 import { createHash } from "node:crypto"
+import { isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   SAAS_INBOUND_EMAIL_APPS,
@@ -432,11 +433,13 @@ export async function ingestInboundEmail(
     }
   }
   // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo, si el
-  // correo entró en él (la regla de la Bandeja).
-  const threadClient = input.senderVerified ? await clientByThread(tx, created.id, thread) : null
+  // correo entró en él (la regla de la Bandeja). Lo que llegó a una app que es otro sistema
+  // (gestorIA) no se liga nunca: los clientes de la administración son de las clínicas.
+  const linkable = input.senderVerified && inboundEmailHasClients(input.product)
+  const threadClient = linkable ? await clientByThread(tx, created.id, thread) : null
   const match: { clientId: string; matchedBy: SaasInboundMatch } | null = threadClient
     ? { clientId: threadClient, matchedBy: "hilo" }
-    : input.senderVerified
+    : linkable
       ? await matchInboundClient(tx, input.from)
       : null
   let fileIds: string[] = []
@@ -491,6 +494,15 @@ export async function ingestInboundEmail(
   }
 }
 
+/**
+ * Si un correo puede ser de un cliente de la administración: solo lo que llegó a una app de
+ * clínicas. Lo de gestorIA (otro sistema) queda sin cliente hasta que el ARM tenga clientes de
+ * otras apps (ADR 0220): ni se liga solo, ni se sugiere, ni se liga a mano.
+ */
+export function inboundEmailHasClients(product: string): boolean {
+  return isClinicalProduct(product)
+}
+
 /** Los correos son de Administración (ADR 0196): Soporte, 403. */
 function requireAdmin(actor: AdminActor | null): AdminActor {
   if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
@@ -523,6 +535,13 @@ export async function assignInboundEmail(
   if (!email) throw notFound("Correo")
   if (email.clientId === clientId) return { id: email.id, clientId, fileIds: [] }
   if (email.clientId) throw new ServiceError("CONFLICT", 409, "Ese correo ya es de otro cliente")
+  if (!inboundEmailHasClients(email.product))
+    throw new ServiceError(
+      "VALIDATION",
+      400,
+      "Lo que llegó a gestorIA no se liga a un cliente de las clínicas",
+      { clientId: "Lo que llegó a gestorIA no se liga a un cliente de las clínicas" },
+    )
   const [client] = await tx
     .select({ id: saasClient.id })
     .from(saasClient)

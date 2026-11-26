@@ -26,6 +26,7 @@
 import type { Db } from "@odentia/db"
 import {
   kairosItem,
+  SAAS_CLIENT_PRODUCTS,
   type SaasInboundAttachment,
   type SaasInboundMailbox,
   saasChat,
@@ -48,7 +49,11 @@ import {
   outreachThreadKeySql,
   threadClientIdSql,
 } from "./admin-email-thread.js"
-import { inboundFileCarga, matchInboundClient } from "./admin-inbound-email.js"
+import {
+  inboundEmailHasClients,
+  inboundFileCarga,
+  matchInboundClient,
+} from "./admin-inbound-email.js"
 import { CHAT_OUTREACH_SETTLE_MS, replySignature, replySubject } from "./admin-sales.js"
 import { type MailApp, outreachSenderPreview, replyAppOf } from "./admin-staff-mail.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -605,10 +610,17 @@ function itemOf(row: ConversationRow): InboxItem {
   }
 }
 
+/** Un chat, o un correo que llegó a una app de clínicas (el único que puede tener cliente). */
+const clinicOrChatSql = (alias: string) =>
+  sql.raw(
+    `(${alias}.email_app is null or ${alias}.email_app in (${SAAS_CLIENT_PRODUCTS.map((product) => `'${product}'`).join(",")}))`,
+  )
+
 function filterSql(filter: InboxFilter): SQL {
   const parts: SQL[] = []
   if (filter.estado && filter.estado !== "todas") parts.push(sql`x.state = ${filter.estado}`)
-  if (filter.cliente === "sin") parts.push(sql`x.client_id is null`)
+  // «Sin cliente» es lo que espera que alguien diga de quién es: lo de gestorIA no (ADR 0220).
+  if (filter.cliente === "sin") parts.push(sql`x.client_id is null and ${clinicOrChatSql("x")}`)
   else if (filter.cliente) parts.push(sql`x.client_id = ${filter.cliente}::uuid`)
   if (filter.fase) parts.push(sql`coalesce(x.client_phase, 'por_vender') = ${filter.fase}`)
   if (filter.canal) parts.push(sql`x.channel = ${filter.canal}`)
@@ -621,7 +633,8 @@ async function countsOf(tx: Db, now: Date): Promise<Inbox["counts"]> {
     ...(await tx.execute<{ te_toca: number; kairos: number; sin_cliente: number }>(
       sql`select count(*) filter (where s.state = 'te_toca')::int as te_toca,
         count(*) filter (where s.state = 'kairos')::int as kairos,
-        count(*) filter (where s.state = 'te_toca' and s.client_id is null)::int as sin_cliente
+        count(*) filter (where s.state = 'te_toca' and s.client_id is null
+          and ${clinicOrChatSql("s")})::int as sin_cliente
       from (${conversationsSql(now, { all: true })}) s`,
     )),
   ]
@@ -1055,6 +1068,8 @@ async function threadSuggestion(
   replies: ReadonlyArray<{ row: typeof saasOutreach.$inferSelect }>,
   latest: typeof saasInboundEmail.$inferSelect,
 ): Promise<EmailThread["suggestion"]> {
+  // Lo de gestorIA no tiene cliente donde ligarse (ADR 0220): no se sugiere ninguno.
+  if (!inboundEmailHasClients(latest.product)) return null
   const unverified = latest.senderVerified
     ? ""
     : ", pero el remitente no está verificado: confírmalo antes de ligarlo"

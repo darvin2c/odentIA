@@ -388,21 +388,28 @@ describe("responder un correo", () => {
     expect(entries).toContainEqual({ body: "Re: Precios\n\nHola, le cuento.", direction: "salio" })
   })
 
-  it("lo que llegó a gestorIA se responde desde gestorIA, también si se liga a un cliente de una clínica", async () => {
+  it("lo que llegó a gestorIA queda sin cliente y se responde desde gestorIA", async () => {
+    // Su remitente es contacto de una clínica: igual no se liga, ni solo ni a mano.
     const toGestoria = await ingestInboundEmail(
       ownerDb,
       mail({
         product: "gestoria",
         to: "hola@gestoria24.com",
-        from: `tienda.${crypto.randomUUID()}@gmail.com`,
+        from: "rosa@hilo.test",
         subject: "Mi tienda",
       }),
     )
-    // Su cliente sería de una clínica: se liga a mano, y la respuesta sigue saliendo de gestorIA.
-    await assignInboundEmail(ownerDb, admin, toGestoria.id, clientId)
+    expect(toGestoria.clientId).toBeNull()
+    await expect(assignInboundEmail(ownerDb, admin, toGestoria.id, clientId)).rejects.toMatchObject(
+      {
+        code: "VALIDATION",
+        status: 400,
+      },
+    )
     const detail = await getInboundEmail(ownerDb, admin, toGestoria.id)
     expect(detail).toMatchObject({
       product: "gestoria",
+      clientId: null,
       replyFrom: { name: "Ada Lovelace · gestorIA", address: "ada.lovelace@gestoria24.com" },
       replySignature: "Ada Lovelace · gestorIA",
     })
@@ -419,6 +426,7 @@ describe("responder un correo", () => {
     expect(email.replyTo).toBe("ada.lovelace@gestoria24.com")
     expect(email.messageId).toMatch(/^<[0-9a-f-]{36}@gestoria24\.com>$/)
     expect(email.text).toContain("Ada Lovelace · gestorIA")
+    expect(email.text).toContain("Le respondemos el correo que nos escribió a hola@gestoria24.com")
     // soporte@gestoria24.com sale desde soporte@ de gestorIA.
     const toSupport = await ingestInboundEmail(
       ownerDb,

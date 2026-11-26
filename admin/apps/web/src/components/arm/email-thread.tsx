@@ -8,7 +8,7 @@
  * archivos sale como respuesta tuya y su borrador se cierra. Lo incierto queda «¿Salió?»: nunca se
  * reenvía solo. Es solo de Administración.
  */
-import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import {
   AgentMark,
@@ -242,6 +242,8 @@ function Conversation({
 
   const attendedByMe = thread.attendedBy?.id === myUserId
   const settled = thread.state === "respondida" && Boolean(thread.settledAt)
+  // Lo que llegó a gestorIA no se liga a un cliente: los de la administración son de las clínicas.
+  const linkable = isClinicalProduct(thread.product)
   const firstIn = thread.entries.find((entry) => entry.kind === "entro")
   const title = thread.subject?.trim() || "Correo sin asunto"
   const description = firstIn
@@ -278,7 +280,9 @@ function Conversation({
             Ver la ficha de {thread.client.name}
           </ClientName>
         ) : (
-          <span className="text-muted-foreground">Sin cliente todavía</span>
+          <span className="text-muted-foreground">
+            {linkable ? "Sin cliente todavía" : "Llegó a gestorIA: se atiende aquí, sin cliente"}
+          </span>
         )}
         {thread.client ? (
           <span className="text-muted-foreground">· {CLIENT_PHASE_WORDS[thread.client.phase]}</span>
@@ -322,7 +326,7 @@ function Conversation({
         </div>
       </div>
 
-      {!thread.client && isAdmin ? (
+      {!thread.client && isAdmin && linkable ? (
         <PageNotice
           tone="aviso"
           label="¿De quién es?"

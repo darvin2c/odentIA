@@ -208,10 +208,6 @@ export type SaasMilestoneLostReason = (typeof SAAS_MILESTONE_LOST_REASONS)[numbe
 export const SAAS_MILESTONE_SOURCES = ["hecho", "respaldo"] as const
 export type SaasMilestoneSource = (typeof SAAS_MILESTONE_SOURCES)[number]
 /**
- * A dónde llegó un correo: un buzón fijo de cada dominio (soporte@, contacto@, hola@,
- * fundadores@) o la dirección de una persona del equipo (`persona`, con su `staff_user_id`).
- */
-/**
  * La app a la que escribieron un correo (`saas_inbound_email.product`), por el dominio: el
  * producto de sus clínicas o, si la app es otro sistema, su clave de app (`gestoria`), como
  * `saas_plan.product` (ADR 0211 y 0220).
@@ -222,6 +218,10 @@ export const SAAS_INBOUND_EMAIL_APPS = [
 ] as const
 export type SaasInboundEmailApp = (typeof SAAS_INBOUND_EMAIL_APPS)[number]
 
+/**
+ * A dónde llegó un correo: un buzón fijo de cada dominio (soporte@, contacto@, hola@,
+ * fundadores@) o la dirección de una persona del equipo (`persona`, con su `staff_user_id`).
+ */
 export const SAAS_INBOUND_MAILBOXES = [
   "soporte",
   "contacto",
