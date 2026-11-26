@@ -33,6 +33,12 @@ function usesWords(uses: readonly string[]): string {
   return [listWords(procedures), listWords(anesthetics)].filter(Boolean).join(" · ")
 }
 
+/** «Anestesia local · Exodoncia simple»; sin repetir «Anestesia local» si es el servicio de hoy (revisión final del 25 nov). */
+function anesthesiaTitle(uses: readonly string[]): string {
+  const words = usesWords(uses)
+  return !words || words.toLocaleLowerCase("es").trim() === "anestesia local" ? "Anestesia local" : `Anestesia local · ${words}`
+}
+
 /** Un nombre en medio de una frase: la primera letra en minúscula si no es una sigla. */
 function midSentence(name: string): string {
   return /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
@@ -49,7 +55,7 @@ const GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
  * nunca se le preguntó. «Niega alergias, enfermedades y medicación.»
  */
 export function anesthesiaHealthWords(
-  health: Pick<PatientHealth, "allergies" | "conditions" | "medications" | "reviewStatus"> | null,
+  health: (Pick<PatientHealth, "allergies" | "conditions" | "medications" | "reviewStatus"> & Partial<Pick<PatientHealth, "said">>) | null,
   gaps: readonly HealthGap[],
   risks: readonly string[],
   today: string,
@@ -76,7 +82,13 @@ export function anesthesiaHealthWords(
     if (denied.length > 0) parts.push(`Niega ${listWords(denied)}.`)
   }
   if (risks.length > 0) parts.push(`Dijo que ${listWords(risks)}.`)
-  const unasked = gaps.flatMap((gap) => (gap === "asa" ? [] : [GAP_WORDS[gap]]))
+  // Lo que dijo en la consulta y nadie revisó todavía cuenta como dicho, no como «falta preguntarle»
+  // (revisión final del 25 nov: «Falta preguntarle por su medicación» con el apixabán ya dicho).
+  const saidRows = (health?.said ?? []).flatMap((item) => item.rows).filter((row) => !row.denied && !row.stopped && !row.newer)
+  const saidGroups = new Set(saidRows.map((row) => (row.key === "anticoagulants" || row.key === "boneMedicines" ? "medications" : row.key)))
+  const saidNow = saidRows.filter((row) => ["medications", "anticoagulants", "boneMedicines", "conditions"].includes(row.key)).map((row) => midSentence(row.value))
+  if (saidNow.length > 0) parts.push(`Dijo ${listWords([...new Set(saidNow)])}, sin revisar.`)
+  const unasked = gaps.flatMap((gap) => (gap === "asa" || saidGroups.has(gap) ? [] : [GAP_WORDS[gap]]))
   if (unasked.length > 0) parts.push(`Falta preguntarle por ${listWords(unasked)}.`)
   return parts.join(" ")
 }
@@ -220,7 +232,7 @@ export function EncounterAnesthesiaLine({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {usesWords(uses)}
+            {anesthesiaTitle(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {[
@@ -259,7 +271,7 @@ export function EncounterAnesthesiaLine({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {usesWords(uses)}
+            {anesthesiaTitle(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {said}
@@ -342,8 +354,8 @@ export function EncounterAnesthesiaLine({
           ) : words.dose ? (
             `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
           ) : words.weightIssue ? (
-            // Con un peso imposible para su edad no se calcula: el motivo va en los avisos de abajo.
-            "Revisa su peso en los signos vitales para ver la dosis máxima."
+            // Con un peso imposible para su edad no se calcula: en una sola línea, el motivo y qué hacer.
+            `${words.weightIssue} Corrígelo en los signos vitales para ver la dosis máxima.`
           ) : (
             "Anota su peso en los signos vitales para ver la dosis máxima."
           )}
@@ -357,7 +369,7 @@ export function EncounterAnesthesiaLine({
             </>
           ) : null}
         </p>
-        {words.warnings.map((warning) => (
+        {words.warnings.filter((warning) => warning !== words.weightIssue).map((warning) => (
           <p key={warning} className="text-sm">
             {warning}
           </p>

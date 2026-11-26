@@ -5,9 +5,10 @@ import {
   type DictationTurn,
   type DictationUnusedItem,
   encounterDictationSegment,
+  encounterDictationSuggestion,
 } from "@odentia/db/schema/clinical"
 import { kinSaid } from "@odentia/clinical"
-import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm"
 import { type DictationFormQuestion, dictationFormQuestions } from "./dictation-forms.js"
 import {
   type DictationDraft,
@@ -420,9 +421,24 @@ export async function saveDictationReview(
     await tx.update(encounterDictationSegment).set({ turns, updatedAt: new Date() }).where(eq(encounterDictationSegment.id, row.id))
     turnsUnsplit.push(row.segmentId)
   }
-  // Lo que no se usó va al tramo donde se dijo, como lo de una pausa; sin tramo claro, al último.
+  // Lo que no se usó va al tramo donde se dijo, como lo de una pausa; sin tramo claro, al último. Lo
+  // que ya está en una sugerencia de la atención (la vacuna en el relato) no es «No lo usé», aunque el
+  // repaso lo cite así (revisión final del 25 nov).
+  const used = (
+    await tx
+      .select({ sourceText: encounterDictationSuggestion.sourceText })
+      .from(encounterDictationSuggestion)
+      .where(
+        and(
+          eq(encounterDictationSuggestion.organizationId, orgId),
+          eq(encounterDictationSuggestion.encounterId, encounterId),
+          ne(encounterDictationSuggestion.status, "descartada"),
+        ),
+      )
+  ).map((row) => loose(row.sourceText ?? ""))
+  const isUsed = (said: string) => loose(said).trim() !== "" && used.some((text) => text.includes(loose(said)))
   const items: DictationUnusedItem[] = [
-    ...input.unused.map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
+    ...input.unused.filter((said) => !isUsed(said)).map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
     ...input.outOfPlace.map(({ said, why }): DictationUnusedItem => {
       const detail = DICTATION_OUT_OF_PLACE[why]
       return { said, why: "sin_lugar", ...(detail ? { detail } : {}) }

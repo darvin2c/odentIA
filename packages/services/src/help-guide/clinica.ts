@@ -82,7 +82,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-peso-presion",
         q: "¿Puedo dictarle a Clío el peso y la presión?",
-        a: "Sí. Dilo como lo mides («en la balanza pesa veintitrés», «presión ciento sesenta y cinco con noventa y cinco») y Clío lo propone en «Signos vitales», dentro del examen de la atención, con la frase que oyó. Al confirmarlo queda en los signos de hoy y «Anestesia local» calcula el máximo con ese peso, sin teclear. Solo el peso y la presión: lo demás del examen se escribe. Un peso que alguien calcula o recuerda («debe pesar como 24») no es una medida: queda en «Lo que se dijo» › «No lo usé», para que lo midas. Un peso imposible para su edad («230 kg» a los 7 años) queda por revisar, con el aviso, y no da una dosis hasta que lo corrijas; si lo escribes a mano, el mismo aviso sale bajo los signos vitales y en «Anestesia local».",
+        a: "Sí: dilo como lo mides («en la balanza pesa veintitrés», «presión ciento sesenta y cinco con noventa y cinco») y Clío lo propone en «Signos vitales», junto a sus campos. Al confirmarlo, «Anestesia local» calcula el máximo con ese peso. Lo que alguien calcula («debe pesar como 24») queda en «No lo usé». Un peso imposible para su edad avisa y no da una dosis hasta que lo corrijas.",
         forms: [
           "dictar el peso",
           "clio puede anotar el peso",
@@ -344,22 +344,32 @@ export const CLINICA: readonly HelpMore[] = [
         area: "clinica",
         needs: "clinical.write",
       },
-      // Mesa del 25 nov («salud y familia», entrega 2): la familia y lo que ya no toma tienen su lugar.
+      // Mesa del 25 nov («salud y familia», entrega 2), en respuestas cortas (revisión final del 25 nov).
       {
         id: "pacientes-dictado-familia",
-        q: "¿Dónde queda lo que dijo de la salud de su familia, o una medicina que ya no toma?",
-        a: "En el mismo aviso de la atención, «Revisa con … lo que dijo de su salud». Lo de un familiar sale en «De su familia», una línea por familiar con su parentesco con el paciente («Hermana: cáncer de boca», «Abuelo materno: diabetes») y quién lo dijo: nunca como del paciente, no avisa en la franja ni en la receta. Con «Lo revisé con…» se suma a sus antecedentes familiares, sin borrar los que ya tenía; después lo ves en su página › Clínica › Antecedentes, en «Familiares». Una medicina que dijo que dejó sale en «Ya no toma» («Ya no toma: apixabán · lo dijo su hija»), con su propio botón «Sí, lo dejó»: termina en sus antecedentes el día anterior al que se dijo y deja de avisar en lo que se hace y se receta hoy. «Lo revisé con…» no la da por dejada. Si solo la suspende unos días por un procedimiento, no la dejó: sigue vigente. Lo que quien lo acompaña cuenta de su propia salud («yo soy diabética») no se registra: queda en «No lo usé». En latidIA, la fecha de su última regla sale como «Última regla» y, si está embarazada, con «Embarazo: sí»: al revisarlo, sus semanas se cuentan desde esa fecha y la receta avisa el embarazo. Lo que se dice de sus vacunas queda escrito en la consulta, tal como se dijo.",
+        q: "¿Dónde queda lo que dijo de la salud de su familia?",
+        a: "En el aviso «Revisa con… lo que dijo de su salud» de la atención, en «De su familia»: una línea por familiar con su parentesco con el paciente («Hermana: cáncer de boca»). Con «Lo revisé con…» se suma a sus familiares, sin borrar los que tenía. Se lee en su página › Clínica › Antecedentes, en «Familiares», y en «Antecedentes y última atención». Nunca cuenta como suyo. Si el parentesco está mal, «Corregir algo» lo abre para cambiarlo.",
         forms: [
           "donde queda lo que dijo de su familia",
           "el papa del paciente es diabetico donde lo anoto",
           "antecedentes familiares dichos en la consulta",
           "su hermana tuvo cancer",
+          "el parentesco salio mal",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-ya-no-toma",
+        q: "¿Cómo anoto que ya no toma una medicina?",
+        a: "Si lo dice en la consulta, sale en el aviso de la atención como «Ya no toma» con su botón «Sí, lo dejó»: la medicina termina el día anterior al que lo dijo y deja de avisar. «Lo revisé con…» no la da por dejada: hasta tocar «Sí, lo dejó» sigue vigente. Suspenderla unos días por un procedimiento no es dejarla. Después se lee en Antecedentes, en «Medicación vigente», como «Dejó: …».",
+        forms: [
           "el paciente ya no toma una medicina",
+          "dejo de tomar una pastilla",
           "dejo el apixaban",
           "si lo dejo",
           "ya no toma",
           "le cambiaron el anticoagulante por aspirina",
-          "fecha de ultima regla en la consulta",
         ],
         area: "clinica",
         needs: "clinical.write",

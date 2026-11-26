@@ -31,6 +31,7 @@ import { productUi } from "../../product/product-ui"
 import { DeclaredResponse } from "./declared-response"
 import type { DictationSession } from "./dictation-session"
 import { ConsultHealthReviewed, HealthReviewNotice } from "./health-review-notice"
+import { endedMedicineWords, familyLine } from "./patient-health-fields"
 
 /**
  * Lo que respondió antes de venir sale arriba al abrir la atención: el
@@ -174,6 +175,7 @@ export function EncounterContextBody({
   const medications = history.current("medications", currentMedications)
   const beforeConditions = history.alone("conditions", activeConditions)
   const beforeMedications = history.alone("medications", currentMedications)
+  const endedMedicines = endedMedicineWords(data.medications, today)
   const beforeItem = (piece: (typeof beforeConditions)[number]) => (
     <li key={piece.line} className="text-muted-foreground">
       {piece.line}
@@ -296,7 +298,19 @@ export function EncounterContextBody({
             {beforeMedications.map(beforeItem)}
           </ul>
         )}
+        {endedMedicines.length > 0 ? <p className="text-muted-foreground">Dejó: {endedMedicines.join("; ")}.</p> : null}
       </section>
+      {(data.familyHistory ?? []).length > 0 ? (
+        // Lo de su familia, como en Antecedentes: no es suyo ni avisa en la franja (revisión final del 25 nov).
+        <section className="flex flex-col gap-1">
+          <h3 className="font-medium">De su familia</h3>
+          <ul className="flex flex-col gap-1">
+            {(data.familyHistory ?? []).map((row) => (
+              <li key={row.id}>{familyLine(row)}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {interviewRows.length > 0 ? (
         // Lo de la entrevista que cambia la cita (el corazón, la anestesia) y lo de un niño en casa, también
         // ya revisado: no desaparece de la atención (revisión final del 15 nov, K4).

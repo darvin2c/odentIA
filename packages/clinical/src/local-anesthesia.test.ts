@@ -119,7 +119,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     })
     expect(words).toEqual({
       cap: "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos",
-      dose: "Máximo por peso (64 kg): 7,8",
+      dose: "Máximo por peso (64 kg): 7,8 cartuchos",
       warnings: [],
     })
   })

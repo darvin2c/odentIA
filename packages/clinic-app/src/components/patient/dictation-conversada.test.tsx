@@ -857,3 +857,44 @@ describe("De su familia y «Ya no toma»", () => {
     expect(screen.getByRole("button", { name: "Sí, lo dejó" })).toBeTruthy()
   })
 })
+
+/* Revisión final del 25 nov: lo que dejó y su familia se leen, y la franja no calla lo que espera. */
+describe("revisión final · la familia y lo que ya no toma", () => {
+  it("la franja dice lo que dejó y espera su «Sí, lo dejó», sin alarma", () => {
+    const alerts = saidHealthAlerts([
+      {
+        suggestionId: "s-9",
+        encounterId: "e-1",
+        by: { kind: "representative", name: null, relation: "hija" },
+        at: "2026-11-25T15:00:00.000Z",
+        open: true,
+        rows: [{ key: "stopped:apixaban", group: "stopped", label: "Ya no toma", value: "apixabán", stopped: true }],
+      },
+    ])
+    expect(alerts).toEqual([expect.objectContaining({ label: "Ya no toma: dijo que dejó apixabán, sin confirmar", tone: "secondary" })])
+  })
+
+  it("un familiar se lee con lo que se dijo; lo que dejó, con su día", async () => {
+    const { familyLine, endedMedicineWords, familyKinshipFromWords } = await import("./patient-health-fields")
+    expect(familyLine({ relationship: "SIB", condition: "cáncer de boca", notes: "Hermana" })).toBe("Hermana: cáncer de boca")
+    expect(familyLine({ relationship: "FTH", condition: "diabetes" })).toBe("Padre: diabetes")
+    expect(endedMedicineWords([{ name: "apixabán", endDate: "2026-11-24" }, { name: "metformina", endDate: null }], "2026-11-25")).toEqual(["apixabán, lo dejó el 24 nov"])
+    expect(familyKinshipFromWords("abuelo materno")).toBe("MGRPRN")
+    expect(familyKinshipFromWords("tía materna")).toBe("AUNT")
+  })
+})
+
+it("tras «Lo revisé con…», con lo que ya no toma esperando, el foco va a su «Sí, lo dejó»", async () => {
+  const elena = suggestion({
+    id: "salud-3",
+    payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina" }, stopped: { state: "recorded", items: [{ name: "apixabán" }] } },
+    healthRows: [
+      { key: "anticoagulants", group: "anticoagulants", label: "Antiagregante", value: "aspirina", by: { declarante: "paciente" }, before: null, denied: false },
+      { key: "stopped:apixaban", group: "stopped", label: "Ya no toma", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, stopped: true },
+    ],
+  })
+  const confirmHealth = { ...mutation(), mutate: vi.fn((_item: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.()) }
+  renderNotice(sessionWith({ suggestions: [elena], confirmHealth }))
+  fireEvent.click(screen.getByRole("button", { name: /^Lo revisé con/ }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, lo dejó" })))
+})

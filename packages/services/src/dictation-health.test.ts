@@ -356,4 +356,35 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
     expect(familyKinshipOf("papás")).toBe("FAMMEMB")
     expect(familyRelationWords("Su abuela")).toBe("abuela")
   })
+
+  it("el parentesco lo cuenta el sistema desde el paciente: «su papá» es su padre; «mi papá», dicho por la madre, su abuelo materno", () => {
+    const mom = (family: unknown[], said: string) => prepareHealth({ declarante: "acompanante", vinculo: "madre", family }, said, DENTAL)!.payload["family"]
+    expect(mom([{ relation: "papá", of: "paciente", name: "alergia a la penicilina" }], "su papá es alérgico a la penicilina")).toEqual({
+      state: "recorded",
+      items: [{ relation: "papá", name: "alergia a la penicilina" }],
+    })
+    expect(mom([{ relation: "papá", of: "quien_habla", name: "diabetes" }], "mi papá es diabético")).toEqual({ state: "recorded", items: [{ relation: "abuelo materno", name: "diabetes" }] })
+    expect(mom([{ relation: "hermana", of: "quien_habla", name: "asma" }], "mi hermana tiene asma")).toEqual({ state: "recorded", items: [{ relation: "tía materna", name: "asma" }] })
+    // «Mi hermana», dicho por la hija de Elena, es la hija de Elena.
+    const daughter = prepareHealth({ declarante: "acompanante", vinculo: "hija", family: [{ relation: "hermana", of: "quien_habla", name: "lupus" }] }, "mi hermana tiene lupus", DENTAL)!.payload
+    expect(daughter["family"]).toEqual({ state: "recorded", items: [{ relation: "hija", name: "lupus" }] })
+    expect(familyKinshipOf("tía materna")).toBe("AUNT")
+    expect(familyKinshipOf("hija")).toBe("CHILD")
+  })
+
+  it("lo que quien acompaña dice de sí misma no es del paciente, ni en el repaso; su familia sí", () => {
+    const ready = prepareHealth(
+      { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] } },
+      "yo soy diabética, eso es mío",
+      DENTAL,
+    )
+    expect(ready).toBeNull()
+    // Lo que cuenta del niño sí lo es.
+    expect(prepareHealth({ declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "asma" }] } }, "él tiene asma", DENTAL)).not.toBeNull()
+  })
+
+  it("la aspirina dicha se lee «Antiagregante», como la franja", () => {
+    const rows = healthRows({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina 100 mg" } })
+    expect(rows[0]?.label).toBe("Antiagregante")
+  })
 })

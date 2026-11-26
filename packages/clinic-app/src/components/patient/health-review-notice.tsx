@@ -199,6 +199,7 @@ export function HealthReviewNotice({
   // Las respuestas de siempre («No tiene alergias», «Niega enfermedades»…) quedan plegadas mientras hay
   // algo dicho por revisar: competían con «Lo revisé con…» (QA del 22 nov, UX-3: 7 botones).
   const [showOthers, setShowOthers] = useState(false)
+  const [focusStopped, setFocusStopped] = useState(false)
   const detailId = useId()
   // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto: la revisión no
   // tiene vuelta atrás en el servidor (sella quién y cuándo), así que se deshace antes de enviarla. Si
@@ -240,6 +241,28 @@ export function HealthReviewNotice({
       toast.success(group === "conditions" ? "Anotado: niega enfermedades" : "Anotado: no toma medicación")
     },
   })
+  // El foco a «Sí, lo dejó», después de que el aviso se pinta otra vez tras «Lo revisé con…».
+  useEffect(() => {
+    if (!focusStopped) return
+    // Mientras se guarda, el botón está deshabilitado y no toma el foco: se intenta hasta que se habilita.
+    let tries = 0
+    const timer = setInterval(() => {
+      const button = document.querySelector<HTMLButtonElement>("[data-stopped-row] button")
+      tries += 1
+      if (button && !button.disabled) {
+        button.focus()
+        if (document.activeElement === button) {
+          clearInterval(timer)
+          setFocusStopped(false)
+        }
+      } else if (tries > 40) {
+        clearInterval(timer)
+        setFocusStopped(false)
+        titleRef.current?.focus()
+      }
+    }, 100)
+    return () => clearInterval(timer)
+  }, [focusStopped])
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
   const today = clinicToday()
@@ -484,11 +507,16 @@ export function HealthReviewNotice({
     dictation.confirmHealth.mutate(heardItem, {
       onSuccess: () => {
         toast.success(
-          heard.rows.some((row) => row.denied)
-            ? `Revisado con ${heardWith}: quedó en sus antecedentes. Su «no» sigue aquí: confírmalo en su fila.`
-            : `Revisado con ${heardWith}: quedó en sus antecedentes como lo dijo en la consulta`,
+          heard.rows.some((row) => row.stopped)
+            ? `Revisado con ${heardWith}: quedó en sus antecedentes. Falta confirmar con «Sí, lo dejó» lo que ya no toma.`
+            : heard.rows.some((row) => row.denied)
+              ? `Revisado con ${heardWith}: quedó en sus antecedentes. Su «no» sigue aquí: confírmalo en su fila.`
+              : `Revisado con ${heardWith}: quedó en sus antecedentes como lo dijo en la consulta`,
         )
-        titleRef.current?.focus()
+        // Con lo que ya no toma esperando, el foco va a su «Sí, lo dejó» cuando el aviso se vuelve a
+        // pintar con lo que queda: no queda a medias sin verlo (verificación del 26 nov).
+        if (heard.rows.some((row) => row.stopped)) setFocusStopped(true)
+        else titleRef.current?.focus()
       },
     })
   }
@@ -589,7 +617,10 @@ export function HealthReviewNotice({
           </h2>
           {heardItem ? (
             <p className="text-sm text-muted-foreground">
-              {CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con {heardWith}.
+              {heardToSave
+                ? `${CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con ${heardWith}.`
+                : // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
+                  "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."}
             </p>
           ) : unasked.length > 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -710,7 +741,8 @@ export function HealthReviewNotice({
           </li>
         ) : null}
         {heardStopped.map((row) => (
-          <li key={row.key} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+          // La marca va en la fila: `SubmitButton` no pasa atributos propios al botón.
+          <li key={row.key} data-stopped-row="" className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
               <h3 className="text-sm font-medium">Ya no toma</h3>
               {heardLine(row)}

@@ -103,6 +103,10 @@ Igual que en odentIA (`odontologia.md`, «Cómo recorrerlo en una ronda»): una 
 **Huecos conocidos:** sin antecedentes perinatales ni del desarrollo; el método anticonceptivo «otro» no tiene detalle.
 **Fuentes:** HL7 FHIR AllergyIntolerance y FamilyMemberHistory; ATC (OMS); ADR 0072 y 0163.
 
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] En la primera consulta de un paciente sin antecedentes, «Lo revisé con…» con familia y otro dato guarda todo; nunca «otra sesión guardó…» sin otra sesión. Caso: C9 de la revisión del 25 nov.
+- [ ] «Es mi segundo embarazo» propone «Embarazos: 2» en gineco-obstétricos, además del relato.
+
 ## P-MED-04 Vacunas
 
 **Dónde:** la lista `{vacuna, fecha}` de antecedentes (`M history.ts`).
@@ -175,6 +179,9 @@ Igual que en odentIA (`odontologia.md`, «Cómo recorrerlo en una ronda»): una 
 
 **Huecos conocidos:** indicaciones solo en texto; sin controles por edad ni recordatorio de vacunas.
 **Fuentes:** AIEPI (OPS/OMS) para los signos de alarma en niños; control de crecimiento y desarrollo (CRED) del MINSA.
+
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] «Control si hay fiebre» es una indicación condicional, no un control con fecha para reservar. Caso: Valentina, 25 nov.
 
 ## P-MED-10 Receta
 
@@ -297,6 +304,9 @@ Nebulización, inyectable, sutura o curación, con sus insumos (ADR 0106).
 
 **Ya falló:** (21 nov 2026) la salud dicha sin tildes ni puntuación se perdía en «Una parte que no supe citar»; se corrigió en la rama `fix/clio-lee-la-conversacion`. El peso dicho sin lugar sigue pendiente.
 
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] El relato no se duplica al sumar dos pausas sobre lo mismo.
+
 ## P-MED-20 Señales de alarma en los mensajes
 
 **Dónde:** `SM agent-texts.ts` y `CL emergency.ts`.
@@ -390,3 +400,9 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | RM1 | El lactante de CM1: otitis, control a las 48–72 horas y alta. | 1 a 3 | En el control se compara la fiebre y la otoscopia; si no mejora, se cambia el antibiótico con rastro; si mejora, la otitis queda resuelta y deja de proponerse. |
 | RM2 | Adulto que debuta con hipertensión: confirmación, laboratorio, tratamiento y controles por años. | 1 a 4 | Diagnóstico presuntivo que pasa a definitivo; laboratorio pedido y su resultado ligado; enalapril como medicación habitual; controles cada 3 meses con la serie de presión; al volver al año, la ficha muestra todo. |
 | RM3 | Niña de la demo desde los 2 meses hasta los 2 años, en sus controles del niño sano. | 1 a 4 | Cada control parte del anterior: la curva de crecimiento sigue, las vacunas que faltan se ven y el próximo control es el que toca por edad. |
+
+## P-MED-26 (de la revisión del 25 nov)
+
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] Con la FUR, la fecha probable de parto (Naegele: FUR + 280 días; 10 jun 2026 → 17 mar 2027) se ve junto a las semanas.
+- [ ] La cefalea en una gestante de 20 semanas o más sugiere tomar la presión (señal de alarma de preeclampsia). Fuente: guía de preeclampsia del MINSA o ACOG (verificar).
