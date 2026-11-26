@@ -3451,9 +3451,6 @@ async function confirmHealthRow(
   // La declaración lleva la hora en que se dijo, no la de la revisión (QA del 22 nov, H8).
   const saidAt = await healthSaidAt(tx, orgId, row, meta.segments)
   const saidOn = await clinicToday(tx, orgId, saidAt)
-  // Lo de su familia va a sus antecedentes familiares, sumado (mesa del 25 nov, entrega 2): no es una
-  // declaración de su propia salud.
-  await addSaidFamilyHistory(tx, orgId, actorUserId, patientId, saidFamilyOf(kept), { entity: "encounter", entityId: row.encounterId })
   // La última regla (latidIA) va a su entrevista, como la anota el profesional.
   const interviewSaid = saidInterviewOf(kept)
   const origin = { entity: "encounter", entityId: row.encounterId, at: new Date() }
@@ -3475,6 +3472,11 @@ async function confirmHealthRow(
       if (Object.keys(interviewSaid).length) await addDeclaredHealth(tx, orgId, actorUserId, patientId, {}, origin, interviewSaid)
     } else await addDeclaredHealth(tx, orgId, actorUserId, patientId, health, origin, interviewSaid)
   } else if (Object.keys(interviewSaid).length) await addDeclaredHealth(tx, orgId, actorUserId, patientId, {}, origin, interviewSaid)
+  // Lo de su familia va a sus antecedentes familiares, sumado (mesa del 25 nov, entrega 2): no es una
+  // declaración de su propia salud. Va después de su primera declaración, que se guarda con la versión 0
+  // de sus antecedentes: antes, la familia subía la versión y «Lo revisé con…» daba «Otra sesión guardó
+  // antecedentes» en la primera consulta de todo paciente nuevo (revisión final del 25 nov).
+  await addSaidFamilyHistory(tx, orgId, actorUserId, patientId, saidFamilyOf(kept), { entity: "encounter", entityId: row.encounterId })
   let after = await getPatientHealth(tx, orgId, patientId)
   if (clean && (after.reviewPending || after.declared.length > 0))
     after = await reviewDeclaredHealth(tx, orgId, actorUserId, patientId, { expectedRevision: after.revision })
