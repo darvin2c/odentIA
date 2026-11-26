@@ -351,8 +351,8 @@ const GROUPS: GroupSpec[] = [
       },
       {
         key: "guaranteeNoticeDays",
-        name: "Aviso del fin de las condiciones de una Fundadora",
-        label: "Avisar que terminan las condiciones garantizadas de una Fundadora",
+        name: "Aviso del fin de las condiciones garantizadas",
+        label: "Avisar que terminan las condiciones garantizadas de un plan especial",
         unit: "días antes",
         min: 1,
         max: 60,
@@ -362,7 +362,7 @@ const GROUPS: GroupSpec[] = [
     ],
     sentences: (x) => [
       [t("Un precio especial se avisa "), v(days(x.discountNoticeDays)), t(" antes de que termine.")],
-      [t("Las condiciones garantizadas de una Fundadora se avisan "), v(days(x.guaranteeNoticeDays)), t(" antes de que terminen.")],
+      [t("Las condiciones garantizadas de un plan especial se avisan "), v(days(x.guaranteeNoticeDays)), t(" antes de que terminen.")],
     ],
   },
 ]

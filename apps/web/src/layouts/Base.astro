@@ -11,14 +11,9 @@ interface Props {
   description: string
   /** Datos estructurados schema.org (Product, FAQPage, BreadcrumbList…). */
   jsonLd?: Record<string, unknown> | Record<string, unknown>[]
-  /** Cabecera sobre fondo oscuro (portadas) o claro; «none» para una página que lleva el logo dentro
-   *  (la solicitud de Fundadores: un formulario, sin menú que distraiga). */
-  header?: "dark" | "light" | "none"
-  /** «legal»: solo la fila legal del pie, sin el mapa de la web. */
-  footer?: "full" | "legal"
+  /** Cabecera sobre fondo oscuro (portadas) o claro. */
+  header?: "dark" | "light"
   noindex?: boolean
-  /** El botón de la cabecera, si la página lo cambia (en una guía baja a su solicitud). */
-  cta?: { href: string; label: string }
   /**
    * La imagen al compartir el enlace, si la página tiene la suya (una guía: su plantilla), y si es un
    * artículo, con sus fechas.
@@ -26,7 +21,7 @@ interface Props {
   share?: { image: string; alt: string; article?: { published: string; modified: string } }
 }
 
-const { title, description, jsonLd, header = "dark", footer = "full", noindex = false, cta, share } = Astro.props
+const { title, description, jsonLd, header = "dark", noindex = false, share } = Astro.props
 // Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
 // la del mapa del sitio y los enlaces, va sin .html.
 const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
@@ -113,11 +108,11 @@ const ld = [...(isHome ? [site] : []), org, ...(Array.isArray(jsonLd) ? jsonLd :
   </head>
   <body>
     <a class="skip" href="#contenido">Ir al contenido</a>
-    {header === "none" ? null : <Header variant={header} cta={cta} />}
+    <Header variant={header} />
     <main id="contenido">
       <slot />
     </main>
-    <Footer legalOnly={footer === "legal"} />
+    <Footer />
     <script is:inline>
       // Cada bloque de una sección aparece con un fundido la primera vez que asoma. Solo se prepara lo
       // que al cargar está más abajo de la pantalla: nada de lo que ya se ve se esconde, y sin

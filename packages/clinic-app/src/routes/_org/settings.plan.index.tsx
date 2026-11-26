@@ -173,7 +173,13 @@ function PlanContent() {
         body: JSON.stringify({ orgId: organizationId, planCode }),
       }),
     onSuccess: () => {
-      setPlanMessage("Plan actualizado.")
+      // Dice qué se eligió y desde cuándo rige: en prueba, el mes empieza al terminarla (ADR 0221).
+      const ends = subscription.data?.status === "prueba" && subscription.data.trialEndsAt ? new Date(subscription.data.trialEndsAt) : null
+      setPlanMessage(
+        ends && ends.getTime() > Date.now()
+          ? `Plan elegido. Tu mes empieza el ${new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "long", timeZone: activeOrgTimeZone() }).format(ends)}, al terminar tu prueba; el cargo llega al cerrar ese mes, para pagar con tu comprobante.`
+          : "Plan elegido. Tu mes empieza hoy; el cargo llega al cerrar el mes, para pagar con tu comprobante.",
+      )
       refresh()
     },
     onError: () => setPlanMessage("No se pudo cambiar el plan."),
@@ -296,7 +302,14 @@ function PlanContent() {
         </h2>
         {summary.guaranteedUntil ? (
           <p className="rounded-lg border bg-card px-4 py-3 text-sm">
-            Tienes el plan <span className="font-medium">{summary.plan?.name ?? "Fundadores"}</span> con condiciones de Fundador hasta el{" "}
+            {summary.plan?.name ? (
+              <>
+                Tienes el plan <span className="font-medium">{summary.plan.name}</span>
+              </>
+            ) : (
+              "Tienes tu plan"
+            )}{" "}
+            con sus precios garantizados hasta el{" "}
             {new Intl.DateTimeFormat(activeOrgLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: activeOrgTimeZone() }).format(
               new Date(summary.guaranteedUntil),
             )}

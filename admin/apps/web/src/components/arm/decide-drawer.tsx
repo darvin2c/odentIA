@@ -282,7 +282,7 @@ function InviteForm({
           </PageNotice>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Sin propuesta aceptada: entra con el plan de la invitación de siempre.
+            Sin propuesta aceptada: entra con el plan de lista de {productWords(client.product).name}.
           </p>
         )}
         {client.waitlistRequest?.status === "invitada" && client.waitlistRequest.inviteExpiresAt ? (

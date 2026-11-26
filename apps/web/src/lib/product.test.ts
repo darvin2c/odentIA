@@ -118,7 +118,7 @@ describe("las páginas de cada web", () => {
     ])
       expect(servesPage(path), path).toBe(true)
     for (const path of [
-      // Clío no dicta en una óptica, y vistIA aún no tiene presentación de Fundadores.
+      // Clío no dicta en una óptica, y vistIA aún no tiene presentación.
       "/agentes/asistente-clinico",
       "/presentacion",
       "/presentacion/fundadores",

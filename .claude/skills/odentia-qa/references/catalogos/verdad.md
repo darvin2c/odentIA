@@ -347,15 +347,16 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Línea base (16 nov 2026):** sesión 2 de endodoncia, «Endodoncia posterior vital» 7 veces; el requisito del diagnóstico, 3 veces; 11 frases de regla en la consulta vacía; 3615 px a 1440 y 4289 px a 390.
 
-## V-DAT-11 La oferta en la web: regalo, descuento, cuota y días para responder
-**Aparece en:** el cierre de cada página (`apps/web/src/components/CtaBand.astro`), Precios, la solicitud (`founders/WaitlistForm.tsx` y `WaitlistSplit.tsx`), el final de cada guía (`guides/GuideStart.astro`), el botón de la cabecera (`lib/site.ts` `ctaOf`), el correo de la solicitud y el de las plantillas (`S/saas-emails.ts`).
-**A mano:** se lee `GET /api/public/founders/pricing?product=<producto>` y se compara cada frase: regalo = `trialCreditCents` del plan que se muestra; descuento = `discountPercent`; cuota = `priceCents`; días = `terms.waitlistAnswerDays`.
-- [ ] Ninguna frase de la oferta se escribe a mano: sale de `offerOf`, `ctaOf`, `giftOf` o de los precios que lee la API.
-- [ ] El regalo dice «de tus agentes».
-- [ ] Con el alta abierta no aparecen «Sin cuota» ni «gratis» si el plan que se muestra cobra cuota.
-- [ ] La pantalla de enviada no dice «Te enviamos una copia» cuando el servidor no la envió (solicitud ya en la lista).
-- [ ] La página de la solicitud (`/solicitar-invitacion`) cambia con el alta: con el alta abierta no dice «invitación», «sin cuota» ni «50 % menos».
-**Caso:** precios del 24 nov 2026 (Fundadores sin cuota, USD 100, 50 % menos, 2 días hábiles): cada lugar dice lo mismo. Con `signupMode` en «abierta», ningún lugar dice «gratis» ni «sin cuota».
+## V-DAT-11 La oferta en la web: regalo, cuota y lo que sigue a la prueba
+**Aparece en:** el cierre de cada página (`apps/web/src/components/CtaBand.astro`), la portada, Precios, el final de cada guía (`guides/GuideStart.astro`), el botón de la cabecera (`lib/site.ts` `ctaOf`), el registro del panel (`apps/panel/src/routes/register.tsx`), el correo de las plantillas (`S/saas-emails.ts`) y lo que dice Kairós (`S/kairos-sales-facts.ts`).
+**A mano:** se lee `GET /api/public/founders/pricing?product=<producto>` y se compara cada frase: regalo = `trialCreditCents` del plan de lista; días = `trialDays`; cuota = `priceCents`; crédito = `creditCents`.
+- [ ] Ninguna frase de la oferta se escribe a mano: sale de `offerOf` y sus textos, de `ctaOf` o de los precios que lee la API.
+- [ ] El regalo dice «para tus agentes» y va con sus días.
+- [ ] Si el plan cobra cuota, no aparecen «Sin cuota», «USD 0» por el sistema ni «No pagas por el software»; junto al botón se dice lo que sigue a la prueba («Después, USD 59 al mes que vuelven como crédito»).
+- [ ] «Sin tarjeta» no se contradice en ningún lugar: el pago es con comprobante y nunca se pide tarjeta.
+- [ ] No queda «Fundadores», «invitación», «lugares limitados» ni precios tachados en la web ni en el registro (la invitación del equipo de una clínica sí).
+- [ ] Sin plan publicado (vistIA todavía), el botón dice «Escríbenos» y no hay cifras.
+**Caso:** precios del 26 nov 2026 (plan de lista USD 59 que vuelven como crédito, 30 días con USD 100, Sofi responde USD 0,20): cada lugar dice lo mismo. Ya falló el 26 nov: con el alta abierta, Precios seguía diciendo «El sistema completo USD 0» y el registro «la tarjeta te la pediremos al elegir tu plan».
 
 ## V-DAT-12 El título y la fecha de una guía, en todos sus lugares
 **Aparece en:** la guía (H1, ruta de arriba, «Actualizada el»), el `<title>` y los datos para Google, el índice `/guias`, el pie («Guías»), «Sigue con» de las otras guías, «Guías de este tema» de su página de producto, el mapa del sitio (`apps/web/astro.config.mjs`) y «Llegó desde» en la administración (la ruta, con su enlace).

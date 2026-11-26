@@ -1,7 +1,7 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
 import { ARM_PATH } from "./arm"
 import { GUIDES, GUIDES_PATH, guidePath } from "./guides"
-import { giftOf, type Pricing } from "./pricing"
+import { type Pricing, shownPlan } from "./pricing"
 import { DEFAULT_DOMAIN, ofProduct, WORDS } from "./product"
 
 const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
@@ -27,21 +27,16 @@ export function salesWhatsAppHref(phone: string | undefined, name: string): stri
   return `https://wa.me/${digits.slice(1)}?text=${encodeURIComponent(`Hola, quiero información de ${name}`)}`
 }
 export const salesWhatsApp = salesWhatsAppHref(import.meta.env.VITE_SALES_WHATSAPP, WORDS.name)
-/** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
-export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
-/** El correo que se deja en el aviso de una guía (ADR 0216): la misma ruta pública. */
+/** El correo que se deja en el aviso de una guía (ADR 0216): la ruta pública de la API, en api.<dominio>. */
 export const guideContactApiUrl = `https://api.${domain}${port}/api/public/founders/contact`
 
 /**
- * La llamada a la acción de toda la web, con el regalo del plan que se
- * muestra (Fundadores, issue 165). Mientras se entra por invitación lleva a
- * la lista de espera; con el alta abierta, al registro.
+ * La llamada a la acción de toda la web. El alta es libre: con plan publicado, «Empieza gratis» lleva
+ * al registro y la clínica se abre al momento con su prueba (el regalo va fuera del botón, en ámbar).
+ * Sin plan publicado (vistIA hoy) no hay prueba que prometer: se habla con nosotros.
  */
 export function ctaOf(pricing: Pricing): { href: string; label: string } {
-  const gift = giftOf(pricing)
-  return pricing.signupMode === "invitacion"
-    ? { href: "/solicitar-invitacion", label: gift ? `Pide tus ${gift}` : "Solicita tu invitación" }
-    : { href: registerUrl, label: gift ? `Obtén ${gift} de crédito` : "Crear mi cuenta" }
+  return shownPlan(pricing) ? { href: registerUrl, label: "Empieza gratis" } : { href: contactHref, label: "Escríbenos" }
 }
 
 export type NavLink = { href: string; label: string }
@@ -222,7 +217,6 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
         { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
         { href: "/precios", label: "Precios" },
         { href: "/seguridad", label: "Seguridad" },
-        { href: "/solicitar-invitacion", label: "Pide tu invitación" },
         { href: "/contacto", label: "Habla con nosotros" },
       ],
     },
@@ -255,7 +249,6 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
         { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
         { href: "/precios", label: "Precios" },
         { href: "/seguridad", label: "Seguridad" },
-        { href: "/solicitar-invitacion", label: "Pide tu invitación" },
         { href: "/contacto", label: "Habla con nosotros" },
       ],
     },

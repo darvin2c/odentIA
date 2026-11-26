@@ -6,7 +6,7 @@
 // packages/auth/src/permissions.ts). Cada alternativa es una categoría en general, sin nombrar a nadie
 // ni decir «los únicos» (veracidad publicitaria); donde hacen algo a medias, se dice «a medias».
 import type { FaqItem } from "./faq"
-import { HAS_CLIO, ofProduct, WORDS } from "./product"
+import { DEFAULT_DOMAIN, HAS_CLIO, ofProduct, WORDS } from "./product"
 
 export const ARM_PATH = "/comparar"
 
@@ -100,12 +100,27 @@ export const MATRIX: MatrixRow[] = [
     marks: { crm: "medias", chatbot: "medias", software: "no", manual: "no" },
   },
   {
-    task: "Sin límite de usuarios: pagas por el trabajo hecho",
+    // Sin cifras (salen de Precios); vistIA aún no publica su plan.
+    task: ofProduct({
+      dental: "Sin límite de usuarios: tu plan vuelve como crédito para el trabajo de tus agentes",
+      medical: "Sin límite de usuarios: tu plan vuelve como crédito para el trabajo de tus agentes",
+      optical: "Sin límite de usuarios: pagas por el trabajo de tus agentes",
+    }),
     marks: { crm: "no", chatbot: "medias", software: "no", manual: "no" },
   },
 ]
 
 // ——— Cada alternativa, fila por fila ———
+
+/**
+ * «Lo que pagas» con nosotros, sin cifras (las de Precios salen de la administración): el plan vuelve
+ * como crédito para lo que hacen los agentes. vistIA aún no publica su plan: dice solo el trabajo.
+ */
+const PAY_US = ofProduct({
+  dental: "Un plan que vuelve entero como crédito para lo que hacen tus agentes, sin límite de usuarios.",
+  medical: "Un plan que vuelve entero como crédito para lo que hacen tus agentes, sin límite de usuarios.",
+  optical: "Por lo que hacen tus agentes, sin límite de usuarios.",
+})
 
 export const ALTERNATIVES: Alternative[] = [
   {
@@ -138,7 +153,7 @@ export const ALTERNATIVES: Alternative[] = [
         ? [{ task: "La consulta", them: "No entra al consultorio.", us: `Dictas y Clío prepara la nota. Nada entra a la historia hasta que el ${WORDS.clinician} confirma.` }]
         : []),
       { task: "El seguimiento", them: "Una lista de pendientes que crece cada semana.", us: ARGOS_BACK },
-      { task: "Lo que pagas", them: "Licencias por usuario, trabajes o no.", us: "Por lo que hacen tus agentes, sin límite de usuarios." },
+      { task: "Lo que pagas", them: "Licencias por usuario, trabajes o no.", us: PAY_US },
     ],
   },
   {
@@ -184,7 +199,7 @@ export const ALTERNATIVES: Alternative[] = [
       { task: "La agenda", them: "Alguien anota cada cita.", us: "Sofi agenda con el sí de la persona." },
       ...(HAS_CLIO ? [{ task: "La nota", them: "La escribes tú, al final del día.", us: "Dictas y Clío la prepara. Tú confirmas." }] : []),
       { task: "El seguimiento", them: "Un reporte que alguien tiene que leer.", us: ARGOS_BACK },
-      { task: "Lo que pagas", them: "Una licencia por usuario o por sede.", us: "Por lo que hacen tus agentes, sin límite de usuarios." },
+      { task: "Lo que pagas", them: "Una licencia por usuario o por sede.", us: PAY_US },
     ],
   },
   {
@@ -212,10 +227,13 @@ export const AREAS = ofProduct({
   optical: "la recepción y la administración",
 })
 
+/** El correo de soporte de esta web, como `supportEmail` de `site.ts` (que importa este archivo: no se importa de vuelta). */
+const SUPPORT_EMAIL = `soporte@${import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN}`
+
 /** Traer a los pacientes: la misma respuesta que las portadas (la carga la hace nuestro equipo). */
 const IMPORT_FAQ: FaqItem = {
   q: `¿Puedo traer a mis ${P}?`,
-  a: `Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${P} por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan.`,
+  a: `Sí. Escribe a ${SUPPORT_EMAIL} con tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${P} por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan.`,
 }
 
 export interface AltPage {

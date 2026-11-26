@@ -1,8 +1,9 @@
 ---
 // Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
-// Sin otro texto, dice la oferta como el resto de la web (`lib/offer.ts`): con Fundadores, el
-// regalo; con el alta abierta, el crédito y los días de prueba.
-import { offerOf } from "../lib/offer"
+// Sin otro texto, dice la oferta como el resto de la web (`lib/offer.ts`): la prueba con su regalo,
+// sin tarjeta, y lo que sigue. Sin plan publicado, cómo empezar sin cifras.
+import { startText } from "../lib/offer"
+import GiftText from "./GiftText.astro"
 import { ofProduct, WORDS } from "../lib/product"
 import { contactHref, ctaOf } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
@@ -11,7 +12,6 @@ interface Props {
   title?: string
   text?: string
 }
-const offer = offerOf(Astro.locals.pricing)
 // odentIA y vistIA cuentan sedes; latidIA, salas.
 const [people, rooms] = ofProduct({
   dental: ["pacientes", "sedes"],
@@ -20,6 +20,7 @@ const [people, rooms] = ofProduct({
 })
 const limits = `sin límite de ${WORDS.clinicians}, ${rooms} ni usuarios`
 const { title = `Tu equipo, de vuelta con sus ${people}.`, text } = Astro.props
+const start = startText(Astro.locals.pricing, limits)
 ---
 <section class="hero band" id="empezar">
   <div class="grain" aria-hidden="true"></div>
@@ -33,18 +34,13 @@ const { title = `Tu equipo, de vuelta con sus ${people}.`, text } = Astro.props
       <p class="lead lead-d">{text}</p>
     ) : (
       <p class="lead lead-d">
-        {offer.gift && offer.founder ? (
-          <>Los primeros <b class="gift">{offer.gift}</b> de tus agentes los pagamos nosotros. {offer.noFee ? "Sin cuota, sin tarjeta" : "Sin tarjeta"} y {limits}.</>
-        ) : offer.gift ? (
-          <>Obtén <b class="gift">{offer.gift}</b> de crédito y pruébalo {offer.trial} sin tarjeta, {limits}.</>
-        ) : (
-          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y {limits}.</>
-        )}
+        {start ? <GiftText text={start} /> : <>Cuéntanos de {WORDS.yourClinic} y te mostramos cómo trabajan tus agentes, {limits}.</>}
       </p>
     )}
     <div class="ctas">
       <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-      <a class="btn btn-g" href={contactHref}>Habla con nosotros</a>
+      {/* Sin plan publicado el botón ya lleva a escribirnos: no se repite. */}
+      {cta.href === contactHref ? null : <a class="btn btn-g" href={contactHref}>Habla con nosotros</a>}
     </div>
   </div>
 </section>

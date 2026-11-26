@@ -1,16 +1,11 @@
 /**
  * Cobros y planes (admin): suscripciones con saldo, comprobantes pendientes
- * de confirmación, cargos manuales, los planes y el alta de cada producto
- * (ADR 0093) y medios por moneda.
+ * de confirmación, cargos manuales, los planes de cada producto (ADR 0093)
+ * y medios por moneda.
  */
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import {
   Button,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  RadioGroup,
-  RadioGroupItem,
   Select,
   SelectContent,
   SelectItem,
@@ -18,7 +13,6 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import {
-  ConfirmDialog,
   DatePickerButton,
   EmptyState,
   ErrorState,
@@ -56,7 +50,6 @@ import {
   BillingPageSkeleton,
   BillingPendingSkeleton,
   BillingPlansSkeleton,
-  BillingSignupSkeleton,
   BillingSubscriptionsSkeleton,
 } from "../../components/skeletons/billing"
 import { api } from "../../lib/api"
@@ -368,8 +361,6 @@ function BillingPage() {
         onDone={refresh}
       />
 
-      <SignupModeSection products={product === "todos" ? CLINICAL_PRODUCTS : [product]} />
-
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">
           Planes
@@ -423,9 +414,9 @@ function BillingPage() {
                   <p className="text-xs text-muted-foreground">
                     {plan.code} · {plan.billingPeriod}
                     {plan.isDefault ? " · por defecto" : ""}
-                    {plan.seatLimit !== null ? ` · por invitación, ${plan.seatLimit} lugares` : ""}
-                    {plan.guaranteeMonths ? ` · garantizado ${plan.guaranteeMonths} meses` : ""}
                     {plan.showOnWeb ? " · en la web" : ""}
+                    {!plan.showOnWeb && !plan.isDefault ? " · Especial · no sale en la web" : ""}
+                    {plan.guaranteeMonths ? ` · ${plan.guaranteeMonths} ${plan.guaranteeMonths === 1 ? "mes garantizado" : "meses garantizados"}` : ""}
                     {plan.creditCents ? ` · vuelve ${money(plan.creditCents, plan.currency)} en crédito` : ""}
                     {plan.conversationMicros !== null ? ` · ${tierSummary(plan)}` : ""}
                   </p>
@@ -840,113 +831,6 @@ function HistorySection({
           actions={actions}
         />
       )}
-    </section>
-  )
-}
-
-type SignupMode = "invitacion" | "abierta"
-
-/** Las dos formas de abrir clínicas de un producto, con el nombre de su web y de su plan (ADR 0093). */
-function signupModes(product: ClinicalProduct) {
-  const { name } = productWords(product)
-  const place = `su ${productWords(product).place.one}`
-  return [
-    {
-      value: "invitacion",
-      label: "Solo con invitación",
-      hint: `La web de ${name} pide invitación y la solicitud entra a la lista de espera. Quien ya tiene cuenta no puede abrir ${place} sin invitación.`,
-    },
-    { value: "abierta", label: "Abierta", hint: `Cualquiera abre ${place} con el plan por defecto de ${name}.` },
-  ] as const
-}
-
-/**
- * «Alta de clínicas nuevas» (Fundadores, decisión 2): cada producto decide si
- * se entra con invitación o libre (ADR 0093). Cambiarla rige al instante.
- */
-function SignupModeSection({ products }: { products: readonly ClinicalProduct[] }) {
-  const queryClient = useQueryClient()
-  const mode = useQuery({
-    queryKey: ["admin", "signup-mode"],
-    queryFn: () => api<{ modes: Record<ClinicalProduct, SignupMode> }>("/api/admin/waitlist/signup-mode"),
-  })
-  const save = useMutation({
-    mutationFn: (next: { mode: SignupMode; product: ClinicalProduct }) =>
-      api<{ mode: SignupMode }>("/api/admin/waitlist/signup-mode", { method: "PUT", body: JSON.stringify(next) }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["admin", "signup-mode"] })
-      void queryClient.invalidateQueries({ queryKey: ["admin", "waitlist"] })
-    },
-  })
-  const [confirming, setConfirming] = useState<null | { mode: SignupMode; product: ClinicalProduct }>(null)
-  const confirmName = confirming ? productWords(confirming.product).name : ""
-  return (
-    <section id="alta" aria-labelledby="alta-titulo" className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-      <div className="flex flex-col gap-0.5">
-        <h2 id="alta-titulo" className="text-base font-semibold">
-          Alta de clínicas nuevas
-        </h2>
-        <p className="text-sm text-muted-foreground">Cada producto decide si se entra solo con invitación o libre.</p>
-      </div>
-      {mode.isPending ? (
-        <SkeletonRegion message="Cargando…">
-          <BillingSignupSkeleton />
-        </SkeletonRegion>
-      ) : mode.isError ? (
-        <ErrorState title="No se pudo leer cómo se abren clínicas" message={submitErrorMessage(mode.error)} onRetry={() => void mode.refetch()} />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {products.map((product) => (
-            <FieldSet key={product} className="flex flex-col gap-2">
-              <FieldLegend id={`alta-${product}`} className="mb-0">
-                <ProductMark product={product} className="text-sm" />
-              </FieldLegend>
-              <RadioGroup
-                aria-labelledby={`alta-${product}`}
-                // Sin su modo (la API anterior, mientras se despliega), el seguro: «Solo con invitación».
-                value={mode.data.modes[product] ?? "invitacion"}
-                onValueChange={(value) => {
-                  if (value !== (mode.data.modes[product] ?? "invitacion")) setConfirming({ mode: value as SignupMode, product })
-                }}
-                className="gap-3"
-              >
-                {signupModes(product).map((option) => (
-                  <FieldLabel
-                    key={option.value}
-                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal has-data-checked:border-primary"
-                  >
-                    <RadioGroupItem value={option.value} className="mt-0.5" />
-                    <span className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium">{option.label}</span>
-                      <span className="text-sm text-muted-foreground">{option.hint}</span>
-                    </span>
-                  </FieldLabel>
-                ))}
-              </RadioGroup>
-            </FieldSet>
-          ))}
-        </div>
-      )}
-      <ConfirmDialog
-        open={confirming !== null}
-        title={confirming?.mode === "abierta" ? `¿Abrir el alta de ${confirmName}?` : `¿Pedir invitación en ${confirmName}?`}
-        description={
-          confirming?.mode === "abierta"
-            ? `Desde ahora cualquiera con cuenta puede abrir una clínica de ${confirmName} con su plan por defecto, sin pasar por la lista de espera. El otro producto no cambia.`
-            : `Desde ahora abrir una clínica de ${confirmName} pide una invitación. Las clínicas que ya existen y el otro producto no cambian.`
-        }
-        confirmLabel={confirming?.mode === "abierta" ? "Abrir el alta" : "Pedir invitación"}
-        variant="default"
-        pending={save.isPending}
-        error={save.isError ? submitErrorMessage(save.error) : null}
-        onConfirm={() => {
-          if (confirming) save.mutate(confirming, { onSuccess: () => setConfirming(null) })
-        }}
-        onClose={() => {
-          save.reset()
-          setConfirming(null)
-        }}
-      />
     </section>
   )
 }

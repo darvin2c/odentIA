@@ -18,7 +18,6 @@ import ClioDictation from "./ClioDictation"
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
 const color = AGENT_COLORS.clinico
 
 const title = "Clío, dictado de la consulta médica con IA para tu historia clínica"
@@ -67,7 +66,7 @@ const day =
   plan && estandar !== null
     ? {
         q: "¿Cuánto cuesta un día de consulta?",
-        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, 20 consultas estándar son ${money(20 * estandar, plan.currency)}.`,
+        a: `Con los precios de lista, 20 consultas estándar son ${money(20 * estandar, plan.currency)}.`,
       }
     : null
 const faq: AgentQuestion[] = [

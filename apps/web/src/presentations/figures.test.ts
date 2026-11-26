@@ -23,7 +23,7 @@ describe("la v2, con la clínica en 3D", () => {
       "Solo cobramos por valor",
       "Tu semana con odentIA",
       "Tu precio",
-      "Ser clínica fundadora",
+      "Empieza gratis",
     ])
     expect(out).toContain('data-scene="clinic"')
     expect(out).not.toContain('data-scene="log"')
@@ -42,7 +42,7 @@ describe("la v2, con la clínica en 3D", () => {
       "Solo cobramos por valor",
       "Tu semana con latidIA",
       "Tu precio",
-      "Ser consultorio fundador",
+      "Empieza gratis",
     ])
     expect(out).toContain('data-scene="clinic"')
     // Sus escenas siguen en la presentación: no solo el texto.
@@ -128,7 +128,7 @@ describe("la v2, con la clínica en 3D", () => {
       expect(names?.slice(0, 2)).toEqual(["Lo que creemos", "Lo que hacemos"])
       // Sin cifras ni programa: primero se entiende quiénes somos.
       expect(deck.split("<section ").slice(1, 3).join("")).not.toMatch(
-        /\{\{(?!ecg)|Programa Fundadores/,
+        /\{\{(?!ecg)|Fundador/,
       )
     }
   })
@@ -143,17 +143,17 @@ describe("la v2, con la clínica en 3D", () => {
 
   it("con varios precios resalta el menor con «desde»", () => {
     for (const deck of [odentiaDeck, latidiaDeck]) {
-      for (const mark of ["F.informa$", "L.informa$", "F.simple$", "L.simple$"]) {
+      for (const mark of ["L.informa$", "L.simple$"]) {
         expect(deck).toContain(`<i class="from">desde</i> {{${mark}}}`)
       }
-      expect(deck).not.toContain("{{F.informa}} · {{F.gestiona}} · {{F.agenda}}</span>")
+      expect(deck).not.toContain("{{L.informa}} · {{L.gestiona}} · {{L.agenda}}</span>")
     }
   })
 
-  it("el cierre de cada presentación deja juntos los beneficios y cómo entrar", () => {
+  it("el cierre de cada presentación deja juntos los beneficios y cómo empezar", () => {
     for (const deck of [odentiaDeck, latidiaDeck]) {
       const last = parts(deck)?.at(-1)
-      expect(last).toMatch(/fundador/i)
+      expect(last).toContain("Empieza gratis")
       expect(deck).not.toContain('aria-label="Cómo entrar"')
       expect(deck.lastIndexOf('aria-label="Tu precio"')).toBeLessThan(
         deck.lastIndexOf('class="perks"'),
@@ -164,30 +164,42 @@ describe("la v2, con la clínica en 3D", () => {
     }
   })
 
-  it("el botón del cierre es un enlace que lleva a pedir la invitación", () => {
-    const plan = {
-      currency: "USD",
-      plan: 59,
-      recovered: 2,
-      tiers: { informa: 0.2, gestiona: 0.5, agenda: 1, simple: 0.1, estandar: 0.3, completa: 0.5 },
-      trialCredit: 100,
-      trialDays: 30,
-      argos: null,
-      storage: null,
-    }
-    const pricing = {
-      list: plan,
-      founders: { ...plan, plan: 0, discountPercent: 50, guaranteeMonths: 12 },
-      signupMode: "invitacion",
-      terms: { conversationWindowHours: 24, waitlistAnswerDays: 2 },
-    } as unknown as Pricing
-    const figures = deckFigures(pricing, ["gestiona"])
+  const plan = {
+    currency: "USD",
+    plan: 59,
+    credit: 59,
+    recovered: 2,
+    tiers: { informa: 0.2, gestiona: 0.5, agenda: 1, simple: 0.1, estandar: 0.3, completa: 0.5 },
+    trialCredit: 100,
+    trialDays: 30,
+    argos: null,
+    storage: null,
+  }
+  const pricingOf = (list: typeof plan) =>
+    ({ list, terms: { conversationWindowHours: 24 } }) as unknown as Pricing
+
+  it("el botón del cierre es un enlace que lleva a crear la cuenta, con las cifras del plan de lista", () => {
+    const figures = deckFigures(pricingOf(plan), ["gestiona"])
     expect(figures).not.toBeNull()
     for (const deck of [odentiaDeck, latidiaDeck]) {
       const out = fillDeck(deck, { ...figures, logo: "", ecg: "" })
-      expect(out).toContain('<a class="btn" href="/solicitar-invitacion">Pide tus USD 100</a>')
-      expect(out).not.toContain('<span class="btn">Pide tus')
+      expect(out).toMatch(/<a class="btn" href="https:\/\/app\.[^"]+\/register">Empieza gratis<\/a>/)
+      expect(out).toContain("Después, USD 59 al mes que vuelven como crédito.")
+      expect(out).toContain("Vuelve entero como crédito para tus agentes")
+      expect(out).not.toMatch(/Fundador|invitación llega|solicitar-invitacion/)
     }
+  })
+
+  it("con un plan sin cuota, las frases de la cuota siguen siendo verdad", () => {
+    const figures = deckFigures(pricingOf({ ...plan, plan: 0, credit: 0 }), ["gestiona"])
+    expect(figures?.afterTrial).toBe("Después, pagas solo lo que hacen tus agentes.")
+    expect(figures?.feeNote).toContain("Sin cuota")
+    expect(figures?.systemLine).not.toMatch(/crédito/)
+  })
+
+  it("sin plan de lista o sin regalo de prueba no hay presentación", () => {
+    expect(deckFigures(pricingOf(null as unknown as typeof plan), ["gestiona"])).toBeNull()
+    expect(deckFigures(pricingOf({ ...plan, trialCredit: 0 }), ["gestiona"])).toBeNull()
   })
 
   it("la que reciben las clínicas también sale sin el guion", () => {

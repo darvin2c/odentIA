@@ -19,7 +19,7 @@ function VerifyEmailSentPage() {
         </span>
       }
       description="Te enviamos un enlace para confirmar tu correo. Ábrelo para seguir con tu clínica."
-      aside={<AuthAside tag="Paso 2 de 4" title="Ya casi." accent="Tus agentes empiezan hoy." />}
+      aside={<AuthAside tag="Casi listo" title="Ya casi." accent="Tus agentes empiezan hoy." />}
       legal={<AuthLegal />}
     >
       <p className="text-sm text-muted-foreground">¿No llega? Revisa Spam o Promociones.</p>

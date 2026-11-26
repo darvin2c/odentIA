@@ -1,7 +1,7 @@
 import { configureMailLinks, resetMailLinks } from "@odentia/mail"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  newClientNoticeEmail,
+  founderInvitationEmail,
   saasAlertEmail,
   saasBillingUrl,
   saasOverdueEmail,
@@ -136,36 +136,45 @@ describe("correos de Plan y pagos", () => {
   })
 })
 
-describe("aviso de cliente nuevo al buzón comercial", () => {
-  const clientUrl = "https://admin.odentia32.com/clients/7f1c"
+describe("la invitación que manda el equipo", () => {
+  const base = {
+    firstName: "Ana",
+    clinicName: "Clínica <Sonrisa>",
+    email: "ana@clinicasonrisa.pe",
+    url: "https://app.odentia32.com/register?invitation=abc",
+    expiresText: "domingo 1 de noviembre",
+  }
 
-  it("dice la clínica, el producto, la ciudad y el país, con el botón a su ficha y el texto escapado", () => {
-    const mail = newClientNoticeEmail({
-      clinicName: "Consultorio <Latido> & Cía",
-      product: "medical",
-      city: "Arequipa",
-      countryCode: "PE",
-      clientUrl,
+  it("dice la cuenta lista con el plan negociado, sus cifras y hasta cuándo vale, sin Fundadores ni lista de espera", () => {
+    const mail = founderInvitationEmail({
+      ...base,
+      offer: { planName: "Especial", currency: "USD", priceCents: 0, trialCreditCents: 10_000, discountPercent: 50, guaranteeMonths: 12 },
+      replyTo: "hola@odentia32.com",
     })
-    expect(mail.subject).toBe("Cliente nuevo: Consultorio <Latido> & Cía pidió entrar a latidIA")
-    // Interno: con la marca de odentIA aunque el cliente sea de latidIA.
-    expect(mail.brand).toBeUndefined()
-    expect(mail.html).toContain("Interno · Clientes")
-    expect(mail.text).toContain("Producto: latidIA")
-    expect(mail.text).toContain("Clínica: Consultorio <Latido> & Cía")
-    expect(mail.text).toContain("Ciudad: Arequipa")
-    expect(mail.text).toContain("País: Perú")
-    expect(mail.text).toContain(`Abrir la ficha: ${clientUrl}`)
-    expect(mail.html).toContain(`href="${clientUrl}"`)
-    // El nombre lo escribió quien pidió: en el HTML va escapado.
-    expect(mail.html).not.toContain("<Latido>")
-    expect(mail.html).toContain("Consultorio &lt;Latido&gt; &amp; Cía")
+    expect(mail.subject).toBe("Tu cuenta en odentIA está lista")
+    expect(mail.text).toContain("Te preparamos tu cuenta con Especial")
+    expect(mail.text).toContain("USD 100 de regalo")
+    expect(mail.text).toContain("sin cuota")
+    expect(mail.text).toContain("50 % menos que el precio de lista")
+    expect(mail.text).toContain("Esos precios valen 12 meses.")
+    expect(mail.text).toContain("vence el domingo 1 de noviembre")
+    expect(mail.text).toContain("responde este correo")
+    expect(mail.html).toContain(`href="${base.url}"`)
+    expect(mail.html).not.toContain("<Sonrisa>")
+    for (const word of ["Fundador", "lista de espera", "pediste una invitación"]) expect(mail.text).not.toContain(word)
   })
 
-  it("odentIA con su nombre; sin la dirección de la administración, sin botón", () => {
-    const mail = newClientNoticeEmail({ clinicName: "Clínica Sonrisa", product: "dental", city: "Cusco", countryCode: "PE", clientUrl: null })
-    expect(mail.subject).toBe("Cliente nuevo: Clínica Sonrisa pidió entrar a odentIA")
-    expect(mail.text).not.toContain("Abrir la ficha")
-    expect(mail.text).toContain("Clientes")
+  it("sin plan, descuento ni meses no los inventa; sin respuesta, se pide otro enlace a quien lo mandó", () => {
+    const mail = founderInvitationEmail({
+      ...base,
+      offer: { currency: "USD", priceCents: 2900, trialCreditCents: 5_000, discountPercent: null, guaranteeMonths: null },
+      brand: "latidia",
+    })
+    expect(mail.subject).toBe("Tu cuenta en latidIA está lista")
+    expect(mail.text).toContain("Te preparamos tu cuenta con tu plan")
+    expect(mail.text).toContain("con una cuota de USD 29 al mes")
+    expect(mail.text).not.toContain("% menos")
+    expect(mail.text).not.toContain("Esos precios valen")
+    expect(mail.text).toContain("pídele otro a quien te escribió de latidIA")
   })
 })

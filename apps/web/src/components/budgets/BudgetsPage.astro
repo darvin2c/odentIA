@@ -6,8 +6,6 @@
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
-import { days, giftOf, shownPlan } from "../../lib/pricing"
-import { WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
@@ -16,9 +14,6 @@ import BudgetDemo from "./BudgetDemo"
 
 const page = PAGES.presupuestos
 const pricing = Astro.locals.pricing
-const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
-const gift = giftOf(pricing)
 const cta = ctaOf(pricing)
 const faq: FaqItem[] = [
   ...page.faq,
@@ -143,19 +138,7 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
 
   <TopicGuides slugs={["plan-de-tratamiento-odontologico", "presupuesto-dental"]} />
 
-  <CtaBand title="Presupuestos que se entienden y no se olvidan.">
-    <Fragment slot="text">
-      {gift ? (
-        founder ? (
-          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        ) : (
-          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        )
-      ) : (
-        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
-      )}
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Presupuestos que se entienden y no se olvidan." />
 </Base>
 
 <style>

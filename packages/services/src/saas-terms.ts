@@ -298,7 +298,7 @@ const percent = (bps: number) => `${new Intl.NumberFormat("es-PE", { maximumFrac
 /**
  * Lo que cuenta como cambio del plan y cómo se dice. Las filas están en dos auditorías: la de la
  * clínica (`audit_event`, lo que escriben `saas-billing` y estas condiciones) y la de la
- * administración (`admin_audit`, lo que escriben las rutas de Cobros y Fundadores); una misma
+ * administración (`admin_audit`, lo que escriben las rutas de Cobros y del plan especial); una misma
  * acción puede quedar en las dos en la misma transacción, con la misma hora, y se dice una vez.
  * Lo que no está aquí no se muestra, nunca con su código.
  */
@@ -363,14 +363,14 @@ const PLAN_CHANGE_WORDS: Record<string, { support: boolean; words: (meta: PlanCh
     words: (meta, ctx) => {
       const plan = ctx.planName(meta)
       const discount = metaNumber(meta, "discountBps")
-      return `Pasó a Fundadores${plan ? ` (${plan})` : ""}${discount ? `; se quitó su precio especial de ${percent(discount)}` : ""}`
+      return `Pasó a un plan especial${plan ? ` (${plan})` : ""}${discount ? `; se quitó su precio especial de ${percent(discount)}` : ""}`
     },
   },
   "saas.guarantee_ended": {
     support: false,
     words: (meta, ctx) => {
       const plan = ctx.planName({ planId: meta.toPlanId })
-      return plan ? `Terminaron sus condiciones de Fundadora; ahora rige ${plan}` : "Terminaron sus condiciones de Fundadora"
+      return plan ? `Terminaron sus condiciones garantizadas; ahora rige ${plan}` : "Terminaron sus condiciones garantizadas"
     },
   },
   "saas.discount_set": {
@@ -699,7 +699,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
     }
   }
 
-  // Condiciones garantizadas de quien entró por invitación (Fundadores): se
+  // Condiciones garantizadas de un plan especial: se
   // avisa desde los días que dicen las condiciones comerciales (30 al empezar).
   if (sub.guaranteedUntil && sub.guaranteedUntil.getTime() > now.getTime()) {
     const daysLeft = Math.ceil((sub.guaranteedUntil.getTime() - now.getTime()) / DAY)
@@ -709,8 +709,8 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         level: daysLeft <= 7 ? "alarma" : "aviso",
         periodKey: sub.guaranteedUntil.toISOString().slice(0, 10),
         title: daysLeft <= 7 ? "Alarma" : "Aviso",
-        message: `Tus condiciones de Fundador terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista.`,
-        short: `Tus condiciones de Fundador terminan el ${fmtShort(sub.guaranteedUntil)}`,
+        message: `Tus precios garantizados terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista.`,
+        short: `Tus precios garantizados terminan el ${fmtShort(sub.guaranteedUntil)}`,
         action: "ver_plan",
       })
     }
@@ -780,7 +780,7 @@ export async function assertAgentsNotPaused(tx: Db, orgId: string): Promise<void
     throw new ServiceError(
       "AGENTS_PAUSED",
       409,
-      "Los agentes están en pausa: se usó todo el saldo de prueba. Quien administra la clínica puede elegir el plan en Plan y pagos.",
+      "Los agentes están en pausa: se usó todo el saldo de prueba. Vuelven cuando termine la prueba y empiece el plan.",
     )
   }
 }

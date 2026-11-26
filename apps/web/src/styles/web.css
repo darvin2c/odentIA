@@ -557,7 +557,7 @@ details.q p {
   font-family: var(--agent-font);
 }
 
-/* El regalo («USD 100») va en ámbar en toda la web (Fundadores, issue 165): el ámbar de la marca
+/* El regalo de la prueba («USD 100») va en ámbar en toda la web: el ámbar de la marca
    sobre fondo oscuro y uno más oscuro sobre fondo claro, para que se lea. Dentro de un botón, no. */
 .gift { color: var(--amber); }
 .gift-light { color: #b45309; }

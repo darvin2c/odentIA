@@ -1,5 +1,5 @@
 ---
-// /guias (lienzo UYxnET…, tablero 4): una tarjeta por guía, en filas parejas, y la solicitud al final.
+// /guias (lienzo UYxnET…, tablero 4): una tarjeta por guía, en filas parejas, y el cierre al final.
 // Cada guía nueva se suma sola desde su archivo (`src/lib/guides`). Solo en odentIA: latidIA y vistIA
 // no la sirven (`product-pages.json`).
 import GuideCards from "../../components/guides/GuideCards.astro"
@@ -7,11 +7,7 @@ import GuideStart from "../../components/guides/GuideStart.astro"
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd } from "../../lib/faq"
 import { GUIDES, GUIDES_PATH, guidePath, sheetImages } from "../../lib/guides"
-import { ctaOf } from "../../lib/site"
 
-const pricing = Astro.locals.pricing
-const cta = ctaOf(pricing)
-const headerCta = pricing.signupMode === "invitacion" ? { href: "#pide", label: cta.label } : undefined
 const title = "Guías para tu clínica dental, paso a paso"
 const description =
   "Guías para odontólogos: odontograma, periodontograma, historia clínica, CIE-10, consentimiento, plan de tratamiento, presupuesto y caja, con plantilla PDF gratis."
@@ -33,7 +29,7 @@ const jsonLd = [
   },
 ]
 ---
-<Base title={title} description={description} jsonLd={jsonLd} cta={headerCta} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma, periodontograma, historia clínica, códigos CIE-10, consentimiento, plan de tratamiento, presupuesto y cierre de caja." }}>
+<Base title={title} description={description} jsonLd={jsonLd} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma, periodontograma, historia clínica, códigos CIE-10, consentimiento, plan de tratamiento, presupuesto y cierre de caja." }}>
   <section class="hero gi">
     <div class="grain" aria-hidden="true"></div>
     <div class="wrap gi-wrap">
@@ -49,7 +45,7 @@ const jsonLd = [
       <GuideCards guides={[...GUIDES]} level="h2" />
     </div>
   </section>
-  <GuideStart title="Tu clínica, sin papel." page={GUIDES_PATH} />
+  <GuideStart title="Tu clínica, sin papel." />
 </Base>
 
 <style>

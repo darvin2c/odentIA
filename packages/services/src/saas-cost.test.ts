@@ -56,7 +56,7 @@ beforeAll(async () => {
       priceCents: 0,
       creditCents: 0,
       conversationMicros: 250_000,
-      seatLimit: 20,
+      guaranteeMonths: 12,
       trialCreditCents: 0,
       trialMaxCreditCents: 0,
     })

@@ -852,7 +852,7 @@ function RevenueTab({ months }: { months: number }) {
               {margin.toReview === 1
                 ? "1 clínica para revisar"
                 : `${count(margin.toReview)} clínicas para revisar`}{" "}
-              en Cobros y planes: con la alarma de IA o Fundadoras sin uso.
+              en Cobros y planes: con la alarma de IA o con condiciones garantizadas sin uso.
             </p>
           ) : null}
         </ReportCard>

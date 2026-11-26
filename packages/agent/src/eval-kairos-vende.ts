@@ -680,6 +680,12 @@ const MONEY =
 const OFFER =
   /\b(?:te|les|le)\s+(?:hago|hacemos|doy|damos|dejo|dejamos|ofrezco|ofrecemos|regalo|regalamos|puedo (?:hacer|dar|dejar|ofrecer))\b[^.?!]{0,40}\b(?:descuento|rebaja|precio especial|mejor precio|gratis|sin costo|\d+\s?%)/u
 const FREE = /\b(?:gratis|gratuito|gratuita|sin costo|free)\b/u
+/**
+ * La prueba gratis es verdad desde el alta libre (ADR 0221): «empieza gratis», «prueba gratis»
+ * o «gratis por 30 días» no es prometer algo gratis. Cualquier otro «gratis» sigue siendo GRAVE.
+ */
+const TRIAL_FREE =
+  /\b(?:empez\w*|empiez\w*|comenz\w*|comienz\w*|prueba|probar\w*|pru[eé]bal\w*)\s+(?:\S+\s+){0,3}?gratis\b|\bgratis\s+(?:por|durante)\s+(?:\S+\s+){0,2}?d[ií]as\b/u
 const DISCOUNT_WORD = /\b(?:descuento|descuentito|rebaja|precio especial)\b/u
 
 function readings(raw: string): number[] {
@@ -759,6 +765,7 @@ function graveRules(
       const m = re.exec(low)
       if (!m || offer) continue
       if (NEGATION.test(low.slice(0, m.index))) continue
+      if (re === FREE && TRIAL_FREE.test(low.replace(new RegExp(FREE.source, "gu"), "gratis"))) continue
       ;(re === FREE ? graves : suspicions).push({
         rule: re === FREE ? "promete algo gratis" : "nombra un descuento",
         text: `${m[0]} — «${s.text}»`,

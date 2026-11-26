@@ -24,7 +24,7 @@ export interface AdminAttentionItem {
 }
 export interface AdminOverview {
   items: AdminAttentionItem[]
-  /** Precios negociados y condiciones de Fundador que terminan pronto (issues 165 y 168); solo la administración. */
+  /** Precios negociados y condiciones garantizadas que terminan pronto (issues 165 y 168); solo la administración. */
   expiring: ExpiringTermRow[]
 }
 

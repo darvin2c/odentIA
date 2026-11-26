@@ -22,8 +22,8 @@ function planOf(factor: number, plan: number): ValuePrices {
   return valuePricesOf(prices)!
 }
 const LIST = planOf(1, 29)
-/** Un Fundador de ejemplo: sin cuota y con 50 % menos en todo. */
-const FOUNDER = planOf(0.5, 0)
+/** Un plan sin cuota y con la mitad de cada precio: la calculadora no resta un crédito que no existe. */
+const NO_FEE = planOf(0.5, 0)
 
 describe("el precio promedio de cada acción", () => {
   it("sale de la mezcla de tipos de la clínica mediana del estudio", () => {
@@ -55,15 +55,15 @@ describe("lo que pagas y lo que recuperas", () => {
     expect(v.withUs).toBe(29)
   })
 
-  it("un Fundador sin cuota paga solo lo que hacen sus agentes", () => {
-    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 100, noShows: 0, consultations: 80 }, FOUNDER)
+  it("un plan sin cuota paga solo lo que hacen sus agentes", () => {
+    const v = computeValue({ ...DEFAULT_VALUE_INPUT, writers: 100, noShows: 0, consultations: 80 }, NO_FEE)
     expect(v.usage).toBeCloseTo(30.65)
     expect(v.coveredByPlan).toBe(0)
     expect(v.withUs).toBeCloseTo(30.65)
   })
 
-  it("cada fila se cobra por su tipo, como en la cuenta: el ejemplo de Precios da USD 108 con Fundadores", () => {
-    const v = computeValue(DEFAULT_VALUE_INPUT, FOUNDER)
+  it("cada fila se cobra por su tipo, como en la cuenta: el ejemplo de Precios da USD 108 a mitad de precio", () => {
+    const v = computeValue(DEFAULT_VALUE_INPUT, NO_FEE)
     expect(v.byType.informa).toEqual({ count: 150, cost: 7.5 })
     expect(v.byType.gestiona).toEqual({ count: 150, cost: 37.5 })
     expect(v.byType.agenda).toEqual({ count: 75, cost: 18.75 })

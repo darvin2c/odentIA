@@ -43,7 +43,6 @@ test("términos: una cuenta sin aceptación que va a abrir su clínica acepta lo
     await gotoHydrated(page, `${PANEL}/`)
     await expect(page).toHaveURL(panelPattern("/terminos"))
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Un paso antes de seguir")
-    await expect(page.getByText("2 de 4")).toBeVisible()
     await expect(
       page.getByRole("link", { name: "Contrato de encargo de tratamiento" }),
     ).toBeVisible()

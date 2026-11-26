@@ -1,15 +1,9 @@
-// Las cifras de la presentación de Fundadores (/presentacion/fundadores), de la administración como el resto de
-// la web: en deck.html cada una es una marca {{nombre}} que se llena al servir la página. Sin los
-// dos planes publicados con todos sus precios no hay presentación: no se inventa ninguna cifra.
-import {
-  businessDays,
-  days,
-  hours,
-  money,
-  type PlanPrices,
-  type Pricing,
-  type TierPrices,
-} from "../lib/pricing"
+// Las cifras de la presentación (/presentacion), de la administración como el resto de la web: en
+// deck.html cada una es una marca {{nombre}} que se llena al servir la página. Todas salen del plan
+// de lista; sin él publicado con todos sus precios y su regalo de prueba no hay presentación: no se
+// inventa ninguna cifra.
+import { afterTrialText } from "../lib/offer"
+import { days, hours, money, type PlanPrices, type Pricing, type TierPrices } from "../lib/pricing"
 import type { WebProduct } from "../lib/product"
 import { ctaOf } from "../lib/site"
 import clinicStyle from "./clinic/clinic.css?raw"
@@ -27,68 +21,77 @@ function complete(
 
 /**
  * Las marcas de la presentación. `day` son los tipos que cobra el día de ejemplo además de la cita
- * recuperada (en odentIA, una conversación que gestiona y una consulta estándar). Null si falta un
- * plan, el regalo o una condición del plan Fundador.
+ * recuperada (en odentIA, una conversación que gestiona y una consulta estándar). Null si falta el
+ * plan, uno de sus precios o el regalo de la prueba. Si el plan no tiene cuota, las frases de la
+ * cuota (`feeNote`, `systemLine`, `dayNote`) dicen eso en vez de un crédito que no existe.
  */
 export function deckFigures(pricing: Pricing, day: Tier[]): Record<string, string> | null {
   const list = complete(pricing.list)
-  const founders = complete(pricing.founders)
-  const discount = pricing.founders?.discountPercent ?? null
-  const months = pricing.founders?.guaranteeMonths ?? null
-  if (!list || !founders || discount === null || months === null || founders.trialCredit <= 0)
-    return null
-  const cur = founders.currency
+  if (!list || list.trialCredit <= 0) return null
+  const cur = list.currency
   // «0,50» y «1,00»: la cifra sin la moneda y siempre con dos decimales, para las filas que dicen
   // tres precios seguidos.
   const bare = (value: number) => (Math.round(value * 100) / 100).toFixed(2).replace(".", ",")
-  const plan = (p: typeof list, key: "L" | "F") => {
-    const out: Record<string, string> = {
-      [`${key}.fee$`]: money(p.plan, p.currency),
-      [`${key}.feeN`]: String(p.plan),
-      [`${key}.recovered$`]: money(p.recovered, p.currency),
-      [`${key}.day$`]: money(
-        day.reduce((sum, tier) => sum + p.tiers[tier], p.recovered),
-        p.currency,
-      ),
-    }
-    for (const [tier, value] of Object.entries(p.tiers) as [Tier, number][]) {
-      out[`${key}.${tier}`] = bare(value)
-      out[`${key}.${tier}$`] = money(value, p.currency)
-    }
-    return out
+  const out: Record<string, string> = {
+    "L.fee$": money(list.plan, cur),
+    "L.feeN": String(list.plan),
+    "L.credit$": money(list.credit, cur),
+    "L.recovered$": money(list.recovered, cur),
+    "L.day$": money(
+      day.reduce((sum, tier) => sum + list.tiers[tier], list.recovered),
+      cur,
+    ),
   }
-  // Lo de Argos y el espacio solo si el plan Fundador los cobra.
+  for (const [tier, value] of Object.entries(list.tiers) as [Tier, number][]) {
+    out[`L.${tier}`] = bare(value)
+    out[`L.${tier}$`] = money(value, cur)
+  }
+  const fee = money(list.plan, cur)
+  const credit = money(list.credit, cur)
+  const whole = list.plan > 0 && list.credit === list.plan
+  // Lo de Argos y el espacio solo si el plan los cobra.
   const extras = [
-    founders.argos &&
-      `${founders.argos.packQuestions} preguntas más a Argos (${founders.argos.included} al mes incluidas) por ${money(founders.argos.pack, cur)}`,
-    founders.storage &&
-      `cada GB extra sobre ${founders.storage.includedGb} por ${money(founders.storage.perGb, cur)}`,
+    list.argos &&
+      `${list.argos.packQuestions} preguntas más a Argos (${list.argos.included} al mes incluidas) por ${money(list.argos.pack, cur)}`,
+    list.storage && `cada GB extra sobre ${list.storage.includedGb} por ${money(list.storage.perGb, cur)}`,
   ].filter(Boolean)
-  // El botón del cierre es el de toda la web: con el alta por invitación, lleva a pedirla.
+  // El botón del cierre es el de toda la web: «Empieza gratis», al registro.
   const cta = ctaOf(pricing)
   return {
-    ...plan(list, "L"),
-    ...plan(founders, "F"),
+    ...out,
     ctaHref: cta.href,
     ctaLabel: cta.label,
+    /** La dirección del botón, para leerla en pantalla: «app.odentia32.com/register». */
+    ctaUrl: cta.href.replace(/^https?:\/\//, ""),
     cur,
     currencyWord: cur === "USD" ? "dólares" : cur,
-    gift: money(founders.trialCredit, cur),
-    giftN: String(founders.trialCredit),
-    giftDays: days(founders.trialDays),
-    discount: `${discount} %`,
-    discountN: String(discount),
-    months: `${months} meses`,
-    monthsN: String(months),
+    gift: money(list.trialCredit, cur),
+    giftN: String(list.trialCredit),
+    giftDays: days(list.trialDays),
     window: hours(pricing.terms.conversationWindowHours),
-    answer: businessDays(pricing.terms.waitlistAnswerDays),
-    extras: extras.length ? `También con precio de Fundador: ${extras.join(" y ")}. ` : "",
+    afterTrial: afterTrialText(pricing) ?? "",
+    feeNote:
+      list.plan === 0
+        ? "Sin cuota: pagas solo lo que hacen tus agentes"
+        : whole
+          ? "Vuelve entero como crédito para tus agentes"
+          : list.credit > 0
+            ? `Con ${credit} de crédito para tus agentes`
+            : "Lo que hacen tus agentes se suma",
+    systemLine:
+      list.plan === 0
+        ? "El sistema completo va incluido, sin cuota."
+        : whole
+          ? `El sistema completo va incluido en tu plan de ${fee} al mes, que vuelven enteros como crédito para tus agentes.`
+          : `El sistema completo va incluido en tu plan de ${fee} al mes.`,
+    dayNote: list.plan > 0 && list.credit > 0 ? `que se descuentan de tus ${credit} de crédito.` : "y es lo que pagas ese día.",
+    extras: extras.length ? `También: ${extras.join(" y ")}. ` : "",
   }
 }
 
 /**
  * La presentación que reciben las clínicas, sin el guion de quien presenta: fuera las notas de cada
- * parte, su panel y el botón «Guion (N)». Con /presentacion/fundadores?guion la página las conserva.
+ * parte, su panel y el botón «Guion (N)». Con /presentacion?guion la página las conserva.
  */
 export function withoutGuide(html: string): string {
   const out = html
@@ -137,7 +140,7 @@ const CLINIC_PARTS: Record<WebProduct, { inside: string[]; after: string[] } | n
 }
 
 /**
- * La v2 de la presentación (/presentacion/fundadores?v2): «Tus agentes» pasa a ser la clínica en 3D, con
+ * La v2 de la presentación (/presentacion?v2): «Tus agentes» pasa a ser la clínica en 3D, con
  * sus estilos comunes y el texto de cada producto, y se lleva las partes que explica. Convive con la v1
  * hasta que pase una llamada real.
  */

@@ -1,4 +1,4 @@
-import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -8,16 +8,11 @@ import {
   FOUNDER_INVITATION_DAYS,
   founderInvitationEmail,
   founderOffer,
-  getSignupModes,
   getWaitlistRequest,
   hideWaitlistFollowUp,
   inviteFromWaitlist,
-  listWaitlist,
   markInvitationSent,
   ServiceError,
-  setSignupMode,
-  setWaitlistNote,
-  WAITLIST_STAGES,
 } from "@odentia/services"
 import { saasPlan } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
@@ -28,7 +23,7 @@ import { adminContextOf } from "../lib/admin-context.js"
 import { runService, validationError } from "./helpers.js"
 
 export interface AdminFoundersDeps {
-  /** La lista de espera y la política de alta son de la plataforma: solo owner (migración 0028). */
+  /** Las solicitudes son de la plataforma: solo owner (migración 0028). */
   ownerDb: Db
   mailer: Mailer
   /** Origen del panel (`app.`) de cada producto: la invitación lleva a crear la cuenta en el de su solicitud. */
@@ -43,20 +38,12 @@ function staffOf(c: Context): AdminActor {
   return actor
 }
 
-/** Invitar, descartar y cambiar el alta es de la administración; soporte solo mira y anota. */
+/** Invitar y descartar es de la administración; soporte solo mira y anota. */
 function adminOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
   if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración invita o descarta")
   return actor
 }
-
-const stageFilter = z.enum([...WAITLIST_STAGES, "todas"])
-const listQuery = z.object({
-  stage: stageFilter.optional(),
-  /** El nombre de antes, que aún manda una pestaña abierta antes del despliegue: sus cuatro valores son etapas. */
-  status: stageFilter.optional(),
-  q: z.string().trim().max(120).optional(),
-})
 
 /** Lo que se anota en el seguimiento: la regla de cada dato la dice el servicio (`addWaitlistFollowUp`). */
 const followUpBody = z.strictObject({
@@ -71,8 +58,9 @@ function dayText(date: Date): string {
 }
 
 /**
- * Fundadores en la administración (`/api/admin/waitlist`, issue 165), tras el
- * guard de admin. Invitar devuelve el enlace (para copiarlo a WhatsApp) y,
+ * Las solicitudes del ARM en la administración (`/api/admin/waitlist`), tras el
+ * guard de admin. Ya no llegan de la web (ADR 0221): quedan las que ya estaban y
+ * las que crea el equipo al invitar a un cliente desde su venta. Invitar devuelve el enlace (para copiarlo a WhatsApp) y,
  * con `send`, lo envía por correo después de confirmar la transacción: si el
  * correo falla, la invitación sigue vigente y la pantalla lo dice.
  */
@@ -80,34 +68,6 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
   const app = new Hono()
   const invitationUrl = (token: string, product: ClinicalProduct) =>
     `${deps.panelUrlOf(product).replace(/\/+$/, "")}/register?invitacion=${encodeURIComponent(token)}`
-
-  app.get("/", async (c) => {
-    const parsed = listQuery.safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    staffOf(c)
-    return runService(c, 200, () =>
-      deps.ownerDb.transaction((tx) => listWaitlist(tx, { stage: parsed.data.stage ?? parsed.data.status, search: parsed.data.q })),
-    )
-  })
-
-  // Cómo se abren las clínicas de cada producto (ADR 0093).
-  app.get("/signup-mode", (c) => {
-    staffOf(c)
-    return runService(c, 200, async () => ({ modes: await deps.ownerDb.transaction((tx) => getSignupModes(tx)) }))
-  })
-
-  app.put("/signup-mode", async (c) => {
-    const parsed = z
-      .strictObject({
-        mode: z.enum(["invitacion", "abierta"], { error: "Elige cómo se abren las clínicas" }),
-        product: z.enum(CLINICAL_PRODUCTS, { error: "Elige el producto" }).default("dental"),
-      })
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => ({
-      mode: await deps.ownerDb.transaction((tx) => setSignupMode(tx, adminOf(c), parsed.data.mode, parsed.data.product)),
-    }))
-  })
 
   // Una solicitud con su seguimiento, para su cajón: no depende del filtro de la lista.
   app.get("/:id", (c) => {
@@ -132,19 +92,6 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     const actor = staffOf(c)
     return runService(c, 200, async () => {
       await deps.ownerDb.transaction((tx) => hideWaitlistFollowUp(tx, actor, c.req.param("entryId")))
-      return { ok: true }
-    })
-  })
-
-  // La ruta vieja de la nota: la usa una pestaña abierta antes de este despliegue y ahora agrega una entrada.
-  // Se borra en la entrega siguiente.
-  app.put("/:id/note", async (c) => {
-    const parsed = z
-      .strictObject({ note: z.string().max(2000, "La nota puede tener como máximo 2000 caracteres").nullable() })
-      .safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => {
-      await deps.ownerDb.transaction((tx) => setWaitlistNote(tx, staffOf(c), c.req.param("id"), parsed.data.note))
       return { ok: true }
     })
   })

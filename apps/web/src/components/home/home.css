@@ -3200,8 +3200,6 @@
   }
 }
 
-/* El precio de lista tachado junto al del Fundador (issue 165). */
-.home .pwas { font-size: .45em; font-weight: 600; letter-spacing: 0; opacity: .6; margin-left: 8px; white-space: nowrap; }
 
 /* 06 · Debajo de los módulos: lo del día a día que no tiene página (Inicio, la app instalable y la Ayuda). */
 .home .hs-also {

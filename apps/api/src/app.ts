@@ -867,7 +867,7 @@ export function createApp(deps: AppDeps) {
     "/api/public/sign-up",
     createPublicSignUpRoute({ ownerDb: deps.ownerDb, productOf: productOfRequest }),
   )
-  // Fundadores (issue 165): precios que publica la web, solicitudes de la lista de espera y la invitación.
+  // La web: los precios que publica, la invitación de la administración y el correo de las guías (ADR 0221).
   app.route(
     "/api/public/founders",
     createPublicFoundersRoute({
@@ -876,9 +876,6 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
       replyToOf: holaOf,
       productOf: productOfRequest,
-      // El aviso «Cliente nuevo»: a hola@ de la marca de la solicitud, con el enlace a su ficha.
-      adminURL: deps.adminURL,
-      teamEmailOf: holaOf,
       siteUrlOf,
       panelUrlOf,
     }),

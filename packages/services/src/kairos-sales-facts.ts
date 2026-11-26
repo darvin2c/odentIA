@@ -1,7 +1,7 @@
 /**
  * Lo que Kairós puede decir de cada producto cuando responde solo en un chat
  * (Kairós vende, ADR 0189): solo lo que ya dicen las webs (`apps/web`: la
- * portada y sus preguntas, Precios, la oferta de la prueba y Fundadores), en
+ * portada y sus preguntas, Precios y la oferta de la prueba), en
  * frases cortas y sin prometer nada más. Si una web cambia lo que promete, se
  * cambia aquí en el mismo cambio.
  *
@@ -28,7 +28,7 @@ export interface KairosSalesFacts {
   prices: string[]
   /** Cada importe que puede decir, con su moneda: la comprobación no deja salir otro. */
   amounts: Array<{ value: number; currency: string }>
-  /** Los porcentajes que dice la web (el de Fundadores): cualquier otro es un descuento inventado. */
+  /** Los porcentajes que dice la web (hoy ninguno): cualquier otro es un descuento inventado. */
   percents: number[]
 }
 
@@ -98,7 +98,7 @@ function productFacts(product: ClinicalProduct, line: ProductLine): string[] {
     `Omnicanal: atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona.`,
     agents,
     "Los agentes actúan siempre dentro de lo que la clínica les permite; si no saben algo, se lo pasan al equipo con todo lo hablado.",
-    `Todas las ${line.audience} tienen el sistema completo: no hay planes con más o menos funciones. Se paga por el trabajo que hacen los agentes, no por el software.`,
+    `Todas las ${line.audience} tienen el sistema completo, incluido en el plan: no hay planes con más o menos funciones.`,
     `Carga de datos: nos envías tu Excel o lo que exporta tu sistema y el equipo de Sallca carga a tus ${line.patients}; lo dudoso se revisa contigo. Las citas, los saldos y la historia anterior todavía no se cargan.`,
     "Se usa desde el celular en el navegador, y se puede instalar como una app con su ícono, sin tienda.",
     "Usa ChatGPT 6, de OpenAI, con la cuenta de Sallca: no hace falta una cuenta ni una clave propia.",
@@ -109,7 +109,6 @@ function productFacts(product: ClinicalProduct, line: ProductLine): string[] {
     ...(web
       ? [
           `Precios y cómo se calcula el mes: ${web}/precios`,
-          `Pedir la invitación (programa Fundadores): ${web}/solicitar-invitacion`,
         ]
       : ["Los precios y cómo se calcula el mes están en la página Precios de la web."]),
   ]
@@ -181,29 +180,6 @@ export function kairosSalesFactsOf(product: string, pricing: PublicPricing): Kai
     amounts.push({ value: Math.round(units * 100) / 100, currency: plan.currency })
     return salesMoney(units, plan.currency)
   }
-  const founders = pricing.founders
-  if (founders) {
-    const money = say(founders)
-    const fee =
-      founders.priceCents === 0
-        ? "sin cuota"
-        : `con una cuota de ${money(founders.priceCents, "centavos")} al mes`
-    const gift =
-      founders.trialCreditCents > 0
-        ? `, con ${money(founders.trialCreditCents, "centavos")} de regalo para los agentes en los primeros ${founders.trialDays} días`
-        : ` y ${founders.trialDays} días de prueba`
-    prices.push(
-      `Programa Fundadores (${founders.name}, por invitación): es el plan de las clínicas que entran por invitación, ${fee}${gift}.`,
-    )
-    if (founders.discountPercent) {
-      percents.push(founders.discountPercent)
-      prices.push(
-        `Lo que se ahorra con Fundadores: paga ${founders.discountPercent} % menos en cada trabajo de los agentes que el precio de lista${founders.guaranteeMonths ? ` durante ${founders.guaranteeMonths} meses` : ""}.`,
-      )
-    }
-    prices.push("Al terminar la prueba, el plan Fundadores sigue solo, sin activar nada.")
-    prices.push(...planPrices(founders, line, money).map((text) => `Fundadores: ${text}`))
-  }
   const list = pricing.list
   if (list) {
     const money = say(list)
@@ -218,10 +194,12 @@ export function kairosSalesFactsOf(product: string, pricing: PublicPricing): Kai
     prices.push(`Plan ${list.name} (precio de lista): ${fee}${trial}.`)
     prices.push(...planPrices(list, line, money).map((text) => `${list.name}: ${text}`))
   }
-  if (pricing.signupMode === "invitacion")
-    prices.push(
-      `Hoy se entra por invitación${founders ? ", con el plan Fundadores" : ""}: se pide en la web y Sallca responde en ${pricing.terms.waitlistAnswerDays} días hábiles.`,
-    )
+  // El alta es libre (ADR 0221): sin plan publicado, el producto todavía no abre cuentas por la web.
+  prices.push(
+    list
+      ? `Se empieza gratis: se crea la cuenta y se abre ${line.yourPlace} al momento y sin tarjeta. El programa Fundadores ya terminó: no hay invitación, cupos ni precio de Fundadores; hoy se empieza gratis y después rige el plan de lista.`
+      : `Todavía no se abren cuentas nuevas de ${line.name} por la web: para empezar, el equipo de Sallca agenda una presentación.`,
+  )
   // La moneda de los planes, dicha una vez además de en cada importe.
   const currencies = [...new Set(amounts.map((amount) => amount.currency))]
   if (currencies.length === 1)

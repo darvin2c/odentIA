@@ -110,10 +110,8 @@ function TermsStepPage() {
         window.location.assign(back.href)
         return
       }
-      // Quien abre su clínica sigue a crearla aunque viniera de «/» (que sin clínica no tiene nada).
-      await navigate({
-        to: opens && (!back || back.path === "/") ? "/onboarding" : (back?.path ?? "/"),
-      })
+      // «/» decide: sin clínicas ni invitaciones pendientes sigue solo a abrir la clínica.
+      await navigate({ to: back?.path ?? "/" })
     },
   })
   const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })
@@ -162,14 +160,7 @@ function TermsStepPage() {
   return (
     <AuthSplit
       title={
-        <span className="flex items-center justify-between gap-3">
-          Un paso antes de seguir
-          {opens ? (
-            <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
-              2 de 4
-            </span>
-          ) : null}
-        </span>
+        "Un paso antes de seguir"
       }
       aside={
         opens ? (

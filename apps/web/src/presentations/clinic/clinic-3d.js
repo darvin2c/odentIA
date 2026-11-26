@@ -1,4 +1,4 @@
-// La v2 de la presentación (/presentacion/fundadores?v2): una clínica en maqueta llena de gente que se puede
+// La v2 de la presentación (/presentacion?v2): una clínica en maqueta llena de gente que se puede
 // tocar. Cada momento es un tema y con qué trabaja la clínica: hoy, con un chatbot, con un CRM o con odentIA.
 // Lo que pasa lo decide clinic-sim.js, lo que se lee está en clinic-slide.html y esto solo lo dibuja y atiende
 // los clics. Se carga solo cuando hace falta (deck.js), así la v1 no la baja.

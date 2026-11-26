@@ -18,7 +18,8 @@ import {
   mergeClients,
   UNKNOWN_CONTACT_NAME,
 } from "./admin-clients.js"
-import { submitWaitlistRequest, webPageOf } from "./saas-founders.js"
+import { webPageOf } from "./saas-founders.js"
+import { submitWaitlistRequest } from "./waitlist-test-kit.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import {
   mailboxOf,

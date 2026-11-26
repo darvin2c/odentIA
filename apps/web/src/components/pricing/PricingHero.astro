@@ -1,41 +1,53 @@
 ---
-// Portada de Precios: «No pagas por el software. Pagas por el trabajo hecho.», el «Desde» con el
-// precio más bajo del plan que se muestra, el sistema a USD 0 y, con Fundadores, «Aprovecha». Al lado,
-// la cuenta de un jueves que se llena fila por fila (isla WorkDayLedger). Sin un plan publicado, la
-// misma portada sin cifras ni cuenta: el h1 sigue en su sitio. Lienzo «Precios: por lo que hizo».
-import { businessDays, days, giftOf, money, shownPlan, valuePricesOf } from "../../lib/pricing"
+// Portada de Precios: «Todo el sistema. Pagas con el trabajo de tus agentes.», la cuota del plan que
+// se muestra y que vuelve como crédito, lo que cuesta cada trabajo, lo incluido y la prueba. Al lado,
+// la cuenta de un jueves que se llena fila por fila (isla WorkDayLedger). Si el plan no tiene cuota,
+// la cifra es el trabajo más barato («Desde»). Sin un plan publicado, la misma portada sin cifras ni
+// cuenta: el h1 sigue en su sitio. Lienzo «Precios: por lo que hizo».
+import { offerOf, trialText } from "../../lib/offer"
+import { money, shownPlan, valuePricesOf } from "../../lib/pricing"
 import { HAS_CLIO, WORDS } from "../../lib/product"
 import { SHOWS_VALUE } from "../../lib/value"
 import { contactHref, ctaOf } from "../../lib/site"
+import GiftText from "../GiftText.astro"
 import WorkDayLedger from "./WorkDayLedger"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
 const prices = valuePricesOf(plan)
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
-const list = pricing.list
+const { fee, credit } = offerOf(pricing)
+const trial = trialText(pricing)
 /** El trabajo más barato: una respuesta de Sofi o, donde Clío trabaja, una consulta simple suya. */
 const cheapest = (p: typeof plan) => {
   const prices = [p?.tiers.informa, HAS_CLIO ? p?.tiers.simple : null].filter((value): value is number => value != null)
   return prices.length ? Math.min(...prices) : null
 }
 const from = cheapest(plan)
-/** Qué cuesta ese «Desde»: los dos si cuestan lo mismo; si no, el más barato y el otro con su precio. */
-const fromWhat = (() => {
+/** «una respuesta de Sofi, USD 0,20; una receta de Clío, USD 0,10»: lo que cuesta cada trabajo simple. */
+const examples = (() => {
   const sofi = plan?.tiers.informa ?? null
   const clio = HAS_CLIO ? (plan?.tiers.simple ?? null) : null
-  if (!plan || sofi === null) return "Una receta de Clío"
-  if (clio === null) return "Una respuesta de Sofi"
-  if (sofi === clio) return "Una respuesta de Sofi o una receta de Clío"
-  return sofi < clio
-    ? `Una respuesta de Sofi; una receta de Clío, ${money(clio, plan.currency)}`
-    : `Una receta de Clío; una respuesta de Sofi, ${money(sofi, plan.currency)}`
+  if (!plan) return null
+  const parts = [
+    sofi !== null ? `una respuesta de Sofi, ${money(sofi, plan.currency)}` : null,
+    clio !== null ? `una receta de Clío, ${money(clio, plan.currency)}` : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join("; ") : null
 })()
-const fromBefore = founder && list ? cheapest(list) : null
-const discount = founder ? pricing.founders?.discountPercent : null
-const months = founder ? pricing.founders?.guaranteeMonths : null
+/** «Sofi, Clío y Argos»: los agentes que trabajan en este producto. */
+const names = HAS_CLIO ? "Sofi, Clío y Argos" : "Sofi y Argos"
+/** Con cuota: lo que cuesta cada trabajo y de dónde se descuenta. Sin cuota (rama genérica): solo lo que cuesta. */
+const explain = (() => {
+  if (!plan) return null
+  const work = examples ? `: ${examples}; lo que te trae ${WORDS.patients}, más.` : "."
+  if (fee && credit) return `Cada trabajo de ${names} se descuenta de tus ${credit}${work} Si un mes hacen más, pagas la diferencia.`
+  if (fee) return `Además, cada trabajo de ${names} tiene su precio${work}`
+  return `Sin cuota: pagas solo lo que hacen ${names}${work}`
+})()
+/** «al mes, que vuelven enteros como crédito», o lo que diga el plan si el crédito no es toda la cuota. */
+const feePer =
+  plan && fee ? (credit && plan.credit === plan.plan ? "al mes, que vuelven enteros como crédito" : credit ? `al mes, con ${credit} de crédito para tus agentes` : "al mes") : null
 const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.slice(1)}, sedes y usuarios`
 ---
 <section class:list={["hero", "ph", { split: prices }]}>
@@ -43,37 +55,34 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
   <div class="wrap in">
     <div class="copy">
       <span class="tag tag-d rise">[ Precios ]</span>
-      <h1 class="t rise d1">No pagas por el software. <span class="acc">Pagas por el trabajo hecho.</span></h1>
-      {plan && from !== null ? (
+      <h1 class="t rise d1">Todo el sistema. <span class="acc">Pagas con el trabajo de tus agentes.</span></h1>
+      {plan && fee ? (
+        <div class="from rise d2">
+          <div class="from-row">
+            <span class="from-amt">{fee}</span>
+            <span class="from-per">{feePer}</span>
+          </div>
+          {explain ? <span class="from-what">{explain}</span> : null}
+        </div>
+      ) : plan && from !== null ? (
         <div class="from rise d2">
           <span class="from-word">Desde</span>
           <div class="from-row">
             <span class="from-amt">{money(from, plan.currency)}</span>
             <span class="from-per">por trabajo</span>
-            {fromBefore !== null && fromBefore !== from ? <s class="from-was"><span class="sr">antes </span>{money(fromBefore, plan.currency)}</s> : null}
           </div>
-          <span class="from-what">{`${fromWhat}; lo que te trae ${WORDS.patients}, más.`}</span>
+          {explain ? <span class="from-what">{explain}</span> : null}
         </div>
       ) : (
         <p class="lead lead-d rise d2">
-          Cada cosa que hace un agente es un trabajo con su precio: lo simple cuesta poco y lo que te trae pacientes cuesta
+          Cada cosa que hace un agente es un trabajo con su precio: lo simple cuesta poco y lo que te trae {WORDS.patients} cuesta
           más. El sistema completo viene incluido, sin límite de {WORDS.clinicians}, sedes ni usuarios.
         </p>
       )}
       {plan ? (
         <div class="chips rise d2">
-          <a class="chip" href="#incluido">El sistema completo <b>{money(0, plan.currency)}</b></a>
+          <a class="chip" href="#incluido">Agenda, historia, caja y omnicanal <b>incluidos</b></a>
           <span class="chip">{people} <b>sin límite</b></span>
-        </div>
-      ) : null}
-      {founder && plan ? (
-        <div class="grab rise d3">
-          <span class="grab-tag">Aprovecha</span>
-          <span class="grab-text">
-            <b>Precio de Fundadores:</b>{" "}
-            {discount ? <>{discount} % menos en todo{months ? ` durante ${months} meses` : ""}</> : "precios menores"}
-            {gift ? <> y los primeros <b class="gift">{gift}</b> los pagamos nosotros</> : null}. <b>Lugares limitados.</b>
-          </span>
         </div>
       ) : null}
       <div class="ctas rise d3">
@@ -81,17 +90,11 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
         {prices && SHOWS_VALUE ? <a class="btn btn-g" href="#calcula">Calcula tu mes</a> : null}
       </div>
       <p class="mono note rise d4">
-        {founder ? (
-          `Sin cuota y sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}.`
-        ) : plan && gift ? (
-          <>Sin tarjeta para probar: {days(plan.trialDays)} con <span class="gift">{gift}</span> de crédito para tus agentes.</>
-        ) : !plan ? (
+        {trial ? (
+          <GiftText text={`${trial}, sin tarjeta. Si no sigues, tus datos quedan y solo se pueden leer.`} />
+        ) : (
           // Sin plan publicado, lo mismo que las páginas de cada agente: no hay cifras que esconder.
           <>Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</>
-        ) : pricing.signupMode === "invitacion" ? (
-          `Sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}.`
-        ) : (
-          "Sin tarjeta para probar. Tú decides qué puede hacer cada agente."
         )}
       </p>
     </div>
@@ -101,7 +104,7 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
           client:load
           prices={prices}
           currency={plan.currency}
-          note={founder ? "Ejemplo con precios de Fundadores." : `Ejemplo con los precios del ${plan.name}.`}
+          note={`Ejemplo con los precios del ${plan.name}.`}
         />
       </div>
     ) : null}
@@ -125,7 +128,6 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
   .from-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
   .from-amt { font-size: clamp(56px, 5.6vw, 80px); font-weight: 800; letter-spacing: -.055em; line-height: .9; }
   .from-per { font-size: 20px; font-weight: 600; color: var(--on-night-2); }
-  .from-was { font-size: 22px; color: var(--on-night-3); }
   .from-what { font-size: 16px; line-height: 1.45; color: var(--on-night-2); }
   .chips { display: flex; flex-wrap: wrap; gap: 10px; }
   .chip { border-radius: 999px; padding: 9px 14px; font-size: 15px; font-weight: 600; color: var(--on-night); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sky-2) 40%, transparent); text-decoration: none; }
@@ -133,11 +135,6 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
   :global(:root[data-brand="latidia"]) .chip b { color: #ece4fb; }
   :global(:root[data-brand="vistia"]) .chip b { color: #dcfce7; }
   a.chip:hover { background: color-mix(in srgb, var(--sky-2) 10%, transparent); }
-  .grab { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; border-radius: 16px; padding: 12px 16px; background: color-mix(in srgb, var(--amber) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 50%, transparent); }
-  .grab-tag { flex: none; border-radius: 8px; padding: 6px 10px; background: var(--amber); color: var(--night); font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-  .grab-text { flex: 1 1 260px; font-size: 16px; line-height: 1.45; }
-  .grab-text .gift { color: var(--amber); }
-  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .ledger { min-width: 0; }
   @media (max-width: 960px) {
     .ph { padding: 110px 0 64px; }
@@ -147,7 +144,6 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
     .copy { gap: 18px; }
     .from-per { font-size: 16px; }
     .from-what { font-size: 15px; }
-    .grab-text { font-size: 15px; }
-    .ctas .btn { flex: 1 1 100%; }
+      .ctas .btn { flex: 1 1 100%; }
   }
 </style>

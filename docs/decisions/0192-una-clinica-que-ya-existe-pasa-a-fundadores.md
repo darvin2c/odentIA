@@ -1,6 +1,6 @@
 # 0192 · Una clínica que ya existe pasa a Fundadores desde la administración
 
-Fecha: 2026-11-15 · Estado: aceptada · Extiende la [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) (la invitación Fundadores) y sigue a la [0185](0185-el-arm-de-la-administracion.md) (el ARM)
+Fecha: 2026-11-15 · Estado: aceptada; generalizada por la [0221](0221-termina-fundadores-y-el-alta-es-libre.md) («Cambiar a un plan especial») · Extiende la [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) (la invitación Fundadores) y sigue a la [0185](0185-el-arm-de-la-administracion.md) (el ARM)
 
 ## Problema
 

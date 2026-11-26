@@ -8,7 +8,7 @@ import { agentConfig } from "@odentia/db/schema/crm"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
 import { portalPolicy } from "@odentia/db/schema/portal-access"
 import { reportDigest } from "@odentia/db/schema/reports"
-import { saasSignupPolicy, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, ne } from "drizzle-orm"
 import { test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test"
 import { hashPassword } from "better-auth/crypto"
@@ -64,7 +64,7 @@ export async function asClinicFromBefore(db: Db, orgId: string): Promise<void> {
 /** La contraseña de las cuentas de prueba (su hash lo da `passwordHash`). */
 export const PASSWORD = "e2e-secreto-123"
 type TestFixtures = { createOwner: (tag: string, options?: { born?: "encendida" }) => Promise<OwnerFixture>; owner: OwnerFixture }
-type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number; signupOpen: void }
+type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   fixtureDb: [async ({}, use) => {
@@ -74,13 +74,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     try { await use(connection.db) } finally { await connection.close() }
   }, { scope: "worker" }],
   passwordHash: [async ({}, use) => { await use(await hashPassword(PASSWORD)) }, { scope: "worker" }],
-  // La migración deja el alta «solo con invitación» (Fundadores, issue 165). Los recorridos abren
-  // clínicas desde el alta sin invitación: el run la deja abierta en cada producto (ADR 0093). La política es global, así que
-  // ningún caso la cambia; el de Fundadores usa una invitación, que sirve con cualquiera.
-  signupOpen: [async ({ fixtureDb }, use) => {
-    await fixtureDb.update(saasSignupPolicy).set({ mode: "abierta", medicalMode: "abierta", opticalMode: "abierta", updatedAt: new Date() })
-    await use()
-  }, { scope: "worker", auto: true }],
   nextEventId: [async ({}, use, workerInfo) => {
     let counter = 0
     await use(() => {

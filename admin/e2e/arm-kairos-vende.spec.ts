@@ -118,24 +118,40 @@ test("Kairós vende: horario y sala en Equipo, el interruptor, responde y agenda
   await enterAdmin(page, user.password)
   const tag = randomUUID().slice(0, 6)
   const room = `https://meet.example.test/sala-${tag}`
-  // Un plan Fundadores publicado en la web, propio del caso: Kairós da sus precios tal como vienen.
-  const planCode = `kv-${tag}`
-  await fixtureDb.insert(saasPlan).values({
-    code: planCode,
-    name: `Fundadores ${tag}`,
-    product: "dental",
-    currency: "USD",
-    priceCents: 0,
-    creditCents: 10_000,
-    conversationMicros: 500_000,
-    consultationMicros: 400_000,
-    recoveryMicros: 2_000_000,
-    trialCreditCents: 10_000,
-    trialMaxCreditCents: 10_000,
-    trialDays: 30,
-    seatLimit: 50,
-    showOnWeb: true,
-  })
+  // El plan de lista de odentIA, publicado en la web: Kairós da sus precios tal como vienen (desde el
+  // alta libre, ADR 0221, solo el de lista). Si otro caso ya lo creó, se usa ese.
+  const listPlan = async () =>
+    (
+      await fixtureDb
+        .select({ id: saasPlan.id, name: saasPlan.name })
+        .from(saasPlan)
+        .where(and(eq(saasPlan.product, "dental"), eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
+        .limit(1)
+    )[0]
+  if (!(await listPlan())) {
+    await fixtureDb
+      .insert(saasPlan)
+      .values({
+        code: `kv-${tag}`,
+        name: `Lanzamiento ${tag}`,
+        product: "dental",
+        currency: "USD",
+        priceCents: 0,
+        creditCents: 10_000,
+        conversationMicros: 500_000,
+        consultationMicros: 400_000,
+        recoveryMicros: 2_000_000,
+        trialCreditCents: 10_000,
+        trialMaxCreditCents: 10_000,
+        trialDays: 30,
+        isDefault: true,
+        showOnWeb: true,
+      })
+      .onConflictDoNothing()
+  }
+  const plan = await listPlan()
+  if (!plan) throw new Error("sin plan de lista de odentIA")
+  await fixtureDb.update(saasPlan).set({ showOnWeb: true }).where(eq(saasPlan.id, plan.id))
 
   try {
     // --- Equipo: su horario para presentaciones (todos los días, 9 a 13) y su sala ---------
@@ -209,7 +225,7 @@ Turnos de Kairós: ${JSON.stringify(turns)}`)
     }
     const prices = await waitKairos(1)
     expect(prices).toContain("Hola, soy Kairós, del Grupo Sallca.")
-    expect(prices).toContain(`Fundadores ${tag}`)
+    expect(prices).toContain(plan.name)
     expect(prices).toMatch(/— Kairós · odentIA$/)
     // Nombró odentIA: la conversación lo sabe sin preguntar (A1, un solo número para todas).
     const [known] = await fixtureDb
@@ -398,6 +414,7 @@ Turnos de Kairós: ${JSON.stringify(turns)}`)
   } finally {
     // El interruptor es de toda la administración: los demás recorridos lo esperan apagado.
     await api(page, "PUT", "/api/admin/kairos/sells", undefined, { enabled: false })
-    await fixtureDb.delete(saasPlan).where(eq(saasPlan.code, planCode))
+    // Solo si lo creó este caso; el de otro caso se queda.
+    await fixtureDb.delete(saasPlan).where(eq(saasPlan.code, `kv-${tag}`)).catch(() => undefined)
   }
 })

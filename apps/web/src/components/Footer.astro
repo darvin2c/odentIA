@@ -1,17 +1,11 @@
 ---
-// Pie: el mapa completo de la web y las páginas legales. Con `legalOnly`, solo la fila legal (la
-// solicitud de Fundadores): el Libro de Reclamaciones sigue a la vista sin el resto de la web.
+// Pie: el mapa completo de la web y las páginas legales.
 import { WORDS } from "../lib/product"
 import { TITULAR } from "../lib/legal/types"
 import { footerGroups, legalLinks, loginUrl } from "../lib/site"
-
-interface Props {
-  legalOnly?: boolean
-}
-const { legalOnly = false } = Astro.props
 ---
-<footer class:list={["foot", { short: legalOnly }]}>
-  {legalOnly ? null : <div class="wrap grid" style={`--cols: ${Math.max(4, footerGroups.length)}`}>
+<footer class="foot">
+  <div class="wrap grid" style={`--cols: ${Math.max(4, footerGroups.length)}`}>
     <div class="brand">
       <span class="name">{WORDS.name}</span>
       <span>El <abbr title="Agentic Relationship Management">ARM</abbr> para {WORDS.audience} de habla hispana: tus agentes atienden, agendan y hacen seguimiento.</span>
@@ -23,9 +17,9 @@ const { legalOnly = false } = Astro.props
         {g.links.map((l) => <a href={l.href}>{l.label}</a>)}
       </nav>
     ))}
-  </div>}
+  </div>
   <div class="wrap legal">
-    <nav aria-label="Legal">{legalOnly ? <a class="enter" href={loginUrl}>Ingresar</a> : null}{legalLinks.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
+    <nav aria-label="Legal">{legalLinks.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
     <span class="who">{TITULAR.razonSocial} · RUC {TITULAR.ruc} · Precios en dólares, más los impuestos de tu país.</span>
   </div>
 </footer>
@@ -47,8 +41,6 @@ const { legalOnly = false } = Astro.props
   .legal { margin-top: 40px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; font-size: 13px; }
   .legal nav { flex-direction: row; flex-wrap: wrap; gap: 0 22px; }
   .legal a { font-size: 13px; }
-  .short { padding: 0 0 24px; }
-  .short .legal { margin-top: 0; border-top: 0; }
   @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .brand { grid-column: 1 / -1; } }
   /* En el teléfono, dos columnas: con cada enlace de 44 px, una sola columna hacía el pie muy largo. */
   @media (max-width: 480px) { .grid { gap: 24px 16px; } }

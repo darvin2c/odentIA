@@ -1,6 +1,6 @@
 import { isClinicalProduct, productWords } from "@odentia/clinical"
 import { Avatar, AvatarFallback, AvatarImage, BRAND_PLACES, Button, buttonVariants, Input, toast } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, RowActions, type RowActionItem, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ChevronRight, LogOut, Plus, Search } from "lucide-react"
@@ -11,10 +11,10 @@ import { adminAccessQuery } from "../../lib/admin-access"
 import { OrganizationsPageSkeleton, OrganizationsSkeleton } from "../../components/skeletons/home"
 import { StaffEntry } from "../../components/staff-entry"
 import { apiFetch } from "../../lib/api"
-import { API_URL, authClient, authFetch } from "../../lib/auth-client"
+import { authClient, authFetch } from "../../lib/auth-client"
 import { authError } from "../../lib/auth-error"
 import { storedInvitation } from "../../lib/founders"
-import { domainOf, storeUrl, tenantUrl, webUrl } from "../../lib/host"
+import { domainOf, storeUrl, tenantUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
 
 const appRouteApi = getRouteApi("/_app")
@@ -29,20 +29,6 @@ export const Route = createFileRoute("/_app/")({
 })
 
 type BillingStatus = z.infer<typeof billingStatusSchema>
-
-/** Si abrir una clínica pide invitación (Fundadores, issue 165); lo decide el servidor, esto solo lo explica. */
-const signupModeQuery = {
-  queryKey: ["public", "sign-up"],
-  queryFn: async () => {
-    const res = await fetch(`${API_URL}/api/public/sign-up`)
-    if (!res.ok) throw new Error(`Error ${res.status}`)
-    return z
-      .object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta"), waitlistAnswerDays: z.number().optional() })
-      .passthrough()
-      .parse(await res.json())
-  },
-  staleTime: 60_000,
-}
 
 /** Con este número de clínicas aparece el buscador (caso asesor, issue 114). */
 const BUSCADOR_DESDE = 6
@@ -170,11 +156,11 @@ function OrgsPage() {
   const { session } = appRouteApi.useRouteContext()
   const search = Route.useSearch()
   const organizations = useQuery(accountOrganizationsQuery)
+  const navigate = useNavigate()
   const places = useQuery(accountPlacesQuery)
   const invitations = useQuery(accountInvitationsQuery)
   const staff = useQuery(adminAccessQuery)
-  const signUp = useQuery(signupModeQuery)
-  // La invitación Fundadores que trajo el enlace del correo, si quedó guardada al crear la cuenta.
+  // La invitación interna (el plan negociado con ventas) que trajo el enlace, si quedó guardada al crear la cuenta.
   const [founderToken, setFounderToken] = useState<string | null>(null)
   useEffect(() => setFounderToken(storedInvitation()), [])
   const [ultimaGuardada, setUltima] = useState<{ organizationId: string; at: number | null } | null>(null)
@@ -214,12 +200,6 @@ function OrgsPage() {
     onSuccess: async () => { setBloquearAuto(true); setLeaving(null); await queryClient.invalidateQueries({ queryKey: ["account"] }); toast.success("Saliste de la organización") },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
-  // La política de alta la decide el servidor (Fundadores, issue 165): si aún
-  // no respondió, no se ofrece crear ni se explica nada.
-  const politicaLista = signUp.isSuccess
-  const invitationOnly = politicaLista && signUp.data?.signupMode === "invitacion"
-  const canCreate = founderToken !== null || (politicaLista && !invitationOnly)
-
   const todas = useMemo(() => organizations.data ?? [], [organizations.data])
   // Las tiendas de gestorIA que se pueden abrir desde aquí (sin el dominio de gestorIA, ninguna).
   const tiendas = (places.data ?? []).flatMap((place) => {
@@ -261,6 +241,20 @@ function OrgsPage() {
     window.location.replace(tenantUrl(unicaLista.slug, "/home", unicaLista.product))
   }, [search.cambiar, bloquearAuto, unicaLista, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, places.isPending, tiendas.length, puertasListas, session.userId])
 
+  // Sin clínicas, sin invitaciones pendientes ni tiendas, se sigue directo a abrir la clínica (el
+  // alta es libre, ADR 0221): «Elige tu clínica» vacío no tiene nada que elegir.
+  const autoAlta = useRef(false)
+  useEffect(() => {
+    if (autoAlta.current || search.cambiar === 1 || bloquearAuto) return
+    if (!organizations.isSuccess || todas.length > 0) return
+    if (!invitations.isSuccess || (invitations.data?.length ?? 0) > 0) return
+    if (!staff.isSuccess || staff.data.staff) return
+    if (places.isPending || tiendas.length > 0) return
+    if (!puertasListas) return
+    autoAlta.current = true
+    void navigate({ to: "/onboarding", search: { continue: undefined, invitacion: founderToken ?? undefined } })
+  }, [search.cambiar, bloquearAuto, organizations.isSuccess, todas.length, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, places.isPending, tiendas.length, puertasListas, navigate, founderToken])
+
   const pendientes = invitations.data ?? []
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-4 py-10 sm:py-14">
@@ -272,7 +266,7 @@ function OrgsPage() {
       {invitations.isError && <ErrorState title="No se pudieron cargar tus invitaciones" error={invitations.error} onRetry={() => void invitations.refetch()} />}
       {pendientes.length > 0 && <section aria-labelledby="invitations-title" className="space-y-3"><h2 id="invitations-title" className="text-sm font-semibold">Invitaciones pendientes</h2><ul className="space-y-3">{pendientes.map((invitation) => <InvitationItem key={invitation.id} invitation={invitation} onRespond={() => setBloquearAuto(true)} />)}</ul></section>}
       <section aria-label="Clínicas" className="space-y-3">
-        {organizations.isPending ? <SkeletonRegion message="Cargando clínicas…"><OrganizationsSkeleton /></SkeletonRegion> : organizations.isError ? <ErrorState title="No se pudieron cargar tus clínicas" error={organizations.error} onRetry={() => void organizations.refetch()} /> : todas.length === 0 ? (!politicaLista && founderToken === null ? (signUp.isError ? <ErrorState title="No se pudo comprobar cómo crear una clínica" error={signUp.error} onRetry={() => void signUp.refetch()} /> : <LoadingState message="Comprobando cómo crear una clínica…" />) : canCreate ? <EmptyState title="Todavía no perteneces a una clínica" description="Acepta una invitación o crea la cuenta de tu clínica. Si necesitas ayuda, puedes escribir a soporte." /> : <NoInvitation email={session.email} />) : (
+        {organizations.isPending ? <SkeletonRegion message="Cargando clínicas…"><OrganizationsSkeleton /></SkeletonRegion> : organizations.isError ? <ErrorState title="No se pudieron cargar tus clínicas" error={organizations.error} onRetry={() => void organizations.refetch()} /> : todas.length === 0 ? <EmptyState title="Todavía no perteneces a una clínica" description={pendientes.length > 0 ? "Acepta una invitación o crea la cuenta de tu clínica." : `Crea la cuenta de tu clínica: empieza hoy. Si trabajas en una que ya usa ${panelWords.name}, pide a quien la administra que te invite a ${session.email}.`} /> : (
           <>
             {todas.length >= BUSCADOR_DESDE && (
               <div className="relative">
@@ -297,11 +291,12 @@ function OrgsPage() {
         </section>
       )}
       <footer className="flex flex-col items-center gap-3 border-t pt-6">
-        {canCreate && (founderToken ? (
+        {founderToken ? (
           <Button render={<Link to="/onboarding" search={{ continue: undefined, invitacion: founderToken }} />}>Abrir mi clínica</Button>
         ) : (
-          <Button variant="outline" render={<Link to="/onboarding" search={{ continue: undefined }} />}><Plus className="size-4" aria-hidden />{todas.length > 0 ? "Crear otra clínica" : "Crear mi clínica"}</Button>
-        ))}
+          // Sin clínicas, crear la suya es lo que sigue: el botón principal.
+          <Button variant={todas.length > 0 || pendientes.length > 0 || organizations.isPending ? "outline" : "default"} render={<Link to="/onboarding" search={{ continue: undefined }} />}><Plus className="size-4" aria-hidden />{todas.length > 0 ? "Crear otra clínica" : "Crear mi clínica"}</Button>
+        )}
         <p className="text-sm text-muted-foreground">¿Necesitas ayuda? <Link to="/support" className="underline">Contacta con soporte</Link></p>
       </footer>
       <ConfirmDialog open={leaving !== null} title={`Salir de ${leaving?.organizationName ?? "la organización"}`} description="Perderás el acceso a esta clínica. Lo que registraste se conserva con tu autoría; para volver necesitarás una invitación." confirmLabel="Salir de la organización" pending={leave.isPending} onClose={() => setLeaving(null)} onConfirm={() => { if (leaving) leave.mutate(leaving) }} />
@@ -429,37 +424,4 @@ function InvitationItem({ invitation, onRespond }: { invitation: AccountInvitati
     <div className="flex gap-2"><Button variant="ghost" disabled={response.isPending} onClick={() => setRejecting(true)}>Rechazar</Button><Button disabled={response.isPending} onClick={() => response.mutate(true)}>{response.isPending ? "Guardando…" : "Aceptar"}</Button></div>
     <ConfirmDialog open={rejecting} title="Rechazar invitación" description={`No entrarás a ${invitation.organizationName}. Si cambias de opinión, tendrán que invitarte de nuevo.`} confirmLabel="Rechazar invitación" pending={response.isPending} onClose={() => setRejecting(false)} onConfirm={() => response.mutate(false)} />
   </li>
-}
-/**
- * Sin clínica y sin invitación mientras se entra por invitación (Fundadores,
- * tablero 10): dos salidas, pedir la invitación o pedir que la clínica invite.
- * El servidor tampoco deja abrir una clínica sin invitación.
- */
-function NoInvitation({ email }: { email: string }) {
-  // En cuántos días hábiles se responde: las condiciones comerciales que rigen.
-  const answerDays = useQuery(signupModeQuery).data?.waitlistAnswerDays
-  return (
-    <div className="flex flex-col gap-4 rounded-xl border bg-card p-6">
-      <div>
-        <p className="text-lg font-semibold">Todavía no perteneces a una clínica</p>
-        <p className="mt-1 text-sm text-muted-foreground">Por ahora se entra a {panelWords.name} con invitación: estamos abriendo con un grupo de clínicas Fundadoras.</p>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
-        <div>
-          <p className="font-medium">Quiero usar {panelWords.name} en mi {panelWords.place.one}</p>
-          <p className="text-sm text-muted-foreground">
-            Pide tu invitación en la web
-            {answerDays ? `; te respondemos en ${answerDays} ${answerDays === 1 ? "día hábil" : "días hábiles"}` : ""}.
-          </p>
-        </div>
-        <a href={webUrl("/solicitar-invitacion")} className={buttonVariants()}>Solicitar invitación</a>
-      </div>
-      <div className="rounded-lg border p-4">
-        <p className="font-medium">Trabajo en {panelWords.place.indefinite} que ya usa {panelWords.name}</p>
-        <p className="text-sm text-muted-foreground">
-          Pide a quien administra tu clínica que te invite{email ? ` a ${email}` : ""}. La invitación aparecerá aquí.
-        </p>
-      </div>
-    </div>
-  )
 }

@@ -1134,7 +1134,7 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 .thesis .h1 { font-size: 112px; }
 .thesis .h1 span { display: block; }
 
-/* ===== 13 · Fundador ===== */
+/* ===== 13 · Empieza gratis ===== */
 .perks { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; grid-template-rows: auto auto; gap: 22px; }
 .perk { border-radius: 24px; padding: 28px; background: rgba(13,38,47,.9); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .perk .k { font-size: 58px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--sky); }
@@ -1169,6 +1169,8 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 .res .coin11 .from { font-size: .62em; }
 .pr.head { padding: 16px 40px; font-family: var(--agent); font-size: 18px; color: var(--on-3); letter-spacing: .06em; text-transform: uppercase; }
 .pr.head span:nth-child(2), .pr.head span:nth-child(4) { text-align: right; }
+/* Solo el plan de lista: qué se cobra y su precio. */
+.pr.two { grid-template-columns: 1fr 340px; }
 .callback { display: flex; align-items: center; gap: 26px; font-size: 28px; color: var(--on-2); padding: 20px 30px; border-radius: 20px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
 .callback s { color: var(--on-3); }
 .callback b { color: var(--sky); font-size: 40px; }
@@ -1176,17 +1178,17 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 /* ===== 15 · Cierre ===== */
 .close { justify-content: center; }
 /* El cierre: la oferta y qué hacer, juntos. Se queda en pantalla mientras se conversa. */
-.layer.founder-last { padding: 84px 140px 118px; gap: 22px; }
-.founder-last .h2 { font-size: 68px; }
-.founder-last .perks { gap: 18px; }
-.founder-last .perk { padding: 24px 26px; gap: 8px; border-radius: 22px; }
-.founder-last .perk .k { font-size: 52px; }
-.founder-last .perk h3 { font-size: 27px; }
-.founder-last .perk p { font-size: 20px; line-height: 1.36; }
-.founder-last .perk.hero .k { font-size: 96px; }
-.founder-last .perk.hero h3 { font-size: 34px; }
-.founder-last .perk.hero p { font-size: 22px; }
-.founder-last .perk.next .k { font-size: 28px; }
+.layer.start-last { padding: 84px 140px 118px; gap: 22px; }
+.start-last .h2 { font-size: 68px; }
+.start-last .perks { gap: 18px; }
+.start-last .perk { padding: 24px 26px; gap: 8px; border-radius: 22px; }
+.start-last .perk .k { font-size: 52px; }
+.start-last .perk h3 { font-size: 27px; }
+.start-last .perk p { font-size: 20px; line-height: 1.36; }
+.start-last .perk.hero .k { font-size: 96px; }
+.start-last .perk.hero h3 { font-size: 34px; }
+.start-last .perk.hero p { font-size: 22px; }
+.start-last .perk.next .k { font-size: 28px; }
 .enter { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px 40px; padding: 24px 32px; border-radius: 24px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
 .enter-t { font-size: 38px; font-weight: 800; letter-spacing: -.015em; }
 .enter-t span { color: var(--sky); }
@@ -1274,7 +1276,7 @@ html.stacked body { margin: 0; }
 
 <p class="turn" id="turn"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="10" y="4" width="12" height="22" rx="2.5"/><path d="M14.5 22.5h3"/><path d="M27 17a10 10 0 0 1-8 9.8M24.5 23.8l-5.5 3 1.2-5.7" /></svg><span>Gira el teléfono para ver la presentación</span></p>
 <div class="viewport" id="viewport">
-<div class="stage" id="stage" role="region" aria-roledescription="presentación" aria-label="Programa Fundadores de odentIA">
+<div class="stage" id="stage" role="region" aria-roledescription="presentación" aria-label="Presentación de odentIA">
 
 <!-- ============ Lo que creemos ============ -->
 <section class="slide" aria-label="Lo que creemos">
@@ -1554,30 +1556,30 @@ html.stacked body { margin: 0; }
   <div class="layer" data-scene="sys0">
     <span class="was"><s>¿Y mi agenda?</s></span>
     <span class="tag in">[ Con odentIA · El sistema completo ]</span>
-    <h2 class="h2 in" style="--d:.1s; font-size:70px">Todo lo de siempre, incluido. Y no se cobra.</h2>
+    <h2 class="h2 in" style="--d:.1s; font-size:70px">Todo lo de siempre, incluido en tu plan.</h2>
     <div class="mosaic" data-cur="{{cur}}">
-      <button type="button" class="mod" data-tap="mod" data-screen="agenda" data-what="Citas por profesional y unidad dental, con recordatorios." style="--i:0"><i></i><span>Agenda</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="historia" data-what="Antecedentes, alergias y atenciones, con firma." style="--i:1"><i></i><span>Historia clínica</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="odontograma" data-what="El arco completo y su evolución en el tiempo." style="--i:2"><i></i><span>Odontograma</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="periodontograma" data-what="Sondaje pieza por pieza y su clasificación." style="--i:3"><i></i><span>Periodontograma</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="tomografia" data-what="La tomografía en el navegador, con cortes y panorámica." style="--i:4"><i></i><span>Visor de tomografías</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="recetas" data-what="Con aviso de alergias, y se envían al paciente." style="--i:5"><i></i><span>Recetas y órdenes</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="consentimientos" data-what="Se firman en la unidad dental o en papel." style="--i:6"><i></i><span>Consentimientos</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="presupuestos" data-what="Hasta tres opciones, con su enlace para aceptar." style="--i:7"><i></i><span>Plan y presupuestos</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="caja" data-what="Pagos, saldos y deudas al día." style="--i:8"><i></i><span>Caja y cobros</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="finanzas" data-what="Lo que entra y lo que sale, por sede." style="--i:9"><i></i><span>Finanzas y gastos</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="comisiones" data-what="Lo que le toca a cada profesional." style="--i:10"><i></i><span>Comisiones</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="inventario" data-what="Materiales, stock y compras." style="--i:11"><i></i><span>Inventario y compras</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="portal" data-what="Su cita, sus papeles y su presupuesto, desde el celular." style="--i:12"><i></i><span>Portal del paciente</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="oportunidades" data-what="Lo que falta cerrar y quién lo hace." style="--i:13"><i></i><span>Oportunidades y tareas</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="reportes" data-what="Pacientes, citas, cobros y lo que te dejó odentIA." style="--i:14"><i></i><span>Reportes</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-screen="equipo" data-what="Sin límite de personas; cada rol ve lo suyo." style="--i:15"><i></i><span>Sedes, equipo y permisos</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="agenda" data-what="Citas por profesional y unidad dental, con recordatorios." style="--i:0"><i></i><span>Agenda</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="historia" data-what="Antecedentes, alergias y atenciones, con firma." style="--i:1"><i></i><span>Historia clínica</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="odontograma" data-what="El arco completo y su evolución en el tiempo." style="--i:2"><i></i><span>Odontograma</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="periodontograma" data-what="Sondaje pieza por pieza y su clasificación." style="--i:3"><i></i><span>Periodontograma</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="tomografia" data-what="La tomografía en el navegador, con cortes y panorámica." style="--i:4"><i></i><span>Visor de tomografías</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="recetas" data-what="Con aviso de alergias, y se envían al paciente." style="--i:5"><i></i><span>Recetas y órdenes</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="consentimientos" data-what="Se firman en la unidad dental o en papel." style="--i:6"><i></i><span>Consentimientos</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="presupuestos" data-what="Hasta tres opciones, con su enlace para aceptar." style="--i:7"><i></i><span>Plan y presupuestos</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="caja" data-what="Pagos, saldos y deudas al día." style="--i:8"><i></i><span>Caja y cobros</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="finanzas" data-what="Lo que entra y lo que sale, por sede." style="--i:9"><i></i><span>Finanzas y gastos</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="comisiones" data-what="Lo que le toca a cada profesional." style="--i:10"><i></i><span>Comisiones</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="inventario" data-what="Materiales, stock y compras." style="--i:11"><i></i><span>Inventario y compras</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="portal" data-what="Su cita, sus papeles y su presupuesto, desde el celular." style="--i:12"><i></i><span>Portal del paciente</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="oportunidades" data-what="Lo que falta cerrar y quién lo hace." style="--i:13"><i></i><span>Oportunidades y tareas</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="reportes" data-what="Pacientes, citas, cobros y lo que te dejó odentIA." style="--i:14"><i></i><span>Reportes</span><span class="z">Incluido</span></button>
+      <button type="button" class="mod" data-tap="mod" data-screen="equipo" data-what="Sin límite de personas; cada rol ve lo suyo." style="--i:15"><i></i><span>Sedes, equipo y permisos</span><span class="z">Incluido</span></button>
     </div>
     <div class="sys0">
       <div class="zero-br" aria-hidden="true"><b class="num">{{cur}} 0</b></div>
       <div class="sys0-copy">
-        <p class="sys0-k">Todo el sistema, cada mes.</p>
-        <p class="sys0-d">Sin pagar por módulos, usuarios ni sedes. Lo único que se paga es lo que hacen <b class="c-sky">Sofi</b>, <b class="c-mint">Clío</b> y <b class="c-amber">Argos</b>.</p>
+        <p class="sys0-k">Ningún módulo se cobra aparte.</p>
+        <p class="sys0-d">Sin pagar por módulos, usuarios ni sedes: tu plan vuelve como crédito para lo que hacen <b class="c-sky">Sofi</b>, <b class="c-mint">Clío</b> y <b class="c-amber">Argos</b>.</p>
       </div>
     </div>
     <div class="modtip" aria-live="polite"></div>
@@ -1588,7 +1590,7 @@ html.stacked body { margin: 0; }
     </div>
     <span class="tap">Toca un módulo para verlo funcionar</span>
   </div>
-  <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, odentIA tiene todo lo que ya usan: agenda, historia clínica con odontograma y periodontograma, caja, inventario, comisiones y más. Miren el precio de cada uno: cero. No cobramos el software, ni por módulo, ni por usuario, ni por sede. Lo único que se paga es el trabajo que hacen los agentes.</aside>
+  <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, odentIA tiene todo lo que ya usan: agenda, historia clínica con odontograma y periodontograma, caja, inventario, comisiones y más. Miren lo que cuesta aparte cada uno: cero. Todo va incluido en el plan, sin cobrar por módulo, por usuario ni por sede, y la cuota vuelve como crédito para el trabajo de los agentes.</aside>
 </section>
 
 <!-- ============ 10 · Control ============ -->
@@ -1628,15 +1630,15 @@ html.stacked body { margin: 0; }
     </div>
   </div>
   <div class="layer" data-scene="vals">
-    <span class="was"><s>La cuota llega igual</s></span>
+    <span class="was"><s>La cuota paga licencias</s></span>
     <span class="tag in">[ Con odentIA · Por lo que hizo ]</span>
-    <h2 class="h2 in" style="--d:.1s; font-size:58px; white-space:nowrap">No te cobramos el software. Te cobramos lo que hizo.</h2>
+    <h2 class="h2 in" style="--d:.1s; font-size:58px; white-space:nowrap">Todo el sistema. Pagas con el trabajo de tus agentes.</h2>
     <div class="results">
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span><i class="from">desde</i> {{L.informa$}}</span></span></div><p>Según lo que pasó en tu agenda: {{L.informa}} si responde, {{L.gestiona}} si mueve o reserva una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span><i class="from">desde</i> {{L.simple$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} una nota, una receta o un control, {{L.estandar}} con diagnóstico, odontograma o varias partes y {{L.completa}} si arma el presupuesto.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Pedro no tenía cita: Argos lo encontró y Sofi le escribió.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
     </div>
-    <p class="free in" style="--d:1s">El sistema completo cuesta <b class="c-sky">{{cur}} 0</b>. En el plan, la cuota vuelve entera como crédito para tus agentes.</p>
+    <p class="free in" style="--d:1s">{{systemLine}}</p>
     <span class="tap">Toca una tarjeta para verla de nuevo</span>
   </div>
   <div class="layer" data-scene="day">
@@ -1664,7 +1666,7 @@ html.stacked body { margin: 0; }
     </div>
     <span class="tap">Toca una fila para intentar cobrarla</span>
   </div>
-  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: no cobramos el software; cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Clic: y esto nunca se cobra: el spam que Sofi bloquea, los recordatorios de Argos, el borrador que descartaste, la pregunta que Argos no pudo responder y lo que hace tu equipo. Si preguntan: si Sofi duda y responde, esa conversación sí cuenta, y se puede pedir revisión; si reservó y no vino, la cita recuperada no se cobra, pero la conversación sí, como «gestiona». Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
+  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: el sistema va incluido en el plan, y la cuota vuelve como crédito; cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Clic: y esto nunca se cobra: el spam que Sofi bloquea, los recordatorios de Argos, el borrador que descartaste, la pregunta que Argos no pudo responder y lo que hace tu equipo. Si preguntan: si Sofi duda y responde, esa conversación sí cuenta, y se puede pedir revisión; si reservó y no vino, la cita recuperada no se cobra, pero la conversación sí, como «gestiona». Estos son los precios del plan; al final les muestro cómo empezar.</aside>
 </section>
 
 <!-- ============ 12 · Dos formas de trabajar ============ -->
@@ -1755,44 +1757,44 @@ html.stacked body { margin: 0; }
 <section class="slide" aria-label="Tu precio">
   <div class="layer" style="gap:26px">
     <span class="tag in">[ Tu precio ]</span>
-    <h2 class="h2 in" style="--d:.1s; font-size:62px">El mismo producto, a precio de clínica fundadora.</h2>
+    <h2 class="h2 in" style="--d:.1s; font-size:62px">Un solo plan, con todo el sistema.</h2>
     <div class="prices">
-      <div class="pr head in" style="--d:.2s"><span>Qué se cobra</span><span>Precio de lista</span><span></span><span>Fundadora</span></div>
-      <div class="pr in" style="--d:.3s"><span class="what">Cuota mensual<small>De lista vuelve como crédito</small></span><span class="base">{{L.fee$}}</span><span class="arrow">→</span><span class="now gift">{{F.fee$}}</span></div>
-      <div class="pr in" style="--d:.5s"><span class="what">Conversación<small><b class="c-sky">Sofi</b> · informa {{F.informa}} · gestiona {{F.gestiona}} · el paciente vino {{F.agenda}}</small></span><span class="base"><i class="from">desde</i> {{L.informa$}}</span><span class="arrow">→</span><span class="now" style="color:var(--sky)"><i class="from">desde</i> {{F.informa$}}</span></div>
-      <div class="pr in" style="--d:.7s"><span class="what">Consulta<small><b class="c-mint">Clío</b> · simple {{F.simple}} · estándar {{F.estandar}} · completa {{F.completa}} · cuando el odontólogo confirma</small></span><span class="base"><i class="from">desde</i> {{L.simple$}}</span><span class="arrow">→</span><span class="now" style="color:var(--mint)"><i class="from">desde</i> {{F.simple$}}</span></div>
-      <div class="pr in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="base">{{L.recovered$}}</span><span class="arrow">→</span><span class="now" style="color:var(--amber)">{{F.recovered$}}</span></div>
+      <div class="pr two head in" style="--d:.2s"><span>Qué se cobra</span><span>Precio</span></div>
+      <div class="pr two in" style="--d:.3s"><span class="what">Tu plan, al mes<small>{{feeNote}}</small></span><span class="now gift">{{L.fee$}}</span></div>
+      <div class="pr two in" style="--d:.5s"><span class="what">Conversación<small><b class="c-sky">Sofi</b> · informa {{L.informa}} · gestiona {{L.gestiona}} · el paciente vino {{L.agenda}}</small></span><span class="now" style="color:var(--sky)"><i class="from">desde</i> {{L.informa$}}</span></div>
+      <div class="pr two in" style="--d:.7s"><span class="what">Consulta<small><b class="c-mint">Clío</b> · simple {{L.simple}} · estándar {{L.estandar}} · completa {{L.completa}} · cuando el odontólogo confirma</small></span><span class="now" style="color:var(--mint)"><i class="from">desde</i> {{L.simple$}}</span></div>
+      <div class="pr two in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="now" style="color:var(--amber)">{{L.recovered$}}</span></div>
     </div>
-    <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><s>{{L.day$}}</s><span>→</span><b class="num">{{F.day$}}</b><span>como clínica fundadora.</span></div>
+    <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><b class="num">{{L.day$}}</b><span>{{dayNote}}</span></div>
     <p class="small in" style="--d:1.5s">{{extras}}Precios en {{currencyWord}}, sin impuestos. WhatsApp lo cobra Meta directamente a tu clínica.</p>
   </div>
-  <aside class="notes">Mismo producto, mismas funciones. La cuota desaparece y todo cuesta {{discount}} menos. El día que vimos hace un momento pasa de {{L.day$}} a {{F.day$}}.</aside>
+  <aside class="notes">Un solo plan, con todo el sistema y sin límite de odontólogos ni usuarios. La cuota del mes vuelve como crédito: cada trabajo de los agentes se descuenta de ahí y, si un mes hacen más, se paga la diferencia. El día que vimos hace un momento cuesta {{L.day$}}.</aside>
 </section>
 
-<!-- ============ 15 · Cierre: ser clínica fundadora ============ -->
-<section class="slide" aria-label="Ser clínica fundadora">
-  <div class="layer founder-last" data-scene="perks">
-    <span class="tag in">[ Ser clínica fundadora ]</span>
-    <h2 class="h2 in" style="--d:.1s">Lo que recibes por entrar primero.</h2>
+<!-- ============ 15 · Cierre: empieza gratis ============ -->
+<section class="slide" aria-label="Empieza gratis">
+  <div class="layer start-last" data-scene="perks">
+    <span class="tag in">[ Empieza gratis ]</span>
+    <h2 class="h2 in" style="--d:.1s">Empieza hoy, sin tarjeta.</h2>
     <div class="perks">
-      <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>Los primeros {{gift}} de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta {{giftDays}} para usarlos.</p></div>
-      <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{F.feeN}}" data-prefix="{{cur}} ">{{F.fee$}}</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
-      <div class="perk in" style="--d:.6s"><span class="k num" data-count="{{discountN}}" data-suffix=" %">{{discount}}</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
-      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante {{months}}.</p></div>
-      <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
+      <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>{{giftDays}} con {{gift}} para conversaciones, consultas y citas recuperadas.</p></div>
+      <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{L.feeN}}" data-prefix="{{cur}} ">{{L.fee$}}</span><h3>Tu plan, al mes</h3><p>{{afterTrial}}</p></div>
+      <div class="perk in" style="--d:.6s"><span class="k">Sin tarjeta</span><h3>Ni ahora ni después</h3><p>Cuando eliges tu plan, pagas y subes el comprobante.</p></div>
+      <div class="perk in" style="--d:.75s"><span class="k">Todo</span><h3>El sistema incluido</h3><p>Agenda, historia, caja y omnicanal desde el primer día.</p></div>
+      <div class="perk in" style="--d:.9s"><span class="k">Tus datos</span><h3>Si no sigues</h3><p>Quedan guardados y solo se pueden leer.</p></div>
       <div class="perk next in" style="--d:1.05s"><span class="k">Sin límite</span><h3>De odontólogos, sedes ni usuarios</h3><p>Cada odontólogo con su agenda y su firma; cada sede con su equipo. No se cobra por ninguno.</p></div>
     </div>
     <div class="enter in" style="--d:1.25s">
-      <p class="enter-t">Se entra por invitación. <span>Los lugares son pocos.</span></p>
+      <p class="enter-t">Empieza en minutos. <span>Sin esperar respuesta.</span></p>
       <ol>
-        <li><b>1. Pide tus <span class="gift">{{gift}}</span>.</b> Toma dos minutos.</li>
-        <li><b>2. Te respondemos en {{answer}},</b> por WhatsApp.</li>
-        <li><b>3. Abres tu clínica como fundadora.</b> La invitación llega por correo.</li>
+        <li><b>1. Creas tu cuenta</b> con tu correo.</li>
+        <li><b>2. Abres tu clínica</b> al momento.</li>
+        <li><b>3. Tus agentes empiezan</b> con tus <span class="gift">{{gift}}</span>.</li>
       </ol>
-      <div class="cta"><a class="btn" href="{{ctaHref}}">{{ctaLabel}}</a><span class="url">odentia32.com/solicitar-invitacion</span></div>
+      <div class="cta"><a class="btn" href="{{ctaHref}}">{{ctaLabel}}</a><span class="url">{{ctaUrl}}</span></div>
     </div>
   </div>
-  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por {{months}}. Y sin límite de odontólogos, sedes ni usuarios. Y cierren con la acción: entrar es por invitación y los lugares son pocos. Llenan la solicitud, les respondemos en {{answer}} y abren tu clínica con la invitación. Déjenla en pantalla mientras conversan. Gracias.</aside>
+  <aside class="notes">Así se empieza: {{giftDays}} con {{gift}} de regalo para que los agentes trabajen desde el primer día, sin tarjeta. Después, el plan de {{L.fee$}} que vuelve como crédito. Y sin límite de odontólogos, sedes ni usuarios. Si no siguen, sus datos quedan y se pueden leer. Cierren con la acción: crean su cuenta y abren tu clínica hoy mismo. Déjenla en pantalla mientras conversan. Gracias.</aside>
 </section>
 
 <div class="brand">{{logo}}</div>

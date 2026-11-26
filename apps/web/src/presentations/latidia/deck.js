@@ -86,7 +86,7 @@
     document.getElementById("count").textContent = String(n + 1).padStart(2, "0") + " / " + String(slides.length).padStart(2, "0");
     document.getElementById("progress").style.width = ((n + (k + 1) / layers.length) / slides.length * 100) + "%";
     const notes = slides[n].querySelector(".notes");
-    // El guion solo viene con /presentacion/fundadores?guion: la que reciben las clínicas no lo trae.
+    // El guion solo viene con /presentacion?guion: la que reciben las clínicas no lo trae.
     const notesTitle = document.getElementById("notesTitle"), notesText = document.getElementById("notesText");
     if (notesTitle) notesTitle.textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
     if (notesText) notesText.textContent = notes ? notes.textContent : "";
@@ -976,13 +976,13 @@
   let tipHide = 0;
   // Un módulo con pantalla de muestra abre su ventana al costado; los demás, el globo con lo que incluye.
   let screenRun = 0;
-  function openScreen(layer, b, cur) {
+  function openScreen(layer, b) {
     const make = window.ModuleScreens?.[b.dataset.screen];
     if (!make) return false;
     const screen = make(), msc = layer.querySelector(".msc"), run = ++screenRun;
     msc.querySelector(".msc-t").textContent = screen.title;
     msc.querySelector(".msc-s").textContent = screen.sub;
-    msc.querySelector(".msc-zero").textContent = cur + " 0 al mes";
+    msc.querySelector(".msc-zero").textContent = "Incluido en tu plan";
     msc.querySelector(".msc-b").replaceChildren(screen.body);
     layer.querySelector(".modtip").classList.remove("on");
     layer.classList.add("mopen");
@@ -1003,8 +1003,8 @@
     const cur = layer.querySelector(".mosaic").dataset.cur, mods = [...layer.querySelectorAll(".mod")];
     mods.forEach(m => m.classList.toggle("pick", m === b));
     rollZero(z, mods.indexOf(b), cur);
-    if (openScreen(layer, b, cur)) return;
-    tip.innerHTML = `<b>${b.children[1].textContent}</b><span>${b.dataset.what}</span><em>${cur} 0 al mes</em>`;
+    if (openScreen(layer, b)) return;
+    tip.innerHTML = `<b>${b.children[1].textContent}</b><span>${b.dataset.what}</span><em>Incluido en tu plan</em>`;
     const p = within(b, layer), up = p.y > 420;
     tip.style.left = Math.max(140, Math.min(1920 - 140 - 420, p.x + p.w / 2 - 210)) + "px";
     tip.style.top = up ? "" : p.y + p.h + 14 + "px";

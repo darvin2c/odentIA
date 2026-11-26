@@ -8,8 +8,6 @@
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
-import { giftOf, shownPlan } from "../../lib/pricing"
-import { WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
@@ -21,9 +19,6 @@ import "./om-page.css"
 
 const page = PAGES.omnicanal
 const pricing = Astro.locals.pricing
-const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
-const gift = giftOf(pricing)
 const cta = ctaOf(pricing)
 const trail: [string, string][] = [
   ["Inicio", "/"],
@@ -183,18 +178,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="om-faq">
       <Faq items={faq} />
     </div>
-    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta.">
-      <Fragment slot="text">
-        {gift ? (
-          founder ? (
-            <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-          ) : (
-            <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-          )
-        ) : (
-          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        )}
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta." />
   </div>
 </Base>

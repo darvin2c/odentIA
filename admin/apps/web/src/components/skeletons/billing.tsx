@@ -68,31 +68,6 @@ export function BillingHistorySkeleton() {
   )
 }
 
-/** «Alta de clínicas nuevas»: un grupo de dos opciones por producto. */
-export function BillingSignupSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {[0, 1].map((group) => (
-        <div key={group} className="flex flex-col gap-2">
-          <TextSm className="w-20" />
-          <div className="grid w-full gap-3">
-            {[0, 1].map((option) => (
-              <div key={option} className="flex items-start gap-3 rounded-lg border p-3">
-                <Skeleton className="mt-0.5 size-4 shrink-0 rounded-full" />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <TextSm className="w-32" />
-                  <TextSm className="w-full" />
-                  <TextSm className="w-2/3" />
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 /** Condiciones comerciales: una tarjeta por grupo, con su «Cambiar». */
 export function CommercialTermsSkeleton() {
   return (
@@ -138,13 +113,6 @@ export function BillingPageSkeleton() {
           </div>
         </div>
         <BillingSubscriptionsSkeleton />
-      </section>
-      <section className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="text-base font-semibold">Alta de clínicas nuevas</h2>
-          <p className="text-sm text-muted-foreground">Cada producto decide si se entra solo con invitación o libre.</p>
-        </div>
-        <BillingSignupSkeleton />
       </section>
       <section className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Planes</h2>

@@ -59,8 +59,8 @@ const NOTICE_WORDS: Record<string, string> = {
   plan_activo: "Su plan quedó activo",
   precio_especial_aviso: "Su precio especial termina",
   precio_especial_alarma: "Su precio especial termina en 3 días",
-  condiciones_aviso: "Sus condiciones de Fundador terminan",
-  condiciones_alarma: "Sus condiciones de Fundador terminan en 7 días",
+  condiciones_aviso: "Sus condiciones garantizadas terminan",
+  condiciones_alarma: "Sus condiciones garantizadas terminan en 7 días",
 }
 
 /** Un día en la zona de la clínica: «28 de octubre». */

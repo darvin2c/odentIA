@@ -4,11 +4,13 @@
 // decides tú y la confianza, cómo se cobra, preguntas y cierre. El documento (<Base>, título, descripción y datos estructurados) lo arma
 // src/pages/index.astro. Solo lo que vistIA hace hoy (components/vistia/pages-data.ts). Ninguna cifra de
 // precio vive aquí: salen de Astro.locals.pricing.
-import { giftOf, shownPlan } from "../../lib/pricing"
+import { offerOf, startNote } from "../../lib/offer"
+import { shownPlan } from "../../lib/pricing"
 import { ARM_PATH } from "../../lib/arm"
 import { contactHref, ctaOf } from "../../lib/site"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
+import GiftText from "../GiftText.astro"
 import ChargeDay, { type ChargeRow } from "../latidia/home/ChargeDay"
 import ContentBlock from "../pages/ContentBlock.astro"
 import { homeFaq } from "./faq"
@@ -17,10 +19,11 @@ import Visual from "./Visual.astro"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
-const faq = homeFaq(gift, pricing)
+const faq = homeFaq(pricing)
+// Sin plan publicado (hoy) la nota no promete prueba ni cifras.
+const note = startNote(pricing)
+const { fee, credit } = offerOf(pricing)
 // Un caso completo en la óptica: el mismo de la página de los agentes.
 const day = VISTIA_PAGES.agentes.blocks[1]
 
@@ -105,7 +108,7 @@ const trust = [
           <a class="btn btn-g" href="#dia">Ver cómo funciona</a>
         </div>
         <p class="vh-note rise d4">
-          {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes van por nuestra cuenta. </> : null}Sin tarjeta y sin límite de optómetras, sedes ni usuarios.
+          {note ? <GiftText text={note} /> : "Sin límite de optómetras, sedes ni usuarios."}
         </p>
         <ul class="vh-specs" aria-label="Para qué ópticas">
           <li>Examinan y venden</li>
@@ -204,15 +207,18 @@ const trust = [
     <div class="wrap vc-in">
       <div class="vs-head">
         <span class="tag">[ Cómo se cobra ]</span>
-        <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
-        <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un cliente, sí.</p>
+        <h2>Todo el sistema. Pagas con el trabajo de tus agentes.</h2>
+        <p>
+          {fee && credit ? `Un plan de ${fee} al mes que vuelve como crédito: cada trabajo se descuenta de ahí. ` : fee ? `Un plan de ${fee} al mes y lo que hacen tus agentes. ` : null}
+          Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un cliente, sí.
+        </p>
         <a class="lk" href="/precios">Ver precios →</a>
       </div>
       <div class="vc-card">
         {plan && chargeRows.length > 0 ? (
           <>
             <ChargeDay client:visible rows={chargeRows} currency={plan.currency} title="Sábado · Óptica Lucero" />
-            <span class="vc-note">Ejemplo. Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}.` : ""}</span>
+            <span class="vc-note">Ejemplo. Precios en {currencyWord} más impuestos.</span>
           </>
         ) : (
           <p class="vc-empty">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
@@ -224,11 +230,7 @@ const trust = [
   <!-- 8 · Preguntas -->
   <div class="vfaq"><Faq items={faq} title="Lo que suelen preguntarnos." /></div>
 
-  <CtaBand title="Tu óptica, atendida de día y de noche.">
-    <Fragment slot="text">
-      {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de optómetras, sedes ni usuarios.
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Tu óptica, atendida de día y de noche." />
 </div>
 
 <style>

@@ -133,9 +133,9 @@ const ACTION_PLAN = {
 } as const
 
 /**
- * El plan por invitación de Fundadores (issue 165, ADR 0085): sin cuota, la
- * misma prueba de regalo, todo con 50 % menos, 20 lugares y 12 meses
- * garantizados; sin negociación encima. Se publica en la web.
+ * El plan especial de Fundadores (ADR 0085 y 0221): sin cuota, la misma prueba
+ * de regalo, todo con 50 % menos y 12 meses garantizados; sin negociación
+ * encima. No sale en la web: lo asigna la administración.
  */
 const FOUNDERS_PLAN = {
   code: "fundadores-ficticio",
@@ -150,14 +150,13 @@ const FOUNDERS_PLAN = {
   maxDiscountBps: 0,
   sellerDiscountBps: 0,
   ...TRIAL,
-  seatLimit: 20,
   guaranteeMonths: 12,
-  showOnWeb: true,
+  showOnWeb: false,
 } as const
 
 /**
  * La lista de latidIA (ADR 0093): una copia exacta de la de odentIA, con su
- * propio plan por defecto y sus propios 20 lugares de Fundadores.
+ * propio plan por defecto y su propio plan especial de Fundadores.
  */
 const MEDICAL_ACTION_PLAN = {
   ...ACTION_PLAN,
@@ -174,7 +173,7 @@ const MEDICAL_FOUNDERS_PLAN = {
 
 /**
  * La lista de vistIA: empieza con los precios de latidIA, que son los de odentIA
- * (decisión 3 del plan de vistIA), con su plan por defecto y sus 20 lugares.
+ * (decisión 3 del plan de vistIA), con su plan por defecto y su plan especial.
  */
 const OPTICAL_ACTION_PLAN = {
   ...ACTION_PLAN,
@@ -189,7 +188,7 @@ const OPTICAL_FOUNDERS_PLAN = {
   product: "optical",
 } as const
 
-/** Los planes de lista y por invitación de cada producto. */
+/** Los planes de lista y especiales de cada producto. */
 const PRODUCT_PLANS = [
   ACTION_PLAN,
   FOUNDERS_PLAN,

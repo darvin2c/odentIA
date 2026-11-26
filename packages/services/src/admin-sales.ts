@@ -1520,6 +1520,13 @@ export async function applyInvitedProposal(
   orgId: string,
   now = new Date(),
 ): Promise<ProposalTermsOutcome | null> {
+  const proposalId = await invitedProposalOf(tx, requestId)
+  if (!proposalId) return null
+  return applyProposalTerms(tx, null, proposalId, orgId, now)
+}
+
+/** La propuesta aceptada con que se invitó (`inviteClient`), o null si se invitó sin ella. */
+export async function invitedProposalOf(tx: Db, requestId: string): Promise<string | null> {
   const [invited] = await tx
     .select({ metadata: adminAudit.metadata })
     .from(adminAudit)
@@ -1527,8 +1534,7 @@ export async function applyInvitedProposal(
     .orderBy(desc(adminAudit.createdAt))
     .limit(1)
   const proposalId = invited?.metadata?.proposalId
-  if (typeof proposalId !== "string") return null
-  return applyProposalTerms(tx, null, proposalId, orgId, now)
+  return typeof proposalId === "string" ? proposalId : null
 }
 
 /* ---------- Presentaciones ---------- */

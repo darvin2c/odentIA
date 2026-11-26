@@ -7,8 +7,6 @@
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { signatureFaq } from "../../../lib/signature-faq"
-import { days, giftOf, shownPlan } from "../../../lib/pricing"
-import { WORDS } from "../../../lib/product"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -18,9 +16,6 @@ import SignDemo from "./SignDemo"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const plan = shownPlan(pricing)
-const gift = giftOf(pricing)
-const founder = plan !== null && plan === pricing.founders
 
 const path = "/historia-clinica-electronica"
 const title = "Historia clínica electrónica para consultorio médico"
@@ -294,19 +289,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 
   <div class="faqwrap"><Faq items={faq} /></div>
 
-  <CtaBand title="Tu historia clínica, en orden desde la primera consulta.">
-    <Fragment slot="text">
-      {gift ? (
-        founder ? (
-          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, salas ni usuarios.</>
-        ) : (
-          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, salas ni usuarios.</>
-        )
-      ) : (
-        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, salas ni usuarios.`
-      )}
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Tu historia clínica, en orden desde la primera consulta." />
 </Base>
 
 <style>

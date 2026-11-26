@@ -40,14 +40,15 @@ Rutas: `W` = `apps/web/src/`, `G` = `gestoria/apps/`, `R` = `packages/clinic-app
 **Ya falló:** la revisión de la marca ARM tumbó cuatro promesas que el producto no cumplía así: «cambio en los cobros», «lo que no da resultado no se cobra», «tú decides qué hace cada agente» y «recuerda cada cita».
 
 ### CO-WEB-04 Del interés a la cuenta
-**Dónde:** la llamada a la acción `ctaOf` en `W/lib/site.ts` (con invitación, a `W/pages/solicitar-invitacion.astro` y la lista de espera; con el alta abierta, al registro del panel), el registro y la primera vez en el panel (`apps/panel/src/routes/register.tsx`, `verify-email-sent.tsx`, `onboarding.tsx`) y el WhatsApp de ventas (`salesWhatsAppHref` en `W/lib/site.ts`).
+**Dónde:** la llamada a la acción `ctaOf` en `W/lib/site.ts` («Empieza gratis», al registro del panel; el alta es libre desde el 26 nov 2026), el registro y la primera vez en el panel (`apps/panel/src/routes/register.tsx`, `verify-email-sent.tsx`, `onboarding.tsx`) y el WhatsApp de ventas (`salesWhatsAppHref` en `W/lib/site.ts`).
 **Medida:** pasos, campos y pantallas desde la portada hasta la primera pantalla de la clínica.
 - [ ] La llamada a la acción dice lo mismo y lleva al mismo lugar en toda la web.
 - [ ] Ningún campo que no haga falta para empezar.
 - [ ] Al enviar, dice qué pasa ahora y cuándo («te escribimos hoy», «revisa tu correo»).
 - [ ] El WhatsApp de ventas abre con el mensaje que nombra la app.
+- [ ] Tras verificar el correo se va directo a abrir la clínica, y los pasos se cuentan igual de principio a fin.
 - [ ] En producción ningún formulario se envía desde la ronda: llegan de verdad. Se prueban en local.
-**Caso:** la dueña de una clínica pide su invitación desde el celular a las 22:00 y al día siguiente quiere saber en qué va.
+**Caso:** la dueña de una clínica crea su cuenta desde el celular a las 22:00 y quiere dejar su clínica abierta esa misma noche.
 
 ### CO-WEB-05 Las dudas antes de comprar
 **Dónde:** `W/pages/precios.astro`, `W/lib/faq.ts`, `W/pages/comparar/whatsapp-y-cuaderno.astro` y la carga de sus pacientes (la carta de bienvenida, `packages/services/src/clinic-import-letter.ts`).

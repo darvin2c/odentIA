@@ -53,7 +53,7 @@ export const VISTIA_LINKS: Record<string, { label: string; text: string }> = {
   "/reportes": { label: "Reportes con Argos", text: "Lo que pasa en tu óptica, sin armar planillas." },
   "/buscador": { label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
   "/seguridad": { label: "Seguridad", text: "Cada rol ve solo lo suyo y tu óptica, aparte de las demás." },
-  "/precios": { label: "Precios", text: "Pagas por el trabajo hecho, no por el software." },
+  "/precios": { label: "Precios", text: "Todo el sistema incluido; pagas por lo que hacen tus agentes." },
   "/contacto": { label: "Habla con nosotros", text: "Escríbenos y te responde una persona del equipo." },
 }
 

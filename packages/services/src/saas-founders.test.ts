@@ -7,11 +7,10 @@ import {
   saasFollowUp,
   saasPayment,
   saasPlan,
-  saasSignupPolicy,
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import { getActionPricing, planPrices } from "./saas-actions.js"
@@ -26,31 +25,23 @@ import {
   discardWaitlistRequest,
   endFounderGuarantees,
   followUpChoices,
-  founderSeats,
-  getFoundersMove,
   getPublicPricing,
-  getSignupMode,
-  getSignupModes,
+  getSpecialPlanMove,
   getWaitlistRequest,
   hideWaitlistFollowUp,
   inviteFromWaitlist,
   listExpiringTerms,
-  listWaitlist,
-  moveClinicToFounders,
+  moveClinicToSpecialPlan,
   readFounderInvitation,
   releaseFounderInvitation,
-  setSignupMode,
-  setWaitlistNote,
-  submitWaitlistRequest,
-  WAITLIST_STAGES,
-  type WaitlistInput,
   waitlistHomeRows,
   waitlistStage,
 } from "./saas-founders.js"
 import { decideSaasNegotiation, getOrganizationBillingTerms, getSaasAlerts, setSaasDiscount } from "./saas-terms.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { submitWaitlistRequest } from "./waitlist-test-kit.js"
 
-/** Fundadores (issue 165) y precio negociado con vencimiento (issue 168). */
+/** Las solicitudes que quedaron, los planes especiales (ADR 0221) y el precio negociado con vencimiento (issue 168). */
 setupTestDb()
 const admin = { userId: "founders-admin", role: "admin" as const }
 const support = { userId: "founders-support", role: "support" as const }
@@ -116,58 +107,18 @@ beforeAll(async () => {
     trialMaxCreditCents: 10_000,
     trialDays: 90,
     trialMaxDays: 90,
-    seatLimit: 2,
     guaranteeMonths: 12,
-    showOnWeb: true,
   })
   foundersPlanId = founders.id
-  // El plan de otra prueba con lugares no debe colarse como el plan por invitación.
-  await ownerDb.update(saasPlan).set({ isActive: false }).where(eq(saasPlan.code, "fundadores-ficticio"))
+  // Otros planes especiales de odentIA (de la semilla o de otra prueba) no deben colarse en lo que se ofrece.
+  await ownerDb
+    .update(saasPlan)
+    .set({ isActive: false })
+    .where(and(eq(saasPlan.product, "dental"), eq(saasPlan.showOnWeb, false), eq(saasPlan.isDefault, false), eq(saasPlan.isActive, true)))
+  await ownerDb.update(saasPlan).set({ isActive: true }).where(eq(saasPlan.id, foundersPlanId))
 })
 
-describe("cómo se abren clínicas", () => {
-  it("la migración deja «solo con invitación» y solo la administración lo cambia", async () => {
-    expect(await getSignupMode(ownerDb)).toBe("invitacion")
-    await expect(setSignupMode(ownerDb, support, "abierta")).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await setSignupMode(ownerDb, admin, "abierta")
-    expect(await getSignupMode(ownerDb)).toBe("abierta")
-    await setSignupMode(ownerDb, admin, "invitacion")
-    const [row] = await ownerDb.select().from(saasSignupPolicy)
-    expect(row?.updatedBy).toBe(admin.userId)
-  })
-})
-
-describe("la lista de espera", () => {
-  it("guarda la solicitud y no duplica un correo con una solicitud viva", async () => {
-    const first = await submitWaitlistRequest(ownerDb, request("ana@sonrisa.test"))
-    expect(first.existing).toBe(false)
-    const again = await submitWaitlistRequest(ownerDb, { ...request("ANA@sonrisa.test"), clinicName: "Otra" })
-    // El plazo que se promete es el que regía cuando llegó la solicitud.
-    expect(again).toEqual({ id: first.id, clientId: first.clientId, existing: true, answerDays: 2 })
-    expect(first.clientId).toEqual(expect.any(String))
-    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, first.id))
-    expect(row).toMatchObject({ email: "ana@sonrisa.test", phone: "+51987654321", countryCode: "PE", status: "por_revisar" })
-  })
-
-  it("guarda el producto del dominio y pregunta por quien atiende con su palabra (decisión 17 del issue 229)", async () => {
-    const { id } = await submitWaitlistRequest(ownerDb, request("vela@sanmartin.test"), "medical")
-    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
-    expect(row?.product).toBe("medical")
-    const { professionals: _, ...without } = request("sinrespuesta@sanmartin.test")
-    await expect(submitWaitlistRequest(ownerDb, without as WaitlistInput, "medical")).rejects.toMatchObject({
-      message: "Elige cuántos médicos atienden",
-    })
-    await expect(submitWaitlistRequest(ownerDb, without as WaitlistInput)).rejects.toMatchObject({
-      message: "Elige cuántos odontólogos atienden",
-    })
-  })
-
-  it("rechaza datos que no sirven con un mensaje claro", async () => {
-    await expect(submitWaitlistRequest(ownerDb, { ...request("x@y.test"), phone: "abc" })).rejects.toMatchObject({
-      message: "Escribe un celular válido, solo con números",
-    })
-  })
-
+describe("las solicitudes que quedaron", () => {
   it("descartar pide un motivo", async () => {
     const { id } = await submitWaitlistRequest(ownerDb, request("descartar@sonrisa.test"))
     await expect(discardWaitlistRequest(ownerDb, admin, id, "  ")).rejects.toMatchObject({ code: "VALIDATION" })
@@ -177,32 +128,34 @@ describe("la lista de espera", () => {
   })
 })
 
-describe("la invitación Fundadores", () => {
-  it("respeta los lugares del plan: reenviar no ocupa otro y lleno no invita", async () => {
+describe("la invitación que manda el equipo", () => {
+  it("sin plan elegido invita con el plan de lista; reenviar anula el enlace anterior y no hay lugares que se llenen", async () => {
     const a = await submitWaitlistRequest(ownerDb, request("lugar-a@sonrisa.test"))
     const b = await submitWaitlistRequest(ownerDb, request("lugar-b@sonrisa.test"))
     const c = await submitWaitlistRequest(ownerDb, request("lugar-c@sonrisa.test"))
     const first = await inviteFromWaitlist(ownerDb, admin, a.id)
-    expect(first.request.planId).toBe(foundersPlanId)
-    await inviteFromWaitlist(ownerDb, admin, b.id)
+    expect(first.request.planId).toBe(listPlanId)
     const resent = await inviteFromWaitlist(ownerDb, admin, a.id)
     expect(resent.token).not.toBe(first.token)
     // El enlace anterior deja de servir al reenviar.
     expect(await readFounderInvitation(ownerDb, first.token)).toBeNull()
-    await expect(inviteFromWaitlist(ownerDb, admin, c.id)).rejects.toMatchObject({ code: "SAAS_SEATS_FULL" })
-    await expect(inviteFromWaitlist(ownerDb, support, c.id)).rejects.toBeTruthy()
-    // Liberar un lugar (descartar una invitada) deja invitar otra vez.
-    await discardWaitlistRequest(ownerDb, admin, b.id, "No contestó")
-    await inviteFromWaitlist(ownerDb, admin, c.id)
+    expect(await readFounderInvitation(ownerDb, resent.token)).toMatchObject({ offer: { planName: "Plan odentIA", discountPercent: null } })
+    // Con el plan especial, tantas como se quiera.
+    expect((await inviteFromWaitlist(ownerDb, admin, b.id, { planId: foundersPlanId })).request.planId).toBe(foundersPlanId)
+    expect((await inviteFromWaitlist(ownerDb, admin, c.id, { planId: foundersPlanId })).request.planId).toBe(foundersPlanId)
+  })
+
+  it("sin plan de lista en su producto no invita", async () => {
+    const { id } = await submitWaitlistRequest(ownerDb, request("optica@vista.test"), "optical")
+    await expect(inviteFromWaitlist(ownerDb, admin, id)).rejects.toMatchObject({ code: "SAAS_NO_PLAN" })
   })
 
   it("la invitación abre una sola clínica, solo con su correo, con el plan y la prueba del plan", async () => {
-    await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
     const { id } = await submitWaitlistRequest(ownerDb, request("abre@sonrisa.test"))
-    const { token } = await inviteFromWaitlist(ownerDb, admin, id)
+    const { token } = await inviteFromWaitlist(ownerDb, admin, id, { planId: foundersPlanId })
 
     const offer = await readFounderInvitation(ownerDb, token)
-    expect(offer).toMatchObject({ email: "abre@sonrisa.test", offer: { priceCents: 0, trialCreditCents: 10_000, discountPercent: 40, guaranteeMonths: 12 } })
+    expect(offer).toMatchObject({ email: "abre@sonrisa.test", offer: { planName: "Fundadores", priceCents: 0, trialCreditCents: 10_000, discountPercent: 40, guaranteeMonths: 12 } })
 
     await expect(claimFounderInvitation(ownerDb, token, "otra@persona.test")).rejects.toMatchObject({ code: "INVITATION_OTHER_EMAIL" })
     const claimed = await claimFounderInvitation(ownerDb, token, "Abre@Sonrisa.test")
@@ -223,8 +176,21 @@ describe("la invitación Fundadores", () => {
     expect(row).toMatchObject({ status: "entro", organizationId: orgId, tokenHash: null })
     expect(await readFounderInvitation(ownerDb, token)).toBeNull()
     await expect(claimFounderInvitation(ownerDb, token, "abre@sonrisa.test")).rejects.toMatchObject({ code: "INVITATION_INVALID" })
-    // Mientras valgan sus condiciones, la clínica no deja el plan Fundadores por error.
+    // Mientras valgan sus precios garantizados, la clínica no deja el plan especial por error.
     await expect(chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-lista")).rejects.toMatchObject({ code: "SAAS_FOUNDER_GUARANTEED" })
+  })
+
+  it("invitada sin propuesta y con el plan de lista, entra como cualquiera: en prueba y sin plan elegido", async () => {
+    const { id } = await submitWaitlistRequest(ownerDb, request("lista@sonrisa.test"))
+    const { token } = await inviteFromWaitlist(ownerDb, admin, id)
+    const claimed = await claimFounderInvitation(ownerDb, token, "lista@sonrisa.test")
+    const orgId = await clinic()
+    await completeFounderInvitation(ownerDb, claimed, orgId)
+    const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    // Al terminar la prueba elige su plan: la cuota no se le cobra sola.
+    expect(sub).toMatchObject({ status: "prueba", planId: null, guaranteedUntil: null })
+    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
+    expect(row).toMatchObject({ status: "entro", organizationId: orgId })
   })
 
   it("una invitación vencida no sirve", async () => {
@@ -234,9 +200,9 @@ describe("la invitación Fundadores", () => {
     await expect(claimFounderInvitation(ownerDb, token, "vencida@sonrisa.test")).rejects.toMatchObject({ code: "INVITATION_INVALID" })
   })
 
-  it("una clínica no elige el plan por invitación por su cuenta", async () => {
+  it("una clínica no elige un plan especial por su cuenta: lo asigna la administración", async () => {
     const orgId = await clinic()
-    await expect(chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-fundadores")).rejects.toMatchObject({ code: "SAAS_PLAN_BY_INVITATION" })
+    await expect(chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-fundadores")).rejects.toMatchObject({ code: "SAAS_PLAN_NOT_OFFERED" })
   })
 
   it("al terminar las condiciones garantizadas pasa al plan de lista", async () => {
@@ -248,23 +214,20 @@ describe("la invitación Fundadores", () => {
   })
 })
 
-describe("pasar a Fundadores desde la administración", () => {
-  it("una clínica en prueba que entró sin la invitación pasa con el plan, su prueba desde hoy, sus meses y un lugar", async () => {
-    await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
-    // Con un precio especial negociado en el plan de lista: Fundadores trae sus precios.
+describe("pasar a un plan especial desde la administración", () => {
+  it("una clínica en prueba pasa con el plan, su prueba desde hoy y sus meses garantizados, y se le quita el descuento", async () => {
+    // Con un precio especial negociado en el plan de lista: el plan especial trae sus precios.
     const orgId = await clinic({ discountBps: 1000, discountEndsAt: new Date(Date.now() + 90 * DAY) })
-    const before = await founderSeats(ownerDb, foundersPlanId)
     const now = new Date()
-    expect(await getFoundersMove(ownerDb, orgId, now)).toMatchObject({
-      planName: "Fundadores",
-      used: before.used,
-      limit: 50,
-      guaranteeMonths: 12,
-      listPlanName: "Plan odentIA",
-      trialDays: 90,
-    })
+    const move = await getSpecialPlanMove(ownerDb, orgId, now)
+    expect(move).toMatchObject({ listPlanName: "Plan odentIA" })
+    // Solo los planes especiales de su producto: ni el de lista ni los de otra app.
+    expect(move?.plans.map((plan) => plan.id)).toEqual([foundersPlanId])
+    expect(move?.plans[0]).toMatchObject({ name: "Fundadores", guaranteeMonths: 12, trialDays: 90, trialCreditCents: 10_000 })
+    expect(move?.plans[0]?.guaranteedUntil?.getUTCFullYear()).toBe(now.getUTCFullYear() + 1)
 
-    const entered = await moveClinicToFounders(ownerDb, admin, orgId, now)
+    const entered = await moveClinicToSpecialPlan(ownerDb, admin, orgId, foundersPlanId, now)
+    expect(entered.planName).toBe("Fundadores")
     expect(entered.guaranteedUntil?.getUTCFullYear()).toBe(now.getUTCFullYear() + 1)
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub).toMatchObject({
@@ -276,7 +239,11 @@ describe("pasar a Fundadores desde la administración", () => {
       discountEndsAt: null,
     })
     expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - now.getTime()) / DAY)).toBe(90)
-    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
+    const [audit] = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, "saas.founders_entered")))
+    expect(audit?.metadata).toEqual({ planId: foundersPlanId, discountBps: 1000 })
     // La ficha dice a qué plan pasa, desde cuándo y a qué precios: los del plan de lista.
     const [list] = await ownerDb.select().from(saasPlan).where(eq(saasPlan.id, listPlanId))
     expect((await getOrganizationBillingTerms(ownerDb, orgId, now))?.next).toEqual({
@@ -287,17 +254,16 @@ describe("pasar a Fundadores desde la administración", () => {
       prices: planPrices(list!),
       startsAt: entered.guaranteedUntil,
     })
-    // Ya es Fundadora: no se ofrece ni pasa otra vez.
-    expect(await getFoundersMove(ownerDb, orgId)).toBeNull()
-    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
+    // Ya tiene precios garantizados: no se ofrece ni pasa otra vez.
+    expect(await getSpecialPlanMove(ownerDb, orgId)).toBeNull()
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, foundersPlanId)).rejects.toMatchObject({ code: "SPECIAL_PLAN_ALREADY" })
 
-    // Terminadas sus condiciones, su lugar sigue ocupado y no vuelve a pasar.
+    // Terminados sus meses vuelve al plan de lista y, aunque siguiera en prueba, no vuelve a pasar.
     await ownerDb.update(saasSubscription).set({ guaranteedUntil: new Date(Date.now() - 60_000) }).where(eq(saasSubscription.organizationId, orgId))
     expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
-    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
-    // Terminadas sus condiciones, la ficha ya no anuncia otro cambio.
     expect((await getOrganizationBillingTerms(ownerDb, orgId))?.next).toBeNull()
-    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
+    await ownerDb.update(saasSubscription).set({ status: "prueba" }).where(eq(saasSubscription.organizationId, orgId))
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, foundersPlanId)).rejects.toMatchObject({ code: "SPECIAL_PLAN_ALREADY" })
   })
 
   it("con sus condiciones vigentes pero ya en el plan de lista, la ficha no anuncia otro plan", async () => {
@@ -307,35 +273,76 @@ describe("pasar a Fundadores desde la administración", () => {
     expect(terms?.next).toBeNull()
   })
 
-  it("no pasa sin lugar, ni una demo, ni una clínica que ya paga, y solo Administración la pasa", async () => {
+  it("no pasa una demo, una clínica que ya paga ni una con precios garantizados, y solo Administración la pasa", async () => {
     const orgId = await clinic()
-    const { used } = await founderSeats(ownerDb, foundersPlanId)
-    await ownerDb.update(saasPlan).set({ seatLimit: used }).where(eq(saasPlan.id, foundersPlanId))
-    expect(await getFoundersMove(ownerDb, orgId)).toMatchObject({ used, limit: used })
-    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "SAAS_SEATS_FULL" })
-    await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
-    await expect(moveClinicToFounders(ownerDb, support, orgId)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(moveClinicToSpecialPlan(ownerDb, support, orgId, foundersPlanId)).rejects.toMatchObject({ code: "FORBIDDEN" })
 
     const demo = await clinic({ isDemo: true })
-    expect(await getFoundersMove(ownerDb, demo)).toBeNull()
-    await expect(moveClinicToFounders(ownerDb, admin, demo)).rejects.toMatchObject({ code: "FOUNDERS_DEMO" })
+    expect(await getSpecialPlanMove(ownerDb, demo)).toBeNull()
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, demo, foundersPlanId)).rejects.toMatchObject({ code: "SPECIAL_PLAN_DEMO" })
     const paying = await clinic({ planId: listPlanId, status: "activa" })
-    expect(await getFoundersMove(ownerDb, paying)).toBeNull()
-    await expect(moveClinicToFounders(ownerDb, admin, paying)).rejects.toMatchObject({ code: "FOUNDERS_NOT_IN_TRIAL" })
-    // Nada de lo rechazado ocupó un lugar.
-    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(used)
+    expect(await getSpecialPlanMove(ownerDb, paying)).toBeNull()
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, paying, foundersPlanId)).rejects.toMatchObject({ code: "SPECIAL_PLAN_NOT_IN_TRIAL" })
+    const guaranteed = await clinic({ guaranteedUntil: new Date(Date.now() + 30 * DAY) })
+    expect(await getSpecialPlanMove(ownerDb, guaranteed)).toBeNull()
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, guaranteed, foundersPlanId)).rejects.toMatchObject({ code: "SPECIAL_PLAN_ALREADY" })
+    // Nada de lo rechazado cambió de plan.
+    for (const id of [orgId, demo, paying, guaranteed]) {
+      const [sub] = await ownerDb.select({ planId: saasSubscription.planId }).from(saasSubscription).where(eq(saasSubscription.organizationId, id))
+      expect(sub?.planId).not.toBe(foundersPlanId)
+    }
+  })
+
+  it("no pasa a un plan que sale en la web, al de lista ni a uno que no existe: lo dice en el campo del plan", async () => {
+    const orgId = await clinic()
+    const shown = await createSaasPlan(ownerDb, admin.userId, {
+      code: "founders-visible",
+      name: "Visible",
+      currency: "USD",
+      priceCents: 1900,
+      creditCents: 1900,
+      conversationMicros: 400_000,
+      trialCreditCents: 0,
+      trialMaxCreditCents: 0,
+      guaranteeMonths: 6,
+      showOnWeb: true,
+    })
+    for (const planId of [shown.id, listPlanId, randomUUID()]) {
+      await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, planId)).rejects.toMatchObject({ fields: { planId: expect.any(String) } })
+    }
+    for (const planId of [undefined, "no-es-un-id"]) {
+      await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, planId)).rejects.toMatchObject({ fields: { planId: "Elige el plan" } })
+    }
+    expect((await getSpecialPlanMove(ownerDb, orgId))?.plans.map((plan) => plan.id)).toEqual([foundersPlanId])
+    await ownerDb.update(saasPlan).set({ isActive: false }).where(eq(saasPlan.id, shown.id))
+    const [sub] = await ownerDb.select({ planId: saasSubscription.planId }).from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    expect(sub?.planId).not.toBe(foundersPlanId)
+  })
+
+  it("sin planes especiales en su producto no se ofrece nada, ni pasa a uno de otro producto", async () => {
+    const orgId = await clinic()
+    await ownerDb.update(orgProfile).set({ product: "optical" }).where(eq(orgProfile.organizationId, orgId))
+    expect(await getSpecialPlanMove(ownerDb, orgId)).toBeNull()
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, foundersPlanId)).rejects.toMatchObject({ fields: { planId: expect.any(String) } })
   })
 })
 
 describe("lo que publica la web", () => {
-  it("solo los planes con «Mostrar en la web», con el descuento contra la lista y sin lugares", async () => {
+  it("solo el plan de lista y las condiciones: ni planes especiales, ni lugares, ni plazo de la lista de espera", async () => {
     const pricing = await getPublicPricing(ownerDb)
+    // `founders` y `signupMode` solo para la web de antes durante el despliegue: nulo y «abierta».
+    expect(Object.keys(pricing).sort()).toEqual(["founders", "list", "signupMode", "terms"])
+    expect(pricing).toMatchObject({ founders: null, signupMode: "abierta" })
     expect(pricing.list?.code).toBe("founders-lista")
-    expect(pricing.founders).toMatchObject({ code: "founders-fundadores", priceCents: 0, discountPercent: 40, guaranteeMonths: 12 })
-    expect(JSON.stringify(pricing)).not.toContain("seatLimit")
-    await ownerDb.update(saasPlan).set({ showOnWeb: false }).where(eq(saasPlan.id, foundersPlanId))
-    expect((await getPublicPricing(ownerDb)).founders).toBeNull()
+    expect(pricing.terms).not.toHaveProperty("waitlistAnswerDays")
+    const text = JSON.stringify(pricing)
+    for (const word of ["seatLimit", "founders-fundadores"]) expect(text).not.toContain(word)
+    // Mostrar en la web un plan especial no lo vuelve el de lista.
     await ownerDb.update(saasPlan).set({ showOnWeb: true }).where(eq(saasPlan.id, foundersPlanId))
+    expect((await getPublicPricing(ownerDb)).list?.code).toBe("founders-lista")
+    await ownerDb.update(saasPlan).set({ showOnWeb: false }).where(eq(saasPlan.id, foundersPlanId))
+    // Sin plan de lista publicado, la web no tiene precio que mostrar.
+    expect((await getPublicPricing(ownerDb, "optical")).list).toBeNull()
   })
 })
 
@@ -427,9 +434,7 @@ describe("una lista de precios por producto (ADR 0093)", () => {
       trialMaxCreditCents: 10_000,
       trialDays: 90,
       trialMaxDays: 90,
-      seatLimit: 1,
       guaranteeMonths: 12,
-      showOnWeb: true,
     })
     medicalFoundersId = founders.id
   })
@@ -445,40 +450,36 @@ describe("una lista de precios por producto (ADR 0093)", () => {
     await expect(updateSaasPlan(ownerDb, admin.userId, medicalListId, { product: "dental" })).rejects.toMatchObject({ code: "VALIDATION" })
   })
 
-  it("cada web publica su lista y su oferta, con el descuento contra su propio plan de lista", async () => {
+  it("cada web publica su propio plan de lista y su prueba", async () => {
     const medical = await getPublicPricing(ownerDb, "medical")
     expect(medical.list?.code).toBe("founders-lista-latidia")
-    expect(medical.founders).toMatchObject({ code: "founders-fundadores-latidia", discountPercent: 50 })
     const dental = await getPublicPricing(ownerDb, "dental")
     expect(dental.list?.code).toBe("founders-lista")
-    expect(dental.founders).toMatchObject({ code: "founders-fundadores", discountPercent: 40 })
     expect((await getPublicTrialOffer(ownerDb, "medical"))?.days).toBe(45)
     expect((await getPublicTrialOffer(ownerDb, "dental"))?.days).toBe(30)
   })
 
-  it("cada producto decide si se entra con invitación o libre", async () => {
-    await setSignupMode(ownerDb, admin, "abierta", "medical")
-    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta", optical: "invitacion" })
-    expect((await getPublicPricing(ownerDb, "medical")).signupMode).toBe("abierta")
-    // vistIA tiene su propia columna: abrirla no abre las otras.
-    await setSignupMode(ownerDb, admin, "abierta", "optical")
-    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta", optical: "abierta" })
-    await setSignupMode(ownerDb, admin, "invitacion", "medical")
-    await setSignupMode(ownerDb, admin, "invitacion", "optical")
-    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "invitacion", optical: "invitacion" })
-  })
-
-  it("la solicitud de latidIA entra con Fundadores latidIA y gasta sus propios lugares", async () => {
+  it("la solicitud de latidIA se invita con un plan de latidIA: el de lista o su plan especial", async () => {
     const a = await submitWaitlistRequest(ownerDb, request("lugar-a@latido.test"), "medical")
     const b = await submitWaitlistRequest(ownerDb, request("lugar-b@latido.test"), "medical")
     // Con un plan de odentIA no se invita a una solicitud de latidIA.
     await expect(inviteFromWaitlist(ownerDb, admin, a.id, { planId: foundersPlanId })).rejects.toMatchObject({ code: "VALIDATION" })
-    const invited = await inviteFromWaitlist(ownerDb, admin, a.id)
-    expect(invited.request.planId).toBe(medicalFoundersId)
-    // Su único lugar está ocupado; los de odentIA no cuentan.
-    await expect(inviteFromWaitlist(ownerDb, admin, b.id)).rejects.toMatchObject({ code: "SAAS_SEATS_FULL" })
-    const dental = await submitWaitlistRequest(ownerDb, request("sigue@sonrisa.test"))
-    expect((await inviteFromWaitlist(ownerDb, admin, dental.id)).request.planId).toBe(foundersPlanId)
+    expect((await inviteFromWaitlist(ownerDb, admin, a.id)).request.planId).toBe(medicalListId)
+    const special = await inviteFromWaitlist(ownerDb, admin, b.id, { planId: medicalFoundersId })
+    expect(special.request.planId).toBe(medicalFoundersId)
+    // Su descuento se compara con el plan de lista de latidIA.
+    expect((await readFounderInvitation(ownerDb, special.token))?.offer.discountPercent).toBe(50)
+  })
+
+  it("un consultorio de latidIA en prueba ve y pasa solo a los planes especiales de latidIA", async () => {
+    const orgId = await consultorio()
+    const move = await getSpecialPlanMove(ownerDb, orgId)
+    expect(move?.plans.map((plan) => plan.id)).toEqual([medicalFoundersId])
+    expect(move?.listPlanName).toBe("Plan latidIA")
+    await expect(moveClinicToSpecialPlan(ownerDb, admin, orgId, foundersPlanId)).rejects.toMatchObject({ fields: { planId: expect.any(String) } })
+    await moveClinicToSpecialPlan(ownerDb, admin, orgId, medicalFoundersId)
+    const [sub] = await ownerDb.select({ planId: saasSubscription.planId }).from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    expect(sub?.planId).toBe(medicalFoundersId)
   })
 
   it("un consultorio de latidIA prueba, ve y elige solo los planes de latidIA", async () => {
@@ -542,18 +543,16 @@ describe("el seguimiento de un prospecto", () => {
   it("una invitación vencida está en «Invitación vencida» y sale en Inicio", async () => {
     const id = await waiting("vencio@andes.test")
     await inviteFromWaitlist(ownerDb, admin, id, {}, new Date(WED.getTime() - 15 * DAY))
-    const expired = await listWaitlist(ownerDb, { stage: "invitacion_vencida", search: "vencio@andes.test" }, WED)
-    expect(expired.rows.map((row) => [row.id, row.stage])).toEqual([[id, "invitacion_vencida"]])
-    expect((await listWaitlist(ownerDb, { stage: "invitada", search: "vencio@andes.test" }, WED)).rows).toEqual([])
+    expect((await getWaitlistRequest(ownerDb, admin, id, WED)).request.stage).toBe("invitacion_vencida")
     expect(await homeOf(admin, WED, id)).toEqual([expect.objectContaining({ reason: "invitacion", stage: "invitacion_vencida", overdue: true })])
     expect(waitlistStage({ status: "invitada", inviteExpiresAt: WED }, false, WED)).toBe("invitacion_vencida")
   })
 
   it("entró sin un pago confirmado es «Entró», aunque la suscripción esté activa; con uno, «Paga»", async () => {
     const orgId = await clinic({ planId: listPlanId, status: "activa" })
-    await entered("paga@andes.test", orgId)
-    const stageOf = async (email: string) => (await listWaitlist(ownerDb, { stage: "todas", search: email }, WED)).rows[0]?.stage
-    expect(await stageOf("paga@andes.test")).toBe("entro")
+    const paid = await entered("paga@andes.test", orgId)
+    const stageOf = async (id: string) => (await getWaitlistRequest(ownerDb, admin, id, WED)).request.stage
+    expect(await stageOf(paid)).toBe("entro")
     const payment = (status: "pendiente" | "confirmado") =>
       ownerDb.insert(saasPayment).values({
         organizationId: orgId,
@@ -566,27 +565,11 @@ describe("el seguimiento de un prospecto", () => {
       })
     // Un comprobante por revisar todavía no es un pago.
     await payment("pendiente")
-    expect(await stageOf("paga@andes.test")).toBe("entro")
+    expect(await stageOf(paid)).toBe("entro")
     await payment("confirmado")
-    expect(await stageOf("paga@andes.test")).toBe("paga")
-    expect((await listWaitlist(ownerDb, { stage: "paga", search: "paga@andes.test" }, WED)).rows).toHaveLength(1)
+    expect(await stageOf(paid)).toBe("paga")
     // La clínica borrada sigue en «Entró».
-    await entered("borrada@andes.test", null)
-    expect(await stageOf("borrada@andes.test")).toBe("entro")
-  })
-
-  it("los conteos por etapa suman «Todas» y cada etapa trae solo las suyas", async () => {
-    const page = await listWaitlist(ownerDb, { stage: "todas" }, WED)
-    const { todas, ...stages } = page.counts
-    expect(Object.keys(stages).sort()).toEqual([...WAITLIST_STAGES].sort())
-    expect(Object.values(stages).reduce((sum, n) => sum + n, 0)).toBe(todas)
-    const [all] = await ownerDb.select({ n: sql<number>`count(*)::int` }).from(saasWaitlistRequest)
-    expect(todas).toBe(all?.n)
-    for (const stage of WAITLIST_STAGES) {
-      const { rows } = await listWaitlist(ownerDb, { stage }, WED)
-      expect(rows.every((row) => row.stage === stage)).toBe(true)
-      expect(rows).toHaveLength(Math.min(stages[stage], 200))
-    }
+    expect(await stageOf(await entered("borrada@andes.test", null))).toBe("entro")
   })
 
   it("un seguimiento para el jueves no sale el miércoles a las 19:30 de Lima y sí el jueves a las 9:00", async () => {
@@ -658,22 +641,6 @@ describe("el seguimiento de un prospecto", () => {
     await expect(ownerDb.update(saasFollowUp).set({ adminOnly: false }).where(eq(saasFollowUp.id, own.id))).rejects.toThrow()
   })
 
-  it("la nota de una pestaña vieja se agrega como entrada y no cierra el recordatorio", async () => {
-    const id = await waiting("pestana@andes.test")
-    await addWaitlistFollowUp(ownerDb, admin, id, { body: "Pide que la llame el jueves", followUpOn: "2026-11-12" }, TUE)
-    await setWaitlistNote(ownerDb, support, id, "  Preguntó el precio  ", WED)
-    // Sin texto no hace nada.
-    await setWaitlistNote(ownerDb, support, id, null, WED)
-    const { request: row, entries } = await getWaitlistRequest(ownerDb, admin, id, WED)
-    expect(entries.map((entry) => [entry.body, entry.followUpOn, entry.authorName])).toEqual([
-      ["Preguntó el precio", "2026-11-12", "Soporte"],
-      ["Pide que la llame el jueves", "2026-11-12", "Administración"],
-    ])
-    expect(row.nextFollowUpOn).toBe("2026-11-12")
-    const [stored] = await ownerDb.select({ note: saasWaitlistRequest.note }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
-    expect(stored?.note).toBeNull()
-  })
-
   it("una «Nota del equipo» de antes no es un contacto: la solicitud sigue por responder y no se dice «Contactada»", async () => {
     // Como la deja la migración 0101: sin autor, sin fecha para volver, con la fecha en que pidió.
     const createdAt = new Date("2026-11-06T15:00:00Z")
@@ -687,10 +654,6 @@ describe("el seguimiento de un prospecto", () => {
     const detail = await getWaitlistRequest(ownerDb, admin, id, THU)
     expect(detail.request.answer).toMatchObject({ kind: "por_responder", due: "vencida" })
     expect(detail.entries).toEqual([expect.objectContaining({ authorName: null, fromNote: true })])
-    // La nota de una pestaña vieja tampoco es un contacto.
-    await setWaitlistNote(ownerDb, support, id, "Pregunta si hay plan anual", THU)
-    expect((await getWaitlistRequest(ownerDb, admin, id, THU)).entries[0]).toMatchObject({ fromNote: true })
-    expect(await homeOf(admin, THU, id)).toHaveLength(1)
     // Anotar un contacto sí: sale de «Prospectos por responder» y el plazo dice el día del contacto, no el de la nota.
     await addWaitlistFollowUp(ownerDb, admin, id, { body: "La llamé, lo piensa" }, THU)
     expect(await homeOf(admin, THU, id)).toEqual([])

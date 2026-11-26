@@ -15,11 +15,12 @@ import {
 import { AGENTS, CHANS, DAY, type DayEvent, dir, type SceneHost, ToothScene, via } from "@odentia/brand-scene"
 import { pauseStore, useInterval, useNarrow, usePaused, useReducedMotion } from "./motion"
 import { ARM_PATH } from "../../lib/arm"
+import { splitGift } from "../../lib/offer"
 
 type Props = {
   ctaHref: string
   ctaLabel: string
-  /** La nota bajo los botones; con Fundadores lleva el regalo (en ámbar). */
+  /** La nota bajo los botones (`lib/offer.ts`): el texto entero y, dentro de él, el regalo que va en ámbar. */
   note?: { gift: string | null; text: string }
 }
 type Cur = {
@@ -152,6 +153,18 @@ function d3vals(sStep: number, hover: number, cycle: number, still: boolean) {
 }
 
 const cssVar = (o: Record<string, string>) => o as CSSProperties
+
+/** La nota con el regalo en ámbar, partida como en `GiftText.astro` (`splitGift`). */
+function NoteText({ text, gift }: { text: string; gift: string | null }) {
+  const [before, amber, after] = splitGift(text, gift)
+  return (
+    <>
+      {before}
+      {amber ? <span className="gift">{amber}</span> : null}
+      {after}
+    </>
+  )
+}
 
 export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
   const narrow = useNarrow()
@@ -453,13 +466,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
           </div>
           <p className="mono hh-note rise d4">
             {note ? (
-              note.gift ? (
-                <>
-                  Programa Fundadores: <span className="gift">{note.gift}</span> {note.text}
-                </>
-              ) : (
-                note.text
-              )
+              <NoteText text={note.text} gift={note.gift} />
             ) : (
               // Sin plan publicado (sin cifras): no se pide tarjeta nunca, el pago va con su comprobante (lib/offer.ts).
               "No te pedimos tarjeta: ni para probar ni después. Tú decides qué agentes trabajan, y recordar no se cobra."

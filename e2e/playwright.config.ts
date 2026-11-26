@@ -10,9 +10,9 @@ export const ALSO_ADMIN = [
   "**/e2e/cobro.spec.ts",
   "**/e2e/condiciones-comerciales.spec.ts",
   "**/e2e/demos.spec.ts",
-  "**/e2e/fundadores.spec.ts",
   "**/e2e/libro-reclamaciones.spec.ts",
   "**/e2e/loading-unknowns.spec.ts",
+  "**/e2e/precio-negociado.spec.ts",
   "**/e2e/spam-y-cobros.spec.ts",
 ]
 

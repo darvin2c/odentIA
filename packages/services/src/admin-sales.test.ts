@@ -53,7 +53,8 @@ import {
 } from "./admin-sales.js"
 import { limaDate } from "./peru-business-days.js"
 import { createSaasPlan, updateSaasPlan } from "./saas-billing.js"
-import { completeFounderInvitation, submitWaitlistRequest } from "./saas-founders.js"
+import { completeFounderInvitation } from "./saas-founders.js"
+import { submitWaitlistRequest } from "./waitlist-test-kit.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** La venta del ARM: actividades, tareas, decisión, invitación, propuestas, envíos y embudo. */

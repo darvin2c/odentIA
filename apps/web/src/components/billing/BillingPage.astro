@@ -7,8 +7,6 @@
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
-import { giftOf, shownPlan } from "../../lib/pricing"
-import { WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 import FeatureGrid from "../agents/FeatureGrid.astro"
 import SplitHero from "../agents/SplitHero.astro"
@@ -22,9 +20,6 @@ import DebtsList from "./DebtsList"
 
 const page = PAGES.caja
 const pricing = Astro.locals.pricing
-const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
-const gift = giftOf(pricing)
 const cta = ctaOf(pricing)
 const jsonLd = [
   breadcrumbJsonLd(Astro.site, [
@@ -134,19 +129,7 @@ const jsonLd = [
       <Faq items={page.faq} title="Sobre la caja y los cobros." />
     </div>
     <TopicGuides slugs={["cierre-de-caja-dental"]} />
-    <CtaBand title="Cobras el tratamiento. El mes se cuenta solo.">
-      <Fragment slot="text">
-        {gift ? (
-          founder ? (
-            <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-          ) : (
-            <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-          )
-        ) : (
-          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        )}
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Cobras el tratamiento. El mes se cuenta solo." />
   </div>
 </Base>
 

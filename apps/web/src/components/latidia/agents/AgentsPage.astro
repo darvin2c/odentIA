@@ -7,7 +7,8 @@ import SplitHero from "../../agents/SplitHero.astro"
 import CtaBand from "../../CtaBand.astro"
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf, money, type PlanPrices, shownPlan } from "../../../lib/pricing"
+import { chargeFaq, offerOf } from "../../../lib/offer"
+import { money, type PlanPrices, shownPlan } from "../../../lib/pricing"
 import { contactHref, ctaOf } from "../../../lib/site"
 import AgentMini from "../home/AgentMini"
 import AgentSwitches from "../home/AgentSwitches"
@@ -16,10 +17,8 @@ import TrioDemo from "./TrioDemo"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
-const list = pricing.list
-const founder = plan !== null && plan === pricing.founders
+const { fee, credit } = offerOf(pricing)
 
 const title = "Agentes de IA para consultorios médicos: Sofi, Clío y Argos"
 const description =
@@ -70,17 +69,15 @@ const agents = [
   },
 ]
 
-// Cuánto cobra cada uno (ADR 0085): el precio de cada tipo del plan que se muestra y, si es el de
-// Fundadores, el de lista tachado. Sin plan publicado no hay cifras.
+// Cuánto cobra cada uno (ADR 0085): el precio de cada tipo del plan que se muestra. Sin plan publicado
+// no hay cifras.
 const cut = (value: number, currency: string) => {
   const shown = money(value, currency).replace(`${currency} `, "")
   return shown.includes(",") ? shown : `${shown},00`
 }
-type PriceRow = { label: string; text: string; price: string; before: string | null }
-function row(p: PlanPrices, label: string, text: string, own: number | null, base: number | null | undefined): PriceRow[] {
-  if (own === null) return []
-  const before = founder && base !== null && base !== undefined && base !== own ? cut(base, p.currency) : null
-  return [{ label, text, price: cut(own, p.currency), before }]
+type PriceRow = { label: string; text: string; price: string }
+function row(p: PlanPrices, label: string, text: string, own: number | null): PriceRow[] {
+  return own === null ? [] : [{ label, text, price: cut(own, p.currency) }]
 }
 const prices = plan
   ? [
@@ -89,9 +86,9 @@ const prices = plan
         name: "Sofi",
         unit: "Una vez por persona, según lo que pasó en tu agenda.",
         rows: [
-          ...row(plan, "Informa", "Respondió, dio la dirección, el horario o un precio.", plan.tiers.informa, list?.tiers.informa),
-          ...row(plan, "Gestiona", "Reservó, movió o canceló una cita.", plan.tiers.gestiona, list?.tiers.gestiona),
-          ...row(plan, "Agenda", "La consulta que reservó se dio.", plan.tiers.agenda, list?.tiers.agenda),
+          ...row(plan, "Informa", "Respondió, dio la dirección, el horario o un precio.", plan.tiers.informa),
+          ...row(plan, "Gestiona", "Reservó, movió o canceló una cita.", plan.tiers.gestiona),
+          ...row(plan, "Agenda", "La consulta que reservó se dio.", plan.tiers.agenda),
         ],
       },
       {
@@ -99,9 +96,9 @@ const prices = plan
         name: "Clío",
         unit: "Una vez por consulta, y solo si confirmas.",
         rows: [
-          ...row(plan, "Simple", "Una sola parte: la nota, una receta o un control.", plan.tiers.simple, list?.tiers.simple),
-          ...row(plan, "Estándar", "Con el examen físico, un diagnóstico o varias partes.", plan.tiers.estandar, list?.tiers.estandar),
-          ...row(plan, "Completa", "Además dejó indicado lo que sigue.", plan.tiers.completa, list?.tiers.completa),
+          ...row(plan, "Simple", "Una sola parte: la nota, una receta o un control.", plan.tiers.simple),
+          ...row(plan, "Estándar", "Con el examen físico, un diagnóstico o varias partes.", plan.tiers.estandar),
+          ...row(plan, "Completa", "Además dejó indicado lo que sigue.", plan.tiers.completa),
         ],
       },
       {
@@ -109,11 +106,11 @@ const prices = plan
         name: "Argos",
         unit: "Recordar no se cobra. Recuperar, sí.",
         rows: [
-          ...row(plan, "Cita recuperada", "Solo si el paciente vino.", plan.recovered, list?.recovered),
+          ...row(plan, "Cita recuperada", "Solo si el paciente vino.", plan.recovered),
           ...(plan.argos
             ? [
-                { label: `${plan.argos.included} preguntas al mes`, text: "Las que no pudo responder no cuentan.", price: "incluidas", before: null },
-                ...row(plan, `${plan.argos.packQuestions} preguntas más`, "Argos te pregunta antes de sumarlas.", plan.argos.pack, list?.argos?.pack),
+                { label: `${plan.argos.included} preguntas al mes`, text: "Las que no pudo responder no cuentan.", price: "incluidas" },
+                ...row(plan, `${plan.argos.packQuestions} preguntas más`, "Argos te pregunta antes de sumarlas.", plan.argos.pack),
               ]
             : []),
         ],
@@ -143,10 +140,7 @@ const faq: FaqItem[] = [
     q: "¿Y si alguien de mi equipo quiere responder?",
     a: "Escribe en la conversación y Sofi se aparta 15 minutos. Nadie habla encima de nadie.",
   },
-  {
-    q: "¿Cómo se cobra?",
-    a: `Por lo que hace cada agente, no por el software ni por usuario. Lo simple cuesta poco y lo que te trae pacientes cuesta más; recordar una cita no se cobra.${gift ? ` Los primeros ${gift} van por nuestra cuenta.` : ""}`,
-  },
+  chargeFaq(pricing, "pacientes"),
 ]
 
 const trail: [string, string][] = [
@@ -213,8 +207,11 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="wrap lag-charge">
         <div class="lag-head wide">
           <span class="tag">[ Cómo se cobra ]</span>
-          <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
-          <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.</p>
+          <h2>Todo el sistema. Pagas con el trabajo de tus agentes.</h2>
+          <p>
+            {fee && credit ? `Un plan de ${fee} al mes que vuelve como crédito: cada trabajo se descuenta de ahí. ` : fee ? `Un plan de ${fee} al mes y lo que hacen tus agentes. ` : null}
+            Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.
+          </p>
         </div>
         {prices.length > 0 && plan ? (
           <>
@@ -227,7 +224,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
                     {agent.rows.map((r) => (
                       <div>
                         <dt><b>{r.label}</b><span>{r.text}</span></dt>
-                        <dd>{r.price}{r.before ? <s>{r.before}</s> : null}</dd>
+                        <dd>{r.price}</dd>
                       </div>
                     ))}
                   </dl>
@@ -235,7 +232,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
               ))}
             </div>
             <div class="lag-charge-foot">
-              <span class="lag-note">Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}; tachado, el de lista.` : ""}</span>
+              <span class="lag-note">Precios en {currencyWord} más impuestos.</span>
               <a class="lag-more" href="/precios">Todos los precios →</a>
             </div>
           </>
@@ -247,11 +244,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 
     <FaqList items={faq} white />
 
-    <CtaBand title="Tres agentes trabajando en tu consultorio desde esta noche.">
-      <Fragment slot="text">
-        {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Tres agentes trabajando en tu consultorio desde esta noche." />
   </div>
 </Base>
 

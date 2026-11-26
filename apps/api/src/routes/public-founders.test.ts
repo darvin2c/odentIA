@@ -11,15 +11,15 @@ import { eq, like, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "../app.js"
-import { createPublicFoundersRoute, settleFounderMail } from "./public-founders.js"
+import { createPublicFoundersRoute } from "./public-founders.js"
 
 /**
- * Fundadores contra la app real (`createApp`, issue 165): la solicitud de la
- * web, los precios que publica, la invitación y el guard de
- * `organization/create`, que con «solo con invitación» no deja abrir una
- * clínica sin una invitación vigente de quien la abre.
+ * Lo público de la web contra la app real (`createApp`): los precios que publica, la
+ * invitación de la administración, el correo de las guías y el guard de
+ * `organization/create`. El alta es libre (ADR 0221): sin invitación se abre la clínica
+ * con la prueba del plan de lista; con ella, solo quien fue invitado y con su plan.
  */
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -63,13 +63,6 @@ function buildApp(auth: Auth, mailer = recordingMailer()): Hono {
     productDomains: { medical: "latidia.localhost", optical: "vistia.localhost" },
     registrationRemoteAddress: () => `10.0.0.${Math.floor(Math.random() * 250)}`,
   })
-}
-
-/** La respuesta, después de que salen los correos que la ruta manda al terminar. */
-async function withMail(res: Response | Promise<Response>): Promise<Response> {
-  const done = await res
-  await settleFounderMail()
-  return done
 }
 
 function recordingMailer() {
@@ -143,162 +136,68 @@ beforeAll(async () => {
     trialMaxCreditCents: 10_000,
     trialDays: 90,
     trialMaxDays: 90,
-    seatLimit: 20,
     guaranteeMonths: 12,
-    showOnWeb: true,
   })
   foundersPlanId = founders.id
+  // La política vieja de alta, como la dejaba la base antes del alta libre: el guard ya no la lee.
+  await ownerDb.update(saasSignupPolicy).set({ mode: "invitacion", medicalMode: "invitacion", opticalMode: "invitacion" })
 }, 180_000)
 
 afterAll(async () => {
   await container?.stop()
 })
 
-it("la solicitud de la web se guarda, envía su copia una vez y valida lo que llega", async () => {
-  const mailer = recordingMailer()
-  const app = buildApp(authFor(null, { calls: 0 }), mailer)
-  const send = (payload: unknown) =>
-    withMail(app.request("/api/public/founders/waitlist", {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
-        body: JSON.stringify(payload),
-      }))
-  const res = await send(request("ana@sonrisa.test"))
-  expect(res.status).toBe(201)
-  expect(res.headers.get("access-control-allow-origin")).toBe("https://www.odentia.localhost")
-  // La copia a quien pidió, que responde a hola@ de su marca, y el aviso «Cliente nuevo» a ese mismo hola@.
-  expect(mailer.sent.map((m) => m.to)).toEqual(["ana@sonrisa.test", "hola@odentia32.com"])
-  expect(mailer.sent[0]?.subject).toBe("Clínica Sonrisa está en la lista de odentIA")
-  expect(mailer.sent[0]?.replyTo).toBe("hola@odentia32.com")
-  expect(mailer.sent[1]?.subject).toContain("Cliente nuevo: Clínica Sonrisa")
-  // Pedirlo otra vez no duplica la solicitud, ni la copia ni el aviso.
-  expect((await send(request("ana@sonrisa.test"))).status).toBe(201)
-  expect(mailer.sent).toHaveLength(2)
-  const bad = await send({ ...request("x@y.test"), professionals: "muchos" })
-  expect(bad.status).toBe(400)
-  expect(((await bad.json()) as { error: { message: string } }).error.message).toBe("Elige cuántos odontólogos atienden")
+it("la web ya no recibe solicitudes para la lista de espera", async () => {
+  const res = await buildApp(authFor(null, { calls: 0 })).request("/api/public/founders/waitlist", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+    body: JSON.stringify(request("ana@sonrisa.test")),
+  })
+  // La ruta ya no existe: la petición sigue al resto de la API, que pide sesión, y no se guarda nada.
+  expect(res.status).toBe(401)
+  expect(await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, "ana@sonrisa.test"))).toEqual([])
 })
 
-describe("el aviso al equipo de cada solicitud nueva", () => {
-  const TEAM = "fundadores@odentia.test"
-  let ip = 0
-  /** La ruta sola, con la dirección de la administración y el buzón del equipo que le pasa `createApp`. */
-  function foundersRoute(mailer: { send: (m: MailMessage) => Promise<void> }, teamEmail: string | null = TEAM) {
-    return createPublicFoundersRoute({
-      ownerDb,
-      mailer,
-      // Una dirección por envío: el límite por dirección no entra en estas pruebas.
-      remoteAddress: () => `10.9.${Math.floor(ip / 250)}.${ip++ % 250}`,
-      adminURL: "https://admin.odentia.localhost/",
-      teamEmailOf: () => teamEmail ?? undefined,
-    })
-  }
-  const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>
-    withMail(route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }))
-  const idOf = async (email: string) =>
-    (await ownerDb.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.id
-  const clientOf = async (email: string) =>
-    (await ownerDb.select({ clientId: saasWaitlistRequest.clientId }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.clientId
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it("una solicitud nueva envía la copia y el aviso de cliente nuevo, sin el correo ni el celular y con el enlace a su ficha", async () => {
-    const mailer = recordingMailer()
-    const res = await post(foundersRoute(mailer), request("aviso@norte.test"))
-    expect(res.status).toBe(201)
-    expect(mailer.sent.map((m) => m.to)).toEqual(["aviso@norte.test", TEAM])
-    const notice = mailer.sent[1]!
-    expect(notice.subject).toBe("Cliente nuevo: Clínica Sonrisa pidió entrar a odentIA")
-    const url = `https://admin.odentia.localhost/clients/${await clientOf("aviso@norte.test")}`
-    expect(notice.text).toContain(`Abrir la ficha: ${url}`)
-    expect(notice.html).toContain(`href="${url}"`)
-    for (const body of [notice.subject, notice.text, notice.html]) {
-      expect(body).not.toContain("aviso@norte.test")
-      expect(body).not.toMatch(/987\D?654\D?321/)
-    }
-
-    // La misma solicitud otra vez (el formulario enviado dos veces): ni otra copia ni otro aviso.
-    expect((await post(foundersRoute(mailer), request("aviso@norte.test"))).status).toBe(201)
-    expect(mailer.sent).toHaveLength(2)
-  })
-
-  it("sin el buzón del equipo, solo sale la copia", async () => {
-    const mailer = recordingMailer()
-    expect((await post(foundersRoute(mailer, null), request("sin-buzon@norte.test"))).status).toBe(201)
-    expect(mailer.sent.map((m) => m.to)).toEqual(["sin-buzon@norte.test"])
-  })
-
-  it("si la copia no sale, el aviso sale igual; si el aviso no sale, solo su id va al registro y no se reintenta", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const sent: MailMessage[] = []
-    const failing = (to: string) => ({
-      send: async (m: MailMessage) => {
-        if (m.to === to) throw new Error(`rebotó ${m.to}`)
-        sent.push(m)
-      },
-    })
-    expect((await post(foundersRoute(failing("rebota@tacna.test")), request("rebota@tacna.test"))).status).toBe(201)
-    expect(sent.map((m) => m.to)).toEqual([TEAM])
-
-    const res = await post(foundersRoute(failing(TEAM)), request("sin-aviso@tacna.test"))
-    expect(res.status).toBe(201)
-    expect(sent.map((m) => m.to)).toEqual([TEAM, "sin-aviso@tacna.test"])
-    const id = await idOf("sin-aviso@tacna.test")
-    const logged = errors.mock.calls.map((call) => call.join(" "))
-    expect(logged).toContain(`Fundadores: no salió el aviso al equipo de la solicitud ${id}`)
-    expect(logged.join("\n")).not.toContain("sin-aviso@tacna.test")
-  })
-
-  it("pasado el tope de 20 avisos por hora no sale otro, y la solicitud se guarda igual", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const mailer = recordingMailer()
-    const route = foundersRoute(mailer)
-    for (let n = 1; n <= 20; n++) expect((await post(route, request(`tope-${n}@lima.test`))).status).toBe(201)
-    expect(mailer.sent.filter((m) => m.to === TEAM)).toHaveLength(20)
-
-    const res = await post(route, request("tope-21@lima.test"))
-    expect(res.status).toBe(201)
-    expect(mailer.sent.filter((m) => m.to === TEAM)).toHaveLength(20)
-    // La copia sí sale, y la solicitud queda para Inicio.
-    expect(mailer.sent.at(-1)?.to).toBe("tope-21@lima.test")
-    const id = await idOf("tope-21@lima.test")
-    expect(errors.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(id)
-  })
-})
-
-it("los precios publicados: solo lo que se muestra en la web y nunca los lugares", async () => {
+it("los precios publicados: solo el plan de lista y las condiciones, nunca un plan especial ni lugares", async () => {
   const res = await buildApp(authFor(null, { calls: 0 })).request("/api/public/founders/pricing")
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { list: { code: string }; founders: { code: string; discountPercent: number }; signupMode: string }
+  const body = (await res.json()) as { list: { code: string }; terms: Record<string, unknown>; founders: unknown; signupMode: unknown }
+  // `founders` y `signupMode` quedan solo para la web de antes durante el despliegue: nulo y «abierta».
+  expect(Object.keys(body).sort()).toEqual(["founders", "list", "signupMode", "terms"])
+  expect(body).toMatchObject({ founders: null, signupMode: "abierta" })
   expect(body.list.code).toBe("api-lista")
-  expect(body.founders).toMatchObject({ code: "api-fundadores", discountPercent: 40 })
-  expect(body.signupMode).toBe("invitacion")
-  expect(JSON.stringify(body)).not.toMatch(/seat/i)
+  expect(body.terms).not.toHaveProperty("waitlistAnswerDays")
+  expect(JSON.stringify(body)).not.toMatch(/seat|fundadores/i)
 })
 
-it("con «solo con invitación», abrir una clínica pide la invitación de quien la abre", async () => {
+it("sin invitación se abre la clínica con la prueba del plan de lista, aunque la política vieja diga «solo con invitación»", async () => {
   const created = { calls: 0 }
-  const noInvite = await createOrg(buildApp(authFor("pedro@gmail.test", created)), "sin-invitacion")
-  expect(noInvite.status).toBe(403)
-  expect(((await noInvite.json()) as { error: { code: string } }).error.code).toBe("INVITATION_REQUIRED")
-  expect(created.calls).toBe(0)
+  const res = await createOrg(buildApp(authFor("libre@clinica.test", created)), "libre")
+  expect(res.status).toBe(200)
+  expect(created.calls).toBe(1)
+  // Nace en prueba y nunca con el plan especial: ese llega solo con la invitación.
+  const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-libre"))
+  expect(sub?.status).toBe("prueba")
+  expect(sub?.planId).not.toBe(foundersPlanId)
+})
 
+it("con la invitación de la administración, solo quien fue invitado abre una clínica, una vez y con su plan", async () => {
+  const created = { calls: 0 }
   const [row] = await ownerDb
     .insert(saasWaitlistRequest)
     .values({ ...request("rosa@norte.test"), professionals: "1", currentTool: "nada", phone: "+51911111111" })
     .returning({ id: saasWaitlistRequest.id })
-  const { token } = await inviteFromWaitlist(ownerDb, ADMIN, row!.id)
+  const { token } = await inviteFromWaitlist(ownerDb, ADMIN, row!.id, { planId: foundersPlanId })
 
   const invitation = await buildApp(authFor(null, created)).request(`/api/public/founders/invitation/${token}`)
   expect(invitation.status).toBe(200)
   const missing = await buildApp(authFor(null, created)).request("/api/public/founders/invitation/otro")
   expect(missing.status).toBe(404)
 
-  // Con la invitación de otra persona, tampoco.
+  // Con la invitación de otra persona, no.
   const other = await createOrg(buildApp(authFor("pedro@gmail.test", created)), "ajena", token)
   expect(other.status).toBe(403)
+  expect(((await other.json()) as { error: { code: string } }).error.code).toBe("INVITATION_OTHER_EMAIL")
   expect(created.calls).toBe(0)
 
   const ok = await createOrg(buildApp(authFor("rosa@norte.test", created)), "norte", token)
@@ -315,19 +214,7 @@ it("con «solo con invitación», abrir una clínica pide la invitación de quie
   expect(created.calls).toBe(1)
 })
 
-it("con el alta abierta, se abre sin invitación y con el plan por defecto", async () => {
-  await ownerDb.update(saasSignupPolicy).set({ mode: "abierta" })
-  const created = { calls: 0 }
-  const res = await createOrg(buildApp(authFor("libre@clinica.test", created)), "libre")
-  expect(res.status).toBe(200)
-  expect(created.calls).toBe(1)
-  const [plan] = await ownerDb.select().from(saasPlan).where(eq(saasPlan.code, "api-fundadores"))
-  const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-libre"))
-  expect(sub?.planId).not.toBe(plan?.id)
-  await ownerDb.update(saasSignupPolicy).set({ mode: "invitacion" })
-})
-
-it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", async () => {
+it("cada producto tiene su lista: latidIA por su dominio y se abre sin invitación (ADR 0093)", async () => {
   await createSaasPlan(ownerDb, ADMIN.userId, {
     code: "api-lista-latidia",
     name: "Plan latidIA",
@@ -352,47 +239,25 @@ it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", 
   expect(byDomain.list.code).toBe("api-lista-latidia")
   expect(((await (await app.request("/api/public/founders/pricing")).json()) as { list: { code: string } }).list.code).toBe("api-lista")
 
-  // Se abre latidIA y odentIA sigue pidiendo invitación.
-  await ownerDb.update(saasSignupPolicy).set({ medicalMode: "abierta" })
+  // Sin invitación, aunque la política vieja de latidIA diga «solo con invitación».
   const created = { calls: 0 }
-  const dental = await createOrg(buildApp(authFor("dental@clinica.test", created)), "sigue-cerrada")
-  expect(dental.status).toBe(403)
   const medical = await createOrg(buildApp(authFor("libre@latido.test", created)), "latido", undefined, "https://api.latidia.localhost")
   expect(medical.status).toBe(200)
   // Nace con la prueba del Plan latidIA, no con la de odentIA.
   const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-latido"))
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / 86_400_000)).toBe(45)
-  await ownerDb.update(saasSignupPolicy).set({ medicalMode: "invitacion" })
 })
 
 describe("las guías de la web (ADR 0216)", () => {
   const GUIDE = "/guias/como-llenar-un-odontograma"
   const post = (app: Hono, path: string, payload: unknown) =>
-    withMail(app.request(path, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
-        body: JSON.stringify(payload),
-      }))
+    app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://www.odentia.localhost" },
+      body: JSON.stringify(payload),
+    })
 
-  it("la solicitud enviada desde una guía guarda su página; si ya estaba en la lista, la respuesta es la misma", async () => {
-    const mailer = recordingMailer()
-    const app = buildApp(authFor(null, { calls: 0 }), mailer)
-    const res = await post(app, `/api/public/founders/waitlist?desde=${encodeURIComponent(GUIDE)}`, request("qa.guia@example.com"))
-    expect(res.status).toBe(201)
-    const first = await res.json()
-    expect(first).toEqual({ ok: true, answerDays: expect.any(Number) })
-    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, "qa.guia@example.com"))
-    expect(row?.sourcePage).toBe(GUIDE)
-    const copies = () => mailer.sent.filter((mail) => mail.to === "qa.guia@example.com").length
-    expect(copies()).toBe(1)
-    // Otra vez el mismo correo: no sale otra copia, y la web no se entera de que ya había pedido.
-    const again = await post(app, "/api/public/founders/waitlist", request("qa.guia@example.com"))
-    expect(again.status).toBe(201)
-    expect(await again.json()).toEqual(first)
-    expect(copies()).toBe(1)
-  })
-
-  it("el aviso manda las plantillas adjuntas una vez al día, con la puerta para pedir entrar", async () => {
+  it("el aviso manda las plantillas adjuntas una vez al día, con la puerta para empezar gratis", async () => {
     const mailer = recordingMailer()
     const app = buildApp(authFor(null, { calls: 0 }), mailer)
     const body = { email: "QA.Milagros@example.com", page: GUIDE, sheets: ["odontograma", "odontograma-ninos"] }
@@ -408,9 +273,11 @@ describe("las guías de la web (ADR 0216)", () => {
       ["odontograma.pdf", "application/pdf"],
       ["odontograma-ninos.pdf", "application/pdf"],
     ])
-    // Con Fundadores, «Pide tus USD 100» con su correo en el fragmento: nunca en la consulta.
-    expect(mail.html).toContain("Pide tus USD 100")
-    expect(mail.html).toContain("https://www.odentia.localhost/solicitar-invitacion#correo=qa.milagros%40example.com")
+    // El alta es libre: «Empieza gratis» lleva a crear la cuenta, con lo que regala el plan de lista.
+    expect(mail.html).toContain("Empieza gratis")
+    expect(mail.html).toContain("https://app.odentia.localhost/register")
+    expect(mail.text).toContain("Empieza gratis: 30 días con USD 100 de regalo para tus agentes, sin tarjeta.")
+    for (const word of ["solicitar-invitacion", "Fundadores", "Pide tus", "qa.milagros%40example.com"]) expect(mail.html).not.toContain(word)
     expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}`)
     // Lo que promete el aviso («te mostramos cómo»): la demo de la guía, sin cuenta.
     expect(mail.html).toContain(`https://www.odentia.localhost${GUIDE}#pruebalo`)
@@ -480,8 +347,25 @@ describe("las guías de la web (ADR 0216)", () => {
     const html = mailer.sent[0]?.html ?? ""
     expect(html).toContain("Entrar a odentIA")
     expect(html).toContain("https://app.odentia.localhost/login")
-    expect(html).not.toContain("Pide tus")
+    expect(html).not.toContain("Empieza gratis")
     expect(html).not.toContain("Fundadores")
+  })
+
+  it("sin plan de lista en la web, el correo no invita a crear la cuenta ni promete un regalo", async () => {
+    await ownerDb.update(saasPlan).set({ showOnWeb: false }).where(eq(saasPlan.code, "api-lista"))
+    try {
+      const mailer = recordingMailer()
+      const app = buildApp(authFor(null, { calls: 0 }), mailer)
+      const res = await post(app, "/api/public/founders/contact", { email: "qa.sinplan@example.com", page: GUIDE, sheets: ["odontograma"] })
+      expect(res.status).toBe(201)
+      const mail = mailer.sent[0]!
+      for (const word of ["Empieza gratis", "/register", "de regalo"]) {
+        expect(mail.html).not.toContain(word)
+        expect(mail.text).not.toContain(word)
+      }
+    } finally {
+      await ownerDb.update(saasPlan).set({ showOnWeb: true }).where(eq(saasPlan.code, "api-lista"))
+    }
   })
 
   it("cuenta por red de IPv6: cambiar de dirección dentro de la misma red no pasa el tope", async () => {

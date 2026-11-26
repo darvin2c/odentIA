@@ -34,11 +34,9 @@ const doesNot = [
   { title: "No dicta todo el odontograma", text: "Implantes, endodoncias y la movilidad se siguen marcando en la pieza." },
 ]
 
-// Cuánto cobra Clío (ADR 0085): el precio de cada tipo del plan que se muestra y, si es el de
-// Fundadores, el de lista tachado (como AgentPrices). Sin plan publicado no hay cifras.
+// Cuánto cobra Clío (ADR 0085): el precio de cada tipo del plan que se muestra (como AgentPrices). Sin
+// plan publicado no hay cifras.
 const plan = shownPlan(pricing)
-const list = pricing.list
-const founder = plan !== null && plan === pricing.founders
 const cut = (value: number, currency: string) => money(value, currency).replace(`${currency} `, "")
 const tiers: Array<{ key: keyof TierPrices; name: string; text: string }> = [
   { key: "simple", name: "Simple", text: "Una sola parte: una nota, una receta o un control." },
@@ -49,8 +47,7 @@ const rows = plan
   ? tiers.flatMap((tier) => {
       const price = plan.tiers[tier.key]
       if (price === null) return []
-      const base = founder && list ? list.tiers[tier.key] : null
-      return [{ ...tier, price: cut(price, plan.currency), before: base !== null && base !== price ? cut(base, plan.currency) : null }]
+      return [{ ...tier, price: cut(price, plan.currency) }]
     })
   : []
 ---
@@ -105,12 +102,12 @@ const rows = plan
             {rows.map((row) => (
               <div class="price-row">
                 <dt><b>{row.name}</b><span>{row.text}</span></dt>
-                <dd>{row.price}{row.before ? <s>{row.before}</s> : null}</dd>
+                <dd>{row.price}</dd>
               </div>
             ))}
           </dl>
           <p class="price-note">
-            Precios en {plan.currency === "USD" ? "dólares" : plan.currency} más impuestos{founder && rows.some((row) => row.before) ? "; tachado, el precio de lista" : ""}. <a href="/precios">Ver todos los precios</a>
+            Precios en {plan.currency === "USD" ? "dólares" : plan.currency} más impuestos. <a href="/precios">Ver todos los precios</a>
           </p>
         </div>
       ) : (

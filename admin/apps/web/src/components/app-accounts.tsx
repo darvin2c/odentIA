@@ -107,7 +107,7 @@ const fromMicros = (value: number | null) => (value === null ? "" : String(value
 /**
  * Crear o editar un plan de gestorIA. La conversación «atendida» y la que «tomó un pedido» son
  * las dos que cuenta la app (lo que una clínica llama Informa y Gestiona); sin negociación ni
- * Fundadores: lo que no tiene motivo en una tienda no se pide.
+ * meses garantizados: lo que no tiene motivo en una tienda no se pide.
  */
 export function AppPlanDrawer({
   app,

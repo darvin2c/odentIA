@@ -1,11 +1,12 @@
 // Las preguntas del inicio de vistIA. Las usa la página y sus datos estructurados (FAQPage en
-// index.astro). El regalo sale del plan que se muestra, nunca del código.
+// index.astro). El regalo y la cuota salen del plan que se muestra, nunca del código.
 import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
-import { trialFaq } from "../../lib/offer"
+import { chargeFaq, trialFaq } from "../../lib/offer"
 import type { Pricing } from "../../lib/pricing"
+import { supportEmail } from "../../lib/site"
 
-export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
+export function homeFaq(pricing: Pricing): FaqItem[] {
   return [
     armFaq,
     {
@@ -28,17 +29,14 @@ export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
       q: "¿Sofi ve la historia clínica?",
       a: "No. Responde y agenda con lo que tu óptica le enseña: servicios, precios, horarios y medios de pago. La historia la ve quien examina, según los permisos de cada rol.",
     },
-    {
-      q: "¿Cómo se cobra?",
-      a: `Por lo que hacen tus agentes, no por el software ni por usuario. Lo simple cuesta poco y lo que te trae clientes cuesta más.${gift ? ` Los primeros ${gift} van por nuestra cuenta.` : ""}`,
-    },
+    chargeFaq(pricing, "clientes"),
     {
       q: "¿Cómo encuentro rápido a un cliente?",
       a: "Con Ctrl K (⌘K en Mac) desde cualquier pantalla, o con la lupa en el teléfono. Escribe parte del nombre sin preocuparte por las tildes, el teléfono, el documento o el número de historia, y aparece la persona con su próxima cita, su última conversación y lo que debe.",
     },
     {
       q: "¿Puedo traer a mis clientes?",
-      a: "Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus clientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu óptica.",
+      a: `Sí. Escribe a ${supportEmail} con tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus clientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu óptica.`,
     },
     {
       q: "¿Hay aplicación para el celular?",

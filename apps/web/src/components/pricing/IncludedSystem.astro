@@ -1,13 +1,16 @@
 ---
-// «Todo el sistema, USD 0»: lo que trae el sistema, cada cosa a USD 0 y con su página, para que se
-// vea que no se cobra el software sino lo que hacen los agentes. Va bajo la portada de Precios.
+// «Todo el sistema, incluido en tu plan»: lo que trae el sistema, cada cosa incluida y con su página,
+// para que se vea que no se cobra por módulo, usuario ni sede: la cuota vuelve como crédito para lo que
+// hacen los agentes. Si el plan no tiene cuota, la misma lista dice «incluido». Va bajo la portada de Precios.
 // Cada web lista lo suyo; en latidIA y vistIA «Varias sedes» no tiene página propia. Lienzo «Precios: por lo que hizo».
+import { offerOf } from "../../lib/offer"
 import { money, shownPlan } from "../../lib/pricing"
 import { AGENTS, HAS_CLIO, ofProduct, WORDS } from "../../lib/product"
 
 const plan = shownPlan(Astro.locals.pricing)
 const currency = plan?.currency ?? "USD"
 const zero = money(0, currency)
+const { fee, credit } = offerOf(Astro.locals.pricing)
 // El trabajo más barato: una respuesta de Sofi o, donde Clío trabaja, una consulta simple.
 const tiers = [plan?.tiers.informa, HAS_CLIO ? plan?.tiers.simple : null].filter((value): value is number => value != null)
 const from = tiers.length ? Math.min(...tiers) : null
@@ -65,10 +68,12 @@ const extra: Item = storage
   <div class="wrap in">
     <div class="side">
       <span class="tag">[ El sistema, incluido ]</span>
-      <h2 class="h2 t">Todo el sistema, <span class="acc">{zero}.</span></h2>
-      <p class="lead">No cobramos por usuario, por sede ni por módulo. Usas todo desde el primer día y pagas solo cuando un agente hizo un trabajo.</p>
+      <h2 class="h2 t">Todo el sistema, <span class="acc">{fee ? "incluido en tu plan." : "incluido."}</span></h2>
+      <p class="lead">
+        No cobramos por usuario, por sede ni por módulo. Usas todo desde el primer día{fee && credit ? `; tu plan de ${fee} al mes vuelve como crédito para lo que hagan tus agentes.` : fee ? `, con tu plan de ${fee} al mes.` : "."}
+      </p>
       <div class="only">
-        <span class="only-k">Lo único que se paga</span>
+        <span class="only-k">{fee && credit ? "Lo que se descuenta de tu crédito" : fee ? "Lo que se suma a tu plan" : "Lo único que se paga"}</span>
         <span class="only-t">Lo que hacen {agentNames}</span>
         <span class="only-d">
           {from !== null && plan ? <>Desde <b>{money(from, currency)}</b> por trabajo. </> : null}Si el agente no hizo nada útil, la fila dice {zero}.
@@ -81,7 +86,7 @@ const extra: Item = storage
         const body = (
           <>
             <span class="txt"><b>{item.name}</b><span class="what">{item.what}</span></span>
-            <span class="zero">{zero}{item.href ? <span aria-hidden="true"> →</span> : null}</span>
+            <span class="zero">Incluido{item.href ? <span aria-hidden="true"> →</span> : null}</span>
           </>
         )
         return <li class:list={{ last: item === extra }}>{item.href ? <a class="it" href={item.href}>{body}</a> : <div class="it">{body}</div>}</li>

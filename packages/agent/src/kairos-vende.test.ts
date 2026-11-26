@@ -621,11 +621,9 @@ describe("Kairós vende: lo mismo dicho dos veces sale una vez", () => {
 })
 
 describe("Kairós vende: las instrucciones", () => {
-  it("piden la moneda con cada precio y no tratan Fundadores como un descuento", () => {
+  it("piden la moneda con cada precio y no tratan una pregunta por Fundadores como un descuento", () => {
     expect(SELLER_SYSTEM).toContain("cada importe con su moneda")
-    expect(SELLER_SYSTEM).toContain(
-      "por Fundadores o por cuánto se ahorra con Fundadores no es pedir un descuento",
-    )
+    expect(SELLER_SYSTEM).toContain("por el programa Fundadores (ya terminó) no es pedir un descuento")
   })
 })
 

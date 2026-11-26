@@ -119,6 +119,9 @@ describe("la solo lectura por falta de pago", () => {
 
   it("cómo salir y qué pasa con un comprobante en revisión tienen su respuesta (QA del 11 nov)", () => {
     expect(firstFaq("Mi clínica está en solo lectura, ¿qué hago para volver a usarla?")).toBe("plan-y-pagos-solo-lectura")
+    // Con el alta libre (ADR 0221) es la pregunta de toda clínica nueva.
+    expect(firstFaq("¿qué pasa cuando se acabe mi prueba gratis?")).toBe("plan-y-pagos-fin-de-la-prueba")
+    expect(firstFaq("¿cuánto voy a pagar y cuándo me cobran?")).toBe("plan-y-pagos-fin-de-la-prueba")
     expect(
       firstFaq("Subí mi comprobante antes de que venza el cargo y todavía dice en revisión. ¿Igual me pueden pasar a solo lectura?"),
     ).toBe("plan-y-pagos-comprobante-en-revision")
