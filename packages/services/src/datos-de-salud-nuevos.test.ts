@@ -80,3 +80,10 @@ it("la medicina para los huesos que ya no toma queda terminada, con por qué y c
   expect(row).toMatchObject({ name: "zoledronato", declaredClass: "boneMedicines", endDate: "2026-11-13" })
   expect(row?.notes).toBe("Por un cáncer · inyección · dijo que ya no la toma")
 })
+
+describe("la dosis declarada en los campos de la lista (QA del 26 nov)", () => {
+  it("con su unidad y cada cuánto de la lista, por cualquier camino que se guarde", () => {
+    const [row] = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } })
+    expect(row).toMatchObject({ name: "apixabán", doseValue: 5, doseUnit: "mg", frequencyCode: "cada_12_h" })
+  })
+})

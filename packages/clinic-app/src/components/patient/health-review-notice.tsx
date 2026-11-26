@@ -650,7 +650,8 @@ export function HealthReviewNotice({
               <SubmitButton
                 type="button"
                 size="sm"
-                className="min-h-11 sm:min-h-8"
+                // Con el nombre de quien acompaña puede ser largo: se parte en líneas a 390 px (QA del 26 nov).
+                className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
                 pending={!!dictation?.confirmHealth.isPending}
                 disabled={busy}
                 onClick={confirmHeard}
@@ -814,7 +815,7 @@ export function HealthReviewNotice({
                     {showing ? "Ocultar lo que dijo" : "Ver lo que dijo"}
                   </Button>
                 ) : null}
-                <Button type="button" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={reviewNow}>
+                <Button type="button" size="sm" className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8" disabled={busy} onClick={reviewNow}>
                   {`Lo revisé con ${reviewWho(reviewer, sex)}`}
                 </Button>
                 {openWide ? (
@@ -983,7 +984,14 @@ function SaidEarlierRow({
           No lo registro
         </Button>
         {current.length > 0 ? (
-          <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending && act.variables === "confirm"} disabled={disabled || act.isPending} onClick={() => act.mutate("confirm")}>
+          <SubmitButton
+            type="button"
+            size="sm"
+            className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
+            pending={act.isPending && act.variables === "confirm"}
+            disabled={disabled || act.isPending}
+            onClick={() => act.mutate("confirm")}
+          >
             {`Lo revisé con ${who}`}
           </SubmitButton>
         ) : null}

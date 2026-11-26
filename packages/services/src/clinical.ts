@@ -1446,7 +1446,17 @@ export function declaredMedications(
   // «Sí» a «algún otro» sin decir cuál, que ahora es opcional como en las dos clases (QA del 14 nov, B15).
   if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
-  return rows
+  // La dosis con su unidad y cada cuánto, en los campos de la lista, por cualquier camino que se guarde
+  // (la primera consulta de un paciente nuevo también; QA del 26 nov). Lo que no calza queda como texto.
+  return rows.map((row) => {
+    const structured = row.dose?.trim() ? structuredDose(row.dose) : null
+    const code = row.frequency?.trim() ? frequencyCodeOf(row.frequency) : null
+    return {
+      ...row,
+      ...(structured ? { dose: doseText(structured.doseValue, structured.doseUnit), doseValue: structured.doseValue, doseUnit: structured.doseUnit } : {}),
+      ...(code ? { frequency: MEDICATION_FREQUENCY_LABELS[code], frequencyCode: code } : {}),
+    }
+  })
 }
 
 /** La dosis y cada cuánto de lo declarado, en los campos de su fila (`validateMedicationRow`). */

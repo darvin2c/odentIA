@@ -409,7 +409,7 @@ describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)",
 
   it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
     const rows = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } } as never)
-    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "cada 12 h", declaredClass: "anticoagulants" })
+    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "Cada 12 horas", frequencyCode: "cada_12_h", declaredClass: "anticoagulants" })
   })
 })
 

@@ -367,4 +367,19 @@ describe("la primera consulta de un paciente registrado en el panel", () => {
     expect(after.conditions.map((row) => row.name)).toEqual(["hipertensión"])
     await enable(false)
   })
+
+  // QA del 26 nov (verificador): por este camino la dosis quedaba como «Escrita antes» y «Otra».
+  it("la dosis dicha con su unidad queda en los campos de la lista también en su primera consulta", async () => {
+    await enable(true)
+    const { fx, segment, health, confirm, medicines } = await session()
+    await ownerDb.insert(patientRegistration).values({ organizationId: ORG, patientId: fx.patient.id, entryPoint: "platform", respondent: "staff", answers: {} })
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixaban de cinco miligramos cada doce horas" }],
+      transcript: "Tomo apixaban de cinco miligramos cada doce horas.",
+    })
+    const [said] = await health()
+    await confirm(said!.id)
+    expect((await medicines()).map((row) => [row.name, Number(row.doseValue), row.doseUnit, row.frequencyCode])).toEqual([["apixabán", 5, "mg", "cada_12_h"]])
+    await enable(false)
+  })
 })
