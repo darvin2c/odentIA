@@ -179,6 +179,11 @@ serve({ fetch: app.fetch, port: API_PORT, hostname: "127.0.0.1" })
 
 // La cuenta de mentira, con las cabeceras que pide la pantalla (credenciales, su origen).
 let current: Who | null = "rosa"
+/**
+ * Si la sesión pasó el código del personal (lo dice la cuenta en el token, ADR 0219): soporte
+ * llega así desde la administración; `POST /__codigo/no` la deja como si entrara directo.
+ */
+let staffCode = true
 /** Quién activó los dos pasos y lo que pidió Mi perfil (para que el recorrido lo compruebe). */
 const twoFactorOn = new Set<Who>()
 const asked: Array<{ path: string; body: Record<string, unknown> }> = []
@@ -207,6 +212,11 @@ const account = createServer(async (request, response) => {
     return json(200, { como })
   }
   if (request.method === "GET" && url.pathname === "/__cuenta") return json(200, { asked })
+  const code = /^\/__codigo\/(si|no)$/.exec(url.pathname)?.[1]
+  if (request.method === "POST" && code) {
+    staffCode = code === "si"
+    return json(200, { staffCode })
+  }
   // Entrar con correo y contraseña (la de todas es `CLAVE`) y cerrar la sesión.
   if (request.method === "POST" && url.pathname === "/api/auth/sign-in/email") {
     const chunks: Buffer[] = []
@@ -299,6 +309,8 @@ const account = createServer(async (request, response) => {
       emailVerified: true,
       name: p.name,
       image: null,
+      // Solo Ana es del personal del grupo.
+      staffVerified: current === "ana" && staffCode,
     })
       .setProtectedHeader({ alg: "EdDSA", kid: "e2e" })
       .setSubject(p.id)

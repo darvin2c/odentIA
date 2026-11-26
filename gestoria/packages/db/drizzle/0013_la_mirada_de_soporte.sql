@@ -1,0 +1,3 @@
+-- Soporte termina su mirada con «Salir» (ADR 0219): queda en el registro de la tienda.
+ALTER TABLE "store_event" DROP CONSTRAINT "store_event_action_check";--> statement-breakpoint
+ALTER TABLE "store_event" ADD CONSTRAINT "store_event_action_check" CHECK (action IN ('tienda.creada','invitacion.creada','invitacion.anulada','invitacion.aceptada','equipo.rol','equipo.quitado','cuenta.cerrada','configuracion.pago','configuracion.entrega','catalogo.producto','catalogo.hoja','configuracion.sofi','soporte.pedido','soporte.aceptado','soporte.rechazado','soporte.quitado','soporte.entro','soporte.salio'));

@@ -4,7 +4,7 @@
  * persona. Lo hace la app, con sus reglas; aquí queda el botón que lo pide, quién lo pidió y cómo
  * quedó (pendiente, hecho o falló, con lo que respondió la app). Solo la administración.
  */
-import { Badge, FieldGroup } from "@odentia/ui"
+import { Badge, Button, FieldGroup } from "@odentia/ui"
 import {
   type CountryCode,
   CountrySelect,
@@ -16,6 +16,7 @@ import { useMutation } from "@tanstack/react-query"
 import { useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
+import { lookableRequest } from "../lib/support-look"
 import { APP_NAMES } from "./app-accounts"
 import { CurrencySelect } from "./billing-fields"
 import { dayTime, money } from "./billing-payments"
@@ -27,6 +28,7 @@ export const appRequestSchema = z.object({
   status: z.enum(["pendiente", "hecho", "fallo"]),
   message: z.string().nullable(),
   requestedBy: z.string().nullable(),
+  mine: z.boolean().default(false),
   createdAt: z.string(),
   doneAt: z.string().nullable(),
   detail: z.string().nullable(),
@@ -44,11 +46,29 @@ const STATUS_NAMES: Record<AppRequest["status"], string> = {
   fallo: "Falló",
 }
 
+/**
+ * Lo que dice el estado de un pedido. Entrar como soporte, llegado a la app, no está «hecho»: la
+ * administración no se entera de cuándo acepta la tienda (ADR 0219); lo dice gestorIA al abrirla.
+ */
+function statusName(request: AppRequest): string {
+  if (request.type === "soporte.entrar" && request.status === "hecho") return "Pedido a la tienda"
+  return STATUS_NAMES[request.status]
+}
 
-/** Lo pedido a la app de esta cuenta, del más nuevo al más viejo. */
-export function AppRequestList({ requests }: { requests: AppRequest[] }) {
+/**
+ * Lo pedido a la app de esta cuenta, del más nuevo al más viejo. `lookHref`: la dirección de la
+ * tienda con el pase, para «Mirar la tienda (solo mirar)» en el pedido de entrar de quien mira.
+ */
+export function AppRequestList({
+  requests,
+  lookHref = null,
+}: {
+  requests: AppRequest[]
+  lookHref?: string | null
+}) {
   if (requests.length === 0)
     return <p className="text-sm text-muted-foreground">Todavía no se le pidió nada a su app.</p>
+  const look = lookHref ? lookableRequest(requests) : null
   return (
     <ul className="flex flex-col gap-2">
       {requests.map((request) => (
@@ -64,7 +84,7 @@ export function AppRequestList({ requests }: { requests: AppRequest[] }) {
                     : "outline"
               }
             >
-              {STATUS_NAMES[request.status]}
+              {statusName(request)}
             </Badge>
             <span className="ml-auto text-xs text-muted-foreground">
               {request.requestedBy ?? "Alguien del equipo"} · {dayTime(request.createdAt)}
@@ -79,6 +99,17 @@ export function AppRequestList({ requests }: { requests: AppRequest[] }) {
                 ? `Todavía no llega: ${request.message}`
                 : request.message}
             </p>
+          ) : null}
+          {look === request.id && lookHref ? (
+            <div className="flex flex-col items-start gap-1 pt-1">
+              <Button size="sm" render={<a href={lookHref} target="_blank" rel="noopener" />}>
+                Mirar la tienda (solo mirar) ↗
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Solo para quien lo pidió. Abre la tienda en otra pestaña, sin volver a entrar. Al
+                llegar, la app dice si ya puedes mirar o si la tienda todavía no responde.
+              </p>
+            </div>
           ) : null}
         </li>
       ))}
@@ -149,7 +180,7 @@ export function AppRequestDrawer({
       title={support ? "Dejar entrar a soporte" : "Quitar a una persona"}
       description={
         support
-          ? `Le pide a ${name} que te deje mirar la cuenta, solo a mirar, el rato que elijas. La tienda lo acepta o no; entras con tu cuenta.`
+          ? `Le pide a ${name} que te deje mirar la cuenta, solo a mirar, el rato que elijas. La tienda lo acepta o no; después la miras con «Mirar la tienda», desde aquí.`
           : `Le pide a ${name} que la saque del equipo de la cuenta. Si es su único Dueño, no se puede.`
       }
       submitLabel="Pedirlo"

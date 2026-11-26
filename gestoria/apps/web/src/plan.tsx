@@ -490,6 +490,24 @@ function Support({ view }: { view: PlanView }) {
             : "Todavía no podemos recibir preguntas desde aquí."}
         </p>
       </div>
+      {/* Mientras gestorIA no tenga su Ayuda, lo que más se pregunta del soporte va aquí. */}
+      <details className="rounded-lg border p-3 text-sm">
+        <summary className="flex min-h-11 cursor-pointer items-center font-medium">
+          ¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?
+        </summary>
+        <div className="flex flex-col gap-2 pt-1 text-muted-foreground">
+          <p>
+            Soporte de gestorIA entra solo si tú o un Administrador lo dejan entrar, y por los
+            minutos que pidió, que empiezan cuando lo dejas entrar. Ve tu tienda, tu catálogo sin
+            costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones,
+            y no cambia nada. Solo el equipo de gestorIA puede pedirlo.
+          </p>
+          <p>
+            En Equipo ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras
+            mira, «Sacar ahora» lo saca al momento.
+          </p>
+        </div>
+      </details>
       {view.connected ? (
         <form onSubmit={submit} className="flex flex-col gap-4">
           <FieldGroup>

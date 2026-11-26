@@ -27,7 +27,7 @@ import {
   TwoFactorPage,
   VerifyEmailSentPage,
 } from "./entrada"
-import { SignedOut } from "./lib/api"
+import { ApiError, SignedOut } from "./lib/api"
 import { authFetch, hasSession, safeNext } from "./lib/cuenta"
 import { PaymentsPage } from "./pagos"
 import { OrdersPage } from "./pedidos"
@@ -48,7 +48,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // Sin sesión no se reintenta: se manda a entrar.
-      retry: (count, error) => !(error instanceof SignedOut) && count < 1,
+      // Un rechazo de permisos (403) no cambia al reintentarlo.
+      retry: (count, error) =>
+        !(error instanceof SignedOut) &&
+        !(error instanceof ApiError && error.status === 403) &&
+        count < 1,
     },
   },
 })
@@ -235,8 +239,19 @@ const router = createRouter({
   defaultErrorComponent: RouteError,
 })
 
-// Si la sesión de la cuenta vence a mitad, cualquier pantalla manda a entrar.
+// Si la sesión de la cuenta vence a mitad, cualquier pantalla manda a entrar. Si a soporte se le
+// terminó el acceso (o la tienda todavía no responde), la tienda se vuelve a mirar: deja de salir
+// en su lista y la pantalla dice por qué (ADR 0219).
 queryClient.getQueryCache().subscribe((event) => {
+  const error =
+    event.type === "updated" && event.action.type === "error" ? event.action.error : null
+  if (
+    error instanceof ApiError &&
+    error.code.startsWith("SUPPORT_") &&
+    event.query.queryKey[0] !== "yo" &&
+    event.query.queryKey[0] !== "soporte-mio"
+  )
+    void queryClient.invalidateQueries({ queryKey: ["yo"] })
   if (event.type === "updated" && event.query.state.error instanceof SignedOut) {
     window.location.assign(
       `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`,

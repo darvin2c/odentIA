@@ -9,6 +9,7 @@ import {
   createAuth,
   EXTERNAL_ACCOUNT_APPS,
   isAccountApp,
+  signedTokenPayload,
 } from "./index.js"
 
 // postgres-js conecta en la primera consulta, y estas peticiones no llegan a ninguna.
@@ -54,5 +55,29 @@ describe("las apps de la cuenta (ADR 0201)", () => {
       const response = await auth.handler(new Request(`https://api.example.test${path}`))
       expect(response.status, path).toBe(404)
     }
+  })
+
+  it("el token firmado suma lo que dice la cuenta de la sesión, sin pisar a la persona (ADR 0219)", async () => {
+    const who = { id: "u1", email: "ana@grupo.test", emailVerified: true, name: "Ana", image: null }
+    const asked: unknown[] = []
+    const payload = await signedTokenPayload(who, { id: "s1" }, async (input) => {
+      asked.push(input)
+      return { staffVerified: true, email: "otra@x.test", name: "Otra" }
+    })
+    expect(asked).toEqual([{ userId: "u1", sessionId: "s1" }])
+    expect(payload).toEqual({
+      staffVerified: true,
+      email: "ana@grupo.test",
+      emailVerified: true,
+      name: "Ana",
+      image: null,
+    })
+    // Sin nada que sumar, lo de siempre.
+    expect(await signedTokenPayload(who, { id: "s1" })).toEqual({
+      email: "ana@grupo.test",
+      emailVerified: true,
+      name: "Ana",
+      image: null,
+    })
   })
 })

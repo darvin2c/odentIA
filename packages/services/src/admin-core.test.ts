@@ -30,6 +30,7 @@ import {
   regenerateStaffBackupCodes,
   resolveAdminVerification,
   setAdminStaffActive,
+  staffVerifiedSession,
   trustAdminDevice,
 } from "./admin-core.js"
 import { ServiceError } from "./errors.js"
@@ -212,6 +213,48 @@ describe("admin-core contra Postgres", () => {
     // Un token de otra persona no vale.
     await makeUser("u-other", "other@example.test")
     expect((await resolveAdminVerification(ownerDb, { userId: "u-other", sessionId: "s-10", deviceToken: third, country: "PE", now })).verified).toBe(false)
+  }, 60_000)
+
+  it("la marca para otra app: misma sesión, mismo país, personal activo y sin bloqueo (ADR 0219)", async () => {
+    await makeUser("u-mira", "mira@example.test")
+    await makeStaff("u-mira", "admin")
+    await ownerDb.execute(
+      sql`insert into two_factor (id,user_id,secret,backup_codes,verified) values ('tf-mira','u-mira','s','b',true)`,
+    )
+    const now = new Date()
+    const verified = (sessionId: string, country: string | null, userId = "u-mira") =>
+      staffVerifiedSession(ownerDb, { userId, sessionId, country, now })
+    // Sin el código puesto en esta sesión, no.
+    expect(await verified("s-mira", "PE")).toBe(false)
+    await recordAdminSessionBinding(ownerDb, {
+      userId: "u-mira",
+      sessionId: "s-mira",
+      factorId: "tf-mira",
+      method: "totp",
+      ttlMs: 60_000,
+      country: "PE",
+    })
+    expect(await verified("s-mira", "PE")).toBe(true)
+    // Otra sesión, otro país u otra persona con la misma sesión: no.
+    expect(await verified("s-otra", "PE")).toBe(false)
+    expect(await verified("s-mira", "CL")).toBe(false)
+    expect(await verified("s-mira", null)).toBe(false)
+    await makeUser("u-ajena", "ajena@example.test")
+    await makeStaff("u-ajena", "admin")
+    expect(await verified("s-mira", "PE", "u-ajena")).toBe(false)
+    // Bloqueada o fuera del personal, tampoco.
+    await ownerDb.execute(
+      sql`insert into user_global_block (user_id, active, reason) values ('u-mira', true, 'Bloqueo de prueba de la marca')`,
+    )
+    expect(await verified("s-mira", "PE")).toBe(false)
+    await ownerDb.execute(sql`delete from user_global_block where user_id = 'u-mira'`)
+    expect(await verified("s-mira", "PE")).toBe(true)
+    await ownerDb.execute(sql`update admin_staff set active = false where user_id = 'u-mira'`)
+    expect(await verified("s-mira", "PE")).toBe(false)
+    // Un factor retirado mata la marca aunque no haya vencido.
+    await ownerDb.execute(sql`update admin_staff set active = true where user_id = 'u-mira'`)
+    await ownerDb.execute(sql`delete from two_factor where id = 'tf-mira'`)
+    expect(await verified("s-mira", "PE")).toBe(false)
   }, 60_000)
 
   it("enrolamiento abandonado no cuenta y permite reiniciar", async () => {

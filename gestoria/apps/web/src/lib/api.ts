@@ -18,17 +18,35 @@ export interface MyStore {
   onlyOwner: boolean
 }
 
-/** La entrada de soporte de gestorIA a la tienda, como la ve el equipo. */
+/** Cómo terminó una entrada de soporte (ADR 0219). */
+export type SupportEnding = "tiempo" | "quitado" | "salio" | "rechazado" | "sin_respuesta"
+
+/**
+ * La entrada de soporte de gestorIA a la tienda, como la ve el equipo. El Dueño y un
+ * Administrador la ven entera; Ventas, solo quién mira ahora y hasta cuándo (sin lo demás).
+ */
 export interface SupportAccess {
   id: string
   staffName: string
-  minutes: number
-  reason: string
   status: "por_aceptar" | "vigente" | "terminado" | "rechazado"
-  requestedAt: string
   expiresAt: string | null
   usedAt: string | null
+  minutes?: number
+  reason?: string
+  requestedAt?: string
+  answeredAt?: string | null
+  /** Quién la dejó entrar o dijo que no, y su nombre (si sigue en el equipo). */
+  answeredBy?: string | null
+  answeredByName?: string | null
+  ending?: { reason: SupportEnding; at: string; by: string | null; byName: string | null } | null
 }
+
+/** Cómo está la entrada de quien es soporte, dicho por el servidor (ADR 0219). */
+export type MySupportState =
+  | { state: "pendiente"; requestedAt: string }
+  | { state: "falta_codigo"; until: string }
+  | { state: "puede_mirar"; until: string }
+  | { state: "terminado"; reason: SupportEnding; at: string; byName: string | null }
 
 export interface MyInvitation {
   id: string

@@ -19,6 +19,7 @@ import {
   adminTrustedDevice,
   twoFactor,
 } from "@odentia/db/schema/admin-core"
+import { userGlobalBlock } from "@odentia/db/schema/admin-organizations"
 import { account as authAccount, session, user } from "@odentia/db/schema/auth"
 import { generateRandomString, type SecretConfig, symmetricEncrypt } from "better-auth/crypto"
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
@@ -860,6 +861,40 @@ export async function resolveAdminVerification(
     country: input.country,
   })
   return { verified: true, binding: fresh, deviceToken: input.deviceToken }
+}
+
+/**
+ * ¿Pasó esta sesión el código del personal, con la misma regla de la administración? Para el
+ * token firmado de otra app (ADR 0219): gestorIA deja mirar una tienda como soporte solo con esta
+ * marca. Vale la marca de la sesión, viva y del mismo país que la petición que pide el token, de
+ * una persona activa del personal, con su factor vigente y sin bloqueo. El equipo reconocido no
+ * cuenta aquí: su cookie es de la API de la administración y no llega a otro dominio; al abrir la
+ * administración con él, la sesión ya queda marcada.
+ */
+export async function staffVerifiedSession(
+  ownerDb: Db,
+  input: { userId: string; sessionId: string; country: string | null; now: Date },
+): Promise<boolean> {
+  const [staff] = await ownerDb
+    .select({ role: adminStaff.role, active: adminStaff.active })
+    .from(adminStaff)
+    .where(eq(adminStaff.userId, input.userId))
+    .limit(1)
+  if (!staff?.active || !isAdminRole(staff.role)) return false
+  const [blocked] = await ownerDb
+    .select({ userId: userGlobalBlock.userId })
+    .from(userGlobalBlock)
+    .where(
+      and(
+        eq(userGlobalBlock.userId, input.userId),
+        eq(userGlobalBlock.active, true),
+        or(isNull(userGlobalBlock.expiresAt), gt(userGlobalBlock.expiresAt, input.now)),
+      ),
+    )
+    .limit(1)
+  if (blocked) return false
+  const binding = await getLiveSessionBinding(ownerDb, input.sessionId, input.now)
+  return binding !== null && binding.userId === input.userId && binding.country === input.country
 }
 
 /**

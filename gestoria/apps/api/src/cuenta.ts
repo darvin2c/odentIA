@@ -29,6 +29,11 @@ export interface Person {
   userId: string
   email: string
   name: string
+  /**
+   * La sesión que pidió el token pasó el código del personal del grupo, con la regla de la
+   * administración (ADR 0219). Sin esto, soporte no mira ninguna tienda.
+   */
+  staffVerified?: boolean
 }
 
 export interface AccountConfig {
@@ -53,6 +58,8 @@ const claims = z.object({
   name: z.string().max(200),
   image: z.string().max(2000).nullish(),
   iat: z.number().int(),
+  /** Lo dice la cuenta al firmar (ADR 0219); falta en los tokens de antes, y entonces es no. */
+  staffVerified: z.boolean().optional(),
 })
 export type AccountClaims = z.infer<typeof claims>
 

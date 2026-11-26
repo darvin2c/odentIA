@@ -8,8 +8,8 @@ import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import { answerAppState, receiveAppEvent } from "./app-contract.js"
 import {
-  type AppContractSender,
   APP_REQUEST_MAX_ATTEMPTS,
+  type AppContractSender,
   appContractSendersFromEnv,
   deliverAppContractRequests,
   listAppContractRequests,
@@ -185,13 +185,16 @@ describe("el envío", () => {
       [requestId, true],
     ])
     expect(app.calls[0]!.url).toBe("https://servidor.gestoria.test/acuerdo/pedidos")
-    const [row] = await listAppContractRequests(ownerDb, id)
+    const [row] = await listAppContractRequests(ownerDb, id, ACTOR.userId)
     expect(row).toMatchObject({
       type: "soporte.entrar",
       status: "hecho",
       message: "Pedido a la tienda",
       requestedBy: "Rosa de Soporte",
+      // «Mirar la tienda» es solo para quien lo pidió (ADR 0219).
+      mine: true,
     })
+    expect((await listAppContractRequests(ownerDb, id, "otra-persona"))[0]?.mine).toBe(false)
     // Lo respondido no vuelve a salir.
     await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(3_600_000) })
     expect(app.calls).toHaveLength(2)
@@ -301,7 +304,14 @@ describe("un pedido que nunca llega", () => {
       .set({ attempts: APP_REQUEST_MAX_ATTEMPTS - 1 })
       .where(eq(appContractRequest.id, first))
     await ownerDb.transaction((tx) =>
-      requestAppSupportAccess(tx, [SENDER], ACTOR, id, { minutes: 30, reason: "Mirar otra vez" }, NOW),
+      requestAppSupportAccess(
+        tx,
+        [SENDER],
+        ACTOR,
+        id,
+        { minutes: 30, reason: "Mirar otra vez" },
+        NOW,
+      ),
     )
     const app = fakeApp([new Response("caída", { status: 500 })])
     await deliverAppContractRequests(ownerDb, [SENDER], { fetch: app.fetch, now: soon(1000) })

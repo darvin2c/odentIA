@@ -26,8 +26,12 @@ import {
   activeSupportOf,
   answerSupportIn,
   endSupportIn,
+  leaveSupportIn,
+  type MySupportState,
   noteSupportEntry,
   supportForTeam,
+  supportStateError,
+  supportStateOf,
   supportStoresOf,
 } from "./soporte.js"
 
@@ -146,8 +150,11 @@ export async function myStores(appDb: Db, person: Person) {
       )
       .orderBy(desc(storeInvitation.createdAt))
     const mine = new Set(stores.map((s) => s.id))
-    // Las que soporte de gestorIA puede mirar ahora (la tienda la dejó entrar), solo a mirar.
-    const support = (await supportStoresOf(tx, person.userId)).filter((s) => !mine.has(s.id))
+    // Las que soporte de gestorIA puede mirar ahora (la tienda la dejó entrar), solo a mirar y
+    // solo con el código del personal en esta sesión (ADR 0219).
+    const support = (
+      await supportStoresOf(tx, person.userId, person.staffVerified === true)
+    ).filter((s) => !mine.has(s.id))
     // Las tiendas donde es el único Dueño: antes de cerrar su cuenta, que le dé el rol a otra
     // persona (la cuenta no conoce las tiendas; se lo pregunta a gestorIA). El equipo de una
     // tienda solo se ve dentro de ella: se entra a cada una a contar, y se sale al terminar.
@@ -249,7 +256,8 @@ export async function createStore(appDb: Db, person: Person, input: z.infer<type
 
 /**
  * El lugar de la persona en una tienda: su rol en el equipo o, si no es del equipo, soporte con una
- * entrada vigente. Si no, 404 (no se dice si existe).
+ * entrada vigente y el código del personal en esta sesión (ADR 0219). A soporte sin eso se le dice
+ * cómo está su entrada; a cualquier otra persona, 404 (no se dice si existe).
  */
 async function seatIn(tx: Db, person: Person, storeId: string) {
   const [row] = await tx
@@ -258,7 +266,9 @@ async function seatIn(tx: Db, person: Person, storeId: string) {
     .where(and(eq(storeMember.storeId, storeId), eq(storeMember.userId, person.userId)))
   if (row) return { role: row.role as StoreSeat, support: null }
   const support = await activeSupportOf(tx, storeId, person.userId)
-  if (support) return { role: "support" as const, support }
+  if (support && person.staffVerified) return { role: "support" as const, support }
+  const state = await supportStateOf(tx, storeId, person, new Date(), support)
+  if (state) throw supportStateError(state)
   throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
 }
 
@@ -298,7 +308,7 @@ export async function storeSummary(appDb: Db, person: Person, storeId: string) {
 }
 
 export async function storeTeam(appDb: Db, person: Person, storeId: string) {
-  return inStore(appDb, person, storeId, "equipo.ver", async (tx) => {
+  return inStore(appDb, person, storeId, "equipo.ver", async (tx, seat) => {
     const members = await tx
       .select({
         userId: storeMember.userId,
@@ -333,7 +343,7 @@ export async function storeTeam(appDb: Db, person: Person, storeId: string) {
     return {
       members,
       invitations: invitations.map((i) => ({ ...i, expired: i.expiresAt.getTime() <= now })),
-      support: await supportForTeam(tx, storeId),
+      support: await supportForTeam(tx, storeId, seat),
     }
   })
 }
@@ -349,6 +359,29 @@ export async function answerSupport(
   return inStore(appDb, person, storeId, "equipo.gestionar", (tx) =>
     answerSupportIn(tx, storeId, person.userId, accessId, accept),
   )
+}
+
+/**
+ * Cómo está la entrada de soporte de esta persona en la tienda (ADR 0219): por responder, la puede
+ * mirar, le falta el código o terminó (con su motivo). A quien nunca tuvo una, 404.
+ */
+export async function mySupportState(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+): Promise<MySupportState> {
+  if (!z.uuid().safeParse(storeId).success)
+    throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
+  const state = await withPerson(appDb, person, (tx) => supportStateOf(tx, storeId, person))
+  if (!state) throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
+  return state
+}
+
+/** Soporte termina su mirada («Salir»): solo la entrada, nunca su sesión. */
+export async function leaveSupport(appDb: Db, person: Person, storeId: string) {
+  if (!z.uuid().safeParse(storeId).success)
+    throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
+  await withPerson(appDb, person, (tx) => leaveSupportIn(tx, storeId, person.userId))
 }
 
 /** El Dueño o un Administrador saca a soporte antes de que venza. */

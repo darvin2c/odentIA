@@ -6,9 +6,10 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { accountEventSendersFromEnv, adminChannelsFromEnv, appContractPeersFromEnv, appContractSendersFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { accountEventSendersFromEnv, staffVerifiedSession, adminChannelsFromEnv, appContractPeersFromEnv, appContractSendersFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp, type ExternalAppEntry } from "./app.js"
 import { env } from "./env.js"
+import { visitCountryNow } from "./lib/visit.js"
 import { instagramLoginFromEnv, metaPagesFromEnv } from "./routes/meta-pages.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 
@@ -134,6 +135,16 @@ for (const app of EXTERNAL_ACCOUNT_APPS) {
       app,
       signedTokens: true,
       sisters,
+      // Soporte del grupo mira una tienda solo desde la administración, con su código (ADR 0219):
+      // el token dice si esta sesión lo pasó, con la regla de la administración. Sin el país de
+      // la petición (fuera de la ruta de la cuenta), no.
+      tokenClaims: async ({ userId, sessionId }) => {
+        const visit = visitCountryNow()
+        const staffVerified = visit
+          ? await staffVerifiedSession(ownerDb, { userId, sessionId, country: visit.country, now: new Date() })
+          : false
+        return { staffVerified }
+      },
       baseURL: onDomain(env.BETTER_AUTH_URL, env.COOKIE_DOMAIN, domain),
       webURL: onDomain(env.WEB_URL, env.COOKIE_DOMAIN, domain),
       cookieDomain: domain,
