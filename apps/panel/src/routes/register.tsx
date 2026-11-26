@@ -170,7 +170,7 @@ function RegisterPage() {
     if (founder && !form.getFieldValue("email")) form.setFieldValue("email", founder.email)
   }, [founder, form])
 
-  const trialChip = trial && trial.days > 0 ? (credit ? `${trial.days} días con ${credit} para tus agentes` : `${trial.days} días de prueba`) : null
+  const trialChip = trial && trial.days > 0 ? (credit ? `${trial.days} días con ${credit} de regalo para tus agentes` : `${trial.days} días de prueba`) : null
   // Quien entra invitado al equipo de una clínica no abre la suya: ni prueba ni regalo que prometerle.
   const trust = invitationId
     ? []

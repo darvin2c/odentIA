@@ -4,7 +4,7 @@
  * un número distinto de otra.
  */
 export const SIGNUP_CLINIC_STEPS = [
-  { id: "org", label: "Organización" },
-  { id: "profile", label: "Perfil legal" },
+  { id: "org", label: "Clínica" },
+  { id: "profile", label: "Datos" },
   { id: "branch", label: "Sede" },
 ] as const

@@ -59,7 +59,7 @@ export const Route = createFileRoute("/onboarding")({
 const STEPS = SIGNUP_CLINIC_STEPS
 
 /** Tema de cada paso para el subtítulo "Paso N de M: …". */
-const STEP_TOPICS = ["organización", "perfil legal", "primera sede"] as const
+const STEP_TOPICS = ["tu clínica", "sus datos", "primera sede"] as const
 
 // Subdominios reservados (misma lista que el servidor).
 const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, media: true, storage: true }
