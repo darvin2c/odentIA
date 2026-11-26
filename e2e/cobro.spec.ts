@@ -132,7 +132,13 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await expect(after.getByText("1 paciente vino a la cita que reservó Sofi")).toBeVisible()
   await expect(after.getByText("1 cita recuperada")).toBeVisible()
   await expect(page.getByText("Te devolvemos los", { exact: false }).first()).toBeVisible()
-  await expect(page.getByText("100 preguntas más")).toBeVisible()
+  // Su plan dice el paquete de preguntas. Si a la vez otro caso publicó el plan de lista de odentIA
+  // (arm-kairos-vende), este sale como plan especial, en corto, debajo del de lista.
+  const myPlan = page.getByRole("region", { name: "Plan odentIA", exact: true })
+  await expect(myPlan).toBeVisible()
+  if ((await myPlan.getByText("Condiciones que acordaste", { exact: false }).count()) === 0) {
+    await expect(myPlan.getByText("100 preguntas más")).toBeVisible()
+  }
   await shot("panel-plan-y-pagos")
 
   // El presupuesto se cambia en su panel lateral, con lo que pasa al llegar dicho antes de guardar.
