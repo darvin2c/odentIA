@@ -3,6 +3,8 @@ import {
   FAMILY_KINSHIP,
   type FamilyKinship,
   findHabitualMedication,
+  medicineLine,
+  medicineWords,
   HABITUAL_MEDICATIONS,
   type HealthDeclarant,
   INTERVIEW_ANSWER_LABELS,
@@ -513,6 +515,32 @@ export function groundHealthNames(
     const { detail: _invented, ...rest } = value
     out[group] = rest
   }
+  // Lo oído, con la dosis y cuándo en su lugar y en cifras: «apixabán de cinco cada doce horas» se lee
+  // «apixabán 5 mg cada 12 h», y así llega a su medicación (revisión del 25 nov). Después de mirar si se
+  // oyó: las cifras no están en lo dicho.
+  const meds = out["medications"]
+  if (isRecord(meds) && Array.isArray(meds["items"]))
+    out["medications"] = {
+      ...meds,
+      items: (meds["items"] as Array<Record<string, unknown>>).map((item) => {
+        if (text(item["dose"])) return item
+        const parts = medicineWords(text(item["name"]))
+        return { ...item, name: parts.name, ...(parts.dose ? { dose: parts.dose } : {}), ...(parts.frequency && !text(item["frequency"]) ? { frequency: parts.frequency } : {}) }
+      }),
+    }
+  for (const group of DIRECTED) {
+    const value = out[group]
+    if (isRecord(value) && text(value["detail"])) out[group] = { ...value, detail: medicineLine(medicineWords(text(value["detail"]))) }
+  }
+  // «La presión», «presión alta»: es la hipertensión arterial, como la llama su historia.
+  const conditions = out["conditions"]
+  if (isRecord(conditions) && Array.isArray(conditions["items"]))
+    out["conditions"] = {
+      ...conditions,
+      items: (conditions["items"] as Array<Record<string, unknown>>).map((item) =>
+        /^(?:la |de la )?(?:presion|presion alta|alta presion)$/.test(plain(text(item["name"]))) ? { ...item, name: "hipertensión arterial" } : item,
+      ),
+    }
   return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
 }
 
@@ -644,6 +672,33 @@ export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
     if (PER_ITEM.includes(group)) for (const item of (value["items"] ?? []) as Array<Record<string, unknown>>) keys.add(itemKey(group, item))
     else if (!INTERVIEW.includes(group)) keys.add(group)
     else for (const field of Object.keys(value)) keys.add(`${group}.${field}`)
+  }
+  return keys
+}
+
+/**
+ * Lo de la propuesta que nombra una frase, como claves para `withoutHealthKeys`: «quitar» por voz una
+ * propuesta de su salud quita solo lo que la frase nombra («no, la diabetes no»), no la propuesta
+ * entera (revisión del 25 nov: «yo soy diabética, eso es mío», dicho por la madre, se llevó también
+ * «Papá: alergia a la penicilina»). Vacío si no nombra nada de lo propuesto.
+ */
+export function healthNamedIn(payload: Record<string, unknown>, said: string): Set<string> {
+  const keys = new Set<string>()
+  if (!said.trim()) return keys
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value) || INTERVIEW.includes(group)) continue
+    if (DIRECTED.includes(group)) {
+      if (text(value["detail"]) && nameHeard(text(value["detail"]), said)) keys.add(group)
+      continue
+    }
+    for (const item of (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>) {
+      const named = nameHeard(text(item["name"]), said) || (group === "family" && nameHeard(text(item["relation"]), said))
+      if (!named) continue
+      if (PER_ITEM.includes(group)) keys.add(itemKey(group, item))
+      else if (group === "medications" && drugKey(item["name"])) keys.add(drugKey(item["name"]))
+      else keys.add(group)
+    }
   }
   return keys
 }

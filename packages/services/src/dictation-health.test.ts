@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { declaredMedications } from "./clinical.js"
 import {
   familyKinshipOf,
   familyRelationWords,
@@ -126,7 +127,7 @@ describe("A5 · lo que nombra sale de su frase", () => {
     )
     expect(heard.notHeard).toEqual(["metformina", "apixabán"])
     expect(heard.payload?.["anticoagulants"]).toEqual({ state: "recorded" })
-    expect(heard.payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán 50 mg" }] })
+    expect(heard.payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] })
   })
 
   it("se reconoce por una palabra que lo distingue o por cómo suena", () => {
@@ -386,5 +387,27 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
   it("la aspirina dicha se lee «Antiagregante», como la franja", () => {
     const rows = healthRows({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina 100 mg" } })
     expect(rows[0]?.label).toBe("Antiagregante")
+  })
+})
+
+describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)", () => {
+  it("el anticoagulante, la medicina y la presión de Julio", () => {
+    const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta, tengo la presion"
+    const { payload } = groundHealthNames(
+      {
+        anticoagulants: { state: "recorded", detail: "apixabán de cinco miligramos cada doce horas" },
+        medications: { state: "recorded", items: [{ name: "losartán cincuenta" }] },
+        conditions: { state: "recorded", items: [{ name: "presión" }] },
+      },
+      said,
+    )
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
+    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] })
+    expect(payload?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "hipertensión arterial" }] })
+  })
+
+  it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
+    const rows = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } } as never)
+    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "cada 12 h", declaredClass: "anticoagulants" })
   })
 })

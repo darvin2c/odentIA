@@ -94,7 +94,7 @@ describe("C7 · «ya no toma apixabán, ahora aspirina»", () => {
     const reviewed = await confirm(said!.id)
     expect(reviewed.status).toBe("lista")
     const today = await fx.run((tx) => clinicToday(tx, ORG))
-    expect((await medicines()).filter((row) => !row.endDate || row.endDate >= today).map((row) => row.name).sort()).toEqual(["apixabán", "aspirina 100 mg"])
+    expect((await medicines()).filter((row) => !row.endDate || row.endDate >= today).map((row) => row.name).sort()).toEqual(["apixabán", "aspirina"])
 
     await fx.run((tx) => confirmSaidStopped(tx, ...fx.args, said!.id, stopped!.key))
     const yesterday = new Date(`${today}T12:00:00Z`)
@@ -103,7 +103,7 @@ describe("C7 · «ya no toma apixabán, ahora aspirina»", () => {
     expect(apixaban?.endDate).toBe(yesterday.toISOString().slice(0, 10))
     // Un solo antitrombótico vigente, y lo dicho ya no espera nada.
     const health2 = await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))
-    expect(health2.medications.filter((row) => !row.endDate || row.endDate >= today).map((row) => row.name)).toEqual(["aspirina 100 mg"])
+    expect(health2.medications.filter((row) => !row.endDate || row.endDate >= today).map((row) => row.name)).toEqual(["aspirina"])
     expect(await health()).toEqual([])
     // Otra vez, ya no está: no se termina dos veces.
     await expect(fx.run((tx) => confirmSaidStopped(tx, ...fx.args, said!.id, stopped!.key))).rejects.toMatchObject({ code: "SUGGESTION_DECIDED" })
@@ -157,6 +157,51 @@ describe("C8 · latidIA, control prenatal", () => {
 
 /* Revisión con ojos nuevos del 25 nov: lo que la entrega dejaba mal. */
 describe("revisión del 25 nov", () => {
+  it("«eso es mío», dicho por la madre, no se lleva lo de su familia; «no, la penicilina no» sí lo quita", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "acompanante", vinculo: "madre", family: [{ relation: "papá", of: "paciente", name: "alergia a la penicilina" }] },
+          sourceText: "su papá es alérgico a la penicilina",
+        },
+      ],
+      transcript: "Su papá es alérgico a la penicilina.",
+    })
+    const [said] = await health()
+    // Clío lee «eso es mío» como un «quitar»: la frase no nombra nada de lo propuesto, y no se quita.
+    await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "yo soy diabética, eso es mío" }], transcript: "Yo soy diabética, eso es mío." })
+    const [kept] = await health()
+    expect(kept?.status).not.toBe("descartada")
+    expect(kept?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Papá: alergia a la penicilina"])
+    // Lo que nombra, sí: sin nada más, la propuesta se quita entera, como antes.
+    await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "no, lo de la penicilina no" }], transcript: "No, lo de la penicilina no." })
+    expect((await health()).filter((item) => item.status !== "descartada")).toEqual([])
+    await enable(false)
+  })
+
+  it("la dosis dicha en palabras queda en su campo al revisarlo («apixabán de cinco cada doce horas»)", async () => {
+    await enable(true)
+    const { segment, health, confirm, medicines } = await session()
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán de cinco miligramos cada doce horas" } },
+          sourceText: "tomo apixaban de cinco miligramos cada doce horas",
+        },
+      ],
+      transcript: "Tomo apixaban de cinco miligramos cada doce horas.",
+    })
+    const [said] = await health()
+    expect(said?.healthRows?.find((row) => row.group === "anticoagulants")?.value).toBe("apixabán 5 mg cada 12 h")
+    await confirm(said!.id)
+    expect((await medicines()).map((row) => [row.name, row.dose, row.frequency])).toEqual([["apixabán", "5 mg", "cada 12 h"]])
+    await enable(false)
+  })
+
   it("«toma apixabán» firmado otro día y hoy «ya no toma apixabán»: lo de antes queda atrás y no se registra como vigente", async () => {
     await enable(true)
     const { fx, segment, medicines } = await session()

@@ -17,6 +17,7 @@ import {
   type DirectedMedicineDeclaration,
   BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
+  medicineWords,
   type MedicationClass,
   type MedicineClassAnswer,
   medicineClassAnswers,
@@ -1405,19 +1406,26 @@ export function declaredMedications(
     const answer = declared[group]
     if (answer?.state !== "recorded") continue
     // Sin decir cuál, la fila lo dice (`MEDICATION_CLASSES[group].unnamed`).
-    const name = answer.detail?.trim() || MEDICATION_CLASSES[group].unnamed
+    // «Apixabán de cinco cada doce horas»: el nombre, la dosis y cuándo, cada uno en su lugar (revisión del 25 nov).
+    const said = answer.detail?.trim() ? medicineWords(answer.detail) : { name: MEDICATION_CLASSES[group].unnamed }
+    const name = said.name
     seen.add(normalizeDrugText(name))
     // Los huesos: por qué y cómo, y si ya no la toma, terminada (B3): sigue contando, no está vigente.
     const notes = directedMedicineNotes(answer)
     rows.push({
       name,
+      ...(said.dose ? { dose: said.dose } : {}),
+      ...(said.frequency ? { frequency: said.frequency } : {}),
       declaredClass: group,
       ...(notes.length ? { notes: upperFirst(notes.join(" · ")) } : {}),
       // Terminada el día antes de decirlo: una medicina con fin hoy todavía se lee como vigente hoy.
       ...(answer.now === false && saidOn ? { endDate: dayBefore(saidOn) } : {}),
     })
   }
-  for (const item of declared.medications?.state === "recorded" ? declared.medications.items : []) {
+  for (const declaredItem of declared.medications?.state === "recorded" ? declared.medications.items : []) {
+    // Sin dosis aparte, la que dijo dentro del nombre («losartán cincuenta») va a su campo.
+    const said = declaredItem.dose ? { name: declaredItem.name } : medicineWords(declaredItem.name)
+    const item = { ...declaredItem, name: said.name, ...(said.dose ? { dose: said.dose } : {}), ...(said.frequency && !declaredItem.frequency ? { frequency: said.frequency } : {}) }
     const key = normalizeDrugText(item.name)
     if (seen.has(key)) continue
     seen.add(key)

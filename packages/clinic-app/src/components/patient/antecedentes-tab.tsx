@@ -32,6 +32,7 @@ import {
   ErrorState,
   FormDrawer,
   useAppForm,
+  useDraftSaved,
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
@@ -622,6 +623,11 @@ export function AntecedentesTab({
   const values = useStore(form.store, (state) => state.values)
   const [prefilledShot, setPrefilledShot] = useState<string | null>(null)
   const changedHere = isDirty && (prefilledShot === null || JSON.stringify(values) !== prefilledShot)
+  // Abierta en la columna de la atención, la columna cuenta lo que se escribe en este cajón, pero no ve que
+  // se guardó: después de «Guardar» seguía preguntando «¿Salir sin guardar?» (revisión del 25 nov, UX-9).
+  // Se le dice cómo quedó: algo por perder solo mientras el cajón está abierto con un cambio de quien edita.
+  const reportDraft = useDraftSaved()
+  useEffect(() => reportDraft(!(drawerOpen && changedHere)), [reportDraft, drawerOpen, changedHere])
   const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const interviewErrors = useMemo<SubFieldErrors>(
     () => ({ ...(submitted ? productHealth.validate(interview, today) : {}), ...serverInterviewErrors }),

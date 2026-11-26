@@ -32,9 +32,14 @@ export interface ServerParts {
   prepareHealth?: (payload: Payload, said: string | undefined, own: object) => { payload: Payload; status: string; note: string | null } | null
   withoutSettledHealth?: (payload: Payload, settled: readonly Payload[], namedAllergy?: boolean) => Payload | null
   dictationContext?: (earlier: readonly string[]) => string
+  /** Lo hecho hoy que la misma frase pone en el plan es para otro día (revisión del 25 nov). */
+  plannedInSamePhrase?: (done: DictationDraft, drafts: readonly DictationDraft[]) => boolean
+  /** «Quitar» por voz en su salud quita solo lo que la frase nombra (revisión del 25 nov). */
+  healthNamedIn?: (payload: Payload, said: string) => Set<string>
+  withoutHealthKeys?: (payload: Payload, keys: ReadonlySet<string>) => Payload | null
 }
 
-const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext"] as const
+const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext", "plannedInSamePhrase", "healthNamedIn", "withoutHealthKeys"] as const
 
 /** Las funciones que tiene el módulo de servicios de la rama, por su nombre. */
 export function serverPartsOf(module: Record<string, unknown>): ServerParts {
@@ -200,6 +205,17 @@ export function applyPause(
     for (const removal of read.removals) {
       const row = listed[removal.index]
       if (!row || row.status === "descartada") continue
+      // Como el servidor: en su salud, solo lo que la frase nombra; si no nombra nada, no se quita.
+      if (row.kind === "salud" && parts.healthNamedIn && parts.withoutHealthKeys) {
+        const named = parts.healthNamedIn(row.payload, removal.sourceText ?? "")
+        if (!named.size) continue
+        const rest = parts.withoutHealthKeys(row.payload, named)
+        if (rest) {
+          row.payload = rest
+          counts.removed += 1
+          continue
+        }
+      }
       row.status = "descartada"
       counts.removed += 1
     }
@@ -221,7 +237,7 @@ export function applyPause(
     .filter((item) => item.kind === "nota")
     .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
   const { drafts, twins } = services.withFormTwins(
-    services.withoutRepeatedNotes(services.withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], questions, site, transcript), pendingNotes),
+    services.withoutRepeatedNotes(services.withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], questions, site, transcript), pendingNotes, { review: !!input.review }),
     questions,
   )
   for (const draft of fromDiagnoses) twins.add(draft)
@@ -267,6 +283,7 @@ export function applyPause(
   }
   for (const [index, { draft, ready }] of prepared.entries()) {
     const sourceText = ready.said ?? draft.sourceText
+    if (draft.kind === "procedimiento" && parts.plannedInSamePhrase?.(draft, drafts)) continue
     if (draft.kind === "ficha" && lastForm.get(`${String(ready.payload["responseId"])}.${String(ready.payload["fieldId"])}`) !== index) continue
     if (draft.kind === "nota") {
       // La rama nueva: lo nuevo se suma a la consulta pendiente; en `main`, cada una es otra tarjeta.

@@ -1536,16 +1536,28 @@ function noteWords(sentence: string): { stems: string[]; numbers: number[]; nega
  * con sus números y las mismas negaciones: «No refiere dolor» no repite «Refiere dolor», ni «en la 46»
  * repite «en la 36». Si la nota queda vacía, no se propone.
  */
-export function withoutRepeatedNotes<T extends FormDraftLike>(drafts: readonly T[], pendingNotes: readonly string[]): T[] {
-  const before = pendingNotes.flatMap(sentencesOf).map(noteWords)
+export function withoutRepeatedNotes<T extends FormDraftLike>(
+  drafts: readonly T[],
+  pendingNotes: readonly string[],
+  /**
+   * El repaso relee toda la conversación y cuenta otra vez, con otras palabras, lo que ya cuenta la
+   * consulta («la mamá refiere que le falta…» por «le falta…»): ahí basta con que tres de cada cuatro
+   * raíces estén en una misma oración (revisión del 25 nov: el relato firmado salía dos veces).
+   */
+  options: { review?: boolean } = {},
+): T[] {
+  // En el repaso se compara también con cada nota entera: otra puntuación junta dos oraciones en una.
+  const before = [...pendingNotes.flatMap(sentencesOf), ...(options.review ? pendingNotes : [])].map(noteWords)
   if (!before.length) return [...drafts]
   const repeated = (sentence: string) => {
     const now = noteWords(sentence)
+    const covered = (old: { stems: string[] }) => {
+      const found = now.stems.filter((stem) => old.stems.includes(stem)).length
+      return options.review ? found >= Math.ceil(now.stems.length * 0.75) : found === now.stems.length
+    }
     return (
       now.stems.length >= 3 &&
-      before.some(
-        (old) => now.stems.every((stem) => old.stems.includes(stem)) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join(),
-      )
+      before.some((old) => covered(old) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join())
     )
   }
   const clean = (text: string) => {

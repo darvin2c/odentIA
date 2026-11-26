@@ -640,6 +640,54 @@
         "noPropone": [{ "tipo": "alergia", "con": ["penicilina"] }],
         "noLoUse": ["yo soy diabética|yo soy diabetica"]
       }
+    },
+    {
+      "id": "od-tomas-papa-dos-pausas",
+      "producto": "odentia",
+      "descripcion": "Revisión del 25 nov (la propuesta del padre desapareció una vez): lo mismo que od-tomas-papa-alergico, con «eso es mío» en la pausa siguiente. Lo de su familia no se pierde.",
+      "pausas": [
+        "hola tomas. señora alguna alergia o enfermedad en la familia",
+        "su papá es alérgico a la penicilina",
+        "y yo soy diabética pero eso es mío",
+        "a ver abre grande. la setenta y cinco tiene caries profunda"
+      ],
+      "espera": {
+        "salud": [{ "ruta": "family", "con": ["papa|padre", "penicilina"] }],
+        "saludNo": [{ "ruta": "conditions", "con": ["diabet"] }]
+      }
+    },
+    {
+      "id": "od-resina-la-proxima",
+      "producto": "odentia",
+      "descripcion": "Revisión del 25 nov: la resina dicha para otro día es una indicación, no algo hecho hoy, y no queda en los dos lugares.",
+      "pausas": [
+        "buenos días señora rosa qué la trae",
+        "se me rompió un pedacito de la muela de abajo hace una semana",
+        "a ver la cuarenta y seis tiene caries por oclusal. hoy solo le hago la profilaxis",
+        "para la resina de la cuarenta y seis lo vemos la próxima semana"
+      ],
+      "espera": {
+        "propone": [
+          { "tipo": "plan", "campos": { "toothNumber": 46 }, "con": ["resina"] },
+          { "tipo": "procedimiento", "con": ["profilaxis"] }
+        ],
+        "noPropone": [{ "tipo": "procedimiento", "con": ["resina"] }]
+      }
+    },
+    {
+      "id": "lat-control-si-fiebre",
+      "producto": "latidia",
+      "descripcion": "Revisión del 25 nov: «control si hay fiebre» es una indicación de la consulta, no un control con fecha para reservar.",
+      "pausas": [
+        "hola valentina qué tal, cómo te sientes",
+        "tiene tos desde hace dos días doctora, sin fiebre",
+        "pulmones limpios, garganta un poco roja. es un resfrío común",
+        "líquidos abundantes y control si hay fiebre"
+      ],
+      "espera": {
+        "consulta": { "motivo": ["tos"], "tiempo": "dos dias|2 dias" },
+        "noPropone": [{ "tipo": "control", "con": ["fiebre"] }]
+      }
     }
   ]
 }
