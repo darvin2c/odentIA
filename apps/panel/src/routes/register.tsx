@@ -89,13 +89,14 @@ function RegisterPage() {
   const credit = trial && trial.creditCents > 0 ? creditText(trial.currency, trial.creditCents) : null
   // Quien entra invitado a un equipo no abre una clínica: no recibe el crédito.
   const cta = credit && !invitationId && !founder ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
-  // Tras verificar el correo (o con Google) se sigue directo a abrir la clínica;
-  // quien viene invitado al equipo de una clínica, a aceptar su invitación.
+  // Tras verificar el correo (o con Google), quien viene invitado al equipo de una clínica va a
+  // aceptar su invitación; los demás, a «/», que sin clínicas ni invitaciones pendientes sigue
+  // solo a abrir la clínica (y con una invitación pendiente la muestra antes).
   const nextPath = invitationId
     ? `/accept-invitation/${encodeURIComponent(invitationId)}`
     : founderToken && !staleInvitation
       ? `/onboarding?invitacion=${encodeURIComponent(founderToken)}`
-      : "/onboarding"
+      : "/"
   const [work, setWork] = useState<DayEvent | null>(null)
   // Documentos que cambiaron o no cargaron: el aviso junto al botón ofrece recargar.
   const [reload, setReload] = useState(false)
@@ -156,7 +157,7 @@ function RegisterPage() {
   const trialChip = trial && trial.days > 0 ? (credit ? `${trial.days} días con ${credit} para tus agentes` : `${trial.days} días de prueba`) : null
   const trust = [
     "Sin tarjeta",
-    ...(founder ? [`Plan ${founder.offer.planName}`] : []),
+    ...(founder ? [founder.offer.planName] : []),
     ...(trialChip ? [trialChip] : []),
   ]
   const headline = "Crea tu cuenta."
@@ -316,7 +317,7 @@ function RegisterPage() {
           </form.Subscribe>
           <p className="text-center text-xs text-muted-foreground">
             {founder
-              ? `Sin tarjeta. Tu clínica abre con el plan ${founder.offer.planName}.`
+              ? `Sin tarjeta. Tu clínica abre con ${founder.offer.planName}.`
               : "Sin tarjeta. Al terminar la prueba eliges tu plan y pagas con tu comprobante."}
           </p>
         </FieldGroup>

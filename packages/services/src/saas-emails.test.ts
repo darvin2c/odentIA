@@ -152,7 +152,7 @@ describe("la invitación que manda el equipo", () => {
       replyTo: "hola@odentia32.com",
     })
     expect(mail.subject).toBe("Tu cuenta en odentIA está lista")
-    expect(mail.text).toContain("Te preparamos tu cuenta con el plan Especial")
+    expect(mail.text).toContain("Te preparamos tu cuenta con Especial")
     expect(mail.text).toContain("USD 100 de regalo")
     expect(mail.text).toContain("sin cuota")
     expect(mail.text).toContain("50 % menos que el precio de lista")

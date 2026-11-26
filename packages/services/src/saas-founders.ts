@@ -20,9 +20,9 @@ import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lte, ne, or, type SQ
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { planPrices } from "./saas-actions.js"
-import { assertSaasCurrencyChange } from "./saas-billing.js"
+import { assertSaasCurrencyChange, startSaasTrial } from "./saas-billing.js"
 import { clientForWaitlistRequest, linkClientToOrganization } from "./admin-clients.js"
-import { applyInvitedProposal } from "./admin-sales.js"
+import { applyInvitedProposal, invitedProposalOf } from "./admin-sales.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
@@ -844,8 +844,12 @@ export async function completeFounderInvitation(tx: Db, requestId: string, orgId
   if (!row || row.status !== "invitada" || !row.planId) throw new ServiceError("INVITATION_INVALID", 409, "La invitación ya no estaba vigente")
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, row.planId)).limit(1)
   if (!plan) throw notFound("Plan")
-  // El disparador de la base dejó la suscripción con la prueba del plan por defecto; aquí toma la del plan invitado.
-  await enterInvitationPlan(tx, orgId, plan, now)
+  // El disparador de la base dejó la suscripción con la prueba del plan por defecto; aquí toma la del
+  // plan invitado. Invitada sin propuesta y con el plan de lista, entra como cualquiera (ADR 0221):
+  // su prueba sin plan elegido, para que al terminarla elija su plan y no se le cobre sola la cuota.
+  const product: ClinicalProduct = isClinicalProduct(plan.product) ? plan.product : "dental"
+  if (plan.isDefault && !(await invitedProposalOf(tx, requestId))) await startSaasTrial(tx, orgId, { product }, now)
+  else await enterInvitationPlan(tx, orgId, plan, now)
   await tx
     .update(saasWaitlistRequest)
     .set({ status: "entro", organizationId: orgId, enteredAt: now, claimedAt: null, tokenHash: null, updatedAt: now })
@@ -1222,6 +1226,9 @@ export interface PublicPlanPrices {
 export interface PublicPricing {
   /** El plan de lista (el por defecto), si se muestra en la web. */
   list: PublicPlanPrices | null
+  /** Solo para la web de antes durante el despliegue: siempre nulo y «abierta» (ADR 0221). */
+  founders?: null
+  signupMode?: "abierta"
   /** Las condiciones comerciales que la web promete (ADR 0074): la web no las escribe a mano. */
   terms: PublicSaasTerms
 }
@@ -1282,6 +1289,11 @@ export async function getPublicPricing(tx: Db, product: ClinicalProduct = "denta
   const list = plans.find((plan) => plan.isDefault) ?? null
   return {
     list: list ? publicPlan(list) : null,
+    // Para la web de antes mientras se publica la nueva (la API y la web salen por separado): sin
+    // `signupMode`, la de antes entendería «solo con invitación» y llevaría a un formulario que ya
+    // no existe. Se quitan en el cambio que borra la política de alta (ADR 0221).
+    founders: null,
+    signupMode: "abierta",
     terms: await publicSaasTerms(tx),
   }
 }

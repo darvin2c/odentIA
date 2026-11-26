@@ -180,6 +180,19 @@ describe("la invitación que manda el equipo", () => {
     await expect(chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-lista")).rejects.toMatchObject({ code: "SAAS_FOUNDER_GUARANTEED" })
   })
 
+  it("invitada sin propuesta y con el plan de lista, entra como cualquiera: en prueba y sin plan elegido", async () => {
+    const { id } = await submitWaitlistRequest(ownerDb, request("lista@sonrisa.test"))
+    const { token } = await inviteFromWaitlist(ownerDb, admin, id)
+    const claimed = await claimFounderInvitation(ownerDb, token, "lista@sonrisa.test")
+    const orgId = await clinic()
+    await completeFounderInvitation(ownerDb, claimed, orgId)
+    const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    // Al terminar la prueba elige su plan: la cuota no se le cobra sola.
+    expect(sub).toMatchObject({ status: "prueba", planId: null, guaranteedUntil: null })
+    const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id))
+    expect(row).toMatchObject({ status: "entro", organizationId: orgId })
+  })
+
   it("una invitación vencida no sirve", async () => {
     const { id } = await submitWaitlistRequest(ownerDb, request("vencida@sonrisa.test"))
     const { token } = await inviteFromWaitlist(ownerDb, admin, id, {}, new Date(Date.now() - 15 * DAY))
@@ -317,11 +330,13 @@ describe("pasar a un plan especial desde la administración", () => {
 describe("lo que publica la web", () => {
   it("solo el plan de lista y las condiciones: ni planes especiales, ni lugares, ni plazo de la lista de espera", async () => {
     const pricing = await getPublicPricing(ownerDb)
-    expect(Object.keys(pricing).sort()).toEqual(["list", "terms"])
+    // `founders` y `signupMode` solo para la web de antes durante el despliegue: nulo y «abierta».
+    expect(Object.keys(pricing).sort()).toEqual(["founders", "list", "signupMode", "terms"])
+    expect(pricing).toMatchObject({ founders: null, signupMode: "abierta" })
     expect(pricing.list?.code).toBe("founders-lista")
     expect(pricing.terms).not.toHaveProperty("waitlistAnswerDays")
     const text = JSON.stringify(pricing)
-    for (const word of ["seatLimit", "founders-fundadores", "signupMode"]) expect(text).not.toContain(word)
+    for (const word of ["seatLimit", "founders-fundadores"]) expect(text).not.toContain(word)
     // Mostrar en la web un plan especial no lo vuelve el de lista.
     await ownerDb.update(saasPlan).set({ showOnWeb: true }).where(eq(saasPlan.id, foundersPlanId))
     expect((await getPublicPricing(ownerDb)).list?.code).toBe("founders-lista")

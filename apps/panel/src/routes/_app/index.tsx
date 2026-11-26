@@ -156,6 +156,7 @@ function OrgsPage() {
   const { session } = appRouteApi.useRouteContext()
   const search = Route.useSearch()
   const organizations = useQuery(accountOrganizationsQuery)
+  const navigate = useNavigate()
   const places = useQuery(accountPlacesQuery)
   const invitations = useQuery(accountInvitationsQuery)
   const staff = useQuery(adminAccessQuery)
@@ -239,6 +240,20 @@ function OrgsPage() {
     recordarClinica(session.userId, unicaLista.organizationId)
     window.location.replace(tenantUrl(unicaLista.slug, "/home", unicaLista.product))
   }, [search.cambiar, bloquearAuto, unicaLista, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, places.isPending, tiendas.length, puertasListas, session.userId])
+
+  // Sin clínicas, sin invitaciones pendientes ni tiendas, se sigue directo a abrir la clínica (el
+  // alta es libre, ADR 0221): «Elige tu clínica» vacío no tiene nada que elegir.
+  const autoAlta = useRef(false)
+  useEffect(() => {
+    if (autoAlta.current || search.cambiar === 1 || bloquearAuto) return
+    if (!organizations.isSuccess || todas.length > 0) return
+    if (!invitations.isSuccess || (invitations.data?.length ?? 0) > 0) return
+    if (!staff.isSuccess || staff.data.staff) return
+    if (places.isPending || tiendas.length > 0) return
+    if (!puertasListas) return
+    autoAlta.current = true
+    void navigate({ to: "/onboarding", search: { continue: undefined, invitacion: founderToken ?? undefined } })
+  }, [search.cambiar, bloquearAuto, organizations.isSuccess, todas.length, invitations.isSuccess, invitations.data, staff.isSuccess, staff.data, places.isPending, tiendas.length, puertasListas, navigate, founderToken])
 
   const pendientes = invitations.data ?? []
   return (

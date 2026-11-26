@@ -111,10 +111,8 @@ function TermsStepPage() {
         window.location.assign(back.href)
         return
       }
-      // Quien abre su clínica sigue a crearla aunque viniera de «/» (que sin clínica no tiene nada).
-      await navigate({
-        to: opens && (!back || back.path === "/") ? "/onboarding" : (back?.path ?? "/"),
-      })
+      // «/» decide: sin clínicas ni invitaciones pendientes sigue solo a abrir la clínica.
+      await navigate({ to: back?.path ?? "/" })
     },
   })
   const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })

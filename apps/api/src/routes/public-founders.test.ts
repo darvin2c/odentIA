@@ -161,11 +161,13 @@ it("la web ya no recibe solicitudes para la lista de espera", async () => {
 it("los precios publicados: solo el plan de lista y las condiciones, nunca un plan especial ni lugares", async () => {
   const res = await buildApp(authFor(null, { calls: 0 })).request("/api/public/founders/pricing")
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { list: { code: string }; terms: Record<string, unknown> }
-  expect(Object.keys(body).sort()).toEqual(["list", "terms"])
+  const body = (await res.json()) as { list: { code: string }; terms: Record<string, unknown>; founders: unknown; signupMode: unknown }
+  // `founders` y `signupMode` quedan solo para la web de antes durante el despliegue: nulo y «abierta».
+  expect(Object.keys(body).sort()).toEqual(["founders", "list", "signupMode", "terms"])
+  expect(body).toMatchObject({ founders: null, signupMode: "abierta" })
   expect(body.list.code).toBe("api-lista")
   expect(body.terms).not.toHaveProperty("waitlistAnswerDays")
-  expect(JSON.stringify(body)).not.toMatch(/seat|fundadores|signupMode/i)
+  expect(JSON.stringify(body)).not.toMatch(/seat|fundadores/i)
 })
 
 it("sin invitación se abre la clínica con la prueba del plan de lista, aunque la política vieja diga «solo con invitación»", async () => {

@@ -305,7 +305,7 @@ export function founderInvitationEmail(input: {
 }): MailTemplate {
   const name = mailBrandName(input.brand)
   const credit = moneyText(input.offer.currency, input.offer.trialCreditCents)
-  const plan = input.offer.planName ? `con el plan ${input.offer.planName}` : "con tu plan"
+  const plan = input.offer.planName ? `con ${input.offer.planName}` : "con tu plan"
   const fee = input.offer.priceCents === 0 ? "sin cuota" : `con una cuota de ${moneyText(input.offer.currency, input.offer.priceCents)} al mes`
   const discount = input.offer.discountPercent ? `, con ${input.offer.discountPercent} % menos que el precio de lista` : ""
   const months = input.offer.guaranteeMonths ? ` Esos precios valen ${input.offer.guaranteeMonths} meses.` : ""
