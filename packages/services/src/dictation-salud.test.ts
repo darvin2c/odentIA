@@ -177,7 +177,7 @@ describe("C1 y C2 · la medicación dicha en la conversación", () => {
     expect(said).toHaveLength(1)
     expect(said[0]?.encounterId).toBe(fx.encounter.id)
     expect(said[0]?.by).toEqual({ kind: "patient", name: null, relation: null })
-    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, said: "tomo apixabán" })
+    expect(said[0]?.rows).toContainEqual({ key: "anticoagulants", group: "anticoagulants", label: "Anticoagulante", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, drugs: ["drug:atc:B01AF02"], said: "tomo apixabán" })
     expect(said[0]?.open).toBe(true)
     await enable(false)
   })

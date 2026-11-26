@@ -57,11 +57,11 @@ const SAID_FAMILY = z.strictObject({
   items: z
     .array(z.strictObject({ relation: z.string().trim().min(1).max(60), name: z.string().trim().min(1).max(200) }))
     .min(1)
-    .max(10),
+    .max(50),
 })
 const SAID_STOPPED = z.strictObject({
   state: z.literal("recorded"),
-  items: z.array(z.strictObject({ name: z.string().trim().min(1).max(200) })).min(1).max(5),
+  items: z.array(z.strictObject({ name: z.string().trim().min(1).max(200) })).min(1).max(20),
 })
 /** La última regla, como la anota latidIA en su entrevista (`ginecoObstetricos.fur`). */
 export const SAID_GYNECO = z.strictObject({ fur: z.iso.date() })
@@ -76,14 +76,19 @@ const groupShape = (group: string): z.ZodType | undefined =>
  * otro familiar, con sus palabras en la nota.
  */
 export function familyKinshipOf(words: string): FamilyKinship {
-  const said = plain(words)
+  const direct = (FAMILY_KINSHIP as readonly string[]).includes(words.trim()) ? (words.trim() as FamilyKinship) : null
+  // «Sus padres», «sus abuelos»: son dos personas, no una con su código; quedan con sus palabras.
+  const known = direct ?? kinshipFromWords(familyRelationWords(words))
+  return known && (FAMILY_KINSHIP as readonly string[]).includes(known) ? (known as FamilyKinship) : "FAMMEMB"
+}
+
+/** El parentesco dicho, sin «su» ni «mi», en minúsculas y sin tildes: «Su abuela» → «abuela». */
+export function familyRelationWords(words: unknown): string {
+  return plain(text(words))
     .replace(/[^a-z ]+/g, " ")
     .replace(/^(?:su|sus|mi|mis|el|la|los|las) /, "")
     .replace(/\s+/g, " ")
     .trim()
-  const direct = (FAMILY_KINSHIP as readonly string[]).includes(words.trim()) ? (words.trim() as FamilyKinship) : null
-  const known = direct ?? kinshipFromWords(said) ?? kinshipFromWords(said.replace(/s$/, ""))
-  return known && (FAMILY_KINSHIP as readonly string[]).includes(known) ? (known as FamilyKinship) : "FAMMEMB"
 }
 
 /** «Hermana», «Abuelo materno»: el parentesco como se dijo, con mayúscula. */
@@ -133,7 +138,7 @@ export function dictationHealthSchema(own: z.ZodRawShape) {
             .trim()
             .min(1)
             .max(60)
-            .describe("Qué es del paciente, no de quien habla: si la madre dice «mi papá», es su «abuelo materno»; «su hermana», «padre», «tía»."),
+            .describe("Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."),
           name: z.string().trim().min(1).max(200).describe("La enfermedad o la alergia de ese familiar, en sus palabras («diabetes», «cáncer de boca»)."),
         }),
       )
@@ -193,7 +198,7 @@ function declarantKeys(group: HealthGroup, value: Record<string, unknown>): stri
 }
 const itemKey = (group: HealthGroup, item: Record<string, unknown>) =>
   group === "family"
-    ? `family:${familyKinshipOf(text(item["relation"]))}:${plain(kinSaid(item["relation"]))}:${normalizeDrugText(text(item["name"]))}`
+    ? `family:${familyKinshipOf(text(item["relation"]))}:${familyRelationWords(item["relation"])}:${normalizeDrugText(text(item["name"]))}`
     : `${group}:${normalizeDrugText(text(item["name"]))}`
 /** Las filas que son una por dato de su lista, cada una con su clave: su familia y lo que ya no toma. */
 const PER_ITEM: readonly HealthGroup[] = ["family", "stopped"]
@@ -368,6 +373,11 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
   for (const group of Object.keys(health)) {
     const check = groupShape(group)?.safeParse(health[group])
     if (!check?.success) delete health[group]
+  }
+  // En la misma pausa, la medicina que dijo que dejó no queda también como que la toma.
+  if (isRecord(health["stopped"])) {
+    const kept = withoutContradictedDrugs(health, { stopped: healthDrugKeysOf({ stopped: health["stopped"] }), taking: new Set() })
+    for (const group of Object.keys(health)) if (!(group in kept)) delete health[group]
   }
   if (!Object.keys(health).length) return null
   // Quién dijo cada dato: lo que ya traía (una propuesta sumada) y, si no, quien lo dijo en la pausa.
@@ -553,6 +563,35 @@ export const hasHealth = (payload: Record<string, unknown>) => GROUPS.some((grou
  * (las medicinas, el anticoagulante) o, en la entrevista, su campo («dental.corazon»). Con ellas se
  * sabe qué dato dijo después otra vez (QA del 21 nov, H3: lo dicho otro día y corregido hoy).
  */
+/** La medicina como clave, sin dosis: con ella, «ya no toma apixabán» reemplaza a «toma apixabán». */
+const drugKey = (name: unknown) => {
+  const head = drugHead(name)
+  return head ? `drug:${head}` : ""
+}
+
+/**
+ * Las medicinas que nombra, como claves (`drug:`): lo que toma (las de la lista, el anticoagulante,
+ * la de los huesos) y lo que ya no toma. Con ellas, lo último que dijo de una medicina vale para
+ * todos sus grupos (revisión del 25 nov): «ya no toma apixabán» deja atrás el «toma apixabán» de
+ * antes, y volver a tomarlo deja atrás el «ya no toma».
+ */
+export function healthDrugKeysOf(payload: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>()
+  for (const group of DIRECTED) {
+    const value = payload[group]
+    if (isRecord(value) && value["state"] === "recorded" && drugKey(value["detail"])) keys.add(drugKey(value["detail"]))
+  }
+  for (const group of ["medications", "stopped"] as const) {
+    const value = payload[group]
+    if (!isRecord(value) || value["state"] !== "recorded" || !Array.isArray(value["items"])) continue
+    for (const item of value["items"] as Array<Record<string, unknown>>) if (drugKey(item["name"])) keys.add(drugKey(item["name"]))
+  }
+  return keys
+}
+
+/** Lo que dijo después y deja atrás lo de antes: sus datos (`healthKeysOf`) y sus medicinas (`healthDrugKeysOf`). */
+export const healthSupersedingKeysOf = (payload: Record<string, unknown>) => new Set([...healthKeysOf(payload), ...healthDrugKeysOf(payload)])
+
 export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
   const keys = new Set<string>()
   for (const group of GROUPS) {
@@ -575,13 +614,22 @@ export function withoutHealthKeys(payload: Record<string, unknown>, keys: Readon
     const value = out[group]
     if (!isRecord(value)) continue
     if (PER_ITEM.includes(group)) {
-      const items = ((value["items"] ?? []) as Array<Record<string, unknown>>).filter((item) => !keys.has(itemKey(group, item)))
+      const items = ((value["items"] ?? []) as Array<Record<string, unknown>>).filter(
+        (item) => !keys.has(itemKey(group, item)) && !(group === "stopped" && keys.has(drugKey(item["name"]))),
+      )
       if (items.length) out[group] = { ...value, items }
       else delete out[group]
       continue
     }
     if (!INTERVIEW.includes(group)) {
       if (keys.has(group)) delete out[group]
+      // Una medicina dicha después en otro grupo («ya no toma apixabán») deja atrás la de aquí.
+      else if (DIRECTED.includes(group) && value["state"] === "recorded" && keys.has(drugKey(value["detail"]))) delete out[group]
+      else if (group === "medications" && value["state"] === "recorded" && Array.isArray(value["items"]) && value["items"].length) {
+        const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !keys.has(drugKey(item["name"])))
+        if (items.length) out[group] = { ...value, items }
+        else delete out[group]
+      }
       continue
     }
     const fields = Object.fromEntries(Object.entries(value).filter(([field]) => !keys.has(`${group}.${field}`)))
@@ -649,6 +697,15 @@ export function healthOfPayload(
   return registrationAnswersSchema.shape.health.unwrap().parse(health)
 }
 
+/**
+ * Lo de la entrevista que solo se dice en la consulta (latidIA: la última regla), con la forma de su
+ * entrevista: `{ ginecoObstetricos: { fur } }`. Vacío si no lo trae.
+ */
+export function saidInterviewOf(payload: Record<string, unknown>): Record<string, unknown> {
+  const fur = isRecord(payload["gyneco"]) ? text(payload["gyneco"]["fur"]) : ""
+  return fur ? { ginecoObstetricos: { fur } } : {}
+}
+
 /** ¿Trae algo que se guarda como su declaración (lo de su registro), además de lo que solo se dice aquí? */
 export const hasDeclaredHealth = (payload: Record<string, unknown>) => GROUPS.some((group) => !SAID_ONLY.includes(group) && isRecord(payload[group]))
 
@@ -678,6 +735,19 @@ export function withoutStopped(payload: Record<string, unknown>, key: string): R
   return hasHealth(out) ? withSaidBy(out, healthSaidBy(payload)) : null
 }
 
+/**
+ * La propuesta sin lo que «ya no toma» que solo nombró mal y corrigió en la misma frase («tomo
+ * warfarina, perdón, apixabán»): no la dejó, se equivocó al decirla. `null` si no queda nada.
+ */
+export function withoutMisspokenStopped(payload: Record<string, unknown>, misspoken: readonly string[]): Record<string, unknown> | null {
+  const value = payload["stopped"]
+  if (!misspoken.length || !isRecord(value) || !Array.isArray(value["items"])) return payload
+  const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !misspoken.some((name) => sameDrug(item["name"], name)))
+  const { stopped: _gone, ...rest } = payload
+  const out = items.length ? { ...rest, stopped: { ...value, items } } : rest
+  return hasHealth(out) ? out : null
+}
+
 /** ¿Las dos frases nombran la misma medicina? Por su código ATC o por las palabras antes de la dosis. */
 export const sameDrug = (a: unknown, b: unknown) => sameName(a, b) || (drugHead(a) !== "" && drugHead(a) === drugHead(b))
 
@@ -687,7 +757,12 @@ const sameName = (a: unknown, b: unknown) => normalizeDrugText(text(a)) === norm
  * es la misma (mesa del 25 nov, H3); lo de su familia, el mismo familiar con la misma enfermedad.
  */
 function sameItem(group: HealthGroup, a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-  if (group === "family") return familyKinshipOf(text(a["relation"])) === familyKinshipOf(text(b["relation"])) && sameName(a["name"], b["name"])
+  if (group === "family") {
+    const kin = familyKinshipOf(text(a["relation"]))
+    // Sin su código («su abuela», «sus padres»), el mismo familiar es el de las mismas palabras.
+    const same = kin === familyKinshipOf(text(b["relation"])) && (kin !== "FAMMEMB" || familyRelationWords(a["relation"]) === familyRelationWords(b["relation"]))
+    return same && sameName(a["name"], b["name"])
+  }
   if (group === "medications" || group === "stopped") return sameName(a["name"], b["name"]) || (drugHead(a["name"]) !== "" && drugHead(a["name"]) === drugHead(b["name"]))
   return sameName(a["name"], b["name"])
 }
@@ -837,9 +912,43 @@ export function mergeHealth(
     }
     payload[group] = merged
   }
+  // Lo último que dijo de una medicina vale (revisión del 25 nov): «ya no toma apixabán» después de
+  // «toma apixabán» lo saca de lo que toma; volver a tomarlo lo saca de «Ya no toma».
+  const reconciled = withoutContradictedDrugs(payload, {
+    stopped: isRecord(added["stopped"]) ? healthDrugKeysOf({ stopped: added["stopped"] }) : new Set(),
+    taking: healthDrugKeysOf({ ...added, stopped: undefined }),
+  })
   // Cada dato con quien lo dijo (revisión del 21 nov, A4): lo nuevo, con quien lo dijo en esta pausa;
   // lo de antes, con quien lo dijo entonces. La metformina que dijo su hija no queda a nombre del paciente.
-  return { payload: withSaidBy(payload, { ...healthSaidBy(current), ...explicitSaidBy(added) }), earlier }
+  return { payload: withSaidBy(reconciled, { ...healthSaidBy(current), ...explicitSaidBy(added) }), earlier }
+}
+
+/**
+ * Lo que toma y lo que ya no toma de la misma medicina no quedan juntos: la que dijo que dejó
+ * (`said.stopped`) sale de lo que toma, y la que dijo que toma (`said.taking`) sale de «Ya no toma».
+ */
+function withoutContradictedDrugs(payload: Record<string, unknown>, said: { stopped: ReadonlySet<string>; taking: ReadonlySet<string> }): Record<string, unknown> {
+  if (!said.stopped.size && !said.taking.size) return payload
+  const out = { ...payload }
+  const left = (list: unknown, drop: ReadonlySet<string>) =>
+    ((Array.isArray(list) ? list : []) as Array<Record<string, unknown>>).filter((item) => !drop.has(drugKey(item["name"])))
+  for (const group of DIRECTED) {
+    const value = out[group]
+    if (isRecord(value) && value["state"] === "recorded" && said.stopped.has(drugKey(value["detail"]))) delete out[group]
+  }
+  const meds = out["medications"]
+  if (said.stopped.size && isRecord(meds) && meds["state"] === "recorded" && Array.isArray(meds["items"]) && meds["items"].length) {
+    const items = left(meds["items"], said.stopped)
+    if (items.length) out["medications"] = { ...meds, items }
+    else delete out["medications"]
+  }
+  const stopped = out["stopped"]
+  if (said.taking.size && isRecord(stopped)) {
+    const items = left(stopped["items"], said.taking)
+    if (items.length) out["stopped"] = { ...stopped, items }
+    else delete out["stopped"]
+  }
+  return out
 }
 
 /* ---------- En palabras: la tarjeta, la franja y lo que lee Clío ---------- */
@@ -970,6 +1079,8 @@ export interface HealthRow {
   denied: boolean
   /** Lo que ya no toma: se confirma en su fila con «Sí, lo dejó», nunca con «Lo revisé con…». */
   stopped?: boolean
+  /** Las medicinas que nombra la fila, como claves (`healthDrugKeysOf`): lo dicho después de ellas la deja atrás. */
+  drugs?: string[]
   /** Lo volvió a decir después, distinto o igual (ISO 8601): esta fila ya no es lo vigente. */
   newer?: string | null
   /** La frase en que se oyó, tal cual (la de la última pausa que lo dijo): la fila la muestra. */
@@ -1070,7 +1181,16 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
       for (const item of (value["items"] ?? []) as Array<Record<string, unknown>>) {
         const key = itemKey(group, item)
         const label = group === "family" ? relationLabel(item["relation"]) : GROUP_LABEL[group]
-        rows.push({ key, group, label, value: text(item["name"]), by: saidBy[key] ?? unknownBy, before: null, denied: false, ...(group === "stopped" ? { stopped: true } : {}) })
+        rows.push({
+          key,
+          group,
+          label,
+          value: text(item["name"]),
+          by: saidBy[key] ?? unknownBy,
+          before: null,
+          denied: false,
+          ...(group === "stopped" ? { stopped: true, drugs: [...healthDrugKeysOf({ stopped: { state: "recorded", items: [item] } })] } : {}),
+        })
       }
       continue
     }
@@ -1089,7 +1209,8 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
           : groupWords(group, value)
       const still = (name: string) =>
         items.some((item) => sameName(item["name"], name) || sameName([item["name"], item["dose"], item["frequency"]].filter(Boolean).join(" "), name))
-      push({ key: group, group, label: GROUP_LABEL[group], value: words, by }, value["state"] === "none", still)
+      const drugs = [...healthDrugKeysOf({ [group]: value })]
+      push({ key: group, group, label: GROUP_LABEL[group], value: words, by, ...(drugs.length ? { drugs } : {}) }, value["state"] === "none", still)
       continue
     }
     for (const [key, item] of Object.entries(value)) {

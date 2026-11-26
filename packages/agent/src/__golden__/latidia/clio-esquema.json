@@ -855,7 +855,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 60,
-                  "description": "Qué es del paciente, no de quien habla: si la madre dice «mi papá», es su «abuelo materno»; «su hermana», «padre», «tía»."
+                  "description": "Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."
                 },
                 "name": {
                   "type": "string",

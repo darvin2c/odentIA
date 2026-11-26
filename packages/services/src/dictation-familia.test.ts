@@ -1,12 +1,13 @@
 import { withOrgContext } from "@odentia/db"
-import { patientFamilyHistory, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
+import { encounter, patientAnamnesis, patientFamilyHistory, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
-import { getPatientHealth } from "./clinical.js"
+import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { confirmDictationHealth, confirmSaidStopped, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
+import { confirmDictationHealth, confirmSaidHealth, confirmSaidStopped, dictatedHealthInterview, listDictationSuggestions, listSaidHealth, saveDictationSegment } from "./encounter-dictation.js"
+import { finalizeEncounter } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -151,5 +152,98 @@ describe("C8 · latidIA, control prenatal", () => {
     expect(after.pregnancy).toMatchObject({ state: "vigente", weeksToday: 10 })
     await enable(false)
     await setProduct("dental")
+  })
+})
+
+/* Revisión con ojos nuevos del 25 nov: lo que la entrega dejaba mal. */
+describe("revisión del 25 nov", () => {
+  it("«toma apixabán» firmado otro día y hoy «ya no toma apixabán»: lo de antes queda atrás y no se registra como vigente", async () => {
+    await enable(true)
+    const { fx, segment, medicines } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "apixabán" } }, sourceText: "tomo apixabán" }],
+      transcript: "Tomo apixabán.",
+    })
+    await fx.ready(fx.encounter.id)
+    await fx.run((tx) => finalizeEncounter(tx, ...fx.args, fx.encounter.id))
+    const [second] = await ownerDb.insert(encounter).values({ organizationId: ORG, patientId: fx.patient.id, professionalUserId: fx.actor, reason: "Control" }).returning()
+    const [today] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, second!.id, {
+          drafts: [{ kind: "salud", payload: { declarante: "paciente", stopped: [{ name: "apixabán" }] }, sourceText: "ya no tomo el apixabán" }],
+          transcript: "Ya no tomo el apixabán.",
+        }),
+      )
+    ).suggestions
+    const [before] = await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))
+    expect(before?.rows.find((row) => row.key === "anticoagulants")?.newer).toBeTruthy()
+    // Lo de antes, revisado ahora, ya no registra el apixabán como vigente.
+    await expect(fx.run((tx) => confirmSaidHealth(tx, ...fx.args, before!.suggestionId))).resolves.toBeTruthy()
+    expect(await medicines()).toEqual([])
+    const key = today!.healthRows!.find((row) => row.group === "stopped")!.key
+    await fx.run((tx) => confirmSaidStopped(tx, ...fx.args, today!.id, key))
+    expect((await medicines()).map((row) => [row.name, !!row.endDate])).toEqual([["apixabán", true]])
+    expect(await fx.run((tx) => listSaidHealth(tx, ORG, fx.patient.id))).toEqual([])
+    await enable(false)
+  })
+
+  it("latidIA: la última regla dicha sola queda en su entrevista; «Corregir algo» la trae", async () => {
+    await setProduct("medical")
+    await enable(true)
+    const { fx, segment, health, confirm } = await session()
+    const today = await fx.run((tx) => clinicToday(tx, ORG))
+    const fur = new Date(`${today}T12:00:00Z`)
+    fur.setUTCDate(fur.getUTCDate() - 20)
+    const day = fur.toISOString().slice(0, 10)
+    await segment({
+      drafts: [
+        { kind: "salud", payload: { declarante: "paciente", gyneco: { fur: day }, family: [{ relation: "madre", name: "hipertensión" }] }, sourceText: "mi última regla fue hace veinte días, mi mamá es hipertensa" },
+      ],
+      transcript: "Mi última regla fue hace veinte días, mi mamá es hipertensa.",
+    })
+    const [said] = await health()
+    expect(await fx.run((tx) => dictatedHealthInterview(tx, ORG, said!.payload))).toMatchObject({ ginecoObstetricos: { fur: day } })
+    await confirm(said!.id)
+    const [latest] = await ownerDb.select().from(patientAnamnesis).where(eq(patientAnamnesis.patientId, fx.patient.id))
+    expect(latest?.answers).toMatchObject({ ginecoObstetricos: { fur: day } })
+    await enable(false)
+    await setProduct("dental")
+  })
+
+  it("con Antecedentes abierto desde antes, guardarlo no borra la familia sumada ni vuelve vigente lo que dejó", async () => {
+    await enable(true)
+    const { fx, segment, health, confirm } = await session()
+    const stale = await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", family: [{ relation: "padre", name: "diabetes" }] }, sourceText: "mi papá es diabético" }],
+      transcript: "Mi papá es diabético.",
+    })
+    const [said] = await health()
+    await confirm(said!.id)
+    const after = await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))
+    expect(after.revision).toBeGreaterThan(stale.revision)
+    await expect(
+      fx.run((tx) =>
+        savePatientHealth(tx, ORG, fx.actor, fx.patient.id, { expectedRevision: stale.revision, allergies: [], conditions: [], medications: [], familyHistory: [] } as never),
+      ),
+    ).rejects.toMatchObject({ status: 409 })
+    await enable(false)
+  })
+
+  it("«Sí, lo dejó» de lo dicho antes no termina la que volvió a tomar después", async () => {
+    await enable(true)
+    const { fx, segment, health, medicines } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", stopped: [{ name: "metformina" }] }, sourceText: "ya no tomo la metformina" }],
+      transcript: "Ya no tomo la metformina.",
+    })
+    const [said] = await health()
+    // Anotada después, con fecha de inicio desde el día en que lo dijo.
+    const today = await fx.run((tx) => clinicToday(tx, ORG))
+    await ownerDb.insert(patientMedication).values({ organizationId: ORG, patientId: fx.patient.id, name: "metformina", startDate: today })
+    const key = said!.healthRows!.find((row) => row.group === "stopped")!.key
+    await fx.run((tx) => confirmSaidStopped(tx, ...fx.args, said!.id, key))
+    expect((await medicines()).map((row) => row.endDate)).toEqual([null])
+    await enable(false)
   })
 })

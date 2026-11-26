@@ -62,7 +62,7 @@ function nextRowKey(prefix: string): string {
  * Los grupos de lo que dijo en la consulta que «Corregir algo» deja puestos en el formulario: todo
  * menos las alergias, que tienen su propia lista (su «No sabe» se revisa en el aviso).
  */
-export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines", "personal", "medical", "dental"] as const
+export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines", "personal", "gyneco", "medical", "dental"] as const
 
 /**
  * Lo que oyó Clío, para el formulario: `health` con la forma de su registro y `interview` ya con

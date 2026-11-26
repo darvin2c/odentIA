@@ -1465,15 +1465,19 @@ export async function addSaidFamilyHistory(
   origin: { entity: string; entityId: string },
 ): Promise<number> {
   if (!items.length) return 0
+  await lockHealthRevision(tx, orgId, patientId)
   const existing = await tx
     .select({ relationship: patientFamilyHistory.relationship, condition: patientFamilyHistory.condition, notes: patientFamilyHistory.notes })
     .from(patientFamilyHistory)
     .where(and(eq(patientFamilyHistory.organizationId, orgId), eq(patientFamilyHistory.patientId, patientId)))
-  const seen = new Set(existing.map((row) => `${row.relationship}:${normalizeDrugText(row.notes ?? "")}:${normalizeDrugText(row.condition)}`))
+  // Sin su código, el familiar es el de sus palabras, sin «su» ni «mi» (como lo compara lo dicho).
+  const kinWords = (notes: string | null) => normalizeDrugText((notes ?? "").replace(/^\s*(?:su|sus|mi|mis)\s+/i, ""))
+  const seen = new Set(existing.map((row) => `${row.relationship}:${row.relationship === "FAMMEMB" ? kinWords(row.notes) : ""}:${normalizeDrugText(row.condition)}`))
   let added = 0
   for (const item of items) {
-    const notes = item.relationship === "FAMMEMB" && item.relation.trim() ? item.relation.trim().slice(0, 200) : null
-    const key = `${item.relationship}:${normalizeDrugText(notes ?? "")}:${normalizeDrugText(item.condition)}`
+    const words = item.relation.trim().replace(/^(?:su|sus|mi|mis)\s+/i, "")
+    const notes = item.relationship === "FAMMEMB" && words ? words.slice(0, 200) : null
+    const key = `${item.relationship}:${item.relationship === "FAMMEMB" ? kinWords(notes) : ""}:${normalizeDrugText(item.condition)}`
     if (seen.has(key)) continue
     seen.add(key)
     await tx.insert(patientFamilyHistory).values({
@@ -1486,7 +1490,10 @@ export async function addSaidFamilyHistory(
     })
     added += 1
   }
-  if (added) await audit(tx, orgId, actorUserId, "health.family_said", "patient", patientId, { origin: origin.entity, originId: origin.entityId, count: added })
+  if (added) {
+    await bumpHealthRevision(tx, orgId, patientId)
+    await audit(tx, orgId, actorUserId, "health.family_said", "patient", patientId, { origin: origin.entity, originId: origin.entityId, count: added })
+  }
   return added
 }
 
@@ -1507,21 +1514,33 @@ export async function endSaidMedication(
   same: (a: string, b: string) => boolean,
   origin: { entity: string; entityId: string },
 ): Promise<number> {
+  await lockHealthRevision(tx, orgId, patientId)
   const today = await clinicToday(tx, orgId)
   const ended = dayBefore(saidOn)
   const rows = await tx
-    .select({ id: patientMedication.id, name: patientMedication.name, genericName: patientMedication.genericName, startDate: patientMedication.startDate, endDate: patientMedication.endDate })
+    .select({
+      id: patientMedication.id,
+      name: patientMedication.name,
+      genericName: patientMedication.genericName,
+      startDate: patientMedication.startDate,
+      endDate: patientMedication.endDate,
+      createdAt: patientMedication.createdAt,
+    })
     .from(patientMedication)
     .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
     .for("update")
-  const current = rows.filter((row) => isCurrentMedication(row, today) && (same(row.name, name) || (!!row.genericName && same(row.genericName, name))))
+  const named = rows.filter((row) => same(row.name, name) || (!!row.genericName && same(row.genericName, name)))
+  // Lo anotado o empezado desde el día en que dijo que la dejó es más nuevo que eso: vale lo último
+  // (volvió a tomarla), y no se termina.
+  const newer = async (row: (typeof rows)[number]) => (!!row.startDate && row.startDate >= saidOn) || (await clinicToday(tx, orgId, row.createdAt)) > saidOn
+  const current: typeof rows = []
+  for (const row of named) if (isCurrentMedication(row, today) && !(await newer(row))) current.push(row)
   for (const row of current)
     await tx
       .update(patientMedication)
-      // Empezada después del día que se dice: termina el día en que empezó, nunca antes.
-      .set({ endDate: row.startDate && row.startDate > ended ? row.startDate : ended, updatedAt: new Date() })
+      .set({ endDate: ended, updatedAt: new Date() })
       .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.id, row.id)))
-  if (!current.length && !rows.some((row) => same(row.name, name) || (!!row.genericName && same(row.genericName, name)))) {
+  if (!named.length) {
     const hooks = await productHooks(tx, orgId)
     await tx.insert(patientMedication).values({
       organizationId: orgId,
@@ -1533,9 +1552,32 @@ export async function endSaidMedication(
       createdBy: actorUserId,
     })
   }
-  const changed = current.length || 1
+  const changed = current.length || (named.length ? 0 : 1)
+  if (changed) await bumpHealthRevision(tx, orgId, patientId)
   await audit(tx, orgId, actorUserId, "health.medication_stopped", "patient", patientId, { origin: origin.entity, originId: origin.entityId, count: changed })
   return changed
+}
+
+/**
+ * Lo que se escribe en sus antecedentes fuera de «Guardar» de Antecedentes también cambia su versión
+ * (revisión del 25 nov): con el formulario abierto desde antes, guardarlo no borra la familia que se
+ * sumó ni vuelve vigente la medicina que dejó; le dice que cambió (`expectedRevision`).
+ */
+async function lockHealthRevision(tx: Db, orgId: string, patientId: string): Promise<void> {
+  const [locked] = await tx
+    .select({ id: patient.id })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+}
+
+async function bumpHealthRevision(tx: Db, orgId: string, patientId: string): Promise<void> {
+  await tx
+    .update(patient)
+    .set({ healthRevision: sql`${patient.healthRevision} + 1`, updatedAt: new Date() })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
 }
 
 export async function initializeDeclaredPatientHealth(
@@ -2035,6 +2077,11 @@ export async function addDeclaredHealth(
   input: DeclaredPatientHealthInput,
   /** De dónde vino y cuándo lo dijo: su origen va en la auditoría, no en las notas. */
   origin: { entity: string; entityId: string; at: Date },
+  /**
+   * Lo de la entrevista que solo se dice en la consulta y no es de su registro (latidIA: la última
+   * regla, `ginecoObstetricos.fur`): entra con lo demás, validado como lo del profesional.
+   */
+  extraInterview: Record<string, unknown> = {},
 ): Promise<{ conditions: number; medications: number; interview: boolean; saidNo: Array<"allergies" | "conditions" | "medications"> }> {
   const parsed = registrationAnswersSchema.shape.health.safeParse(input)
   if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
@@ -2114,7 +2161,7 @@ export async function addDeclaredHealth(
   // La entrevista (embarazo con su fecha, operaciones…): lo que dijo encima de lo que había, campo por
   // campo (nunca un grupo entero: las operaciones que anotó el profesional siguen), en una versión nueva
   // validada como la del profesional. Lo que ya no se acepta en la entrevista queda en las versiones de antes.
-  const said = hooks.interview.declared(declared, saidOn)
+  const said = { ...hooks.interview.declared(declared, saidOn), ...extraInterview }
   let interview = false
   if (Object.keys(said).length) {
     const [latest] = await tx
