@@ -99,8 +99,11 @@ export default function BudgetJourney({ cta }: Props) {
     setSilent(true)
   }
 
-  // El paso de la barra: el dictado y las opciones son 1 y 2; enviado, 3; el paciente, 4; Argos, 5.
-  const current = silent && stage === 2 ? 4 : stage === 0 ? 0 : Math.min(stage + 1, 3)
+  // El paso de la barra: lo dictado ya está, así que se empieza en «Confirmas» (2); con las opciones,
+  // «Al cerrar» (3); enviado, el paciente (4); con «¿Y si no responde?», Argos (5).
+  const current = silent && stage === 2 ? 4 : Math.min(stage + 1, 3)
+  // Con Argos (paso 5), el paciente aún no eligió: el paso 4 no se marca hecho.
+  const done = silent && stage === 2 ? 3 : current
   const carlos = "Resina o incrustación · 36"
   const board: Array<{ step: string; when: string; cards: Card[] }> = [
     {
@@ -182,7 +185,7 @@ export default function BudgetJourney({ cta }: Props) {
           {STEPS.map((step, index) => (
             <li
               key={step.title}
-              className={index === current ? "now" : index < current && index < 4 ? "done" : ""}
+              className={index === current ? "now" : index < current && index < done ? "done" : ""}
               aria-current={index === current ? "step" : undefined}
             >
               <span className={`bj-who ${step.tone}`}>
@@ -192,6 +195,10 @@ export default function BudgetJourney({ cta }: Props) {
             </li>
           ))}
         </ol>
+        {/* En angosto la barra son rayas: el paso en que vas, escrito debajo (el lector ya lo tiene en la lista). */}
+        <p className="bj-now" aria-hidden="true">
+          0{current + 1} · {STEPS[current]?.who}: {STEPS[current]?.title}
+        </p>
 
         <div className="bj-panels">
           <section
@@ -317,7 +324,12 @@ export default function BudgetJourney({ cta }: Props) {
                     >
                       Aceptar la opción {pick}
                     </button>
-                    {silent ? null : (
+                    {/* Lo de Argos se ve aquí, donde se tocó: en el celular el tablero queda abajo. */}
+                    {silent ? (
+                      <span className="bj-chip bj-argos">
+                        Dos días después: le llegó un recordatorio
+                      </span>
+                    ) : (
                       <button type="button" className="bj-link" onClick={ignore}>
                         ¿Y si no responde?
                       </button>
@@ -376,7 +388,10 @@ export default function BudgetJourney({ cta }: Props) {
                   <b>{column.step}</b>
                   <span className="bj-when">{column.when}</span>
                   {column.cards.map((card) => (
-                    <span key={card.who} className={`bj-card${card.tone ? ` ${card.tone}` : ""}`}>
+                    <span
+                      key={card.who}
+                      className={`bj-card${card.tone ? ` ${card.tone}` : ""}${card.who === "Carlos" ? "" : " bj-other"}`}
+                    >
                       <b>{card.who}</b>
                       <span>{card.what}</span>
                       <span className="bj-note">{card.note}</span>
@@ -396,20 +411,20 @@ export default function BudgetJourney({ cta }: Props) {
             Ejemplo con montos de una clínica de Perú, no precios de odentIA. No guarda nada.
           </span>
           <span className="bj-actions">
+            {stage === 4 && cta ? (
+              <a className="btn btn-p" href={cta.href} data-next="">
+                {cta.label}
+              </a>
+            ) : null}
             {stage > 0 || silent ? (
               <button
                 type="button"
                 className="bj-btn bj-soft"
-                data-next={stage === 4 ? "" : undefined}
+                data-next={stage === 4 && !cta ? "" : undefined}
                 onClick={reset}
               >
                 Volver a empezar
               </button>
-            ) : null}
-            {stage === 4 && cta ? (
-              <a className="bj-btn bj-cta" href={cta.href}>
-                {cta.label}
-              </a>
             ) : null}
           </span>
         </div>

@@ -18,6 +18,7 @@
   gap: 8px;
 }
 .bj-steps li {
+  border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px 14px;
   display: flex;
@@ -423,14 +424,6 @@
   flex-wrap: wrap;
   gap: 10px;
 }
-.bj-cta {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-}
-.bj-cta:hover {
-  color: #fff;
-}
 .bj-foot {
   display: flex;
   flex-wrap: wrap;
@@ -473,6 +466,7 @@
     flex: 1 1 0;
     padding: 0;
     height: 6px;
+    border: 0;
     border-radius: 3px;
     background: var(--line);
     overflow: hidden;
@@ -531,11 +525,8 @@
     flex: 1 1 140px;
   }
   .bj-actions,
-  .bj-foot .bj-btn {
+  .bj-actions > * {
     flex: 1 1 100%;
-  }
-  .bj-cta {
-    justify-content: center;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -546,5 +537,29 @@
   }
   .bj-steps li {
     transition: none;
+  }
+}
+
+/* El paso en que vas, escrito: solo cuando la barra son rayas. */
+.bj-now {
+  display: none;
+}
+@container (max-width: 680px) {
+  .bj-now {
+    display: block;
+    margin: -6px 0 0;
+    font-family: var(--agent-font);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--teal);
+  }
+  /* El tablero compacto: el nombre de cada paso y solo la tarjeta de Carlos, para que su cambio se vea
+     junto al celular sin bajar. */
+  .bj-other {
+    display: none;
+  }
+  .bj-col {
+    padding: 8px 10px;
   }
 }
