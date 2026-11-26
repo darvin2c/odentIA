@@ -215,7 +215,7 @@ const startTitle = START_TITLES[guide.topic]
         ) : guide.tryIt.demo === "cie10" ? (
           <Cie10Search client:visible codes={cie10.codes} daily={cie10.daily} />
         ) : (
-          <BudgetJourney client:visible />
+          <BudgetJourney client:visible cta={{ href: cta.href, label: cta.label }} />
         )}
       </div>
     </div>
