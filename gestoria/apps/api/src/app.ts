@@ -9,8 +9,8 @@ import { ZodError, type z } from "zod"
 import {
   askSupport,
   type ContractConfig,
-  planView,
   planReceiptInput,
+  planView,
   sendReceipt,
   supportInput,
 } from "./acuerdo.js"
@@ -108,7 +108,9 @@ import {
   inStore,
   invitationInput,
   inviteToStore,
+  leaveSupport,
   myStores,
+  mySupportState,
   newStoreInput,
   removeMember,
   revokeInvitation,
@@ -264,8 +266,7 @@ export function createApp(deps: AppDeps) {
     if (c.req.method === "POST" && PHOTO_UPLOAD.test(c.req.path)) return photo(c, next)
     if (c.req.method === "POST" && SHEET_UPLOAD.test(c.req.path)) return sheet(c, next)
     if (c.req.method === "POST" && RECEIPT_UPLOAD.test(c.req.path)) return receipt(c, next)
-    if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path))
-      return planReceipt(c, next)
+    if (c.req.method === "POST" && PLAN_RECEIPT_UPLOAD.test(c.req.path)) return planReceipt(c, next)
     return small(c, next)
   })
 
@@ -326,13 +327,14 @@ export function createApp(deps: AppDeps) {
     const token = /^Bearer ([A-Za-z0-9._-]+)$/.exec(header)?.[1]
     if (!token) return c.json(errorBody(c, "UNAUTHORIZED", "Entra con tu cuenta para seguir."), 401)
     const claims = await readAccountToken(token, deps.account, keys)
-    c.set("person", await syncAccountCopy(deps.ownerDb, claims))
+    const person = await syncAccountCopy(deps.ownerDb, claims)
+    c.set("person", { ...person, staffVerified: claims.staffVerified === true })
     return next()
   })
 
   app.get("/api/yo", async (c) => {
-    const person = c.get("person")
-    return c.json({ person, ...(await myStores(deps.appDb, person)) })
+    const { staffVerified: _, ...person } = c.get("person")
+    return c.json({ person, ...(await myStores(deps.appDb, c.get("person"))) })
   })
 
   app.post("/api/tiendas", async (c) => {
@@ -707,6 +709,15 @@ export function createApp(deps: AppDeps) {
   app.post("/api/tiendas/:id/soporte/:accessId/quitar", async (c) => {
     const { id, accessId } = c.req.param()
     await endSupport(deps.appDb, c.get("person"), id, accessId)
+    return c.body(null, 204)
+  })
+  // Soporte mirando (ADR 0219): cómo está su entrada (lo dice el servidor, con su motivo) y
+  // «Salir», que termina solo la mirada.
+  app.get("/api/tiendas/:id/soporte/mio", async (c) =>
+    c.json(await mySupportState(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/soporte/salir", async (c) => {
+    await leaveSupport(deps.appDb, c.get("person"), c.req.param("id"))
     return c.body(null, 204)
   })
 

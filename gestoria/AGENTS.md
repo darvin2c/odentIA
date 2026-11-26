@@ -119,6 +119,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   cuenta, solo a mirar (`support` en `permisos.ts`) y hasta que vence o lo sacan. No es del equipo:
   `inStore` lo reconoce por su entrada vigente. Un permiso nuevo de solo lectura se le suma solo
   si leer con él no escribe nada.
+- Soporte mira solo desde la administración (ADR 0219): su lugar exige la entrada vigente y la
+  marca `staffVerified` del token (la sesión pasó el código del personal), en `/api/yo` y en
+  `seatIn` a la vez. A quien tuvo una entrada, el servidor le dice cómo está la suya
+  (`supportStateOf`); a cualquier otra persona, 404. «Salir» termina solo la entrada, nunca la
+  sesión. Ventas ve solo quién mira y hasta cuándo; soporte no ve la lista de soporte.
 
 ## Trabajo
 

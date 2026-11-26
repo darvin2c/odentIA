@@ -200,6 +200,8 @@ export const STORE_EVENT_ACTIONS = [
   "soporte.rechazado",
   "soporte.quitado",
   "soporte.entro",
+  // Soporte terminó su mirada con «Salir» (ADR 0219).
+  "soporte.salio",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 

@@ -7,8 +7,9 @@ import { ACCOUNT, CLAVE, PEOPLE, STORE_ID, type Who } from "./entorno"
  * Lo nuevo de gestorIA en un navegador (ADR 0214), contra su servidor y su base de verdad:
  * - «Plan y pagos» del Dueño: subir el comprobante de un cobro sin pagar (un archivo que no es
  *   lo que dice se rechaza con su mensaje; una imagen válida queda «por enviar»).
- * - El aviso de soporte en cada sección: «Dejar entrar» abre la tienda a soporte, solo a mirar,
- *   y «Sacar ahora» la cierra.
+ * - El aviso de soporte en cada sección: «Dejar entrar» abre la tienda a soporte, solo a mirar y
+ *   solo con el código del personal (ADR 0219), con su franja; «Sacar ahora» la cierra, y soporte
+ *   ve «El acceso terminó» con quién lo sacó, y la tienda, quién miró y cómo terminó.
  * - La conversación que Sofi no atendió (apagada) espera a una persona con su motivo, en «Te toca».
  * - El armazón común (lienzo «Una cuenta, todas las apps»): el selector de la tienda con el rol,
  *   «Pedir ayuda» en la cabecera, el menú de la persona con Apariencia, y la entrada que recuerda
@@ -43,6 +44,12 @@ async function noSideScroll(page: Page) {
 /** Quién entra con la cuenta de mentira. */
 async function as(who: Who | "nadie") {
   const response = await fetch(`${ACCOUNT}/__como/${who}`, { method: "POST" })
+  expect(response.ok).toBe(true)
+}
+
+/** Si la sesión de soporte pasó el código del personal (llegó desde la administración). */
+async function staffCode(on: boolean) {
+  const response = await fetch(`${ACCOUNT}/__codigo/${on ? "si" : "no"}`, { method: "POST" })
   expect(response.ok).toBe(true)
 }
 
@@ -113,27 +120,50 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/catalogo`)
   await expect(page.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
+  // La caja dice qué verá, desde cuándo corren los minutos y quién puede pedirlo.
+  await expect(
+    page.getByText(
+      /tu equipo \(nombres, correos y roles\).*Los 30 minutos empiezan cuando la dejas entrar/,
+    ),
+  ).toBeVisible()
   await noSideScroll(page)
   await shot(page, "soporte-por-aceptar-escritorio")
   await page.setViewportSize(PHONE)
+  // En el celular, el detalle se pliega en «Qué verá».
+  await expect(page.getByText("Qué verá", { exact: true })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "soporte-por-aceptar-telefono")
 
   const accept = page.getByRole("button", { name: "Dejar entrar" })
   await accept.focus()
   await page.keyboard.press("Enter")
-  await expect(page.getByText(/Ana de Soporte puede mirar tu tienda hasta el/)).toBeVisible()
+  await expect(
+    page.getByText(/Ana de Soporte puede mirar tu tienda hasta las? .* · todavía no entró/),
+  ).toBeVisible()
   await expect(page.getByRole("button", { name: "Sacar ahora" })).toBeVisible()
   await noSideScroll(page)
   await shot(page, "soporte-adentro-telefono")
   await page.setViewportSize(DESKTOP)
   await shot(page, "soporte-adentro-escritorio")
 
-  // Soporte entra con su cuenta y solo mira: sin pedidos, sin Sofi, sin el plan.
+  // Si entra directo con su contraseña, sin el código de la administración, no mira.
   await as("ana")
+  await staffCode(false)
+  await page.goto(`${BASE}/catalogo`)
+  await expect(
+    page.getByRole("heading", { name: "Para mirar esta tienda, ábrela desde la administración" }),
+  ).toBeVisible()
+  await noSideScroll(page)
+  await shot(page, "soporte-sin-codigo-escritorio")
+
+  // Desde la administración (con su código) mira, solo a mirar: sin pedidos, sin Sofi, sin el plan.
+  await staffCode(true)
   await page.goto("/")
   // Con una sola tienda, «Tus tiendas» entra directo a ella; a soporte, por el catálogo.
-  await expect(page.getByText(/Entraste como soporte de gestorIA, solo a mirar/)).toBeVisible()
+  await expect(
+    page.getByText(/Solo mirar · Estás viendo Calzados Rosa como soporte de gestorIA, hasta las?/),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Salir" })).toBeVisible()
   await expect(page).toHaveURL(/\/catalogo$/)
   const nav = page.getByRole("navigation", { name: "Principal" })
   await expect(nav.getByRole("link", { name: "Catálogo" })).toBeVisible()
@@ -152,11 +182,28 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/equipo`)
-  await expect(page.getByText("Puede mirar", { exact: true })).toBeVisible()
+  // Ya entró: la tienda ve desde cuándo mira y quién la dejó entrar.
+  await expect(page.getByText("Mirando", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Ana de Soporte está mirando tu tienda desde las? /)).toBeVisible()
+  await expect(page.getByText(/Lo aceptaste tú\./)).toBeVisible()
   await page.getByRole("button", { name: "Sacar ahora" }).click()
-  await expect(page.getByText("Terminó", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText(/Ana de Soporte miró tu tienda el .* · terminaste el acceso a las? /),
+  ).toBeVisible()
   await noSideScroll(page)
   await shot(page, "soporte-terminado-equipo-escritorio")
+
+  // Soporte lo sabe con su motivo, nunca «te quitaron del equipo».
+  await as("ana")
+  await page.goto(`${BASE}/catalogo`)
+  await expect(page.getByRole("heading", { name: "El acceso terminó" })).toBeVisible()
+  await expect(page.getByText(/: Rosa Quispe terminó tu acceso\./)).toBeVisible()
+  await expect(page.getByText("Puede que te hayan quitado del equipo.")).toHaveCount(0)
+  await noSideScroll(page)
+  await shot(page, "soporte-acceso-termino-escritorio")
+  await page.setViewportSize(PHONE)
+  await noSideScroll(page)
+  await shot(page, "soporte-acceso-termino-telefono")
 })
 
 test("la conversación que Sofi no atendió espera a una persona, con su motivo", async ({

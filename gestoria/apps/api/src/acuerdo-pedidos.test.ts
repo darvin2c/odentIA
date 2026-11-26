@@ -13,6 +13,7 @@ import {
   storeAgent,
   storeEvent,
   storeMember,
+  storeSupportAccess,
 } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import {
@@ -69,17 +70,34 @@ let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"]
 let app: ReturnType<typeof createApp>
 let storeId = ""
 
-const people = {
+const people: Record<
+  "rosa" | "mario" | "soporte" | "soporteConCodigo",
+  { id: string; email: string; name: string; staffVerified?: boolean }
+> = {
   rosa: { id: "p-rosa", email: "rosa@zapatos.test", name: "Rosa" },
   mario: { id: "p-mario", email: "mario@zapatos.test", name: "Mario" },
+  // La misma persona de soporte: entrando directo con su contraseña, o desde la administración
+  // con su código (la cuenta lo dice en el token, ADR 0219).
   soporte: { id: "p-soporte", email: "soporte@gestoria.test", name: "Ana de Soporte" },
+  soporteConCodigo: {
+    id: "p-soporte",
+    email: "soporte@gestoria.test",
+    name: "Ana de Soporte",
+    staffVerified: true,
+  },
 }
 type Who = keyof typeof people
 
 async function token(who: Who) {
   const p = people[who]
   const iat = Math.floor(Date.now() / 1000)
-  return new SignJWT({ email: p.email, emailVerified: true, name: p.name, image: null })
+  return new SignJWT({
+    email: p.email,
+    emailVerified: true,
+    name: p.name,
+    image: null,
+    ...(p.staffVerified ? { staffVerified: true } : {}),
+  })
     .setProtectedHeader({ alg: "EdDSA", kid: "k1" })
     .setSubject(p.id)
     .setIssuer(ACCOUNT)
@@ -239,23 +257,29 @@ describe("la entrada de soporte", () => {
     email: people.soporte.email,
   }
   let accessId = ""
+  const askToEnter = () =>
+    ask({
+      type: "soporte.entrar",
+      timestamp: now(),
+      data: { account: storeId, staff, minutes: 30, reason: "Ver por qué no carga su catálogo" },
+    })
+  const mine = (who: Who = "soporteConCodigo") =>
+    call(who, "GET", `/api/tiendas/${storeId}/soporte/mio`)
 
-  it("se pide, y soporte no entra hasta que la tienda lo acepta", async () => {
-    const asked = await ask({
-      type: "soporte.entrar",
-      timestamp: now(),
-      data: { account: storeId, staff, minutes: 30, reason: "Ver por qué no carga su catálogo" },
-    })
-    expect(asked.json.status).toBe("hecho")
-    // Pedirlo otra vez sin respuesta no suma otro.
-    const twice = await ask({
-      type: "soporte.entrar",
-      timestamp: now(),
-      data: { account: storeId, staff, minutes: 30, reason: "Ver por qué no carga su catálogo" },
-    })
-    expect(twice.json.message).toBe("Ya estaba pedido: la tienda todavía no responde.")
-    expect((await call("soporte", "GET", "/api/yo")).json.stores).toEqual([])
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(404)
+  it("se pide una vez, y soporte no entra hasta que la tienda lo acepta", async () => {
+    expect((await askToEnter()).json.status).toBe("hecho")
+    // Un pedido por vez: otro sin respuesta falla con su motivo (la tienda solo vería el primero).
+    const twice = await askToEnter()
+    expect(twice.json).toMatchObject({ status: "fallo" })
+    expect(twice.json.message).toMatch(/^Ya lo pediste y la tienda todavía no responde/)
+    expect((await call("soporteConCodigo", "GET", "/api/yo")).json.stores).toEqual([])
+    // A quien pidió, el servidor le dice que la tienda todavía no responde; a cualquier otra
+    // persona, la tienda no existe.
+    const waiting = await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/catalogo`)
+    expect([waiting.status, waiting.json.error.code]).toEqual([403, "SUPPORT_PENDING"])
+    expect((await mine()).json).toMatchObject({ state: "pendiente" })
+    expect((await call("mario", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(404)
+    expect((await mine("mario")).status).toBe(404)
     const team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
     expect(team.json.support).toMatchObject([
       { staffName: "Ana de Soporte", minutes: 30, status: "por_aceptar" },
@@ -274,26 +298,38 @@ describe("la entrada de soporte", () => {
     expect(
       (await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/aceptar`)).status,
     ).toBe(409)
-    const me = await call("soporte", "GET", "/api/yo")
+    const me = await call("soporteConCodigo", "GET", "/api/yo")
     expect(me.json.stores).toMatchObject([
       { id: storeId, role: "support", permissions: ["tienda.ver", "equipo.ver", "catalogo.ver"] },
     ])
     expect(me.json.stores[0].supportUntil).toBeTruthy()
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(200)
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/equipo`)).status).toBe(200)
+    expect(me.json.person).toEqual({
+      userId: people.soporte.id,
+      email: people.soporte.email,
+      name: people.soporte.name,
+    })
+    expect((await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(
+      200,
+    )
+    // Soporte ve el equipo, pero no la lista de soporte (ya tiene su franja).
+    const seen = await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/equipo`)
+    expect([seen.status, seen.json.support]).toEqual([200, []])
     // Nada que cambie ni lo que también escribe (pedidos, conversaciones, el plan).
     expect(
       (
-        await call("soporte", "POST", `/api/tiendas/${storeId}/productos`, {
+        await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/productos`, {
           name: "X",
           listPriceCents: 100,
         })
       ).status,
     ).toBe(403)
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/pedidos`)).status).toBe(403)
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/plan`)).status).toBe(403)
+    expect((await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/pedidos`)).status).toBe(
+      403,
+    )
+    expect((await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/plan`)).status).toBe(403)
     expect(
-      (await call("soporte", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`)).status,
+      (await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`))
+        .status,
     ).toBe(403)
     // La primera entrada queda anotada una vez.
     const actions = (await events(storeId)).map((e) => e.action)
@@ -302,16 +338,89 @@ describe("la entrada de soporte", () => {
       "soporte.aceptado",
       "soporte.entro",
     ])
+    // Ventas ve solo quién mira y hasta cuándo, sin el «Para qué».
+    const sales = await call("mario", "GET", `/api/tiendas/${storeId}/equipo`)
+    expect(sales.json.support).toHaveLength(1)
+    expect(sales.json.support[0]).toMatchObject({ staffName: "Ana de Soporte", status: "vigente" })
+    expect(sales.json.support[0].reason).toBeUndefined()
+    // El Dueño ve quién lo aceptó y desde cuándo mira.
+    const owner = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
+    expect(owner.json.support[0]).toMatchObject({ answeredByName: "Rosa", ending: null })
+    expect(owner.json.support[0].usedAt).toBeTruthy()
   })
 
-  it("la tienda lo saca cuando quiere y ya no entra", async () => {
+  it("sin el código del personal en esta sesión no mira, aunque la tienda lo aceptó", async () => {
+    // Entró directo con su contraseña: la tienda no sale en su lista ni se abre.
+    expect((await call("soporte", "GET", "/api/yo")).json.stores).toEqual([])
+    const direct = await call("soporte", "GET", `/api/tiendas/${storeId}/catalogo`)
+    expect([direct.status, direct.json.error.code]).toEqual([403, "SUPPORT_NEEDS_ADMIN"])
+    expect(direct.json.error.message).toBe(
+      "Para mirar esta tienda, ábrela desde la administración.",
+    )
+    expect((await mine("soporte")).json).toMatchObject({ state: "falta_codigo" })
+    expect((await mine()).json).toMatchObject({ state: "puede_mirar" })
+  })
+
+  it("la tienda lo saca cuando quiere, y soporte sabe quién y cuándo", async () => {
     expect(
       (await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${accessId}/quitar`)).status,
     ).toBe(204)
-    expect((await call("soporte", "GET", `/api/tiendas/${storeId}/catalogo`)).status).toBe(404)
-    expect((await call("soporte", "GET", "/api/yo")).json.stores).toEqual([])
+    const after = await call("soporteConCodigo", "GET", `/api/tiendas/${storeId}/catalogo`)
+    expect([after.status, after.json.error.code]).toEqual([403, "SUPPORT_ENDED"])
+    expect((await call("soporteConCodigo", "GET", "/api/yo")).json.stores).toEqual([])
+    expect((await mine()).json).toMatchObject({
+      state: "terminado",
+      reason: "quitado",
+      byName: "Rosa",
+    })
     const team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
-    expect(team.json.support[0].status).toBe("terminado")
+    expect(team.json.support[0]).toMatchObject({
+      status: "terminado",
+      ending: { reason: "quitado", by: people.rosa.id, byName: "Rosa" },
+    })
+  })
+
+  it("«Salir» termina solo su mirada, y queda anotado", async () => {
+    expect((await askToEnter()).json.status).toBe("hecho")
+    const team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
+    const second = team.json.support.find((row: Json) => row.status === "por_aceptar").id
+    await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${second}/aceptar`)
+    // Nadie más puede terminar la mirada de soporte con esto.
+    expect((await call("mario", "POST", `/api/tiendas/${storeId}/soporte/salir`)).status).toBe(409)
+    expect(
+      (await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/soporte/salir`)).status,
+    ).toBe(204)
+    expect(
+      (await call("soporteConCodigo", "POST", `/api/tiendas/${storeId}/soporte/salir`)).status,
+    ).toBe(409)
+    expect((await mine()).json).toMatchObject({ state: "terminado", reason: "salio" })
+    const actions = (await events(storeId)).map((e) => e.action)
+    expect(actions.filter((a) => a === "soporte.salio")).toHaveLength(1)
+    const latest = (await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)).json.support[0]
+    // No entró a mirar nada antes de salir: «no entró», con su motivo.
+    expect(latest).toMatchObject({ ending: { reason: "salio" } })
+  })
+
+  it("se terminó el tiempo o la tienda dijo que no: lo dice con su motivo", async () => {
+    expect((await askToEnter()).json.status).toBe("hecho")
+    let team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
+    const third = team.json.support.find((row: Json) => row.status === "por_aceptar").id
+    await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${third}/aceptar`)
+    // Vence con la pestaña abierta.
+    await db.ownerDb
+      .update(storeSupportAccess)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(storeSupportAccess.id, third))
+    expect((await mine()).json).toMatchObject({ state: "terminado", reason: "tiempo" })
+    expect((await askToEnter()).json.status).toBe("hecho")
+    team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
+    const fourth = team.json.support.find((row: Json) => row.status === "por_aceptar").id
+    await call("rosa", "POST", `/api/tiendas/${storeId}/soporte/${fourth}/rechazar`)
+    expect((await mine()).json).toMatchObject({
+      state: "terminado",
+      reason: "rechazado",
+      byName: "Rosa",
+    })
   })
 })
 

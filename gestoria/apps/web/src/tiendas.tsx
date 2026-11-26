@@ -74,14 +74,15 @@ import {
   invitationLink,
   type Me,
   type MyStore,
+  type MySupportState,
   type PendingInvitation,
   ROLES,
   type StoreRole,
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
-import { authClient, forgetToken, forgetUser } from "./lib/cuenta"
-import { when } from "./lib/pedidos"
+import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
+import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
 export function useMe() {
@@ -159,12 +160,15 @@ function AskForHelp({ store }: { store: MyStore }) {
 }
 
 /**
- * La franja de soporte de gestorIA mirando la tienda: no se cierra y dice hasta cuándo. Como la
- * de las clínicas, sigue al permiso: cada medio minuto y al vencer vuelve a preguntar, así lo que
- * estaba a la vista no queda abierto después de que la tienda lo saca o de que vence.
+ * La franja de soporte de gestorIA mirando la tienda (ADR 0219), con las palabras de las clínicas:
+ * qué tienda, hasta cuándo y que no cambia nada. No se cierra; «Salir» termina solo esta mirada,
+ * nunca la sesión (que es la misma de la administración). Sigue al permiso: cada medio minuto y al
+ * vencer vuelve a preguntar, así lo que estaba a la vista no queda abierto después de que la
+ * tienda la saca o de que se termina el tiempo.
  */
-function SupportStrip({ until }: { until: string }) {
+function SupportStrip({ store }: { store: MyStore }) {
   const queryClient = useQueryClient()
+  const until = store.supportUntil ?? ""
   useEffect(() => {
     const check = () => void queryClient.invalidateQueries({ queryKey: ["yo"] })
     const timer = window.setInterval(check, 30_000)
@@ -175,8 +179,11 @@ function SupportStrip({ until }: { until: string }) {
       if (atEnd) window.clearTimeout(atEnd)
     }
   }, [until, queryClient])
-  // «p. m.» termina en punto: en la frase larga no se repite antes del siguiente.
-  const end = when(until)
+  const leave = useMutation({
+    mutationFn: () => api(`/api/tiendas/${store.id}/soporte/salir`, { method: "POST" }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["yo"] }),
+    onError: (error) => toast.error(error.message),
+  })
   return (
     <NoticeStrip
       label="Soporte de gestorIA"
@@ -184,8 +191,14 @@ function SupportStrip({ until }: { until: string }) {
         {
           id: "soporte-mirando",
           tone: "alarma",
-          message: `Entraste como soporte de gestorIA, solo a mirar, hasta el ${end.replace(/\.$/, "")}. No puedes cambiar nada.`,
-          short: `Solo mirar · hasta el ${end}`,
+          message: stripMessage(store.name, until),
+          short: `Solo mirar · hasta ${atTime(until)}`,
+          action: {
+            label: "Salir",
+            onSelect: () => {
+              if (!leave.isPending) leave.mutate()
+            },
+          },
         },
       ]}
     />
@@ -283,7 +296,7 @@ export function Shell({
     : { tienda: store?.id ?? "" }
   return (
     <AppShell
-      notice={store?.supportUntil ? <SupportStrip until={store.supportUntil} /> : undefined}
+      notice={store?.supportUntil ? <SupportStrip store={store} /> : undefined}
       items={items}
       LinkComponent={RouterLink}
       pathname={pathname}
@@ -315,8 +328,13 @@ export function Shell({
       brand={<Brand />}
       brandIcon={<Brand compact />}
       switcher={store ? <StoreSwitcher me={me} store={store} /> : undefined}
-      // La sesión es la misma en las apps abiertas desde aquí con el pase (ADR 0215): se cierra en todas.
-      signOutHint="Cierra tu sesión aquí y en las apps que abriste desde aquí"
+      // La sesión es la misma en las apps abiertas desde aquí con el pase (ADR 0215): se cierra en
+      // todas. Soporte llegó desde la administración: se le dice antes que también la cierra.
+      signOutHint={
+        store?.role === "support"
+          ? "También cierra la administración: es la misma sesión. Para dejar de mirar, usa «Salir» arriba"
+          : "Cierra tu sesión aquí y en las apps que abriste desde aquí"
+      }
       onSignOut={() => void signOut()}
     >
       <HeaderUtilitiesProvider
@@ -655,9 +673,54 @@ export function StoreLayout() {
 
   if (me.isPending) return <Opening message="Abriendo tu tienda…" />
   if (me.isError) return <OpeningFailed error={me.error} onRetry={() => void me.refetch()} />
-  if (!store)
+  if (!store) return <NotYours me={me.data} id={id} />
+  // Quien solo mira (soporte) entra por el catálogo: los pedidos no son suyos.
+  if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
+    return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
+  return (
+    <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
+      <Shell me={me.data} store={store}>
+        <Outlet />
+      </Shell>
+    </StoreContext.Provider>
+  )
+}
+
+/**
+ * Una tienda que no está en la lista de la persona. Si alguna vez tuvo una entrada de soporte en
+ * ella, el servidor dice cómo está la suya (ADR 0219): la tienda todavía no responde, hay que
+ * abrirla desde la administración o el acceso terminó, con su motivo. A cualquier otra persona, que
+ * no la encontramos.
+ */
+function NotYours({ me, id }: { me: Me; id: string }) {
+  const queryClient = useQueryClient()
+  const state = useQuery({
+    queryKey: ["soporte-mio", id],
+    queryFn: async () => {
+      const first = await api<MySupportState>(`/api/tiendas/${id}/soporte/mio`)
+      if (first.state !== "falta_codigo") return first
+      // Un token pedido antes de abrirla desde la administración no trae el código: otro, una vez.
+      await accountToken(true)
+      return api<MySupportState>(`/api/tiendas/${id}/soporte/mio`)
+    },
+    retry: false,
+  })
+  const ready = state.data?.state === "puede_mirar"
+  useEffect(() => {
+    if (ready) void queryClient.invalidateQueries({ queryKey: ["yo"] })
+  }, [ready, queryClient])
+  const retry = () =>
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["soporte-mio", id] }),
+      queryClient.invalidateQueries({ queryKey: ["yo"] }),
+    ])
+  if (state.isPending || ready) return <Opening message="Abriendo la tienda…" />
+  const found = state.data
+  if (!found) {
+    if (state.error instanceof ApiError && state.error.status !== 404)
+      return <OpeningFailed error={state.error} onRetry={retry} />
     return (
-      <Shell me={me.data}>
+      <Shell me={me}>
         <PageHeader title="Tienda no encontrada" />
         <ErrorState
           title="No encontramos esa tienda en tu cuenta"
@@ -668,15 +731,49 @@ export function StoreLayout() {
         </Button>
       </Shell>
     )
-  // Quien solo mira (soporte) entra por el catálogo: los pedidos no son suyos.
-  if (!store.permissions.includes("ventas.atender") && pathname.endsWith("/pedidos"))
-    return <Navigate to="/tiendas/$id/catalogo" params={{ id }} replace />
+  }
+  // Abierta desde un enlace (la administración), la pestaña se puede cerrar desde aquí.
+  const closable = typeof window !== "undefined" && window.history.length <= 1
+  const close = closable ? (
+    <Button variant="outline" className="self-start" onClick={() => window.close()}>
+      Cerrar esta pestaña
+    </Button>
+  ) : null
   return (
-    <StoreContext.Provider value={{ store, meId: me.data.person.userId }}>
-      <Shell me={me.data} store={store}>
-        <Outlet />
-      </Shell>
-    </StoreContext.Provider>
+    <Shell me={me}>
+      {found.state === "pendiente" ? (
+        <>
+          <PageHeader title="La tienda todavía no responde" />
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Su Dueño o un Administrador decide si entras. Cuando te deje entrar, vuelve a abrirla
+            desde la cuenta de la tienda en la administración.
+          </p>
+          <Button variant="outline" className="self-start" onClick={retry}>
+            Volver a probar
+          </Button>
+        </>
+      ) : found.state === "falta_codigo" ? (
+        <>
+          <PageHeader title="Para mirar esta tienda, ábrela desde la administración" />
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Como soporte, se mira desde la cuenta de la tienda en la administración, con tu código.
+            Tu acceso sigue hasta {sentence(atTime(found.until))}
+          </p>
+          {close}
+        </>
+      ) : found.state === "terminado" ? (
+        <>
+          <PageHeader title="El acceso terminó" />
+          <div className="flex max-w-prose flex-col gap-2 text-sm">
+            <p>{endedMessage(found)}</p>
+            <p className="text-muted-foreground">
+              Si hace falta seguir, pídelo otra vez desde la cuenta en la administración.
+            </p>
+          </div>
+          {close}
+        </>
+      ) : null}
+    </Shell>
   )
 }
 
@@ -775,20 +872,15 @@ interface Team {
   support: SupportAccess[]
 }
 
-const SUPPORT_STATUS: Record<SupportAccess["status"], string> = {
-  por_aceptar: "Pide entrar",
-  vigente: "Puede mirar",
-  terminado: "Terminó",
-  rechazado: "No lo dejaste",
-}
-
 /**
- * Soporte de gestorIA (ADR 0214): lo que pide la administración para mirar la tienda y lo que
- * pasó. Dejarlo entrar, no hacerlo o sacarlo es del Dueño o un Administrador. En cada sección de
- * la tienda se ve lo que está pendiente o vigente («actual»); en Equipo, también lo último.
+ * Soporte de gestorIA (ADR 0214 y 0219): lo que pide la administración para mirar la tienda y lo
+ * que pasó. Dejarlo entrar, no hacerlo o sacarlo es del Dueño o un Administrador. En cada sección
+ * de la tienda se ve lo que está pendiente o vigente («actual»); en Equipo, también quién miró,
+ * cuándo, quién lo aceptó y cómo terminó. Ventas solo ve quién mira y hasta cuándo.
  */
 function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | "todo" }) {
   const queryClient = useQueryClient()
+  const { meId } = useStoreContext()
   const canManage = store.permissions.includes("equipo.gestionar")
   const team = useQuery({
     queryKey: ["equipo", store.id],
@@ -805,7 +897,7 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
           ? "Listo: soporte ya puede mirar tu tienda."
           : action === "quitar"
             ? "Soporte ya no puede mirar tu tienda."
-            : "Listo: soporte no entra.",
+            : "Listo: soporte no entra. Si te equivocaste, pide ayuda otra vez y soporte lo vuelve a pedir.",
       )
     },
     onError: (error) => toast.error(error.message),
@@ -823,53 +915,65 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
         Soporte de gestorIA
       </h2>
       <ul className="flex flex-col divide-y">
-        {rows.map((row) => (
-          <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
-            <div className="flex min-w-0 flex-1 basis-60 flex-col gap-0.5">
-              <span className="font-medium">
-                {row.status === "por_aceptar"
-                  ? `${row.staffName} pide mirar tu tienda ${row.minutes} minutos`
-                  : row.status === "vigente" && row.expiresAt
-                    ? `${row.staffName} puede mirar tu tienda hasta el ${when(row.expiresAt)}`
-                    : row.staffName}
-              </span>
-              <span className="text-muted-foreground">
-                Para: {row.reason}. Solo mira la tienda, su equipo y su catálogo; no ve tus pedidos
-                ni tus conversaciones, y no cambia nada.
-              </span>
-            </div>
-            {only === "todo" ? <Badge variant="outline">{SUPPORT_STATUS[row.status]}</Badge> : null}
-            {canManage && row.status === "por_aceptar" ? (
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  disabled={act.isPending}
-                  onClick={() => act.mutate({ id: row.id, action: "aceptar" })}
-                >
-                  Dejar entrar
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={act.isPending}
-                  onClick={() => act.mutate({ id: row.id, action: "rechazar" })}
-                >
-                  No
-                </Button>
+        {rows.map((row) => {
+          const line = supportLine(row, meId)
+          const sees = `Verá tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Los ${row.minutes ?? ""} minutos empiezan cuando la dejas entrar. Este pedido solo lo puede hacer el equipo de gestorIA.`
+          return (
+            <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
+              <div className="flex min-w-0 flex-1 basis-60 flex-col gap-1">
+                <span className="font-medium">{line.title}</span>
+                {line.detail ? <span className="text-muted-foreground">{line.detail}</span> : null}
+                {row.status === "por_aceptar" ? (
+                  <>
+                    <span className="max-sm:hidden">{sees}</span>
+                    {/* En el celular se pliega para no empujar lo que se estaba haciendo. */}
+                    <details className="sm:hidden">
+                      <summary className="flex min-h-11 cursor-pointer items-center font-medium">
+                        Qué verá
+                      </summary>
+                      <p>{sees}</p>
+                    </details>
+                  </>
+                ) : null}
               </div>
-            ) : null}
-            {canManage && row.status === "vigente" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={act.isPending}
-                onClick={() => act.mutate({ id: row.id, action: "quitar" })}
-              >
-                Sacar ahora
-              </Button>
-            ) : null}
-          </li>
-        ))}
+              {only === "todo" && row.status === "por_aceptar" ? (
+                <Badge variant="outline">Pide entrar</Badge>
+              ) : null}
+              {only === "todo" && row.status === "vigente" ? (
+                <Badge variant="outline">{row.usedAt ? "Mirando" : "Puede mirar"}</Badge>
+              ) : null}
+              {canManage && row.status === "por_aceptar" ? (
+                <div className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:gap-2">
+                  <Button
+                    className="max-sm:h-12"
+                    disabled={act.isPending}
+                    onClick={() => act.mutate({ id: row.id, action: "aceptar" })}
+                  >
+                    Dejar entrar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="max-sm:h-12"
+                    disabled={act.isPending}
+                    onClick={() => act.mutate({ id: row.id, action: "rechazar" })}
+                  >
+                    No
+                  </Button>
+                </div>
+              ) : null}
+              {canManage && row.status === "vigente" ? (
+                <Button
+                  variant="outline"
+                  className="max-sm:h-12"
+                  disabled={act.isPending}
+                  onClick={() => act.mutate({ id: row.id, action: "quitar" })}
+                >
+                  Sacar ahora
+                </Button>
+              ) : null}
+            </li>
+          )
+        })}
       </ul>
     </section>
   )
