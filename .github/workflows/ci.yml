@@ -492,7 +492,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - if: env.OMITIR != 'true'
-        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic... --filter @gestoria/web...
+        run: pnpm install --frozen-lockfile --filter @odentia/web... --filter @odentia/panel... --filter @odentia/admin... --filter @odentia/dental-clinic... --filter @odentia/medical-clinic... --filter @odentia/optical-clinic... --filter @gestoria/web... --filter @gestoria/sitio...
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
       # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
       # `SALES_WHATSAPP` (variable del repositorio, E.164) es el WhatsApp de ventas del Grupo Sallca:
@@ -695,6 +695,22 @@ jobs:
       - name: Publicar la app de gestorIA
         if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && vars.GESTORIA_API_URL != '' && vars.GESTORIA_ACCOUNT_URL != '' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/web')
         working-directory: gestoria/apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      # La web pública de gestorIA (gestoria24.com, lienzo B8): solo archivos, en su propio Worker
+      # `gestoria-sitio`. El armado comprueba cada página que enlazan los correos de la cuenta. Sin
+      # rutas: el dominio se conecta a mano en Cloudflare (docs/deployment.md).
+      - name: Armar la web de gestorIA
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/sitio')
+        working-directory: gestoria/apps/sitio
+        env:
+          VITE_SALES_WHATSAPP: ${{ vars.SALES_WHATSAPP }}
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de gestorIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@gestoria/sitio')
+        working-directory: gestoria/apps/sitio
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

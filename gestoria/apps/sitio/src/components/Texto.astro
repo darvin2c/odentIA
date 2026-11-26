@@ -1,0 +1,13 @@
+---
+// Un texto de las páginas legales: los marcadores de lo que falta, resaltados, y sus enlaces.
+import { segments } from "../lib/legal"
+
+interface Props {
+  text: string
+}
+
+const parts = segments(Astro.props.text)
+---
+{parts.map((part) =>
+  part.mark ? <span class="mark">{part.text}</span> : part.href ? <a href={part.href}>{part.text}</a> : part.text,
+)}

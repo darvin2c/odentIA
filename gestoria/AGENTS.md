@@ -120,6 +120,20 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `inStore` lo reconoce por su entrada vigente. Un permiso nuevo de solo lectura se le suma solo
   si leer con él no escribe nada.
 
+## La web pública (B8)
+
+- `gestoria24.com` es `apps/sitio`: Astro armado una vez al publicar, solo archivos en el Worker
+  `gestoria-sitio`, aparte de la app (`gestoria-web`) y de las webs de las clínicas. No usa nada
+  de `apps/web` de las clínicas (lo vigila `src/lib/limites.test.ts`).
+- Existen siempre `/terminos`, `/privacidad` y `/contacto`: los enlazan los correos de la cuenta.
+  El armado lo comprueba (`scripts/comprobar-armado.mjs`) y no se publica sin ellas.
+- Solo dice lo que gestorIA ya hace. Sin precios hasta que el usuario defina los planes. Términos y
+  Privacidad llevan «[Por completar]» en lo que falta y, mientras tengan marcas, `noindex` y fuera
+  del mapa del sitio; los datos de la empresa son los de odentia32.com/privacidad.
+- El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
+  Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda».
+- El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
+
 ## Trabajo
 
 - La mesa y la QA llevan las voces de gestorIA: comercial (la experta en vender), novato, desarrollo,
@@ -129,7 +143,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - La tienda de ejemplo es Calzados Rosa (`apps/api/src/semilla.ts`, `seed:dev`): cada entrega le
   suma lo suyo. Nunca se importa en pruebas ni corre en producción.
 - Local: `gestoria/infra/dev/.env` (desde `.env.example`), `pnpm --filter @gestoria/db migrate`,
-  `pnpm --filter @gestoria/api local` y `pnpm --filter @gestoria/web local`. La entrada necesita la
+  `pnpm --filter @gestoria/api local` y `pnpm --filter @gestoria/web local` (la web pública: `pnpm --filter @gestoria/sitio local`). La entrada necesita la
   API de las clínicas con `GESTORIA_DOMAIN`. No corren con el `pnpm dev` de la raíz.
 - Pruebas: `pnpm --filter @gestoria/db test` y `pnpm --filter @gestoria/api test` (PostgreSQL con
   testcontainers, imagen `postgres:18.6-bookworm`).

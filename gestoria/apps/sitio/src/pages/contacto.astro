@@ -1,0 +1,32 @@
+---
+// Contacto (lienzo B8, tablero 5): el WhatsApp de ventas con el mensaje ya escrito, el correo y, para
+// quien ya tiene tienda, entrar. Los correos de la cuenta la enlazan como «Ayuda».
+import Base from "../layouts/Base.astro"
+import { CONTACT_EMAIL, LOGIN_URL, SALES_TEXT, salesWhatsApp } from "../lib/sitio"
+---
+<Base title="Contacto" description="Habla con una persona de gestorIA por WhatsApp o por correo.">
+  <div class="wrap page">
+    <header class="page-head">
+      <h1>Hablemos</h1>
+      <p>Te contamos cómo vendería gestorIA en tu tienda. Te responde una persona.</p>
+    </header>
+    <ul class="contact">
+      {salesWhatsApp && (
+        <li>
+          <h2>Escríbenos por WhatsApp</h2>
+          <p>Abre el chat con «{SALES_TEXT}».</p>
+          <a class="btn btn-big" href={salesWhatsApp}>Abrir WhatsApp</a>
+        </li>
+      )}
+      <li>
+        <h2>Por correo</h2>
+        <a class="email" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+      </li>
+      <li>
+        <h2>¿Ya tienes tienda?</h2>
+        <p>Entra con tu cuenta y sigue donde lo dejaste.</p>
+        <a class="btn btn-ghost" href={LOGIN_URL}>Entrar a mi tienda</a>
+      </li>
+    </ul>
+  </div>
+</Base>

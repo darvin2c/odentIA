@@ -1,0 +1,68 @@
+---
+// El documento de cada página: título y descripción propios, la imagen al compartir el enlace
+// (WhatsApp la muestra), la cabecera y el pie.
+import Footer from "../components/Footer.astro"
+import Header from "../components/Header.astro"
+import { SITE_URL } from "../lib/sitio"
+import "../styles/sitio.css"
+
+interface Props {
+  title: string
+  description: string
+  header?: "dark" | "light"
+  noindex?: boolean
+}
+
+const { title, description, header = "light", noindex = false } = Astro.props
+// Al armar, la ruta es el archivo (/terminos.html); la dirección pública va sin .html.
+const path = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/"
+const canonical = new URL(path, SITE_URL).toString()
+const fullTitle = title.includes("gestorIA") ? title : `${title} · gestorIA`
+const ogImage = new URL("/og.png", SITE_URL).toString()
+const isHome = path === "/"
+// La 404 se sirve en cualquier dirección que no existe: no dice ser ninguna.
+const isNotFound = path === "/404"
+const ld = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "gestorIA",
+  alternateName: ["gestoria24", "Gestoria"],
+  url: `${SITE_URL}/`,
+  inLanguage: "es",
+  publisher: { "@type": "Organization", name: "gestorIA", url: `${SITE_URL}/` },
+}
+---
+<!doctype html>
+<html lang="es" data-brand="gestoria">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    {!isNotFound && <link rel="canonical" href={canonical} />}
+    {noindex && <meta name="robots" content="noindex, follow" />}
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_419" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    {!isNotFound && <meta property="og:url" content={canonical} />}
+    <meta property="og:site_name" content="gestorIA" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="gestorIA: tu tienda vende en los chats a toda hora." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#170d07" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    {isHome && <script type="application/ld+json" set:html={JSON.stringify(ld)} />}
+  </head>
+  <body>
+    <a class="skip" href="#contenido">Ir al contenido</a>
+    <Header variant={header} />
+    <main id="contenido">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>
