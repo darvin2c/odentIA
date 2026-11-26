@@ -5,11 +5,11 @@
  * escribe al registrarse («Eliquis 5mg c/12h»): las dos cosas terminan en la misma fila de su
  * medicación (revisión del 25 nov: «apixabán de cinco» quedaba como el nombre).
  *
- * Solo se separa lo que es claro, y nunca se inventa: sin unidad dicha, la dosis queda como el número
- * («apixabán de cinco» → «5»), porque la unidad depende de la medicina (la levotiroxina «de cien» son
- * microgramos). Un número en cifras pegado al nombre sin «de» puede ser parte del nombre («omega 3»).
- * Si lo que sigue a la dosis no es cuándo se toma («y amlodipino de 5», «setenta treinta»), o antes de
- * un número viene un tiempo («cada doce horas», «desde hace dos años»), todo queda como el nombre.
+ * Solo se separa lo que es claro, y nunca se inventa: la dosis con su unidad dicha («cinco miligramos»,
+ * «5 mg», «dos puffs»). Sin unidad («apixabán de cinco», «losartán cincuenta», «omega tres») todo queda
+ * como el nombre, porque la unidad depende de la medicina. Tampoco se parte si antes del número viene
+ * un tiempo («cada doce horas»), si lo que sigue a la dosis no es cuándo se toma («con hidroclorotiazida
+ * 12,5 mg»), ni si el nombre junta dos medicinas («enalapril y amlodipino»).
  */
 
 export interface MedicineWords {
@@ -64,8 +64,19 @@ function wordNumber(words: readonly string[], start: number): { value: number; u
     value += UNITS[words[index] ?? ""] ?? 0
     index++
     seen = true
+  } else if (words[index] === "cero" && !seen) {
+    index++
+    seen = true
   }
   if (!seen) return null
+  // «Cero coma cinco», «dos punto cinco»: con decimales.
+  if ((words[index] === "coma" || words[index] === "punto") && !String(value).includes(".")) {
+    const decimals = wordNumber(words, index + 1)
+    if (decimals && decimals.value < 100 && Number.isInteger(decimals.value)) {
+      value += decimals.value / 10 ** String(decimals.value).length
+      index += 1 + decimals.used
+    }
+  }
   // «Cincuenta mil», «dos mil»: los miles van después.
   if (words[index] === "mil" && value > 0 && value < 1000) {
     value *= 1000
@@ -99,12 +110,18 @@ const UNIT_OF: ReadonlyArray<[RegExp, string]> = [
 const unitOf = (word: string | undefined) => (word ? UNIT_OF.find(([pattern]) => pattern.test(plain(word)))?.[1] : undefined)
 
 /** Un número en cifras («5», «850», «0,5»). */
-const digits = (word: string | undefined) => (word && /^\d+(?:[.,]\d+)?$/.test(word) ? Number(word.replace(",", ".")) : null)
+const digits = (word: string | undefined) => {
+  if (!word) return null
+  // «1.000», «50,000»: miles, no decimales.
+  if (/^[1-9]\d{0,2}(?:[.,]\d{3})+$/.test(word)) return Number(word.replace(/[.,]/g, ""))
+  return /^\d+(?:[.,]\d+)?$/.test(word) ? Number(word.replace(",", ".")) : null
+}
 /** Un número pegado a su unidad («5mg», «100mg»). */
 const glued = (word: string | undefined) => {
-  const match = word ? /^(\d+(?:[.,]\d+)?)([a-zA-Z]+)$/.exec(word) : null
+  const match = word ? /^(\d+(?:[.,]\d+)*)([a-zA-Z]+)$/.exec(word) : null
   const unit = match ? unitOf(match[2]) : undefined
-  return match && unit ? { value: Number((match[1] ?? "").replace(",", ".")), unit } : null
+  const value = match ? digits(match[1]) : null
+  return match && unit && value !== null ? { value, unit } : null
 }
 
 const written = (value: number) => String(value).replace(".", ",")
@@ -150,7 +167,6 @@ export function medicineWords(said: string): MedicineWords {
     const at = withDe ? index + 1 : index
     let value: number | null = null
     let used = 0
-    let inWords = false
     let unit: string | undefined
     const stuck = glued(words[at])
     if (stuck) {
@@ -165,29 +181,22 @@ export function medicineWords(said: string): MedicineWords {
       if (number) {
         value = number.value
         used = number.used
-        inWords = true
       }
     }
-    if (value === null || value <= 0) continue
-    const after = lower[at + used] ?? ""
-    // «Dos años», «doce horas»: un tiempo, no una dosis.
-    if (TIME_WORD.test(after)) return whole
+    // Las palabras antes del primer número son el nombre.
+    if (value === null) continue
     unit ??= unitOf(words[at + used])
-    const unitSaid = !stuck && unit !== undefined
-    // Sin unidad, solo lo que se dice como una dosis («de cinco», «cincuenta»); «omega 3» es un nombre,
-    // y «una al día» es una tableta, no un número de miligramos.
-    if (!unit && !(withDe || inWords)) continue
-    if (!unit && (value === 1 || /^(un|una|uno)$/.test(lower[at] ?? ""))) return whole
-    const rest = words.slice(at + used + (unitSaid ? 1 : 0))
-    // Lo que sigue tiene que ser cuándo se toma; si es otra cosa (otra medicina, otro número), no se parte.
-    if (rest.length && !frequencyStart(rest.map(plain))) return whole
+    // El primer número es la dosis solo con su unidad dicha; si no, todo es el nombre («omega 3»,
+    // «losartán cincuenta», «metformina de quinientos dos al día»).
+    if (!unit || value <= 0) return whole
     const name = words.slice(0, index).join(" ").replace(/[,;:]$/, "")
+    // Dos medicinas en una línea («enalapril y amlodipino de 5 mg»): no se adivina de cuál es la dosis.
+    if (/(^| )(y|e)( |$)|,/.test(plain(name))) return whole
+    const rest = words.slice(at + used + (stuck ? 0 : 1))
+    // Lo que sigue tiene que ser cuándo se toma, sin otra dosis («con hidroclorotiazida 12,5 mg»).
+    if (rest.length && (!frequencyStart(rest.map(plain)) || rest.some((word) => glued(word) || unitOf(word)))) return whole
     const frequency = frequencyWords(rest)
-    return {
-      name,
-      dose: unit ? `${written(value)} ${plural(unit, value)}` : written(value),
-      ...(frequency ? { frequency } : {}),
-    }
+    return { name, dose: `${written(value)} ${plural(unit, value)}`, ...(frequency ? { frequency } : {}) }
   }
   return whole
 }
@@ -198,7 +207,7 @@ const TIME_WORD = /^(horas?|h|dias?|semanas?|mes|meses|anos?|minutos?)$/
 /** ¿Así empieza cuándo se toma? «cada…», «al día», «dos veces…», «en la noche», «c/12h». */
 function frequencyStart(words: readonly string[]): boolean {
   const first = words[0] ?? ""
-  if (/^(cada|al|por|en|todos|todas|diari[oa]|antes|despues|con|x|c\/.*|interdiario|semanal|mensual|segun)$/.test(first)) return true
+  if (/^(cada|al|por|en|todos|todas|diari[oa]|antes|despues|x|c\/.*|interdiario|semanal|mensual|segun)$/.test(first)) return true
   const number = wordNumber(words, 0) ?? (digits(words[0]) !== null ? { value: digits(words[0]) ?? 0, used: 1 } : null)
   return !!number && /^(vez|veces)$/.test(words[number.used] ?? "")
 }
@@ -206,4 +215,21 @@ function frequencyStart(words: readonly string[]): boolean {
 /** La medicina en una línea, como se lee: «apixabán 5 mg cada 12 h». */
 export function medicineLine(parts: MedicineWords): string {
   return [parts.name, parts.dose, parts.frequency].filter(Boolean).join(" ")
+}
+
+/**
+ * El nombre de una medicina sin la dosis del final, para saber si dos filas son la misma: «Losartán 50»,
+ * «losartán cincuenta» y «losartán 50 mg» son «losartán». Solo para comparar: lo guardado no cambia.
+ */
+export function medicineName(said: string): string {
+  const words = medicineWords(said).name.split(" ")
+  const lower = words.map(plain)
+  let end = words.length
+  while (end > 1) {
+    const last = lower[end - 1] ?? ""
+    const isNumber = digits(last) !== null || glued(last) !== null || (wordNumber([last], 0) !== null && last !== "y") || last === "mil"
+    if (isNumber || unitOf(last) || last === "de") end--
+    else break
+  }
+  return words.slice(0, end).join(" ")
 }

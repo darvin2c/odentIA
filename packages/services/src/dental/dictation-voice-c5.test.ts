@@ -288,3 +288,19 @@ describe("lo dicho como plan con otras caras o sin pieza no quita lo de hoy", ()
     expect(plannedInSamePhrase({ kind: "procedimiento", payload: { service: "profilaxis" }, sourceText: said }, [{ kind: "plan", payload: { service: "profilaxis" }, sourceText: said }])).toBe(false)
   })
 })
+
+describe("en el repaso, otra persona es otra cosa (revisión de código del 26 nov)", () => {
+  it("«su padre tuvo un infarto» no repite «su madre tuvo un infarto»", () => {
+    const now = { kind: "nota", payload: { presentIllness: "Su padre tuvo un infarto a los cincuenta años." } }
+    expect(withoutRepeatedNotes([now], ["Su madre tuvo un infarto a los cincuenta años."], { review: true })).toEqual([now])
+  })
+})
+
+describe("una cara de un solo lado no hace dos prestaciones", () => {
+  it("la resina con caras en el plan y sin caras en lo hecho es la misma", () => {
+    const phrase = "para la resina oclusal de la 46 lo vemos la próxima"
+    const done = { kind: "procedimiento", payload: { service: "resina", toothNumber: 46 }, sourceText: phrase }
+    const plan = { kind: "plan", payload: { service: "resina", toothNumber: 46, surfaces: ["O"] }, sourceText: phrase }
+    expect(plannedInSamePhrase(done, [done, plan])).toBe(true)
+  })
+})

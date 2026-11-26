@@ -39,9 +39,10 @@ export interface ServerParts {
   withoutHealthKeys?: (payload: Payload, keys: ReadonlySet<string>) => Payload | null
   /** Lo que quien acompaña dice de sí misma no es un «quitar». */
   companionSelfTalk?: (said: string | undefined) => boolean
+  speaksOfSelf?: (said: string | undefined) => boolean
 }
 
-const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext", "plannedInSamePhrase", "healthNamedIn", "withoutHealthKeys", "companionSelfTalk"] as const
+const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext", "plannedInSamePhrase", "healthNamedIn", "withoutHealthKeys", "companionSelfTalk", "speaksOfSelf"] as const
 
 /** Las funciones que tiene el módulo de servicios de la rama, por su nombre. */
 export function serverPartsOf(module: Record<string, unknown>): ServerParts {
@@ -211,7 +212,7 @@ export function applyPause(
       // misma no quita nada, y sin nombrar nada se quita entera.
       if (row.kind === "salud" && parts.healthNamedIn && parts.withoutHealthKeys) {
         const named = parts.healthNamedIn(row.payload, removal.sourceText ?? "")
-        if (!named.size && parts.companionSelfTalk?.(removal.sourceText)) continue
+        if (!named.size && (parts.companionSelfTalk?.(removal.sourceText) || parts.speaksOfSelf?.(removal.sourceText))) continue
         const rest = named.size ? parts.withoutHealthKeys(row.payload, named) : null
         if (rest) {
           row.payload = rest

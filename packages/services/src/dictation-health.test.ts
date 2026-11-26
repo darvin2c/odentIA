@@ -19,6 +19,7 @@ import {
   saidStoppedOf,
   sameDrug,
   selfCorrectedHealth,
+  speaksOfSelf,
   splitHealthDenials,
   withoutSettledHealth,
   withoutHealthKeys,
@@ -402,8 +403,8 @@ describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)",
       said,
     )
     expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
-    // Sin unidad dicha, la dosis queda como el número: la unidad no se inventa.
-    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50" }] })
+    // Sin unidad dicha no se parte: la unidad no se inventa.
+    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán cincuenta" }] })
   })
 
   it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
@@ -421,5 +422,14 @@ describe("quitar por voz lo de su salud, dato por dato (revisión de código del
   })
   it("un nombre sin palabras que lo distingan no se da por nombrado", () => {
     expect(healthNamed({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "T4" }] } }, "quita eso").keys.size).toBe(0)
+  })
+})
+
+describe("lo que quien habla dice de sí misma no es quitar (revisión de código del 26 nov)", () => {
+  it.each(["lo del azúcar no, eso es mío", "eso lo tengo yo, no la niña", "no, la que tiene eso soy yo"])("«%s»", (said) => {
+    expect(speaksOfSelf(said)).toBe(true)
+  })
+  it.each(["quita eso", "eso no va", "no, eso no"])("«%s» sí es quitar", (said) => {
+    expect(speaksOfSelf(said)).toBe(false)
   })
 })

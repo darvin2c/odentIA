@@ -17,6 +17,7 @@ import {
   type DirectedMedicineDeclaration,
   BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
+  medicineName,
   medicineWords,
   type MedicationClass,
   type MedicineClassAnswer,
@@ -997,10 +998,10 @@ export function changedHealthOf(input: {
         if (row.status === "activa" && before(row.createdAt) && !sayNow.has(normalizeDrugText(row.name))) out.conditions.push(row.id)
     }
     // Lo que nombró ahora de cualquier medicina: si la repitió, sigue igual, en el grupo que sea.
-    const sayNow = new Set(declaredMedications(health).map((row) => normalizeDrugText(row.name)))
+    const sayNow = new Set(declaredMedications(health).flatMap((row) => [normalizeDrugText(row.name), normalizeDrugText(medicineName(row.name))]))
     for (const row of input.medications) {
       // Una fila de antes con la dosis en el nombre («losartán cincuenta») es la misma medicina que «losartán».
-      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name)) || sayNow.has(normalizeDrugText(medicineWords(row.name).name))) continue
+      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name)) || sayNow.has(normalizeDrugText(medicineName(row.name)))) continue
       const group = medicationClassOf(row.atcCode)
       if (answered(group ? health[group]?.state : health.medications?.state)) out.medications.push(row.id)
     }
@@ -2146,7 +2147,7 @@ export async function addDeclaredHealth(
     )
       .filter((row) => isCurrentMedication(row, today))
       // También sin la dosis que traía en el nombre una fila de antes («losartán cincuenta»): no se duplica.
-      .flatMap((row) => [normalizeDrugText(row.name), normalizeDrugText(medicineWords(row.name).name)]),
+      .flatMap((row) => [normalizeDrugText(row.name), normalizeDrugText(medicineName(row.name))]),
   )
   // Lo que dijo al responder «Sí» a la pregunta de una clase entra con el código de ese grupo; lo
   // demás, con el de la lista si lo escrito es exactamente una DCI (la regla de `validateMedicationRow`).
@@ -2155,7 +2156,7 @@ export async function addDeclaredHealth(
   let addedMedications = 0
   for (const item of declaredMedications(declared, saidOn)) {
     const key = normalizeDrugText(item.name)
-    if (!key || currentMedications.has(key)) continue
+    if (!key || currentMedications.has(key) || currentMedications.has(normalizeDrugText(medicineName(item.name)))) continue
     currentMedications.add(key)
     const name = item.name.trim().slice(0, 200)
     await tx.insert(patientMedication).values({

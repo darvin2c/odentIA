@@ -65,6 +65,7 @@ import {
 } from "./clinical.js"
 import {
   companionSelfTalk,
+  speaksOfSelf,
   groundHealthNames,
   hasDeclaredHealth,
   hasHealth,
@@ -1870,9 +1871,10 @@ export function plannedInSamePhrase(
     if (other === done || other.kind !== "plan") return false
     const otherPhrase = normalizeForSearch(other.sourceText ?? "").trim()
     if (!otherPhrase || !(otherPhrase.includes(phrase) || phrase.includes(otherPhrase))) return false
-    // La misma pieza y las mismas caras: «la oclusal hoy y la distal la próxima» son dos resinas.
+    // La misma pieza y, si las dos dicen caras, las mismas: «la oclusal hoy y la distal la próxima» son dos.
     const planned = placeOf(other.payload)
-    if (planned.tooth !== place.tooth || JSON.stringify(planned.surfaces) !== JSON.stringify(place.surfaces)) return false
+    if (planned.tooth !== place.tooth) return false
+    if (planned.surfaces.length && place.surfaces.length && JSON.stringify(planned.surfaces) !== JSON.stringify(place.surfaces)) return false
     const services = [other.payload as PlanChoice, ...(Array.isArray(other.payload["options"]) ? (other.payload["options"] as PlanChoice[]) : [])].map((choice) =>
       normalizeForSearch(String(choice.service ?? "")).trim(),
     )
@@ -2299,11 +2301,12 @@ export async function saveDictationSegment(
     const { data, meta } = splitMeta(row.payload)
     // Lo de su salud junta varias cosas dichas: quitar por voz quita solo lo que la frase nombra, como
     // una corrección que se puede deshacer. Lo que quien acompaña dice de sí misma («yo soy diabética,
-    // eso es mío») no es un «quitar»: no se toca la propuesta (revisión del 25 nov: se perdía «Papá:
-    // alergia a la penicilina»). Un «quita eso» sin nombrar nada quita la propuesta entera, como antes.
+    // eso es mío», «lo tengo yo») no es un «quitar»: no se toca la propuesta (revisión del 25 nov: se
+    // perdía «Papá: alergia a la penicilina»). Un «quita eso» sin nombrar nada quita la propuesta
+    // entera, como antes, y «Deshacer» la devuelve.
     if (row.kind === "salud") {
       const named = healthNamed(data, removal.said)
-      if (!named.keys.size && companionSelfTalk(removal.said)) continue
+      if (!named.keys.size && (companionSelfTalk(removal.said) || speaksOfSelf(removal.said))) continue
       const rest = named.keys.size ? withoutHealthKeys(data, named.keys) : null
       if (rest) {
         const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: named.names.join(", ") }, meta.voice)

@@ -1528,8 +1528,13 @@ function noteWords(sentence: string): { stems: string[]; numbers: number[]; nega
   return { stems: stemsOf(sentence), numbers: saidNumbers(sentence, { articles: false }), negations: [...new Set(negationsOf(sentence))].sort() }
 }
 
-/** Quién lo cuenta y cómo, delante de lo que cuenta: en el repaso no hacen que una oración sea otra. */
-const REPORTING_WORDS = "refiere refieren dice dicen comenta comentan cuenta cuentan menciona indica manifiesta mama mamá papa papá madre padre paciente señora señor hija hijo esposa esposo"
+/** Cómo se cuenta lo dicho («refiere», «comenta»): en el repaso no hace que una oración sea otra. */
+const REPORTING_WORDS = "refiere refieren dice dicen comenta comentan cuenta cuentan menciona indica manifiesta"
+/**
+ * Quién lo cuenta («la mamá refiere…»): solo si la oración dice que lo cuenta alguien. Sin eso es de
+ * quién se habla, y otra persona es otra cosa («su padre tuvo un infarto» no repite «su madre…»).
+ */
+const TELLER_WORDS = "mama mamá papa papá madre padre paciente señora señor hija hijo esposa esposo"
 
 /**
  * La nota de una pausa sin las oraciones que ya dice una nota pendiente de la atención: lo que cortó
@@ -1545,7 +1550,7 @@ export function withoutRepeatedNotes<T extends FormDraftLike>(
   /**
    * El repaso relee toda la conversación y cuenta otra vez lo que ya cuenta la consulta, con quién lo
    * dijo delante («la mamá refiere que le falta…» por «le falta…») y con otra puntuación (una coma
-   * por un «;»): ahí no cuentan esas palabras de quién lo cuenta, y se compara también con cada nota
+   * por un «;»): ahí no cuentan las palabras de quién lo cuenta y cómo, y se compara también con cada nota
    * entera (revisión del 25 nov: el relato firmado salía dos veces). Lo demás tiene que estar todo:
    * otro lado u otro estímulo es otra cosa.
    */
@@ -1554,9 +1559,11 @@ export function withoutRepeatedNotes<T extends FormDraftLike>(
   const before = [...pendingNotes.flatMap(sentencesOf), ...(options.review ? pendingNotes : [])].map(noteWords)
   if (!before.length) return [...drafts]
   const reporting = options.review ? new Set(stemsOf(REPORTING_WORDS)) : new Set<string>()
+  const tellers = new Set(stemsOf(TELLER_WORDS))
   const repeated = (sentence: string) => {
     const now = noteWords(sentence)
-    const stems = now.stems.filter((stem) => !reporting.has(stem))
+    const told = now.stems.some((stem) => reporting.has(stem))
+    const stems = now.stems.filter((stem) => !reporting.has(stem) && !(told && tellers.has(stem)))
     return (
       stems.length >= 3 &&
       before.some(

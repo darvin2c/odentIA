@@ -677,6 +677,14 @@ export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
  * entera (revisión del 25 nov: «yo soy diabética, eso es mío», dicho por la madre, se llevó también
  * «Papá: alergia a la penicilina»). Vacío si no nombra nada de lo propuesto.
  */
+/**
+ * ¿Quien habla dice algo de sí misma («eso es mío», «lo tengo yo», «la que tiene eso soy yo»)? Entonces
+ * su «no» no es quitar lo propuesto del paciente (revisión de código del 26 nov: «lo del azúcar no, eso
+ * es mío» se llevaba «Papá: alergia a la penicilina»).
+ */
+export const speaksOfSelf = (said: string | undefined) =>
+  !!said && /(^| )(yo|mio|mia|mios|mias|mismo|misma|soy)( |$)/.test(plain(said).replace(/[^a-z ]+/g, " "))
+
 export function healthNamedIn(payload: Record<string, unknown>, said: string): Set<string> {
   return healthNamed(payload, said).keys
 }
