@@ -10,16 +10,19 @@ export function VitalsPressureAlert({
   ageYears,
   id,
   className,
+  withWeight = true,
 }: {
   vitals: Vitals | null | undefined
   ageYears: number | null | undefined
+  /** Sin el peso: donde la línea de anestesia ya dice que el peso no es posible (el diálogo de firmar). */
+  withWeight?: boolean
   id?: string
   className?: string
 }): React.JSX.Element | null {
   const alert = bloodPressureAlert(vitals, ageYears)
   // Un peso imposible para su edad («230 kg» a los 7 años): avisa antes de que la anestesia lo use
   // (mesa del 25 nov, entrega 3).
-  const weight = weightForAgeAlert(vitals?.peso, ageYears)
+  const weight = withWeight ? weightForAgeAlert(vitals?.peso, ageYears) : null
   if (!alert && !weight) return null
   const [word, ...rest] = (alert ?? "").split(": ")
   return (

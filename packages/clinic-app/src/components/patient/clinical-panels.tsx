@@ -18,6 +18,7 @@ import {
   prescribingAlerts,
   takenMedication,
   weightDoseMg,
+  weightForAgeAlert,
 } from "@odentia/clinical"
 import { Badge, Button, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
 import {
@@ -1153,6 +1154,8 @@ export function RecetasPanel({
   const weight = useStore(form.store, (state) => state.values.patientWeightKg)
   const conflictsByMedication = medications.map((medication) => conflictsOf(medication.genericName))
   const typedWeight = weight.trim() ? Number(weight.replace(",", ".")) : null
+  // Un peso imposible para su edad avisa y no da los mg por toma (mesa del 25 nov, entrega 3).
+  const weightIssue = typedWeight !== null && Number.isFinite(typedWeight) ? weightForAgeAlert(typedWeight, rules.weight.ageYears ?? null) : null
   const ruleCheck = rules.check(
     medications,
     typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null,
@@ -1310,6 +1313,7 @@ export function RecetasPanel({
                       placeholder="Ej.: 1 tableta"
                       description={(() => {
                         // Solo informa: con la dosis por peso, cuántos mg son por toma; los ml los escribe quien receta.
+                        if (weightIssue) return undefined
                         const mg = weightDoseMg(medications[index]?.dose ?? "", typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null)
                         return mg === null ? undefined : `Con ${typedWeight} kg son ${mg} mg por toma. Escribe también cuánto es en la presentación (ml, gotas).`
                       })()}
@@ -1385,7 +1389,9 @@ export function RecetasPanel({
           {(field) => (
             <field.Control
               label="Peso (kg)"
-              description={`Es menor de 12 años: la receta va con su peso.${rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}`}
+              description={
+                weightIssue ?? `Es menor de 12 años: la receta va con su peso.${rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}`
+              }
             >
               {(control) => (
                 <Input

@@ -165,6 +165,19 @@ export function demoExtraction(
   const drafts: DictationDraft[] = []
   const nota: Record<string, string> = {}
   const noteSource: string[] = []
+  // El peso medido y la presión (mesa del 25 nov, entrega 3), en cifras: «pesa 23 kilos», «presión 165 con 95».
+  const vitals: Record<string, number> = {}
+  const vitalSource: string[] = []
+  for (const sentence of sentences) {
+    const text = plain(sentence)
+    const before = Object.keys(vitals).length
+    const pressure = /presion (\d{2,3})(?: con | sobre | |\/)(\d{2,3})\b/.exec(text)
+    if (pressure?.[1] && pressure[2]) Object.assign(vitals, { presionSistolica: Number(pressure[1]), presionDiastolica: Number(pressure[2]) })
+    const weight = /\b(?:pesa|peso) (\d{1,3}(?:[.,]\d)?) (?:kilos|kg)\b/.exec(text)
+    if (weight?.[1] && !/\bdebe pesar\b/.test(text)) vitals["peso"] = Number(weight[1].replace(",", "."))
+    if (Object.keys(vitals).length > before) vitalSource.push(sentence)
+  }
+  if (Object.keys(vitals).length) drafts.push({ kind: "signos", payload: vitals, sourceText: vitalSource.join(" ") })
   for (const sentence of sentences) {
     const text = plain(sentence)
     if (!nota["reason"] && /\b(motivo|viene por|refiere|acude por|dolor)\b/.test(text)) {

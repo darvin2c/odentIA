@@ -250,6 +250,9 @@ export function formatVitals(vitals: Vitals | null | undefined): string {
   const parts: string[] = []
   if (vitals.presionSistolica !== undefined && vitals.presionDiastolica !== undefined)
     parts.push(`PA ${vitals.presionSistolica}/${vitals.presionDiastolica} mmHg`)
+  // Una sola de las dos (lo dictado a medias, por revisar): se ve cuál falta, no una línea vacía.
+  else if (vitals.presionSistolica !== undefined) parts.push(`PA ${vitals.presionSistolica}/? mmHg`)
+  else if (vitals.presionDiastolica !== undefined) parts.push(`PA ?/${vitals.presionDiastolica} mmHg`)
   const short: Partial<Record<VitalSignKey, string>> = {
     frecuenciaCardiaca: "FC",
     frecuenciaRespiratoria: "FR",
@@ -278,13 +281,15 @@ export const DENTAL_DICTATED_VITAL_KEYS: readonly VitalSignKey[] = ["peso", "pre
  * 2007): fuera de eso no es un niño muy grande o muy chico, es un error al anotarlo o al dictarlo
  * («230» en vez de «23»). Desde los 18 vale el rango de plausibilidad de siempre (`VITAL_SIGNS`).
  */
+// Los topes dejan lugar a la obesidad grave de un niño (revisión del 25 nov): entre los 14 y los 17
+// vale el tope de un adulto; lo que se busca es «230» en vez de «23», no a un niño grande.
 const WEIGHT_FOR_AGE: ReadonlyArray<{ below: number; min: number; max: number }> = [
-  { below: 1, min: 0.5, max: 16 },
-  { below: 3, min: 5, max: 25 },
-  { below: 6, min: 7, max: 45 },
-  { below: 10, min: 10, max: 90 },
-  { below: 14, min: 15, max: 130 },
-  { below: 18, min: 20, max: 200 },
+  { below: 1, min: 0.5, max: 20 },
+  { below: 3, min: 4, max: 35 },
+  { below: 6, min: 6, max: 70 },
+  { below: 10, min: 9, max: 130 },
+  { below: 14, min: 14, max: 200 },
+  { below: 18, min: 20, max: 400 },
 ]
 
 /**
@@ -296,6 +301,7 @@ export function weightForAgeAlert(weightKg: number | null | undefined, ageYears:
   if (weightKg === null || weightKg === undefined || !(weightKg > 0) || ageYears === null || ageYears === undefined || ageYears < 0) return null
   const band = WEIGHT_FOR_AGE.find((one) => ageYears < one.below)
   if (!band || (weightKg >= band.min && weightKg <= band.max)) return null
-  const age = ageYears < 1 ? "antes del año" : `a los ${Math.floor(ageYears)} ${Math.floor(ageYears) === 1 ? "año" : "años"}`
+  const years = Math.floor(ageYears)
+  const age = years < 1 ? "antes del año" : years === 1 ? "con 1 año" : `a los ${years} años`
   return `${weightKg.toLocaleString("es")} kg no es un peso posible ${age}: revísalo antes de usarlo.`
 }

@@ -2447,6 +2447,13 @@ export async function saveDictationSegment(
       const keys = materialKeys(payload)
       return same.some((item) => materialKeys(item.payload).some((key) => keys.includes(key))) ? null : payload
     }
+    // Los signos dichos en pausas distintas (el peso en una, la presión en otra): ya decididos si cada
+    // medida que trae ya la trae alguna decidida (revisión del 25 nov).
+    if (kind === "signos") {
+      const decided = same.map((item) => item.payload)
+      const covered = Object.entries(payload).every(([key, value]) => decided.some((item) => item[key] === value))
+      return covered ? null : payload
+    }
     const key = settledKey(kind, payload)
     if (key !== null) return same.some((item) => settledKey(kind, item.payload) === key) ? null : payload
     const plain = JSON.stringify(payload)
