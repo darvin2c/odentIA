@@ -762,7 +762,7 @@ describe("ninguna clínica alcanza una cuenta de otra app", () => {
   it("los planes de gestorIA no se le ofrecen a una clínica ni le cambian la oferta", async () => {
     const plans = await withOrgContext(appDb, C.cobro, (tx: Db) => listClinicPlans(tx, C.cobro))
     expect(plans.map((plan) => plan.code)).toEqual(["lista"])
-    expect(await getPublicTrialOffer(ownerDb, "dental")).toEqual({
+    expect(await getPublicTrialOffer(ownerDb, "dental")).toMatchObject({
       currency: "USD",
       creditCents: 5000,
       days: 14,

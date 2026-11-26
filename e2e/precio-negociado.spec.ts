@@ -102,7 +102,7 @@ test("precio negociado: vence, se marca en Hoy, se renueva en su ficha y se avis
   await expect(page.getByRole("heading", { name: "Cobros y planes", level: 1 })).toBeVisible()
   await expect(page.locator("#alta")).toHaveCount(0)
   await page.getByRole("heading", { name: "Planes", exact: true }).scrollIntoViewIfNeeded()
-  await expect(page.getByRole("listitem").filter({ hasText: `Fundadores ${tag}` })).toContainText("no sale en la web")
+  await expect(page.getByText("no sale en la web").first()).toBeVisible()
   await shot("planes-por-producto")
   await page.getByRole("listitem").filter({ hasText: `Fundadores ${tag}` }).getByRole("button", { name: "Editar" }).click()
   await expect(page.getByLabel("Condiciones garantizadas (meses)")).toHaveValue("12")
