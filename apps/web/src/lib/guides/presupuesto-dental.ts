@@ -107,7 +107,7 @@ export const guide: Guide = {
     demo: "presupuesto",
     title: "En odentIA, el presupuesto sale del plan.",
     text: "Con los precios de tu lista y hasta tres opciones. El paciente lo recibe en su celular y elige ahí mismo, o lo firma en la consulta.",
-    note: "El presupuesto de Carlos, con dos opciones: él elige la A desde su celular.",
+    note: "Confirma lo que propone Clío, envíaselo a Carlos y acéptalo en su celular: tu tablero avanza solo.",
     product: { href: "/presupuestos-dentales", label: "Mira «Presupuestos»" },
   },
   faq: [

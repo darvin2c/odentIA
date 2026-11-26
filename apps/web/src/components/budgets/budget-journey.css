@@ -1,0 +1,565 @@
+/* El recorrido del presupuesto de Carlos (isla BudgetJourney): tu consulta, su celular y tu tablero. */
+.bj {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+}
+.bj-in {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.bj-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.bj-steps li {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--paper);
+  color: var(--soft);
+  transition:
+    background-color 0.3s,
+    color 0.3s;
+  min-width: 0;
+}
+.bj-steps li b {
+  font-size: 14.5px;
+  line-height: 1.3;
+}
+.bj-steps li.done {
+  background: var(--teal-soft);
+  color: var(--ink);
+}
+.bj-steps li.now {
+  background: var(--night);
+  color: #fff;
+}
+.bj-who {
+  font-family: var(--agent-font);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.bj-who.clio {
+  color: #1f7f63;
+}
+.bj-who.argos {
+  color: #8f6210;
+}
+.bj-steps li.now .bj-who {
+  color: var(--sky-2);
+}
+
+.bj-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.85fr) minmax(0, 1.2fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.bj-panel {
+  background: var(--paper);
+  /* El borde lo separa también sobre fondo blanco (la guía). */
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.bj-label,
+.bj-mono {
+  font-family: var(--agent-font);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.bj-dictation {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+.bj-dictation > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bj-dictation .bj-mono {
+  color: #1f7f63;
+}
+.bj-mic {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e3f4e8;
+  color: #1f7f63;
+  display: grid;
+  place-items: center;
+}
+.bj-quote {
+  font-size: 15px;
+  line-height: 1.45;
+}
+.bj-hint {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.bj-btn {
+  min-height: 46px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--teal);
+  color: #fff;
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+.bj-btn:hover {
+  background: var(--teal-hover);
+}
+.bj-btn:focus-visible,
+.bj-pick:focus-visible,
+.bj-slot:focus-visible,
+.bj-link:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.bj-dark {
+  background: var(--night);
+  border-radius: 999px;
+}
+.bj-dark:hover {
+  background: #12333d;
+}
+.bj-soft {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  min-height: 44px;
+  font-size: 14px;
+}
+.bj-soft:hover {
+  background: var(--teal-soft);
+}
+.bj-opts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.bj-opt {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 0;
+  animation: bj-flash 0.5s ease;
+}
+.bj-opt b {
+  font-size: 14px;
+}
+.bj-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bj-line > span:last-child {
+  white-space: nowrap;
+}
+.bj-total {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  font-weight: 800;
+}
+.bj-ask {
+  border: 1.5px solid var(--teal);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bj-ask b {
+  font-size: 15px;
+}
+.bj-chip {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+.bj-chip.bj-argos {
+  color: #8f6210;
+  background: #fdf3dd;
+}
+
+.bj-phone-wrap {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.bj-phone {
+  width: 100%;
+  max-width: 300px;
+  background: var(--ink);
+  border-radius: 40px;
+  padding: 10px;
+  box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.55);
+  box-sizing: border-box;
+}
+.bj-screen {
+  background: #fff;
+  color: var(--ink);
+  border-radius: 31px;
+  min-height: 500px;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  box-sizing: border-box;
+}
+.bj-notch {
+  align-self: center;
+  width: 80px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.bj-screen .bj-mono {
+  font-size: 10.5px;
+}
+.bj-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--soft);
+  font-size: 14px;
+  padding: 0 10px;
+}
+.bj-bubble {
+  background: #e3f4e8;
+  border-radius: 14px 14px 14px 4px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  animation: bj-flash 0.5s ease;
+}
+.bj-bubble-btn {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--teal);
+  border-top: 1px solid rgba(15, 23, 42, 0.1);
+  padding-top: 8px;
+}
+.bj-phone-t {
+  font-size: 18px;
+}
+.bj-pick {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: var(--ink);
+  font: 800 14px var(--font);
+  cursor: pointer;
+  min-height: 48px;
+}
+.bj-pick.on {
+  border: 2px solid var(--teal);
+  padding: 11px;
+}
+.bj-small {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.bj-link {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: #8f6210;
+  font: 700 13.5px var(--font);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.bj-ok {
+  font-size: 14px;
+  font-weight: 700;
+  color: #166534;
+}
+.bj-slot {
+  min-height: 44px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  font: 700 14px var(--font);
+  cursor: pointer;
+}
+.bj-slot:hover {
+  background: var(--teal-soft);
+}
+.bj-done {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: #166534;
+}
+.bj-done b {
+  font-size: 18px;
+  color: var(--ink);
+}
+.bj-done span {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.bj-board {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.bj-col {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 140px;
+  min-width: 0;
+}
+.bj-col > b {
+  font-size: 13.5px;
+  line-height: 1.25;
+}
+.bj-when {
+  font-size: 11.5px;
+  color: var(--soft);
+}
+.bj-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+.bj-card > span {
+  color: var(--muted);
+}
+.bj-card b {
+  font-size: 13.5px;
+}
+.bj-card .bj-note {
+  font-family: var(--agent-font);
+  font-size: 11px;
+  color: var(--teal);
+}
+.bj-card.moved {
+  border: 1.5px solid var(--teal);
+  animation: bj-flash 0.6s ease;
+}
+.bj-card.won {
+  border: 1.5px solid #166534;
+}
+.bj-card.won .bj-note {
+  color: #166534;
+}
+.bj-card.argos {
+  border: 1.5px solid #b7791f;
+}
+.bj-card.argos .bj-note {
+  color: #8f6210;
+}
+.bj-says {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.bj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.bj-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--soft);
+}
+@keyframes bj-flash {
+  from {
+    background-color: var(--teal-soft);
+  }
+}
+
+/* Según el ancho del recorrido, no de la pantalla: en la guía va en media columna. Angosto o tableta:
+   el celular y el tablero debajo de la consulta. */
+@container (max-width: 1000px) {
+  .bj-panels {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .bj-board-wrap {
+    grid-column: 1 / -1;
+  }
+  .bj-board {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+/* Celular: un paso por pantalla. Se ve la consulta o el celular de Carlos, según el paso, y el tablero
+   como lista. La barra muestra solo el paso en que vas. */
+@container (max-width: 680px) {
+  .bj-in {
+    gap: 14px;
+  }
+  .bj-steps {
+    display: flex;
+    gap: 6px;
+  }
+  .bj-steps li {
+    flex: 1 1 0;
+    padding: 0;
+    height: 6px;
+    border: 0;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+  }
+  .bj-steps li > * {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .bj-steps li.done,
+  .bj-steps li.now {
+    background: var(--teal);
+  }
+  .bj-steps li.now {
+    flex-grow: 1;
+  }
+  .bj-panels {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .bj-later {
+    display: none;
+  }
+  .bj-panel {
+    padding: 16px;
+    border-radius: 20px;
+  }
+  .bj-phone {
+    max-width: 320px;
+  }
+  .bj-screen {
+    min-height: 0;
+  }
+  .bj-board {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .bj-col {
+    min-height: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 10px;
+  }
+  .bj-col > b {
+    flex: 1 1 100%;
+  }
+  .bj-when {
+    display: none;
+  }
+  .bj-card {
+    flex: 1 1 140px;
+  }
+  .bj-actions,
+  .bj-actions > * {
+    flex: 1 1 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bj-opt,
+  .bj-bubble,
+  .bj-card.moved {
+    animation: none;
+  }
+  .bj-steps li {
+    transition: none;
+  }
+}
+
+/* El paso en que vas, escrito: solo cuando la barra son rayas. */
+.bj-now {
+  display: none;
+}
+@container (max-width: 680px) {
+  .bj-now {
+    display: block;
+    margin: -6px 0 0;
+    font-family: var(--agent-font);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--teal);
+  }
+  /* El tablero compacto: el nombre de cada paso y solo la tarjeta de Carlos, para que su cambio se vea
+     junto al celular sin bajar. */
+  .bj-other {
+    display: none;
+  }
+  .bj-col {
+    padding: 8px 10px;
+  }
+}

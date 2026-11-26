@@ -21,7 +21,7 @@ import {
 } from "../../lib/guides"
 import { ctaOf, guideContactApiUrl } from "../../lib/site"
 import CloseSheet from "../billing/CloseSheet"
-import BudgetDemo from "../budgets/BudgetDemo"
+import BudgetJourney from "../budgets/BudgetJourney"
 import ChartPreview from "../clinical/ChartPreview"
 import ChildChartPreview from "../clinical/ChildChartPreview"
 import ConsentDemo from "../consent/ConsentDemo"
@@ -215,7 +215,7 @@ const startTitle = START_TITLES[guide.topic]
         ) : guide.tryIt.demo === "cie10" ? (
           <Cie10Search client:visible codes={cie10.codes} daily={cie10.daily} />
         ) : (
-          <BudgetDemo client:visible />
+          <BudgetJourney client:visible />
         )}
       </div>
     </div>
@@ -346,7 +346,7 @@ const startTitle = START_TITLES[guide.topic]
   .glist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 17px; line-height: 1.55; color: var(--ink-2); }
   .gstep :global(b) { color: var(--ink); }
 
-  .gtry-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .gtry-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
   .gtry-copy { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
   .gtry-t { font-size: clamp(30px, 3.6vw, 44px); }
   .gtry-text { margin: 0; font-size: 18px; line-height: 1.55; color: var(--muted); }
