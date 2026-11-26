@@ -1,0 +1,50 @@
+---
+// Términos y Privacidad (lienzo B8, tableros 4 y 5): índice, secciones numeradas y lo que falta
+// marcado. Mientras haya marcas, la página va con noindex.
+import Base from "../layouts/Base.astro"
+import { hasPending, type LegalDoc } from "../lib/legal"
+import Texto from "./Texto.astro"
+
+interface Props {
+  doc: LegalDoc
+}
+
+const { doc } = Astro.props
+---
+<Base title={doc.title} description={doc.description} noindex={hasPending(doc)}>
+  <div class="wrap page">
+    <nav class="crumbs" aria-label="Migas de pan">
+      <ol>
+        <li><a href="/">Inicio</a></li>
+        <li><span aria-current="page">{doc.title}</span></li>
+      </ol>
+    </nav>
+    <header class="page-head">
+      <h1>{doc.title}</h1>
+      <p class="since">Vigente desde <Texto text={doc.since} /></p>
+      <p>{doc.intro}</p>
+    </header>
+    <div class="legal">
+      <nav class="toc" aria-labelledby="indice">
+        <h2 id="indice">En esta página</h2>
+        <ol>
+          {doc.sections.map((s, i) => <li><a href={`#${s.id}`}>{i + 1}. {s.title}</a></li>)}
+        </ol>
+      </nav>
+      <div class="legal-body">
+        {doc.sections.map((s, i) => (
+          <section id={s.id} aria-labelledby={`${s.id}-t`}>
+            <h2 id={`${s.id}-t`}>{i + 1}. {s.title}</h2>
+            {s.blocks.map((b) =>
+              typeof b === "string" ? (
+                <p><Texto text={b} /></p>
+              ) : (
+                <ul>{b.list.map((item) => <li><Texto text={item} /></li>)}</ul>
+              ),
+            )}
+          </section>
+        ))}
+      </div>
+    </div>
+  </div>
+</Base>

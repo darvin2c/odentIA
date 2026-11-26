@@ -92,6 +92,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/ui-patterns",
   "@odentia/brand-scene",
   "@gestoria/web",
+  "@gestoria/sitio",
 ]
 // Apps que se publican en Cloudflare Workers (deploy-web).
 const CLOUDFLARE = [
@@ -102,6 +103,7 @@ const CLOUDFLARE = [
   "@odentia/medical-clinic",
   "@odentia/optical-clinic",
   "@gestoria/web",
+  "@gestoria/sitio",
 ]
 // Apps del VPS: la imagen de producción sirve api y worker.
 const VPS = ["@odentia/api", "@odentia/worker"]

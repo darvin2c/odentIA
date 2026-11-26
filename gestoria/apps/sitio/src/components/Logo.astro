@@ -1,0 +1,12 @@
+---
+// El logotipo de gestorIA, el mismo de la marca común (lo vigila src/lib/marca.test.tsx). Sus colores
+// salen de `--identity-ink` y `--identity-accent`: claro sobre la portada, oscuro sobre lo claro.
+import logotipo from "../assets/logotipo.svg?raw"
+
+// El enlace ya dice «gestorIA, inicio»: el dibujo no se lee dos veces.
+const svg = logotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
+---
+<a class="logo" href="/" aria-label="gestorIA, inicio"><Fragment set:html={svg} /></a>

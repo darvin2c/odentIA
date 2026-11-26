@@ -1,0 +1,12 @@
+---
+// El pie de todas las páginas: la firma y lo que enlazan los correos de la cuenta.
+import { footerLinks, SIGNATURE } from "../lib/sitio"
+---
+<footer class="footer-line">
+  <div class="wrap footer">
+    <span>{SIGNATURE}</span>
+    <nav aria-label="Pie">
+      {footerLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+    </nav>
+  </div>
+</footer>
