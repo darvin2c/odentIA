@@ -10,7 +10,7 @@ import {
   withFormDiagnoses,
   withoutRepeatedNotes,
 } from "../dictation-forms.js"
-import { dictatedService } from "../encounter-dictation.js"
+import { dictatedService, plannedInSamePhrase } from "../encounter-dictation.js"
 import { productHooksFor } from "../products.js"
 
 /**
@@ -227,5 +227,80 @@ describe("el relato no repite lo que ya cuenta una nota pendiente (v07)", () => 
     expect(withoutRepeatedNotes([other], ["Dolor espontáneo en la pieza 36."])).toEqual([other])
     const longer = { kind: "nota", payload: { presentIllness: "Dolor desde hace cinco días." } }
     expect(withoutRepeatedNotes([longer], ["Dolor desde hace 2 días."])).toEqual([longer])
+  })
+})
+
+describe("el repaso no repite el relato con otras palabras (revisión del 25 nov)", () => {
+  const before = ["Le falta la vacuna del sarampión de los doce meses; no se la pusieron porque estaba resfriada."]
+  const again = { kind: "nota", payload: { presentIllness: "La mamá refiere que le falta la vacuna del sarampión de los 12 meses, no se la pusieron porque estaba resfriada." } }
+
+  it("en el repaso, lo mismo dicho de otra forma no se suma otra vez", () => {
+    expect(withoutRepeatedNotes([again], before, { review: true })).toEqual([])
+  })
+
+  it("en la pausa sigue la regla estricta, y lo nuevo del repaso se queda", () => {
+    expect(withoutRepeatedNotes([again], before)).toEqual([again])
+    const other = { kind: "nota", payload: { presentIllness: "Tiene tos desde hace tres días, sin fiebre." } }
+    expect(withoutRepeatedNotes([other], before, { review: true })).toEqual([other])
+  })
+})
+
+describe("el repaso no tapa lo que contradice lo de antes", () => {
+  it("«refiere dolor al morder la pieza» no repite «no refiere dolor al morder la pieza»", () => {
+    const now = { kind: "nota", payload: { presentIllness: "Refiere dolor al morder la pieza." } }
+    expect(withoutRepeatedNotes([now], ["No refiere dolor al morder la pieza. Viene a control."], { review: true })).toEqual([now])
+  })
+})
+
+describe("lo dicho para otro día no queda también como hecho hoy (revisión del 25 nov)", () => {
+  const phrase = "para la resina de la cuarenta y seis lo vemos la próxima"
+  const done = { kind: "procedimiento", payload: { service: "resina", toothNumber: 46 }, sourceText: phrase }
+  const plan = { kind: "plan", payload: { service: "Resina", toothNumber: 46 }, sourceText: phrase }
+
+  it("la misma frase en el plan y en lo hecho: gana el plan", () => {
+    expect(plannedInSamePhrase(done, [done, plan])).toBe(true)
+  })
+
+  it("en frases distintas, otra pieza u otra prestación, las dos se quedan", () => {
+    expect(plannedInSamePhrase({ ...done, sourceText: "ya, la hacemos ahora" }, [done, plan])).toBe(false)
+    expect(plannedInSamePhrase(done, [{ ...plan, payload: { service: "resina", toothNumber: 36 } }])).toBe(false)
+    expect(plannedInSamePhrase(done, [{ ...plan, payload: { service: "corona", toothNumber: 46 } }])).toBe(false)
+  })
+})
+
+describe("el repaso no tapa un cambio clínico (revisión de código del 26 nov)", () => {
+  const before = ["Refiere dolor en el lado derecho al masticar, que aumenta con el frío."]
+  it.each(["Refiere dolor en el lado izquierdo al masticar.", "Dolor que aumenta con el calor.", "Refiere dolor punzante al masticar."])("«%s» se queda", (said) => {
+    const now = { kind: "nota", payload: { presentIllness: said } }
+    expect(withoutRepeatedNotes([now], before, { review: true })).toEqual([now])
+  })
+})
+
+describe("lo dicho como plan con otras caras o sin pieza no quita lo de hoy", () => {
+  const phrase = "hoy le hago la resina oclusal de la 46 y la distal la próxima"
+  it("otras caras de la misma pieza: las dos se quedan", () => {
+    const done = { kind: "procedimiento", payload: { service: "resina", toothNumber: 46, surfaces: ["O"] }, sourceText: phrase }
+    const plan = { kind: "plan", payload: { service: "resina", toothNumber: 46, surfaces: ["D"] }, sourceText: phrase }
+    expect(plannedInSamePhrase(done, [done, plan])).toBe(false)
+  })
+  it("sin pieza: las dos se quedan", () => {
+    const said = "hoy la profilaxis y otra profilaxis en seis meses"
+    expect(plannedInSamePhrase({ kind: "procedimiento", payload: { service: "profilaxis" }, sourceText: said }, [{ kind: "plan", payload: { service: "profilaxis" }, sourceText: said }])).toBe(false)
+  })
+})
+
+describe("en el repaso, otra persona es otra cosa (revisión de código del 26 nov)", () => {
+  it("«su padre tuvo un infarto» no repite «su madre tuvo un infarto»", () => {
+    const now = { kind: "nota", payload: { presentIllness: "Su padre tuvo un infarto a los cincuenta años." } }
+    expect(withoutRepeatedNotes([now], ["Su madre tuvo un infarto a los cincuenta años."], { review: true })).toEqual([now])
+  })
+})
+
+describe("una cara de un solo lado no hace dos prestaciones", () => {
+  it("la resina con caras en el plan y sin caras en lo hecho es la misma", () => {
+    const phrase = "para la resina oclusal de la 46 lo vemos la próxima"
+    const done = { kind: "procedimiento", payload: { service: "resina", toothNumber: 46 }, sourceText: phrase }
+    const plan = { kind: "plan", payload: { service: "resina", toothNumber: 46, surfaces: ["O"] }, sourceText: phrase }
+    expect(plannedInSamePhrase(done, [done, plan])).toBe(true)
   })
 })

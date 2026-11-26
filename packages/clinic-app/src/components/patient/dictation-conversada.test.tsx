@@ -236,6 +236,9 @@ describe("«Pregúntale a…» con lo que Clío oyó de su salud", () => {
     const row = screen.getByRole("heading", { name: "Anticoagulante" }).closest("li") as HTMLElement
     expect(row.textContent).toContain("un «no»: anótalo en Antecedentes si va")
     expect(screen.queryByRole("button", { name: "Lo revisé con Rosa" })).toBeNull()
+    // Sin nada que dejó, el aviso no pide un «Sí, lo dejó» que no hay (QA del 26 nov).
+    expect(document.body.textContent).not.toContain("Sí, lo dejó")
+    expect(document.body.textContent).toContain("Su «no» se confirma en su fila")
     fireEvent.click(screen.getByRole("button", { name: "No lo registro" }))
     expect(session.discardHealth.mutate).toHaveBeenCalledWith(onlyNo, expect.anything())
   })

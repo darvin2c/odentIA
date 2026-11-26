@@ -619,8 +619,11 @@ export function HealthReviewNotice({
             <p className="text-sm text-muted-foreground">
               {heardToSave
                 ? `${CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con ${heardWith}.`
-                : // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
-                  "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."}
+                : heard.rows.some((row) => row.stopped)
+                  ? // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
+                    "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."
+                  : // Solo un «No» («No toma medicación»): se confirma en su fila (QA del 26 nov).
+                    `${CLINICAL_NAME} lo oyó en la consulta. Su «no» se confirma en su fila.`}
             </p>
           ) : unasked.length > 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -647,7 +650,8 @@ export function HealthReviewNotice({
               <SubmitButton
                 type="button"
                 size="sm"
-                className="min-h-11 sm:min-h-8"
+                // Con el nombre de quien acompaña puede ser largo: se parte en líneas a 390 px (QA del 26 nov).
+                className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
                 pending={!!dictation?.confirmHealth.isPending}
                 disabled={busy}
                 onClick={confirmHeard}
@@ -811,7 +815,7 @@ export function HealthReviewNotice({
                     {showing ? "Ocultar lo que dijo" : "Ver lo que dijo"}
                   </Button>
                 ) : null}
-                <Button type="button" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={reviewNow}>
+                <Button type="button" size="sm" className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8" disabled={busy} onClick={reviewNow}>
                   {`Lo revisé con ${reviewWho(reviewer, sex)}`}
                 </Button>
                 {openWide ? (
@@ -980,7 +984,14 @@ function SaidEarlierRow({
           No lo registro
         </Button>
         {current.length > 0 ? (
-          <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={act.isPending && act.variables === "confirm"} disabled={disabled || act.isPending} onClick={() => act.mutate("confirm")}>
+          <SubmitButton
+            type="button"
+            size="sm"
+            className="h-auto min-h-11 max-w-full whitespace-normal text-left sm:min-h-8"
+            pending={act.isPending && act.variables === "confirm"}
+            disabled={disabled || act.isPending}
+            onClick={() => act.mutate("confirm")}
+          >
             {`Lo revisé con ${who}`}
           </SubmitButton>
         ) : null}

@@ -3,6 +3,10 @@ import {
   FAMILY_KINSHIP,
   type FamilyKinship,
   findHabitualMedication,
+  doseFromSaid,
+  groundedDose,
+  medicineLine,
+  medicineWords,
   HABITUAL_MEDICATIONS,
   type HealthDeclarant,
   INTERVIEW_ANSWER_LABELS,
@@ -114,7 +118,7 @@ export function familyFromPatient(item: Record<string, unknown>, speaker: string
 /** «Yo soy diabética», «eso es mío»: quien acompaña habla de sí misma, no del paciente. */
 const SELF_TALK = /(?<![\p{L}])(?:yo soy|yo tengo|yo tomo|yo sufro|eso es m[ií]o|es m[ií]o)(?![\p{L}])/u
 const ABOUT_PATIENT = /(?<![\p{L}])(?:él|ella|el niño|la niña|mi hij[oa]|le|lo|la toma|toma)(?![\p{L}])/u
-const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
+export const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
 
 /** El parentesco dicho, sin «su» ni «mi», en minúsculas y sin tildes: «Su abuela» → «abuela». */
 export function familyRelationWords(words: unknown): string {
@@ -441,10 +445,14 @@ function wordHeard(word: string, said: string): boolean {
 }
 
 /** ¿El nombre sale de lo dicho? Basta una palabra que lo distinga («losartán 50 mg» de «tomo losartán»). */
-function nameHeard(name: string, said: string): boolean {
-  const words = plain(name)
+/** Las palabras de un nombre que lo distinguen: sin las de relleno, los números ni las de menos de tres letras. */
+const distinctWords = (name: string) =>
+  plain(name)
     .split(/[^a-z0-9ñ]+/)
     .filter((word) => word.length >= 3 && !/^\d+$/.test(word) && !NAME_FILLER.has(word))
+
+function nameHeard(name: string, said: string): boolean {
+  const words = distinctWords(name)
   return words.length === 0 || words.some((word) => wordHeard(word, said))
 }
 
@@ -512,6 +520,50 @@ export function groundHealthNames(
     notHeard.push(text(value["detail"]))
     const { detail: _invented, ...rest } = value
     out[group] = rest
+  }
+  // Lo oído, con la dosis y cuándo en su lugar y en cifras: «apixabán de cinco cada doce horas» se lee
+  // «apixabán 5 mg cada 12 h», y así llega a su medicación (revisión del 25 nov). Después de mirar si se
+  // oyó: las cifras no están en lo dicho.
+  // La dosis que trajo Clío se queda con lo que se dijo: en cifras y con su unidad solo si se dijo
+  // (QA del 26 nov: «losartán cincuenta» llegaba como «50 mg»).
+  const meds = out["medications"]
+  if (isRecord(meds) && Array.isArray(meds["items"]))
+    out["medications"] = {
+      ...meds,
+      items: (meds["items"] as Array<Record<string, unknown>>).map((item) => {
+        if (text(item["dose"])) {
+          const { dose: _said, ...rest } = item
+          const dose = groundedDose(text(item["dose"]), said)
+          return dose ? { ...rest, dose } : rest
+        }
+        // La dosis dentro del nombre, o si no, la que se dijo junto a su nombre en la frase.
+        const named = medicineWords(text(item["name"]))
+        const heard = doseFromSaid(named.name, said)
+        const parts = { name: named.name, dose: named.dose ?? heard.dose, frequency: named.frequency ?? heard.frequency }
+        return { ...item, name: parts.name, ...(parts.dose ? { dose: parts.dose } : {}), ...(parts.frequency && !text(item["frequency"]) ? { frequency: parts.frequency } : {}) }
+      }),
+    }
+  for (const group of DIRECTED) {
+    const value = out[group]
+    if (!isRecord(value) || !text(value["detail"])) continue
+    // La misma medicina también en lo que toma (QA del 26 nov, latidIA: «apixabán» dos veces, y la dosis
+    // se perdía al guardar): una sola fila, la de su clase, con la dosis y cuándo que se dijeron.
+    const written = medicineWords(text(value["detail"]))
+    // Clío suele poner en su clase solo el nombre, o la dosis sin cuándo: lo que falta se lee de la
+    // frase dicha, cada cosa por su lado (QA del 26 nov: «apixabán 5 mg» perdía «cada doce horas»).
+    const heard = doseFromSaid(written.name, said)
+    const detail = { name: written.name, dose: written.dose ?? heard.dose, frequency: written.frequency ?? heard.frequency }
+    const list = out["medications"]
+    const found = isRecord(list) && Array.isArray(list["items"]) ? (list["items"] as Array<Record<string, unknown>>).find((item) => sameDrug(item["name"], detail.name)) : undefined
+    const line = medicineLine({ name: detail.name, dose: detail.dose ?? (text(found?.["dose"]) || undefined), frequency: detail.frequency ?? (text(found?.["frequency"]) || undefined) })
+    // Solo si la línea junta se vuelve a leer igual (una dosis sin unidad no: quedarían las dos filas).
+    const twin = found && medicineWords(line).name === detail.name ? found : undefined
+    if (twin && isRecord(list)) {
+      const rest = (list["items"] as Array<Record<string, unknown>>).filter((item) => item !== twin)
+      if (rest.length) out["medications"] = { ...list, items: rest }
+      else delete out["medications"]
+    }
+    out[group] = { ...value, detail: twin ? line : medicineLine(detail) }
   }
   return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
 }
@@ -649,6 +701,52 @@ export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
 }
 
 /**
+ * Lo de la propuesta que nombra una frase, como claves para `withoutHealthKeys`: «quitar» por voz una
+ * propuesta de su salud quita solo lo que la frase nombra («no, la diabetes no»), no la propuesta
+ * entera (revisión del 25 nov: «yo soy diabética, eso es mío», dicho por la madre, se llevó también
+ * «Papá: alergia a la penicilina»). Vacío si no nombra nada de lo propuesto.
+ */
+/**
+ * ¿Quien habla dice algo de sí misma («eso es mío», «lo tengo yo», «la que tiene eso soy yo»)? Entonces
+ * su «no» no es quitar lo propuesto del paciente (revisión de código del 26 nov: «lo del azúcar no, eso
+ * es mío» se llevaba «Papá: alergia a la penicilina»).
+ */
+export const speaksOfSelf = (said: string | undefined) =>
+  !!said && /(^| )(yo|mio|mia|mios|mias|mismo|misma|soy)( |$)/.test(plain(said).replace(/[^a-z ]+/g, " "))
+
+export function healthNamedIn(payload: Record<string, unknown>, said: string): Set<string> {
+  return healthNamed(payload, said).keys
+}
+
+/** Lo que nombra la frase (`healthNamedIn`), con los nombres como se leen («diabetes», «Papá: alergia…»). */
+export function healthNamed(payload: Record<string, unknown>, said: string): { keys: Set<string>; names: string[] } {
+  const keys = new Set<string>()
+  const names: string[] = []
+  if (!said.trim()) return { keys, names }
+  // Un nombre sin ninguna palabra que lo distinga («T4», «DM») no se da por nombrado: cualquier frase lo quitaría.
+  const named = (name: string) => distinctWords(name).length > 0 && nameHeard(name, said)
+  for (const group of GROUPS) {
+    const value = payload[group]
+    if (!isRecord(value) || INTERVIEW.includes(group)) continue
+    if (DIRECTED.includes(group)) {
+      if (text(value["detail"]) && named(text(value["detail"]))) {
+        keys.add(group)
+        names.push(text(value["detail"]))
+      }
+      continue
+    }
+    for (const item of (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>) {
+      if (!(named(text(item["name"])) || (group === "family" && named(text(item["relation"]))))) continue
+      // Dato por dato: «no, la diabetes no» quita la diabetes, no las demás enfermedades.
+      if (group === "medications" && drugKey(item["name"])) keys.add(drugKey(item["name"]))
+      else keys.add(itemKey(group, item))
+      names.push(group === "family" ? `${relationLabel(item["relation"])}: ${text(item["name"])}` : text(item["name"]))
+    }
+  }
+  return { keys, names }
+}
+
+/**
  * La propuesta sin los datos que se dijeron después otra vez (`keys`, de `healthKeysOf`): de un dato
  * vale lo último que dijo. `null` si no le queda nada de su salud.
  */
@@ -673,6 +771,13 @@ export function withoutHealthKeys(payload: Record<string, unknown>, keys: Readon
         const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !keys.has(drugKey(item["name"])))
         if (items.length) out[group] = { ...value, items }
         else delete out[group]
+      } else if (LISTS.includes(group) && value["state"] === "recorded" && Array.isArray(value["items"]) && value["items"].length) {
+        // Una enfermedad quitada por voz, sola (`healthNamed`): las demás siguen.
+        const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !keys.has(itemKey(group, item)))
+        if (items.length < value["items"].length) {
+          if (items.length) out[group] = { ...value, items }
+          else delete out[group]
+        }
       }
       continue
     }

@@ -64,10 +64,13 @@ import {
   reviewDeclaredHealth,
 } from "./clinical.js"
 import {
+  companionSelfTalk,
+  speaksOfSelf,
   groundHealthNames,
   hasDeclaredHealth,
   hasHealth,
   healthDrugKeysOf,
+  healthNamed,
   healthSupersedingKeysOf,
   saidInterviewOf,
   saidFamilyOf,
@@ -1537,6 +1540,8 @@ async function refreshBudgetPreview(tx: Db, orgId: string, patientId: string, en
 const IN_SENT_BUDGET = "Está en un presupuesto que el paciente aún no respondió: se registra como servicio de tu lista. Anota su respuesta en el presupuesto."
 const ACCEPTED_WHEN_DONE = "Estaba en un presupuesto sin aceptar: al confirmar, queda aceptado y hecho, con su precio."
 const NOT_IN_SERVICES = "No está en tus servicios: queda registrado sin cobro. Si se cobra, elige el servicio."
+const ONE_SERVICE = (said: string) => `«${said}» puede ser la prestación de tus servicios que sale aquí: elígela, si se cobra. Si no, queda registrado sin cobro.`
+const MANY_SERVICES = (said: string) => `«${said}» calza con más de una prestación de tus servicios: elige cuál, si se cobra. Si no, queda registrado sin cobro.`
 
 /**
  * De dónde sale lo que se dice hecho, sin que el odontólogo lo elija: del
@@ -1576,6 +1581,11 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
     const note = [fitted.note, item?.inSentBudget ? IN_SENT_BUDGET : null].filter(Boolean).join(" ")
     return { payload: { ...fitted.payload, source: "servicio" }, status: fitted.status, note: note || null }
   }
+  // Está en sus servicios, pero más de uno calza («resina»: «Obturación con resina» y «Resina
+  // fotocurable»): la tarjeta las ofrece para elegir, y el aviso no dice «no está en tus servicios»
+  // (revisión del 25 nov: lo decía con 3 candidatas a la vista).
+  if (Array.isArray(base["candidates"]) && base["candidates"].length)
+    return { payload: { ...base, source: "libre" }, status: "lista", note: base["candidates"].length > 1 ? MANY_SERVICES(spoken) : ONE_SERVICE(spoken) }
   // Ni en el plan ni en sus servicios: queda registrado sin cobro, y si se cobra se elige el servicio.
   return { payload: { ...base, source: "libre" }, status: "lista", note: NOT_IN_SERVICES }
 }
@@ -1840,6 +1850,36 @@ function planEntry(id: string | null, payload: Record<string, unknown>): Pending
     ...(choice.service ? [`dicho:${normalizeForSearch(String(choice.service))}`] : []),
   ])
   return { id, names, place: placeOf(payload), choice: choices.length > 1 }
+}
+
+/**
+ * ¿Lo dicho como hecho hoy es la misma prestación, en la misma pieza, que otra sugerencia del tramo
+ * pone en el plan desde la misma frase? Entonces es para otro día: gana el plan. Dichas en frases
+ * distintas («le indico una resina en la 46… ya, la hacemos ahora»), las dos se quedan.
+ */
+export function plannedInSamePhrase(
+  done: { kind: string; payload: Record<string, unknown>; sourceText?: string | null },
+  drafts: ReadonlyArray<{ kind: string; payload: Record<string, unknown>; sourceText?: string | null }>,
+): boolean {
+  const phrase = normalizeForSearch(done.sourceText ?? "").trim()
+  if (!phrase) return false
+  const service = normalizeForSearch(String(done.payload["service"] ?? "")).trim()
+  const place = placeOf(done.payload)
+  // Sin pieza no se sabe si es la misma («hoy la profilaxis y otra en seis meses»): las dos se quedan.
+  if (place.tooth === null) return false
+  return drafts.some((other) => {
+    if (other === done || other.kind !== "plan") return false
+    const otherPhrase = normalizeForSearch(other.sourceText ?? "").trim()
+    if (!otherPhrase || !(otherPhrase.includes(phrase) || phrase.includes(otherPhrase))) return false
+    // La misma pieza y, si las dos dicen caras, las mismas: «la oclusal hoy y la distal la próxima» son dos.
+    const planned = placeOf(other.payload)
+    if (planned.tooth !== place.tooth) return false
+    if (planned.surfaces.length && place.surfaces.length && JSON.stringify(planned.surfaces) !== JSON.stringify(place.surfaces)) return false
+    const services = [other.payload as PlanChoice, ...(Array.isArray(other.payload["options"]) ? (other.payload["options"] as PlanChoice[]) : [])].map((choice) =>
+      normalizeForSearch(String(choice.service ?? "")).trim(),
+    )
+    return !!service && services.some((name) => !!name && (name.includes(service) || service.includes(name)))
+  })
 }
 
 const diagnosisKey = (payload: Record<string, unknown>) =>
@@ -2259,6 +2299,25 @@ export async function saveDictationSegment(
       continue
     }
     const { data, meta } = splitMeta(row.payload)
+    // Lo de su salud junta varias cosas dichas: quitar por voz quita solo lo que la frase nombra, como
+    // una corrección que se puede deshacer. Lo que quien acompaña dice de sí misma («yo soy diabética,
+    // eso es mío», «lo tengo yo») no es un «quitar»: no se toca la propuesta (revisión del 25 nov: se
+    // perdía «Papá: alergia a la penicilina»). Un «quita eso» sin nombrar nada quita la propuesta
+    // entera, como antes, y «Deshacer» la devuelve.
+    if (row.kind === "salud") {
+      const named = healthNamed(data, removal.said)
+      if (!named.keys.size && (companionSelfTalk(removal.said) || speaksOfSelf(removal.said))) continue
+      const rest = named.keys.size ? withoutHealthKeys(data, named.keys) : null
+      if (rest) {
+        const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: named.names.join(", ") }, meta.voice)
+        await tx
+          .update(encounterDictationSuggestion)
+          .set({ payload: withMeta(rest, stamp({ ...meta, voice })), updatedAt: new Date() })
+          .where(eq(encounterDictationSuggestion.id, row.id))
+        if (!corrected.includes(row.id)) corrected.push(row.id)
+        continue
+      }
+    }
     // Si se entendió mal, «Deshacer» la devuelve como estaba (issue 135, opción B).
     const undo = { status: row.status as "lista" | "por_revisar", said: removal.said.slice(0, DICTATION_SOURCE_CHARS) }
     await tx
@@ -2320,7 +2379,7 @@ export async function saveDictationSegment(
     .filter((item) => item.kind === "nota")
     .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
   const { drafts, twins } = withFormTwins(
-    withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes),
+    withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes, { review: !!segment.review }),
     scope.formQuestions,
   )
   for (const draft of fromDiagnoses) twins.add(draft)
@@ -2608,6 +2667,10 @@ export async function saveDictationSegment(
       allergiesTouched = true
     }
     if (draft.kind === "procedimiento") {
+      // La misma prestación en la misma pieza, dicha también como plan en la misma frase: es para otro
+      // día («para la resina de la 46 lo vemos la próxima»). Si no queda claro si es de hoy, es una
+      // indicación (la regla del prompt), y no se registra también como hecha (revisión del 25 nov).
+      if (plannedInSamePhrase(draft, segment.drafts)) continue
       const key = doneKey(ready.payload)
       if (pendingDone.has(key)) continue
       if (alreadyRegistered(doneHere, ready.payload)) {

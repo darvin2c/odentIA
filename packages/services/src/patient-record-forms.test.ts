@@ -1438,7 +1438,9 @@ it("la medicina de una clase conserva su clase en el PDF y su código ATC en FHI
   const [warfarin] = record.medications
   const statement = resourcesOf(record).find((resource) => resource.id === warfarin?.id)
   expect(statement).toMatchObject({
-    medicationCodeableConcept: { coding: [{ system: "http://www.whocc.no/atc", code: expect.stringMatching(/^B01A/) }], text: "warfarina 5 mg" },
+    // La dosis en su lugar de FHIR (`dosage`), no dentro del nombre (QA del 26 nov).
+    medicationCodeableConcept: { coding: [{ system: "http://www.whocc.no/atc", code: expect.stringMatching(/^B01A/) }], text: "warfarina" },
+    dosage: [{ text: "5 mg" }],
   })
 })
 

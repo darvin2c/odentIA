@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { declaredMedications } from "./clinical.js"
 import {
   familyKinshipOf,
   familyRelationWords,
@@ -6,6 +7,7 @@ import {
   hasDeclaredHealth,
   healthByDeclarant,
   healthOfPayload,
+  healthNamed,
   healthSupersedingKeysOf,
   healthRows,
   healthSaidBy,
@@ -17,6 +19,7 @@ import {
   saidStoppedOf,
   sameDrug,
   selfCorrectedHealth,
+  speaksOfSelf,
   splitHealthDenials,
   withoutSettledHealth,
   withoutHealthKeys,
@@ -126,7 +129,7 @@ describe("A5 · lo que nombra sale de su frase", () => {
     )
     expect(heard.notHeard).toEqual(["metformina", "apixabán"])
     expect(heard.payload?.["anticoagulants"]).toEqual({ state: "recorded" })
-    expect(heard.payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán 50 mg" }] })
+    expect(heard.payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] })
   })
 
   it("se reconoce por una palabra que lo distingue o por cómo suena", () => {
@@ -386,5 +389,64 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
   it("la aspirina dicha se lee «Antiagregante», como la franja", () => {
     const rows = healthRows({ declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina 100 mg" } })
     expect(rows[0]?.label).toBe("Antiagregante")
+  })
+})
+
+describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)", () => {
+  it("el anticoagulante y la medicina de Julio", () => {
+    const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta"
+    const { payload } = groundHealthNames(
+      {
+        anticoagulants: { state: "recorded", detail: "apixabán de cinco miligramos cada doce horas" },
+        medications: { state: "recorded", items: [{ name: "losartán cincuenta" }] },
+      },
+      said,
+    )
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
+    // Sin unidad dicha no se parte: la unidad no se inventa.
+    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán cincuenta" }] })
+  })
+
+  it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
+    const rows = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } } as never)
+    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "Cada 12 horas", frequencyCode: "cada_12_h", declaredClass: "anticoagulants" })
+  })
+})
+
+describe("quitar por voz lo de su salud, dato por dato (revisión de código del 26 nov)", () => {
+  const payload = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }
+  it("«no, la diabetes no» quita la diabetes y deja el asma", () => {
+    const named = healthNamed(payload, "no, la diabetes no")
+    expect(named.names).toEqual(["diabetes"])
+    expect(withoutHealthKeys(payload, named.keys)?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+  })
+  it("un nombre sin palabras que lo distingan no se da por nombrado", () => {
+    expect(healthNamed({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "T4" }] } }, "quita eso").keys.size).toBe(0)
+  })
+})
+
+describe("lo que quien habla dice de sí misma no es quitar (revisión de código del 26 nov)", () => {
+  it.each(["lo del azúcar no, eso es mío", "eso lo tengo yo, no la niña", "no, la que tiene eso soy yo"])("«%s»", (said) => {
+    expect(speaksOfSelf(said)).toBe(true)
+  })
+  it.each(["quita eso", "eso no va", "no, eso no"])("«%s» sí es quitar", (said) => {
+    expect(speaksOfSelf(said)).toBe(false)
+  })
+})
+
+describe("la dosis de su clase, leída de la frase (QA del 26 nov)", () => {
+  it("Clío pone «apixabán» solo: la dosis y cuándo salen de lo dicho", () => {
+    const { payload } = groundHealthNames(
+      { anticoagulants: { state: "recorded", detail: "Apixabán" } },
+      "doctora tomo apixabán de cinco miligramos cada doce horas y losartán cincuenta",
+    )
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "Apixabán 5 mg cada 12 h" })
+  })
+})
+
+describe("lo que falta de la dosis se lee de la frase, cada cosa por su lado (QA del 26 nov)", () => {
+  it("Clío trae «apixabán 5 mg» sin cuándo: «cada doce horas» sale de lo dicho", () => {
+    const { payload } = groundHealthNames({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg" } }, "tomo apixabán de cinco miligramos cada doce horas")
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
   })
 })
