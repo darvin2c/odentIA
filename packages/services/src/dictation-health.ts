@@ -121,6 +121,22 @@ const SELF_TALK = /(?<![\p{L}])(?:yo soy|yo tengo|yo tomo|yo sufro|eso es m[ií]
 const ABOUT_PATIENT = /(?<![\p{L}])(?:él|ella|el niño|la niña|mi hij[oa]|le|lo|la toma|toma)(?![\p{L}])/u
 export const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
 
+/**
+ * Las medicinas que quien acompaña dice que toma ella («yo tomo metformina, eso es mío»): no son del
+ * paciente y `prepareHealth` no las propone. Antes se borraban sin aviso; ahora su motivo va a «No lo
+ * usé», como lo demás que no es del paciente (revisión del 26 nov). `null` si no hay ninguna.
+ */
+export function companionOwnMedicinesWhy(payload: Record<string, unknown>, said: string | undefined): string | null {
+  if (payload["declarante"] !== "acompanante" || !companionSelfTalk(said)) return null
+  const namesOf = (value: unknown) =>
+    (Array.isArray(value) ? value : isRecord(value) && Array.isArray(value["items"]) ? value["items"] : [])
+      .flatMap((item) => (isRecord(item) && text(item["name"]) ? [text(item["name"])] : []))
+  const names = [...new Set([...namesOf(payload["medications"]), ...namesOf(payload["stopped"])])]
+  if (names.length === 0) return null
+  const kin = kinSaid(payload["vinculo"]).replace(/^(?:su|mi)\s+/i, "")
+  return `«${names.join("», «")}» lo dijo ${kin ? `su ${kin}` : "quien lo acompaña"} de sí: no es del paciente y no lo propuse. Si es suyo, anótalo a mano.`
+}
+
 /*
  * ---------- La enfermedad dicha como de quien la tiene (QA clínica del 26 nov) ----------
  *

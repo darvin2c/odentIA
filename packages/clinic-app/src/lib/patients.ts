@@ -713,6 +713,12 @@ export interface PlanItem {
    * dijo ella el 14 nov): pide su INR del día». Lo dice el servidor; es un aviso, no frena nada.
    */
   extractionRisks?: string[]
+  /**
+   * La fase que sugiere la regla cuando difiere de la que tiene y nadie la eligió con «Planificar…»:
+   * «Sugerencia: con pulpitis de la 46 iría en «Urgencia». Cámbiala con «Planificar…».» Lo dice el
+   * servidor; la fase no cambia sola.
+   */
+  phaseSuggestion?: string
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">

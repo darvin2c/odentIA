@@ -749,6 +749,21 @@ describe("dictado en la atención", () => {
     await enable(false)
   })
 
+  it("un diagnóstico dictado sin decir si es presuntivo o definitivo queda presuntivo, a la vista (revisión del 26 nov)", async () => {
+    await enable(true)
+    const fx = await openSession("Tipo sin decir")
+    const [dictated] = await fx.run((tx) =>
+      saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", toothNumber: 16 }, sourceText: "Caries de dentina en la dieciséis." },
+      ]),
+    )
+    expect(dictated).toMatchObject({ status: "lista", payload: { diagnosisType: "provisional" }, summary: "K02.1 · Caries de la dentina\nPieza 16 · Presuntivo" })
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, dictated!.id))
+    const rows = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))
+    expect(rows.map((row) => row.diagnosisType)).toEqual(["provisional"])
+    await enable(false)
+  })
+
   it("confirmar un diagnóstico que ya está en la atención con la misma pieza no lo registra dos veces", async () => {
     await enable(true)
     const fx = await openSession("Obturación sin repetir")

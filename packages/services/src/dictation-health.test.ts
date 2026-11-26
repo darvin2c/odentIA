@@ -3,6 +3,7 @@ import { declaredMedications } from "./clinical.js"
 import {
   companionFamily,
   companionKinOf,
+  companionOwnMedicinesWhy,
   familyKinshipOf,
   familyRelationWords,
   groundHealthNames,
@@ -500,6 +501,17 @@ describe("lo que quien acompaña dice de sí, como lo de la familia del paciente
     expect(prepareHealth({ declarante: "acompanante", vinculo: "esposa", conditions: { state: "recorded", items: [{ name: "diabetes" }] } }, said, {})).toBeNull()
     expect(companionFamily(["diabetes"], "")).toEqual([])
     expect(companionFamily(["diabetes"], "abuela")).toEqual([{ relation: "abuela", name: "diabetes" }])
+  })
+  it("sus propias medicinas no se proponen al paciente: su motivo va a «No lo usé» (revisión del 26 nov)", () => {
+    const payload = { declarante: "acompanante", vinculo: "madre", medications: { state: "recorded", items: [{ name: "metformina" }] } }
+    expect(prepareHealth(payload, "yo tomo metformina, eso es mío", {})).toBeNull()
+    expect(companionOwnMedicinesWhy(payload, "yo tomo metformina, eso es mío")).toBe(
+      "«metformina» lo dijo su madre de sí: no es del paciente y no lo propuse. Si es suyo, anótalo a mano.",
+    )
+    // Sin vínculo, quien lo acompaña; dicho del paciente, o por el paciente, nada.
+    expect(companionOwnMedicinesWhy({ ...payload, vinculo: undefined }, "yo tomo metformina")).toContain("lo dijo quien lo acompaña de sí")
+    expect(companionOwnMedicinesWhy(payload, "él toma metformina")).toBeNull()
+    expect(companionOwnMedicinesWhy({ ...payload, declarante: "paciente" }, "yo tomo metformina")).toBeNull()
   })
   it("«la diabetes no, eso es mío» pasa la diabetes propuesta a lo de su familia", () => {
     const payload = { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }

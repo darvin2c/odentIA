@@ -2190,6 +2190,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           withoutVoided: true,
           extractionRisks: true,
           sessions: true,
+          phaseSuggestions: true,
         }),
       ),
     )

@@ -310,7 +310,9 @@ export const OPERATIONS = {
     fields: {
       diagnosisCode: { kind: "text", min: 1, max: 10, label: "Código", description: "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
       diagnosisSystem: { kind: "text", min: 1, max: 20, label: "Lista", description: "La lista de diagnósticos de la clínica.", body: "optional", nullable: true, agent: "context" },
-      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques.", body: "required", agent: "requires" },
+      // Si el profesional no dijo si es presuntivo o definitivo, Clío no lo inventa: queda presuntivo, lo
+      // que no afirma nada, y la tarjeta lo muestra para cambiarlo (revisión del 26 nov, ADR 0221).
+      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo dice que es presuntivo o probable; confirmed solo si dice que es seguro o definitivo. Si no dijo ninguna de las dos, no lo indiques.", body: "required", agent: "fills" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (dieciséis = 16).", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
       // El área de un tratamiento por cuadrante o arcada: «Usar» la propuesta la manda tal cual. Clío no la llena.

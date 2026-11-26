@@ -20,7 +20,7 @@ import {
   leadAuditIndex,
 } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
-import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
+import { budgetAwaitsAnswerSql, budgetLineUnitsSql, budgetValueOptionSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { failedSinceSql, handoffOpenExistsSql, lastIsFailedOutSql, lastIsUncertainOutSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
@@ -1238,7 +1238,7 @@ async function waitingSystemTasks(
 /**
  * Presupuestos armados y sin enviar desde antes de hoy (en la zona de la
  * clínica): el borrador de la persona con alguna línea. El total es el de la
- * opción recomendada (la que vale mientras decide).
+ * opción que vale mientras decide (la recomendada o, sin ella, la primera).
  */
 async function waitingUnsentBudgets(
   tx: Db,
@@ -1249,18 +1249,19 @@ async function waitingUnsentBudgets(
     total: number
     totals: Array<{ currency: string; totalCents: number | null }> | null
   }
+  // La opción que vale mientras decide: la recomendada o, si nadie marcó ninguna, la primera
+  // (`valueOptionOf`). Antes contaba solo la recomendada, y uno sin marca salía en cero.
+  const valued = budgetValueOptionSql({ id: sql`b.id`, organizationId: sql`b.organization_id` })
   const rows = await tx.execute<Row>(sql`
     select b.id, b.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName", ${iso(sql`armado.at`)} as since,
       (select count(distinct l.plan_item_id)::int from treatment_budget_item l
-        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
-        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "itemCount",
+        where l.organization_id = b.organization_id and l.budget_id = b.id and l.option_id = ${valued}) as "itemCount",
       -- Un total por moneda de sus líneas: la cabecera no dice ninguna.
       (select jsonb_agg(by_currency order by by_currency.currency) from (
         select l.currency::text as currency, case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
           ${budgetLineUnitsSql({ billingMode: sql`l.billing_mode`, sessionsPlanned: sql`l.sessions_planned` })})::int end as "totalCents"
         from treatment_budget_item l
-        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
-        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended
+        where l.organization_id = b.organization_id and l.budget_id = b.id and l.option_id = ${valued}
         group by l.currency) by_currency) as totals,
       (select count(*)::int from treatment_budget_option o where o.organization_id = b.organization_id and o.budget_id = b.id) as options,
       count(*) over ()::int as total

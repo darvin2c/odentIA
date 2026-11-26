@@ -182,6 +182,31 @@ describe("revisión del 25 nov", () => {
     await enable(false)
   })
 
+  // Revisión del 26 nov: sus medicinas se borraban sin aviso; ahora van a «No lo usé» con su motivo.
+  it("la medicina que la madre dice que toma ella no se propone al paciente y «No lo usé» dice por qué", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const saved = await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] }, medications: { state: "recorded", items: [{ name: "metformina" }] } },
+          sourceText: "yo soy diabética y tomo metformina, eso es mío",
+        },
+      ],
+      transcript: "Yo soy diabética y tomo metformina, eso es mío.",
+    })
+    expect(saved.droppedForms).toContainEqual({
+      said: "yo soy diabética y tomo metformina, eso es mío",
+      why: "«metformina» lo dijo su madre de sí: no es del paciente y no lo propuse. Si es suyo, anótalo a mano.",
+      targets: [],
+    })
+    const [said] = await health()
+    expect(said?.payload["medications"]).toBeUndefined()
+    expect(said?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Madre: diabetes"])
+    await enable(false)
+  })
+
   it("«no, la diabetes no» quita solo la diabetes, como corrección que se deshace; «quita eso» quita la propuesta entera", async () => {
     await enable(true)
     const { fx, segment, health } = await session()

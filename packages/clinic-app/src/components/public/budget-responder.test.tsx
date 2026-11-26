@@ -164,4 +164,34 @@ describe("BudgetResponder", () => {
     expect(page).toContain(`Aceptas ${soles} + ${dollars} de ${soles} + ${dollars}`)
     expect(page).not.toContain("Por cotizar")
   })
+
+  // Revisión del 26 nov: sin recomendada marcada, no se elige ninguna por la persona.
+  const twoOptions = (recommendedB: boolean): PortalBudget => ({
+    ...plain,
+    options: [
+      { ...plain.options[0]!, isRecommended: false },
+      { id: "o2", label: "Opción B", isRecommended: recommendedB, decision: "pendiente", totalCents: 30000 },
+    ],
+    items: [
+      plain.items[0]!,
+      { ...plain.items[0]!, planItemId: "i2", optionId: "o2", title: "Exodoncia del molar 46", lineTotalCents: 30000 },
+    ],
+  })
+
+  it("con varias opciones y ninguna recomendada, ninguna va elegida ni se muestran sus líneas", () => {
+    const page = html(twoOptions(false))
+    expect(page).not.toMatch(/role="radio"[^>]*aria-checked="true"/)
+    expect(page).not.toContain("La recomienda tu")
+    expect(page).not.toContain('font-medium">Endodoncia del molar 46')
+    expect(page).not.toContain("Aceptas")
+    expect(page).toMatch(/<button[^>]*disabled[^>]*>[^]*Elige una opción/)
+  })
+
+  it("con la recomendada marcada, esa va elegida de antemano", () => {
+    const page = html(twoOptions(true))
+    expect(page).toContain("La recomienda tu")
+    expect(page.match(/role="radio"[^>]*aria-checked="true"/g)).toHaveLength(1)
+    expect(page).toContain("Elijo la opción b")
+    expect(page).toContain("Aceptas")
+  })
 })

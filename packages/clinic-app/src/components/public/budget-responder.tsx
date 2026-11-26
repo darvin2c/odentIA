@@ -91,16 +91,23 @@ export function BudgetResponder({
 }) {
   const several = budget.options.length > 1
   const chosen = budget.options.find((option) => option.decision === "elegida") ?? null
-  const recommended =
-    budget.options.find((option) => option.isRecommended) ?? budget.options[0] ?? null
+  // Va elegida de antemano solo la que su odontólogo marcó como recomendada: si nadie marcó
+  // ninguna, elige la persona (revisión del 26 nov). Con una sola opción no hay nada que elegir.
+  const recommended = budget.options.find((option) => option.isRecommended) ?? null
   const [pickedOptionId, setPickedOptionId] = useState<string | null>(
     chosen?.id ?? (several ? (recommended?.id ?? null) : null),
   )
   const viewedOption =
-    chosen ?? budget.options.find((option) => option.id === pickedOptionId) ?? recommended
+    chosen ??
+    budget.options.find((option) => option.id === pickedOptionId) ??
+    (several ? null : (budget.options[0] ?? null))
+  // Con varias y ninguna elegida todavía, no se muestran líneas: serían las de todas mezcladas.
+  const choosing = several && !viewedOption
   const lines = viewedOption
     ? budget.items.filter((item) => item.optionId === viewedOption.id)
-    : budget.items
+    : choosing
+      ? []
+      : budget.items
   const open = (decision: string) => decision !== "aceptado" && decision !== "rechazado"
   // Por omisión todo marcado: lo habitual es aceptar lo que propone su odontólogo.
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set())
@@ -123,7 +130,7 @@ export function BudgetResponder({
     budget,
   )
   const totalText = portalTotalsText(several && viewedOption ? viewedOption : budget, budget)
-  const anyOpen = lines.some((item) => open(item.decision))
+  const anyOpen = (choosing ? budget.items : lines).some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")
   const answer = () =>
     onAnswer({
@@ -138,8 +145,9 @@ export function BudgetResponder({
   const noneMarked = lines
     .filter((item) => open(item.decision))
     .every((item) => unchecked.has(item.planItemId))
-  const label =
-    several && !chosen && viewedOption
+  const label = choosing
+    ? "Elige una opción"
+    : several && !chosen && viewedOption
       ? `Elijo la ${viewedOption.label.toLowerCase()}`
       : noneMarked
         ? "Lo dejo para después"
@@ -217,93 +225,97 @@ export function BudgetResponder({
         <p className="text-sm font-semibold">Elegiste la {viewedOption.label.toLowerCase()}</p>
       ) : null}
 
-      <ul className="flex flex-col divide-y rounded-2xl border bg-card">
-        {lines.map((item) => {
-          const id = `linea-${item.planItemId}`
-          const isOpen = open(item.decision)
-          const checked = accepted(item.planItemId, item.decision)
-          const detail = [
-            item.billingMode === "session"
-              ? item.sessionsPlanned === 1
-                ? "1 sesión"
-                : item.sessionsPlanned
-                  ? `${item.sessionsPlanned} sesiones`
-                  : "Se paga en cada visita"
-              : null,
-            item.promotionName ? `Promoción: ${item.promotionName}` : null,
-            !checked
-              ? item.decision === "rechazado"
-                ? "No lo aceptaste"
-                : "Lo dejo para después"
-              : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-          const guideRows = lineGuideRows(item.patientGuide)
-          return (
-            <li key={item.planItemId} className="flex flex-col p-3 text-sm">
-              <div className="flex items-center gap-3">
-                {isOpen ? (
-                  <Checkbox
-                    id={id}
-                    checked={checked}
-                    disabled={pending}
-                    onCheckedChange={(next) => {
-                      const copy = new Set(unchecked)
-                      if (next === true) copy.delete(item.planItemId)
-                      else copy.add(item.planItemId)
-                      setUnchecked(copy)
-                    }}
-                  />
-                ) : checked ? (
-                  <Check className="size-4 text-success" aria-label="Aceptado" />
-                ) : (
-                  <Minus className="size-4 text-muted-foreground" aria-label="No aceptado" />
-                )}
-                <label
-                  htmlFor={isOpen ? id : undefined}
-                  className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
-                >
-                  <span className="font-medium">{item.title}</span>
-                  {detail ? <span className="text-muted-foreground">{detail}</span> : null}
-                </label>
-                <span className="whitespace-nowrap font-medium tabular-nums">
-                  {formatPortalMoney(
-                    item.lineTotalCents,
-                    item.currency,
-                    budget.locale,
-                    !twoCurrencies,
-                  )}
-                </span>
-              </div>
-              {guideRows.length > 0 ? (
-                // Fuera de la etiqueta de la casilla: tocarlo no marca ni desmarca.
-                <details className="group mt-1 pl-7">
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-primary [&::-webkit-details-marker]:hidden">
-                    Cómo es este tratamiento
-                    <ChevronDown
-                      aria-hidden
-                      className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+      {choosing ? null : (
+        <ul className="flex flex-col divide-y rounded-2xl border bg-card">
+          {lines.map((item) => {
+            const id = `linea-${item.planItemId}`
+            const isOpen = open(item.decision)
+            const checked = accepted(item.planItemId, item.decision)
+            const detail = [
+              item.billingMode === "session"
+                ? item.sessionsPlanned === 1
+                  ? "1 sesión"
+                  : item.sessionsPlanned
+                    ? `${item.sessionsPlanned} sesiones`
+                    : "Se paga en cada visita"
+                : null,
+              item.promotionName ? `Promoción: ${item.promotionName}` : null,
+              !checked
+                ? item.decision === "rechazado"
+                  ? "No lo aceptaste"
+                  : "Lo dejo para después"
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+            const guideRows = lineGuideRows(item.patientGuide)
+            return (
+              <li key={item.planItemId} className="flex flex-col p-3 text-sm">
+                <div className="flex items-center gap-3">
+                  {isOpen ? (
+                    <Checkbox
+                      id={id}
+                      checked={checked}
+                      disabled={pending}
+                      onCheckedChange={(next) => {
+                        const copy = new Set(unchecked)
+                        if (next === true) copy.delete(item.planItemId)
+                        else copy.add(item.planItemId)
+                        setUnchecked(copy)
+                      }}
                     />
-                  </summary>
-                  <dl className="flex flex-col gap-1.5 pb-1 text-muted-foreground">
-                    {guideRows.map(([term, text]) => (
-                      <div key={term}>
-                        <dt className="font-medium text-foreground">{term}</dt>
-                        <dd className="whitespace-pre-wrap">{text}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </details>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
+                  ) : checked ? (
+                    <Check className="size-4 text-success" aria-label="Aceptado" />
+                  ) : (
+                    <Minus className="size-4 text-muted-foreground" aria-label="No aceptado" />
+                  )}
+                  <label
+                    htmlFor={isOpen ? id : undefined}
+                    className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
+                  >
+                    <span className="font-medium">{item.title}</span>
+                    {detail ? <span className="text-muted-foreground">{detail}</span> : null}
+                  </label>
+                  <span className="whitespace-nowrap font-medium tabular-nums">
+                    {formatPortalMoney(
+                      item.lineTotalCents,
+                      item.currency,
+                      budget.locale,
+                      !twoCurrencies,
+                    )}
+                  </span>
+                </div>
+                {guideRows.length > 0 ? (
+                  // Fuera de la etiqueta de la casilla: tocarlo no marca ni desmarca.
+                  <details className="group mt-1 pl-7">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-primary [&::-webkit-details-marker]:hidden">
+                      Cómo es este tratamiento
+                      <ChevronDown
+                        aria-hidden
+                        className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                      />
+                    </summary>
+                    <dl className="flex flex-col gap-1.5 pb-1 text-muted-foreground">
+                      {guideRows.map(([term, text]) => (
+                        <div key={term}>
+                          <dt className="font-medium text-foreground">{term}</dt>
+                          <dd className="whitespace-pre-wrap">{text}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </details>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
-      <p className="text-sm font-semibold" aria-live="polite">
-        Aceptas {acceptedText} de {totalText}
-      </p>
+      {choosing ? null : (
+        <p className="text-sm font-semibold" aria-live="polite">
+          Aceptas {acceptedText} de {totalText}
+        </p>
+      )}
       {hasSessions ? (
         <p className="text-sm text-muted-foreground">
           No lo pagas todo desde el primer día: lo que se cobra por visita se paga en cada visita.

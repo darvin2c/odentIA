@@ -154,6 +154,8 @@ export interface ClosingSession {
   booked?: BookedSession
   /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
   before?: { planItemId: string; title: string }
+  /** Lo que firmar dibuja si queda realizado (odentIA: en el odontograma); sin él, nada. */
+  draws?: { toothNumber: number; words: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */

@@ -85,7 +85,7 @@ import {
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { lesionRowsOf, treatedByItem } from "./lesion.js"
 import { dentalProductSite, dentalSiteOfRow, siteColumns, surfaceWords } from "./site.js"
-import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
+import { drawTreatedFinding, treatedFindingOf, treatedFindingWords, voidLeftFindings } from "./treated-findings.js"
 
 /**
  * Lo que hace odentIA en los momentos de lo común (ADR 0079): el odontograma,
@@ -361,6 +361,21 @@ export const dentalHooks: ProductHooks = {
       encounterId,
       await withPlanItemDental(tx, orgId, row),
     )
+  },
+
+  // Lo que la firma dibuja al terminar, en palabras, para decirlo en el cierre (revisión del 26 nov).
+  async treatmentDraws(tx, { orgId, patientId, planItemIds }) {
+    const out = new Map<string, { toothNumber: number; words: string }>()
+    if (planItemIds.length === 0) return out
+    const rows = await tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, [...planItemIds])))
+    for (const row of rows) {
+      const left = await treatedFindingOf(tx, orgId, patientId, await withPlanItemDental(tx, orgId, row))
+      if (left) out.set(row.id, { toothNumber: left.finding.toothNumber, words: treatedFindingWords(left.finding) })
+    }
+    return out
   },
 
   async treatmentUndone(

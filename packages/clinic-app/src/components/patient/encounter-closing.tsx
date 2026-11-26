@@ -1037,6 +1037,7 @@ export function ClosingSessions({
                 ? "Al firmar queda realizado."
                 : `Sigue en curso con una sesión más, la ${session.n + 1}: al firmar puedes reservarla.`}
             </p>
+            {answer === "terminar" ? <DrawnOnSign session={session} /> : null}
           </li>
         )
       })}
@@ -1073,6 +1074,7 @@ export function ClosingSessions({
                 ? `Al firmar queda realizado, en la sesión ${session.n} de ${session.m}.`
                 : `Sigue en curso: le queda la sesión ${session.n + 1}.`}
             </p>
+            {answer === "terminar" ? <DrawnOnSign session={session} /> : null}
           </li>
         )
       })}
@@ -1112,6 +1114,20 @@ export function ClosingSessions({
       })}
     </ul>
   )
+}
+
+/** «En la 46 se dibuja: …»: lo que firmar deja en el odontograma al terminarlo. */
+export function drawnOnSignText(drawn: { toothNumber: number; words: string }): string {
+  return `En la ${drawn.toothNumber} se dibuja: ${drawn.words}. Si no es así, corrígelo en el odontograma.`
+}
+
+/**
+ * Lo que firmar dibuja al dejarlo realizado (revisión del 26 nov): antes se dibujaba dentro de la
+ * firma sin verse. Solo si el producto lo dice (odentIA).
+ */
+function DrawnOnSign({ session }: { session: ClosingSession }): React.JSX.Element | null {
+  if (!session.draws) return null
+  return <p className="text-xs text-muted-foreground">{drawnOnSignText(session.draws)}</p>
 }
 
 /**

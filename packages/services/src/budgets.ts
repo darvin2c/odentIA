@@ -92,8 +92,8 @@ export { budgetLineUnitsSql, budgetValueOptionSql } from "./budget-awaiting.js"
  * - Dos o tres opciones en un mismo presupuesto (decisión 13): cada opción
  *   tiene sus líneas y su propio total, nunca sumados. La persona elige una y
  *   dentro de ella puede dejar algo para después; las otras quedan «No
- *   elegida». Mientras decide, el valor es el de la recomendada; después, el
- *   de lo elegido.
+ *   elegida». Mientras decide, el valor es el de la recomendada (sin ella, el de
+ *   la primera); después, el de lo elegido.
  * - El odontólogo actúa sobre lo que él indicó (`treatment_plan_item.created_by`),
  *   no sobre «su plan»: el plan es uno por persona.
  */
@@ -205,7 +205,7 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
   options: BudgetOptionWithTotals[]
   /**
    * Total que vale el presupuesto: el de la opción elegida o, mientras decide,
-   * el de la recomendada. Nunca la suma de las opciones. Esta y las tres
+   * el de la recomendada (sin ella, la primera). Nunca la suma de las opciones. Esta y las tres
    * siguientes son las de su única moneda; nulas si lleva dos (las dice `totals`).
    */
   totalCents: number | null
@@ -1248,7 +1248,11 @@ export async function findDraftBudget(
   return row ?? null
 }
 
-/** Nace el borrador con su primera opción, la recomendada. */
+/**
+ * Nace el borrador con su primera opción, sin recomendada: la recomendada la marca
+ * quien lo arma («Marcar como recomendada»), nunca el sistema (revisión del 26 nov,
+ * ADR 0221). Sin marca, lo que vale mientras decide es la primera (`valueOptionOf`).
+ */
 async function insertDraftBudget(
   tx: Db,
   orgId: string,
@@ -1284,7 +1288,7 @@ async function insertDraftBudget(
       patientId,
       budgetId: budget.id,
       position: 1,
-      isRecommended: true,
+      isRecommended: false,
       createdBy: actorUserId,
     })
     .returning()
@@ -1969,8 +1973,8 @@ export async function recommendBudgetOption(
 
 /**
  * Quita una opción del borrador (siempre queda al menos una). Las demás se
- * renumeran para que las letras sigan seguidas; si era la recomendada, pasa a
- * serlo la primera.
+ * renumeran para que las letras sigan seguidas; si era la recomendada, ninguna
+ * queda recomendada hasta que alguien la marque (revisión del 26 nov).
  */
 export async function removeBudgetOption(
   tx: Db,
@@ -2019,7 +2023,7 @@ export async function removeBudgetOption(
       .update(treatmentBudgetOption)
       .set({
         position: index + 1,
-        isRecommended: gone.isRecommended ? index === 0 : option.isRecommended,
+        isRecommended: option.isRecommended,
         updatedAt: new Date(),
       })
       .where(
@@ -2169,7 +2173,7 @@ export async function restoreDraftBudget(
       createdBy: actorUserId,
     })
   }
-  // La recomendada de antes (quitar la había pasado a la primera que quedó).
+  // La recomendada de antes, si había una (quitarla la había dejado sin recomendada).
   const recommended = snapshot.options.find((option) => option.isRecommended)
   if (recommended) {
     await tx
@@ -3816,7 +3820,8 @@ export async function reviseBudget(
   const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
   const plan = kept.length > 0 ? kept : sources.slice(0, 1)
   // Varios caminos sin recomendada (el odontólogo no dijo cuál, revisión del 26 nov) siguen sin ella.
-  const recommended = plan.find((source) => source.isRecommended) ?? (plan.length === 1 ? plan[0] : null) ?? null
+  // Tampoco una sola: la recomendada es la que alguien marcó.
+  const recommended = plan.find((source) => source.isRecommended) ?? null
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
   const billingModes = await readBillingModes(
     tx,
@@ -3832,7 +3837,7 @@ export async function reviseBudget(
         patientId,
         budgetId: revision.id,
         position: index + 1,
-        isRecommended: plan.length > 0 ? source?.id === recommended?.id : true,
+        isRecommended: !!recommended && source?.id === recommended.id,
         name: keepsPaths ? (source?.name ?? null) : null,
         pros: keepsPaths ? (source?.pros ?? null) : null,
         cons: keepsPaths ? (source?.cons ?? null) : null,

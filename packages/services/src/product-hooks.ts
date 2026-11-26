@@ -663,6 +663,14 @@ export interface ProductHooks {
   }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>
+  /**
+   * Lo que `treatmentDone` dejaría registrado de cada tratamiento, en palabras y sin registrarlo
+   * (odentIA: «tratamiento de conducto, buen estado» en la 46): el cierre lo dice antes de firmar.
+   */
+  treatmentDraws?(
+    tx: Db,
+    scope: { orgId: string; patientId: string; planItemIds: readonly string[] },
+  ): Promise<Map<string, { toothNumber: number; words: string }>>
   /** Un tratamiento dejó de estar realizado porque se anuló su procedimiento. */
   treatmentUndone(
     tx: Db,

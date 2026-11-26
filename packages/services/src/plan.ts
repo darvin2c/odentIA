@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   encounter,
@@ -778,6 +779,104 @@ async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise
   return Boolean(row)
 }
 
+/**
+ * La fase que la regla de siempre (`proposedPhaseOf`) le daría a lo indicado, cuando difiere de la
+ * que tiene y nadie la eligió con «Planificar…»: el Plan la sugiere en la fila, con texto, y la fase
+ * no cambia sola (revisión del 26 nov, ADR 0221). La misma regla que al indicar, en lote: un
+ * diagnóstico suyo o uno vigente de su atención en el mismo sitio. Con una sola fase, nada.
+ */
+async function phaseSuggestionsOf(
+  tx: Db,
+  orgId: string,
+  hooks: ProductHooks,
+  patientId: string,
+  items: ReadonlyArray<typeof treatmentPlanItem.$inferSelect>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (hooks.planPhases.length <= 1) return out
+  const open = items.filter((item) => !CLOSED_STATUSES.includes(item.status) && item.decisionStatus !== "no_elegida")
+  if (open.length === 0) return out
+  const planned = new Set(
+    (
+      await tx
+        .select({ id: auditEvent.entityId })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.entity, "treatment_plan_item"),
+            inArray(auditEvent.entityId, open.map((item) => item.id)),
+            eq(auditEvent.action, "plan.item_planned"),
+            sql`${auditEvent.metadata}->>'phase' is not null`,
+          ),
+        )
+    ).map((row) => row.id),
+  )
+  const pending = open.filter((item) => !planned.has(item.id))
+  if (pending.length === 0) return out
+  const serviceIds = [...new Set(pending.flatMap((item) => (item.serviceId ? [item.serviceId] : [])))]
+  const services = serviceIds.length
+    ? await tx
+        .select({ id: serviceCatalog.id, templateId: serviceCatalog.templateId, specialtyId: serviceCatalog.specialtyId, key: treatmentTemplate.key })
+        .from(serviceCatalog)
+        .leftJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+        .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, serviceIds)))
+    : []
+  const kinds = new Map<string, { kind: string | null; key: string | null }>()
+  for (const service of services) kinds.set(service.id, { kind: await serviceKindOf(tx, orgId, service), key: service.key ?? null })
+  const encounterIds = [...new Set(pending.flatMap((item) => (item.sourceEncounterId ? [item.sourceEncounterId] : [])))]
+  const atSite = encounterIds.length
+    ? await tx
+        .select({
+          encounterId: encounterDiagnosis.encounterId,
+          siteSystem: encounterDiagnosis.siteSystem,
+          siteCode: encounterDiagnosis.siteCode,
+          system: encounterDiagnosis.diagnosisSystem,
+          code: encounterDiagnosis.diagnosisCode,
+        })
+        .from(encounterDiagnosis)
+        .where(
+          and(
+            eq(encounterDiagnosis.organizationId, orgId),
+            eq(encounterDiagnosis.patientId, patientId),
+            inArray(encounterDiagnosis.encounterId, encounterIds),
+            eq(encounterDiagnosis.status, "activo"),
+            isNull(encounterDiagnosis.voidedAt),
+          ),
+        )
+    : []
+  const found: Array<{ itemId: string; phase: string; cause: { system: string | null; code: string | null } | null }> = []
+  for (const item of pending) {
+    const service = item.serviceId ? kinds.get(item.serviceId) : undefined
+    const diagnoses: Array<{ system: string | null; code: string | null }> = [
+      ...(item.diagnosisCode ? [{ system: item.diagnosisSystem, code: item.diagnosisCode }] : []),
+      ...(item.siteSystem && item.siteCode
+        ? atSite
+            .filter((row) => row.encounterId === item.sourceEncounterId && row.siteSystem === item.siteSystem && row.siteCode === item.siteCode)
+            .map((row) => ({ system: row.system, code: row.code }))
+        : []),
+    ]
+    const phase = hooks.phaseFor(service?.kind ?? null, diagnoses, service?.key ?? null)
+    if (phase === (item.phase ?? hooks.planPhases[0])) continue
+    // Lo que la mueve: un diagnóstico, si sin él la regla la dejaría donde dice su tipo.
+    const byKind = hooks.phaseFor(service?.kind ?? null, [], service?.key ?? null)
+    const cause = phase === byKind ? null : (diagnoses.find((one) => hooks.phaseFor(service?.kind ?? null, [one], service?.key ?? null) === phase) ?? null)
+    found.push({ itemId: item.id, phase, cause })
+  }
+  if (found.length === 0) return out
+  const titles = await diagnosisTitlesOf(tx, found.flatMap((row) => (row.cause ? [row.cause] : [])))
+  const byId = new Map(pending.map((item) => [item.id, item]))
+  for (const { itemId, phase, cause } of found) {
+    const item = byId.get(itemId)!
+    const label = hooks.phaseWords?.(phase) ?? phase
+    const tooth = hooks.site.fields(item)["toothNumber"]
+    const named = cause?.code ? (titles.get(`${cause.system}|${cause.code}`) ?? diagnosisCodeLabel(cause.system, cause.code)) : null
+    const why = named ? `con ${named.charAt(0).toLowerCase()}${named.slice(1)}${typeof tooth === "number" ? ` de la ${tooth}` : ""}` : "por su tipo de tratamiento"
+    out.set(itemId, `Sugerencia: ${why} iría en «${label}». Cámbiala con «Planificar…».`)
+  }
+  return out
+}
+
 function assertPlannedSessions(value: number | null | undefined): number | null {
   if (value === undefined || value === null) return null
   if (!Number.isInteger(value) || value < 1 || value > 60)
@@ -1044,13 +1143,15 @@ export async function listPlanItems(
    * `extractionRisks`: a la exodoncia por hacer, lo que toma y la cambia (`extractionRisksOf`). Solo
    * lo pide quien lee lo clínico (la ruta del plan): la coordinación y el dictado no lo reciben.
    */
-  opts: { withoutVoided?: boolean; extractionRisks?: boolean; sessions?: boolean } = {},
+  opts: { withoutVoided?: boolean; extractionRisks?: boolean; sessions?: boolean; phaseSuggestions?: boolean } = {},
 ): Promise<
   Array<
     PlanItemWithProgress & {
       waitsFor: { id: string; title: string } | null
       extractionRisks?: string[]
       sessions?: PlanItemSession[]
+      /** «Sugerencia: con pulpitis de la 46 iría en «Urgencia»…» (`phaseSuggestionsOf`); solo si se pide. */
+      phaseSuggestion?: string
     }
   >
 > {
@@ -1095,6 +1196,7 @@ export async function listPlanItems(
         withProgress.map((item) => item.id),
       )
     : null
+  const suggested = opts.phaseSuggestions ? await phaseSuggestionsOf(tx, orgId, hooks, patientId, items) : new Map<string, string>()
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
     return {
@@ -1104,6 +1206,7 @@ export async function listPlanItems(
       consentMissing: consents.get(item.id)?.missing ?? [],
       ...(risky.has(item.id) && risks.length > 0 ? { extractionRisks: risks } : {}),
       ...(sessions ? { sessions: sessions.get(item.id) ?? [] } : {}),
+      ...(suggested.has(item.id) ? { phaseSuggestion: suggested.get(item.id)! } : {}),
     }
   })
 }
@@ -1451,7 +1554,6 @@ export async function updatePlanItem(
   const set: Partial<typeof treatmentPlanItem.$inferInsert> = {}
   const fields: string[] = []
   const hooks = await hooksOf(tx, orgId)
-  let newService: ServiceRow | null = null
   let itemSite: SiteColumns = { siteSystem: current.siteSystem, siteCode: current.siteCode, siteQualifiers: current.siteQualifiers }
   let scope = assertScopeValue(hooks.site, current.scope)
   // El sitio pedido: lo que llegó sobre lo que ya tenía.
@@ -1482,8 +1584,6 @@ export async function updatePlanItem(
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
       // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
       if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
-      // Su fase se vuelve a proponer más abajo, con el diagnóstico que quede.
-      newService = service
       fields.push("serviceId")
     }
   }
@@ -1528,38 +1628,9 @@ export async function updatePlanItem(
     fields.push("diagnosisCode")
   }
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
-  // Cambió el servicio, el sitio o el diagnóstico: su fase se vuelve a proponer con la misma regla
-  // que al indicar (la exodoncia cambiada por una endodoncia no se queda en la quirúrgica, QA del
-  // 9 nov; la endodoncia de una pulpitis va a «Urgencia», reglas clínicas del 18 nov), salvo que
-  // alguien la haya elegido a mano con «Planificar…». El orden del plan sale de ella («va después»).
-  if (
-    fields.some((field) => field === "serviceId" || field === "site" || field === "diagnosisCode") &&
-    !(await phaseChosenByHand(tx, orgId, current.id))
-  ) {
-    const [kept] =
-      newService || !current.serviceId
-        ? []
-        : await tx
-            .select({ templateId: serviceCatalog.templateId, specialtyId: serviceCatalog.specialtyId })
-            .from(serviceCatalog)
-            .where(and(eq(serviceCatalog.id, current.serviceId), eq(serviceCatalog.organizationId, orgId)))
-            .limit(1)
-    const encounterIds = [current.sourceEncounterId, patch.encounterId.trim()].filter(
-      (id): id is string => typeof id === "string" && id.length > 0,
-    )
-    set.phase = await proposedPhaseOf(tx, orgId, hooks, {
-      patientId,
-      service: newService ?? kept ?? null,
-      encounterIds: [...new Set(encounterIds)],
-      site: { siteSystem: itemSite.siteSystem, siteCode: itemSite.siteCode },
-      own: {
-        diagnosisSystem: "diagnosisCode" in set ? (set.diagnosisSystem ?? null) : current.diagnosisSystem,
-        diagnosisCode: "diagnosisCode" in set ? (set.diagnosisCode ?? null) : current.diagnosisCode,
-      },
-    })
-    // Al cambiar de fase entra al final de la nueva, como con «Planificar…».
-    if (set.phase !== current.phase) set.sortOrder = await nextSortOrder(tx, orgId, current.planId)
-  }
+  // Cambiar el servicio, el sitio o el diagnóstico no mueve la fase ni el orden: la fase la decide
+  // el profesional con «Planificar…» (revisión del 26 nov, ADR 0221). Si la regla de siempre la
+  // pondría en otra, el Plan lo sugiere en la fila (`phaseSuggestion`), sin cambiarla.
   const [updated] = await tx
     .update(treatmentPlanItem)
     .set({ ...set, updatedAt: new Date() })

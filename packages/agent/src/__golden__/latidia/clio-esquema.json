@@ -178,12 +178,12 @@
             "description": "El código del diagnóstico que nombró el médico, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno."
           },
           "diagnosisType": {
+            "description": "provisional si el médico dice que es presuntivo o probable; confirmed solo si dice que es seguro o definitivo. Si no dijo ninguna de las dos, no lo indiques.",
             "type": "string",
             "enum": [
               "provisional",
               "confirmed"
-            ],
-            "description": "provisional si el médico aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques."
+            ]
           },
           "note": {
             "description": "Una precisión que dijo el médico sobre el diagnóstico.",
@@ -198,8 +198,7 @@
           }
         },
         "required": [
-          "diagnosisCode",
-          "diagnosisType"
+          "diagnosisCode"
         ],
         "additionalProperties": false
       }

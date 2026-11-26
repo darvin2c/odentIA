@@ -68,6 +68,7 @@ import {
 import {
   companionFamily,
   companionKinOf,
+  companionOwnMedicinesWhy,
   companionSelfTalk,
   healthNegated,
   selfConditionsOf,
@@ -908,6 +909,9 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value] as const)
       .filter(([, value]) => value !== undefined && value !== null && value !== ""),
   )
+  // Sin decir si es presuntivo o definitivo, queda presuntivo: es lo que no afirma nada, y la
+  // tarjeta lo muestra para cambiarlo (revisión del 26 nov, ADR 0221).
+  if (draft.kind === "diagnostico" && payload["diagnosisType"] === undefined) payload["diagnosisType"] = "provisional"
   if (draft.kind === "nota") {
     const note = Object.fromEntries(
       Object.entries(payload)
@@ -2563,6 +2567,9 @@ export async function saveDictationSegment(
     if (said.kind === "salud") {
       const phrase = said.sourceText?.trim() ?? ""
       if (!phrase) continue
+      // Las medicinas que quien acompaña dice que toma ella no se proponen; su motivo, a «No lo usé».
+      const ownMedicines = companionOwnMedicinesWhy(said.payload, phrase)
+      if (ownMedicines) droppedForms.push({ said: phrase, why: ownMedicines, targets: [] })
       // El nombre se busca en su frase y, si no está, en lo dicho en la pausa: Clío a veces cita solo
       // un pedazo («tomo warfarina…») y el losartán dicho al lado salía como no propuesto (QA del 22 nov, H4).
       const inPhrase = groundHealthNames(said.payload, phrase)
@@ -3494,7 +3501,8 @@ export async function confirmDictationSuggestion(
     const input = {
       diagnosisCode: String(payload["diagnosisCode"]),
       diagnosisSystem: typeof payload["diagnosisSystem"] === "string" ? payload["diagnosisSystem"] : null,
-      diagnosisType: String(payload["diagnosisType"]),
+      // Sin tipo dicho, presuntivo (como al preparar): lo que no afirma nada.
+      diagnosisType: String(payload["diagnosisType"] ?? "provisional"),
       toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
       note: (payload["note"] as string | undefined) ?? null,
@@ -4309,13 +4317,18 @@ async function confirmPlanChoice(
     await removeBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [main.id], optionId: created.id })
     await addBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [other.id], optionId: created.id })
   }
-  // La A nace recomendada; si el odontólogo no dijo cuál recomienda, ninguna lo es: el paciente ve
-  // las opciones sin recomendación, y se marca después con «Marcar como recomendada» (revisión del 26 nov).
-  if (payload["recommended"] !== true) {
+  // Ninguna nace recomendada: la A lo es solo si el odontólogo dijo que la recomienda. Si no, el
+  // paciente ve las opciones sin recomendación, y se marca después con «Marcar como recomendada»
+  // (revisión del 26 nov). Un borrador de antes con su A marcada también queda sin marca.
+  await tx
+    .update(treatmentBudgetOption)
+    .set({ isRecommended: false, updatedAt: new Date() })
+    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budget.id)))
+  if (payload["recommended"] === true) {
     await tx
       .update(treatmentBudgetOption)
-      .set({ isRecommended: false, updatedAt: new Date() })
-      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budget.id)))
+      .set({ isRecommended: true, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionA.id)))
   }
   return main.id
 }

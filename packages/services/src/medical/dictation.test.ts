@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { encounter } from "@odentia/db/schema/clinical"
+import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -42,6 +42,9 @@ describe("Clío médica (issue 229, entrega 10)", () => {
     await enable(true)
     try {
       const fx = await clinicalFixture()
+      // Su servicio no se usa aquí: sin quitarlo, la prueba de abajo tendría dos
+      // «Tratamiento propio» y su plan dictado quedaría, con razón, por revisar.
+      await ownerDb.delete(serviceCatalog).where(eq(serviceCatalog.id, fx.service.id))
       const { suggestions } = await fx.run((tx) =>
         saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
           drafts: [{ kind: "examen", payload: { system: "neurologico", state: "sin_alteraciones", finding: "Lasègue negativo" }, sourceText: "Lasègue negativo." }],

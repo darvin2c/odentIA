@@ -165,7 +165,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman). Ninguna nace recomendada: la marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; sin marca, la persona elige sin ninguna elegida de antemano. La recomendada es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer" && form !== "dos caminos") } : {}),
           },
         ]
@@ -471,7 +471,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» al indicarlo, si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Un diagnóstico que anotas después no mueve lo ya indicado: si va antes, pásalo tú con «Planificar…». Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» al indicarlo, si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Un diagnóstico que anotas después, o cambiarle el servicio, no mueve lo ya indicado: si iría en otra fase, su fila lo sugiere y lo pasas tú con «Planificar…».",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },

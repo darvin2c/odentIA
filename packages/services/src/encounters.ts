@@ -2458,6 +2458,11 @@ export interface ClosingSession {
   booked?: BookedSession
   /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
   before?: { planItemId: string; title: string }
+  /**
+   * Lo que firmar dibuja si queda realizado (odentIA: «tratamiento de conducto, buen estado» en la
+   * 46), para decirlo en el cierre y corregirlo en el odontograma si no es así. Sin él, nada.
+   */
+  draws?: { toothNumber: number; words: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
@@ -2649,6 +2654,7 @@ async function closingSessionsOf(
   orgId: string,
   encounterId: string,
   appointmentId: string | null,
+  patientId: string,
 ): Promise<ClosingCheckBase["sessions"]> {
   const rows = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
     select worked.id, worked.title, worked.planned_sessions as m,
@@ -2666,9 +2672,20 @@ async function closingSessionsOf(
   const next = new Map(
     (await nextSessionsOf(tx, orgId, rows.map((row) => row.id), appointmentId)).map((session) => [session.planItemId, session.booked]),
   )
+  // Lo que la firma dibuja al terminarlo (odentIA: en el odontograma), dicho antes de firmar: dibujarlo
+  // sin que se vea era fijar un dato clínico sin mostrarlo (revisión del 26 nov, ADR 0221).
+  const draws = (await (await productHooks(tx, orgId)).treatmentDraws?.(tx, { orgId, patientId, planItemIds: rows.map((row) => row.id) })) ?? new Map()
   for (const row of rows) {
     const booked = next.get(row.id)
-    const session: ClosingSession = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m), ...(booked ? { booked } : {}) }
+    const drawn = draws.get(row.id)
+    const session: ClosingSession = {
+      planItemId: row.id,
+      title: row.title,
+      n: Number(row.done),
+      m: Number(row.m),
+      ...(booked ? { booked } : {}),
+      ...(drawn ? { draws: drawn } : {}),
+    }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
   // Lo que la cita traía, o se trajo al empezar («Hacer hoy»), y hoy no se
@@ -2948,7 +2965,7 @@ export async function checkEncounterClosing(
     uses: await anesthesiaUsesOf(tx, orgId, row.id),
     asksAsa: (await productHooks(tx, orgId)).asksAsa,
   }
-  const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
+  const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null, row.patientId)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
   const openForms = await listOpenEncounterForms(tx, orgId, row.id)
   // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
