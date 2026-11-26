@@ -21,6 +21,7 @@ import {
 import { businessDays } from "../../lib/pricing"
 import { ofProduct, WORDS } from "../../lib/product"
 import { contactEmail, waitlistApiUrl } from "../../lib/site"
+import { countryOfDevice } from "../../lib/device-country"
 
 /** Países de habla hispana primero; el código es ISO 3166-1 alfa-2 y el prefijo, E.164. */
 const COUNTRIES: [code: string, name: string, dial: string][] = [
@@ -66,8 +67,11 @@ const DRAFT_KEY = "odentia:solicitud:v1"
 /** El país del dispositivo, si está en la lista; si no, ninguno (se elige). */
 function deviceCountry(): string {
   try {
-    const region = new Intl.Locale(navigator.language).maximize().region ?? ""
-    return COUNTRIES.some(([code]) => code === region) ? region : ""
+    return countryOfDevice(
+      navigator.language,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      COUNTRIES.map(([code]) => code),
+    )
   } catch {
     return ""
   }
