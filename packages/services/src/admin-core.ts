@@ -863,6 +863,32 @@ export async function resolveAdminVerification(
 }
 
 /**
+ * ¿Pasó esta sesión el código del personal, con la misma regla de la administración? Para el
+ * token firmado de otra app (ADR 0219): gestorIA deja mirar una tienda como soporte solo con esta
+ * marca. Vale la marca de la sesión, viva y del mismo país que la petición que pide el token, de
+ * una persona activa del personal, con su factor vigente y sin bloqueo. El equipo reconocido no
+ * cuenta aquí: su cookie es de la API de la administración y no llega a otro dominio; al abrir la
+ * administración con él, la sesión ya queda marcada.
+ */
+export async function staffVerifiedSession(
+  ownerDb: Db,
+  input: { userId: string; sessionId: string; country: string | null; now: Date },
+): Promise<boolean> {
+  const [staff] = await ownerDb
+    .select({ role: adminStaff.role, active: adminStaff.active })
+    .from(adminStaff)
+    .where(eq(adminStaff.userId, input.userId))
+    .limit(1)
+  if (!staff?.active || !isAdminRole(staff.role)) return false
+  const blocked = await ownerDb.execute(
+    sql`select 1 from "user_global_block" where "user_id" = ${input.userId} and "active" and ("expires_at" is null or "expires_at" > now()) limit 1`,
+  )
+  if (Array.isArray(blocked) && blocked.length > 0) return false
+  const binding = await getLiveSessionBinding(ownerDb, input.sessionId, input.now)
+  return binding !== null && binding.userId === input.userId && binding.country === input.country
+}
+
+/**
  * Reserva atómica del intento MFA con freno de fuerza bruta y anti-replay,
  * persistida en auditoría. En UNA transacción con lock consultivo por usuario:
  * 1) cuenta los `staff.mfa.attempt` en ventana y lanza 429 si se agota (la

@@ -61,6 +61,31 @@ export interface CreateAuthOptions {
    * sesión de una a otra al abrir un lugar de otro dominio. Sin ellas, el pase no sale de aquí.
    */
   sisters?: readonly PaseSister[]
+  /**
+   * Lo que el token firmado suma de la sesión que lo pide (ADR 0219): gestorIA sabe así si esa
+   * sesión pasó el código del personal. Lo decide quien crea la cuenta, que conoce la petición;
+   * no puede pisar los datos de la persona.
+   */
+  tokenClaims?: (who: { userId: string; sessionId: string }) => Promise<Record<string, unknown>>
+}
+
+/**
+ * Lo que lleva el token firmado de otra app (ADR 0201): lo justo para su copia de la cuenta, más
+ * lo que sume `tokenClaims` de la sesión (ADR 0219). Lo de la persona va al final: lo sumado
+ * nunca lo pisa.
+ */
+export async function signedTokenPayload(
+  who: { id: string; email: string; emailVerified: boolean; name: string; image?: string | null },
+  current: { id: string },
+  tokenClaims?: CreateAuthOptions["tokenClaims"],
+): Promise<Record<string, unknown>> {
+  return {
+    ...(tokenClaims ? await tokenClaims({ userId: who.id, sessionId: current.id }) : {}),
+    email: who.email,
+    emailVerified: who.emailVerified,
+    name: who.name,
+    image: who.image ?? null,
+  }
 }
 
 /**
@@ -109,6 +134,7 @@ export function createAuth({
   app = BASE_ACCOUNT_APP,
   signedTokens = false,
   sisters = [],
+  tokenClaims,
 }: CreateAuthOptions) {
   const { name: appName, mailBrand: brand } = ACCOUNT_APP_INFO[app]
   return betterAuth({
@@ -219,12 +245,7 @@ export function createAuth({
           issuer: baseURL,
           audience: app,
           expirationTime: "15m",
-          definePayload: ({ user: who }) => ({
-            email: who.email,
-            emailVerified: who.emailVerified,
-            name: who.name,
-            image: who.image ?? null,
-          }),
+          definePayload: ({ user: who, session: current }) => signedTokenPayload(who, current, tokenClaims),
         },
       }),
       keepTwoFactorWhileRequired(ownerDb),

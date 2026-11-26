@@ -362,12 +362,13 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
   })
 
   app.get("/accounts/:accountId", async (c) => {
-    if (!requireAdmin(c)) return forbid(c)
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c)
     const accountId = c.req.param("accountId")
     return runService(c, 200, async () => {
       const [detail, requests] = await Promise.all([
         getAppAccountDetail(deps.ownerDb, accountId),
-        listAppContractRequests(deps.ownerDb, accountId),
+        listAppContractRequests(deps.ownerDb, accountId, actor.userId),
       ])
       return {
         ...detail,

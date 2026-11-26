@@ -222,6 +222,8 @@ export interface AppContractRequestRow {
   /** Lo que dijo la app, o por qué todavía no llega. */
   message: string | null
   requestedBy: string | null
+  /** Lo pidió quien mira la lista: «Mirar la tienda» es solo para quien pidió entrar (ADR 0219). */
+  mine: boolean
   createdAt: string
   doneAt: string | null
   /** A quién se refiere (la persona por quitar, o soporte y por cuánto). */
@@ -244,10 +246,11 @@ function detailOf(
   return null
 }
 
-/** Los pedidos de una cuenta, del más nuevo al más viejo. */
+/** Los pedidos de una cuenta, del más nuevo al más viejo; `viewerId` dice cuáles pidió quien mira. */
 export async function listAppContractRequests(
   tx: Db,
   accountId: string,
+  viewerId: string | null = null,
   limit = 30,
 ): Promise<AppContractRequestRow[]> {
   const rows = await tx
@@ -277,6 +280,7 @@ export async function listAppContractRequests(
     status: request.status,
     message: request.status === "pendiente" ? request.lastError : request.resultMessage,
     requestedBy: requesterName || requesterEmail || null,
+    mine: viewerId !== null && request.requestedBy === viewerId,
     createdAt: request.createdAt.toISOString(),
     doneAt: request.doneAt?.toISOString() ?? null,
     detail: detailOf(request.type, request.payload, emails),

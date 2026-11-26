@@ -6,6 +6,7 @@ import type { Storage } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
 import { portalOrigin } from "./lib/portal-origin.js"
+import { visitCountryNow } from "./lib/visit.js"
 
 /**
  * Una instalación para los dominios de cada producto (decisión 9 del issue 229):
@@ -116,6 +117,25 @@ describe("el dominio de una app que es otro sistema (gestorIA, ADR 0201)", () =>
     expect((await app.request("https://api.gestoria.test/api/patients")).status).toBe(404)
     expect((await app.request("https://gestoria.test/health")).status).toBe(404)
     expect(await (await app.request("https://api.odentia.test/api/auth/get-session")).text()).toBe("odentIA")
+  })
+
+  it("su cuenta conoce el país de la visita mientras atiende, para el código del personal (ADR 0219)", async () => {
+    const entry = {
+      handler: async () => Response.json(visitCountryNow() ?? "fuera"),
+      api: { getSession: async () => null },
+    } as unknown as Auth
+    const on = appWith(entry)
+    const country = async (header?: string) =>
+      (
+        await on.request("https://api.gestoria.test/api/auth/token", {
+          headers: header ? { "cf-ipcountry": header } : {},
+        })
+      ).json()
+    expect(await country("pe")).toEqual({ country: "PE" })
+    // Sin la cabecera de Cloudflare, nulo: solo vale una marca puesta también sin país.
+    expect(await country()).toEqual({ country: null })
+    // Fuera de esa petición no hay país: quien decide con él lo niega.
+    expect(visitCountryNow()).toBeUndefined()
   })
 
   it("con su entrada, solo responde la cuenta, sin las organizaciones de las clínicas", async () => {

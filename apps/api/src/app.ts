@@ -63,12 +63,13 @@ import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import { streamSSE } from "hono/streaming"
 import { z } from "zod"
-import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
+import { adminContextOf, requireAdminContext, visitCountryOf } from "./lib/admin-context.js"
 import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { lockedRecordGuard } from "./lib/record-lock.js"
 import { searchFromHeader } from "./lib/search-header.js"
+import { withVisitCountry } from "./lib/visit.js"
 import {
   auditDenied,
   createSupportSessionRoute,
@@ -623,7 +624,9 @@ export function createApp(deps: AppDeps) {
         return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
       return entryCors(c, async () => {
         const blocked = await factorBoundary(c, async () => {
-          c.res = await entryAuth.handler(c.req.raw)
+          // El token firmado dice si esta sesión pasó el código del personal, solo desde el
+          // país donde se puso (ADR 0219): el país de la petición viaja hasta él.
+          c.res = await withVisitCountry(visitCountryOf(c), () => entryAuth.handler(c.req.raw))
         })
         if (blocked) c.res = blocked
       })
