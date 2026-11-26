@@ -101,7 +101,8 @@ test("precio negociado: vence, se marca en Hoy, se renueva en su ficha y se avis
   await gotoHydrated(page, hostUrl("admin", "/billing"))
   await expect(page.getByRole("heading", { name: "Cobros y planes", level: 1 })).toBeVisible()
   await expect(page.locator("#alta")).toHaveCount(0)
-  await page.getByRole("heading", { name: "Planes", exact: true }).scrollIntoViewIfNeeded()
+  // La lista se dibuja otra vez al cargar los planes: se espera el encabezado, sin desplazar a mano.
+  await expect(page.getByRole("heading", { name: "Planes", exact: true })).toBeVisible()
   await expect(page.getByText("no sale en la web").first()).toBeVisible()
   await shot("planes-por-producto")
   await page.getByRole("listitem").filter({ hasText: `Fundadores ${tag}` }).getByRole("button", { name: "Editar" }).click()
