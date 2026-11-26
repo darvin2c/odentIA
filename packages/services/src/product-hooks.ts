@@ -429,6 +429,8 @@ export interface DictationDiagnosis {
 export interface DictationPatient {
   /** Si es adulto (null: no se sabe su edad). */
   adult: boolean | null
+  /** Sus años cumplidos (null: no se sabe): un peso imposible para su edad avisa (mesa del 25 nov). */
+  ageYears?: number | null
   /**
    * Lo diagnosticado en la atención (en la pausa, propuesto o confirmado, y lo que responden sus
    * fichas): decide la variante que depende de eso (odentIA: la endodoncia vital o no vital, prueba
@@ -505,7 +507,7 @@ export interface ProductDictation {
     tx: Db,
     kind: DictationKind,
     payload: Record<string, unknown>,
-    context: { diagnosisSystem: DiagnosisSystemKey; product: unknown },
+    context: { diagnosisSystem: DiagnosisSystemKey; product: unknown; ageYears?: number | null },
   ): Promise<DictationPrepared | null>
   /** Lo que entraría a la historia, en pocas palabras, de una clase propia. */
   summarize(kind: DictationKind, payload: Record<string, unknown>): string

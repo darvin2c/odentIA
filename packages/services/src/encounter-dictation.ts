@@ -1,4 +1,5 @@
 import {
+  ageInYears,
   ADMINISTRATION_ROUTES,
   type AllergenEntry,
   type ClinicalProduct,
@@ -448,7 +449,7 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
     site: hooks.site,
     formQuestions: [],
     serviceWords: serviceWordsOf(hooks),
-    patient: { adult: age?.birthDate ? !age.isMinor : null },
+    patient: { adult: age?.birthDate ? !age.isMinor : null, ageYears: age?.birthDate ? ageInYears(age.birthDate, age.today) : null },
   }
 }
 
@@ -865,7 +866,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     )
     return Object.keys(note).length ? { payload: note, status: "lista", note: null } : null
   }
-  if (own) return dictation.prepare(tx, draft.kind, payload, { diagnosisSystem, product: scope.product })
+  if (own) return dictation.prepare(tx, draft.kind, payload, { diagnosisSystem, product: scope.product, ageYears: scope.patient.ageYears ?? null })
   if (draft.kind === "diagnostico" || draft.kind === "plan" || draft.kind === "procedimiento") {
     const site = dictation.normalizeSite(payload)
     if (site.invalid) return { payload: site.payload, status: "por_revisar", note: site.invalid }

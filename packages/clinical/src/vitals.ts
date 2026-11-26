@@ -268,3 +268,34 @@ export function formatVitals(vitals: Vitals | null | undefined): string {
   }
   return parts.join(" · ")
 }
+
+/** Los signos que dicta odentIA (mesa del 25 nov, entrega 3, decisión 6): lo que cambia la anestesia o avisa. */
+export const DENTAL_DICTATED_VITAL_KEYS: readonly VitalSignKey[] = ["peso", "presionSistolica", "presionDiastolica"]
+
+/**
+ * Lo que puede pesar alguien a su edad, con márgenes muy amplios por encima y por debajo de las
+ * curvas de peso para la edad de la OMS (0–5 años, Child Growth Standards; 5–19, Growth Reference
+ * 2007): fuera de eso no es un niño muy grande o muy chico, es un error al anotarlo o al dictarlo
+ * («230» en vez de «23»). Desde los 18 vale el rango de plausibilidad de siempre (`VITAL_SIGNS`).
+ */
+const WEIGHT_FOR_AGE: ReadonlyArray<{ below: number; min: number; max: number }> = [
+  { below: 1, min: 0.5, max: 16 },
+  { below: 3, min: 5, max: 25 },
+  { below: 6, min: 7, max: 45 },
+  { below: 10, min: 10, max: 90 },
+  { below: 14, min: 15, max: 130 },
+  { below: 18, min: 20, max: 200 },
+]
+
+/**
+ * «230 kg no es un peso posible a los 7 años: revísalo antes de usarlo.» (mesa del 25 nov, entrega
+ * 3), o null si el peso es posible para su edad o no se sabe la edad. Avisa antes de que el peso se
+ * use (la dosis máxima de anestesia, la receta de un niño), no lo corrige.
+ */
+export function weightForAgeAlert(weightKg: number | null | undefined, ageYears: number | null | undefined): string | null {
+  if (weightKg === null || weightKg === undefined || !(weightKg > 0) || ageYears === null || ageYears === undefined || ageYears < 0) return null
+  const band = WEIGHT_FOR_AGE.find((one) => ageYears < one.below)
+  if (!band || (weightKg >= band.min && weightKg <= band.max)) return null
+  const age = ageYears < 1 ? "antes del año" : `a los ${Math.floor(ageYears)} ${Math.floor(ageYears) === 1 ? "año" : "años"}`
+  return `${weightKg.toLocaleString("es")} kg no es un peso posible ${age}: revísalo antes de usarlo.`
+}

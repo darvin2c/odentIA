@@ -50,6 +50,36 @@
       },
       "additionalProperties": false
     },
+    "signos": {
+      "description": "El peso medido y la presión que dijo, en una sola entrada. Omite lo que no dijo.",
+      "type": "object",
+      "properties": {
+        "peso": {
+          "description": "El peso en kg.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 400
+        },
+        "presionSistolica": {
+          "description": "La presión arterial sistólica en mmHg: el primer número («ciento dieciocho con setenta y seis» = 118).",
+          "type": "number",
+          "minimum": 50,
+          "maximum": 260
+        },
+        "presionDiastolica": {
+          "description": "La presión arterial diastólica en mmHg: el segundo número («ciento dieciocho con setenta y seis» = 76).",
+          "type": "number",
+          "minimum": 30,
+          "maximum": 160
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "additionalProperties": false
+    },
     "odontograma": {
       "default": [],
       "description": "Un elemento por cada hallazgo de una pieza que nombró el odontólogo, de la lista de hallazgos.",
