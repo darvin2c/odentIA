@@ -267,3 +267,24 @@ describe("lo dicho para otro día no queda también como hecho hoy (revisión de
     expect(plannedInSamePhrase(done, [{ ...plan, payload: { service: "corona", toothNumber: 46 } }])).toBe(false)
   })
 })
+
+describe("el repaso no tapa un cambio clínico (revisión de código del 26 nov)", () => {
+  const before = ["Refiere dolor en el lado derecho al masticar, que aumenta con el frío."]
+  it.each(["Refiere dolor en el lado izquierdo al masticar.", "Dolor que aumenta con el calor.", "Refiere dolor punzante al masticar."])("«%s» se queda", (said) => {
+    const now = { kind: "nota", payload: { presentIllness: said } }
+    expect(withoutRepeatedNotes([now], before, { review: true })).toEqual([now])
+  })
+})
+
+describe("lo dicho como plan con otras caras o sin pieza no quita lo de hoy", () => {
+  const phrase = "hoy le hago la resina oclusal de la 46 y la distal la próxima"
+  it("otras caras de la misma pieza: las dos se quedan", () => {
+    const done = { kind: "procedimiento", payload: { service: "resina", toothNumber: 46, surfaces: ["O"] }, sourceText: phrase }
+    const plan = { kind: "plan", payload: { service: "resina", toothNumber: 46, surfaces: ["D"] }, sourceText: phrase }
+    expect(plannedInSamePhrase(done, [done, plan])).toBe(false)
+  })
+  it("sin pieza: las dos se quedan", () => {
+    const said = "hoy la profilaxis y otra profilaxis en seis meses"
+    expect(plannedInSamePhrase({ kind: "procedimiento", payload: { service: "profilaxis" }, sourceText: said }, [{ kind: "plan", payload: { service: "profilaxis" }, sourceText: said }])).toBe(false)
+  })
+})

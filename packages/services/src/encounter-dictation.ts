@@ -64,11 +64,12 @@ import {
   reviewDeclaredHealth,
 } from "./clinical.js"
 import {
+  companionSelfTalk,
   groundHealthNames,
   hasDeclaredHealth,
   hasHealth,
   healthDrugKeysOf,
-  healthNamedIn,
+  healthNamed,
   healthSupersedingKeysOf,
   saidInterviewOf,
   saidFamilyOf,
@@ -1538,6 +1539,7 @@ async function refreshBudgetPreview(tx: Db, orgId: string, patientId: string, en
 const IN_SENT_BUDGET = "Está en un presupuesto que el paciente aún no respondió: se registra como servicio de tu lista. Anota su respuesta en el presupuesto."
 const ACCEPTED_WHEN_DONE = "Estaba en un presupuesto sin aceptar: al confirmar, queda aceptado y hecho, con su precio."
 const NOT_IN_SERVICES = "No está en tus servicios: queda registrado sin cobro. Si se cobra, elige el servicio."
+const ONE_SERVICE = (said: string) => `«${said}» puede ser la prestación de tus servicios que sale aquí: elígela, si se cobra. Si no, queda registrado sin cobro.`
 const MANY_SERVICES = (said: string) => `«${said}» calza con más de una prestación de tus servicios: elige cuál, si se cobra. Si no, queda registrado sin cobro.`
 
 /**
@@ -1582,7 +1584,7 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
   // fotocurable»): la tarjeta las ofrece para elegir, y el aviso no dice «no está en tus servicios»
   // (revisión del 25 nov: lo decía con 3 candidatas a la vista).
   if (Array.isArray(base["candidates"]) && base["candidates"].length)
-    return { payload: { ...base, source: "libre" }, status: "lista", note: MANY_SERVICES(spoken) }
+    return { payload: { ...base, source: "libre" }, status: "lista", note: base["candidates"].length > 1 ? MANY_SERVICES(spoken) : ONE_SERVICE(spoken) }
   // Ni en el plan ni en sus servicios: queda registrado sin cobro, y si se cobra se elige el servicio.
   return { payload: { ...base, source: "libre" }, status: "lista", note: NOT_IN_SERVICES }
 }
@@ -1862,15 +1864,19 @@ export function plannedInSamePhrase(
   if (!phrase) return false
   const service = normalizeForSearch(String(done.payload["service"] ?? "")).trim()
   const place = placeOf(done.payload)
+  // Sin pieza no se sabe si es la misma («hoy la profilaxis y otra en seis meses»): las dos se quedan.
+  if (place.tooth === null) return false
   return drafts.some((other) => {
     if (other === done || other.kind !== "plan") return false
     const otherPhrase = normalizeForSearch(other.sourceText ?? "").trim()
     if (!otherPhrase || !(otherPhrase.includes(phrase) || phrase.includes(otherPhrase))) return false
-    if (placeOf(other.payload).tooth !== place.tooth) return false
-    const planned = [other.payload as PlanChoice, ...(Array.isArray(other.payload["options"]) ? (other.payload["options"] as PlanChoice[]) : [])].map((choice) =>
+    // La misma pieza y las mismas caras: «la oclusal hoy y la distal la próxima» son dos resinas.
+    const planned = placeOf(other.payload)
+    if (planned.tooth !== place.tooth || JSON.stringify(planned.surfaces) !== JSON.stringify(place.surfaces)) return false
+    const services = [other.payload as PlanChoice, ...(Array.isArray(other.payload["options"]) ? (other.payload["options"] as PlanChoice[]) : [])].map((choice) =>
       normalizeForSearch(String(choice.service ?? "")).trim(),
     )
-    return !!service && planned.some((name) => !!name && (name.includes(service) || service.includes(name)))
+    return !!service && services.some((name) => !!name && (name.includes(service) || service.includes(name)))
   })
 }
 
@@ -2291,18 +2297,21 @@ export async function saveDictationSegment(
       continue
     }
     const { data, meta } = splitMeta(row.payload)
-    // Lo de su salud junta varias cosas dichas: quitar por voz quita solo lo que la frase nombra. Si no
-    // nombra nada de lo propuesto («eso es mío», de quien acompaña), no se quita nada: sigue para
-    // revisarlo con la persona (revisión del 25 nov: se perdía «Papá: alergia a la penicilina»).
+    // Lo de su salud junta varias cosas dichas: quitar por voz quita solo lo que la frase nombra, como
+    // una corrección que se puede deshacer. Lo que quien acompaña dice de sí misma («yo soy diabética,
+    // eso es mío») no es un «quitar»: no se toca la propuesta (revisión del 25 nov: se perdía «Papá:
+    // alergia a la penicilina»). Un «quita eso» sin nombrar nada quita la propuesta entera, como antes.
     if (row.kind === "salud") {
-      const named = healthNamedIn(data, removal.said)
-      if (!named.size) continue
-      const rest = withoutHealthKeys(data, named)
+      const named = healthNamed(data, removal.said)
+      if (!named.keys.size && companionSelfTalk(removal.said)) continue
+      const rest = named.keys.size ? withoutHealthKeys(data, named.keys) : null
       if (rest) {
+        const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: named.names.join(", ") }, meta.voice)
         await tx
           .update(encounterDictationSuggestion)
-          .set({ payload: withMeta(rest, stamp(meta)), updatedAt: new Date() })
+          .set({ payload: withMeta(rest, stamp({ ...meta, voice })), updatedAt: new Date() })
           .where(eq(encounterDictationSuggestion.id, row.id))
+        if (!corrected.includes(row.id)) corrected.push(row.id)
         continue
       }
     }

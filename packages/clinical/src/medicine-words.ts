@@ -5,9 +5,11 @@
  * escribe al registrarse («Eliquis 5mg c/12h»): las dos cosas terminan en la misma fila de su
  * medicación (revisión del 25 nov: «apixabán de cinco» quedaba como el nombre).
  *
- * Sin unidad dicha, la dosis es en miligramos cuando el número se dijo en palabras o con «de»
- * («apixabán de cinco», «losartán cincuenta»): así se dicen las tabletas. Un número en cifras pegado
- * al nombre sin «de» puede ser parte del nombre («omega 3»), y entonces no se separa.
+ * Solo se separa lo que es claro, y nunca se inventa: sin unidad dicha, la dosis queda como el número
+ * («apixabán de cinco» → «5»), porque la unidad depende de la medicina (la levotiroxina «de cien» son
+ * microgramos). Un número en cifras pegado al nombre sin «de» puede ser parte del nombre («omega 3»).
+ * Si lo que sigue a la dosis no es cuándo se toma («y amlodipino de 5», «setenta treinta»), o antes de
+ * un número viene un tiempo («cada doce horas», «desde hace dos años»), todo queda como el nombre.
  */
 
 export interface MedicineWords {
@@ -64,6 +66,16 @@ function wordNumber(words: readonly string[], start: number): { value: number; u
     seen = true
   }
   if (!seen) return null
+  // «Cincuenta mil», «dos mil»: los miles van después.
+  if (words[index] === "mil" && value > 0 && value < 1000) {
+    value *= 1000
+    index++
+    const rest = wordNumber(words, index)
+    if (rest && rest.value < 1000) {
+      value += rest.value
+      index += rest.used
+    }
+  }
   // «Y medio»: media tableta, medio miligramo.
   if (words[index] === "y" && (words[index + 1] === "medio" || words[index + 1] === "media")) {
     value += 0.5
@@ -128,9 +140,12 @@ function frequencyWords(words: readonly string[]): string {
  */
 export function medicineWords(said: string): MedicineWords {
   const clean = said.trim().replace(/\s+/g, " ")
+  const whole = { name: clean }
   const words = clean.split(" ")
   const lower = words.map(plain)
   for (let index = 1; index < words.length; index++) {
+    // Antes de la dosis, un tiempo o cuándo la toma («cada doce horas», «desde hace dos años»): no se parte.
+    if (BEFORE_DOSE_STOP.test(lower[index] ?? "")) return whole
     const withDe = lower[index] === "de" && index + 1 < words.length
     const at = withDe ? index + 1 : index
     let value: number | null = null
@@ -154,22 +169,38 @@ export function medicineWords(said: string): MedicineWords {
       }
     }
     if (value === null || value <= 0) continue
+    const after = lower[at + used] ?? ""
+    // «Dos años», «doce horas»: un tiempo, no una dosis.
+    if (TIME_WORD.test(after)) return whole
     unit ??= unitOf(words[at + used])
     const unitSaid = !stuck && unit !== undefined
-    // Sin unidad, solo lo que se dice como una dosis («de cinco», «cincuenta»); «omega 3» es un nombre.
+    // Sin unidad, solo lo que se dice como una dosis («de cinco», «cincuenta»); «omega 3» es un nombre,
+    // y «una al día» es una tableta, no un número de miligramos.
     if (!unit && !(withDe || inWords)) continue
-    // «Una vez al día» o «dos veces» justo después del nombre es cuándo, no la dosis.
-    if (!unit && /^(vez|veces)$/.test(lower[at + used] ?? "")) continue
-    const name = words.slice(0, index).join(" ").replace(/[,;:]$/, "")
+    if (!unit && (value === 1 || /^(un|una|uno)$/.test(lower[at] ?? ""))) return whole
     const rest = words.slice(at + used + (unitSaid ? 1 : 0))
+    // Lo que sigue tiene que ser cuándo se toma; si es otra cosa (otra medicina, otro número), no se parte.
+    if (rest.length && !frequencyStart(rest.map(plain))) return whole
+    const name = words.slice(0, index).join(" ").replace(/[,;:]$/, "")
     const frequency = frequencyWords(rest)
     return {
       name,
-      dose: `${written(value)} ${plural(unit ?? "mg", value)}`,
+      dose: unit ? `${written(value)} ${plural(unit, value)}` : written(value),
       ...(frequency ? { frequency } : {}),
     }
   }
-  return { name: clean }
+  return whole
+}
+
+/** Lo que, antes de una dosis, dice que lo que sigue no es la dosis: un tiempo o cuándo la toma. */
+const BEFORE_DOSE_STOP = /^(cada|desde|hace|por|durante|al|todos|todas|diari[oa]|antes|despues|cuando|veces|vez|c\/.*)$/
+const TIME_WORD = /^(horas?|h|dias?|semanas?|mes|meses|anos?|minutos?)$/
+/** ¿Así empieza cuándo se toma? «cada…», «al día», «dos veces…», «en la noche», «c/12h». */
+function frequencyStart(words: readonly string[]): boolean {
+  const first = words[0] ?? ""
+  if (/^(cada|al|por|en|todos|todas|diari[oa]|antes|despues|con|x|c\/.*|interdiario|semanal|mensual|segun)$/.test(first)) return true
+  const number = wordNumber(words, 0) ?? (digits(words[0]) !== null ? { value: digits(words[0]) ?? 0, used: 1 } : null)
+  return !!number && /^(vez|veces)$/.test(words[number.used] ?? "")
 }
 
 /** La medicina en una línea, como se lee: «apixabán 5 mg cada 12 h». */

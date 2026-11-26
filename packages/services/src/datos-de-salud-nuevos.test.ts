@@ -10,10 +10,11 @@ describe("declaredMedications", () => {
       boneMedicines: { state: "recorded", detail: "Alendronato" },
       medications: { state: "recorded", items: [{ name: "Losartán" }] },
     })
-    expect(rows.map((row) => [row.name, row.declaredClass])).toEqual([
-      ["Warfarina 5 mg", "anticoagulants"],
-      ["Alendronato", "boneMedicines"],
-      ["Losartán", null],
+    // La dosis escrita con el nombre va a su campo (revisión del 25 nov).
+    expect(rows.map((row) => [row.name, row.dose ?? null, row.declaredClass])).toEqual([
+      ["Warfarina", "5 mg", "anticoagulants"],
+      ["Alendronato", null, "boneMedicines"],
+      ["Losartán", null, null],
     ])
   })
 

@@ -37,9 +37,11 @@ export interface ServerParts {
   /** «Quitar» por voz en su salud quita solo lo que la frase nombra (revisión del 25 nov). */
   healthNamedIn?: (payload: Payload, said: string) => Set<string>
   withoutHealthKeys?: (payload: Payload, keys: ReadonlySet<string>) => Payload | null
+  /** Lo que quien acompaña dice de sí misma no es un «quitar». */
+  companionSelfTalk?: (said: string | undefined) => boolean
 }
 
-const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext", "plannedInSamePhrase", "healthNamedIn", "withoutHealthKeys"] as const
+const PART_NAMES = ["mergeNote", "saysCorrection", "saidToCorrectNote", "addsNotCorrects", "doubtfulAllergy", "mergeHealth", "prepareHealth", "withoutSettledHealth", "dictationContext", "plannedInSamePhrase", "healthNamedIn", "withoutHealthKeys", "companionSelfTalk"] as const
 
 /** Las funciones que tiene el módulo de servicios de la rama, por su nombre. */
 export function serverPartsOf(module: Record<string, unknown>): ServerParts {
@@ -205,11 +207,12 @@ export function applyPause(
     for (const removal of read.removals) {
       const row = listed[removal.index]
       if (!row || row.status === "descartada") continue
-      // Como el servidor: en su salud, solo lo que la frase nombra; si no nombra nada, no se quita.
+      // Como el servidor: en su salud, solo lo que la frase nombra; lo que quien acompaña dice de sí
+      // misma no quita nada, y sin nombrar nada se quita entera.
       if (row.kind === "salud" && parts.healthNamedIn && parts.withoutHealthKeys) {
         const named = parts.healthNamedIn(row.payload, removal.sourceText ?? "")
-        if (!named.size) continue
-        const rest = parts.withoutHealthKeys(row.payload, named)
+        if (!named.size && parts.companionSelfTalk?.(removal.sourceText)) continue
+        const rest = named.size ? parts.withoutHealthKeys(row.payload, named) : null
         if (rest) {
           row.payload = rest
           counts.removed += 1

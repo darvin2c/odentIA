@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { confirmDictationHealth, confirmSaidHealth, confirmSaidStopped, dictatedHealthInterview, listDictationSuggestions, listSaidHealth, saveDictationSegment } from "./encounter-dictation.js"
+import { confirmDictationHealth, confirmSaidHealth, confirmSaidStopped, dictatedHealthInterview, listDictationSuggestions, listSaidHealth, saveDictationSegment, undoDictationVoiceCorrection } from "./encounter-dictation.js"
 import { finalizeEncounter } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -178,6 +178,26 @@ describe("revisión del 25 nov", () => {
     expect(kept?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Papá: alergia a la penicilina"])
     // Lo que nombra, sí: sin nada más, la propuesta se quita entera, como antes.
     await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "no, lo de la penicilina no" }], transcript: "No, lo de la penicilina no." })
+    expect((await health()).filter((item) => item.status !== "descartada")).toEqual([])
+    await enable(false)
+  })
+
+  it("«no, la diabetes no» quita solo la diabetes, como corrección que se deshace; «quita eso» quita la propuesta entera", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }, sourceText: "tengo diabetes y asma" }],
+      transcript: "Tengo diabetes y asma.",
+    })
+    const [said] = await health()
+    await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "no, la diabetes no" }], transcript: "No, la diabetes no." })
+    const [kept] = await health()
+    expect(kept?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+    expect(kept?.voice).toEqual({ before: "diabetes" })
+    await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, said!.id))
+    const [back] = await health()
+    expect(back?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] })
+    await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "quita eso" }], transcript: "Quita eso." })
     expect((await health()).filter((item) => item.status !== "descartada")).toEqual([])
     await enable(false)
   })

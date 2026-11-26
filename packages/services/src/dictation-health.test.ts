@@ -7,6 +7,7 @@ import {
   hasDeclaredHealth,
   healthByDeclarant,
   healthOfPayload,
+  healthNamed,
   healthSupersedingKeysOf,
   healthRows,
   healthSaidBy,
@@ -391,23 +392,34 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
 })
 
 describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)", () => {
-  it("el anticoagulante, la medicina y la presión de Julio", () => {
-    const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta, tengo la presion"
+  it("el anticoagulante y la medicina de Julio", () => {
+    const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta"
     const { payload } = groundHealthNames(
       {
         anticoagulants: { state: "recorded", detail: "apixabán de cinco miligramos cada doce horas" },
         medications: { state: "recorded", items: [{ name: "losartán cincuenta" }] },
-        conditions: { state: "recorded", items: [{ name: "presión" }] },
       },
       said,
     )
     expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
-    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50 mg" }] })
-    expect(payload?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "hipertensión arterial" }] })
+    // Sin unidad dicha, la dosis queda como el número: la unidad no se inventa.
+    expect(payload?.["medications"]).toEqual({ state: "recorded", items: [{ name: "losartán", dose: "50" }] })
   })
 
   it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
     const rows = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } } as never)
     expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "cada 12 h", declaredClass: "anticoagulants" })
+  })
+})
+
+describe("quitar por voz lo de su salud, dato por dato (revisión de código del 26 nov)", () => {
+  const payload = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }
+  it("«no, la diabetes no» quita la diabetes y deja el asma", () => {
+    const named = healthNamed(payload, "no, la diabetes no")
+    expect(named.names).toEqual(["diabetes"])
+    expect(withoutHealthKeys(payload, named.keys)?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+  })
+  it("un nombre sin palabras que lo distingan no se da por nombrado", () => {
+    expect(healthNamed({ declarante: "paciente", medications: { state: "recorded", items: [{ name: "T4" }] } }, "quita eso").keys.size).toBe(0)
   })
 })

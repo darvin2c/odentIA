@@ -116,7 +116,7 @@ export function familyFromPatient(item: Record<string, unknown>, speaker: string
 /** «Yo soy diabética», «eso es mío»: quien acompaña habla de sí misma, no del paciente. */
 const SELF_TALK = /(?<![\p{L}])(?:yo soy|yo tengo|yo tomo|yo sufro|eso es m[ií]o|es m[ií]o)(?![\p{L}])/u
 const ABOUT_PATIENT = /(?<![\p{L}])(?:él|ella|el niño|la niña|mi hij[oa]|le|lo|la toma|toma)(?![\p{L}])/u
-const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
+export const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
 
 /** El parentesco dicho, sin «su» ni «mi», en minúsculas y sin tildes: «Su abuela» → «abuela». */
 export function familyRelationWords(words: unknown): string {
@@ -443,10 +443,14 @@ function wordHeard(word: string, said: string): boolean {
 }
 
 /** ¿El nombre sale de lo dicho? Basta una palabra que lo distinga («losartán 50 mg» de «tomo losartán»). */
-function nameHeard(name: string, said: string): boolean {
-  const words = plain(name)
+/** Las palabras de un nombre que lo distinguen: sin las de relleno, los números ni las de menos de tres letras. */
+const distinctWords = (name: string) =>
+  plain(name)
     .split(/[^a-z0-9ñ]+/)
     .filter((word) => word.length >= 3 && !/^\d+$/.test(word) && !NAME_FILLER.has(word))
+
+function nameHeard(name: string, said: string): boolean {
+  const words = distinctWords(name)
   return words.length === 0 || words.some((word) => wordHeard(word, said))
 }
 
@@ -532,15 +536,6 @@ export function groundHealthNames(
     const value = out[group]
     if (isRecord(value) && text(value["detail"])) out[group] = { ...value, detail: medicineLine(medicineWords(text(value["detail"]))) }
   }
-  // «La presión», «presión alta»: es la hipertensión arterial, como la llama su historia.
-  const conditions = out["conditions"]
-  if (isRecord(conditions) && Array.isArray(conditions["items"]))
-    out["conditions"] = {
-      ...conditions,
-      items: (conditions["items"] as Array<Record<string, unknown>>).map((item) =>
-        /^(?:la |de la )?(?:presion|presion alta|alta presion)$/.test(plain(text(item["name"]))) ? { ...item, name: "hipertensión arterial" } : item,
-      ),
-    }
   return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
 }
 
@@ -683,24 +678,35 @@ export function healthKeysOf(payload: Record<string, unknown>): Set<string> {
  * «Papá: alergia a la penicilina»). Vacío si no nombra nada de lo propuesto.
  */
 export function healthNamedIn(payload: Record<string, unknown>, said: string): Set<string> {
+  return healthNamed(payload, said).keys
+}
+
+/** Lo que nombra la frase (`healthNamedIn`), con los nombres como se leen («diabetes», «Papá: alergia…»). */
+export function healthNamed(payload: Record<string, unknown>, said: string): { keys: Set<string>; names: string[] } {
   const keys = new Set<string>()
-  if (!said.trim()) return keys
+  const names: string[] = []
+  if (!said.trim()) return { keys, names }
+  // Un nombre sin ninguna palabra que lo distinga («T4», «DM») no se da por nombrado: cualquier frase lo quitaría.
+  const named = (name: string) => distinctWords(name).length > 0 && nameHeard(name, said)
   for (const group of GROUPS) {
     const value = payload[group]
     if (!isRecord(value) || INTERVIEW.includes(group)) continue
     if (DIRECTED.includes(group)) {
-      if (text(value["detail"]) && nameHeard(text(value["detail"]), said)) keys.add(group)
+      if (text(value["detail"]) && named(text(value["detail"]))) {
+        keys.add(group)
+        names.push(text(value["detail"]))
+      }
       continue
     }
     for (const item of (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>) {
-      const named = nameHeard(text(item["name"]), said) || (group === "family" && nameHeard(text(item["relation"]), said))
-      if (!named) continue
-      if (PER_ITEM.includes(group)) keys.add(itemKey(group, item))
-      else if (group === "medications" && drugKey(item["name"])) keys.add(drugKey(item["name"]))
-      else keys.add(group)
+      if (!(named(text(item["name"])) || (group === "family" && named(text(item["relation"]))))) continue
+      // Dato por dato: «no, la diabetes no» quita la diabetes, no las demás enfermedades.
+      if (group === "medications" && drugKey(item["name"])) keys.add(drugKey(item["name"]))
+      else keys.add(itemKey(group, item))
+      names.push(group === "family" ? `${relationLabel(item["relation"])}: ${text(item["name"])}` : text(item["name"]))
     }
   }
-  return keys
+  return { keys, names }
 }
 
 /**
@@ -728,6 +734,13 @@ export function withoutHealthKeys(payload: Record<string, unknown>, keys: Readon
         const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !keys.has(drugKey(item["name"])))
         if (items.length) out[group] = { ...value, items }
         else delete out[group]
+      } else if (LISTS.includes(group) && value["state"] === "recorded" && Array.isArray(value["items"]) && value["items"].length) {
+        // Una enfermedad quitada por voz, sola (`healthNamed`): las demás siguen.
+        const items = (value["items"] as Array<Record<string, unknown>>).filter((item) => !keys.has(itemKey(group, item)))
+        if (items.length < value["items"].length) {
+          if (items.length) out[group] = { ...value, items }
+          else delete out[group]
+        }
       }
       continue
     }

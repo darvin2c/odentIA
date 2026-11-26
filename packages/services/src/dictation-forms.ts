@@ -1528,6 +1528,9 @@ function noteWords(sentence: string): { stems: string[]; numbers: number[]; nega
   return { stems: stemsOf(sentence), numbers: saidNumbers(sentence, { articles: false }), negations: [...new Set(negationsOf(sentence))].sort() }
 }
 
+/** Quién lo cuenta y cómo, delante de lo que cuenta: en el repaso no hacen que una oración sea otra. */
+const REPORTING_WORDS = "refiere refieren dice dicen comenta comentan cuenta cuentan menciona indica manifiesta mama mamá papa papá madre padre paciente señora señor hija hijo esposa esposo"
+
 /**
  * La nota de una pausa sin las oraciones que ya dice una nota pendiente de la atención: lo que cortó
  * la pausa llega otra vez al comienzo de lo nuevo (`withPauseBridge`) y Clío lo vuelve a contar
@@ -1540,24 +1543,25 @@ export function withoutRepeatedNotes<T extends FormDraftLike>(
   drafts: readonly T[],
   pendingNotes: readonly string[],
   /**
-   * El repaso relee toda la conversación y cuenta otra vez, con otras palabras, lo que ya cuenta la
-   * consulta («la mamá refiere que le falta…» por «le falta…»): ahí basta con que tres de cada cuatro
-   * raíces estén en una misma oración (revisión del 25 nov: el relato firmado salía dos veces).
+   * El repaso relee toda la conversación y cuenta otra vez lo que ya cuenta la consulta, con quién lo
+   * dijo delante («la mamá refiere que le falta…» por «le falta…») y con otra puntuación (una coma
+   * por un «;»): ahí no cuentan esas palabras de quién lo cuenta, y se compara también con cada nota
+   * entera (revisión del 25 nov: el relato firmado salía dos veces). Lo demás tiene que estar todo:
+   * otro lado u otro estímulo es otra cosa.
    */
   options: { review?: boolean } = {},
 ): T[] {
-  // En el repaso se compara también con cada nota entera: otra puntuación junta dos oraciones en una.
   const before = [...pendingNotes.flatMap(sentencesOf), ...(options.review ? pendingNotes : [])].map(noteWords)
   if (!before.length) return [...drafts]
+  const reporting = options.review ? new Set(stemsOf(REPORTING_WORDS)) : new Set<string>()
   const repeated = (sentence: string) => {
     const now = noteWords(sentence)
-    const covered = (old: { stems: string[] }) => {
-      const found = now.stems.filter((stem) => old.stems.includes(stem)).length
-      return options.review ? found >= Math.ceil(now.stems.length * 0.75) : found === now.stems.length
-    }
+    const stems = now.stems.filter((stem) => !reporting.has(stem))
     return (
-      now.stems.length >= 3 &&
-      before.some((old) => covered(old) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join())
+      stems.length >= 3 &&
+      before.some(
+        (old) => stems.every((stem) => old.stems.includes(stem)) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join(),
+      )
     )
   }
   const clean = (text: string) => {

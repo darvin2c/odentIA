@@ -999,7 +999,8 @@ export function changedHealthOf(input: {
     // Lo que nombró ahora de cualquier medicina: si la repitió, sigue igual, en el grupo que sea.
     const sayNow = new Set(declaredMedications(health).map((row) => normalizeDrugText(row.name)))
     for (const row of input.medications) {
-      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name))) continue
+      // Una fila de antes con la dosis en el nombre («losartán cincuenta») es la misma medicina que «losartán».
+      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name)) || sayNow.has(normalizeDrugText(medicineWords(row.name).name))) continue
       const group = medicationClassOf(row.atcCode)
       if (answered(group ? health[group]?.state : health.medications?.state)) out.medications.push(row.id)
     }
@@ -2144,7 +2145,8 @@ export async function addDeclaredHealth(
         .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
     )
       .filter((row) => isCurrentMedication(row, today))
-      .map((row) => normalizeDrugText(row.name)),
+      // También sin la dosis que traía en el nombre una fila de antes («losartán cincuenta»): no se duplica.
+      .flatMap((row) => [normalizeDrugText(row.name), normalizeDrugText(medicineWords(row.name).name)]),
   )
   // Lo que dijo al responder «Sí» a la pregunta de una clase entra con el código de ese grupo; lo
   // demás, con el de la lista si lo escrito es exactamente una DCI (la regla de `validateMedicationRow`).
