@@ -21,7 +21,8 @@ import VistiaHome from "../components/vistia/HomePage.astro"
 import Base from "../layouts/Base.astro"
 import { faqJsonLd } from "../lib/faq"
 import { ofProduct, WORDS } from "../lib/product"
-import { businessDays, giftOf } from "../lib/pricing"
+import { startNote } from "../lib/offer"
+import { giftOf } from "../lib/pricing"
 import { ctaOf } from "../lib/site"
 
 const { title, description } = ofProduct({
@@ -45,12 +46,9 @@ const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const HOME_FAQ = homeFaq(pricing)
-const answer = businessDays(pricing.terms.waitlistAnswerDays)
-// Mientras se entra por invitación, la nota de la portada dice el regalo y cómo se entra.
-const note =
-  pricing.signupMode === "invitacion"
-    ? { gift, text: gift ? `de regalo para tus agentes, sin cuota ni tarjeta. Se entra por invitación; te respondemos en ${answer}.` : `Se entra por invitación; te respondemos en ${answer}.` }
-    : undefined
+// La nota bajo el botón: cómo se empieza y, junto a «Empieza gratis», lo que se paga después.
+const noteText = startNote(pricing)
+const note = noteText ? { gift, text: noteText } : undefined
 // La pregunta pendiente de confirmar se muestra en la página, pero no se publica en los datos estructurados.
 const faqLd = faqJsonLd(HOME_FAQ.filter((q) => !q.pending))
 const softwareLd = {
@@ -64,8 +62,8 @@ const softwareLd = {
 // latidIA y vistIA tienen su propia portada; la de odentIA se arma aquí mismo.
 const { Own, jsonLd } = ofProduct({
   dental: { Own: null, jsonLd: [softwareLd, faqLd] },
-  medical: { Own: LatidiaHome, jsonLd: [softwareLd, faqJsonLd(latidiaFaq(gift, pricing))] },
-  optical: { Own: VistiaHome, jsonLd: [softwareLd, faqJsonLd(vistiaFaq(gift, pricing))] },
+  medical: { Own: LatidiaHome, jsonLd: [softwareLd, faqJsonLd(latidiaFaq(pricing))] },
+  optical: { Own: VistiaHome, jsonLd: [softwareLd, faqJsonLd(vistiaFaq(pricing))] },
 })
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>

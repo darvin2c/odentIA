@@ -1,8 +1,8 @@
 /**
  * Ficha de la clínica › Precio y prueba (ADR 0031, tablero O2): prueba y
  * descuento negociados (por encima de lo de siempre queda pedido para
- * aprobar), cada cuánto se factura y «Pasar a Fundadores» para la clínica
- * en prueba que entró sin la invitación (ADR 0192). Lo que hicieron los
+ * aprobar), cada cuánto se factura y «Cambiar a un plan especial» para la
+ * clínica en prueba que negoció un plan que no sale en la web (ADR 0192). Lo que hicieron los
  * agentes y el crédito del mes están en Resumen y Gastos. Solo la
  * administración (ADR 0094).
  */
@@ -11,6 +11,9 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  Field,
+  FieldGroup,
+  FieldLabel,
   Label,
   Select,
   SelectContent,
@@ -77,7 +80,7 @@ interface BillingTerms {
   /** Último instante del descuento (issue 168); null = no vence. */
   discountEndsAt: string | null
   guaranteedUntil: string | null
-  /** El plan que rige cuando terminan sus condiciones de Fundadora, desde `startsAt`; null si nada cambia solo. */
+  /** El plan que rige cuando terminan sus condiciones garantizadas, desde `startsAt`; null si nada cambia solo. */
   next: {
     name: string
     currency: string
@@ -116,23 +119,26 @@ interface BillingTerms {
     decidedAt: string | null
   }>
   notices: Array<{ kind: string; sentAt: string | null }>
-  /** «Pasar a Fundadores»: lo que tendría si pasa ahora; null si no puede (ADR 0192). */
-  founders?: FoundersMove | null
+  /** «Cambiar a un plan especial»: los planes a los que puede pasar ahora; null si no puede (ADR 0192). */
+  specialPlan?: SpecialPlanMove | null
   /** «Cambios del plan»: de las dos auditorías, del más nuevo al más viejo (ADR 0196). */
   changes?: Array<{ id: string; at: string; action: string; words: string; by: { userId: string; name: string } | null }>
 }
 
-interface FoundersMove {
-  planName: string
-  currency: string
-  /** Lugares usados, sin esta clínica, y los del plan. */
-  used: number
-  limit: number
-  guaranteeMonths: number | null
-  guaranteedUntil: string | null
+interface SpecialPlanMove {
+  plans: Array<{
+    id: string
+    name: string
+    currency: string
+    priceCents: number
+    guaranteeMonths: number | null
+    /** Hasta cuándo valdrían sus precios si pasa hoy; null sin meses garantizados. */
+    guaranteedUntil: string | null
+    trialDays: number
+    trialCreditCents: number
+  }>
+  /** El plan al que vuelve cuando terminan sus condiciones garantizadas. */
   listPlanName: string | null
-  trialDays: number
-  trialCreditCents: number
 }
 
 const NOTICE_WORDS: Record<string, string> = {
@@ -155,8 +161,8 @@ const NOTICE_WORDS: Record<string, string> = {
   plan_activo: "Plan activo",
   precio_especial_aviso: "Aviso: su precio especial termina",
   precio_especial_alarma: "Alarma: su precio especial termina en 3 días",
-  condiciones_aviso: "Aviso: sus condiciones de Fundador terminan",
-  condiciones_alarma: "Alarma: sus condiciones de Fundador terminan en 7 días",
+  condiciones_aviso: "Aviso: sus condiciones garantizadas terminan",
+  condiciones_alarma: "Alarma: sus condiciones garantizadas terminan en 7 días",
 }
 
 /** El día elegido (`yyyy-MM-dd`) vale completo: el descuento termina al final de ese día, en la hora de este equipo. */
@@ -192,7 +198,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     queryFn: () => api<BillingTerms | null>(`/api/admin/organizations/${organizationId}/billing`),
   })
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "organizations", organizationId] })
-  // Pasar a Fundadores cambia también la cabecera de la ficha y la del cliente: su historial y lo que muestran Hoy y Kairós.
+  // Cambiar a un plan especial cambia también la cabecera de la ficha y la del cliente: su historial y lo que muestran Hoy y Kairós.
   const refreshAll = () => {
     refresh()
     void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
@@ -230,10 +236,10 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
       <PlanSummary data={data} halfWords={halfWords} />
       <PlanChanges changes={data.changes ?? []} />
 
-      {data.founders ? (
-        <FoundersMoveSection
+      {data.specialPlan?.plans.length ? (
+        <SpecialPlanSection
           organizationId={organizationId}
-          move={data.founders}
+          move={data.specialPlan}
           discountBps={data.discountBps}
           spendCapCents={data.spendCapCents}
           onChanged={refreshAll}
@@ -257,7 +263,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
       {plan ? (
         <div className="grid gap-4 md:grid-cols-2">
           <TrialForm organizationId={organizationId} data={data} plan={plan} money={money} onSaved={refresh} />
-          {/* Un plan sin descuento (Fundadores) no se negocia: no se ofrece. */}
+          {/* Un plan sin descuento (un plan especial) no se negocia: no se ofrece. */}
           {plan.maxDiscountBps > 0 || data.discountBps > 0 ? (
             <DiscountForm organizationId={organizationId} data={data} plan={plan} onSaved={refresh} />
           ) : null}
@@ -357,7 +363,7 @@ function PlanSummary({ data, halfWords }: { data: BillingTerms; halfWords: strin
                 {moneyText(plan.creditCents, plan.currency)} de crédito al mes
                 {/* «Hasta el … después»: lo mismo que se le dice a la clínica, y el cambio ocurre ese día. */}
                 {ends ? <> · hasta el {shortDay(ends)}</> : null}
-                {data.guaranteedUntil && !next ? <span className="text-muted-foreground"> (condiciones de Fundadora)</span> : null}
+                {data.guaranteedUntil && !next ? <span className="text-muted-foreground"> (condiciones garantizadas)</span> : null}
               </>
             ) : (
               <span className="text-muted-foreground">Sin un plan con precios por acción</span>
@@ -483,12 +489,12 @@ function PlanChanges({ changes }: { changes: NonNullable<BillingTerms["changes"]
 }
 
 /**
- * «Pasar a Fundadores» (ADR 0192): la clínica toma el plan por invitación como si entrara
- * hoy con la invitación. Lo que cambia se dice antes de confirmar; el servidor vuelve a
- * mirar si puede y si queda lugar. Si lo rechaza, el motivo queda en la pregunta y lo de
- * hoy se vuelve a leer al cerrarla.
+ * «Cambiar a un plan especial» (ADR 0192): la clínica en prueba pasa hoy a un plan que no
+ * sale en la web, negociado a mano. Lo que cambia se dice antes de confirmar; el servidor
+ * vuelve a mirar si puede. Si lo rechaza, el motivo queda en la pregunta y lo de hoy se
+ * vuelve a leer al cerrarla.
  */
-function FoundersMoveSection({
+function SpecialPlanSection({
   organizationId,
   move,
   discountBps,
@@ -496,7 +502,7 @@ function FoundersMoveSection({
   onChanged,
 }: {
   organizationId: string
-  move: FoundersMove
+  move: SpecialPlanMove
   /** El precio especial negociado que tiene hoy: al pasar se quita. */
   discountBps: number
   /** El presupuesto del mes: al pasar queda igual. */
@@ -504,20 +510,20 @@ function FoundersMoveSection({
   onChanged: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [planId, setPlanId] = useState(move.plans[0]?.id ?? "")
   const box = useRef<HTMLElement>(null)
-  const left = Math.max(0, move.limit - move.used)
-  const money = (cents: number) => new Intl.NumberFormat("es-PE", { style: "currency", currency: move.currency }).format(cents / 100)
+  const chosen = move.plans.find((item) => item.id === planId) ?? move.plans[0]
   // Cuando la sección se va (pasó, u otra persona ya la pasó), el foco queda en Precio y prueba.
   const keepFocus = () => {
     const around = box.current?.parentElement ?? null
     focusInsideLater(() => around)
   }
   const enter = useMutation({
-    mutationFn: () =>
-      api<{ planName: string; guaranteedUntil: string | null }>(`/api/admin/organizations/${organizationId}/billing/founders`, {
-        method: "POST",
-        body: "{}",
-      }),
+    mutationFn: (id: string) =>
+      api<{ planName: string; trialEndsAt: string | null; guaranteedUntil: string | null }>(
+        `/api/admin/organizations/${organizationId}/billing/special-plan`,
+        { method: "POST", body: JSON.stringify({ planId: id }) },
+      ),
     onSuccess: (result) => {
       toast.success(result.guaranteedUntil ? `Pasó a ${result.planName} hasta el ${shortDay(result.guaranteedUntil)}` : `Pasó a ${result.planName}`)
       setConfirming(false)
@@ -525,37 +531,57 @@ function FoundersMoveSection({
       onChanged()
     },
   })
-  const months = move.guaranteeMonths ?? 0
-  const conditions = move.guaranteedUntil
-    ? ` Sus condiciones valen ${months} ${months === 1 ? "mes" : "meses"}, hasta el ${shortDay(move.guaranteedUntil)}${move.listPlanName ? `; después pasa al ${move.listPlanName}` : ""}.`
+  if (!chosen) return null
+  const money = (cents: number, currency: string) => new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(cents / 100)
+  const months = chosen.guaranteeMonths ?? 0
+  const conditions = chosen.guaranteedUntil
+    ? ` Sus precios quedan garantizados ${months} ${months === 1 ? "mes" : "meses"}, hasta el ${shortDay(chosen.guaranteedUntil)}${move.listPlanName ? `; después vuelve a ${move.listPlanName}, con aviso antes` : ""}.`
     : ""
-  const discount = discountBps > 0 ? ` Su precio especial de ${discountBps / 100} % se quita: Fundadores trae sus precios.` : ""
-  const cap = spendCapCents !== null ? ` Su presupuesto del mes sigue en ${money(spendCapCents)}.` : ""
+  const discount = discountBps > 0 ? ` Se quita su descuento negociado de ${discountBps / 100} %: el plan trae sus precios.` : ""
+  const cap =
+    spendCapCents !== null
+      ? ` Su presupuesto del mes no cambia: sigue en ${money(spendCapCents, chosen.currency)}.`
+      : " Su presupuesto del mes no cambia."
+  const planLabel = (item: SpecialPlanMove["plans"][number]) => `${item.name} · ${money(item.priceCents, item.currency)} al mes`
   return (
-    <section ref={box} aria-labelledby="org-founders" className="flex flex-col gap-2 rounded-lg border p-3">
-      <h3 id="org-founders" className="text-sm font-medium">
-        Fundadores
+    <section ref={box} aria-labelledby="org-special-plan" className="flex flex-col gap-2 rounded-lg border p-3">
+      <h3 id="org-special-plan" className="text-sm font-medium">
+        Cambiar a un plan especial
       </h3>
-      <p className="text-sm text-muted-foreground">
-        No está en {move.planName}. {left ? `Quedan ${left} de ${move.limit} lugares.` : `Los ${move.limit} lugares están ocupados.`}
-      </p>
-      {left ? null : <p className="text-sm">Para pasarla, sube los lugares de {move.planName} en Cobros y planes.</p>}
+      <p className="text-sm text-muted-foreground">Para una clínica en prueba que negoció un plan que no sale en la web.</p>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="org-special-plan-choice">Plan</FieldLabel>
+          <Select value={chosen.id} disabled={enter.isPending} onValueChange={(value) => setPlanId(String(value))}>
+            <SelectTrigger id="org-special-plan-choice" className="w-full sm:w-80">
+              <SelectValue>{planLabel(chosen)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {move.plans.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {planLabel(item)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldGroup>
       <div>
-        <Button size="sm" variant="outline" type="button" disabled={!left || enter.isPending} onClick={() => setConfirming(true)}>
-          Pasar a Fundadores
+        <Button size="sm" variant="outline" type="button" disabled={enter.isPending} onClick={() => setConfirming(true)}>
+          Cambiar a {chosen.name}
         </Button>
       </div>
       <ConfirmDialog
         open={confirming}
-        title="¿Pasar a Fundadores?"
-        description={`Queda en ${move.planName}, con sus precios.${conditions} Su prueba empieza de nuevo hoy: ${move.trialDays} días con ${money(move.trialCreditCents)}.${discount}${cap} Ocupa uno de los ${move.limit} lugares y no se deshace desde aquí.`}
-        confirmLabel="Pasar a Fundadores"
+        title={`¿Cambiar a ${chosen.name}?`}
+        description={`Pasa hoy a ${chosen.name}, con sus precios. Su prueba empieza de nuevo: ${chosen.trialDays} días con ${money(chosen.trialCreditCents, chosen.currency)}.${conditions}${discount}${cap} No se deshace desde aquí.`}
+        confirmLabel={`Cambiar a ${chosen.name}`}
         variant="default"
         pending={enter.isPending}
         // Un rechazo no se reintenta desde la misma pregunta: al cerrarla se lee lo de hoy.
-        confirmDisabled={!left || enter.isError}
+        confirmDisabled={enter.isError}
         error={enter.isError ? submitErrorMessage(enter.error) : null}
-        onConfirm={() => enter.mutate()}
+        onConfirm={() => enter.mutate(chosen.id)}
         onClose={() => {
           setConfirming(false)
           if (enter.isError) {

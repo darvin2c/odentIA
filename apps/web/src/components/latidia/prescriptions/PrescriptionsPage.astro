@@ -6,8 +6,6 @@
 // La receta no revisa interacciones ni es la receta oficial de ningún país: eso no se dice.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { days, giftOf, shownPlan } from "../../../lib/pricing"
-import { WORDS } from "../../../lib/product"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -16,9 +14,6 @@ import SickLeaveDemo from "./SickLeaveDemo"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const plan = shownPlan(pricing)
-const gift = giftOf(pricing)
-const founder = plan !== null && plan === pricing.founders
 
 const path = "/receta-y-descanso-medico"
 const title = "Receta médica y descanso médico para consultorio"
@@ -190,19 +185,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 
   <div class="faqwrap"><Faq items={faq} /></div>
 
-  <CtaBand title="Recetas y descansos que salen bien a la primera.">
-    <Fragment slot="text">
-      {gift ? (
-        founder ? (
-          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, salas ni usuarios.</>
-        ) : (
-          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, salas ni usuarios.</>
-        )
-      ) : (
-        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, salas ni usuarios.`
-      )}
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Recetas y descansos que salen bien a la primera." />
 </Base>
 
 <style>

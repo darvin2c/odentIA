@@ -9,12 +9,10 @@ import {
   SAAS_WAITLIST_PROFESSIONALS,
   SAAS_WAITLIST_STATUSES,
   SAAS_WAITLIST_TOOLS,
-  type SaasSignupMode,
   type SaasWaitlistStatus,
   saasFollowUp,
   saasPayment,
   saasPlan,
-  saasSignupPolicy,
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
@@ -33,12 +31,11 @@ import { limaDate } from "./peru-business-days.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 
 /**
- * Fundadores (issue 165): mientras dure el programa, se abren clínicas solo con
- * invitación. Quien quiere entrar deja su solicitud en la web (lista de
- * espera), la administración la revisa e invita, y la invitación abre una sola
- * clínica, con el plan de la invitación. Crear la cuenta sigue libre (decisión
- * 1): lo que pide invitación es abrir la clínica, y lo revisa el servidor en
- * `organization/create`.
+ * Las solicitudes y la invitación del ARM, los planes especiales y los precios públicos.
+ * El alta es libre (ADR 0221): cualquiera abre su clínica en la prueba del plan de lista.
+ * La invitación ya no hace falta para entrar: es como la administración le manda a un
+ * cliente lo que negoció, que se aplica al abrir su clínica. El programa Fundadores
+ * terminó; su plan sigue como un plan especial, oculto de la web.
  *
  * Todo vive en tablas de la plataforma que solo toca `ownerDb`.
  */
@@ -47,71 +44,11 @@ const DAY = 86_400_000
 /** La invitación vale 14 días (decisión 8); reenviarla da otros 14. */
 export const FOUNDER_INVITATION_DAYS = 14
 
-export type { SaasSignupMode, SaasWaitlistStatus }
+export type { SaasWaitlistStatus }
 export { SAAS_WAITLIST_PROFESSIONALS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
-export { founderInvitationEmail, moneyText, newClientNoticeEmail, waitlistReceivedEmail, webContactEmail } from "./saas-emails.js"
+export { founderInvitationEmail, moneyText, webContactEmail } from "./saas-emails.js"
 
-/* ---------- Cómo se abren clínicas ---------- */
-
-type SignupPolicyRow = { mode: string; medicalMode: string; opticalMode: string }
-
-/**
- * Dónde guarda cada producto cómo se abren sus clínicas (`saas_signup_policy`,
- * una columna por producto; ADR 0093): un producto nuevo trae la suya.
- */
-const SIGNUP_MODE_COLUMN: Record<
-  ClinicalProduct,
-  { read: (row: SignupPolicyRow) => string; write: (mode: SaasSignupMode) => Partial<SignupPolicyRow> }
-> = {
-  dental: { read: (row) => row.mode, write: (mode) => ({ mode }) },
-  medical: { read: (row) => row.medicalMode, write: (mode) => ({ medicalMode: mode }) },
-  optical: { read: (row) => row.opticalMode, write: (mode) => ({ opticalMode: mode }) },
-}
-
-/**
- * Cómo se abren las clínicas de un producto (ADR 0093). «Solo con invitación»
- * si no hay fila: lo seguro mientras no se diga otra cosa.
- */
-export async function getSignupMode(tx: Db, product: ClinicalProduct = "dental"): Promise<SaasSignupMode> {
-  const [row] = await tx
-    .select({
-      mode: saasSignupPolicy.mode,
-      medicalMode: saasSignupPolicy.medicalMode,
-      opticalMode: saasSignupPolicy.opticalMode,
-    })
-    .from(saasSignupPolicy)
-    .where(eq(saasSignupPolicy.id, 1))
-    .limit(1)
-  const mode = row ? SIGNUP_MODE_COLUMN[product].read(row) : undefined
-  return mode === "abierta" ? "abierta" : "invitacion"
-}
-
-/** Cómo se abren las clínicas de cada producto, para la administración. */
-export async function getSignupModes(tx: Db): Promise<Record<ClinicalProduct, SaasSignupMode>> {
-  const modes: Partial<Record<ClinicalProduct, SaasSignupMode>> = {}
-  // Una tras otra: comparten la transacción.
-  for (const product of CLINICAL_PRODUCTS) modes[product] = await getSignupMode(tx, product)
-  return modes as Record<ClinicalProduct, SaasSignupMode>
-}
-
-export async function setSignupMode(
-  tx: Db,
-  actor: AdminActor,
-  mode: SaasSignupMode,
-  product: ClinicalProduct = "dental",
-): Promise<SaasSignupMode> {
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia cómo se abren clínicas")
-  if (mode !== "invitacion" && mode !== "abierta") throw validation("Elige «Solo con invitación» o «Abierta»")
-  const column = SIGNUP_MODE_COLUMN[product].write(mode)
-  await tx
-    .insert(saasSignupPolicy)
-    .values({ id: 1, ...column, updatedBy: actor.userId })
-    .onConflictDoUpdate({ target: saasSignupPolicy.id, set: { ...column, updatedBy: actor.userId, updatedAt: new Date() } })
-  await writeAdminAudit(tx, actor, { action: "saas.signup_mode_set", metadata: { mode, product } })
-  return mode
-}
-
-/* ---------- Solicitudes de la web ---------- */
+/* ---------- La página de la web de donde viene algo ---------- */
 
 /** Una página de la web, como se guarda (ADR 0216): «/guias/como-llenar-un-odontograma». */
 const WEB_PAGE = /^\/[a-z0-9-]+(\/[a-z0-9-]+)*$/
@@ -124,98 +61,6 @@ export function webPageOf(value: unknown): string | null {
   if (typeof value !== "string") return null
   const page = value.trim()
   return page.length <= 160 && WEB_PAGE.test(page) ? page : null
-}
-
-const text = (min: number, max: number, what: string) =>
-  z
-    .string({ error: `Escribe ${what}` })
-    .trim()
-    .min(min, `Escribe ${what}`)
-    .max(max, `Usa como máximo ${max} caracteres`)
-
-export const waitlistInputSchema = z.strictObject({
-  firstName: text(1, 80, "tu nombre"),
-  lastName: text(1, 80, "tus apellidos"),
-  email: z
-    .string({ error: "Escribe tu correo" })
-    .trim()
-    .toLowerCase()
-    .pipe(z.email("Escribe un correo válido, como nombre@clinica.com")),
-  /** Con el código del país, como lo muestra el formulario: «+51 987 654 321». */
-  phone: z
-    .string({ error: "Escribe tu celular" })
-    .trim()
-    .regex(/^\+?[0-9][0-9 ()-]{5,19}$/, "Escribe un celular válido, solo con números")
-    .transform((value) => value.replace(/[ ()-]/g, "")),
-  clinicName: text(1, 120, "el nombre de la clínica"),
-  countryCode: z
-    .string({ error: "Elige el país" })
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z]{2}$/, "Elige el país"),
-  city: text(1, 80, "la ciudad"),
-  professionals: z.enum(SAAS_WAITLIST_PROFESSIONALS, "Elige cuántos odontólogos atienden"),
-  currentTool: z.enum(SAAS_WAITLIST_TOOLS, "Elige qué usan hoy"),
-})
-export type WaitlistInput = z.input<typeof waitlistInputSchema>
-
-/**
- * La solicitud de un producto: pregunta por quien atiende con su palabra
- * («cuántos médicos» en latidIA; decisión 17 del issue 229).
- */
-export function waitlistInputSchemaFor(product: ClinicalProduct) {
-  return waitlistInputSchema.extend({
-    professionals: z.enum(SAAS_WAITLIST_PROFESSIONALS, `Elige cuántos ${productWords(product).clinician.many} atienden`),
-  })
-}
-
-export interface WaitlistSubmitResult {
-  id: string
-  /** El cliente del ARM de la solicitud: el aviso al buzón comercial abre su ficha. */
-  clientId: string | null
-  /** Ya había una solicitud viva con ese correo: no se duplica ni se vuelve a escribir. */
-  existing: boolean
-  /** Días hábiles que se prometen para responderla: los que regían cuando llegó. */
-  answerDays: number
-}
-
-/**
- * Deja la solicitud en la lista, con el producto del dominio donde se pidió.
- * Un mismo correo con una solicitud viva (por revisar o invitada) no crea
- * otra: se devuelve la que hay. En la misma transacción la solicitud queda
- * con su cliente del ARM (`clientForWaitlistRequest`: el que ya tiene a esa
- * persona, o uno nuevo que llegó por la web) y su persona como contacto.
- */
-export async function submitWaitlistRequest(
-  tx: Db,
-  input: WaitlistInput,
-  product: ClinicalProduct = "dental",
-  options: { sourcePage?: string | null } = {},
-): Promise<WaitlistSubmitResult> {
-  const parsed = waitlistInputSchemaFor(product).safeParse(input)
-  if (!parsed.success) throw validation(parsed.error.issues[0]?.message ?? "Revisa los datos de la solicitud")
-  const data = parsed.data
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${data.email}`}, 0))`)
-  const [alive] = await tx
-    .select({ id: saasWaitlistRequest.id, clientId: saasWaitlistRequest.clientId, createdAt: saasWaitlistRequest.createdAt })
-    .from(saasWaitlistRequest)
-    .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
-    .limit(1)
-  if (alive) return { id: alive.id, clientId: alive.clientId, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
-  // Solo una guía que existe: la administración la muestra como enlace (ADR 0216).
-  const page = webPageOf(options.sourcePage)
-  const sourcePage = page && guideSheetsFor(product)?.pages.includes(page) ? page : null
-  const clientId = await clientForWaitlistRequest(tx, { ...data, product, sourcePage })
-  const [row] = await tx
-    .insert(saasWaitlistRequest)
-    .values({ ...data, product, clientId, source: "web", sourcePage })
-    .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
-  if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
-  return { id: row.id, clientId, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
-}
-
-export async function markWaitlistConfirmationSent(tx: Db, id: string): Promise<void> {
-  await tx.update(saasWaitlistRequest).set({ confirmationSentAt: new Date() }).where(eq(saasWaitlistRequest.id, id))
 }
 
 /* ---------- Etapas de una solicitud ---------- */
@@ -405,75 +250,12 @@ export interface WaitlistRow {
   invitationSoon: boolean
 }
 
-export interface WaitlistFilter {
-  stage?: WaitlistStage | "todas"
-  search?: string
-}
-
-export interface WaitlistPage {
-  rows: WaitlistRow[]
-  /** Cuántas hay en cada etapa, entre todas las solicitudes; suman «todas». */
-  counts: Record<WaitlistStage | "todas", number>
-  /** Lugares del plan por invitación de cada producto, el que se usa al invitar (ADR 0093). */
-  seats: Record<ClinicalProduct, FounderSeats | null>
-  /** Cómo se abren las clínicas de cada producto. */
-  modes: Record<ClinicalProduct, SaasSignupMode>
-  /** Días hábiles que se prometen hoy para responder una solicitud. */
-  answerDays: number
-  /** Hoy, en America/Lima: con él se lee si un «Volver a contactar» ya toca. */
-  today: string
-}
-
-export interface FounderSeats {
-  planId: string
-  planName: string
-  used: number
-  limit: number | null
-}
-
 /**
- * La constancia de una clínica que la administración pasó a Fundadores desde su prueba
- * (`moveClinicToFounders`): ocupa su lugar en `founderSeats` y no deja pasarla otra vez.
+ * La constancia de una clínica que la administración pasó a un plan especial desde su prueba
+ * (`moveClinicToSpecialPlan`): no deja pasarla otra vez. El nombre de la acción queda como
+ * estaba para que la auditoría vieja se siga leyendo igual.
  */
 export const FOUNDERS_ENTERED_ACTION = "saas.founders_entered"
-
-/**
- * Lugares usados de un plan por invitación: las clínicas que entraron con la invitación,
- * las que la administración pasó desde su prueba y las invitaciones vigentes. Terminar sus
- * condiciones no libera el lugar: es de las clínicas que entraron al programa.
- */
-export async function founderSeats(tx: Db, planId: string, now = new Date()): Promise<FounderSeats> {
-  const [plan] = await tx.select({ id: saasPlan.id, name: saasPlan.name, seatLimit: saasPlan.seatLimit }).from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
-  if (!plan) throw notFound("Plan")
-  const [row] = await tx
-    .select({ used: sql<number>`count(*)::int` })
-    .from(saasWaitlistRequest)
-    .where(
-      and(
-        eq(saasWaitlistRequest.planId, planId),
-        or(
-          eq(saasWaitlistRequest.status, "entro"),
-          and(eq(saasWaitlistRequest.status, "invitada"), gt(saasWaitlistRequest.inviteExpiresAt, now)),
-        ),
-      ),
-    )
-  const [moved] = await tx
-    .select({ used: sql<number>`count(distinct ${adminAudit.organizationId})::int` })
-    .from(adminAudit)
-    .where(and(eq(adminAudit.action, FOUNDERS_ENTERED_ACTION), sql`${adminAudit.metadata}->>'planId' = ${planId}`))
-  return { planId: plan.id, planName: plan.name, used: (row?.used ?? 0) + (moved?.used ?? 0), limit: plan.seatLimit }
-}
-
-/** El plan por invitación de un producto: el activo con lugares, o null si no hay (ADR 0093). */
-export async function invitationPlan(tx: Db, product: ClinicalProduct = "dental"): Promise<{ id: string; name: string } | null> {
-  const [plan] = await tx
-    .select({ id: saasPlan.id, name: saasPlan.name })
-    .from(saasPlan)
-    .where(and(eq(saasPlan.isActive, true), eq(saasPlan.product, product), sql`${saasPlan.seatLimit} IS NOT NULL`))
-    .orderBy(asc(saasPlan.sortOrder), asc(saasPlan.createdAt))
-    .limit(1)
-  return plan ?? null
-}
 
 /**
  * Las solicitudes como filas de la lista, con su etapa y lo que le toca al
@@ -509,52 +291,6 @@ async function readWaitlistRows(
   const rows = await query
   const timeline = await loadSaasTermsTimeline(tx)
   return rows.map((found) => toWaitlistRow(found, timeline, now))
-}
-
-export async function listWaitlist(tx: Db, filter: WaitlistFilter = {}, now = new Date()): Promise<WaitlistPage> {
-  const stage = filter.stage ?? "por_revisar"
-  const where: SQL[] = []
-  if (stage !== "todas") where.push(sql`${stageSql(now)} = ${stage}`)
-  const search = filter.search?.trim()
-  if (search) {
-    const like = `%${search.replace(/[%_\\]/g, (m) => `\\${m}`)}%`
-    const matches = or(
-      ilike(saasWaitlistRequest.clinicName, like),
-      ilike(saasWaitlistRequest.email, like),
-      ilike(sql`${saasWaitlistRequest.firstName} || ' ' || ${saasWaitlistRequest.lastName}`, like),
-    )
-    if (matches) where.push(matches)
-  }
-  const rows = await readWaitlistRows(tx, where.length ? and(...where) : undefined, now, {
-    // Por revisar: primero las que vencen antes (las más viejas). Lo demás: lo último primero.
-    orderBy: [stage === "por_revisar" ? asc(saasWaitlistRequest.createdAt) : desc(saasWaitlistRequest.updatedAt)],
-    limit: 200,
-  })
-  // Los conteos, entre todas las solicitudes y con la etapa calculada en la base: suman «todas».
-  const countRows = await tx
-    .select({ stage: stageSql(now), n: sql<number>`count(*)::int` })
-    .from(saasWaitlistRequest)
-    .groupBy(sql`1`)
-  const counts = Object.fromEntries([...WAITLIST_STAGES, "todas"].map((s) => [s, 0])) as Record<WaitlistStage | "todas", number>
-  for (const entry of countRows) {
-    counts[entry.stage] = entry.n
-    counts.todas += entry.n
-  }
-  const timeline = await loadSaasTermsTimeline(tx)
-  const seatsOf = async (product: ClinicalProduct) => {
-    const plan = await invitationPlan(tx, product)
-    return plan ? await founderSeats(tx, plan.id, now) : null
-  }
-  const seats: Partial<Record<ClinicalProduct, FounderSeats | null>> = {}
-  for (const product of CLINICAL_PRODUCTS) seats[product] = await seatsOf(product)
-  return {
-    rows,
-    counts,
-    seats: seats as Record<ClinicalProduct, FounderSeats | null>,
-    modes: await getSignupModes(tx),
-    answerDays: timeline.at(now).waitlistAnswerDays,
-    today: limaDate(now),
-  }
 }
 
 function toWaitlistRow(
@@ -634,8 +370,6 @@ export interface WaitlistRequestDetail {
   request: WaitlistRow
   /** Las entradas, la más nueva arriba. */
   entries: WaitlistFollowUpEntry[]
-  /** Los lugares del plan por invitación de su producto, el que se usa al invitar. */
-  seats: FounderSeats | null
   /** Las fechas que se ofrecen hoy para volver a contactarla. */
   choices: FollowUpChoices
 }
@@ -663,11 +397,9 @@ export async function getWaitlistRequest(tx: Db, actor: AdminActor, id: string, 
     .leftJoin(user, eq(user.id, saasFollowUp.authorUserId))
     .where(eq(saasFollowUp.requestId, id))
     .orderBy(desc(saasFollowUp.createdAt), desc(saasFollowUp.id))
-  const plan = await invitationPlan(tx, request.product)
   return {
     request,
     entries: entries.map((entry) => ({ ...entry, body: entry.adminOnly && actor.role !== "admin" ? null : entry.body })),
-    seats: plan ? await founderSeats(tx, plan.id, now) : null,
     choices: followUpChoices(now),
   }
 }
@@ -775,30 +507,6 @@ export async function hideWaitlistFollowUp(tx: Db, actor: AdminActor, entryId: s
     entityId: entry.requestId,
     metadata: { entryId },
   })
-}
-
-/**
- * La ruta vieja de la nota (`PUT /:id/note`), que sigue usando una pestaña
- * abierta antes de este despliegue. Ya no escribe `note`: agrega una entrada
- * con el texto y le copia la fecha pendiente, para no cerrar el recordatorio.
- * Es una nota, como la de antes (`fromNote`): no cuenta como haberle
- * respondido. Sin texto, o con el mismo texto de la última entrada, no hace
- * nada. Se borra
- * en la entrega siguiente, junto con la columna.
- */
-export async function setWaitlistNote(tx: Db, actor: AdminActor, id: string, note: string | null, now = new Date()): Promise<void> {
-  const value = note?.trim() ? note.trim() : null
-  if (value && value.length > 2000) throw invalidField("note", "La nota puede tener como máximo 2000 caracteres")
-  if (!value) return
-  await lockRequest(tx, id)
-  const [last] = await tx
-    .select({ body: saasFollowUp.body, followUpOn: saasFollowUp.followUpOn })
-    .from(saasFollowUp)
-    .where(eq(saasFollowUp.requestId, id))
-    .orderBy(desc(saasFollowUp.createdAt), desc(saasFollowUp.id))
-    .limit(1)
-  if (last?.body === value) return
-  await insertFollowUp(tx, actor, id, { body: value, followUpOn: last?.followUpOn ?? null, adminOnly: false, fromNote: true }, now)
 }
 
 /* ---------- Prospectos en Inicio de la administración ---------- */
@@ -969,23 +677,19 @@ export async function inviteFromWaitlist(
   if (row.status === "descartada") throw new ServiceError("WAITLIST_DISCARDED", 409, "Esa solicitud está descartada")
   if (row.claimedAt) throw new ServiceError("WAITLIST_IN_USE", 409, "La invitación se está usando en este momento: intenta en un minuto")
   const requestProduct: ClinicalProduct = isClinicalProduct(row.product) ? row.product : "dental"
-  const planId = input.planId ?? row.planId ?? (await invitationPlan(tx, requestProduct))?.id
+  // Sin plan elegido, el de lista de su producto: lo negociado llega con la propuesta (ADR 0093).
+  const planId =
+    input.planId ??
+    row.planId ??
+    (await tx.select({ id: saasPlan.id }).from(saasPlan).where(defaultPlanOf(requestProduct)).limit(1))[0]?.id
   if (!planId) {
-    throw new ServiceError("SAAS_NO_INVITATION_PLAN", 409, `No hay un plan por invitación de ${productWords(requestProduct).name}: crea uno con lugares en Cobros y planes`)
+    throw new ServiceError("SAAS_NO_PLAN", 409, `No hay un plan de ${productWords(requestProduct).name} para invitar: crea uno en Cobros y planes`)
   }
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1).for("update")
   if (!plan || !plan.isActive) throw notFound("Plan")
   // La clínica entra con un plan de su producto (ADR 0093).
   if (plan.product !== requestProduct) {
     throw validation(`${plan.name} es de ${isClinicalProduct(plan.product) ? productWords(plan.product).name : "otra app"}: esta solicitud es de ${productWords(requestProduct).name}`)
-  }
-  // Reenviar una invitación vigente del mismo plan no ocupa otro lugar.
-  const holdsSeat = row.status === "invitada" && row.planId === planId && row.inviteExpiresAt !== null && row.inviteExpiresAt > now
-  if (plan.seatLimit !== null && !holdsSeat) {
-    const seats = await founderSeats(tx, planId, now)
-    if (seats.used >= plan.seatLimit) {
-      throw new ServiceError("SAAS_SEATS_FULL", 409, `Los ${plan.seatLimit} lugares de ${plan.name} están ocupados: sube los lugares del plan para invitar`)
-    }
   }
   const token = randomBytes(32).toString("base64url")
   const expiresAt = new Date(now.getTime() + FOUNDER_INVITATION_DAYS * DAY)
@@ -1206,36 +910,46 @@ async function enterInvitationPlan(
   return { trialEndsAt, guaranteedUntil }
 }
 
-/* ---------- Una clínica que ya existe pasa a Fundadores ---------- */
+/* ---------- Una clínica en prueba pasa a un plan especial ---------- */
 
 /**
- * Lo que ve la administración para pasar a Fundadores una clínica que entró sin la
- * invitación (el alta asistida): el plan por invitación de su producto, sus lugares y lo
- * que tendría si pasa ahora.
+ * Un plan especial: activo, de su producto, que no sale en la web ni es el de lista. Lo
+ * asigna solo la administración, por lo que negoció (el de Fundadores, por ejemplo).
  */
-export interface FoundersMove {
-  planName: string
+function specialPlansOf(product: ClinicalProduct): SQL | undefined {
+  return and(
+    eq(saasPlan.isActive, true),
+    eq(saasPlan.product, product),
+    eq(saasPlan.showOnWeb, false),
+    eq(saasPlan.isDefault, false),
+  )
+}
+
+export interface SpecialPlanOption {
+  id: string
+  name: string
   currency: string
-  /** Lugares usados, sin esta clínica, y los del plan: lleno, no pasa. */
-  used: number
-  limit: number
+  priceCents: number
   guaranteeMonths: number | null
-  /** Hasta cuándo valdrían sus condiciones si pasa ahora; después, el plan de lista. */
+  /** Hasta cuándo valdrían sus precios si pasa ahora; después, el plan de lista. */
   guaranteedUntil: Date | null
-  listPlanName: string | null
   /** Su prueba empieza de nuevo, como al entrar con la invitación. */
   trialDays: number
   trialCreditCents: number
 }
 
-type FoundersMoveCheck = { plan: typeof saasPlan.$inferSelect; seatLimit: number } | { refusal: ServiceError }
+/** Lo que ve la administración para «Cambiar a un plan especial» en Plan y pagos. */
+export interface SpecialPlanMove {
+  plans: SpecialPlanOption[]
+  listPlanName: string | null
+}
 
 /**
- * Si esta clínica puede pasar a Fundadores y a qué plan: una en prueba, que no es una demo
- * y que nunca estuvo en un plan por invitación (ni entró con la invitación ni se la pasó
- * antes, aunque sus condiciones ya terminaran). Los lugares se miran aparte.
+ * Si esta clínica puede pasar a un plan especial: una en prueba, que no es una demo y que
+ * nunca tuvo condiciones garantizadas (ni entró con ellas ni se la pasó antes, aunque ya
+ * terminaran). A una clínica que ya paga se le negocia con el descuento por clínica.
  */
-async function foundersMoveCheck(tx: Db, orgId: string): Promise<FoundersMoveCheck> {
+async function specialPlanRefusal(tx: Db, orgId: string): Promise<ServiceError | null> {
   const [sub] = await tx
     .select({
       status: saasSubscription.status,
@@ -1246,96 +960,86 @@ async function foundersMoveCheck(tx: Db, orgId: string): Promise<FoundersMoveChe
     .from(saasSubscription)
     .where(eq(saasSubscription.organizationId, orgId))
     .limit(1)
-  if (!sub) return { refusal: notFound("Suscripción") }
-  if (sub.isDemo) return { refusal: new ServiceError("FOUNDERS_DEMO", 409, "Una demo no pasa a Fundadores") }
+  if (!sub) return notFound("Suscripción")
+  if (sub.isDemo) return new ServiceError("SPECIAL_PLAN_DEMO", 409, "Una demo no pasa a un plan especial")
   if (sub.status !== "prueba")
-    return { refusal: new ServiceError("FOUNDERS_NOT_IN_TRIAL", 409, "Solo pasa a Fundadores una clínica en prueba") }
+    return new ServiceError(
+      "SPECIAL_PLAN_NOT_IN_TRIAL",
+      409,
+      "Solo pasa a un plan especial una clínica en prueba: a una que ya paga, negocia con un descuento",
+    )
   const [current] = sub.planId
-    ? await tx.select({ seatLimit: saasPlan.seatLimit }).from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
+    ? await tx.select({ guaranteeMonths: saasPlan.guaranteeMonths }).from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
     : []
   const [entered] = await tx
     .select({ id: saasWaitlistRequest.id })
     .from(saasWaitlistRequest)
     .innerJoin(saasPlan, eq(saasPlan.id, saasWaitlistRequest.planId))
-    .where(and(eq(saasWaitlistRequest.organizationId, orgId), eq(saasWaitlistRequest.status, "entro"), isNotNull(saasPlan.seatLimit)))
+    .where(and(eq(saasWaitlistRequest.organizationId, orgId), eq(saasWaitlistRequest.status, "entro"), isNotNull(saasPlan.guaranteeMonths)))
     .limit(1)
   const [moved] = await tx
     .select({ id: adminAudit.id })
     .from(adminAudit)
     .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, FOUNDERS_ENTERED_ACTION)))
     .limit(1)
-  if (sub.guaranteedUntil || (current && current.seatLimit !== null) || entered || moved)
-    return { refusal: new ServiceError("FOUNDERS_ALREADY", 409, "Esta clínica ya es o fue Fundadora") }
+  if (sub.guaranteedUntil || (current && current.guaranteeMonths !== null) || entered || moved)
+    return new ServiceError("SPECIAL_PLAN_ALREADY", 409, "Esta clínica ya tiene o tuvo condiciones garantizadas")
+  return null
+}
+
+/** Lo de «Cambiar a un plan especial»; null si esta clínica no puede o no hay planes especiales. */
+export async function getSpecialPlanMove(tx: Db, orgId: string, now = new Date()): Promise<SpecialPlanMove | null> {
+  if (await specialPlanRefusal(tx, orgId)) return null
   const product = await orgProduct(tx, orgId)
-  const invited = await invitationPlan(tx, product)
-  if (!invited) {
-    return {
-      refusal: new ServiceError(
-        "SAAS_NO_INVITATION_PLAN",
-        409,
-        `No hay un plan por invitación de ${productWords(product).name}: crea uno con lugares en Cobros y planes`,
-      ),
-    }
-  }
-  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, invited.id)).limit(1)
-  if (!plan || plan.seatLimit === null) return { refusal: notFound("Plan") }
-  return { plan, seatLimit: plan.seatLimit }
-}
-
-/** Lo de «Pasar a Fundadores» en Plan y pagos de la administración; null si esta clínica no puede. */
-export async function getFoundersMove(tx: Db, orgId: string, now = new Date()): Promise<FoundersMove | null> {
-  const check = await foundersMoveCheck(tx, orgId)
-  if ("refusal" in check) return null
-  const { plan, seatLimit } = check
-  const seats = await founderSeats(tx, plan.id, now)
-  const [list] = await tx.select({ name: saasPlan.name }).from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
+  const plans = await tx.select().from(saasPlan).where(specialPlansOf(product)).orderBy(asc(saasPlan.sortOrder), asc(saasPlan.createdAt))
+  if (!plans.length) return null
+  const [list] = await tx.select({ name: saasPlan.name }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
   return {
-    planName: plan.name,
-    currency: plan.currency,
-    used: seats.used,
-    limit: seatLimit,
-    guaranteeMonths: plan.guaranteeMonths,
-    guaranteedUntil: plan.guaranteeMonths ? addMonths(now, plan.guaranteeMonths) : null,
+    plans: plans.map((plan) => ({
+      id: plan.id,
+      name: plan.name,
+      currency: plan.currency,
+      priceCents: plan.priceCents,
+      guaranteeMonths: plan.guaranteeMonths,
+      guaranteedUntil: plan.guaranteeMonths ? addMonths(now, plan.guaranteeMonths) : null,
+      trialDays: plan.trialDays,
+      trialCreditCents: plan.trialCreditCents,
+    })),
     listPlanName: list?.name ?? null,
-    trialDays: plan.trialDays,
-    trialCreditCents: plan.trialCreditCents,
   }
 }
 
-export interface FoundersEntered {
+export interface SpecialPlanEntered {
   planName: string
   trialEndsAt: Date
   guaranteedUntil: Date | null
 }
 
 /**
- * Pasa a Fundadores una clínica que entró sin la invitación (el alta asistida) y sigue en
- * prueba: queda como si hubiera entrado hoy con ella —el plan, su prueba desde ahora y sus
- * meses garantizados— y ocupa uno de sus lugares. Un descuento negociado en el plan de lista
- * se quita: Fundadores trae sus precios y, al terminar sus meses, vuelve al precio de lista
- * como una Fundadora invitada. El presupuesto del mes queda como estaba. Solo
- * Administración. Con el plan bloqueado, como al invitar, dos a la vez no toman el mismo lugar.
+ * Pasa a un plan especial una clínica que sigue en prueba: queda como si hubiera entrado
+ * hoy con la invitación de ese plan —su prueba desde ahora y sus meses garantizados—. Un
+ * descuento negociado en el plan de lista se quita: el plan especial trae sus precios y,
+ * al terminar sus meses, vuelve al precio de lista. El presupuesto del mes queda como
+ * estaba. Solo Administración.
  */
-export async function moveClinicToFounders(
+export async function moveClinicToSpecialPlan(
   tx: Db,
   actor: AdminActor,
   orgId: string,
+  planId: unknown,
   now = new Date(),
-): Promise<FoundersEntered> {
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo Administración pasa una clínica a Fundadores")
+): Promise<SpecialPlanEntered> {
+  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo Administración cambia una clínica a un plan especial")
+  if (typeof planId !== "string" || !UUID.test(planId)) throw invalidField("planId", "Elige el plan")
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas:${orgId}`}, 0))`)
-  const check = await foundersMoveCheck(tx, orgId)
-  if ("refusal" in check) throw check.refusal
-  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, check.plan.id)).limit(1).for("update")
-  if (!plan) throw notFound("Plan")
-  const seats = await founderSeats(tx, plan.id, now)
-  if (plan.seatLimit !== null && seats.used >= plan.seatLimit) {
-    throw new ServiceError(
-      "SAAS_SEATS_FULL",
-      409,
-      `Los ${plan.seatLimit} lugares de ${plan.name} están ocupados: sube los lugares del plan para pasarla`,
-    )
-  }
+  const refusal = await specialPlanRefusal(tx, orgId)
+  if (refusal) throw refusal
+  const [plan] = await tx
+    .select()
+    .from(saasPlan)
+    .where(and(eq(saasPlan.id, planId), specialPlansOf(await orgProduct(tx, orgId))))
+    .limit(1)
+  if (!plan) throw invalidField("planId", "Ese plan no es un plan especial de esta app")
   const [before] = await tx
     .select({ discountBps: saasSubscription.discountBps })
     .from(saasSubscription)
@@ -1515,9 +1219,6 @@ export interface PublicPlanPrices {
 export interface PublicPricing {
   /** El plan de lista (el por defecto), si se muestra en la web. */
   list: PublicPlanPrices | null
-  /** El plan por invitación (Fundadores), si se muestra en la web. */
-  founders: (PublicPlanPrices & { discountPercent: number | null; guaranteeMonths: number | null }) | null
-  signupMode: SaasSignupMode
   /** Las condiciones comerciales que la web promete (ADR 0074): la web no las escribe a mano. */
   terms: PublicSaasTerms
 }
@@ -1531,8 +1232,7 @@ export interface PublicSaasTerms {
   graceDays: number
   /** Prueba cuando no hay un plan por defecto. */
   trialDays: number
-  waitlistAnswerDays: number
-  /** Días antes del fin de los meses garantizados de una Fundadora en que se le avisa. */
+  /** Días antes del fin de los meses garantizados de un plan especial en que se le avisa. */
   guaranteeNoticeDays: number
 }
 
@@ -1577,14 +1277,8 @@ export async function getPublicPricing(tx: Db, product: ClinicalProduct = "denta
     .where(and(eq(saasPlan.isActive, true), eq(saasPlan.showOnWeb, true), eq(saasPlan.product, product)))
     .orderBy(asc(saasPlan.sortOrder), asc(saasPlan.createdAt))
   const list = plans.find((plan) => plan.isDefault) ?? null
-  const founders = plans.find((plan) => plan.seatLimit !== null) ?? null
-  const [defaultPlan] = list ? [list] : await tx.select().from(saasPlan).where(defaultPlanOf(product)).limit(1)
   return {
     list: list ? publicPlan(list) : null,
-    founders: founders
-      ? { ...publicPlan(founders), discountPercent: discountAgainst(founders, defaultPlan), guaranteeMonths: founders.guaranteeMonths }
-      : null,
-    signupMode: await getSignupMode(tx, product),
     terms: await publicSaasTerms(tx),
   }
 }
@@ -1599,12 +1293,6 @@ async function publicSaasTerms(tx: Db): Promise<PublicSaasTerms> {
     halfCycleDays: terms.halfCycleDays,
     graceDays: terms.graceDays,
     trialDays: terms.trialDays,
-    waitlistAnswerDays: terms.waitlistAnswerDays,
     guaranteeNoticeDays: terms.guaranteeNoticeDays,
   }
-}
-
-/** Para el panel: ¿esta persona puede abrir una clínica de este producto sin invitación? */
-export async function canOpenClinicWithoutInvitation(tx: Db, product: ClinicalProduct = "dental"): Promise<boolean> {
-  return (await getSignupMode(tx, product)) === "abierta"
 }

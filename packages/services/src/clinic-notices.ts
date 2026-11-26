@@ -260,7 +260,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
       }
     }
 
-    // Prueba, crédito, tope, precio especial y Fundadores: los calcula el
+    // Prueba, crédito, tope, precio especial y condiciones garantizadas: los calcula el
     // servidor al leer (ADR 0031). Solo quien administra, salvo el tope
     // alcanzado, que cambia el trabajo de quien atiende conversaciones.
     if (sub.status === "prueba" || sub.status === "activa" || sub.status === "gracia") {

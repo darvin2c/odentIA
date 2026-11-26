@@ -52,7 +52,7 @@ export const SAAS_FIXED_COST_MICROS = 5_500_000
 export const SAAS_AI_ALARM_SHARE_BPS = 2000
 /** …o de este monto al mes. Nunca corta nada: es para revisar un error o un abuso. */
 export const SAAS_AI_ALARM_MICROS = 30_000_000
-/** Una clínica fundadora sin encender ningún agente en estos días: conviene escribirle. */
+/** Una clínica con condiciones garantizadas sin encender ningún agente en estos días: conviene escribirle. */
 export const SAAS_FOUNDER_IDLE_DAYS = 60
 
 export type CostGroup = "sofi" | "clio" | "argos" | "regalo" | "no_ia"
@@ -100,7 +100,7 @@ export interface ClinicCostMargin {
   /** La IA sobre lo cobrado, en puntos básicos; null si no se cobró nada. */
   aiShareBps: number | null
   alarm: boolean
-  /** Fundadora sin encender ningún agente en `SAAS_FOUNDER_IDLE_DAYS`. */
+  /** Con condiciones garantizadas y sin encender ningún agente en `SAAS_FOUNDER_IDLE_DAYS`. */
   idle: boolean
   sellerName: string | null
   /** Llamadas sin costo conocido (modelo sin precio o uso no reportado): no están en el total. */
@@ -502,7 +502,8 @@ export async function getClinicCostMargin(
     period.end <= (await clinicCommissionCutoff(tx, { trialStartedAt: sub.trialStartedAt, createdAt: sub.subscriptionCreatedAt }))
   const commissionCents = commissionable ? Math.floor((chargedCents * (sub?.sellerRateBps ?? 0)) / 10_000) : 0
   const aiShareBps = chargedMicros > 0 ? Math.round((aiMicros / chargedMicros) * 10_000) : null
-  const founder = plan?.seatLimit !== null && plan?.seatLimit !== undefined
+  // Con condiciones garantizadas (un plan especial, como el de Fundadores).
+  const founder = plan?.guaranteeMonths !== null && plan?.guaranteeMonths !== undefined
   return {
     organizationId: orgId,
     organizationName: sub?.name ?? orgId,

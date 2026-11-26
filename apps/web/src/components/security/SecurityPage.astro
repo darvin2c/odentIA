@@ -13,7 +13,6 @@
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
-import { days, giftOf, shownPlan } from "../../lib/pricing"
 import { WORDS } from "../../lib/product"
 import { contactHref, ctaOf } from "../../lib/site"
 import FeatureGrid from "../agents/FeatureGrid.astro"
@@ -25,9 +24,6 @@ import RoleView from "../latidia/security/RoleView"
 const page = PAGES.seguridad
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
-const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
 const trail: [string, string][] = [
   ["Inicio", "/"],
   [page.crumb, page.path],
@@ -218,19 +214,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <div class="faqwrap">
     <Faq items={faq} title="Sobre tus datos." />
   </div>
-  <CtaBand title="Tus pacientes confían en ti. Sus datos, también.">
-    <Fragment slot="text">
-      {gift ? (
-        founder ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        ) : (
-          <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        )
-      ) : (
-        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
-      )}
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Tus pacientes confían en ti. Sus datos, también." />
   </div>
 </Base>
 

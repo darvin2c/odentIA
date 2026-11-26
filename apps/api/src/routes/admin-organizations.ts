@@ -7,10 +7,10 @@ import {
   getClinicAgentCounts,
   type AssistedOrganizationResult,
   approveRecoveryCase,
-  getFoundersMove,
+  getSpecialPlanMove,
   getOrganizationBillingTerms,
   listSaasPlanChanges,
-  moveClinicToFounders,
+  moveClinicToSpecialPlan,
   setSaasBillingCycle,
   setSaasDiscount,
   setSaasTrialTerms,
@@ -510,7 +510,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
   })
 
   // O2: cobro y consumo de la clínica (ADR 0031). Precio y prueba son de la administración: soporte no ve importes (ADR 0094).
-  // Con «Pasar a Fundadores» cuando la clínica entró sin la invitación y sigue en prueba (ADR 0192).
+  // Con «Cambiar a un plan especial» mientras la clínica sigue en prueba (ADR 0192 y 0221).
   app.get("/:id/billing", async (c) => {
     const actor = adminContextOf(c)
     const denied = forbidUnlessManager(c, actor)
@@ -521,7 +521,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         const terms = await getOrganizationBillingTerms(tx, id)
         // «Cambios del plan»: de las dos auditorías, del más nuevo al más viejo (ADR 0196).
         return terms
-          ? { ...terms, founders: await getFoundersMove(tx, id), changes: await listSaasPlanChanges(tx, actor, id) }
+          ? { ...terms, specialPlan: await getSpecialPlanMove(tx, id), changes: await listSaasPlanChanges(tx, actor, id) }
           : null
       }),
     )
@@ -592,11 +592,12 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     )
   })
 
-  app.post("/:id/billing/founders", async (c) => {
+  app.post("/:id/billing/special-plan", async (c) => {
     const actor = adminContextOf(c)
     const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
-    return runService(c, 200, () => owner((tx) => moveClinicToFounders(tx, actor, c.req.param("id"))))
+    const body = (await c.req.json().catch(() => null)) as { planId?: unknown } | null
+    return runService(c, 200, () => owner((tx) => moveClinicToSpecialPlan(tx, actor, c.req.param("id"), body?.planId)))
   })
 
   // Ficha completa al final: evita que `/:id` capture rutas literales.

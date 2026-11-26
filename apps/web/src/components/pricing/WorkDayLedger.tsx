@@ -55,7 +55,7 @@ export default function WorkDayLedger({
 }: {
   prices: ValuePrices
   currency: string
-  /** «Ejemplo con precios de Fundadores.» o el del plan de lista. */
+  /** «Ejemplo con los precios del Plan odentIA.»: el del plan que se muestra. */
   note: string
 }) {
   const cost = (charge: Charge) =>

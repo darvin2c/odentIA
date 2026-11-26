@@ -1,10 +1,9 @@
 // Las plantillas de una guía y el aviso al descargar (lienzo, tablero 3; acta de la mesa del 24 nov):
 // el PDF baja sin pedir nada. Recién al tocarlo aparece, debajo, «Se está descargando · ¿No bajó?
-// Ábrelo aquí» y, con Fundadores, el correo opcional: le llegan las plantillas adjuntas con la puerta
-// para pedir entrar (`POST /api/public/founders/contact`, ADR 0216). Con el alta abierta no se pide
-// nada: el botón de toda la web. Los estados van en la misma caja, del alto del más alto, y un
-// segundo PDF no vuelve a pedir el correo. Nunca dice si ese correo ya pidió entrar, y si no se
-// sabe si el correo salió no invita a reintentarlo: el servidor no lo manda dos veces.
+// Ábrelo aquí» y el correo opcional: le llegan las plantillas adjuntas y cómo empezar en odentIA
+// (`POST /api/public/founders/contact`, ADR 0216). Los estados van en la misma caja, del alto del más
+// alto, y un segundo PDF no vuelve a pedir el correo. Si no se sabe si el correo salió no invita a
+// reintentarlo: el servidor no lo manda dos veces.
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { EMAIL } from "../../lib/form"
 import "./guide-downloads.css"
@@ -16,9 +15,6 @@ type Props = {
   sheets: Sheet[]
   /** La guía: «/guias/como-llenar-un-odontograma». */
   page: string
-  /** «correo» con Fundadores; «boton» con el alta abierta, que lleva al de toda la web. */
-  ask: "correo" | "boton"
-  cta: { href: string; label: string }
   contactUrl: string
 }
 
@@ -36,7 +32,7 @@ type Problem = { text: string; field: boolean }
 
 const ERROR_ID = "gd-email-error"
 
-export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: Props) {
+export default function GuideDownloads({ sheets, page, contactUrl }: Props) {
   const [downloaded, setDownloaded] = useState<Sheet | null>(null)
   const [phase, setPhase] = useState<Phase>("form")
   const [email, setEmail] = useState("")
@@ -162,73 +158,64 @@ export default function GuideDownloads({ sheets, page, ask, cta, contactUrl }: P
               ¿No bajó? Ábrelo aquí
             </a>
           </p>
-          {ask === "boton" ? (
-            <div className="gd-offer">
-              <p>¿Tienes una clínica? En odentIA lo llenas sin papel.</p>
-              <a className="btn btn-d btn-sm" href={cta.href}>
-                {cta.label}
-              </a>
-            </div>
-          ) : (
-            <div className="gd-stage">
-              <form className="gd-form" onSubmit={submit} noValidate inert={!showForm} aria-hidden={!showForm}>
-                <p>¿Tienes una clínica? Déjanos tu correo y te mostramos cómo llenarlo sin papel.</p>
-                <div className="gd-row">
-                  <label className="gd-field">
-                    <span>Tu correo (opcional)</span>
-                    <input
-                      ref={inputRef}
-                      type="email"
-                      inputMode="email"
-                      autoComplete="email"
-                      maxLength={254}
-                      value={email}
-                      onChange={(event) => {
-                        setEmail(event.target.value)
-                        if (error) setError(null)
-                      }}
-                      aria-invalid={error?.field ? true : undefined}
-                      aria-describedby={error ? errorId : undefined}
-                    />
-                  </label>
-                  <button className="btn btn-d btn-sm" type="submit" aria-disabled={phase === "sending" ? true : undefined}>
-                    {phase === "sending" ? "Enviando…" : "Quiero verlo"}
-                  </button>
-                </div>
-                {/* Solo para quien no ve la página: una persona no lo llena. */}
-                <label className="gd-trap" aria-hidden="true">
-                  Tu sitio web
-                  <input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} />
+          <div className="gd-stage">
+            <form className="gd-form" onSubmit={submit} noValidate inert={!showForm} aria-hidden={!showForm}>
+              <p>¿Tienes una clínica? Déjanos tu correo y te mostramos cómo llenarlo sin papel.</p>
+              <div className="gd-row">
+                <label className="gd-field">
+                  <span>Tu correo (opcional)</span>
+                  <input
+                    ref={inputRef}
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    maxLength={254}
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value)
+                      if (error) setError(null)
+                    }}
+                    aria-invalid={error?.field ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
+                  />
                 </label>
-                <p className="gd-error" id={errorId} role="alert">
-                  {error?.text ?? ""}
+                <button className="btn btn-d btn-sm" type="submit" aria-disabled={phase === "sending" ? true : undefined}>
+                  {phase === "sending" ? "Enviando…" : "Quiero verlo"}
+                </button>
+              </div>
+              {/* Solo para quien no ve la página: una persona no lo llena. */}
+              <label className="gd-trap" aria-hidden="true">
+                Tu sitio web
+                <input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} />
+              </label>
+              <p className="gd-error" id={errorId} role="alert">
+                {error?.text ?? ""}
+              </p>
+            </form>
+            {showForm ? null : (
+              <div className="gd-done">
+                <p ref={doneRef} tabIndex={-1}>
+                  {phase === "sent" ? (
+                    <>
+                      <b>Listo, te escribimos a {sentTo}.</b> En unos minutos te llegan las plantillas de esta guía en PDF y cómo se hace en odentIA.
+                    </>
+                  ) : phase === "recent" ? (
+                    <>
+                      <b>Hoy ya pediste las plantillas de esta guía para {sentTo}.</b> Si no las ves, revisa la carpeta de spam.
+                    </>
+                  ) : (
+                    <>
+                      <b>No pudimos confirmar que salió el correo a {sentTo}.</b> Si no te llega en unos minutos,
+                      las plantillas están aquí arriba.
+                    </>
+                  )}
                 </p>
-              </form>
-              {showForm ? null : (
-                <div className="gd-done">
-                  <p ref={doneRef} tabIndex={-1}>
-                    {phase === "sent" ? (
-                      <>
-                        <b>Listo, te escribimos a {sentTo}.</b> En unos minutos te llegan las plantillas de esta guía en PDF y cómo se hace en odentIA.
-                      </>
-                    ) : phase === "recent" ? (
-                      <>
-                        <b>Hoy ya pediste las plantillas de esta guía para {sentTo}.</b> Si no las ves, revisa la carpeta de spam.
-                      </>
-                    ) : (
-                      <>
-                        <b>No pudimos confirmar que salió el correo a {sentTo}.</b> Si no te llega en unos minutos,
-                        las plantillas están aquí arriba.
-                      </>
-                    )}
-                  </p>
-                  <button type="button" className="gd-change" onClick={change}>
-                    Cambiar correo
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+                <button type="button" className="gd-change" onClick={change}>
+                  Cambiar correo
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>

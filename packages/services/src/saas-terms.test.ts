@@ -235,7 +235,7 @@ describe("cambios del plan (ADR 0196)", () => {
 
     const changes = await listSaasPlanChanges(ownerDb, admin, orgId)
     expect(changes.map((change) => change.words)).toEqual([
-      "Terminaron sus condiciones de Fundadora; ahora rige Plan odentIA",
+      "Terminaron sus condiciones garantizadas; ahora rige Plan odentIA",
       "Se pausó su plan: Vacaciones de la clínica",
       `Su presupuesto del mes pasó a ${formatMoney(5000, "USD", "es")}`,
       "Precio especial: 10 % menos en cada acción, sin fecha de fin",

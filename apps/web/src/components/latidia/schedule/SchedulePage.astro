@@ -5,7 +5,6 @@
 // atiende), las preguntas y el cierre.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf } from "../../../lib/pricing"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -17,7 +16,6 @@ const title = "Agenda médica para tu consultorio, por sala y por médico"
 const description =
   "Agenda médica para consultorios: citas por sala y por médico, quién llegó y quién espera, recordatorios por WhatsApp, controles que se repiten y un agente que agenda con el sí del paciente."
 const cta = ctaOf(Astro.locals.pricing)
-const gift = giftOf(Astro.locals.pricing)
 const trail: [string, string][] = [["Inicio", "/"], ["Agenda médica", "/agenda-medica"]]
 
 const reminders = [
@@ -143,12 +141,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="sp-faq">
       <Faq items={faq} />
     </div>
-    <CtaBand title="Una agenda que se llena y se recuerda sola.">
-      <Fragment slot="text">
-        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
-        Sin tarjeta y sin límite de médicos, salas ni usuarios.
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Una agenda que se llena y se recuerda sola." />
   </div>
 </Base>
 

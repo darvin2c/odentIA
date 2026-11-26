@@ -19,7 +19,6 @@ import SofiChat from "./SofiChat"
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
 const color = AGENT_COLORS.recepcion
 
 const title = "Sofi, recepcionista virtual con IA para consultorios médicos"
@@ -71,7 +70,7 @@ const night =
   plan && informa !== null && agenda !== null
     ? {
         q: "¿Cuánto me cuesta una noche normal?",
-        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, ocho personas que solo preguntan y dos que agendan y vienen son ${bare(8 * informa, plan.currency)} + ${bare(2 * agenda, plan.currency)}: ${money(8 * informa + 2 * agenda, plan.currency)}.`,
+        a: `Con los precios de lista, ocho personas que solo preguntan y dos que agendan y vienen son ${bare(8 * informa, plan.currency)} + ${bare(2 * agenda, plan.currency)}: ${money(8 * informa + 2 * agenda, plan.currency)}.`,
       }
     : null
 

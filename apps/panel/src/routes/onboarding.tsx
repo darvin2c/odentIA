@@ -5,7 +5,6 @@ import {
   InputGroupAddon,
   InputGroupInput,
   InputGroupText,
-  toast,
 } from "@odentia/ui"
 import {
   CountrySelect,
@@ -30,13 +29,14 @@ import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
-import { API_URL, authClient } from "../lib/auth-client"
+import { authClient } from "../lib/auth-client"
 import { type AuthClientError, authError, authFailureOf, authFormMessage } from "../lib/auth-error"
 import { panelWords } from "../lib/brand"
 import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "../lib/clinic-address"
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
+import { SIGNUP_ACCOUNT_STEPS, SIGNUP_CLINIC_STEPS, SIGNUP_STEP_TOTAL } from "../lib/signup-steps"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ location }) => {
@@ -45,29 +45,21 @@ export const Route = createFileRoute("/onboarding")({
   },
   validateSearch: (search: Record<string, unknown>) => ({
     continue: typeof search.continue === "string" ? search.continue : undefined,
-    // Invitación Fundadores (issue 165): viaja al crear la clínica.
+    // Invitación interna (el plan negociado con ventas): viaja al crear la clínica.
     ...(typeof search.invitacion === "string" && search.invitacion ? { invitacion: search.invitacion } : {}),
   }),
   component: OnboardingPage,
 })
 
-const STEPS = [
-  { id: "persona", label: "Tu perfil" },
-  { id: "org", label: "Organización" },
-  { id: "profile", label: "Perfil legal" },
-  { id: "branch", label: "Sede" },
-] as const
+/**
+ * Los pasos del alta. El nombre y los apellidos, si la cuenta no los trae
+ * (entró con Google), se piden en el primer paso que se ve: así la cuenta de
+ * pasos no cambia según cómo se creó la cuenta.
+ */
+const STEPS = SIGNUP_CLINIC_STEPS
 
 /** Tema de cada paso para el subtítulo "Paso N de M: …". */
-const STEP_TOPICS = ["tus datos", "organización", "perfil legal", "primera sede"] as const
-
-/** Campos validados al avanzar desde cada paso. */
-const STEP_FIELDS = [
-  ["firstName", "lastName"],
-  ["orgName", "slug"],
-  ["legalName", "fiscalDocNumber", "countryCode", "currency"],
-  ["branchName", "branchAddress", "branchPhone", "branchTimezone"],
-] as const
+const STEP_TOPICS = ["organización", "perfil legal", "primera sede"] as const
 
 // Subdominios reservados (misma lista que el servidor).
 const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, media: true, storage: true }
@@ -121,20 +113,27 @@ const onboardingSubmitSchema = onboardingSchema.extend({
 /** Schema por campo; valida al salir de su paso y en el submit final. */
 const FIELD_SCHEMAS = onboardingSchema.shape
 
-/** Paso que posee cada campo: antes de ese paso el campo no se valida. */
-const FIELD_STEP: Record<OnboardingField, number> = {
-  firstName: 0,
-  lastName: 0,
-  orgName: 1,
-  slug: 1,
-  legalName: 2,
-  fiscalDocNumber: 2,
-  countryCode: 2,
-  currency: 2,
-  branchName: 3,
-  branchAddress: 3,
-  branchPhone: 3,
-  branchTimezone: 3,
+/** Campos validados al avanzar desde cada paso (el nombre de la persona se suma al primero que se ve). */
+const STEP_FIELDS: readonly (readonly OnboardingField[])[] = [
+  ["orgName", "slug"],
+  ["legalName", "fiscalDocNumber", "countryCode", "currency"],
+  ["branchName", "branchAddress", "branchPhone", "branchTimezone"],
+]
+
+const PERSONA_FIELDS: readonly OnboardingField[] = ["firstName", "lastName"]
+
+/** Paso que posee cada campo: antes de ese paso el campo no se valida. El nombre de la persona va en el primero que se ve. */
+const FIELD_STEP: Record<Exclude<OnboardingField, "firstName" | "lastName">, number> = {
+  orgName: 0,
+  slug: 0,
+  legalName: 1,
+  fiscalDocNumber: 1,
+  countryCode: 1,
+  currency: 1,
+  branchName: 2,
+  branchAddress: 2,
+  branchPhone: 2,
+  branchTimezone: 2,
 }
 
 /**
@@ -205,38 +204,27 @@ function OnboardingPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { continue: continueOrgId, invitacion } = useSearch({ from: "/onboarding" })
-  // La invitación llega en la dirección (correo de verificación, Google) o quedó guardada al crear la cuenta.
-  const [founderToken] = useState(() => invitacion ?? (typeof window === "undefined" ? null : storedInvitation()))
+  // La invitación interna llega en la dirección (correo de verificación, Google) o quedó guardada al crear la cuenta.
+  const [founderToken, setFounderToken] = useState(() => invitacion ?? (typeof window === "undefined" ? null : storedInvitation()))
   useEffect(() => {
     if (invitacion) rememberInvitation(invitacion)
   }, [invitacion])
-  const signUpInfo = useQuery({
-    queryKey: ["public", "sign-up"],
-    queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/public/sign-up`)
-      if (!res.ok) throw new Error(`Error ${res.status}`)
-      return z.object({ signupMode: z.enum(["invitacion", "abierta"]).default("abierta") }).passthrough().parse(await res.json())
-    },
-    staleTime: 60_000,
-  })
   // Alta asistida: la clínica ya existe (invitación aceptada); se completa su
   // perfil y sede sin crear otra. El servidor solo deja a owner/admin
   // (settings.write); el resto espera al responsable.
   const skipOrg = typeof continueOrgId === "string" && continueOrgId.length > 0
-  // Sin invitación y con el alta «solo con invitación», no hay clínica que abrir: vuelve a «Mis organizaciones», que lo explica.
-  const blocked = !skipOrg && !founderToken && signUpInfo.data?.signupMode === "invitacion"
-  useEffect(() => {
-    if (blocked) void navigate({ to: "/" })
-  }, [blocked, navigate])
-  // Quien se registró por email ya dio nombre y apellidos: el paso "Tu perfil"
-  // solo aparece cuando la sesión no los tiene (p. ej. cuenta vía Google).
-  const hasStoredName = Boolean(sessionUser?.firstName || sessionUser?.lastName)
-  const offset = hasStoredName ? 1 : 0
-  const [step, setStep] = useState(0)
-  const [visited, setVisited] = useState<number[]>([0])
-  // La dirección sigue al nombre hasta que la persona la escribe a mano; si la
-  // borra entera, vuelve a seguirlo (issue 106).
+  // Quien se registró por correo ya dio nombre y apellidos; si la cuenta no los
+  // trae (p. ej. vía Google), se piden en el primer paso que se ve.
+  const showPersona = sessionUser ? !(sessionUser.firstName && sessionUser.lastName) : false
+  const firstStep = skipOrg ? 1 : 0
+  const [step, setStep] = useState(firstStep)
+  const [visited, setVisited] = useState<number[]>([firstStep])
+  // La dirección, la razón social y el nombre de la sede siguen al nombre de
+  // la clínica hasta que la persona los escribe a mano; si los borra enteros,
+  // vuelven a seguirlo (issue 106): el nombre se escribe una sola vez.
   const [addressEdited, setAddressEdited] = useState(false)
+  const [legalNameEdited, setLegalNameEdited] = useState(false)
+  const [branchNameEdited, setBranchNameEdited] = useState(false)
   // Direcciones que el servidor dijo que están en uso: no dejan avanzar.
   const takenAddresses = useRef(new Set<string>())
   // La clínica que este alta ya creó: si falló el perfil o la sede, el
@@ -255,8 +243,8 @@ function OnboardingPage() {
   // El tipo sale del esquema: `branchPhone` es `string | null` y `countryCode`
   // es un ISO de 2 letras, no el literal del valor inicial.
   const initialValues: OnboardingValues = {
-    firstName: splitName(sessionUser?.name ?? "").firstName,
-    lastName: splitName(sessionUser?.name ?? "").lastName,
+    firstName: sessionUser?.firstName || splitName(sessionUser?.name ?? "").firstName,
+    lastName: sessionUser?.lastName || splitName(sessionUser?.name ?? "").lastName,
     orgName: "",
     slug: "",
     legalName: "",
@@ -282,8 +270,8 @@ function OnboardingPage() {
         lastName: value.lastName,
       })
       if (nameError) {
-        // El nombre se corrige en su paso (si la cuenta no lo traía guardado).
-        if (!hasStoredName) goTo(0)
+        // El nombre se corrige en el primer paso (si la cuenta no lo traía guardado).
+        if (showPersona) goTo(firstStep)
         throw nameSaveError(nameError)
       }
       let slug = value.slug
@@ -297,13 +285,23 @@ function OnboardingPage() {
         )
         if (orgError) {
           const { code, message } = authFailureOf(orgError)
-          if (code === "INVITATION_INVALID") forgetInvitation()
-          if (code === "INVITATION_REQUIRED" || code === "INVITATION_INVALID") {
-            // Sin una invitación que sirva no se abre la clínica aquí: se vuelve al inicio (como antes),
-            // y el aviso viaja en un toast porque este formulario deja de estar a la vista.
-            toast.error(message)
-            await navigate({ to: "/" })
-            return
+          if (code === "INVITATION_OTHER_EMAIL") {
+            // La invitación guardada en este navegador es de otro correo. Ya no hace falta para
+            // entrar: se olvida y se abre igual; quien la recibió la usa con el enlace de su correo.
+            forgetInvitation()
+            setFounderToken(null)
+            throw new ApiError(403, {
+              message: `${message} Si no es la tuya, puedes abrir tu ${panelWords.place.one} igual: toca «Crear organización» otra vez.`,
+            })
+          }
+          if (code === "INVITATION_INVALID") {
+            // El enlace venció, se usó o se anuló: se olvida y la clínica se abre igual,
+            // con la prueba de siempre, al volver a tocar el botón. Lo escrito se queda.
+            forgetInvitation()
+            setFounderToken(null)
+            throw new ApiError(403, {
+              message: `El enlace de tu invitación ya no sirve: venció, se usó o se anuló. Puedes abrir tu ${panelWords.place.one} igual: toca «Crear organización» otra vez.`,
+            })
           }
           if (code === "ORGANIZATION_ALREADY_EXISTS" || code === "ORGANIZATION_SLUG_ALREADY_TAKEN") {
             // Alguien la tomó entre la comprobación y el envío: el campo lo dice
@@ -311,7 +309,7 @@ function OnboardingPage() {
             takenAddresses.current.add(value.slug)
             void queryClient.invalidateQueries({ queryKey: ["onboarding", "address", value.slug] })
           }
-          // La dirección (reservada, en uso) va a su campo; la invitación, junto al botón.
+          // La dirección (reservada, en uso) va a su campo; lo demás (la invitación), junto al botón.
           throw authError(orgError, {
             fields: ADDRESS_ERRORS,
             messages: { RESERVED_SLUG: `Esa dirección está reservada para ${panelWords.name}. Elige otra.` },
@@ -358,6 +356,7 @@ function OnboardingPage() {
   const submitError = useFormSubmitError(form)
   // Alta reanudada: precarga lo que el alta asistida ya dejó (país, moneda,
   // razón social) para no repetirlo.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al entrar a la reanudada; el formulario no cambia.
   useEffect(() => {
     if (!skipOrg) return
     let cancelled = false
@@ -380,7 +379,6 @@ function OnboardingPage() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skipOrg])
 
   // El país elegido alimenta la máscara del teléfono y las zonas sugeridas.
@@ -431,18 +429,16 @@ function OnboardingPage() {
     }))
   }, [])
 
-  // Precarga el nombre de la sesión cuando llega después del primer render y
-  // salta el paso de perfil si la cuenta ya lo trae guardado.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega la sesión; el paso y lo visitado se leen en ese momento, no lo vuelven a disparar.
+  // Precarga el nombre de la sesión cuando llega después del primer render.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega la sesión.
   useEffect(() => {
     if (!sessionUser) return
     if (!form.getFieldValue("firstName") && !form.getFieldValue("lastName")) {
-      const { firstName, lastName } = splitName(sessionUser.name)
+      const split = splitName(sessionUser.name)
+      const firstName = sessionUser.firstName || split.firstName
+      const lastName = sessionUser.lastName || split.lastName
       if (firstName) form.setFieldValue("firstName", firstName)
       if (lastName) form.setFieldValue("lastName", lastName)
-    }
-    if ((sessionUser.firstName || sessionUser.lastName) && step === 0 && !visited.includes(1)) {
-      goTo(skipOrg ? 2 : 1)
     }
   }, [sessionUser])
 
@@ -465,7 +461,9 @@ function OnboardingPage() {
         if (skipOrg && (key === "orgName" || key === "slug")) return undefined
         // La clínica ya se creó: su dirección quedó fija.
         if (createdSlug && key === "slug") return undefined
-        if (step < FIELD_STEP[key]) return undefined
+        // El nombre de la persona solo se pide si la cuenta no lo trae.
+        if ((key === "firstName" || key === "lastName") && !showPersona) return undefined
+        if (key !== "firstName" && key !== "lastName" && step < FIELD_STEP[key]) return undefined
         const parsed = FIELD_SCHEMAS[key].safeParse(value)
         if (!parsed.success) return parsed.error.issues[0]?.message ?? undefined
         if (key === "slug" && typeof value === "string" && takenAddresses.current.has(value))
@@ -488,16 +486,20 @@ function OnboardingPage() {
     return instance.validate("submit", { skipFormValidation: true })
   }
 
+  /** Los campos de un paso: el primero que se ve suma el nombre de la persona si hace falta. */
+  function fieldsOf(index: number): readonly OnboardingField[] {
+    const fields = STEP_FIELDS[index] ?? []
+    return index === firstStep && showPersona ? [...PERSONA_FIELDS, ...fields] : fields
+  }
+
   /** Valida los campos del paso actual y avanza si pasan; si no, enfoca el primero que falla. */
   async function handleContinue() {
-    const results = await Promise.all(
-      STEP_FIELDS[step].map((field) => Promise.resolve(validateStepField(field))),
-    )
+    const results = await Promise.all(fieldsOf(step).map((field) => Promise.resolve(validateStepField(field))))
     if (results.some((errors) => errors.length > 0)) {
       setFocusRequest((count) => count + 1)
       return
     }
-    goTo(step + 1 === 1 && skipOrg ? 2 : step + 1)
+    goTo(step + 1)
   }
 
   /**
@@ -511,35 +513,56 @@ function OnboardingPage() {
       root: formRef.current,
     })
     if (ok) return
-    const invalidStep = STEP_FIELDS.findIndex((fields) =>
-      fields.some((field) => (form.getFieldMeta(field)?.errors.length ?? 0) > 0),
+    const invalidStep = STEPS.findIndex((_, index) =>
+      index >= firstStep && fieldsOf(index).some((field) => (form.getFieldMeta(field)?.errors.length ?? 0) > 0),
     )
     if (invalidStep === -1) return
-    goTo(skipOrg && invalidStep === 1 ? 2 : invalidStep)
+    goTo(invalidStep)
     setFocusRequest((count) => count + 1)
   }
 
-  /** Pasos visibles: en reanudada no se crea la organización; con nombre
-   * guardado se salta el perfil. Todo índice visual sale de aquí. */
-  const shownIndexes = STEPS.map((_, index) => index)
-    .filter((index) => !(skipOrg && index === 1))
-    .slice(offset)
-  const visibleSteps = shownIndexes.map((index) => STEPS[index])
-  const shownTopics = shownIndexes.map((index) => STEP_TOPICS[index])
-  const currentPosition = shownIndexes.indexOf(step)
+  /**
+   * Pasos visibles. Al abrir una clínica, la cuenta sigue la del registro
+   * («Paso 3 de 5»): los pasos de la cuenta se ven hechos. En la reanudada no
+   * se crea la organización y la cuenta es solo la del alta que falta.
+   */
+  const shownIndexes = STEPS.map((_, index) => index).filter((index) => index >= firstStep)
+  const lead = skipOrg ? 0 : SIGNUP_ACCOUNT_STEPS.length
+  const visibleSteps = [...(skipOrg ? [] : SIGNUP_ACCOUNT_STEPS), ...shownIndexes.map((index) => STEPS[index])]
+  const total = skipOrg ? shownIndexes.length : SIGNUP_STEP_TOTAL
+  const currentPosition = lead + shownIndexes.indexOf(step)
+  const shownVisited = [
+    ...SIGNUP_ACCOUNT_STEPS.map((_, index) => index).slice(0, lead),
+    ...visited.map((v) => shownIndexes.indexOf(v)).filter((v) => v >= 0).map((v) => v + lead),
+  ]
+
+  const personaFields = showPersona ? (
+    <>
+      <form.AppField name="firstName" validators={stepValidator("firstName")}>
+        {(field) => <field.TextField id="firstName" label="Tu nombre" autoComplete="given-name" />}
+      </form.AppField>
+      <form.AppField name="lastName" validators={stepValidator("lastName")}>
+        {(field) => <field.TextField id="lastName" label="Tus apellidos" autoComplete="family-name" />}
+      </form.AppField>
+    </>
+  ) : null
 
   return (
     <main>
       <PageShell maxWidth="md" className="py-10">
         <PageHeader
           title={skipOrg ? "Termina el alta de tu clínica" : "Configura tu clínica"}
-          subtitle={`Paso ${currentPosition + 1} de ${visibleSteps.length}: ${shownTopics[currentPosition] ?? ""}`}
+          subtitle={`Paso ${currentPosition + 1} de ${total}: ${STEP_TOPICS[step] ?? ""}`}
         />
         <WizardSteps
           steps={visibleSteps}
           current={currentPosition}
-          visited={visited.map((v) => shownIndexes.indexOf(v)).filter((v) => v >= 0)}
-          onGo={(index) => goTo(shownIndexes[index] ?? 0)}
+          visited={shownVisited}
+          // Los pasos de la cuenta ya están hechos: se ven, pero no se vuelve a ellos desde aquí.
+          onGo={(index) => {
+            const target = shownIndexes[index - lead]
+            if (target !== undefined) goTo(target)
+          }}
           className="mt-6"
         />
         <form
@@ -553,22 +576,17 @@ function OnboardingPage() {
           }}
         >
           <FieldGroup className="gap-4">
-            <div data-step={0} className={step === 0 ? "flex flex-col gap-4" : "hidden"}>
-              <form.AppField name="firstName" validators={stepValidator("firstName")}>
-                {(field) => <field.TextField id="firstName" label="Nombre" autoComplete="given-name" />}
-              </form.AppField>
-              <form.AppField name="lastName" validators={stepValidator("lastName")}>
-                {(field) => <field.TextField id="lastName" label="Apellidos" autoComplete="family-name" />}
-              </form.AppField>
-            </div>
-
-            <div data-step={1} className={step === 1 && !skipOrg ? "flex flex-col gap-4" : "hidden"}>
+            <div data-step={0} className={step === 0 && !skipOrg ? "flex flex-col gap-4" : "hidden"}>
+              {skipOrg ? null : personaFields}
               <form.AppField
                 name="orgName"
                 validators={stepValidator("orgName")}
                 listeners={{
                   onChange: ({ value }) => {
                     if (!addressEdited && !createdSlug) form.setFieldValue("slug", addressFromName(value))
+                    // La razón social y la sede nacen con el mismo nombre; se cambian en su paso.
+                    if (!legalNameEdited) form.setFieldValue("legalName", value)
+                    if (!branchNameEdited) form.setFieldValue("branchName", value)
                   },
                 }}
               >
@@ -636,9 +654,22 @@ function OnboardingPage() {
               </form.AppField>
             </div>
 
-            <div data-step={2} className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
-              <form.AppField name="legalName" validators={stepValidator("legalName")}>
-                {(field) => <field.TextField id="legalName" label="Razón social" />}
+            <div data-step={1} className={step === 1 ? "flex flex-col gap-4" : "hidden"}>
+              {skipOrg ? personaFields : null}
+              <form.AppField
+                name="legalName"
+                validators={stepValidator("legalName")}
+                listeners={{
+                  onChange: ({ value }) => setLegalNameEdited(value !== "" && value !== form.getFieldValue("orgName")),
+                }}
+              >
+                {(field) => (
+                  <field.TextField
+                    id="legalName"
+                    label="Razón social"
+                    description={skipOrg ? undefined : "La pusimos con el nombre de tu clínica. Cámbiala si la empresa se llama distinto."}
+                  />
+                )}
               </form.AppField>
               <form.AppField name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
                 {(field) => (
@@ -678,9 +709,21 @@ function OnboardingPage() {
               </form.AppField>
             </div>
 
-            <div data-step={3} className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
-              <form.AppField name="branchName" validators={stepValidator("branchName")}>
-                {(field) => <field.TextField id="branchName" label="Nombre de la sede" />}
+            <div data-step={2} className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
+              <form.AppField
+                name="branchName"
+                validators={stepValidator("branchName")}
+                listeners={{
+                  onChange: ({ value }) => setBranchNameEdited(value !== "" && value !== form.getFieldValue("orgName")),
+                }}
+              >
+                {(field) => (
+                  <field.TextField
+                    id="branchName"
+                    label="Nombre de la sede"
+                    description={skipOrg ? undefined : "Con el nombre de tu clínica; si tienes varias, ponle el de este local (p. ej. «Miraflores»)."}
+                  />
+                )}
               </form.AppField>
               <form.AppField name="branchAddress" validators={stepValidator("branchAddress")}>
                 {(field) => <field.TextField id="branchAddress" label="Dirección (opcional)" />}
@@ -722,12 +765,8 @@ function OnboardingPage() {
               </p>
             ) : null}
             <div className="flex justify-between">
-              {currentPosition > 0 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => goTo(shownIndexes[currentPosition - 1] ?? 0)}
-                >
+              {step > firstStep ? (
+                <Button type="button" variant="outline" onClick={() => goTo(step - 1)}>
                   Atrás
                 </Button>
               ) : (

@@ -1,6 +1,7 @@
-// Precios publicados de odentIA (ADR 0031) y el programa Fundadores (issue 165). No hay cifras en
-// el código: salen de la administración (planes con «Mostrar en la web») por la ruta pública de la
-// API y se guardan 30 segundos, así un cambio se ve en menos de un minuto (decisión 14).
+// Precios publicados de odentIA (ADR 0031): el plan de lista de cada producto. No hay cifras en el
+// código: salen de la administración (planes con «Mostrar en la web») por la ruta pública de la API
+// y se guardan 30 segundos, así un cambio se ve en menos de un minuto (decisión 14). El alta es libre:
+// cualquiera crea su cuenta y abre su clínica al momento, así que no hay otro plan que mostrar.
 
 // Este archivo también lo importan las islas (por `money` y los tipos): nada de lo que lee la
 // configuración del servidor se evalúa al cargarlo.
@@ -46,12 +47,8 @@ export interface PlanPrices {
 }
 
 export interface Pricing {
-  /** El plan de lista (el por defecto), si se muestra en la web. */
+  /** El plan de lista (el por defecto), si se muestra en la web; null en un producto sin plan publicado. */
   list: PlanPrices | null
-  /** El plan por invitación (Fundadores), si se muestra en la web. */
-  founders: (PlanPrices & { discountPercent: number | null; guaranteeMonths: number | null }) | null
-  /** «invitacion»: abrir una clínica pide invitación y la web lleva a la lista de espera. */
-  signupMode: "invitacion" | "abierta"
   /** Las condiciones comerciales que se prometen (issue 167, ADR 0074): también de la administración. */
   terms: Terms
 }
@@ -71,10 +68,6 @@ export interface Terms {
   graceDays: number
   /** Prueba cuando no hay un plan por defecto. */
   trialDays: number
-  /** Días hábiles para responder una solicitud de invitación. */
-  waitlistAnswerDays: number
-  /** Días antes del fin de los meses de Fundadores en que se avisa; falta si la API es anterior. */
-  guaranteeNoticeDays?: number
 }
 
 interface ApiPlan {
@@ -147,27 +140,17 @@ let cached: { at: number; value: Pricing } | null = null
 let inflight: Promise<Pricing> | null = null
 
 async function fetchPricing(): Promise<Pricing> {
-  // La lista de este producto (ADR 0093): la red interna no lleva el dominio, así que se dice.
+  // La lista de este producto (ADR 0093): la red interna no lleva el dominio, así que se dice. La
+  // ruta conserva su nombre de antes; solo se lee el plan de lista y las condiciones (una API que
+  // aún mande otros campos no cambia lo que se muestra).
   const res = await fetch(`${apiBase()}/api/public/founders/pricing?product=${PRODUCT}`, {
     signal: AbortSignal.timeout(3000),
   })
   if (!res.ok) throw new Error(`precios: la API respondió ${res.status}`)
-  const body = (await res.json()) as {
-    list: ApiPlan | null
-    founders: (ApiPlan & { discountPercent: number | null; guaranteeMonths: number | null }) | null
-    signupMode: "invitacion" | "abierta"
-    terms?: Terms
-  }
+  const body = (await res.json()) as { list: ApiPlan | null; terms?: Terms }
   // Sin condiciones la respuesta no sirve: la web no las inventa (se sigue con lo último leído).
   if (!body.terms) throw new Error("precios: la API no entregó las condiciones")
-  return {
-    list: body.list ? planOf(body.list) : null,
-    founders: body.founders
-      ? { ...planOf(body.founders), discountPercent: body.founders.discountPercent, guaranteeMonths: body.founders.guaranteeMonths }
-      : null,
-    signupMode: body.signupMode === "abierta" ? "abierta" : "invitacion",
-    terms: body.terms,
-  }
+  return { list: body.list ? planOf(body.list) : null, terms: body.terms }
 }
 
 /**
@@ -246,9 +229,9 @@ export function valuePricesOf(plan: PlanPrices | null): ValuePrices | null {
   }
 }
 
-/** El plan con que se muestran las cifras: el Fundador mientras se entra por invitación, si no, el de lista. */
+/** El plan con que se muestran las cifras: el de lista. */
 export function shownPlan(pricing: Pricing): PlanPrices | null {
-  return (pricing.signupMode === "invitacion" ? pricing.founders : null) ?? pricing.list ?? pricing.founders
+  return pricing.list
 }
 
 /** El regalo que se promete: el saldo de prueba del plan que se muestra. */

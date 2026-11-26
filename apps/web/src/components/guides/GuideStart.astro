@@ -1,64 +1,12 @@
 ---
-// El final de una guía y del índice (lienzo, tableros 3 y 4): mientras se entra por invitación, la
-// solicitud ahí mismo (la misma de «Pide tus USD 100», con la página de la que se envía); con el alta
-// abierta, el cierre de toda la web. Las cifras salen de Precios, como en el resto de la web.
-import { giftOf } from "../../lib/pricing"
+// El final de una guía y del índice (lienzo, tableros 3 y 4): el cierre de toda la web, con lo que gana
+// quien empieza dicho con el tema de la guía. Las cifras salen de Precios, como en el resto de la web.
 import CtaBand from "../CtaBand.astro"
-import WaitlistForm from "../founders/WaitlistForm"
-import "../founders/waitlist.css"
 
 interface Props {
   /** «Tu odontograma, sin papel.»: lo que gana quien empieza, dicho con el tema de la guía. */
   title: string
-  /** La página desde la que se envía la solicitud. */
-  page: string
 }
-const { title, page } = Astro.props
-const pricing = Astro.locals.pricing
-const gift = giftOf(pricing)
-const founder = pricing.signupMode === "invitacion" ? pricing.founders : null
-const noFee = founder ? founder.plan === 0 : false
+const { title } = Astro.props
 ---
-{pricing.signupMode === "invitacion" ? (
-  <section id="pide" class="gs" aria-labelledby="gs-t" tabindex="-1">
-    <div class="grain" aria-hidden="true"></div>
-    <div class="wrap gs-in">
-      <div class="gs-copy">
-        <span class="tag tag-d">[ Programa Fundadores ]</span>
-        <h2 class="gs-t" id="gs-t">
-          {title}
-          {gift ? (
-            <span class="gs-acc"> Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros.</span>
-          ) : null}
-        </h2>
-        <ul class="gs-chips">
-          {noFee ? <li>Sin cuota mensual</li> : null}
-          {founder?.discountPercent ? <li>Acciones con {founder.discountPercent} % menos</li> : null}
-          <li>Sin tarjeta</li>
-        </ul>
-      </div>
-      <div class="gs-form">
-        <WaitlistForm client:visible variant="section" gift={gift} answerDays={pricing.terms.waitlistAnswerDays} sourcePage={page} />
-      </div>
-    </div>
-  </section>
-) : (
-  <CtaBand title={title} />
-)}
-
-<style>
-  .gs { position: relative; overflow: hidden; color: var(--on-night); background: radial-gradient(1200px 700px at 72% 42%, #0f3a45 0%, var(--night) 48%, var(--night-2) 100%); padding: 96px 0; scroll-margin-top: 24px; }
-  .gs-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
-  .gs-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-  .gs-t { margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.04; letter-spacing: -0.04em; font-weight: 800; text-wrap: balance; }
-  .gs-acc { color: var(--sky); }
-  .gs-chips { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
-  .gs-chips li { border: 1px solid #23444e; background: rgba(79, 195, 215, .1); border-radius: 999px; padding: 7px 13px; font-size: 14px; font-weight: 700; }
-  .gs-chips li::before { content: "✓ "; color: var(--sky); }
-  .gs-form { flex: 1 1 460px; min-width: 0; background: #f1f5f9; color: var(--ink); border-radius: 22px; padding: 28px; display: flex; justify-content: center; }
-  .gs-form :global(.wl-card) { width: 100%; }
-  @media (max-width: 720px) {
-    .gs { padding: 64px 0; }
-    .gs-form { padding: 20px 16px; }
-  }
-</style>
+<CtaBand title={title} />

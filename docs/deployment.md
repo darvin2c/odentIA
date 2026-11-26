@@ -37,18 +37,12 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Workers de Cloudflare (ver «Las webs en Cloudflare Workers»). Leen los precios de
   `https://api.<dominio>`; su dirección canónica, su mapa del sitio y sus enlaces a `app.`
   y `api.` salen de `VITE_BASE_DOMAIN`: la canónica es `https://<dominio>`, no `WEB_URL`,
-  que es el panel. El Libro de Reclamaciones y la solicitud de Fundadores envían desde el
+  que es el panel. El Libro de Reclamaciones y el correo de las guías envían desde el
   navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y
   `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
-  `hola@` de la marca de cada solicitud (ADR 0186) recibe «Cliente nuevo: <clínica> pidió
-  entrar a <marca>», con la clínica, el producto, la ciudad y el país (nunca el correo ni el
-  celular de quien pidió) y el botón «Abrir la ficha» a su cliente en `ADMIN_URL`, y las
-  respuestas de la clínica a su confirmación y a su invitación (lo que recibe la clínica sigue
-  nombrando Fundadores). hola@ entra al ARM por el Email Worker; desde ahí se responde con la
-  dirección de quien escribe. No hay variable: sale de la marca. El aviso sale una vez por
-  solicitud, aparte de la copia a quien pidió, sin reintentos y con un tope de 20 por hora por
-  proceso; lo que no sale queda en el registro con el id de la solicitud, que igual se ve en
-  Clientes.
+  `hola@` de cada marca (ADR 0186) recibe las respuestas a la invitación que manda la
+  administración desde su venta. hola@ entra al ARM por el Email Worker; desde ahí se responde
+  con la dirección de quien escribe. No hay variable: sale de la marca.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
@@ -151,9 +145,8 @@ los Workers `latidia-panel` y `latidia-clinicas`, armados con `VITE_BASE_DOMAIN=
 `api.latidia72.com` va por el túnel a la misma API.
 
 La web de `latidia72.com` es la misma `apps/web` con ese build (el Worker `latidia-web`):
-solo inicio, precios, pedir invitación y las páginas legales
-(`apps/web/src/lib/product-pages.json`); lo demás responde 404. La lista de espera guarda el
-producto del dominio desde el que se pide (decisión 17).
+solo inicio, precios y las páginas legales
+(`apps/web/src/lib/product-pages.json`); lo demás responde 404. El botón lleva al registro de `app.latidia72.com` (ADR 0221).
 
 ### gestorIA y la cuenta (apagado)
 
@@ -268,8 +261,8 @@ Pendiente fuera del código, como con latidIA:
    plantillas `vistia_invitar_a_volver_v1` y `vistia_lentes_listos_v1` («Tus lentes están listos», ADR 0172) cuando una óptica conecte su WhatsApp.
 4. R2: `https://*.vistia20.com` en el CORS del bucket de adjuntos.
 5. Correo: `hola@`, `privacidad@` y `soporte@vistia20.com` (Email Routing) y el remitente.
-6. Administración: «Plan vistIA» y «Fundadores vistIA», empezando con los precios de los de
-   latidIA, y el alta de vistIA («Solo con invitación» hasta decidir otra cosa).
+6. Administración: «Plan vistIA», empezando con los precios del de latidIA, con «Mostrar en la
+   web». Mientras no exista, la web de vistIA dice «Escríbenos» en vez de «Empieza gratis».
 
 El panel de `app.vistia20.com` y la app de sus ópticas (`apps/optical-clinic`) son los Workers
 `vistia-panel` y `vistia-clinicas`, armados con `VITE_BASE_DOMAIN=vistia20.com`,
@@ -278,7 +271,7 @@ El panel de `app.vistia20.com` y la app de sus ópticas (`apps/optical-clinic`) 
 `VITE_OPTICAL_DOMAIN=vistia20.com`.
 
 La web de `vistia20.com` sirve sus 22 páginas (`apps/web/src/lib/product-pages.json`); lo demás
-responde 404, como la de latidIA, y su lista de espera guarda `optical`. Muestra los planes de
+responde 404, como la de latidIA. Muestra el plan de lista de
 vistIA marcados «Mostrar en la web».
 
 ## Las webs en Cloudflare Workers

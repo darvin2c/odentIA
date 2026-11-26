@@ -43,7 +43,7 @@ export interface SaasTerms {
   halfCycleDays: number
   warnPercent: number
   alarmPercent: number
-  /** Días antes del fin de las condiciones de Fundador en que se avisa. */
+  /** Días antes del fin de los precios garantizados de un plan negociado en que se avisa. */
   guaranteeNoticeDays: number
 }
 

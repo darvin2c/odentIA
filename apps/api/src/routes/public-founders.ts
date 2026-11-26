@@ -5,20 +5,14 @@ import type { Mailer } from "@odentia/mail"
 import {
   getPublicPricing,
   guideSheetsFor,
-  markWaitlistConfirmationSent,
   markWebContactSent,
   moneyText,
   readFounderInvitation,
   ServiceError,
-  submitWaitlistRequest,
   submitWebContact,
-  waitlistInputSchemaFor,
-  waitlistReceivedEmail,
-  newClientNoticeEmail,
   WEB_CONTACTS_PER_HOUR,
   webContactEmail,
   webContactInputSchema,
-  webPageOf,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -28,69 +22,39 @@ import { validationError } from "./helpers.js"
 import type { RegistrationRemoteAddress } from "./public-patient-registration.js"
 
 const WINDOW_MS = 10 * 60 * 1000
-/** Solicitudes por dirección y ventana: de sobra para una clínica, poco para quien abusa. */
-const MAX_POSTS = 5
 const MAX_BUCKETS = 10000
 /** Lo que la web vuelve a pedir: un cambio de precio en la administración se ve en menos de un minuto (decisión 14). */
 const PRICING_MAX_AGE_S = 30
-/**
- * Avisos al equipo por hora en este proceso: de sobra para la lista de espera,
- * poco para llenar el buzón si alguien abusa del formulario. Pasado el tope la
- * solicitud se guarda igual y sale en Inicio de la administración.
- */
-const TEAM_NOTICES_PER_HOUR = 20
-const HOUR_MS = 60 * 60 * 1000
 /** Correos que deja el aviso de las guías por dirección y ventana: de sobra para quien baja plantillas. */
 const MAX_CONTACTS = 3
 
 /**
- * Lo público de Fundadores (issue 165), terminal: nunca sigue hacia
- * `requireSession`.
+ * Lo público de la web, terminal: nunca sigue hacia `requireSession`. La dirección
+ * `/api/public/founders` queda como estaba porque la web ya publicada la usa; el
+ * programa Fundadores terminó y el alta es libre (ADR 0221).
  *
  * - `GET /pricing`: los planes con «Mostrar en la web»; lo lee la web de
- *   marketing al servir cada página. Nunca los lugares que quedan.
- * - `POST /waitlist`: la solicitud de la web. Guarda con `ownerDb` y después
- *   envía la copia a quien pidió y el aviso al buzón del equipo, cada uno por
- *   su lado: si un correo falla, el otro sale y la solicitud queda igual.
- * - `GET /invitation/:token`: lo que muestra «Crea tu cuenta» con una
- *   invitación. Sin invitación vigente responde 404 sin decir por qué.
+ *   marketing al servir cada página.
+ * - `GET /invitation/:token`: lo que muestra «Crea tu cuenta» con la invitación
+ *   que la administración manda desde su venta. Sin invitación vigente responde
+ *   404 sin decir por qué.
+ * - `POST /contact`: el correo con las plantillas de una guía.
  */
-/** Los correos de la solicitud que siguen saliendo después de responder. */
-const pendingMail = new Set<Promise<void>>()
-
-function track(work: () => Promise<void>): void {
-  const done = work().catch(() => undefined)
-  pendingMail.add(done)
-  void done.finally(() => pendingMail.delete(done))
-}
-
-/** Espera los correos que quedaron saliendo (las pruebas, antes de mirar el buzón). */
-export async function settleFounderMail(): Promise<void> {
-  while (pendingMail.size) await Promise.all([...pendingMail])
-}
-
 export function createPublicFoundersRoute(deps: {
   ownerDb: Db
   mailer: Mailer
   remoteAddress?: RegistrationRemoteAddress | undefined
-  /** A dónde responde la clínica su confirmación: hola@ de la marca de su solicitud. */
+  /** A dónde responde quien recibe el correo de una guía: hola@ de la marca. */
   replyToOf?: (product: ClinicalProduct) => string | undefined
-  /** El producto del dominio de la petición: la solicitud lo guarda (decisión 17 del issue 229). */
+  /** El producto del dominio de la petición (decisión 17 del issue 229). */
   productOf?: (c: Context) => ClinicalProduct
-  /** La administración (ADMIN_URL): el aviso al equipo abre la ficha del cliente. */
-  adminURL?: string | undefined
-  /** Quién recibe el aviso de cada cliente nuevo: hola@ de la marca de la solicitud; sin él, no sale. */
-  teamEmailOf?: (product: ClinicalProduct) => string | undefined
   /** La web de un producto («https://odentia32.com»): los enlaces del correo de las plantillas. */
   siteUrlOf?: (product: ClinicalProduct) => string
-  /** El panel de un producto: con el alta abierta, el correo de las plantillas lleva a crear la cuenta. */
+  /** El panel de un producto: el correo de las plantillas lleva a crear la cuenta. */
   panelUrlOf?: (product: ClinicalProduct) => string
 }) {
   const app = new Hono()
-  const defaultBuckets = new Map<string, { expiresAt: number; posts: number }>()
   const contactBuckets = new Map<string, { expiresAt: number; posts: number }>()
-  /** Cuándo salió cada aviso al equipo de la última hora, del más viejo al más nuevo. */
-  const noticesSent: number[] = []
   const address: RegistrationRemoteAddress =
     deps.remoteAddress ??
     ((c) => {
@@ -103,11 +67,11 @@ export function createPublicFoundersRoute(deps: {
 
   app.onError((error, c) => {
     if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
-    // Sin el error: podría llevar los datos de quien pidió.
-    console.error("Fundadores: error en la ruta pública")
+    // Sin el error: podría llevar los datos de quien escribió.
+    console.error("Web: error en la ruta pública")
     const message = c.req.path.endsWith("/contact")
       ? "No pudimos enviarte el correo. Intenta nuevamente en unos minutos."
-      : "No pudimos guardar tu solicitud. Intenta nuevamente."
+      : "No pudimos responder. Intenta nuevamente."
     return c.json(errorBody(c, "INTERNAL", message), 500)
   })
 
@@ -129,14 +93,6 @@ export function createPublicFoundersRoute(deps: {
   })
 
   app.use(
-    "/waitlist",
-    bodyLimit({
-      maxSize: 8 * 1024,
-      onError: (c) => c.json(errorBody(c, "BODY_TOO_LARGE", "La solicitud excede el tamaño permitido"), 413),
-    }),
-  )
-
-  app.use(
     "/contact",
     bodyLimit({
       maxSize: 2 * 1024,
@@ -144,7 +100,7 @@ export function createPublicFoundersRoute(deps: {
     }),
   )
 
-  const limited = (c: Context, buckets: Map<string, { expiresAt: number; posts: number }> = defaultBuckets, max = MAX_POSTS): Response | null => {
+  const limited = (c: Context, buckets: Map<string, { expiresAt: number; posts: number }>, max: number): Response | null => {
     const now = Date.now()
     for (const [key, bucket] of buckets) if (bucket.expiresAt <= now) buckets.delete(key)
     const key = rateKeyOf(address(c))
@@ -164,74 +120,6 @@ export function createPublicFoundersRoute(deps: {
     bucket.posts++
     return null
   }
-
-  /**
-   * Una sola vez por solicitud nueva y sin reintentos: si no sale, solo su id
-   * va al registro (nunca los datos de quien pidió) y la solicitud sigue en
-   * Inicio de la administración.
-   */
-  const noticeTeam = async (to: string, id: string, clientId: string | null, product: ClinicalProduct, data: { clinicName: string; city: string; countryCode: string }) => {
-    const now = Date.now()
-    while ((noticesSent[0] ?? now) <= now - HOUR_MS) noticesSent.shift()
-    if (noticesSent.length >= TEAM_NOTICES_PER_HOUR) {
-      console.error(`Fundadores: pasó el tope de ${TEAM_NOTICES_PER_HOUR} avisos por hora; la solicitud ${id} queda sin aviso y sale en Inicio`)
-      return
-    }
-    noticesSent.push(now)
-    try {
-      await deps.mailer.send({
-        to,
-        ...newClientNoticeEmail({
-          clinicName: data.clinicName,
-          product,
-          city: data.city,
-          countryCode: data.countryCode,
-          clientUrl: deps.adminURL && clientId ? `${deps.adminURL.replace(/\/+$/, "")}/clients/${clientId}` : null,
-        }),
-      })
-    } catch {
-      console.error(`Fundadores: no salió el aviso al equipo de la solicitud ${id}`)
-    }
-  }
-
-  app.post("/waitlist", async (c) => {
-    c.header("Cache-Control", "no-store")
-    const blocked = limited(c)
-    if (blocked) return blocked
-    const product = deps.productOf?.(c) ?? "dental"
-    const parsed = waitlistInputSchemaFor(product).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    // La página desde la que se envió va en la dirección (`?desde=`), no en el cuerpo: así la
-    // API de antes la ignora mientras la web nueva ya se publicó (ADR 0216).
-    const sourcePage = webPageOf(c.req.query("desde"))
-    const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product, { sourcePage }))
-    // La copia sale una sola vez: si ya estaba en la lista, no se repite. Los correos salen después
-    // de responder: si la respuesta esperara por ellos, lo que tarda diría si el correo ya pidió.
-    if (!result.existing) track(async () => {
-      try {
-        await deps.mailer.send({
-          to: parsed.data.email,
-          ...waitlistReceivedEmail({
-            firstName: parsed.data.firstName,
-            clinicName: parsed.data.clinicName,
-            phone: parsed.data.phone,
-            answerDays: result.answerDays,
-            replyTo: deps.replyToOf?.(product),
-            brand: productWords(product).brand,
-          }),
-        })
-        await deps.ownerDb.transaction((tx) => markWaitlistConfirmationSent(tx, result.id)).catch(() => undefined)
-      } catch {
-        console.error(`Fundadores: no salió la copia de la solicitud ${result.id}`)
-      }
-      // Aparte de la copia: que la de quien pidió rebote no deja al equipo sin saberlo.
-      const team = deps.teamEmailOf?.(product)
-      if (team) await noticeTeam(team, result.id, result.clientId, product, parsed.data)
-    })
-    // La misma respuesta si ya estaba en la lista: la web no dice si un correo ya pidió entrar,
-    // ni promete la copia (ADR 0216).
-    return c.json({ ok: true, answerDays: result.answerDays }, 201)
-  })
 
   /**
    * El aviso de una guía (ADR 0216): quien bajó una plantilla deja su correo y le llegan
@@ -266,27 +154,24 @@ export function createPublicFoundersRoute(deps: {
       return c.json(errorBody(c, "RATE_LIMITED", "Ahora no pudimos enviarte el correo. Intenta nuevamente en un rato."), 429)
     }
     if (!result.send) return c.json({ ok: true, sent: false, reason: result.reason }, 200)
-    const shown = (pricing.signupMode === "invitacion" ? pricing.founders : null) ?? pricing.list ?? pricing.founders
+    const shown = pricing.list
     const gift = shown && shown.trialCreditCents > 0 ? moneyText(shown.currency, shown.trialCreditCents) : null
     const site = deps.siteUrlOf?.(product)
     const panel = deps.panelUrlOf?.(product)
     const email = parsed.data.email
     const name = productWords(product).name
-    // A quien ya es de una clínica con cuenta no se lo invita a pedir entrar: se le abre su entrada.
+    // A quien ya es de una clínica con cuenta se le abre su entrada; a los demás, empezar gratis.
+    // Sin plan publicado (vistIA todavía), el producto no abre cuentas: no se invita a crearla.
     const start = result.hasAccount
       ? panel
         ? { label: `Entrar a ${name}`, url: `${panel}/login` }
         : null
-      : pricing.signupMode === "invitacion"
-        ? site
-          ? { label: gift ? `Pide tus ${gift}` : "Solicita tu invitación", url: `${site}/solicitar-invitacion#correo=${encodeURIComponent(email)}` }
-          : null
-        : panel
-          ? { label: gift ? `Obtén ${gift} de crédito` : "Crear mi cuenta", url: `${panel}/register` }
-          : null
+      : panel && shown
+        ? { label: "Empieza gratis", url: `${panel}/register` }
+        : null
     const offer =
-      !result.hasAccount && pricing.signupMode === "invitacion" && gift
-        ? `Mientras dure el programa Fundadores, los primeros ${gift} de tus agentes los pagamos nosotros.`
+      !result.hasAccount && shown && gift
+        ? `Empieza gratis: ${shown.trialDays} días con ${gift} de regalo para tus agentes, sin tarjeta.`
         : null
     const attachments = await Promise.all(
       result.sheets.map(async (sheet) => ({

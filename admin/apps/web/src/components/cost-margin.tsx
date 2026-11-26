@@ -1,7 +1,7 @@
 /**
  * Costo y margen (ADR 0085, tableros O2 y O3): lo cobrado a cada clínica sin
  * impuesto frente a lo que nos costó, por agente y tipo, con la alarma
- * interna y la Fundadora sin uso. Solo lo ve odentIA (rol admin).
+ * interna y la clínica con condiciones garantizadas sin uso. Solo lo ve odentIA (rol admin).
  */
 import { Badge, Button, ScrollArea } from "@odentia/ui"
 import { ErrorState, LoadingState, ViewTabs } from "@odentia/ui-patterns"
@@ -36,6 +36,7 @@ export interface ClinicCostMargin {
   period: { start: string; end: string; credit: "prueba" | "mes" }
   currency: string
   planName: string | null
+  /** Con condiciones garantizadas (un plan especial con meses): no se le cobra el uso. */
   founder: boolean
   /** Una demo para presentar: no se cobra. */
   demo?: boolean
@@ -150,7 +151,7 @@ function reviewReason(item: ClinicCostMargin): string {
         : "la IA pasó de USD 30 este mes"
     return `${share} (${cost(item.aiMicros, item.currency)} de ${money(item.chargedCents, item.currency)}). No se cortó nada: revisa si hay un error o un abuso.`
   }
-  return "Fundadora sin encender ningún agente en 60 días. No se le cobra nada: sus meses están garantizados. Conviene escribirle."
+  return "Con condiciones garantizadas y sin encender ningún agente en 60 días. No se le cobra nada: sus meses están garantizados. Conviene escribirle."
 }
 
 /** La tabla de una clínica: cada agente y tipo, lo regalado y lo que no es IA. */
@@ -208,7 +209,7 @@ export function CostMarginOverviewSection({ product = "todos" }: { product?: Pro
         <Stat
           label="Clínicas activas"
           value={String(data.clinics.length)}
-          detail={`${data.founders} ${data.founders === 1 ? "Fundadora" : "Fundadoras"} · ${data.clinics.length - data.founders} ${data.clinics.length - data.founders === 1 ? "normal" : "normales"}`}
+          detail={`${data.founders} con condiciones garantizadas · ${data.clinics.length - data.founders} ${data.clinics.length - data.founders === 1 ? "normal" : "normales"}`}
         />
         <Stat label="Cobrado, sin impuestos" value={money(data.chargedCents)} />
         <Stat

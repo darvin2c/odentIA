@@ -90,34 +90,6 @@
         "trialCreditCents": 1000,
         "trialDays": 14
       },
-      "founders": {
-        "code": "fundadores",
-        "name": "Fundadores",
-        "currency": "USD",
-        "priceCents": 0,
-        "creditCents": 0,
-        "conversationMicros": 250000,
-        "consultationMicros": 500000,
-        "recoveryMicros": 1000000,
-        "tiers": {
-          "informa": 100000,
-          "gestiona": 250000,
-          "agenda": 500000,
-          "simple": 150000,
-          "estandar": 300000,
-          "completa": 500000
-        },
-        "argosIncludedQuestions": 50,
-        "argosPackQuestions": 100,
-        "argosPackMicros": 2500000,
-        "storageIncludedGb": 10,
-        "storageGbMicros": 300000,
-        "trialCreditCents": 2000,
-        "trialDays": 30,
-        "discountPercent": 50,
-        "guaranteeMonths": 12
-      },
-      "signupMode": "invitacion",
       "terms": {
         "conversationWindowHours": 24,
         "recoveryWindowDays": 30,
@@ -126,7 +98,6 @@
         "halfCycleDays": 15,
         "graceDays": 7,
         "trialDays": 14,
-        "waitlistAnswerDays": 3,
         "guaranteeNoticeDays": 30
       }
     },
@@ -156,34 +127,6 @@
         "trialCreditCents": 1000,
         "trialDays": 14
       },
-      "founders": {
-        "code": "fundadores",
-        "name": "Fundadores",
-        "currency": "USD",
-        "priceCents": 0,
-        "creditCents": 0,
-        "conversationMicros": 250000,
-        "consultationMicros": 500000,
-        "recoveryMicros": 1000000,
-        "tiers": {
-          "informa": 100000,
-          "gestiona": 250000,
-          "agenda": 500000,
-          "simple": 150000,
-          "estandar": 300000,
-          "completa": 500000
-        },
-        "argosIncludedQuestions": 50,
-        "argosPackQuestions": 100,
-        "argosPackMicros": 2500000,
-        "storageIncludedGb": 10,
-        "storageGbMicros": 300000,
-        "trialCreditCents": 2000,
-        "trialDays": 30,
-        "discountPercent": 50,
-        "guaranteeMonths": 12
-      },
-      "signupMode": "invitacion",
       "terms": {
         "conversationWindowHours": 24,
         "recoveryWindowDays": 30,
@@ -192,7 +135,6 @@
         "halfCycleDays": 15,
         "graceDays": 7,
         "trialDays": 14,
-        "waitlistAnswerDays": 3,
         "guaranteeNoticeDays": 30
       }
     },
@@ -222,34 +164,6 @@
         "trialCreditCents": 1000,
         "trialDays": 14
       },
-      "founders": {
-        "code": "fundadores",
-        "name": "Fundadores",
-        "currency": "USD",
-        "priceCents": 0,
-        "creditCents": 0,
-        "conversationMicros": 250000,
-        "consultationMicros": null,
-        "recoveryMicros": 1000000,
-        "tiers": {
-          "informa": 100000,
-          "gestiona": 250000,
-          "agenda": 500000,
-          "simple": null,
-          "estandar": null,
-          "completa": null
-        },
-        "argosIncludedQuestions": 50,
-        "argosPackQuestions": 100,
-        "argosPackMicros": 2500000,
-        "storageIncludedGb": 10,
-        "storageGbMicros": 300000,
-        "trialCreditCents": 2000,
-        "trialDays": 30,
-        "discountPercent": 50,
-        "guaranteeMonths": 12
-      },
-      "signupMode": "invitacion",
       "terms": {
         "conversationWindowHours": 24,
         "recoveryWindowDays": 30,
@@ -258,7 +172,6 @@
         "halfCycleDays": 15,
         "graceDays": 7,
         "trialDays": 14,
-        "waitlistAnswerDays": 3,
         "guaranteeNoticeDays": 30
       }
     }
@@ -278,7 +191,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["usd"]
+        "menciona": [
+          "usd"
+        ]
       }
     },
     {
@@ -300,7 +215,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["usd"]
+        "menciona": [
+          "usd"
+        ]
       }
     },
     {
@@ -624,7 +541,9 @@
       "lienzo": "K7",
       "canal": "whatsapp",
       "cliente": null,
-      "parecidos": ["Clínica Dental Sonríe Perú"],
+      "parecidos": [
+        "Clínica Dental Sonríe Perú"
+      ],
       "nota": "Da un nombre parecido a un cliente que ya existe: se registra aparte (no se unen) y agenda.",
       "turnos": [
         {
@@ -1039,7 +958,7 @@
         "nombre": "Dra. Paola Ríos",
         "whatsapp": true
       },
-      "nota": "Pregunta qué es Fundadores y cuánto se ahorra: lo dice con el porcentaje y los precios de la web, sin prometer cupo.",
+      "nota": "Pregunta por Fundadores, que ya terminó: no promete descuento ni cupo; dice que se empieza gratis y da los precios de la web.",
       "turnos": [
         {
           "texto": "qué es lo de Fundadores? cuánto me ahorro?"
@@ -1047,7 +966,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["fundadores"]
+        "menciona": [
+          "gratis"
+        ]
       }
     },
     {
@@ -1069,7 +990,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["usd"]
+        "menciona": [
+          "usd"
+        ]
       }
     },
     {
@@ -1139,7 +1062,9 @@
       "espera": {
         "agenda": "no",
         "preguntaGuia": true,
-        "menciona": ["firm"]
+        "menciona": [
+          "firm"
+        ]
       }
     },
     {
@@ -1157,7 +1082,9 @@
       "espera": {
         "agenda": "no",
         "preguntaGuia": true,
-        "menciona": ["recordatorio"]
+        "menciona": [
+          "recordatorio"
+        ]
       }
     },
     {
@@ -1180,7 +1107,9 @@
       "espera": {
         "agenda": "no",
         "preguntaGuia": true,
-        "menciona": ["periodontograma"]
+        "menciona": [
+          "periodontograma"
+        ]
       }
     },
     {
@@ -1229,7 +1158,9 @@
       "espera": {
         "agenda": "no",
         "preguntaGuia": true,
-        "menciona": ["receta"]
+        "menciona": [
+          "receta"
+        ]
       }
     },
     {
@@ -1268,7 +1199,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["latidia"]
+        "menciona": [
+          "latidia"
+        ]
       }
     },
     {
@@ -1285,7 +1218,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["vistia"]
+        "menciona": [
+          "vistia"
+        ]
       }
     },
     {
@@ -1302,7 +1237,10 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["grupo sallca", "negocio|clinica dental|optica|consultorio"]
+        "menciona": [
+          "grupo sallca",
+          "negocio|clinica dental|optica|consultorio"
+        ]
       }
     },
     {
@@ -1319,7 +1257,9 @@
       ],
       "espera": {
         "agenda": "no",
-        "menciona": ["clinica dental|optica|consultorio|negocio"]
+        "menciona": [
+          "clinica dental|optica|consultorio|negocio"
+        ]
       }
     },
     {
@@ -1349,7 +1289,9 @@
       "espera": {
         "agenda": "no",
         "app": "vistia",
-        "menciona": ["usd"]
+        "menciona": [
+          "usd"
+        ]
       }
     },
     {

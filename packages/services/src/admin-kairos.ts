@@ -4895,7 +4895,7 @@ export async function todayForStaff(
       why:
         row.kind === "precio_especial"
           ? `Su precio especial termina el ${dayText(limaDate(row.endsAt))}`
-          : `Sus condiciones de Fundadora terminan el ${dayText(limaDate(row.endsAt))}`,
+          : `Sus condiciones garantizadas terminan el ${dayText(limaDate(row.endsAt))}`,
     })),
   }
 }

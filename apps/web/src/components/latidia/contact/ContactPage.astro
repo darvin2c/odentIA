@@ -1,32 +1,31 @@
 ---
-// /contacto de latidIA y de odentIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (pedir la
-// invitación o escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de
+// /contacto de latidIA y de odentIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (crear la
+// cuenta o escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de
 // empezar. Una sola página para todas las webs: las palabras de cada producto salen de `WORDS` y lo que
 // cambia de verdad (unidades dentales, presupuestos, el ejemplo del correo) de `copy`, un mapa por producto.
-// vistIA lleva la misma página con lo suyo (`copy`).
-// Sin formulario: la web solo envía la lista de espera y el Libro de Reclamaciones (apps/AGENTS.md), así
-// que el tablero «Cuatro datos y tu mensaje» queda como un correo con lo que conviene contarnos.
-// El regalo, la invitación y los días hábiles para responder salen de Astro.locals.pricing; el correo,
-// de `contactEmail`; la razón social y el RUC, de TITULAR.
+// vistIA lleva la misma página con lo suyo (`copy`); sin plan publicado, solo el camino de escribirnos.
+// Sin formulario de contacto (apps/AGENTS.md): el tablero «Cuatro datos y tu mensaje» queda como un correo
+// con lo que conviene contarnos. La oferta sale de Astro.locals.pricing (`lib/offer.ts`); el correo, de
+// `contactEmail` y `supportEmail`; la razón social y el RUC, de TITULAR.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { TITULAR } from "../../../lib/legal/types"
 import { PAGES } from "../../../lib/pages-data"
-import { businessDays, giftOf, shownPlan } from "../../../lib/pricing"
+import { trialText } from "../../../lib/offer"
+import { giftOf, shownPlan } from "../../../lib/pricing"
 import { ofProduct, WORDS } from "../../../lib/product"
-import { contactEmail, ctaOf, salesWhatsApp } from "../../../lib/site"
+import { contactEmail, ctaOf, salesWhatsApp, supportEmail } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
+import GiftText from "../../GiftText.astro"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
-const invite = pricing.signupMode === "invitacion"
-const founders = plan !== null && plan === pricing.founders
-const answer = businessDays(pricing.terms.waitlistAnswerDays)
-// «Sin cuota» solo si el plan que se muestra no la cobra.
-const noFee = plan !== null && plan.plan === 0
+// Sin plan publicado (vistIA hoy) no hay alta que ofrecer: se empieza escribiéndonos.
+const open = plan !== null
+const trial = trialText(pricing)
 // Lo que cambia de un producto a otro. `setup` es lo que se crea al empezar: la sede y los lugares donde
 // se atiende («salas» en un consultorio, «unidades dentales» en una clínica, «salas de examen» en una óptica).
 const copy = ofProduct({
@@ -41,7 +40,7 @@ const copy = ofProduct({
   },
   medical: {
     title: "Habla con nosotros",
-    description: "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo.",
+    description: "¿Quieres saber si latidIA le sirve a tu consultorio médico? Crea tu cuenta o escríbenos: te responde una persona del equipo.",
     setup: "Tu sede, tus salas, tu horario y tu tarifario.",
     solve: "La agenda, la historia clínica, la receta, los controles o los cobros.",
     example: "Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?",
@@ -50,7 +49,7 @@ const copy = ofProduct({
   },
   optical: {
     title: "Habla con nosotros",
-    description: "¿Quieres saber si vistIA le sirve a tu óptica? Pide tu invitación o escríbenos: te responde una persona del equipo.",
+    description: "¿Quieres saber si vistIA le sirve a tu óptica? Escríbenos: te responde una persona del equipo.",
     setup: "Tus sedes, tus salas de examen, tu horario y tu tarifario.",
     solve: "La agenda, la ficha de tus clientes, la caja, el inventario o los controles.",
     example: "Somos una óptica con dos sedes y una optómetra. Nos escriben casi todo por WhatsApp. ¿Sofi puede agendar los exámenes de la vista?",
@@ -65,18 +64,18 @@ const trail: [string, string][] = [
 ]
 const mailto = `mailto:${contactEmail}`
 
-const steps: [string, string][] = invite
+const steps: [string, string][] = open
   ? [
-      ["Pides tu invitación", "O nos escribes con tu duda."],
-      ["Te respondemos", `En ${answer}, una persona del equipo.`],
-      [`Creas ${WORDS.yourClinic}`, setup],
-      ["Tus agentes empiezan", gift ? `Con los ${gift} que pagamos nosotros.` : "Desde el primer día."],
-    ]
-  : [
       ["Creas tu cuenta", "O nos escribes con tu duda."],
       [`Creas ${WORDS.yourClinic}`, setup],
       ["Conectas tus canales", "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web o el correo."],
-      ["Tus agentes empiezan", gift ? `Con ${gift} de crédito.` : "Desde el primer día."],
+      ["Tus agentes empiezan", gift ? `Con ${gift} de regalo.` : "Desde el primer día."],
+    ]
+  : [
+      ["Nos escribes", "Con tu duda o lo que quieres resolver."],
+      ["Te respondemos", "Una persona del equipo."],
+      [`Creas ${WORDS.yourClinic}`, setup],
+      ["Conectas tus canales", "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web o el correo."],
     ]
 
 const tell = [
@@ -91,13 +90,13 @@ const tell = [
 const faq: FaqItem[] = [
   {
     q: `¿Puedo traer mis ${WORDS.patients}?`,
-    a: `Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${WORDS.patients} por ti; lo dudoso lo revisamos contigo. Las citas, los saldos y la historia anterior todavía no se cargan. Los nuevos se registran solos cuando te escriben o cuando llenan sus datos desde su enlace.`,
+    a: `Sí. Escribe a ${supportEmail} con tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${WORDS.patients} por ti; lo dudoso lo revisamos contigo. Las citas, los saldos y la historia anterior todavía no se cargan. Los nuevos se registran solos cuando te escriben o cuando llenan sus datos desde su enlace.`,
   },
   {
     q: "¿Cuánto tarda empezar?",
-    a: invite
-      ? `Te respondemos en ${answer}. Con la invitación, la puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`
-      : `Te registras y la puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`,
+    a: open
+      ? `Te registras y abres ${WORDS.yourClinic} al momento; la puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`
+      : `Nos escribes y te respondemos. La puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`,
   },
   {
     q: "¿Y si me pierdo al usarlo?",
@@ -122,28 +121,19 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         <div class="cp-head">
           <span class="tag tag-d cp-tag rise">[ Contacto ]</span>
           <h1 class="cp-h1 rise d1">Habla con <span class="accent">nosotros.</span></h1>
-          <p class="cp-lead rise d2">¿Quieres saber si {WORDS.name} le sirve a {WORDS.yourClinic}? {invite ? "Pide tu invitación" : "Crea tu cuenta"} o escríbenos. Te responde una persona del equipo.</p>
+          <p class="cp-lead rise d2">¿Quieres saber si {WORDS.name} le sirve a {WORDS.yourClinic}? {open ? "Crea tu cuenta o escríbenos" : "Escríbenos"}. Te responde una persona del equipo.</p>
         </div>
         <div class="cp-paths rise d2">
+          {open ? (
+            <div class="cp-path">
+              <span class="cp-k">Camino 1 · Empieza</span>
+              <p class="cp-path-t">Crea tu cuenta{gift ? <> y empieza con <span class="gift">{gift}</span> de regalo</> : null}.</p>
+              {trial ? <p class="cp-path-x"><GiftText text={`${trial}, sin tarjeta.`} /></p> : null}
+              <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+            </div>
+          ) : null}
           <div class="cp-path">
-            <span class="cp-k">Camino 1 · {founders ? "Fundadores" : "Empieza"}</span>
-            {invite ? (
-              gift ? (
-                <p class="cp-path-t">Pide tu invitación y empieza con <span class="gift">{gift}</span> nuestros.</p>
-              ) : (
-                <p class="cp-path-t">Pide tu invitación.</p>
-              )
-            ) : (
-              <p class="cp-path-t">Crea tu cuenta{gift ? <> y empieza con <span class="gift">{gift}</span> de crédito</> : null}.</p>
-            )}
-            <p class="cp-path-x">
-              {gift ? `Los primeros ${gift} de tus agentes los pagamos nosotros. ` : invite ? `Se entra por invitación; te respondemos en ${answer}. ` : ""}
-              {noFee ? "Sin tarjeta y sin cuota." : "Sin tarjeta."}
-            </p>
-            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-          </div>
-          <div class="cp-path">
-            <span class="cp-k">Camino 2 · Una duda</span>
+            <span class="cp-k">{open ? "Camino 2 · Una duda" : "Una duda"}</span>
             <p class="cp-path-t">Escríbenos y te contamos si te sirve.</p>
             <p class="cp-path-x">Cuéntanos cuántos {WORDS.clinicians} y sedes tienen, y por dónde te escriben tus {WORDS.patients}.</p>
             <a class="btn btn-g" href={mailto}>{contactEmail}</a>
@@ -193,15 +183,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="faqwrap">
       <Faq items={faq} title="Antes de empezar." />
     </div>
-    <CtaBand title={`Cuéntanos de ${WORDS.yourClinic}.`}>
-      <Fragment slot="text">
-        {gift ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, {copy.rooms} ni usuarios.</>
-        ) : (
-          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día. Sin límite de {WORDS.clinicians}, {copy.rooms} ni usuarios.</>
-        )}
-      </Fragment>
-    </CtaBand>
+    <CtaBand title={`Cuéntanos de ${WORDS.yourClinic}.`} />
   </div>
 </Base>
 

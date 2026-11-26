@@ -296,7 +296,14 @@ function PlanContent() {
         </h2>
         {summary.guaranteedUntil ? (
           <p className="rounded-lg border bg-card px-4 py-3 text-sm">
-            Tienes el plan <span className="font-medium">{summary.plan?.name ?? "Fundadores"}</span> con condiciones de Fundador hasta el{" "}
+            {summary.plan?.name ? (
+              <>
+                Tienes el plan <span className="font-medium">{summary.plan.name}</span>
+              </>
+            ) : (
+              "Tienes tu plan"
+            )}{" "}
+            con sus precios garantizados hasta el{" "}
             {new Intl.DateTimeFormat(activeOrgLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: activeOrgTimeZone() }).format(
               new Date(summary.guaranteedUntil),
             )}

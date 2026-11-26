@@ -171,7 +171,7 @@ export interface RevenueReport {
     costMicros: number
     marginPct: number | null
     marginAfterCommissionPct: number | null
-    /** Las que tienen la alarma de IA o son Fundadoras sin uso. */
+    /** Las que tienen la alarma de IA o tienen condiciones garantizadas sin uso. */
     toReview: number
     charged: ReportMoneyFigure
     cost: AdminReportFigure

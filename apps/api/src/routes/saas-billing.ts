@@ -29,7 +29,6 @@ import {
   chooseSaasPlan,
   claimFounderInvitation,
   completeFounderInvitation,
-  getSignupMode,
   releaseFounderInvitation,
   claimSaasNoticeMail,
   completeSaasNoticeMail,
@@ -200,7 +199,6 @@ const planInput = z
     trialMaxDays: planInt(1, 365, "Escribe de 1 a 365 días").optional(),
     isDefault: z.boolean().optional(),
     showOnWeb: z.boolean().optional(),
-    seatLimit: planInt(1, 100000, "Escribe un número entero mayor que cero, o déjalo vacío").nullish(),
     guaranteeMonths: planInt(1, 120, "Escribe de 1 a 120 meses, o déjalo vacío").nullish(),
   })
   .strict()
@@ -1705,7 +1703,7 @@ export async function readSaasSubscription(db: Db, orgId: string) {
  * Recovery (`/reset-password`, `/verify-email`), webhooks e ingesta no se
  * tocan: este middleware no los mira.
  */
-/** Cabecera con que el panel manda la invitación Fundadores al abrir la clínica. */
+/** Cabecera con que el panel manda la invitación de la administración al abrir la clínica. */
 export const FOUNDER_INVITATION_HEADER = "x-odentia-invitation"
 
 export interface SaasPreAuthDeps {
@@ -1736,25 +1734,17 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
       return next()
     }
     if (tail !== "create") return next()
-    // Fundadores (issue 165): con «solo con invitación», abrir una clínica pide
-    // la invitación vigente de quien la abre. Crear la cuenta sigue libre.
+    // El alta es libre (ADR 0221): cualquiera abre su clínica. Con la invitación de la
+    // administración, entra con el plan que se negoció; sin ella, con la prueba del de lista.
+    // Un producto sin plan publicado (vistIA todavía) no se frena aquí: su web no invita a
+    // crear la cuenta, y los entornos sin planes también abren clínicas en prueba.
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
     if (!session) return next()
     const token = c.req.header(FOUNDER_INVITATION_HEADER)?.trim() || null
-    // Cada producto decide si se entra con invitación o libre (ADR 0093).
     const product = deps.productOf?.(c) ?? "dental"
     let claimed: string | null = null
     if (token) {
       claimed = await deps.ownerDb.transaction((tx) => claimFounderInvitation(tx, token, session.user.email))
-    } else if ((await deps.ownerDb.transaction((tx) => getSignupMode(tx, product))) === "invitacion") {
-      return c.json(
-        errorBody(
-          c,
-          "INVITATION_REQUIRED",
-          `Por ahora se abren clínicas solo con invitación. Pide la tuya desde la web de ${productWords(product).name}.`,
-        ),
-        403,
-      )
     }
     try {
       await next()

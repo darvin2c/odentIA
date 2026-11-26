@@ -11,7 +11,7 @@ const ALERT_TOPIC: Record<SaasAlertFamily, string> = {
   credito: "el crédito del mes",
   tope: "tu presupuesto del mes",
   precio_especial: "tu precio especial termina",
-  condiciones: "tus condiciones de Fundador terminan",
+  condiciones: "tus precios garantizados terminan",
 }
 
 const ALERT_ACTION: Record<SaasAlert["action"], string> = {
@@ -233,7 +233,7 @@ export function saasSettlementEmail(input: {
   })
 }
 
-/* ---------- Fundadores (issue 165) ---------- */
+/* ---------- La web y la invitación de la administración ---------- */
 
 /** «USD 100», «USD 0,50»: la moneda ISO antes de la cifra, coma decimal y sin «,00». */
 export function moneyText(currency: string, cents: number): string {
@@ -242,39 +242,10 @@ export function moneyText(currency: string, cents: number): string {
   return `${currency} ${trimmed.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`
 }
 
-/** Copia a quien pidió entrar: qué sigue y en cuánto respondemos. Sin botón: no hay nada que hacer todavía. */
-export function waitlistReceivedEmail(input: {
-  firstName: string
-  clinicName: string
-  phone: string
-  answerDays: number
-  /** hola@ de la marca, que entra al ARM; sin él, el correo no promete que alguien lea las respuestas. */
-  replyTo?: string | undefined
-  /** La marca del dominio donde se pidió (issue 229). */
-  brand?: MailBrand
-}): MailTemplate {
-  const name = mailBrandName(input.brand)
-  return renderEmail({
-    brand: input.brand,
-    subject: `${input.clinicName} está en la lista de ${name}`,
-    preview: `Revisamos tu solicitud en ${input.answerDays} días hábiles.`,
-    title: `Listo, ${input.firstName}. ${input.clinicName} está en la lista`,
-    paragraphs: [`Mientras dure el programa Fundadores, se entra a ${name} por invitación. Esto es lo que sigue:`],
-    list: [
-      `Revisamos tu solicitud en ${input.answerDays} días hábiles.`,
-      `Te escribimos por WhatsApp al ${input.phone} para una llamada corta.`,
-      "Te llega tu invitación por correo y abres tu clínica como Fundadora.",
-    ],
-    note: input.replyTo ? "Si te equivocaste en un dato, responde este correo." : "Si te equivocaste en un dato, te lo preguntamos cuando te escribamos.",
-    reason: `Te escribimos porque pediste una invitación en la web de ${name}.`,
-    ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
-  })
-}
-
 /**
  * Las plantillas que pidió quien dejó su correo en una guía de la web (ADR 0216): van
- * adjuntas en PDF, con el enlace a la guía y la puerta para empezar (con Fundadores, «Pide
- * tus USD 100» con su correo ya puesto). Las cifras llegan de los precios publicados.
+ * adjuntas en PDF, con el enlace a la guía y la puerta para empezar («Empieza gratis»). Las
+ * cifras llegan de los precios publicados.
  */
 export function webContactEmail(input: {
   /** Los nombres de las plantillas adjuntas: «Odontograma», «Odontograma de niños». */
@@ -287,7 +258,7 @@ export function webContactEmail(input: {
   tryUrl?: string | null
   /** La puerta para empezar, como el botón de la web; nula si no hay. */
   start: { label: string; url: string } | null
-  /** Lo que promete el plan que se muestra («los primeros USD 100 de tus agentes los pagamos nosotros»); nulo si nada. */
+  /** Lo que promete el plan que se muestra («30 días con USD 100 de regalo para tus agentes»); nulo si nada. */
   offer: string | null
   replyTo?: string | undefined
   brand?: MailBrand
@@ -315,43 +286,10 @@ export function webContactEmail(input: {
 }
 
 /**
- * Aviso a hola@ de la marca de la solicitud (ADR 0186) de
- * cada cliente nuevo que pidió entrar desde la web: qué clínica, de qué
- * producto y de dónde, con el botón a su ficha en la administración. Es
- * interno, así que va con la marca de odentIA aunque sea de otro producto.
- * Nunca lleva el correo ni el celular de quien pidió: se leen en la ficha,
- * detrás del segundo factor de la administración.
+ * La invitación que el equipo le manda a un cliente desde su venta: su cuenta lista con el
+ * plan negociado, lo que recibe en cifras de ese plan y hasta cuándo vale el enlace. Ya no
+ * hace falta para entrar (ADR 0221): es como llega lo que se negoció.
  */
-export function newClientNoticeEmail(input: {
-  clinicName: string
-  product: ClinicalProduct
-  city: string
-  /** ISO 3166-1 alfa-2. */
-  countryCode: string
-  /** `<ADMIN_URL>/clients/<id del cliente>`; sin la dirección de la administración, sin botón. */
-  clientUrl: string | null
-}): MailTemplate {
-  const brand = mailBrandName(productWords(input.product).brand)
-  return renderEmail({
-    subject: `Cliente nuevo: ${input.clinicName} pidió entrar a ${brand}`,
-    preview: `${input.clinicName}, de ${input.city}, pidió entrar a ${brand}.`,
-    internal: "Clientes",
-    title: `${input.clinicName} pidió entrar a ${brand}`,
-    paragraphs: [
-      `Llegó un cliente nuevo desde la web de ${brand}. Quién pidió entrar y cómo escribirle están en su ficha, no en este correo.`,
-    ],
-    facts: [
-      { label: "Producto", value: brand },
-      { label: "Clínica", value: input.clinicName },
-      { label: "Ciudad", value: input.city },
-      { label: "País", value: countryDisplayName(input.countryCode) },
-    ],
-    ...(input.clientUrl ? action("Abrir la ficha", input.clientUrl) : { note: "La encuentras en la administración, en Clientes." }),
-    reason: "Aviso interno de la administración: cada cliente nuevo que pide entrar desde la web llega a este buzón.",
-  })
-}
-
-/** La invitación Fundadores: lo que recibe, en cifras del plan, y hasta cuándo vale el enlace. */
 export function founderInvitationEmail(input: {
   firstName: string
   clinicName: string
@@ -359,30 +297,31 @@ export function founderInvitationEmail(input: {
   url: string
   /** «domingo 1 de noviembre». */
   expiresText: string
-  offer: { currency: string; priceCents: number; trialCreditCents: number; discountPercent: number | null; guaranteeMonths: number | null }
-  /** hola@ de la marca, que entra al ARM; sin él, se pide otra invitación desde la web. */
+  offer: { planName?: string; currency: string; priceCents: number; trialCreditCents: number; discountPercent: number | null; guaranteeMonths: number | null }
+  /** hola@ de la marca, que entra al ARM; sin él, se pide otro enlace a quien lo mandó. */
   replyTo?: string | undefined
   /** La marca de la solicitud (issue 229). */
   brand?: MailBrand
 }): MailTemplate {
   const name = mailBrandName(input.brand)
   const credit = moneyText(input.offer.currency, input.offer.trialCreditCents)
-  const fee = input.offer.priceCents === 0 ? "y no pagas cuota" : `y tu cuota es de ${moneyText(input.offer.currency, input.offer.priceCents)} al mes`
-  const after = input.offer.discountPercent
-    ? `Después pagas solo lo que hacen, con ${input.offer.discountPercent} % menos que el precio de lista`
-    : "Después pagas solo lo que hacen"
-  const months = input.offer.guaranteeMonths ? `, durante ${input.offer.guaranteeMonths} meses.` : "."
+  const plan = input.offer.planName ? `con el plan ${input.offer.planName}` : "con tu plan"
+  const fee = input.offer.priceCents === 0 ? "sin cuota" : `con una cuota de ${moneyText(input.offer.currency, input.offer.priceCents)} al mes`
+  const discount = input.offer.discountPercent ? `, con ${input.offer.discountPercent} % menos que el precio de lista` : ""
+  const months = input.offer.guaranteeMonths ? ` Esos precios valen ${input.offer.guaranteeMonths} meses.` : ""
   return renderEmail({
     brand: input.brand,
-    subject: `Tu lugar en ${name} Fundadores está listo`,
-    preview: `Los primeros ${credit} de tus agentes los pagamos nosotros.`,
+    subject: `Tu cuenta en ${name} está lista`,
+    preview: `Tus agentes empiezan con ${credit} de regalo.`,
     title: `${input.firstName}, ${input.clinicName} ya puede entrar`,
-    paragraphs: [`Te guardamos un lugar en el programa Fundadores. Los primeros ${credit} de tus agentes los pagamos nosotros, ${fee}. ${after}${months}`],
+    paragraphs: [
+      `Te preparamos tu cuenta ${plan}: tus agentes empiezan con ${credit} de regalo y después pagas ${fee} lo que hacen${discount}.${months}`,
+    ],
     action: { label: "Crear mi cuenta", url: input.url },
     note: `El enlace sirve para ${input.email} y vence el ${input.expiresText}. ${
-      input.replyTo ? "Si vence, responde este correo y te enviamos otro." : `Si vence, pídela de nuevo desde la web de ${name} y te enviamos otra.`
+      input.replyTo ? "Si vence, responde este correo y te enviamos otro." : `Si vence, pídele otro a quien te escribió de ${name}.`
     }`,
-    reason: `Te escribimos porque pediste una invitación en la web de ${name}.`,
+    reason: `Te escribimos porque hablaste con el equipo de ${name} y te preparó tu cuenta.`,
     ...(input.replyTo ? { replyTo: input.replyTo, replies: `Si respondes, te lee el equipo de ${name}.` } : {}),
   })
 }

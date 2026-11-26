@@ -1,5 +1,5 @@
-// La web de marketing se arma en el servidor al servir cada página (ADR 0062): así los precios y
-// el programa Fundadores salen de la administración y los buscadores siguen leyendo el HTML entero.
+// La web de marketing se arma en el servidor al servir cada página (ADR 0062): así los precios salen de
+// la administración y los buscadores siguen leyendo el HTML entero.
 import { execFileSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
 import { join, relative } from "node:path"
@@ -11,8 +11,9 @@ import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
 // Las presentaciones (/presentacion y cada una debajo) son para mostrarlas o enviarlas, no para
-// buscadores (llevan noindex), y tampoco la página de «no existe».
-const FUERA_DEL_MAPA = /\/(presentacion(\/.*)?|404)$/
+// buscadores (llevan noindex), y tampoco la página de «no existe» ni las direcciones que solo
+// redirigen (la antigua solicitud de invitación).
+const FUERA_DEL_MAPA = /\/(presentacion(\/.*)?|solicitar-invitacion|404)$/
 
 // Cada producto con web la publica el mismo servidor con su VITE_PRODUCT: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/product-pages.json`, las mismas que sirve `servesPage` en

@@ -9,7 +9,6 @@
  * filtros y la búsqueda viven en la dirección (`clientsSearchOf`); la fila abre
  * la ficha, que es su página. Las demos no son clientes: están en Demos.
  */
-import { CLINICAL_PRODUCTS, productWords } from "@odentia/clinical"
 import { Badge, Button } from "@odentia/ui"
 import {
   AgentMark,
@@ -27,7 +26,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { CircleAlert, Plus, Users } from "lucide-react"
 import * as React from "react"
-import { z } from "zod"
 import {
   type ClientListItem,
   clientListSchema,
@@ -45,7 +43,6 @@ import {
   type ProductChoice,
   ProductFilter,
   ProductMark,
-  perProduct,
 } from "../../components/product"
 import {
   CLIENTS_SUBTITLE,
@@ -62,7 +59,6 @@ import {
   clientsSearchOf,
   rememberClientsSearch,
 } from "../../lib/list-search"
-import { useIsAdmin } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/clients")({
   // Cada filtro va siempre, vacío si su valor no sirve: «?vista=xyz» o «?etapa=xyz» se ignoran.
@@ -86,18 +82,9 @@ const STAGES_OF: Record<ClientListView, readonly string[]> = {
   todos: CLIENT_STAGE_NAMES.filter((stage) => stage !== "entro"),
 }
 
-/** Lugares de Fundador y cómo se abren las clínicas de cada producto (ADR 0093), como en la lista de espera. */
-const seatsSchema = z.object({
-  seats: perProduct(
-    z.object({ used: z.number(), limit: z.number().nullable() }).nullable().default(null),
-  ),
-  modes: perProduct(z.enum(["invitacion", "abierta"]).default("invitacion")),
-})
-
 function ClientsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const isAdmin = useIsAdmin()
   const [creating, setCreating] = React.useState(false)
   const view: ClientListView = search.vista ?? "por_vender"
   const page = search.pagina ?? 1
@@ -143,13 +130,6 @@ function ClientsPage() {
       void navigate({ search: (prev) => ({ ...prev, pagina: undefined }), replace: true })
   }, [filterKey, search.pagina, navigate])
   const staff = useStaff()
-  const seats = useQuery({
-    queryKey: ["admin", "waitlist", "seats"],
-    staleTime: 60_000,
-    queryFn: async () =>
-      seatsSchema.parse(await api<unknown>("/api/admin/waitlist?stage=invitada")),
-  })
-
   const rows = React.useMemo(() => list.data?.items ?? [], [list.data?.items])
   const columns = React.useMemo<ColumnDef<ClientListItem>[]>(
     () => [
@@ -278,7 +258,7 @@ function ClientsPage() {
     <PageShell className="flex flex-col gap-5">
       <PageHeader
         title="Clientes"
-        subtitle={<ClientsSubtitle seats={seats.data} isAdmin={isAdmin} />}
+        subtitle={CLIENTS_SUBTITLE}
         primary={{
           label: "Nuevo cliente",
           icon: <Plus aria-hidden />,
@@ -407,41 +387,6 @@ function ClientsPage() {
       </div>
       <NewClientDrawer open={creating} onClose={() => setCreating(false)} />
     </PageShell>
-  )
-}
-
-/** Lo de siempre y, cuando llega, los lugares de Fundador y cómo se abren las clínicas de cada producto. */
-function ClientsSubtitle({
-  seats,
-  isAdmin,
-}: {
-  seats: z.infer<typeof seatsSchema> | undefined
-  isAdmin: boolean
-}) {
-  if (!seats) return <p className="min-w-0">{CLIENTS_SUBTITLE}</p>
-  const seatText = CLINICAL_PRODUCTS.map((product) => {
-    const of = seats.seats[product]
-    return `${productWords(product).name} ${of ? (of.limit === null ? of.used : `${of.used} de ${of.limit}`) : "sin plan"}`
-  }).join(" · ")
-  const modes = CLINICAL_PRODUCTS.map(
-    (product) =>
-      `${productWords(product).name} ${seats.modes[product] === "invitacion" ? "solo con invitación" : "abierta"}`,
-  ).join(" · ")
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <p className="min-w-0">{CLIENTS_SUBTITLE}</p>
-      <p className="min-w-0">
-        Lugares de Fundador: {seatText}. Alta de clínicas: {modes}
-        {isAdmin ? (
-          <>
-            {" · "}
-            <Link to="/billing" hash="alta" className="font-medium text-foreground underline">
-              Cambiar
-            </Link>
-          </>
-        ) : null}
-      </p>
-    </div>
   )
 }
 

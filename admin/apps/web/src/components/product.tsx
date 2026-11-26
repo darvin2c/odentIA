@@ -36,11 +36,6 @@ export function ProductDot({ product, className }: { product: ClinicalProduct; c
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", DOT[product], className)} />
 }
 
-/** Un esquema con una entrada por producto, para lo que la API cuenta de cada uno. */
-export function perProduct<T extends z.ZodType>(shape: T) {
-  return z.object(Object.fromEntries(CLINICAL_PRODUCTS.map((product) => [product, shape])) as Record<ClinicalProduct, T>)
-}
-
 /** «● odentIA», o con `kind` «● latidIA · consultorio médico». */
 export function ProductMark({ product, kind = false, className }: { product: ClinicalProduct; kind?: boolean; className?: string }) {
   return (

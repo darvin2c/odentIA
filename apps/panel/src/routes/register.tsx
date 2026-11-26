@@ -19,16 +19,16 @@ import { API_URL, authClient } from "../lib/auth-client"
 import { authError, authFailureOf, authFormMessage } from "../lib/auth-error"
 import { AuthAlert, AuthLegal } from "../lib/auth-screens"
 import { creditText } from "../lib/credit"
-import { invitationQuery, moneyText, rememberInvitation } from "../lib/founders"
+import { forgetInvitation, invitationQuery, rememberInvitation } from "../lib/founders"
 import { GoogleAuthButton } from "../lib/google-auth"
 import { webUrl } from "../lib/host"
-import { panelWords } from "../lib/brand"
+import { signupStepOf } from "../lib/signup-steps"
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(typeof search.email === "string" ? { email: search.email } : {}),
     ...(typeof search.invitationId === "string" ? { invitationId: search.invitationId } : {}),
-    // Invitación Fundadores (issue 165): el enlace del correo de la lista de espera.
+    // Invitación interna: el enlace que manda el equipo de ventas con el plan negociado.
     ...(typeof search.invitacion === "string" && search.invitacion ? { invitacion: search.invitacion } : {}),
   }),
   component: RegisterPage,
@@ -38,7 +38,6 @@ const signUpInfoSchema = z.object({
   offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
   legalVersion: z.string(),
   agreementVersion: z.string(),
-  signupMode: z.enum(["invitacion", "abierta"]).default("abierta"),
 })
 
 /** Crédito de prueba y versión de los documentos: los dice el servidor, no la pantalla. */
@@ -77,24 +76,26 @@ function RegisterPage() {
   }, [founderToken])
   const founderQuery = useQuery(invitationQuery(founderToken))
   const founder = founderQuery.data ?? null
-  // Fundadores: sin invitación propia, la cuenta se crea igual pero la clínica no se abre (decisión 1).
-  const invitationOnly = info.data?.signupMode === "invitacion" && !founder && !invitationId
+  // Un enlace que ya no sirve no frena: se olvida y la clínica se abre igual, con la prueba de siempre.
+  const staleInvitation = Boolean(founderToken) && founderQuery.data === null
+  useEffect(() => {
+    if (staleInvitation) forgetInvitation()
+  }, [staleInvitation])
   const offer = info.data?.offer ?? null
-  const credit = founder
-    ? founder.offer.trialCreditCents > 0
-      ? moneyText(founder.offer.currency, founder.offer.trialCreditCents)
-      : null
-    : offer && offer.creditCents > 0
-      ? creditText(offer.currency, offer.creditCents)
-      : null
+  // La invitación interna trae su propia prueba; sin ella, la oferta pública del servidor.
+  const trial = founder
+    ? { currency: founder.offer.currency, creditCents: founder.offer.trialCreditCents, days: founder.offer.trialDays }
+    : offer
+  const credit = trial && trial.creditCents > 0 ? creditText(trial.currency, trial.creditCents) : null
   // Quien entra invitado a un equipo no abre una clínica: no recibe el crédito.
-  const cta = credit && !invitationId && !founder && !invitationOnly ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
-  // Tras verificar el correo (o con Google), quien trae invitación Fundadores sigue a abrir su clínica.
+  const cta = credit && !invitationId && !founder ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  // Tras verificar el correo (o con Google) se sigue directo a abrir la clínica;
+  // quien viene invitado al equipo de una clínica, a aceptar su invitación.
   const nextPath = invitationId
     ? `/accept-invitation/${encodeURIComponent(invitationId)}`
-    : founderToken
+    : founderToken && !staleInvitation
       ? `/onboarding?invitacion=${encodeURIComponent(founderToken)}`
-      : "/"
+      : "/onboarding"
   const [work, setWork] = useState<DayEvent | null>(null)
   // Documentos que cambiaron o no cargaron: el aviso junto al botón ofrece recargar.
   const [reload, setReload] = useState(false)
@@ -152,32 +153,15 @@ function RegisterPage() {
     if (founder && !form.getFieldValue("email")) form.setFieldValue("email", founder.email)
   }, [founder, form])
 
-  const trust = founder
-    ? [
-        ...(founder.offer.priceCents === 0 ? ["Sin cuota"] : []),
-        ...(founder.offer.discountPercent ? [`Acciones con ${founder.offer.discountPercent} % menos`] : []),
-        "Sin tarjeta",
-      ]
-    : invitationOnly
-      ? ["Sin tarjeta", "Tu clínica entra con invitación"]
-      : ["Sin tarjeta", offer ? `${offer.days} días` : "Prueba gratis", "Sin límite de usuarios"]
-  const headline: React.ReactNode = founder ? (
-    credit ? (
-      <>
-        Los primeros <span className="text-[1.2em] leading-none whitespace-nowrap text-[#f5c46b]">{credit}</span> los pagamos nosotros.
-      </>
-    ) : (
-      `Tu lugar en ${panelWords.name} está listo.`
-    )
-  ) : invitationOnly ? (
-    "Crea tu cuenta."
-  ) : credit ? (
-    `Obtén ${credit} de crédito.`
-  ) : (
-    `Prueba ${panelWords.name}.`
-  )
-  const accent = founder ? "Tus agentes empiezan hoy." : invitationOnly ? "Para abrir tu clínica, pide tu invitación." : "Tus agentes empiezan hoy."
-  const tag = founder ? "Invitación Fundadores" : invitationOnly ? "Programa Fundadores" : offer ? `Prueba de ${offer.days} días` : "Prueba gratis"
+  const trialChip = trial && trial.days > 0 ? (credit ? `${trial.days} días con ${credit} para tus agentes` : `${trial.days} días de prueba`) : null
+  const trust = [
+    "Sin tarjeta",
+    ...(founder ? [`Plan ${founder.offer.planName}`] : []),
+    ...(trialChip ? [trialChip] : []),
+  ]
+  const headline = "Crea tu cuenta."
+  const accent = "Tu clínica empieza hoy."
+  const tag = founder ? "Tu invitación" : "Prueba gratis"
 
   return (
     <AuthSplit
@@ -185,7 +169,7 @@ function RegisterPage() {
         <span className="flex items-center justify-between gap-3">
           Crea tu cuenta
           <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
-            1 de 4
+            {signupStepOf(1)}
           </span>
         </span>
       }
@@ -215,9 +199,9 @@ function RegisterPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        {founderToken && founderQuery.data === null ? (
+        {staleInvitation ? (
           <AuthAlert>
-            Esa invitación ya no sirve: venció, se usó o se anuló. Responde el correo de la invitación y te enviamos otra.
+            El enlace de tu invitación ya no sirve: venció, se usó o se anuló. Puedes crear tu cuenta y abrir tu clínica igual.
           </AuthAlert>
         ) : null}
         <GoogleAuthButton label="Continuar con Google" callbackURL={nextPath} />
@@ -332,17 +316,9 @@ function RegisterPage() {
           </form.Subscribe>
           <p className="text-center text-xs text-muted-foreground">
             {founder
-              ? "Sin tarjeta. Después sigues a «Configura tu clínica», ya como Fundadora."
-              : "Sin tarjeta. Te la pediremos solo cuando elijas tu plan."}
+              ? `Sin tarjeta. Tu clínica abre con el plan ${founder.offer.planName}.`
+              : "Sin tarjeta. Al terminar la prueba eliges tu plan y pagas con tu comprobante."}
           </p>
-          {invitationOnly ? (
-            <p className="text-center text-sm text-muted-foreground">
-              ¿Quieres usar {panelWords.name} en tu {panelWords.place.one}?{" "}
-              <a href={webUrl("/solicitar-invitacion")} className="font-medium text-foreground underline">
-                Pide tu invitación
-              </a>
-            </p>
-          ) : null}
         </FieldGroup>
       </form>
     </AuthSplit>

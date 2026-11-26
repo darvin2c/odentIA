@@ -12,6 +12,7 @@ import { creditText } from "../lib/credit"
 import { requireVerifiedSession } from "../lib/guards"
 import { legalLinks } from "../lib/host"
 import { safeNext } from "../lib/safe-next"
+import { signupStepOf } from "../lib/signup-steps"
 import { initials } from "../lib/welcome"
 import { panelWords } from "../lib/brand"
 
@@ -166,7 +167,7 @@ function TermsStepPage() {
           Un paso antes de seguir
           {opens ? (
             <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
-              2 de 4
+              {signupStepOf(2)}
             </span>
           ) : null}
         </span>

@@ -1,0 +1,13 @@
+---
+// Un texto de la oferta (`lib/offer.ts`) con el regalo de la prueba en ámbar: `.gift` sobre oscuro y
+// `.gift-light` sobre claro. Así cada página dice la misma frase y solo elige dónde va.
+import { offerOf, splitGift } from "../lib/offer"
+
+interface Props {
+  text: string
+  light?: boolean
+}
+const { text, light = false } = Astro.props
+const [before, gift, after] = splitGift(text, offerOf(Astro.locals.pricing).gift)
+---
+{before}{gift ? <b class={light ? "gift-light" : "gift"}>{gift}</b> : null}{after}

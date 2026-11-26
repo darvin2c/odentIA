@@ -6,31 +6,30 @@ import IncludedSystem from "../components/pricing/IncludedSystem.astro"
 import NeverCharged from "../components/pricing/NeverCharged.astro"
 import PricingHero from "../components/pricing/PricingHero.astro"
 import ValueSection from "../components/pricing/ValueSection.astro"
-// Precios: no pagas por el software, pagas por el trabajo hecho. Todas las cifras salen de lib/pricing.
+// Precios: todo el sistema con un plan que vuelve como crédito, y pagas con el trabajo de tus agentes.
+// Todas las cifras salen de lib/pricing.
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { billingStartText, trialFaq } from "../lib/offer"
-import { businessDays, days, giftOf, money, shownPlan } from "../lib/pricing"
+import { businessDays, days, money, shownPlan } from "../lib/pricing"
 import { HAS_CLIO, ofProduct, WORDS } from "../lib/product"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
-const gift = giftOf(pricing)
 const m = (value: number | null) => (plan && value !== null ? money(value, plan.currency) : "—")
 // Las condiciones comerciales: de la administración, como los precios (issue 167).
 const terms = pricing.terms
 // Cómo llama esta página al lugar: odentIA y latidIA dicen «clínica» desde siempre; vistIA, «óptica».
 const place = ofProduct({ dental: "clínica", medical: "clínica", optical: "óptica" })
 
-const title = "Precios: pagas por el trabajo hecho, no por el software"
+const title = "Precios: todo el sistema, y pagas con el trabajo de tus agentes"
 // Lo que cobra cada agente, de lo más simple a lo que trae pacientes (ADR 0085).
 const range = plan ? `desde ${m(plan.tiers.informa)} una respuesta hasta ${m(plan.recovered)} una cita recuperada` : null
 const description = !plan
-  ? `Software para ${WORDS.audience}: pagas por lo que hacen tus agentes, no por el software. Lo simple cuesta poco y lo que te trae pacientes cuesta más.`
-  : founder
-    ? `Software para ${WORDS.audience}. Programa Fundadores: sin cuota y con ${m(plan.trialCredit)} de regalo para tus agentes; después pagas solo lo que hacen, ${range}${founder.discountPercent ? ` (${founder.discountPercent} % menos que el precio de lista)` : ""}.`
-    : `Software para ${WORDS.audience} con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
+  ? `Software para ${WORDS.audience}: todo el sistema incluido y pagas por lo que hacen tus agentes. Lo simple cuesta poco y lo que te trae ${WORDS.patients} cuesta más.`
+  : plan.plan > 0
+    ? `Software para ${WORDS.audience} con un plan de ${m(plan.plan)} al mes que vuelve como crédito. Pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
+    : `Software para ${WORDS.audience} sin cuota: pagas por lo que hacen tus agentes, ${range}. Prueba ${plan.trialDays} días sin tarjeta.`
 // Lo de Clío que se negocia, donde trabaja.
 const clioDeal = ofProduct({
   dental: "la consulta en la que Clío arma el presupuesto y ",
@@ -59,7 +58,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Por qué no hay planes con más funciones?",
-    a: `Porque no vendemos funciones. Todas las ${place}s tienen el sistema completo; lo que cambia de una a otra es cuánto trabajo hacen sus agentes, y solo eso se paga.`,
+    a: `Porque no vendemos funciones. Todas las ${place}s tienen el sistema completo con el mismo plan; lo que cambia de una a otra es cuánto trabajo hacen sus agentes.`,
   },
   {
     // ADR 0047 y 0054: lo decide el modelo de decisión de toda clínica; si duda, se atiende y cuenta.
@@ -86,13 +85,11 @@ const faq: FaqItem[] = [
     a: `El spam, los mensajes ajenos a tu ${place}, lo que responde tu equipo${HAS_CLIO ? ", los recordatorios y avisos de cita, y el borrador que descartas" : " y los recordatorios y avisos de cita"}.`,
   },
   // Sin un plan publicado no hay cuota ni crédito que explicar.
-  ...(plan
+  ...(plan && plan.plan > 0
     ? [
         {
           q: "¿Qué pasa si no uso el crédito?",
-          a: founder
-            ? "Como Fundador no pagas cuota: si un mes tus agentes no hacen nada, no pagas nada."
-            : `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${m(plan.plan)} del plan. El crédito es el de ese mes.`,
+          a: `Si en un mes tus agentes usan menos que el crédito, pagas solo los ${m(plan.plan)} del plan. El crédito es el de ese mes.`,
         },
       ]
     : []),
@@ -100,7 +97,7 @@ const faq: FaqItem[] = [
   ...trialFaq(pricing, place),
   {
     q: "¿Cada cuánto me cobran?",
-    a: `${billingStartText(pricing)} ${plan && plan.credit > 0 ? "Lo que pasa del crédito" : "Lo que hacen tus agentes"} se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
+    a: `${billingStartText()} ${plan && plan.credit > 0 ? "Lo que pasa del crédito" : "Lo que hacen tus agentes"} se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
   },
   {
     q: `¿Y si mi ${WORDS.clinic} tiene mucho movimiento?`,
@@ -114,9 +111,9 @@ const product = plan
   ? {
       "@context": "https://schema.org",
       "@type": "Product",
-      name: founder ? `${WORDS.name} · Programa Fundadores` : `${plan.name} · ${WORDS.name}`,
+      name: `${plan.name} · ${WORDS.name}`,
       description: `ARM (Agentic Relationship Management) para ${WORDS.audience}: todos tus canales en una ficha y agentes de IA que hacen el trabajo. ${
-        founder ? "Sin cuota mensual" : `El plan de ${m(plan.plan)} al mes vuelve completo como crédito para los agentes`
+        plan.plan > 0 ? `El plan de ${m(plan.plan)} al mes vuelve completo como crédito para los agentes` : "Sin cuota mensual"
       }; cada agente cobra por lo que hizo, ${range}.`,
       brand: { "@type": "Brand", name: WORDS.name },
       url: pageUrl,
@@ -152,19 +149,7 @@ const jsonLd = [
   <NeverCharged />
   <ValueSection />
   <div class="faqwrap"><Faq items={faq} title="Sobre el precio." /></div>
-  <CtaBand title="Pagas por el trabajo hecho. Empieza hoy.">
-    <Fragment slot="text">
-      {gift ? (
-        founder ? (
-          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        ) : (
-          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
-        )
-      ) : (
-        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
-      )}
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Pagas con el trabajo de tus agentes. Empieza hoy." />
 </Base>
 
 <style>

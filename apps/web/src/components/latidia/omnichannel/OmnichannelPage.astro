@@ -5,7 +5,6 @@
 // recordatorio aprobado, las preguntas y el cierre. odentIA sigue con su propia página.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf } from "../../../lib/pricing"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -16,7 +15,6 @@ const title = "WhatsApp y omnicanal para consultorios médicos"
 const description =
   "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo de tu consultorio en la ficha de cada paciente, con su historia y sus citas. Conecta tu número de siempre y deja que Sofi responda."
 const cta = ctaOf(Astro.locals.pricing)
-const gift = giftOf(Astro.locals.pricing)
 const trail: [string, string][] = [["Inicio", "/"], ["Omnicanal y WhatsApp", "/omnicanal"]]
 
 const onePerson: { title: string; text: string; link?: { href: string; label: string } }[] = [
@@ -162,12 +160,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="om-faq">
       <Faq items={faq} />
     </div>
-    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta.">
-      <Fragment slot="text">
-        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
-        Sin tarjeta y sin límite de médicos, salas ni usuarios.
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta." />
   </div>
 </Base>
 

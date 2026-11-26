@@ -3,7 +3,7 @@
 // enseña, muestra cómo lo hace odentIA y deja empezar ahí mismo. Arriba, lo que buscó y la plantilla;
 // el video del canal (de la lista del tema, si tiene; si no, el fijo); «En corto»; los pasos con su figura; las plantillas (sin pedir el correo; al
 // descargar, el aviso); «Pruébalo aquí» con la demo de su página de producto; las preguntas; dos
-// guías para seguir y la solicitud ahí mismo. Todo sale del archivo de la guía.
+// guías para seguir y el cierre para empezar. Todo sale del archivo de la guía.
 import { FDI_ADULT, FDI_CHILD, toothNameOf } from "@odentia/dental"
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
@@ -19,7 +19,7 @@ import {
   SHEET_NAMES,
   sheetImages,
 } from "../../lib/guides"
-import { ctaOf, guideContactApiUrl } from "../../lib/site"
+import { guideContactApiUrl } from "../../lib/site"
 import CloseSheet from "../billing/CloseSheet"
 import BudgetDemo from "../budgets/BudgetDemo"
 import ChartPreview from "../clinical/ChartPreview"
@@ -37,12 +37,7 @@ interface Props {
   guide: Guide
 }
 const { guide } = Astro.props
-const pricing = Astro.locals.pricing
 const path = guidePath(guide)
-const invitation = pricing.signupMode === "invitacion"
-// Con Fundadores, el botón de la cabecera baja a la solicitud de la misma página.
-const cta = ctaOf(pricing)
-const headerCta = invitation ? { href: "#pide", label: cta.label } : undefined
 const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Guías", GUIDES_PATH],
@@ -86,7 +81,7 @@ const START_TITLES: Record<Guide["topic"], string> = {
 }
 const startTitle = START_TITLES[guide.topic]
 ---
-<Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} cta={headerCta} share={share}>
+<Base title={guide.seoTitle} description={guide.description} jsonLd={jsonLd} share={share}>
   <section class="hero gh">
     <div class="grain" aria-hidden="true"></div>
     <div class:list={["wrap", "gh-in", { video }]}>
@@ -153,8 +148,6 @@ const startTitle = START_TITLES[guide.topic]
         client:idle
         sheets={sheets}
         page={path}
-        ask={invitation ? "correo" : "boton"}
-        cta={cta}
         contactUrl={guideContactApiUrl}
       />
     </section>
@@ -215,7 +208,7 @@ const startTitle = START_TITLES[guide.topic]
     </div>
   </section>
 
-  <GuideStart title={startTitle} page={path} />
+  <GuideStart title={startTitle} />
   <script>
     // El botón de arriba (sin JavaScript, solo baja a las plantillas): con una sola plantilla la
     // descarga ahí mismo, con su aviso; con varias, lleva a elegir. El foco queda en la plantilla.

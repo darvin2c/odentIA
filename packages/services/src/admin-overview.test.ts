@@ -6,7 +6,8 @@ import type { AdminActor } from "./admin-core.js"
 import { getBackofficeOverview, getBackofficeToday } from "./admin-overview.js"
 import { openSupportCaseFromHelp } from "./admin-support.js"
 import { createSaasPlan } from "./saas-billing.js"
-import { addWaitlistFollowUp, followUpChoices, inviteFromWaitlist, submitWaitlistRequest } from "./saas-founders.js"
+import { addWaitlistFollowUp, followUpChoices, inviteFromWaitlist } from "./saas-founders.js"
+import { submitWaitlistRequest } from "./waitlist-test-kit.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Inicio de la administración: filas con nombre para administración y soporte. */
@@ -81,7 +82,6 @@ beforeAll(async () => {
     trialMaxCreditCents: 10_000,
     trialDays: 90,
     trialMaxDays: 90,
-    seatLimit: 50,
     guaranteeMonths: 12,
   })
   planId = plan.id

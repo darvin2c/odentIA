@@ -1,13 +1,11 @@
 ---
-// «Cada trabajo, con su precio» (ADR 0085): una tarjeta por agente con el precio de cada tipo. Con el
-// plan Fundadores, cada precio lleva al lado el de lista tachado. Sin plan publicado no se dibuja.
+// «Cada trabajo, con su precio» (ADR 0085): una tarjeta por agente con el precio de cada tipo del plan
+// que se muestra. Sin plan publicado no se dibuja.
 import { hours, money, shownPlan } from "../../lib/pricing"
 import { AGENTS, HAS_CLIO, ofProduct, WORDS } from "../../lib/product"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
-const list = pricing.list
-const founder = plan !== null && plan === pricing.founders
 const terms = pricing.terms
 /** «0,50», «29,00»: la cifra sin la moneda y con sus centavos. */
 const currency = plan?.currency ?? ""
@@ -15,10 +13,8 @@ const cut = (value: number) => {
   const text = money(value, currency).replace(`${currency} `, "")
   return text.includes(",") ? text : `${text},00`
 }
-const struck = (own: number | null, base: number | null | undefined) =>
-  founder && own !== null && base != null && base !== own ? cut(base) : null
 
-type Row = { label: string; price: number | null; before?: string | null; text?: string }
+type Row = { label: string; price: number | null; text?: string }
 /** Lo que hace estándar y completa una consulta de Clío en cada producto; vistIA no la cobra. */
 const clioTiers = ofProduct({
   dental: { estandar: "Diagnóstico, odontograma o más", completa: "Armó el presupuesto" },
@@ -38,9 +34,9 @@ const cards: Card[] = plan
         when: `Una vez por persona cada ${hours(terms.conversationWindowHours)}, según lo que pasó en tu agenda.`,
         href: "/agentes/recepcion",
         rows: [
-          { label: "Respondió o confirmó", price: plan.tiers.informa, before: struck(plan.tiers.informa, list?.tiers.informa) },
-          { label: "Reservó, movió o canceló", price: plan.tiers.gestiona, before: struck(plan.tiers.gestiona, list?.tiers.gestiona) },
-          { label: `Y el ${WORDS.patient} vino`, price: plan.tiers.agenda, before: struck(plan.tiers.agenda, list?.tiers.agenda) },
+          { label: "Respondió o confirmó", price: plan.tiers.informa },
+          { label: "Reservó, movió o canceló", price: plan.tiers.gestiona },
+          { label: `Y el ${WORDS.patient} vino`, price: plan.tiers.agenda },
         ],
       },
       // Clío, solo donde trabaja (en vistIA no dicta).
@@ -53,9 +49,9 @@ const cards: Card[] = plan
         rows: [
           // ADR 0085: simple es una sola parte; estándar, un diagnóstico, el odontograma o dos partes o más.
           // En latidIA, lo que lo hace estándar es más de una parte (el examen, el diagnóstico) y completa, dejar indicado lo que sigue.
-          { label: "Una nota, receta o control", price: plan.tiers.simple, before: struck(plan.tiers.simple, list?.tiers.simple) },
-          { label: clioTiers.estandar, price: plan.tiers.estandar, before: struck(plan.tiers.estandar, list?.tiers.estandar) },
-          { label: clioTiers.completa, price: plan.tiers.completa, before: struck(plan.tiers.completa, list?.tiers.completa) },
+          { label: "Una nota, receta o control", price: plan.tiers.simple },
+          { label: clioTiers.estandar, price: plan.tiers.estandar },
+          { label: clioTiers.completa, price: plan.tiers.completa },
         ],
       } satisfies Card] : []),
       {
@@ -65,11 +61,11 @@ const cards: Card[] = plan
         when: "La cita, cuando vuelve quien no tenía cita ni tratamiento en curso y viene.",
         href: "/agentes/administrador",
         rows: [
-          { label: "Cita recuperada", price: plan.recovered, before: struck(plan.recovered, list?.recovered) },
+          { label: "Cita recuperada", price: plan.recovered },
           ...(plan.argos
             ? [
                 { label: `${plan.argos.included} preguntas al mes`, price: null, text: "incluidas" },
-                { label: `${plan.argos.packQuestions} preguntas más`, price: plan.argos.pack, before: struck(plan.argos.pack, list?.argos?.pack) },
+                { label: `${plan.argos.packQuestions} preguntas más`, price: plan.argos.pack },
               ]
             : []),
         ],
@@ -79,7 +75,6 @@ const cards: Card[] = plan
 const note = plan
   ? [
       `${plan.currency}, más impuestos.`,
-      founder && list ? "Precio de Fundadores con el de lista tachado." : null,
       plan.storage
         ? `${plan.storage.includedGb} GB incluidos; desde el GB ${plan.storage.includedGb + 1}, ${cut(plan.storage.perGb)} por GB al mes.`
         : null,
@@ -107,7 +102,6 @@ const note = plan
                   <dt>{row.label}</dt>
                   <dd>
                     {row.price !== null ? cut(row.price) : row.text}
-                    {row.before ? <s class="was"><span class="sr">antes </span>{row.before}</s> : null}
                   </dd>
                 </div>
               ))}
@@ -142,7 +136,6 @@ const note = plan
   .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .row dt { font-size: 16px; line-height: 1.4; }
   .row dd { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; display: flex; align-items: baseline; gap: 6px; }
-  .was { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--soft); }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .more { align-self: flex-start; font-size: 14px; font-weight: 700; text-decoration: none; padding: 12px 0 0; min-height: 44px; display: inline-flex; align-items: center; color: var(--teal); }
   .more:hover { text-decoration: underline; }

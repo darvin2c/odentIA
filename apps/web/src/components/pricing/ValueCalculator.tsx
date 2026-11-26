@@ -20,7 +20,7 @@ type Key = keyof ValueInput
 
 export default function ValueCalculator({ prices, children }: { prices: ValuePrices; children?: ReactNode }) {
   const { plan: PLAN, credit: CREDIT, recovered: RECOVERED, tiers: T } = prices
-  // Sin cuota ni crédito (Fundadores) no hay filas de plan que restar: serían «USD 0» que nadie paga.
+  // Sin cuota ni crédito (un plan sin cuota) no hay filas de plan que restar: serían «USD 0» que nadie paga.
   const hasPlan = PLAN > 0 || CREDIT > 0
   const [v, setV] = useState<ValueInput>(DEFAULT_VALUE_INPUT)
   const [narrow, setNarrow] = useState(false)

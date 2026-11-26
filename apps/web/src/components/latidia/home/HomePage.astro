@@ -5,10 +5,12 @@
 // El documento (<Base>, título, descripción y datos estructurados) lo arma src/pages/index.astro.
 // Ninguna cifra de precio vive aquí: salen de Astro.locals.pricing; los soles son del tarifario de
 // ejemplo del consultorio de la demo.
+import { offerOf, startNote } from "../../../lib/offer"
 import { giftOf, shownPlan } from "../../../lib/pricing"
 import { ARM_PATH } from "../../../lib/arm"
 import { contactHref, ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
+import GiftText from "../../GiftText.astro"
 import AgentMini from "./AgentMini"
 import AgentSwitches from "./AgentSwitches"
 import ChargeDay, { type ChargeRow } from "./ChargeDay"
@@ -24,8 +26,9 @@ const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
 const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
-const founder = plan !== null && plan === pricing.founders
-const faq = homeFaq(gift, pricing)
+const faq = homeFaq(pricing)
+const note = startNote(pricing)
+const { fee, credit } = offerOf(pricing)
 
 // Un jueves de cobros: lo que hizo cada agente con los precios del plan que se muestra. Rosa vino a
 // su consulta, así que la conversación en que Sofi la agendó cuenta como «Agenda» (ADR 0085).
@@ -137,7 +140,7 @@ const trust = [
           <a class="btn btn-g" href="#caso">Ver cómo funciona</a>
         </div>
         <p class="lh-note">
-          {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes van por nuestra cuenta. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
+          {note ? <GiftText text={note} /> : "Sin tarjeta y sin límite de médicos, salas ni usuarios."}
         </p>
         <ul class="lh-specs" aria-label="Especialidades">
           <li>Medicina general</li>
@@ -354,15 +357,18 @@ const trust = [
     <div class="wrap lc-in">
       <div class="ls-head">
         <span class="tag">[ Cómo se cobra ]</span>
-        <h2>No pagas por el software. Pagas por el trabajo hecho.</h2>
-        <p>Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.</p>
+        <h2>Todo el sistema. Pagas con el trabajo de tus agentes.</h2>
+        <p>
+          {fee && credit ? `Un plan de ${fee} al mes que vuelve como crédito: cada trabajo se descuenta de ahí. ` : fee ? `Un plan de ${fee} al mes y lo que hacen tus agentes. ` : null}
+          Cada cobro dice qué agente lo hizo, a quién y por qué. Recordar no se cobra. Traer de vuelta a un paciente, sí.
+        </p>
         <a class="lk big" href="/precios">Ver precios →</a>
       </div>
       <div class="lc-card">
         {plan && chargeRows.length > 0 ? (
           <>
             <ChargeDay client:visible rows={chargeRows} currency={plan.currency} title="Jueves · Consultorio San Martín" />
-            <span class="lc-note">Precios en {currencyWord} más impuestos.{founder ? ` Precio ${plan.name}.` : ""}</span>
+            <span class="lc-note">Precios en {currencyWord} más impuestos.</span>
           </>
         ) : (
           <p class="lc-empty">Los precios se publican pronto. <a href={contactHref}>Escríbenos</a> y te los contamos.</p>
@@ -374,11 +380,7 @@ const trust = [
   <!-- 8 · Preguntas -->
   <FaqList items={faq} white />
 
-  <CtaBand title="Tu consultorio, atendido de día y de noche.">
-    <Fragment slot="text">
-      {gift ? <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </> : null}Sin tarjeta y sin límite de médicos, salas ni usuarios.
-    </Fragment>
-  </CtaBand>
+  <CtaBand title="Tu consultorio, atendido de día y de noche." />
 
   <!-- En el teléfono, la llamada a la acción fija abajo; aparece al pasar la portada para no taparla. -->
   <div class="lsticky" data-lh-sticky>

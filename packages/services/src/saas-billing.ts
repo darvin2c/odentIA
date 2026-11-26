@@ -350,10 +350,8 @@ export interface SaasPlanInput {
   trialMaxCreditCents?: number
   trialMaxDays?: number
   isDefault?: boolean
-  /** La web lo publica (Fundadores, decisión 14). */
+  /** La web lo publica. Un plan que no sale en la web ni es el de lista es un plan especial. */
   showOnWeb?: boolean
-  /** Plan por invitación: lugares; null = sin tope. */
-  seatLimit?: number | null
   /** Meses de condiciones garantizadas desde que la clínica entra. */
   guaranteeMonths?: number | null
 }
@@ -395,7 +393,6 @@ export interface SaasPlanRow {
   trialMaxDays: number
   isDefault: boolean
   showOnWeb: boolean
-  seatLimit: number | null
   guaranteeMonths: number | null
   createdAt: Date
   updatedAt: Date
@@ -438,7 +435,6 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     trialMaxDays: row.trialMaxDays,
     isDefault: row.isDefault,
     showOnWeb: row.showOnWeb,
-    seatLimit: row.seatLimit,
     guaranteeMonths: row.guaranteeMonths,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -490,10 +486,6 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   if (value.trialMaxDays !== undefined) terms.trialMaxDays = value.trialMaxDays
   if (value.isDefault !== undefined) terms.isDefault = value.isDefault
   if (value.showOnWeb !== undefined) terms.showOnWeb = value.showOnWeb
-  if (value.seatLimit !== undefined) {
-    if (value.seatLimit !== null && (!Number.isInteger(value.seatLimit) || value.seatLimit < 1)) throw invalidField("seatLimit", "Los lugares deben ser un número entero mayor que cero, o vacío")
-    terms.seatLimit = value.seatLimit
-  }
   if (value.guaranteeMonths !== undefined) {
     if (value.guaranteeMonths !== null && (!Number.isInteger(value.guaranteeMonths) || value.guaranteeMonths < 1 || value.guaranteeMonths > 120)) {
       throw invalidField("guaranteeMonths", "Los meses garantizados deben estar entre 1 y 120, o vacío")
@@ -603,7 +595,7 @@ export async function listSaasPlans(
 /**
  * Lo que ve la clínica en Plan y pagos (issue 104): el plan de lista (el por
  * defecto de la administración) y, si tiene otro, el suyo. Ningún otro plan
- * activo se le ofrece: un plan especial o de Fundadores lo asigna la
+ * activo se le ofrece: un plan especial lo asigna la
  * administración, no se elige. Primero el de lista.
  */
 export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRow[]> {
@@ -1157,15 +1149,12 @@ export async function chooseSaasPlan(
   if (plan.product !== (await orgProduct(tx, orgId)) && current?.planId !== plan.id) {
     throw new ServiceError("SAAS_PLAN_NOT_OFFERED", 409, "Ese plan es de otro producto")
   }
-  if (plan.seatLimit !== null && current?.planId !== plan.id) {
-    throw new ServiceError("SAAS_PLAN_BY_INVITATION", 409, "Ese plan es solo por invitación")
-  }
-  // Una Fundadora no deja sus condiciones por error: mientras valgan, el plan no se cambia desde el panel.
+  // Quien tiene condiciones garantizadas no las deja por error: mientras valgan, el plan no se cambia desde el panel.
   if (current?.guaranteedUntil && current.guaranteedUntil > now && current.planId !== plan.id) {
     throw new ServiceError(
       "SAAS_FOUNDER_GUARANTEED",
       409,
-      "Tus condiciones de Fundador siguen vigentes: si quieres cambiar de plan, escríbenos desde Soporte",
+      "Tus precios garantizados siguen vigentes: si quieres cambiar de plan, escríbenos desde Soporte",
     )
   }
   // Solo se elige lo que ofrece Plan y pagos (`listClinicPlans`): el de lista o el que ya tiene.
@@ -1571,7 +1560,7 @@ export interface OrganizationBillingSummary {
   /** En gracia, el día en que pasa a solo lectura (`readOnlyAtOf`); si no, nulo. */
   readOnlyAt: Date | null
   usage30d: SaasUsageSummary
-  /** Entró por invitación (Fundadores): hasta cuándo valen sus condiciones; null si no aplica o ya terminaron. */
+  /** Tiene un plan especial con meses garantizados: hasta cuándo valen sus precios; null si no aplica o ya terminaron. */
   guaranteedUntil: Date | null
 }
 
@@ -3149,8 +3138,8 @@ export async function tickSaasBilling(
     }
   }
 
-  // 1b. Lo negociado que venció (issue 168) y las condiciones de Fundador que
-  // terminaron (issue 165): a precio de lista desde el día siguiente. Los
+  // 1b. Lo negociado que venció (issue 168) y las condiciones garantizadas de un
+  // plan especial que terminaron: a precio de lista desde el día siguiente. Los
   // avisos de antes ya salieron en el paso 1 (`precio_especial`, `condiciones`).
   await clearExpiredDiscounts(tx, now)
   for (const orgId of await endFounderGuarantees(tx, now)) await notifyOrg(tx, orgId, "saas.subscription.updated")

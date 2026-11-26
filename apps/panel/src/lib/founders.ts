@@ -2,11 +2,14 @@ import { z } from "zod"
 import { API_URL } from "./auth-client"
 
 /**
- * Fundadores (issue 165): mientras dure el programa, abrir una clínica pide
- * una invitación. El enlace del correo trae `?invitacion=<token>`; aquí se
- * guarda para que sobreviva a verificar el correo (que vuelve a otra
- * pantalla) y viaja en la cabecera `x-odentia-invitation` al crear la
- * organización. El servidor decide: esto solo la lleva.
+ * Invitación interna: el equipo de ventas manda a un cliente un enlace
+ * `/register?invitacion=<token>` que, al abrir su clínica, le aplica el plan
+ * negociado. Abrir una clínica no la pide: sin ella se abre igual, con la
+ * prueba de siempre. Aquí se guarda el token para que sobreviva a verificar el
+ * correo (que vuelve a otra pantalla) y viaja en la cabecera
+ * `x-odentia-invitation` al crear la organización. El servidor decide: esto
+ * solo la lleva. (La clave y la ruta conservan el nombre del programa que la
+ * creó para no perder los enlaces ya enviados.)
  */
 
 const KEY = "odentia.founder-invitation"
@@ -80,10 +83,3 @@ export const invitationQuery = (token: string | null) => ({
   staleTime: 60_000,
   retry: false,
 })
-
-/** «USD 100», «USD 0,50»: como en la web y los correos. */
-export function moneyText(currency: string, cents: number): string {
-  const fixed = (Math.round(cents) / 100).toFixed(2).replace(".", ",")
-  const trimmed = fixed.endsWith(",00") ? fixed.slice(0, -3) : fixed
-  return `${currency} ${trimmed.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`
-}

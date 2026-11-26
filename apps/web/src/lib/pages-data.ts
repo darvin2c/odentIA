@@ -167,7 +167,7 @@ export const LINKS: Record<string, { label: string; text: string }> = {
   "/seguridad": { label: "Seguridad", text: "Roles, clínicas separadas y cómo usamos la IA." },
   "/precios": {
     label: "Precios",
-    text: "Lo que cobra cada agente y lo que nunca se cobra. Pagas por el trabajo hecho.",
+    text: "El plan que vuelve como crédito, lo que cobra cada agente y lo que nunca se cobra.",
   },
   "/contacto": {
     label: "Habla con nosotros",

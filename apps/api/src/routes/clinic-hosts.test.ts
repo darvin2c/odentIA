@@ -4,7 +4,6 @@ import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
-import { saasSignupPolicy } from "@odentia/db/schema/saas-billing"
 import {
   type ClinicHosts,
   type HostsFirewall,
@@ -140,7 +139,6 @@ beforeAll(async () => {
   ownerDb = createOwnerDb(`postgres://dentalagent:dentalagent@${host}:${port}/dentalagent`)
   await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}:${port}/dentalagent`)
-  await ownerDb.update(saasSignupPolicy).set({ mode: "abierta" })
   // Administración, con su segundo factor en esta sesión: pide y borra las demos.
   await ownerDb.insert(user).values({
     id: "u-admin",

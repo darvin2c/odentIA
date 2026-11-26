@@ -3,13 +3,14 @@ import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
 import { offerOf, trialFaq } from "../../lib/offer"
 import { hours, type Pricing } from "../../lib/pricing"
+import { supportEmail } from "../../lib/site"
 
 /**
  * Las preguntas con la oferta del plan que se muestra y las condiciones comerciales (no van fijos en el código).
- * Con Fundadores, el plan es sin cuota y por invitación, como en Precios; la prueba la cuenta `trialFaq`, igual en las tres webs.
+ * La prueba la cuenta `trialFaq`, igual en las tres webs.
  */
 export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] => {
-  const { founder } = offerOf(pricing)
+  const { fee } = offerOf(pricing)
   const terms = pricing.terms
   return [
   armFaq,
@@ -17,9 +18,9 @@ export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] =
     q: "¿Cuánto voy a pagar al mes?",
     // ADR 0085: también se suman los paquetes de preguntas a Argos y el espacio que pasa de lo incluido.
     a: `${
-      founder
-        ? "Como Fundador no pagas cuota: pagas lo que hacen tus agentes"
-        : "La cuota del plan, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito"
+      fee
+        ? `La cuota del plan, ${fee}, que vuelve como crédito, más lo que tus agentes hagan por encima de ese crédito`
+        : "Lo que hacen tus agentes"
     }, los paquetes de preguntas a Argos que sumes y el espacio que pase de lo incluido. Lo calculas con tus números en la página de precios y puedes poner un presupuesto del mes: te avisamos antes de llegar.`,
   },
   {
@@ -46,7 +47,7 @@ export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] =
   },
   {
     q: "¿Puedo traer a mis pacientes?",
-    a: "Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus pacientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu clínica.",
+    a: `Sí. Escribe a ${supportEmail} con tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus pacientes por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan. Desde ahí, lo que escriban por cualquier canal cae en su ficha, y los nuevos se registran solos con el código QR o el enlace de registro de tu clínica.`,
   },
   {
     q: "¿Puedo usar odentIA desde el celular?",

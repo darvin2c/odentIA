@@ -24,7 +24,7 @@ export interface BillingSummary {
   proofExtensionUntil: string | null
   /** En gracia, el día en que pasa a solo lectura: el fin de la gracia o la prórroga vigente (el de la franja y el correo). */
   readOnlyAt?: string | null
-  /** Fundadores: hasta cuándo valen sus condiciones (el plan no se cambia desde aquí). */
+  /** Plan negociado (invitación interna): hasta cuándo valen sus precios garantizados; mientras, el plan no se cambia desde aquí. */
   guaranteedUntil?: string | null
   usage30d: {
     agentRuns: number

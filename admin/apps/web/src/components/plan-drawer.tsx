@@ -67,10 +67,9 @@ export interface AdminPlan {
   trialMaxCreditCents: number
   trialMaxDays: number
   isDefault: boolean
-  /** La web lo publica (Fundadores, decisión 14). */
+  /** La web lo publica; uno que no sale en la web ni es el por defecto es un plan especial. */
   showOnWeb: boolean
-  /** Plan por invitación: lugares; null = sin tope. */
-  seatLimit: number | null
+  /** Meses con sus precios garantizados desde que la clínica entra; null = sin garantía. */
   guaranteeMonths: number | null
 }
 
@@ -180,7 +179,6 @@ function termsOf(seed: AdminPlan | undefined) {
     trialDays: String(seed?.trialDays ?? 30),
     trialMaxCredit: seed ? centsToMajor(seed.trialMaxCreditCents, seed.currency) : "0",
     trialMaxDays: String(seed?.trialMaxDays ?? 60),
-    seatLimit: seed?.seatLimit ? String(seed.seatLimit) : "",
     guaranteeMonths: seed?.guaranteeMonths ? String(seed.guaranteeMonths) : "",
   }
 }
@@ -195,8 +193,8 @@ const MAX_PRICE_MICROS = 1_000_000_000
 /**
  * El plan como se escribe, con los mismos límites que la ruta: cada número es
  * texto y cada error va en su campo. Un precio por acción vacío es «no cobra
- * ese tipo» (lo dice la pantalla); los lugares, los meses y los mensajes por
- * Informa vacíos, «sin tope».
+ * ese tipo» (lo dice la pantalla); los meses y los mensajes por Informa
+ * vacíos, «sin tope».
  */
 const planSchema = z
   .object({
@@ -221,7 +219,6 @@ const planSchema = z
     trialMaxDays: z.string(),
     isDefault: z.boolean(),
     showOnWeb: z.boolean(),
-    seatLimit: z.string(),
     guaranteeMonths: z.string(),
   })
   .superRefine((value, ctx) => {
@@ -269,9 +266,6 @@ const planSchema = z
     if (trialMaxDays === null) say(["trialMaxDays"], "Escribe de 1 a 365 días")
     else if (trialDays !== null && trialMaxDays < trialDays) say(["trialMaxDays"], "Los días máximos de prueba no pueden ser menos que los de siempre")
 
-    if (value.seatLimit.trim() && integer(value.seatLimit, 1, 100_000) === null) {
-      say(["seatLimit"], "Escribe un número entero mayor que cero, o déjalo vacío")
-    }
     if (value.guaranteeMonths.trim() && integer(value.guaranteeMonths, 1, 120) === null) {
       say(["guaranteeMonths"], "Escribe de 1 a 120 meses, o déjalo vacío")
     }
@@ -326,7 +320,6 @@ function planBody(value: PlanValues, isNew: boolean) {
     trialMaxDays: Number(value.trialMaxDays.trim()),
     isDefault: value.isDefault,
     showOnWeb: value.showOnWeb,
-    seatLimit: optional(value.seatLimit),
     guaranteeMonths: optional(value.guaranteeMonths),
   }
 }
@@ -365,7 +358,7 @@ export function PlanDrawer({
       name: plan?.name ?? "",
       ...termsOf(plan ?? plans.find((item) => item.id === template)),
       isDefault: plan?.isDefault ?? false,
-      // Un plan nuevo nace sin publicar en la web (decisión 14 de Fundadores).
+      // Un plan nuevo nace sin publicar en la web: hasta encenderlo, es un plan especial.
       showOnWeb: plan?.showOnWeb ?? false,
     }
   })
@@ -610,20 +603,13 @@ export function PlanDrawer({
         </FieldSet>
 
         <FieldSet>
-          <FieldLegend>Por invitación (Fundadores)</FieldLegend>
+          <FieldLegend>Plan especial</FieldLegend>
           <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
-            {numberField(
-              "seatLimit",
-              "plan-seats",
-              "Lugares (clínicas como máximo)",
-              "Con lugares, el plan solo se entra con invitación. Vacío: es un plan normal. Bajarlo no saca a nadie.",
-              "numeric",
-            )}
             {numberField(
               "guaranteeMonths",
               "plan-guarantee",
               "Condiciones garantizadas (meses)",
-              `Desde que la clínica entra; después pasa al plan por defecto${notice ? `, con aviso ${notice} días antes` : ""}.`,
+              `Se usa en planes que no salen en la web. Desde que la clínica pasa al plan; después vuelve al plan por defecto${notice ? `, con aviso ${notice} días antes` : ""}. Vacío: sin garantía.`,
               "numeric",
             )}
           </div>

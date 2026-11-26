@@ -6,7 +6,6 @@
 // tarifario de ejemplo del Consultorio San Martín; el regalo y el botón salen de Astro.locals.pricing.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf } from "../../../lib/pricing"
 import { ctaOf } from "../../../lib/site"
 import FeatureGrid from "../../agents/FeatureGrid.astro"
 import SplitHero from "../../agents/SplitHero.astro"
@@ -17,7 +16,6 @@ import Sites from "./Sites"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
 const title = "Caja y cobros para consultorio médico"
 const description =
   "Caja para tu consultorio médico: cobra cada consulta con tu tarifario, en soles o en dólares, con ticket, quién debe y cierre de caja. Y lo que sale: gastos, inventario de insumos y honorarios de cada médico."
@@ -61,7 +59,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Cuesta más tener otra sede?",
-    a: "No. Pagas por el trabajo de tus agentes, no por cuántas sedes, médicos o usuarios tienes.",
+    a: "No. El plan es el mismo con una sede o con varias: no se cobra por sedes, médicos ni usuarios, solo el trabajo de tus agentes.",
   },
 ]
 
@@ -203,15 +201,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="faqwrap">
       <Faq items={faq} title="Sobre la caja y los cobros." />
     </div>
-    <CtaBand title="Cobras la consulta. El mes se cuenta solo.">
-      <Fragment slot="text">
-        {gift ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
-        ) : (
-          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
-        )}
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Cobras la consulta. El mes se cuenta solo." />
   </div>
 </Base>
 

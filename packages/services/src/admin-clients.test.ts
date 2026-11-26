@@ -48,8 +48,8 @@ import { createSaasPlan } from "./saas-billing.js"
 import {
   completeFounderInvitation,
   inviteFromWaitlist,
-  submitWaitlistRequest,
 } from "./saas-founders.js"
+import { submitWaitlistRequest } from "./waitlist-test-kit.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Los clientes del ARM (ADR 0185): etapa calculada, duplicados, fusión, personas, historial y enganches. */

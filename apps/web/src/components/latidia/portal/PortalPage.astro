@@ -8,7 +8,6 @@
 // preguntas que elige el consultorio y su color. odentIA sigue con su propia página.
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf } from "../../../lib/pricing"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -19,7 +18,6 @@ const title = "Portal del paciente para tu consultorio, sin descargar nada"
 const description =
   "Portal del paciente para consultorios médicos: se registra con un código QR, ve su próxima cita, la cambia o la cancela, firma su consentimiento y encuentra su receta y sus papeles, sin vencer. Sin aplicación y sin contraseña."
 const cta = ctaOf(Astro.locals.pricing)
-const gift = giftOf(Astro.locals.pricing)
 const trail: [string, string][] = [["Inicio", "/"], ["Portal del paciente", "/portal-del-paciente"]]
 
 const steps = [
@@ -188,12 +186,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="pt-faq">
       <Faq items={faq} />
     </div>
-    <CtaBand title="Que tus pacientes resuelvan sin llamar.">
-      <Fragment slot="text">
-        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
-        Sin tarjeta y sin límite de médicos, salas ni usuarios.
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Que tus pacientes resuelvan sin llamar." />
   </div>
 </Base>
 

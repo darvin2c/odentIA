@@ -7,7 +7,7 @@
 // de Argos salen del plan que se muestra (Astro.locals.pricing).
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
-import { giftOf, money, shownPlan } from "../../../lib/pricing"
+import { money, shownPlan } from "../../../lib/pricing"
 import { AGENT_COLORS, contactHref, ctaOf } from "../../../lib/site"
 import FeatureGrid from "../../agents/FeatureGrid.astro"
 import SplitHero from "../../agents/SplitHero.astro"
@@ -18,7 +18,6 @@ import ReportsTabs from "./ReportsTabs"
 
 const pricing = Astro.locals.pricing
 const cta = ctaOf(pricing)
-const gift = giftOf(pricing)
 const plan = shownPlan(pricing)
 const title = "Reportes para consultorio médico, sin planillas"
 const description =
@@ -156,15 +155,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="faqwrap">
       <Faq items={faq} title="Sobre los reportes y Argos." />
     </div>
-    <CtaBand title="Pregúntale a tu consultorio desde hoy.">
-      <Fragment slot="text">
-        {gift ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
-        ) : (
-          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
-        )}
-      </Fragment>
-    </CtaBand>
+    <CtaBand title="Pregúntale a tu consultorio desde hoy." />
   </div>
 </Base>
 

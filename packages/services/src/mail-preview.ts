@@ -37,7 +37,6 @@ import {
   saasRestrictionSoonEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
-  waitlistReceivedEmail,
 } from "./saas-emails.js"
 
 const webUrl = process.env.WEB_URL ?? "https://app.odentia.localhost"
@@ -150,14 +149,13 @@ const MAILS: Record<string, MailTemplate> = {
   "22-reclamos-hoja-nueva": received.notice,
   "23-respuesta-a-tu-hoja": answered.response,
   "24-reclamos-respuesta-enviada": answered.copy,
-  "25-estas-en-la-lista": waitlistReceivedEmail({ firstName: "Ana", clinicName: "Clínica Sonrisa", phone: "+51987654321", answerDays: 2 }),
-  "26-invitacion-fundadores": founderInvitationEmail({
+  "26-tu-cuenta-esta-lista": founderInvitationEmail({
     firstName: "Ana",
     clinicName: "Clínica Sonrisa",
     email: "ana@clinicasonrisa.pe",
     url,
     expiresText: "domingo 1 de noviembre",
-    offer: { currency: "USD", priceCents: 0, trialCreditCents: 10_000, discountPercent: 40, guaranteeMonths: 12 },
+    offer: { planName: "Fundadores", currency: "USD", priceCents: 0, trialCreditCents: 10_000, discountPercent: 50, guaranteeMonths: 12 },
   }),
   "27-tu-precio-especial-termina": saasAlertEmail(
     {

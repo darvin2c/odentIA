@@ -70,7 +70,7 @@ export function TodayBilling({ product = "todos" }: { product?: ProductChoice })
           </ul>
         </section>
       ) : null}
-      {/* Costo y margen de todas las clínicas, con la alarma y la Fundadora sin uso (ADR 0085, tablero O3). */}
+      {/* Costo y margen de todas las clínicas, con la alarma y la clínica con condiciones garantizadas sin uso (ADR 0085, tablero O3). */}
       <CostMarginOverviewSection product={product} />
     </>
   )

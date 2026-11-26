@@ -118,11 +118,11 @@ test("Kairós vende: horario y sala en Equipo, el interruptor, responde y agenda
   await enterAdmin(page, user.password)
   const tag = randomUUID().slice(0, 6)
   const room = `https://meet.example.test/sala-${tag}`
-  // Un plan Fundadores publicado en la web, propio del caso: Kairós da sus precios tal como vienen.
+  // Un plan publicado en la web, propio del caso: Kairós da sus precios tal como vienen.
   const planCode = `kv-${tag}`
   await fixtureDb.insert(saasPlan).values({
     code: planCode,
-    name: `Fundadores ${tag}`,
+    name: `Lanzamiento ${tag}`,
     product: "dental",
     currency: "USD",
     priceCents: 0,
@@ -133,7 +133,6 @@ test("Kairós vende: horario y sala en Equipo, el interruptor, responde y agenda
     trialCreditCents: 10_000,
     trialMaxCreditCents: 10_000,
     trialDays: 30,
-    seatLimit: 50,
     showOnWeb: true,
   })
 
@@ -209,7 +208,7 @@ Turnos de Kairós: ${JSON.stringify(turns)}`)
     }
     const prices = await waitKairos(1)
     expect(prices).toContain("Hola, soy Kairós, del Grupo Sallca.")
-    expect(prices).toContain(`Fundadores ${tag}`)
+    expect(prices).toContain(`Lanzamiento ${tag}`)
     expect(prices).toMatch(/— Kairós · odentIA$/)
     // Nombró odentIA: la conversación lo sabe sin preguntar (A1, un solo número para todas).
     const [known] = await fixtureDb
