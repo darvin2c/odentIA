@@ -111,6 +111,10 @@ async function declarationsOf(patientId: string) {
     .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
 }
 
+
+/** La medicina como se lee, con su dosis: ahora la dosis escrita va en su campo (QA del 26 nov). */
+const withDose = (row: { name: string; dose?: string | null }) => [row.name, row.dose].filter(Boolean).join(" ")
+
 it("C6: si pasó más de un mes se le pregunta «¿Cambió algo?», sin listar lo de antes, y con «No» queda anotado con su fecha", async () => {
   const f = await clinicalFixture()
   const marta = await martaBack(f)
@@ -137,7 +141,7 @@ it("C6: si pasó más de un mes se le pregunta «¿Cambió algo?», sin listar l
   expect(health.unchanged).toMatchObject({ by: { kind: "patient" } })
   expect(health.changed).toBeNull()
   // Lo de antes sigue como estaba: la warfarina no se toca.
-  expect(health.medications.map((row) => row.name)).toEqual(["Warfarina 5 mg"])
+  expect(health.medications.map(withDose)).toEqual(["Warfarina 5 mg"])
 
   // Ya respondió: no se le vuelve a preguntar para esta cita, ni dentro del mes para la siguiente.
   const after = await f.run((tx) => getPersonalLinkView(tx, ORG, marta.link.token))
@@ -211,7 +215,7 @@ it("dentro del mes, «¿Empezaste o dejaste alguna medicina?» con un «Sí» de
   expect(said).toMatchObject({ reason: "cambio", via: "enlace", respondent: "patient" })
   expect(said!.health).toEqual({ anticoagulants: { state: "recorded", detail: "Aspirina 100 mg" } })
   const after = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
-  const aspirin = after.medications.find((row) => row.name === "Aspirina 100 mg")
+  const aspirin = after.medications.find((row) => withDose(row) === "Aspirina 100 mg")
   expect(aspirin).toBeDefined()
   expect(after.declared.some((group) => group.medications.includes(aspirin!.id))).toBe(true)
 })
@@ -249,7 +253,7 @@ it("C6: le cambiaron el anticoagulante; con «Sí» vuelve a responder, lo nuevo
   const f = await clinicalFixture()
   const marta = await martaBack(f)
   const before = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
-  const warfarin = before.medications.find((row) => row.name === "Warfarina 5 mg")!
+  const warfarin = before.medications.find((row) => withDose(row) === "Warfarina 5 mg")!
   const penicillin = before.allergies.find((row) => row.substance === "Penicilina")!
 
   await f.run((tx) =>
@@ -263,9 +267,9 @@ it("C6: le cambiaron el anticoagulante; con «Sí» vuelve a responder, lo nuevo
   expect(said).toMatchObject({ reason: "cambio", via: "enlace" })
   const health = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
   // Lo de antes no se borra.
-  const names = health.medications.map((row) => row.name)
+  const names = health.medications.map(withDose)
   expect(names).toEqual(expect.arrayContaining(["Warfarina 5 mg", "Apixabán 5 mg"]))
-  const apixaban = health.medications.find((row) => row.name === "Apixabán 5 mg")!
+  const apixaban = health.medications.find((row) => withDose(row) === "Apixabán 5 mg")!
   expect(apixaban.atcCode?.startsWith("B01A")).toBe(true)
   // El nuevo, arriba por revisar, con su declaración; el anterior, «dijo que cambió».
   expect(health.declared.some((group) => group.medications.includes(apixaban.id))).toBe(true)
@@ -347,8 +351,8 @@ it("C8: al día siguiente sabe qué envió y cuándo, y corrige su salud sin ver
   // Lo de antes no se borra: las tres declaraciones siguen.
   expect(rows).toHaveLength(3)
   const health = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
-  expect(health.medications.map((row) => row.name)).toEqual(expect.arrayContaining(["Warfarina 5 mg", "Warfarina 2,5 mg"]))
-  expect(health.changed?.medications).toEqual([health.medications.find((row) => row.name === "Warfarina 5 mg")!.id])
+  expect(health.medications.map(withDose)).toEqual(expect.arrayContaining(["Warfarina 5 mg", "Warfarina 2,5 mg"]))
+  expect(health.changed?.medications).toEqual([health.medications.find((row) => withDose(row) === "Warfarina 5 mg")!.id])
   // Los valores se ven en su portal, con su código: `portal-access.test.ts`.
 })
 
@@ -535,7 +539,8 @@ it("la copia no da lo de antes como vigente: «Antes: Warfarina 5 mg · dijo que
   const statements = (patientRecordFhirBundle(record) as { entry: Array<{ resource: Record<string, unknown> }> }).entry
     .map((entry) => entry.resource)
     .filter((resource) => resource.resourceType === "MedicationStatement")
-  const warfarin = statements.find((resource) => (resource.medicationCodeableConcept as { text?: string })?.text === "Warfarina 5 mg")
+  // El nombre en FHIR va sin la dosis, que va en `dosage` (QA del 26 nov).
+  const warfarin = statements.find((resource) => (resource.medicationCodeableConcept as { text?: string })?.text === "Warfarina")
   expect(warfarin?.status).toBe("unknown")
   expect(JSON.stringify(warfarin?.note)).toContain("Dijo que cambió el ")
 })
