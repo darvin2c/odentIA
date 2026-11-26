@@ -1,3 +1,4 @@
+import { weightForAgeAlert } from "@odentia/clinical"
 import { apiFetch } from "@odentia/clinic-app/lib/api"
 import {
   fetchPatientHealth,
@@ -54,7 +55,12 @@ function useMedicalPrescribingRules(patientId: string, enabled: boolean): Prescr
   return {
     // El embarazo, la lactancia y lo demás que avisa toda receta lo suma la receta misma (`prescribingAlerts`).
     check: (items, weightKg) => ({ errors: checkPrescription(context, items, weightKg).errors }),
-    weight: { required: age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS, suggested: lastWeight },
+    // El último peso no se propone si es imposible para su edad («230 kg» a los 7 años): se revisa antes.
+    weight: {
+      required: age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS,
+      suggested: lastWeight !== null && weightForAgeAlert(lastWeight, age) ? null : lastWeight,
+      ageYears: age,
+    },
   }
 }
 

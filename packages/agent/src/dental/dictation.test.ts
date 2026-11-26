@@ -724,3 +724,13 @@ describe("lo de salud dicho en la conversación", () => {
     expect(read?.omitted).toBe(1)
   })
 })
+
+describe("el peso y la presión en el modo de demostración (mesa del 25 nov, entrega 3)", () => {
+  it("«pesa 23 kilos» y «presión 165 con 95» van a los signos; «debe pesar» no", async () => {
+    const { demoExtraction } = await import("./dictation.js")
+    const drafts = demoExtraction("Pesa 23 kilos. Presión 165 con 95. Debe pesar 24 kilos.", [], new Date("2026-11-25T15:00:00Z"))
+    expect(drafts.filter((draft) => draft.kind === "signos")).toEqual([
+      { kind: "signos", payload: { peso: 23, presionSistolica: 165, presionDiastolica: 95 }, sourceText: "Pesa 23 kilos. Presión 165 con 95." },
+    ])
+  })
+})

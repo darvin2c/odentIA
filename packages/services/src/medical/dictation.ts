@@ -1,8 +1,6 @@
 import {
   formatVitals,
-  parseVitals,
   VITAL_SIGNS,
-  type VitalSignKey,
   type Vitals,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -20,6 +18,7 @@ import {
 import { and, eq } from "drizzle-orm"
 import { updateEncounterDraft } from "../encounters.js"
 import { DECLARED_HEALTH_SHAPE, SAID_GYNECO } from "../dictation-health.js"
+import { isVital, prepareDictatedVitals } from "../dictation-vitals.js"
 import { ServiceError } from "../errors.js"
 import { normalizeForSearch } from "../knowledge.js"
 import type { DictationPrepared, ProductDictation } from "../product-hooks.js"
@@ -47,7 +46,6 @@ function examSystemOf(spoken: string): (typeof EXAM_SYSTEMS)[number] | undefined
   )
 }
 
-const isVital = (key: string): key is VitalSignKey => VITAL_SIGNS.some((sign) => sign.key === key)
 
 const days = (count: unknown) => `${String(count)} ${count === 1 ? "día" : "días"}`
 
@@ -62,25 +60,6 @@ function dayWords(iso: string): string {
 
 const isDay = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value))
-
-/** Las medidas dictadas, juntas como las valida la atención (la presión va completa). */
-function prepareVitals(payload: Record<string, unknown>): DictationPrepared {
-  const values = Object.fromEntries(Object.entries(payload).filter(([key]) => isVital(key)))
-  const parsed = parseVitals(values, MEDICAL_VITAL_KEYS)
-  if (!parsed.ok)
-    return {
-      payload: values,
-      status: "por_revisar",
-      note: `${parsed.error}. Corrígelo o dilo de nuevo.`,
-    }
-  if (!parsed.value)
-    return {
-      payload: values,
-      status: "por_revisar",
-      note: "No entendí ninguna medida. Dila de nuevo o escríbela.",
-    }
-  return { payload: parsed.value, status: "lista", note: null }
-}
 
 /**
  * Un sistema del examen. Normal es «Sin alteraciones», sin texto; con hallazgos
@@ -182,8 +161,8 @@ export const MEDICAL_DICTATION: ProductDictation = {
     status: "lista",
     note: null,
   }),
-  async prepare(_tx, kind, payload) {
-    if (kind === "signos") return prepareVitals(payload)
+  async prepare(_tx, kind, payload, { ageYears }) {
+    if (kind === "signos") return prepareDictatedVitals(payload, MEDICAL_VITAL_KEYS, ageYears)
     if (kind === "examen") return prepareExam(payload)
     return prepareLeave(payload)
   },

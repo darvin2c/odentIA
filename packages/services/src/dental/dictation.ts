@@ -1,4 +1,5 @@
-import { anesthesiaAnswersSchema, type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
+import { anesthesiaAnswersSchema, DENTAL_DICTATED_VITAL_KEYS, type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
+import { confirmDictatedVitals, dictatedVitalsWords, prepareDictatedVitals, vitalFieldWords } from "../dictation-vitals.js"
 import type { Db } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, isNull, ne } from "drizzle-orm"
@@ -532,7 +533,8 @@ export const DENTAL_DICTATION_HEALTH = {
 } satisfies z.ZodRawShape
 
 export const DENTAL_DICTATION: ProductDictation = {
-  kinds: ["odontograma"],
+  // El peso y la presión medidos (mesa del 25 nov, entrega 3): lo que cambia la anestesia o avisa.
+  kinds: ["odontograma", "signos"],
   health: DENTAL_DICTATION_HEALTH,
   // «la resina de la pieza 36 por oclusal», «la endodoncia de la molar»: la pieza, su tipo, el lado y
   // la cara dicen dónde, no cuál prestación. «Superior» y «anterior» no: también distinguen servicios.
@@ -555,11 +557,15 @@ export const DENTAL_DICTATION: ProductDictation = {
   normalizeSite,
   siteWords: site,
   fitToScope,
-  prepare: (tx, _kind, payload, { diagnosisSystem, product }) =>
-    prepareFinding(tx, payload, diagnosisSystem, product as DentalDictationContext),
-  summarize: (_kind, payload) => findingSummary(payload),
-  modelLabel: (_kind, payload) =>
-    [
+  prepare: (tx, kind, payload, { diagnosisSystem, product, ageYears }) =>
+    kind === "signos"
+      ? Promise.resolve(prepareDictatedVitals(payload, DENTAL_DICTATED_VITAL_KEYS, ageYears))
+      : prepareFinding(tx, payload, diagnosisSystem, product as DentalDictationContext),
+  summarize: (kind, payload) => (kind === "signos" ? dictatedVitalsWords(payload) : findingSummary(payload)),
+  modelLabel: (kind, payload) =>
+    kind === "signos"
+      ? dictatedVitalsWords(payload)
+      : [
       String(payload["condition"] ?? ""),
       payload["variant"] ? String(payload["variant"]) : "",
       site(payload),
@@ -568,6 +574,8 @@ export const DENTAL_DICTATION: ProductDictation = {
       .join(", "),
   describeField(key, before) {
     const old = before[key]
+    const vital = vitalFieldWords(key, before)
+    if (vital) return vital
     if (key === "toothNumber") return typeof old === "number" ? `pieza ${old}` : "sin pieza"
     if (key === "surfaces")
       return Array.isArray(old) && old.length
@@ -585,13 +593,16 @@ export const DENTAL_DICTATION: ProductDictation = {
   },
   // Un hallazgo que ya está pendiente (la misma pieza, el mismo hallazgo y las mismas caras) no se
   // repite: el asistente a veces corrige una sugerencia y además la vuelve a registrar.
-  sameKey: (_kind, payload) =>
-    JSON.stringify([
+  sameKey: (kind, payload) =>
+    kind === "signos"
+      ? null
+      : JSON.stringify([
       payload["toothNumber"],
       payload["condition"],
       [...((payload["surfaces"] as string[] | undefined) ?? [])].sort(),
     ]),
-  async confirm(tx, { orgId, actorUserId, patientId, encounterId }, _kind, payload) {
+  async confirm(tx, { orgId, actorUserId, patientId, encounterId }, kind, payload) {
+    if (kind === "signos") return confirmDictatedVitals(tx, { orgId, actorUserId, patientId, encounterId }, payload)
     // La misma operación que el panel de la pieza: el hallazgo y, si lo lleva, su diagnóstico de la atención.
     const variant = typeof payload["variant"] === "string" ? payload["variant"] : undefined
     const quality =

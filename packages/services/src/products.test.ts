@@ -120,7 +120,7 @@ it("el «dónde» lo dice el producto: odentIA guarda la pieza y una clínica m�
   }
 })
 
-it("Clío dicta en cada producto con lo suyo: el odontograma en odentIA; los signos, el examen y el descanso en latidIA", async () => {
+it("Clío dicta en cada producto con lo suyo: el odontograma, el peso y la presión en odentIA; los signos, el examen y el descanso en latidIA", async () => {
   const f = await clinicalFixture()
   await setProduct("medical")
   try {
@@ -128,7 +128,7 @@ it("Clío dicta en cada producto con lo suyo: el odontograma en odentIA; los sig
   } finally {
     await setProduct("dental")
   }
-  await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toMatchObject({ kinds: ["odontograma"] })
+  await expect(f.run((tx) => requireDictatingProduct(tx, "org_a"))).resolves.toMatchObject({ kinds: ["odontograma", "signos"] })
 })
 
 it("el examen y los signos vitales los pone el producto: la boca en odentIA, los sistemas en latidIA (issue 229)", async () => {

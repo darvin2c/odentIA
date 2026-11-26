@@ -226,7 +226,11 @@ export function EncounterAnesthesiaLine({
             {[
               asksAsa && asa ? `ASA ${asa}` : null,
               said.replace(/\.$/, "") || null,
-              words.dose ? `${words.dose}${weightFromOther ? " (peso anotado hoy en otra atención)" : ""}` : "Sin peso anotado: sin dosis máxima",
+              words.dose
+                ? `${words.dose}${weightFromOther ? " (peso anotado hoy en otra atención)" : ""}`
+                : words.weightIssue
+                  ? "Revisa su peso: sin dosis máxima"
+                  : "Sin peso anotado: sin dosis máxima",
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -330,11 +334,16 @@ export function EncounterAnesthesiaLine({
               <span className="text-muted-foreground">
                 {words.dose
                   ? ` · ${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
-                  : " · Sin peso anotado, sin el máximo por peso."}
+                  : words.weightIssue
+                    ? " · Revisa su peso, sin el máximo por peso."
+                    : " · Sin peso anotado, sin el máximo por peso."}
               </span>
             </>
           ) : words.dose ? (
             `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
+          ) : words.weightIssue ? (
+            // Con un peso imposible para su edad no se calcula: el motivo va en los avisos de abajo.
+            "Revisa su peso en los signos vitales para ver la dosis máxima."
           ) : (
             "Anota su peso en los signos vitales para ver la dosis máxima."
           )}
@@ -343,7 +352,7 @@ export function EncounterAnesthesiaLine({
             <>
               {" "}
               <Button type="button" size="sm" variant="link" className="h-auto p-0" disabled={disabled} onClick={onAddWeight}>
-                Anotar su peso
+                {words.weightIssue ? "Corregir su peso" : "Anotar su peso"}
               </Button>
             </>
           ) : null}

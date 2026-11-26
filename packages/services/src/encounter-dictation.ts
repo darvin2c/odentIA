@@ -1,4 +1,5 @@
 import {
+  ageInYears,
   ADMINISTRATION_ROUTES,
   type AllergenEntry,
   type ClinicalProduct,
@@ -448,7 +449,7 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
     site: hooks.site,
     formQuestions: [],
     serviceWords: serviceWordsOf(hooks),
-    patient: { adult: age?.birthDate ? !age.isMinor : null },
+    patient: { adult: age?.birthDate ? !age.isMinor : null, ageYears: age?.birthDate ? ageInYears(age.birthDate, age.today) : null },
   }
 }
 
@@ -865,7 +866,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     )
     return Object.keys(note).length ? { payload: note, status: "lista", note: null } : null
   }
-  if (own) return dictation.prepare(tx, draft.kind, payload, { diagnosisSystem, product: scope.product })
+  if (own) return dictation.prepare(tx, draft.kind, payload, { diagnosisSystem, product: scope.product, ageYears: scope.patient.ageYears ?? null })
   if (draft.kind === "diagnostico" || draft.kind === "plan" || draft.kind === "procedimiento") {
     const site = dictation.normalizeSite(payload)
     if (site.invalid) return { payload: site.payload, status: "por_revisar", note: site.invalid }
@@ -2445,6 +2446,13 @@ export async function saveDictationSegment(
     if (kind === "material") {
       const keys = materialKeys(payload)
       return same.some((item) => materialKeys(item.payload).some((key) => keys.includes(key))) ? null : payload
+    }
+    // Los signos dichos en pausas distintas (el peso en una, la presión en otra): ya decididos si cada
+    // medida que trae ya la trae alguna decidida (revisión del 25 nov).
+    if (kind === "signos") {
+      const decided = same.map((item) => item.payload)
+      const covered = Object.entries(payload).every(([key, value]) => decided.some((item) => item[key] === value))
+      return covered ? null : payload
     }
     const key = settledKey(kind, payload)
     if (key !== null) return same.some((item) => settledKey(kind, item.payload) === key) ? null : payload

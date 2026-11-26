@@ -78,6 +78,24 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
         own: true,
       },
+      // Mesa del 25 nov («salud y familia», entrega 3): el peso y la presión se dictan en odentIA.
+      {
+        id: "pacientes-dictado-peso-presion",
+        q: "¿Puedo dictarle a Clío el peso y la presión?",
+        a: "Sí. Dilo como lo mides («en la balanza pesa veintitrés», «presión ciento sesenta y cinco con noventa y cinco») y Clío lo propone en «Signos vitales», dentro del examen de la atención, con la frase que oyó. Al confirmarlo queda en los signos de hoy y «Anestesia local» calcula el máximo con ese peso, sin teclear. Solo el peso y la presión: lo demás del examen se escribe. Un peso que alguien calcula o recuerda («debe pesar como 24») no es una medida: queda en «Lo que se dijo» › «No lo usé», para que lo midas. Un peso imposible para su edad («230 kg» a los 7 años) queda por revisar, con el aviso, y no da una dosis hasta que lo corrijas; si lo escribes a mano, el mismo aviso sale bajo los signos vitales y en «Anestesia local».",
+        forms: [
+          "dictar el peso",
+          "clio puede anotar el peso",
+          "como anoto el peso para la anestesia",
+          "dictar la presion",
+          "la mama dice que pesa 24",
+          "puse 230 kilos por error",
+          "peso imposible",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
       {
         id: "pacientes-anestesia-articaina-ninos",
         q: "¿Desde qué edad se puede usar la articaína?",

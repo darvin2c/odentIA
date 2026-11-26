@@ -574,6 +574,51 @@
         "consulta": { "motivo": ["fiebre"], "tiempo": "ayer", "relato": ["sarampion"] },
         "noPropone": [{ "tipo": "procedimiento", "con": ["vacuna"] }]
       }
+    },
+    {
+      "id": "od-tomas-balanza",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (entrega 3, C5): Tomás, 7 años. La mamá dice «debe pesar como veinticuatro» (no es una medida: «No lo usé»); en la balanza pesa veintitrés (va a los signos, para la anestesia). La 75 es una pieza, no un peso.",
+      "pausas": [
+        "hola tomas cuantos años tienes",
+        "tiene siete doctora. le duele la muelita de abajo desde ayer",
+        "cuanto pesa mas o menos",
+        "debe pesar como veinticuatro",
+        "a ver subete a la balanza. pesa veintitres kilos",
+        "la setenta y cinco tiene caries profunda por oclusal"
+      ],
+      "espera": {
+        "propone": [
+          { "tipo": "signos", "campos": { "peso": 23 } },
+          { "tipo": "odontograma", "campos": { "toothNumber": 75 } }
+        ],
+        "noPropone": [
+          { "tipo": "signos", "campos": { "peso": 24 } },
+          { "tipo": "signos", "campos": { "peso": 75 } }
+        ],
+        "noLoUse": ["debe pesar como veinticuatro|debe pesar 24"]
+      }
+    },
+    {
+      "id": "od-presion-piezas",
+      "producto": "odentia",
+      "descripcion": "Mesa del 25 nov (entrega 3): la presión dictada entre piezas. 165/95 va a los signos (la anestesia avisa la epinefrina); la 16 y la 46 son piezas, no medidas.",
+      "pausas": [
+        "buenos dias don carlos que lo trae",
+        "se me movio una muela de arriba desde hace una semana",
+        "le tomo la presion. ciento sesenta y cinco con noventa y cinco",
+        "en la cuarenta y seis hay caries por oclusal y la dieciseis tiene movilidad"
+      ],
+      "espera": {
+        "propone": [
+          { "tipo": "signos", "campos": { "presionSistolica": 165, "presionDiastolica": 95 } },
+          { "tipo": "odontograma", "campos": { "toothNumber": 46 } }
+        ],
+        "noPropone": [
+          { "tipo": "signos", "campos": { "peso": 46 } },
+          { "tipo": "signos", "campos": { "peso": 16 } }
+        ]
+      }
     }
   ]
 }

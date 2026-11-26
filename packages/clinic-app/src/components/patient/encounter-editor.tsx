@@ -3288,7 +3288,7 @@ export function EncounterEditor({
         // La presión alta y la línea de anestesia, las mismas de la atención: avisan y no frenan.
         safety={
           <>
-            <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
+            <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} withWeight={!anesthesiaUses.length} />
             {anesthesiaLine(true)}
           </>
         }

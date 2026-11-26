@@ -40,6 +40,12 @@ export const extraction = z.object({
     .extend({ dicho: dictationSaid })
     .optional()
     .describe("Los textos de la consulta que se dictaron. Omite los que no se dijeron."),
+  // El peso y la presión medidos (mesa del 25 nov, entrega 3): lo que cambia la anestesia o avisa.
+  signos: operationAgentSchema("atencion.signos")
+    .pick({ peso: true, presionSistolica: true, presionDiastolica: true })
+    .extend({ dicho: dictationSaid })
+    .optional()
+    .describe("El peso medido y la presión que dijo, en una sola entrada. Omite lo que no dijo."),
   odontograma: dictationList("odontograma.hallazgo", "Un elemento por cada hallazgo de una pieza que nombró el odontólogo, de la lista de hallazgos."),
   diagnosticos: dictationList("atencion.diagnostico", "Un elemento por cada diagnóstico que nombró el odontólogo y no es un hallazgo del odontograma."),
   indicaciones: dictationList("plan.indicacion", "Un elemento por cada tratamiento que indicó para el plan."),
@@ -61,6 +67,7 @@ export const extraction = z.object({
 
 /** Cada bloque de registros de la respuesta, en el orden en que se guardan. */
 const DRAFT_PARTS = [
+  { key: "signos", kind: "signos", single: true },
   { key: "odontograma", kind: "odontograma" },
   { key: "diagnosticos", kind: "diagnostico" },
   { key: "indicaciones", kind: "plan" },
@@ -89,6 +96,8 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     "Si una pendiente dice lo que le falta («falta: la cara», «falta: la pieza») y lo nuevo es ese dato, aunque lo diga suelto («oclusal», «en la veinticinco»), es una corrección de esa pendiente con ese campo. Si varias piden lo mismo, la más reciente.",
     "Si el odontólogo nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
+    // Mesa del 25 nov (entrega 3): el peso medido se perdía y la anestesia quedaba sin dosis máxima.
+    "En `signos` va solo el peso medido y la presión, en una sola entrada y en números: el peso en kg cuando se mide («en la balanza pesa veintitrés», «pesa 23 kilos») y la presión «ciento sesenta y cinco con noventa y cinco» es 165 de sistólica y 95 de diastólica. Un número que nombra una pieza («la treinta y seis») no es un peso ni una presión. Los demás signos no se dictan aquí: si se dicen, quedan en la consulta.",
     "Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.",
     "Pon la variante o el estado de un hallazgo solo si el odontólogo los dijo («caries en dentina», «corona metalcerámica en buen estado»); si no, déjalos vacíos: el sistema se los pregunta.",
     "Si lo que ve en una pieza no está en la lista de hallazgos (movilidad, giroversión…), no lo cambies por otro parecido: no va en `odontograma`; déjalo en el texto de la consulta.",
@@ -109,7 +118,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
       topics:
         "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, si fuma y, de su boca, si tuvo problemas con la anestesia o sangró mucho tras una extracción, lo del corazón que pide antibiótico antes, el miedo al dentista, si rechina o aprieta los dientes, sus hábitos, su última visita y, de un niño, el biberón, el chupón, los dulces y quién le cepilla",
       notInRelato: "Sus medicinas de siempre, sus enfermedades y lo de la anestesia",
-      measured: "",
+      measured: "`signos` ni en ",
     }),
     ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
     materialsPrompt("odontólogo", "«se fueron cuatro carpules»", "una resina, una profilaxis"),
@@ -156,6 +165,19 @@ export function demoExtraction(
   const drafts: DictationDraft[] = []
   const nota: Record<string, string> = {}
   const noteSource: string[] = []
+  // El peso medido y la presión (mesa del 25 nov, entrega 3), en cifras: «pesa 23 kilos», «presión 165 con 95».
+  const vitals: Record<string, number> = {}
+  const vitalSource: string[] = []
+  for (const sentence of sentences) {
+    const text = plain(sentence)
+    const before = Object.keys(vitals).length
+    const pressure = /presion (\d{2,3})(?: con | sobre | |\/)(\d{2,3})\b/.exec(text)
+    if (pressure?.[1] && pressure[2]) Object.assign(vitals, { presionSistolica: Number(pressure[1]), presionDiastolica: Number(pressure[2]) })
+    const weight = /\b(?:pesa|peso) (\d{1,3}(?:[.,]\d)?) (?:kilos|kg)\b/.exec(text)
+    if (weight?.[1] && !/\bdebe pesar\b/.test(text)) vitals["peso"] = Number(weight[1].replace(",", "."))
+    if (Object.keys(vitals).length > before) vitalSource.push(sentence)
+  }
+  if (Object.keys(vitals).length) drafts.push({ kind: "signos", payload: vitals, sourceText: vitalSource.join(" ") })
   for (const sentence of sentences) {
     const text = plain(sentence)
     if (!nota["reason"] && /\b(motivo|viene por|refiere|acude por|dolor)\b/.test(text)) {
