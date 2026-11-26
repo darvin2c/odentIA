@@ -151,10 +151,12 @@ export function systemPrompt(input: {
     ...consultaPrompt("«dolor de garganta», «control»"),
     ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
     ...healthPrompt({
-      topics: "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, si fuma y si toma alcohol",
+      topics: "sus enfermedades, lo que toma todos los días, si toma un anticoagulante o algo para los huesos, el embarazo y la lactancia, su última regla, si fuma y si toma alcohol",
       notInRelato: "Sus medicinas de siempre y sus enfermedades",
       measured: "`signos` ni en ",
     }),
+    // Mesa del 25 nov (C8): la FUR sola no avisaba el embarazo en la receta, y «G2P1» se partía en números.
+    "La fecha de su última regla (FUR) va en `salud`, en `gyneco.fur`. Si está embarazada (un control prenatal, «es mi segundo embarazo»), va también `personal.embarazo`. Lo que cuenta de sus embarazos («es mi segundo embarazo», «G2P1, una cesárea») va en el relato tal como lo dijo: no lo partas en números.",
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",

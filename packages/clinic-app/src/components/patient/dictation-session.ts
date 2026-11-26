@@ -47,6 +47,8 @@ export interface SaidHealthRow {
   before: string | null
   /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…». */
   denied?: boolean
+  /** Lo que ya no toma: se confirma en su fila con «Sí, lo dejó». */
+  stopped?: boolean
   /** La frase en que se oyó, tal cual: la fila la muestra entre comillas. */
   said?: string | null
 }
@@ -344,7 +346,19 @@ const healthKeys = (patientId: string) => [
 ]
 
 /** Los grupos de su salud que puede traer la sugerencia `salud` (la forma de su registro). */
-export const HEALTH_GROUPS: readonly string[] = ["anticoagulants", "boneMedicines", "medications", "conditions", "allergies", "personal", "medical", "dental"]
+export const HEALTH_GROUPS: readonly string[] = [
+  "anticoagulants",
+  "boneMedicines",
+  "medications",
+  "stopped",
+  "conditions",
+  "allergies",
+  "personal",
+  "gyneco",
+  "medical",
+  "dental",
+  "family",
+]
 
 export type DictationSession = ReturnType<typeof useDictationSession>
 
@@ -1018,6 +1032,19 @@ export function useDictationSession({
     },
   })
   /**
+   * «Sí, lo dejó» de una medicina que dijo que ya no toma: termina en Antecedentes el día anterior al
+   * que se dijo (mesa del 25 nov, entrega 2). Lo confirma quien lleva la atención, en su fila.
+   */
+  const confirmStopped = useMutation({
+    retry: false,
+    mutationFn: (input: { item: DictationSuggestion; key: string }) =>
+      apiFetch(`/api/patients/${patientId}/health/said/${input.item.id}/stopped`, { method: "POST", body: JSON.stringify({ key: input.key }) }),
+    onSettled: () => {
+      void refresh()
+      void refreshHealth()
+    },
+  })
+  /**
    * «No lo registro» de lo que dijo de su salud: no entra a Antecedentes y deja de avisarse. Lo
    * decide quien lleva la atención (revisión del 21 nov, A3).
    */
@@ -1131,6 +1158,7 @@ export function useDictationSession({
     /** Hay tramos sin repasar: el repaso se lanza antes de firmar. */
     unreviewed,
     confirmHealth,
+    confirmStopped,
     discardHealth,
     settleHealthGroups,
     dismissUnused: () => setUnused(NOTHING_UNUSED),

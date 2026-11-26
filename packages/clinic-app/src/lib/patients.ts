@@ -361,6 +361,8 @@ export interface SaidHealth {
     by?: { declarante: "paciente" | "acompanante" | "no_se_sabe"; vinculo?: string }
     before?: string | null
     denied?: boolean
+    /** Lo que ya no toma: se confirma en su fila con «Sí, lo dejó». */
+    stopped?: boolean
     /** Lo volvió a decir después, en otra consulta (ISO 8601): esta fila ya no es lo vigente. */
     newer?: string | null
   }>

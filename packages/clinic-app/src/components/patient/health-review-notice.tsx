@@ -45,7 +45,7 @@ const DeclaredHealthSnapshot = lazy(() => import("./antecedentes-tab").then((m) 
 export interface HeardHealthRow {
   key: string
   /** El grupo de su registro, si es uno de los que tienen fila propia en el aviso. */
-  group: "conditions" | "medications" | "allergies" | "anticoagulants" | "boneMedicines" | null
+  group: "conditions" | "medications" | "allergies" | "anticoagulants" | "boneMedicines" | "family" | "stopped" | null
   label: string
   value: string
   /** Lo que dijo antes, si lo dijo distinto: «warfarina». */
@@ -54,11 +54,15 @@ export interface HeardHealthRow {
   by: string | null
   /** Es un «No»: se confirma en su fila, nunca con «Lo revisé con…». */
   denied: boolean
+  /** Lo que ya no toma: se confirma en su fila con «Sí, lo dejó», nunca con «Lo revisé con…». */
+  stopped: boolean
   /** La frase en que se oyó, tal cual; nula si el servidor no la tiene (lo dicho antes de guardarla). */
   said: string | null
 }
 
 const ROW_GROUPS = new Set(["conditions", "medications", "allergies", "anticoagulants", "boneMedicines"])
+/** Una fila por dato, cada una con su clave: su familia y lo que ya no toma (mesa del 25 nov, entrega 2). */
+const ITEM_GROUPS = new Set(["family", "stopped"])
 
 /** Quién lo dijo, en palabras: «el paciente», «su madre»; nulo si no se sabe. */
 function saidByWords(by: HealthSaidBy | undefined, representative: string | null): string | null {
@@ -82,12 +86,17 @@ export function heardHealth(
   const rows = (item.healthRows ?? []).map(
     (row): HeardHealthRow => ({
       key: row.key,
-      group: ROW_GROUPS.has(row.key) ? (row.key as NonNullable<HeardHealthRow["group"]>) : null,
+      group: ROW_GROUPS.has(row.key)
+        ? (row.key as NonNullable<HeardHealthRow["group"]>)
+        : ITEM_GROUPS.has(row.group)
+          ? (row.group as NonNullable<HeardHealthRow["group"]>)
+          : null,
       label: row.label,
       value: row.value,
       before: row.before ?? null,
       by: saidByWords(row.by, representative),
       denied: row.denied === true,
+      stopped: row.stopped === true,
       said: row.said?.trim() || null,
     }),
   )
@@ -434,6 +443,7 @@ export function HealthReviewNotice({
     denied.isPending ||
     !!dictation?.confirmHealth.isPending ||
     !!dictation?.settleHealthGroups.isPending ||
+    !!dictation?.confirmStopped.isPending ||
     !!dictation?.discardHealth.isPending
   /** Quién lo dijo, en la fila: «lo dijo Rosa», «lo dijo su madre». */
   const saidByOf = (by: string | null) => (by === "el paciente" ? `lo dijo ${patientFirst}` : by ? `lo dijo ${by}` : "no se sabe quién lo dijo")
@@ -453,7 +463,7 @@ export function HealthReviewNotice({
   /** Un «No» que no tiene botón en su fila: no se guarda con «Lo revisé con…»; se anota en Antecedentes si va. */
   const deniedHere = <span className="text-xs text-muted-foreground">un «no»: anótalo en Antecedentes si va</span>
   // «Lo revisé con…» guarda lo que nombró y lo que no sabe; si todo lo que queda es un «No», no hay nada que guardar con él.
-  const heardToSave = heard.rows.some((row) => !row.denied)
+  const heardToSave = heard.rows.some((row) => !row.denied && !row.stopped)
   /** Ya quedó en Antecedentes por otra vía: la propuesta de Clío no lo vuelve a sumar. */
   const settleHeard = (groups: readonly string[]) => {
     if (heardItem && dictation) dictation.settleHealthGroups.mutate({ item: heardItem, groups })
@@ -508,7 +518,22 @@ export function HealthReviewNotice({
     ...(unasked.includes("medications") ? ["medications"] : []),
     "allergies",
   ])
-  const heardRest = heard.rows.filter((row) => !row.group || !mergedGroups.has(row.group))
+  const heardRest = heard.rows.filter((row) => (!row.group || !mergedGroups.has(row.group)) && row.group !== "family" && row.group !== "stopped")
+  // Lo de su familia, una fila por familiar, y lo que ya no toma, cada una con su «Sí, lo dejó».
+  const heardFamily = heard.rows.filter((row) => row.group === "family")
+  const heardStopped = heard.rows.filter((row) => row.group === "stopped")
+  const stopRow = (row: HeardHealthRow) => {
+    if (!heardItem || !dictation) return
+    dictation.confirmStopped.mutate(
+      { item: heardItem, key: row.key },
+      {
+        onSuccess: () => {
+          toast.success(`Anotado: ya no toma ${row.value}`)
+          titleRef.current?.focus()
+        },
+      },
+    )
+  }
   const heardAllergy = heardOf("allergies")
   const heardConditions = unasked.includes("conditions") ? heardOf("conditions") : null
   const heardMedications = unasked.includes("medications") ? heardOf("medications") : null
@@ -684,6 +709,38 @@ export function HealthReviewNotice({
             )}
           </li>
         ) : null}
+        {heardStopped.map((row) => (
+          <li key={row.key} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h3 className="text-sm font-medium">Ya no toma</h3>
+              {heardLine(row)}
+              <p className="text-xs text-muted-foreground">Termina el día anterior al que lo dijo. Si solo la suspende por un procedimiento, sigue vigente.</p>
+            </div>
+            <SubmitButton
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 sm:min-h-8"
+              pending={!!dictation?.confirmStopped.isPending && dictation.confirmStopped.variables?.key === row.key}
+              disabled={busy}
+              onClick={() => stopRow(row)}
+            >
+              Sí, lo dejó
+            </SubmitButton>
+          </li>
+        ))}
+        {heardFamily.length > 0 ? (
+          // De su familia: no es de su salud ni avisa en la franja; se revisa con el mismo «Lo revisé con…».
+          <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h3 className="text-sm font-medium">De su familia</h3>
+              {heardFamily.map((row) => (
+                <div key={row.key}>{heardLine({ ...row, value: `${row.label}: ${row.value}` })}</div>
+              ))}
+            </div>
+            {unconfirmed}
+          </li>
+        ) : null}
         {heardRest.map((row) => (
           <li key={row.key} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
@@ -793,9 +850,21 @@ export function HealthReviewNotice({
           ) : null}
         </div>
       ) : null}
-      {reviewed.error || denied.error || dictation?.confirmHealth.error || dictation?.settleHealthGroups.error || dictation?.discardHealth.error ? (
+      {reviewed.error ||
+      denied.error ||
+      dictation?.confirmHealth.error ||
+      dictation?.confirmStopped.error ||
+      dictation?.settleHealthGroups.error ||
+      dictation?.discardHealth.error ? (
         <p role="alert" className="text-sm text-destructive">
-          {submitErrorMessage(reviewed.error ?? denied.error ?? dictation?.confirmHealth.error ?? dictation?.settleHealthGroups.error ?? dictation?.discardHealth.error)}
+          {submitErrorMessage(
+            reviewed.error ??
+              denied.error ??
+              dictation?.confirmHealth.error ??
+              dictation?.confirmStopped.error ??
+              dictation?.settleHealthGroups.error ??
+              dictation?.discardHealth.error,
+          )}
         </p>
       ) : null}
       <AllergyFormDrawer patientId={patientId} patientName={patientName} open={adding} onClose={() => setAdding(false)} />
@@ -827,7 +896,16 @@ function SaidEarlierRow({
   // Lo que volvió a decir después ya no es lo vigente: se dice, y «Lo revisé con…» no lo registra
   // desde aquí (QA del 21 nov, H3: registraba el apixabán que dijo que dejó).
   const newerOf = (key: string) => item.rows.find((row) => row.key === key)?.newer ?? null
-  const current = heard.rows.filter((row) => !row.denied && !newerOf(row.key))
+  const current = heard.rows.filter((row) => !row.denied && !row.stopped && !newerOf(row.key))
+  // «Sí, lo dejó», en su fila, también de lo dicho otro día (mesa del 25 nov, entrega 2).
+  const stop = useMutation({
+    mutationFn: (key: string) =>
+      apiFetch(`/api/patients/${patientId}/health/said/${item.suggestionId}/stopped`, { method: "POST", body: JSON.stringify({ key }) }),
+    onSuccess: async () => {
+      await onDone()
+      toast.success("Anotado: ya no la toma")
+    },
+  })
   const act = useMutation({
     mutationFn: (action: "confirm" | "discard") =>
       apiFetch(`/api/patients/${patientId}/health/said/${item.suggestionId}/${action}`, { method: "POST", body: JSON.stringify({}) }),
@@ -849,6 +927,19 @@ function SaidEarlierRow({
               {row.denied ? " · un «no»: anótalo en Antecedentes si va" : ""}
               {newerOf(row.key) ? ` · después, el ${shortDay(newerOf(row.key) ?? "") || "otro día"}, dijo algo más nuevo: vale eso` : ""}
             </span>
+            {row.stopped && !newerOf(row.key) ? (
+              <SubmitButton
+                type="button"
+                size="sm"
+                variant="outline"
+                className="ml-2 min-h-11 sm:min-h-8"
+                pending={stop.isPending && stop.variables === row.key}
+                disabled={disabled || stop.isPending || act.isPending}
+                onClick={() => stop.mutate(row.key)}
+              >
+                Sí, lo dejó
+              </SubmitButton>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -862,9 +953,9 @@ function SaidEarlierRow({
           </SubmitButton>
         ) : null}
       </div>
-      {act.error ? (
+      {act.error || stop.error ? (
         <p role="alert" className="text-sm text-destructive">
-          {submitErrorMessage(act.error)}
+          {submitErrorMessage(act.error ?? stop.error)}
         </p>
       ) : null}
     </li>

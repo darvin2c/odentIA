@@ -3,6 +3,7 @@ import {
   allergiesSaidUnknownOf,
   anesthesiaAnswersOf,
   anesthesiaTroubleWords,
+  type FamilyKinship,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -1448,6 +1449,94 @@ function dayBefore(day: string): string {
 
 /** La fila de «algún otro medicamento» dicho sin decir cuál. */
 export const OTHER_MEDICINE_UNNAMED = "Otro medicamento (no dijo cuál)"
+
+/**
+ * Lo que se dijo de su familia en la consulta y se revisó con la persona (mesa del 25 nov, entrega 2):
+ * se suma a sus antecedentes familiares, sin rehacer la lista como al guardar Antecedentes. El mismo
+ * familiar con la misma enfermedad no se repite. Con un parentesco que no tiene su código («su
+ * abuela», sin decir de qué lado), sus palabras quedan en la nota.
+ */
+export async function addSaidFamilyHistory(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  items: ReadonlyArray<{ relationship: FamilyKinship; relation: string; condition: string }>,
+  origin: { entity: string; entityId: string },
+): Promise<number> {
+  if (!items.length) return 0
+  const existing = await tx
+    .select({ relationship: patientFamilyHistory.relationship, condition: patientFamilyHistory.condition, notes: patientFamilyHistory.notes })
+    .from(patientFamilyHistory)
+    .where(and(eq(patientFamilyHistory.organizationId, orgId), eq(patientFamilyHistory.patientId, patientId)))
+  const seen = new Set(existing.map((row) => `${row.relationship}:${normalizeDrugText(row.notes ?? "")}:${normalizeDrugText(row.condition)}`))
+  let added = 0
+  for (const item of items) {
+    const notes = item.relationship === "FAMMEMB" && item.relation.trim() ? item.relation.trim().slice(0, 200) : null
+    const key = `${item.relationship}:${normalizeDrugText(notes ?? "")}:${normalizeDrugText(item.condition)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    await tx.insert(patientFamilyHistory).values({
+      organizationId: orgId,
+      patientId,
+      relationship: item.relationship,
+      condition: item.condition.trim().slice(0, 200),
+      notes,
+      createdBy: actorUserId,
+    })
+    added += 1
+  }
+  if (added) await audit(tx, orgId, actorUserId, "health.family_said", "patient", patientId, { origin: origin.entity, originId: origin.entityId, count: added })
+  return added
+}
+
+/**
+ * «Sí, lo dejó» (mesa del 25 nov, entrega 2): la medicina que dijo que ya no toma termina el día
+ * anterior al que lo dijo, como lo que declara que ya no toma (`declaredMedications`), y deja de
+ * avisar en la anestesia, la exodoncia y la receta. Si no estaba en sus antecedentes, queda anotada ya
+ * terminada, para que se lea «antes: apixabán». Devuelve cuántas filas terminó o anotó.
+ */
+export async function endSaidMedication(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  name: string,
+  /** El día en que dijo que la dejó (AAAA-MM-DD). */
+  saidOn: string,
+  same: (a: string, b: string) => boolean,
+  origin: { entity: string; entityId: string },
+): Promise<number> {
+  const today = await clinicToday(tx, orgId)
+  const ended = dayBefore(saidOn)
+  const rows = await tx
+    .select({ id: patientMedication.id, name: patientMedication.name, genericName: patientMedication.genericName, startDate: patientMedication.startDate, endDate: patientMedication.endDate })
+    .from(patientMedication)
+    .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
+    .for("update")
+  const current = rows.filter((row) => isCurrentMedication(row, today) && (same(row.name, name) || (!!row.genericName && same(row.genericName, name))))
+  for (const row of current)
+    await tx
+      .update(patientMedication)
+      // Empezada después del día que se dice: termina el día en que empezó, nunca antes.
+      .set({ endDate: row.startDate && row.startDate > ended ? row.startDate : ended, updatedAt: new Date() })
+      .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.id, row.id)))
+  if (!current.length && !rows.some((row) => same(row.name, name) || (!!row.genericName && same(row.genericName, name)))) {
+    const hooks = await productHooks(tx, orgId)
+    await tx.insert(patientMedication).values({
+      organizationId: orgId,
+      patientId,
+      name: name.trim().slice(0, 200),
+      atcCode: findHabitualMedication(name, hooks.prescribing.catalog.habitual)?.atc ?? null,
+      endDate: ended,
+      notes: "Dijo que ya no la toma",
+      createdBy: actorUserId,
+    })
+  }
+  const changed = current.length || 1
+  await audit(tx, orgId, actorUserId, "health.medication_stopped", "patient", patientId, { origin: origin.entity, originId: origin.entityId, count: changed })
+  return changed
+}
 
 export async function initializeDeclaredPatientHealth(
   tx: Db,

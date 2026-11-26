@@ -313,7 +313,7 @@ export function turnsFromStarts(
 
 /** Lo que el repaso dejó fuera por ser de otro lugar, con lo que se le dice a la persona. */
 export const DICTATION_OUT_OF_PLACE = {
-  familiar: "Es de la salud de un familiar: va en sus antecedentes familiares, no en los suyos.",
+  familiar: "Es de la salud de quien lo acompaña, no del paciente: no lo registré.",
   peso_dicho: "Es un peso o una talla dichos, no medidos: si hace falta, mídelo.",
   otro: null,
 } as const satisfies Record<string, string | null>

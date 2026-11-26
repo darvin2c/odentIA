@@ -19,7 +19,7 @@ import {
 } from "@odentia/medical"
 import { and, eq } from "drizzle-orm"
 import { updateEncounterDraft } from "../encounters.js"
-import { DECLARED_HEALTH_SHAPE } from "../dictation-health.js"
+import { DECLARED_HEALTH_SHAPE, SAID_GYNECO } from "../dictation-health.js"
 import { ServiceError } from "../errors.js"
 import { normalizeForSearch } from "../knowledge.js"
 import type { DictationPrepared, ProductDictation } from "../product-hooks.js"
@@ -155,6 +155,11 @@ async function draftOf(tx: Db, orgId: string, patientId: string, encounterId: st
  */
 export const MEDICAL_DICTATION_HEALTH = {
   medical: DECLARED_HEALTH_SHAPE.medical.describe("Si da de lactar, si fuma (`cigarrillos`, cuántos al día, solo de quien fuma) y si toma alcohol."),
+  // La última regla, solo de lo dicho en la consulta (mesa del 25 nov, C8): con el embarazo dicho, de
+  // ella salen sus semanas y la receta avisa.
+  gyneco: SAID_GYNECO.optional().describe(
+    "La fecha de su última regla (FUR), solo si la dijo, contada desde la fecha de hoy si la dijo así («el 10 de junio»). Si además está embarazada (un control prenatal, «es mi segundo embarazo»), también `personal.embarazo`.",
+  ),
 } satisfies z.ZodRawShape
 
 export const MEDICAL_DICTATION: ProductDictation = {
