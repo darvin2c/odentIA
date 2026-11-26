@@ -25,11 +25,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { ACCOUNT_STATUS, AppMark } from "../../components/app-accounts"
-import {
-  AppRequestDrawer,
-  AppRequestList,
-  appRequestSchema,
-} from "../../components/app-requests"
+import { AppRequestDrawer, AppRequestList, appRequestSchema } from "../../components/app-requests"
 import {
   ManualPaymentDrawer,
   money,
@@ -40,6 +36,7 @@ import {
 import type { AdminPlan } from "../../components/plan-drawer"
 import { ReasonDialog } from "../../components/reason-dialog"
 import { api } from "../../lib/api"
+import { gestoriaStoreUrl } from "../../lib/host"
 import { requireAdminRole } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/accounts/$accountId")({
@@ -435,7 +432,10 @@ function AccountPage() {
             La conexión con su app no está encendida: todavía no se le puede pedir nada.
           </p>
         ) : null}
-        <AppRequestList requests={requests} />
+        <AppRequestList
+          requests={requests}
+          lookHref={account.app === "gestoria" ? gestoriaStoreUrl(account.externalRef) : null}
+        />
       </section>
 
       {state.notices.length ? (

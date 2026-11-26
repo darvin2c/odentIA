@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
-import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { appContractRequest, saasAccount } from "@odentia/db/schema/admin-accounts"
+import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { session } from "@odentia/db/schema/auth"
 import { saasPlan } from "@odentia/db/schema/saas-billing"
 import type { Page } from "@playwright/test"
@@ -116,14 +116,18 @@ test("la administración le pide a gestorIA y ve cómo quedó cada pedido", asyn
   await expect(page.getByRole("heading", { name: "Dejar entrar a soporte" })).toHaveCount(0)
   // La API lo manda en el momento; gestorIA de mentira responde «hecho».
   await untilShown(page, "Pedido a la tienda: su Dueño o un Administrador decide si entras.")
-  await expect(page.getByText("Hecho", { exact: true }).first()).toBeVisible()
+  // Llegó a la tienda, pero no está «hecho»: la tienda decide (ADR 0219).
+  await expect(page.getByText("Pedido a la tienda", { exact: true }).first()).toBeVisible()
 
   // Quitar a una persona: gestorIA responde que es el único Dueño.
   await page.getByRole("button", { name: "Quitar a una persona" }).click()
   await page.getByLabel("Correo de su cuenta").fill(user.email)
   await page.getByLabel("Motivo").fill("Lo pidió por correo")
   await page.getByRole("button", { name: "Pedirlo" }).click()
-  await untilShown(page, "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.")
+  await untilShown(
+    page,
+    "Es el único Dueño de la tienda: antes, la tienda tiene que tener otro Dueño.",
+  )
   await expect(page.getByText("Falló", { exact: true })).toBeVisible()
   await expect(page.getByText(`${user.email} · Lo pidió por correo`)).toBeVisible()
 

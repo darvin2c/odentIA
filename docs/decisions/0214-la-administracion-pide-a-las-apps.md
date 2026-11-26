@@ -64,6 +64,8 @@ base del otro, sin hacer nada dos veces y todo apagado hasta configurarlo.
   los pedidos siguen en 64 KB.
 - Quedan para después: demos y la guía (tablero 3), y elegir o cambiar el plan o el tope desde
   gestorIA.
+- Actualización (ADR 0219): soporte ya no mira con la contraseña sola; mira desde la administración,
+  con su código, y un segundo pedido sin responder falla con su motivo.
 
 ## Referencias
 
