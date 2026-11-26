@@ -21,7 +21,7 @@ import {
 } from "../../lib/guides"
 import { ctaOf, guideContactApiUrl } from "../../lib/site"
 import CloseSheet from "../billing/CloseSheet"
-import BudgetDemo from "../budgets/BudgetDemo"
+import BudgetJourney from "../budgets/BudgetJourney"
 import ChartPreview from "../clinical/ChartPreview"
 import ChildChartPreview from "../clinical/ChildChartPreview"
 import ConsentDemo from "../consent/ConsentDemo"
@@ -215,7 +215,7 @@ const startTitle = START_TITLES[guide.topic]
         ) : guide.tryIt.demo === "cie10" ? (
           <Cie10Search client:visible codes={cie10.codes} daily={cie10.daily} />
         ) : (
-          <BudgetDemo client:visible />
+          <BudgetJourney client:visible />
         )}
       </div>
     </div>
