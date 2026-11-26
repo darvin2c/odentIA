@@ -7,13 +7,16 @@
  * Junto a cada PDF escribe sus dos imágenes: la vista de la hoja (`<archivo>.webp`, la que se ve en
  * la tarjeta de descarga y lee Google Imágenes) y la de compartir (`<archivo>-og.png`, 1200 × 630,
  * para el enlace en WhatsApp o en redes y la imagen del artículo).
+ *
+ * Escribe también los códigos CIE-10 odontológicos para el buscador de la guía
+ * (`apps/web/src/lib/guides/cie10-odontologia.json`), de la misma lista que la plantilla.
  */
 import { mkdirSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { createCanvas } from "@napi-rs/canvas"
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs"
 import sharp from "sharp"
-import { BLANK_SHEET_KEYS, BLANK_SHEETS, renderBlankSheet } from "./blank-sheets.js"
+import { BLANK_SHEET_KEYS, BLANK_SHEETS, dentalIcd10, renderBlankSheet } from "./blank-sheets.js"
 
 const out = fileURLToPath(new URL("../../../../apps/web/public/guias/", import.meta.url))
 mkdirSync(out, { recursive: true })
@@ -36,7 +39,7 @@ async function firstPage(bytes: Uint8Array, width: number): Promise<Buffer> {
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 
 /** La imagen de compartir: el nombre a la izquierda y la hoja de verdad a la derecha. */
-async function shareImage(page: Buffer, title: string): Promise<Buffer> {
+async function shareImage(page: Buffer, title: string, use = "Para imprimir en A4 y llenar a mano,"): Promise<Buffer> {
   const sheet = await sharp(page).resize({ width: 420 }).png().toBuffer()
   const { height = 0 } = await sharp(sheet).metadata()
   // La hoja asoma desde abajo, sin cortar el encabezado.
@@ -58,7 +61,7 @@ async function shareImage(page: Buffer, title: string): Promise<Buffer> {
   <rect x="690" y="40" width="460" height="620" rx="18" fill="#123844"/>
   <text x="80" y="150" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#5eead4" letter-spacing="3">PLANTILLA GRATIS EN PDF</text>
   ${name}
-  <text x="80" y="${330 + below}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="34" fill="#cbd5e1">Para imprimir en A4 y llenar a mano,</text>
+  <text x="80" y="${330 + below}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="34" fill="#cbd5e1">${escape(use)}</text>
   <text x="80" y="${376 + below}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="34" fill="#cbd5e1">con la guía paso a paso.</text>
   <text x="80" y="540" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#ffffff">odentIA</text>
   <text x="80" y="582" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="26" fill="#94a3b8">odentia32.com/guias</text>
@@ -76,6 +79,11 @@ for (const sheet of BLANK_SHEET_KEYS) {
   const page = await firstPage(bytes, 1240)
   const base = file.replace(/\.pdf$/, "")
   writeFileSync(`${out}${base}.webp`, await sharp(page).resize({ width: 620 }).webp({ quality: 82 }).toBuffer())
-  writeFileSync(`${out}${base}-og.png`, await shareImage(page, title))
+  writeFileSync(`${out}${base}-og.png`, await shareImage(page, title, sheet === "cie10-odontologia" ? "Para imprimir en A4 y tener a mano," : undefined))
   console.log(`${file}: ${Math.round(bytes.length / 1024)} KB, con ${base}.webp y ${base}-og.png`)
 }
+
+const codes = new URL("../../../../apps/web/src/lib/guides/cie10-odontologia.json", import.meta.url)
+writeFileSync(codes, `${JSON.stringify(dentalIcd10(), null, 2)}
+`)
+console.log(`cie10-odontologia.json: ${dentalIcd10().codes.length} códigos`)

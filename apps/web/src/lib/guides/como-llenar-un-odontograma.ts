@@ -14,7 +14,7 @@ export const guide: Guide = {
   description:
     "Cómo llenar un odontograma con la notación FDI: numera cada diente, ubica la cara y marca lo que ves con colores y siglas. Odontograma en PDF gratis.",
   lead: "Con la notación FDI: cómo se numera cada diente, cómo se nombran sus caras y cómo se marca lo que encuentras. Con el odontograma en PDF para descargar.",
-  updated: "2026-11-25",
+  updated: "2026-11-26",
   published: "2026-11-25",
   // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
   playlist: "PLWLbx_BbsOEo",
@@ -106,8 +106,8 @@ export const guide: Guide = {
   ],
   tryIt: {
     demo: "odontograma",
-    title: "En odentIA, el odontograma se llena en la pantalla.",
-    text: "Tocas el diente, eliges lo que ves y queda dibujado con su color y su sigla, en el arco y de frente, con su raíz. O dictas «36, caries de dentina en oclusal» y Clío la deja lista con su diagnóstico; tú la confirmas, y queda con su fecha en la historia del paciente.",
+    title: "En odentIA, el odontograma se llena hablando.",
+    text: "Dictas «36, caries de dentina en oclusal» y **Clío la deja lista** con su diagnóstico y su código; tú la confirmas. O tocas el diente y eliges lo que ves: queda dibujado con su color y su sigla, en el arco y de frente, con su raíz. Y cuando haces el tratamiento, **la pieza se dibuja sola**: la resina queda como restauración, sin tocar el odontograma.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [
@@ -124,6 +124,6 @@ export const guide: Guide = {
       a: "El mismo odontograma, en la computadora o la tablet: tocas el diente, eliges lo que ves y queda dibujado con su fecha. Lo anterior no se borra: puedes ver cómo estaba la boca en cualquier fecha.",
     },
   ],
-  related: ["odontograma-en-ninos", "presupuesto-dental"],
+  related: ["odontograma-en-ninos", "como-llenar-un-periodontograma", "presupuesto-dental"],
   card: "Cómo se numera cada diente con FDI, cómo se nombran sus caras y cómo se marca lo que encuentras.",
 }

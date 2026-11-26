@@ -2,11 +2,14 @@
 // minutos de lectura, la fecha en palabras y los datos para Google). Hoy son solo de odentIA: en
 // latidIA y vistIA, /guias no existe (`product-pages.json` no la sirve) y el pie no las muestra.
 import { PRODUCT } from "../product"
+import { guide as cie10 } from "./cie-10-odontologia"
 import { guide as caja } from "./cierre-de-caja-dental"
 import { guide as odontograma } from "./como-llenar-un-odontograma"
+import { guide as periodontograma } from "./como-llenar-un-periodontograma"
 import { guide as consentimiento } from "./consentimiento-informado-dental"
 import { guide as historia } from "./historia-clinica-odontologica"
 import { guide as ninos } from "./odontograma-en-ninos"
+import { guide as plan } from "./plan-de-tratamiento-odontologico"
 import { guide as presupuesto } from "./presupuesto-dental"
 import { plainText } from "./rich"
 import type { Guide, GuideSheet } from "./types"
@@ -14,7 +17,17 @@ import type { Guide, GuideSheet } from "./types"
 export type { Guide, GuideFigure, GuideSheet, GuideStep, GuideVideo, Rich } from "./types"
 
 /** Las guías, en el orden del índice. Una nueva se suma aquí y con su página en `src/pages/guias/`. */
-export const GUIDES: readonly Guide[] = [odontograma, ninos, historia, consentimiento, presupuesto, caja]
+export const GUIDES: readonly Guide[] = [
+  odontograma,
+  ninos,
+  periodontograma,
+  historia,
+  cie10,
+  consentimiento,
+  plan,
+  presupuesto,
+  caja,
+]
 
 /** ¿Esta web tiene guías? Solo la de odentIA, hasta que las otras tengan las suyas. */
 export const HAS_GUIDES = PRODUCT === "dental"
@@ -41,6 +54,9 @@ export const SHEET_FILES: Record<GuideSheet, string> = {
   "historia-clinica": "/guias/historia-clinica-odontologica.pdf",
   consentimiento: "/guias/consentimiento-informado-dental.pdf",
   "cierre-de-caja": "/guias/cierre-de-caja.pdf",
+  "plan-de-tratamiento": "/guias/plan-de-tratamiento-odontologico.pdf",
+  periodontograma: "/guias/periodontograma.pdf",
+  "cie10-odontologia": "/guias/cie10-odontologia.pdf",
 }
 
 /** Qué es cada plantilla, en palabras: el texto de su imagen. */
@@ -51,6 +67,9 @@ export const SHEET_NAMES: Record<GuideSheet, string> = {
   "historia-clinica": "historia clínica odontológica en blanco",
   consentimiento: "consentimiento informado dental en blanco",
   "cierre-de-caja": "cierre de caja en blanco, con el arqueo",
+  "plan-de-tratamiento": "plan de tratamiento odontológico en blanco, por fases",
+  periodontograma: "periodontograma en blanco, con la placa",
+  "cie10-odontologia": "lista de códigos CIE-10 de odontología",
 }
 
 /**

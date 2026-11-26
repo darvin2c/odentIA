@@ -94,6 +94,28 @@ export function isSurgicalLibraryKey(key: string | null | undefined): boolean {
 }
 
 /**
+ * Lo que va sobre el implante ya puesto (la corona, el pilar, el retenedor, la barra o la prótesis): la
+ * biblioteca lo pone en implantología, pero es rehabilitación y va después de la cirugía (revisión de
+ * la guía del plan por fases, 26 nov: la corona sobre el implante del 46 caía en la quirúrgica). Por el
+ * comienzo de su clave en `seeds/biblioteca.csv`; la colocación y el retiro del implante siguen en la
+ * quirúrgica.
+ */
+export const IMPLANT_PROSTHESIS_LIBRARY_KEY_PREFIXES: readonly string[] = [
+  "barra-de-conexion-sobre-implantes",
+  "corona-",
+  "pilar-",
+  "protesis-",
+  "reparacion-de-pilar-",
+  "reparacion-de-protesis-",
+  "retenedor-",
+]
+
+/** ¿Es la prótesis sobre un implante, aunque la biblioteca la ponga en implantología? */
+export function isImplantProsthesisLibraryKey(key: string | null | undefined): boolean {
+  return !!key && IMPLANT_PROSTHESIS_LIBRARY_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+/**
  * Fase propuesta por el tipo de tratamiento del servicio; el clínico la
  * cambia. Sin tipo, la básica. El tipo nunca propone la urgencia: es un juicio
  * sobre el paciente, no sobre el acto (la propone su diagnóstico,
@@ -132,10 +154,15 @@ export interface PhaseDiagnosis {
 export function phaseForTreatment(
   kind: string | null | undefined,
   diagnoses: readonly PhaseDiagnosis[],
-  /** Su clave en la biblioteca: la apicectomía o un colgajo van en la quirúrgica, como cirugía. */
+  /**
+   * Su clave en la biblioteca: la apicectomía o un colgajo van en la quirúrgica, como cirugía, y la
+   * corona sobre un implante en la rehabilitadora, como prótesis.
+   */
   libraryKey?: string | null,
 ): TreatmentPhase {
-  const phase = phaseForKind(isSurgicalLibraryKey(libraryKey) ? "cirugia" : kind)
+  const phase = phaseForKind(
+    isSurgicalLibraryKey(libraryKey) ? "cirugia" : kind === "implantologia" && isImplantProsthesisLibraryKey(libraryKey) ? "protesis" : kind,
+  )
   if (phase !== "basica" && phase !== "quirurgica") return phase
   return diagnoses.some((diagnosis) => isUrgentDiagnosis(diagnosis.system, diagnosis.code)) ? "urgencia" : phase
 }

@@ -14,7 +14,7 @@ export const guide: Guide = {
   description:
     "Cómo llenar una historia clínica odontológica: datos, motivo, antecedentes, examen, odontograma, diagnóstico y evolución. Formato en PDF gratis.",
   lead: "Qué va en cada parte, en el orden en que atiendes: de los datos del paciente a la evolución de cada visita. Con el formato en blanco en PDF.",
-  updated: "2026-11-25",
+  updated: "2026-11-26",
   published: "2026-11-25",
   // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
   playlist: "PLAdZkePtKV2U",
@@ -82,7 +82,7 @@ export const guide: Guide = {
     {
       title: "El diagnóstico y el plan",
       text: [
-        "Un **diagnóstico por cada problema**, con su pieza: «caries de dentina en el 36». Si usas los códigos CIE-10, va el código al lado. De ahí sale el **plan**, ordenado por fases; con sus precios, es el presupuesto: lo ves en la [guía del presupuesto](/guias/presupuesto-dental).",
+        "Un **diagnóstico por cada problema**, con su pieza: «caries de dentina en el 36». Si usas los [códigos CIE-10](/guias/cie-10-odontologia), va el código al lado. De ahí sale el **plan**, ordenado por fases (paso a paso en la [guía del plan de tratamiento](/guias/plan-de-tratamiento-odontologico)); con sus precios, es el presupuesto: lo ves en la [guía del presupuesto](/guias/presupuesto-dental).",
       ],
     },
     {
@@ -127,6 +127,6 @@ export const guide: Guide = {
       a: "Lo mismo, con los datos de su responsable, y el odontograma de niños.",
     },
   ],
-  related: ["como-llenar-un-odontograma", "consentimiento-informado-dental"],
+  related: ["como-llenar-un-odontograma", "cie-10-odontologia", "consentimiento-informado-dental"],
   card: "Qué va en cada parte: datos, motivo, antecedentes, examen, odontograma, diagnóstico y evolución.",
 }

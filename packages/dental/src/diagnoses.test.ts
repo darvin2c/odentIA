@@ -67,3 +67,13 @@ it("la apicectomía y la cirugía periodontal van en la fase quirúrgica, como c
     phaseForTreatment("endodoncia", [{ system: "ICD-10-PE", code: "K04.7" }], "apicectomia-o-cirugia-periapical-anterior"),
   ).toBe("urgencia")
 })
+
+// Revisión de la guía del plan por fases (26 nov): la corona sobre el implante del 46 caía en la
+// quirúrgica, porque la biblioteca la pone en implantología.
+it("lo que va sobre el implante es rehabilitación; colocarlo sigue siendo cirugía", () => {
+  expect(phaseForTreatment("implantologia", [], "corona-metal-ceramica-sobre-pilar-metal-base")).toBe("rehabilitadora")
+  expect(phaseForTreatment("implantologia", [], "protesis-fija-sobre-implantes-desdentado-parcial")).toBe("rehabilitadora")
+  expect(phaseForTreatment("implantologia", [], "colocacion-de-implante-endooseo")).toBe("quirurgica")
+  // Con la pieza en urgencia, la prótesis no se adelanta.
+  expect(phaseForTreatment("implantologia", [{ system: "ICD-10-PE", code: "K04.0" }], "corona-de-porcelana-sobre-pilar")).toBe("rehabilitadora")
+})

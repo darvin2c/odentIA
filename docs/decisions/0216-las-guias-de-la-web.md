@@ -24,6 +24,10 @@ El video se ve en la misma página al tocarlo (YouTube sin cookies hasta entonce
 
 *Descartado:* leer el canal entero (el feed trae solo los últimos 15, casi todos Shorts) o la API de YouTube (pide clave y cuota).
 
+## Tres guías más (26 nov, tercer PR)
+
+El plan de tratamiento por fases, el periodontograma y los códigos CIE-10, elegidas por lo que los odontólogos escriben en Google (sugerencias de búsqueda de Perú y México). Las tres plantillas no copian una hoja que imprima la app, como las anteriores: la app no imprime el periodontograma ni la lista de códigos, y el plan solo lo imprime dentro del presupuesto. Se hicieron con los mismos datos que maneja la app: los seis sitios y el signo de la recesión de `periodontal.ts`, las cinco fases de `treatment-templates.ts` y los códigos odontológicos de la CIE-10 del MINSA que carga la base (`isDentalDiagnosis`), que el mismo comando de las plantillas deja también en `cie10-odontologia.json` para el buscador de la guía. La plantilla es para quien todavía trabaja en papel; la guía le muestra cómo se hace en odentIA.
+
 ## Alternativas descartadas
 
 - *Pedir el correo a cambio del PDF:* quien busca «odontograma pdf» se va a la página siguiente, Google no muestra un PDF escondido tras un formulario y la mayoría de quienes lo bajan no son clínicas.
