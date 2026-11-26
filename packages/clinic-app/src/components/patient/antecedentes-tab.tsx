@@ -667,6 +667,8 @@ export function AntecedentesTab({
       const next = withSaidHealth(buildDrafts(health), said)
       form.setFieldValue("conditions", next.conditions)
       form.setFieldValue("medications", next.medications)
+      // Lo de su familia también: si no, se daba por revisado al guardar y se perdía (QA del 26 nov).
+      form.setFieldValue("familyHistory", next.familyHistory)
       form.setFieldValue("reviewStatus", next.reviewStatus)
       form.setFieldValue("interview", next.interview)
       const weeks = pregnancyRecordOf(next.interview)?.semanas

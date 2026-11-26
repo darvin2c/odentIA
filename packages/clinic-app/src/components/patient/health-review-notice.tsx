@@ -619,8 +619,11 @@ export function HealthReviewNotice({
             <p className="text-sm text-muted-foreground">
               {heardToSave
                 ? `${CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con ${heardWith}.`
-                : // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
-                  "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."}
+                : heard.rows.some((row) => row.stopped)
+                  ? // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
+                    "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."
+                  : // Solo un «No» («No toma medicación»): se confirma en su fila (QA del 26 nov).
+                    `${CLINICAL_NAME} lo oyó en la consulta. Su «no» se confirma en su fila.`}
             </p>
           ) : unasked.length > 0 ? (
             <p className="text-sm text-muted-foreground">

@@ -433,3 +433,13 @@ describe("lo que quien habla dice de sí misma no es quitar (revisión de códig
     expect(speaksOfSelf(said)).toBe(false)
   })
 })
+
+describe("la dosis de su clase, leída de la frase (QA del 26 nov)", () => {
+  it("Clío pone «apixabán» solo: la dosis y cuándo salen de lo dicho", () => {
+    const { payload } = groundHealthNames(
+      { anticoagulants: { state: "recorded", detail: "Apixabán" } },
+      "doctora tomo apixabán de cinco miligramos cada doce horas y losartán cincuenta",
+    )
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "Apixabán 5 mg cada 12 h" })
+  })
+})

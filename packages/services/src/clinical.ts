@@ -17,8 +17,10 @@ import {
   type DirectedMedicineDeclaration,
   BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
+  frequencyCodeOf,
   medicineName,
   medicineWords,
+  structuredDose,
   type MedicationClass,
   type MedicineClassAnswer,
   medicineClassAnswers,
@@ -1425,10 +1427,18 @@ export function declaredMedications(
     })
   }
   for (const declaredItem of declared.medications?.state === "recorded" ? declared.medications.items : []) {
-    // Sin dosis aparte, la que dijo dentro del nombre («losartán cincuenta») va a su campo.
+    // Sin dosis aparte, la que dijo dentro del nombre («apixabán 5 mg») va a su campo.
     const said = declaredItem.dose ? { name: declaredItem.name } : medicineWords(declaredItem.name)
     const item = { ...declaredItem, name: said.name, ...(said.dose ? { dose: said.dose } : {}), ...(said.frequency && !declaredItem.frequency ? { frequency: said.frequency } : {}) }
     const key = normalizeDrugText(item.name)
+    // La misma medicina dicha también al responder por su clase: una sola fila, con la dosis y cuándo
+    // que se dijeron aquí si allá no estaban (QA del 26 nov, latidIA: el apixabán perdía su dosis).
+    const directed = rows.find((row) => row.declaredClass !== null && normalizeDrugText(row.name) === key)
+    if (directed) {
+      if (!directed.dose && item.dose) directed.dose = item.dose
+      if (!directed.frequency && item.frequency) directed.frequency = item.frequency
+      continue
+    }
     if (seen.has(key)) continue
     seen.add(key)
     rows.push({ ...item, declaredClass: null })
@@ -1437,6 +1447,19 @@ export function declaredMedications(
   if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
+}
+
+/** La dosis y cada cuánto de lo declarado, en los campos de su fila (`validateMedicationRow`). */
+function declaredDoseFields(dose: string | null | undefined, frequency: string | null | undefined) {
+  const structured = dose?.trim() ? structuredDose(dose) : null
+  const code = frequency?.trim() ? frequencyCodeOf(frequency) : null
+  return {
+    dose: structured ? doseText(structured.doseValue, structured.doseUnit) : dose?.trim() || null,
+    doseValue: structured ? String(structured.doseValue) : null,
+    doseUnit: structured?.doseUnit ?? null,
+    frequency: code ? MEDICATION_FREQUENCY_LABELS[code] : frequency?.trim() || null,
+    frequencyCode: code,
+  }
 }
 
 /**
@@ -2166,8 +2189,9 @@ export async function addDeclaredHealth(
       atcCode: item.declaredClass
         ? declaredMedicineAtc(item.declaredClass, name, habitual)
         : (findHabitualMedication(name, habitual)?.atc ?? null),
-      dose: item.dose?.trim() || null,
-      frequency: item.frequency?.trim() || null,
+      // Con número y unidad de la lista, y cada cuánto de la lista, como lo guarda Antecedentes: así no
+      // se lee «Escrita antes» ni «Otra» (QA del 26 nov). Lo que no calza queda como texto.
+      ...declaredDoseFields(item.dose, item.frequency),
       endDate: item.endDate ?? null,
       notes: withNote(item.notes ?? undefined),
       createdBy: actorUserId,

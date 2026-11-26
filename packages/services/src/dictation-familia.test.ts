@@ -202,6 +202,34 @@ describe("revisión del 25 nov", () => {
     await enable(false)
   })
 
+  it("latidIA: la misma medicina como anticoagulante y en lo que toma queda una vez, con su dosis; la unidad no dicha no se inventa", async () => {
+    await enable(true)
+    const { segment, health, confirm, medicines } = await session()
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: {
+            declarante: "paciente",
+            anticoagulants: { state: "recorded", detail: "apixabán" },
+            medications: { state: "recorded", items: [{ name: "apixabán", dose: "5 mg", frequency: "cada 12 horas" }, { name: "losartán", dose: "50 mg" }] },
+          },
+          sourceText: "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta",
+        },
+      ],
+      transcript: "Tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta.",
+    })
+    const [said] = await health()
+    expect(said?.healthRows?.filter((row) => row.value.includes("apix")).length).toBe(1)
+    await confirm(said!.id)
+    const rows = await medicines()
+    expect(rows.map((row) => [row.name, row.dose, row.frequencyCode]).sort()).toEqual([
+      ["apixabán", "5 mg", "cada_12_h"],
+      ["losartán", "50", null],
+    ])
+    await enable(false)
+  })
+
   it("la dosis dicha en palabras queda en su campo al revisarlo («apixabán de cinco cada doce horas»)", async () => {
     await enable(true)
     const { segment, health, confirm, medicines } = await session()
@@ -218,7 +246,8 @@ describe("revisión del 25 nov", () => {
     const [said] = await health()
     expect(said?.healthRows?.find((row) => row.group === "anticoagulants")?.value).toBe("apixabán 5 mg cada 12 h")
     await confirm(said!.id)
-    expect((await medicines()).map((row) => [row.name, row.dose, row.frequency])).toEqual([["apixabán", "5 mg", "cada 12 h"]])
+    // En los campos de la lista, como los guarda Antecedentes: sin «Escrita antes» ni «Otra».
+    expect((await medicines()).map((row) => [row.name, Number(row.doseValue), row.doseUnit, row.frequencyCode])).toEqual([["apixabán", 5, "mg", "cada_12_h"]])
     await enable(false)
   })
 

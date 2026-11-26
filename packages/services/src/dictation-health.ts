@@ -3,6 +3,8 @@ import {
   FAMILY_KINSHIP,
   type FamilyKinship,
   findHabitualMedication,
+  doseFromSaid,
+  groundedDose,
   medicineLine,
   medicineWords,
   HABITUAL_MEDICATIONS,
@@ -522,19 +524,43 @@ export function groundHealthNames(
   // Lo oído, con la dosis y cuándo en su lugar y en cifras: «apixabán de cinco cada doce horas» se lee
   // «apixabán 5 mg cada 12 h», y así llega a su medicación (revisión del 25 nov). Después de mirar si se
   // oyó: las cifras no están en lo dicho.
+  // La dosis que trajo Clío se queda con lo que se dijo: en cifras y con su unidad solo si se dijo
+  // (QA del 26 nov: «losartán cincuenta» llegaba como «50 mg»).
   const meds = out["medications"]
   if (isRecord(meds) && Array.isArray(meds["items"]))
     out["medications"] = {
       ...meds,
       items: (meds["items"] as Array<Record<string, unknown>>).map((item) => {
-        if (text(item["dose"])) return item
-        const parts = medicineWords(text(item["name"]))
+        if (text(item["dose"])) {
+          const { dose: _said, ...rest } = item
+          const dose = groundedDose(text(item["dose"]), said)
+          return dose ? { ...rest, dose } : rest
+        }
+        // La dosis dentro del nombre, o si no, la que se dijo junto a su nombre en la frase.
+        const named = medicineWords(text(item["name"]))
+        const parts = named.dose ? named : { ...named, ...doseFromSaid(named.name, said) }
         return { ...item, name: parts.name, ...(parts.dose ? { dose: parts.dose } : {}), ...(parts.frequency && !text(item["frequency"]) ? { frequency: parts.frequency } : {}) }
       }),
     }
   for (const group of DIRECTED) {
     const value = out[group]
-    if (isRecord(value) && text(value["detail"])) out[group] = { ...value, detail: medicineLine(medicineWords(text(value["detail"]))) }
+    if (!isRecord(value) || !text(value["detail"])) continue
+    // La misma medicina también en lo que toma (QA del 26 nov, latidIA: «apixabán» dos veces, y la dosis
+    // se perdía al guardar): una sola fila, la de su clase, con la dosis y cuándo que se dijeron.
+    const written = medicineWords(text(value["detail"]))
+    // Clío suele poner en su clase solo el nombre: la dosis y cuándo se leen de la frase dicha.
+    const detail = written.dose ? written : { ...written, ...doseFromSaid(written.name, said) }
+    const list = out["medications"]
+    const found = isRecord(list) && Array.isArray(list["items"]) ? (list["items"] as Array<Record<string, unknown>>).find((item) => sameDrug(item["name"], detail.name)) : undefined
+    const line = medicineLine({ name: detail.name, dose: detail.dose ?? (text(found?.["dose"]) || undefined), frequency: detail.frequency ?? (text(found?.["frequency"]) || undefined) })
+    // Solo si la línea junta se vuelve a leer igual (una dosis sin unidad no: quedarían las dos filas).
+    const twin = found && medicineWords(line).name === detail.name ? found : undefined
+    if (twin && isRecord(list)) {
+      const rest = (list["items"] as Array<Record<string, unknown>>).filter((item) => item !== twin)
+      if (rest.length) out["medications"] = { ...list, items: rest }
+      else delete out["medications"]
+    }
+    out[group] = { ...value, detail: twin ? line : medicineLine(detail) }
   }
   return { payload: GROUPS.some((group) => isRecord(out[group])) ? out : null, notHeard, unnamed, vague }
 }

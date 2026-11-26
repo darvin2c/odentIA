@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { medicineLine, medicineName, medicineWords } from "./medicine-words.js"
+import { doseFromSaid, frequencyCodeOf, groundedDose, medicineLine, medicineName, medicineWords, structuredDose } from "./medicine-words.js"
 
 describe("una medicina dicha, en sus partes (revisión del 25 nov)", () => {
   it.each([
@@ -69,5 +69,42 @@ describe("el nombre sin la dosis del final, para comparar filas", () => {
     ["ácido fólico", "ácido fólico"],
   ])("«%s» → «%s»", (said, name) => {
     expect(medicineName(said)).toBe(name)
+  })
+})
+
+describe("la dosis que trae Clío, con lo que se dijo (QA del 26 nov)", () => {
+  const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta"
+  it.each([
+    ["5 mg", "5 mg"],
+    ["50 mg", "50"],
+    ["cincuenta", "50"],
+    ["5mg", "5 mg"],
+    ["una tableta", ""],
+    ["diez mg", ""],
+  ])("«%s» → «%s»", (dose, grounded) => {
+    expect(groundedDose(dose, said)).toBe(grounded)
+  })
+})
+
+describe("la dosis y cada cuánto en los campos de la fila", () => {
+  it("«5 mg» y «cada 12 h» son de la lista; «50» y «en la noche», no", () => {
+    expect(structuredDose("5 mg")).toEqual({ doseValue: 5, doseUnit: "mg" })
+    expect(structuredDose("2 puffs")).toEqual({ doseValue: 2, doseUnit: "{puff}" })
+    expect(structuredDose("50")).toBeNull()
+    expect(frequencyCodeOf("cada 12 h")).toBe("cada_12_h")
+    expect(frequencyCodeOf("2 veces al día")).toBe("cada_12_h")
+    expect(frequencyCodeOf("en la noche")).toBeNull()
+  })
+})
+
+describe("la dosis leída de la frase, junto a su nombre (QA del 26 nov)", () => {
+  const said = "tomo apixaban de cinco miligramos cada doce horas y losartan cincuenta, y metformina 850 miligramos"
+  it.each([
+    ["apixabán", { dose: "5 mg", frequency: "cada 12 h" }],
+    ["losartán", {}],
+    ["metformina", { dose: "850 mg" }],
+    ["warfarina", {}],
+  ])("«%s»", (name, parts) => {
+    expect(doseFromSaid(name, said)).toEqual(parts)
   })
 })

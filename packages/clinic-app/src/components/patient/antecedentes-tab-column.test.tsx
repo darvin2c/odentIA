@@ -48,7 +48,9 @@ const health = {
 } as unknown as PatientHealth
 
 /** Lo que Clío oyó en la consulta: «Corregir algo» abre Antecedentes con eso puesto. */
-const said = { health: { conditions: { state: "recorded", items: [{ name: "Hipertensión" }] } } }
+const said = {
+  health: { conditions: { state: "recorded", items: [{ name: "Hipertensión" }] }, family: { state: "recorded", items: [{ relation: "hermana", name: "cáncer de boca" }] } },
+}
 
 beforeAll(() => {
   window.ResizeObserver ??= class {
@@ -139,4 +141,14 @@ it("lo escrito en Antecedentes sin guardar sí pregunta al salir", async () => {
   await screen.findByText("¿Salir sin guardar?")
   expect(router.state.location.pathname).toBe("/atencion")
   expect(save).not.toHaveBeenCalled()
+})
+
+// QA del 26 nov (clínica): con «Corregir algo», lo de su familia no llegaba al formulario y se perdía al guardar.
+it("«Corregir algo» guarda también lo de su familia que oyó Clío", async () => {
+  save.mockResolvedValue({ data: health })
+  render(<RouterProvider router={app()} />)
+  await writeInDrawer()
+  fireEvent.click(screen.getByRole("button", { name: "Guardar antecedentes" }))
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+  expect(JSON.stringify(save.mock.calls[0])).toContain("cáncer de boca")
 })

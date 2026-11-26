@@ -12,6 +12,8 @@
  * 12,5 mg»), ni si el nombre junta dos medicinas («enalapril y amlodipino»).
  */
 
+import type { DoseUnit, MedicationFrequency } from "./catalogs.js"
+
 export interface MedicineWords {
   name: string
   dose?: string
@@ -232,4 +234,97 @@ export function medicineName(said: string): string {
     else break
   }
   return words.slice(0, end).join(" ")
+}
+
+const UNIT_CODE: Record<string, DoseUnit> = { mg: "mg", g: "g", mcg: "ug", mL: "mL", UI: "[iU]", tableta: "{tbl}", "cápsula": "{cap}", gotas: "{drop}", puff: "{puff}" }
+
+/**
+ * La dosis separada («5 mg», «0,5 mg», «2 puffs») como la guarda su fila: número y unidad de la lista.
+ * `null` si no es eso exactamente: se guarda como texto.
+ */
+export function structuredDose(dose: string): { doseValue: number; doseUnit: DoseUnit } | null {
+  const parts = medicineWords(`x ${dose.trim()}`)
+  if (parts.name !== "x" || !parts.dose || parts.frequency) return null
+  const [number, unit] = parts.dose.split(" ")
+  const value = Number((number ?? "").replace(",", "."))
+  const code = UNIT_CODE[unit === "puffs" ? "puff" : unit === "tabletas" ? "tableta" : unit === "cápsulas" ? "cápsula" : (unit ?? "")]
+  return Number.isFinite(value) && value > 0 && code ? { doseValue: value, doseUnit: code } : null
+}
+
+/** Cada cuánto, en la lista de la fila: «cada 12 h», «2 veces al día» → `cada_12_h`. `null` si no calza. */
+export function frequencyCodeOf(frequency: string): MedicationFrequency | null {
+  const said = plain(frequency).replace(/\s+/g, " ").trim()
+  if (/^cada (8|ocho) (h|horas?)$/.test(said) || /^(3|tres) veces al dia$/.test(said)) return "cada_8_h"
+  if (/^cada (12|doce) (h|horas?)$/.test(said) || /^(2|dos) veces al dia$/.test(said)) return "cada_12_h"
+  if (/^cada (24|veinticuatro) (h|horas?)$/.test(said) || /^(1|una) vez al dia$/.test(said)) return "cada_24_h"
+  if (/^(segun necesidad|si hay dolor|si duele|condicional)$/.test(said)) return "segun_necesidad"
+  return null
+}
+
+/** Cómo se dice cada unidad, para saber si se dijo. */
+const UNIT_SAID: Record<string, RegExp> = {
+  mg: /^(mg|miligramos?)$/,
+  mcg: /^(mcg|ug|microgramos?)$/,
+  g: /^(g|gr|gramos?)$/,
+  mL: /^(ml|mililitros?|cc)$/,
+  UI: /^(ui|unidades?)$/,
+  puff: /^(puffs?|inhalacion(es)?)$/,
+  puffs: /^(puffs?|inhalacion(es)?)$/,
+  gotas: /^gotas?$/,
+  tableta: /^(tabletas?|pastillas?|comprimidos?)$/,
+  tabletas: /^(tabletas?|pastillas?|comprimidos?)$/,
+  "cápsula": /^capsulas?$/,
+  "cápsulas": /^capsulas?$/,
+}
+
+/**
+ * La dosis que propuso Clío, con lo que de verdad se dijo: en cifras («cincuenta» → «50») y con la
+ * unidad solo si se dijo junto a ese número (QA del 26 nov: «losartán cincuenta» llegaba como «50 mg»).
+ * Vacía si el número no se dijo.
+ */
+export function groundedDose(dose: string, said: string): string {
+  const parts = medicineWords(`x ${dose.trim()}`)
+  const heard = plain(said)
+  const words = plain(dose).split(/\s+/)
+  const number = digits(words[0]) ?? glued(words[0])?.value ?? wordNumber(words, 0)?.value ?? null
+  if (number === null) return dose.trim()
+  const unitWord = parts.dose?.split(" ")[1]
+  // La unidad tiene que ir con ese número en lo dicho («cinco miligramos», «5 mg»), no con otro.
+  const pattern = unitWord ? UNIT_SAID[unitWord] : undefined
+  const tokens = heard.replace(/(\d)([a-z])/g, "$1 $2").split(/[^a-z0-9.,ñ]+/).filter(Boolean)
+  let numberSaid = false
+  let unitSaid = false
+  for (let index = 0; index < tokens.length && !unitSaid; index++) {
+    const at = digits(tokens[index]) !== null ? { value: digits(tokens[index]), used: 1 } : wordNumber(tokens, index)
+    if (!at || at.value !== number) continue
+    numberSaid = true
+    unitSaid = !!pattern && pattern.test(tokens[index + at.used] ?? "")
+  }
+  // Un número que no se dijo no es una dosis de lo dicho: no se propone.
+  if (!numberSaid) return ""
+  return unitSaid && parts.dose ? parts.dose : written(number)
+}
+
+/**
+ * La dosis y cada cuánto de una medicina, leídas de la frase dicha junto a su nombre: «tomo apixabán de
+ * cinco miligramos cada doce horas y losartán…» → 5 mg · cada 12 h (QA del 26 nov: Clío pone en su
+ * clase solo «apixabán», y lo que dijo de la dosis se perdía). El tramo va desde el nombre hasta el
+ * siguiente «y», coma o punto; con las mismas reglas de `medicineWords`, y nada si no es claro.
+ */
+export function doseFromSaid(name: string, said: string): Pick<MedicineWords, "dose" | "frequency"> {
+  const head = plain(name).split(/\s+/)[0] ?? ""
+  if (head.length < 4) return {}
+  const words = said.trim().split(/\s+/)
+  const start = words.findIndex((word) => plain(word).replace(/[^a-z0-9ñ]/g, "").startsWith(head.slice(0, 5)))
+  if (start < 0) return {}
+  const piece: string[] = []
+  for (let index = start; index < words.length; index++) {
+    const word = words[index] ?? ""
+    const next = plain(words[index + 1] ?? "")
+    if (index > start && plain(word) === "y" && next !== "medio" && next !== "media") break
+    piece.push(word.replace(/[.,;]+$/, ""))
+    if (/[.,;]$/.test(word)) break
+  }
+  const parts = medicineWords(piece.join(" "))
+  return parts.dose ? { dose: parts.dose, ...(parts.frequency ? { frequency: parts.frequency } : {}) } : {}
 }
