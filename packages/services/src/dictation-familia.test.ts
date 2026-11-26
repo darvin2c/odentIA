@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { encounter, patientAnamnesis, patientFamilyHistory, patientHealthDeclaration, patientMedication } from "@odentia/db/schema/clinical"
+import { encounter, patientAnamnesis, patientFamilyHistory, patientHealthDeclaration, patientMedication, patientRegistration } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -244,6 +244,33 @@ describe("revisión del 25 nov", () => {
     const key = said!.healthRows!.find((row) => row.group === "stopped")!.key
     await fx.run((tx) => confirmSaidStopped(tx, ...fx.args, said!.id, key))
     expect((await medicines()).map((row) => row.endDate)).toEqual([null])
+    await enable(false)
+  })
+})
+
+/* Revisión final del 25 nov (voz de desarrollo): la primera consulta de un paciente nuevo. */
+describe("la primera consulta de un paciente registrado en el panel", () => {
+  it("lo suyo y lo de su familia juntos se revisan con «Lo revisé con…» sin «Otra sesión guardó antecedentes»", async () => {
+    await enable(true)
+    const { fx, segment, health, confirm, family } = await session()
+    // Todo paciente creado en el panel tiene su registro, y nunca se guardó nada de su salud (versión 0).
+    await ownerDb.insert(patientRegistration).values({ organizationId: ORG, patientId: fx.patient.id, entryPoint: "platform", respondent: "staff", answers: {} })
+    await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "hipertensión" }] }, family: [{ relation: "madre", name: "preeclampsia" }] },
+          sourceText: "tengo hipertensión y mi mamá tuvo preeclampsia",
+        },
+      ],
+      transcript: "Tengo hipertensión y mi mamá tuvo preeclampsia.",
+    })
+    const [said] = await health()
+    const confirmed = await confirm(said!.id)
+    expect(confirmed.status).toBe("confirmada")
+    expect((await family()).map((row) => `${row.relationship}: ${row.condition}`)).toEqual(["MTH: preeclampsia"])
+    const after = await fx.run((tx) => getPatientHealth(tx, ORG, fx.patient.id))
+    expect(after.conditions.map((row) => row.name)).toEqual(["hipertensión"])
     await enable(false)
   })
 })
