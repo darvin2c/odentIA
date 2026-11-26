@@ -601,7 +601,8 @@ export function saidHealthAlerts(
       }
       if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
       seen.add(row.key)
-      const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
+      // La aspirina dicha es antiagregante, como dice su fila (verificación del 26 nov).
+      const label = row.label === "Antiagregante" ? row.label : row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label
       // «Ya no la toma» no es «dijo que sí»: lo dejó, sin alarma (QA del 21 nov, H3).
       const stopped = row.value.endsWith("ya no la toma")
       // Su «No sé» no es un «No»: se sabe tan poco como de lo que no se preguntó, y avisa igual (QA del 22 nov, H11).

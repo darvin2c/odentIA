@@ -199,6 +199,7 @@ export function HealthReviewNotice({
   // Las respuestas de siempre («No tiene alergias», «Niega enfermedades»…) quedan plegadas mientras hay
   // algo dicho por revisar: competían con «Lo revisé con…» (QA del 22 nov, UX-3: 7 botones).
   const [showOthers, setShowOthers] = useState(false)
+  const [focusStopped, setFocusStopped] = useState(false)
   const detailId = useId()
   // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto: la revisión no
   // tiene vuelta atrás en el servidor (sella quién y cuándo), así que se deshace antes de enviarla. Si
@@ -239,6 +240,18 @@ export function HealthReviewNotice({
       await refresh()
       toast.success(group === "conditions" ? "Anotado: niega enfermedades" : "Anotado: no toma medicación")
     },
+  })
+  // El foco a «Sí, lo dejó», después de que el aviso se pinta otra vez tras «Lo revisé con…».
+  useEffect(() => {
+    if (!focusStopped) return
+    const timer = setTimeout(() => {
+      const button = document.querySelector<HTMLButtonElement>("[data-stopped-confirm]")
+      if (button) {
+        button.focus()
+        setFocusStopped(false)
+      }
+    }, 400)
+    return () => clearTimeout(timer)
   })
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
@@ -490,9 +503,9 @@ export function HealthReviewNotice({
               ? `Revisado con ${heardWith}: quedó en sus antecedentes. Su «no» sigue aquí: confírmalo en su fila.`
               : `Revisado con ${heardWith}: quedó en sus antecedentes como lo dijo en la consulta`,
         )
-        // Con lo que ya no toma esperando, el foco va a su «Sí, lo dejó»: no queda a medias sin verlo.
-        const stopButton = document.querySelector<HTMLButtonElement>("[data-stopped-confirm]")
-        if (stopButton) stopButton.focus()
+        // Con lo que ya no toma esperando, el foco va a su «Sí, lo dejó» cuando el aviso se vuelve a
+        // pintar con lo que queda: no queda a medias sin verlo (verificación del 26 nov).
+        if (heard.rows.some((row) => row.stopped)) setFocusStopped(true)
         else titleRef.current?.focus()
       },
     })
