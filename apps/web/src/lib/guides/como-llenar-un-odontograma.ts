@@ -106,8 +106,8 @@ export const guide: Guide = {
   ],
   tryIt: {
     demo: "odontograma",
-    title: "En odentIA, el odontograma se llena hablando.",
-    text: "Dictas «36, caries de dentina en oclusal» y **Clío la deja lista** con su diagnóstico y su código; tú la confirmas. O tocas el diente y eliges lo que ves: queda dibujado con su color y su sigla, en el arco y de frente, con su raíz. Y cuando haces el tratamiento, **la pieza se dibuja sola**: la resina queda como restauración, sin tocar el odontograma.",
+    title: "En odentIA, el odontograma se llena hablando o con un toque.",
+    text: "Dictas «36, caries de dentina en oclusal» y **Clío la deja lista** con su diagnóstico y su código; tú la confirmas. O tocas el diente y eliges lo que ves: queda dibujado con su color y su sigla, en el arco y de frente, con su raíz. Y cuando registras el tratamiento, **la pieza se dibuja sola**: haces la resina y queda dibujada como restauración.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [

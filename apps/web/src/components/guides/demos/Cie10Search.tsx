@@ -33,20 +33,26 @@ const codeKey = (code: string) => code.replace(/\./g, "").toLowerCase()
 export default function Cie10Search({ codes, daily }: Props) {
   const [query, setQuery] = useState("")
   const id = useId()
-  const indexed = useMemo(() => codes.map((item) => ({ ...item, text: plain(item.title), key: codeKey(item.code) })), [codes])
+  const indexed = useMemo(() => codes.map((item) => ({ ...item, words: plain(item.title).split(" "), key: codeKey(item.code) })), [codes])
 
   const terms = plain(query).split(" ").filter(Boolean)
+  // Un código se busca entero, con o sin punto («K02.1», «k021»): antes de partirlo en palabras.
+  const asCode = codeKey(query.trim().replace(/\s+/g, ""))
+  const byCode = /^[a-z]\d/.test(asCode) ? indexed.filter((item) => item.key.startsWith(asCode)) : []
   const results = terms.length
-    ? indexed.filter((item) => terms.every((term) => item.key.startsWith(codeKey(term)) || item.text.includes(term)))
+    ? byCode.length
+      ? byCode
+      : indexed.filter((item) => terms.every((term) => item.key.startsWith(codeKey(term)) || item.words.some((word) => word.startsWith(term))))
     : daily.map((code) => indexed.find((item) => item.code === code)).filter((item) => item !== undefined)
-  const shown = results.slice(0, MAX)
+  // Los de uso diario van todos; lo buscado, los primeros.
+  const shown = terms.length ? results.slice(0, MAX) : results
 
   return (
     <div className="gx gx-cie">
       <div className="gx-card">
         <div className="gx-head">
           <b>Códigos CIE-10 de odontología</b>
-          <span>Escribe el diagnóstico o el código: «necrosis», «pulpitis», «k04».</span>
+          <span>Escribe el diagnóstico o el código: «necrosis», «pulpitis», «K04.1».</span>
         </div>
         <label className="gx-search" htmlFor={id}>
           <span className="sr-only">Buscar un código</span>
@@ -75,7 +81,7 @@ export default function Cie10Search({ codes, daily }: Props) {
           ))}
         </ul>
         <p className="gx-note">
-          En odentIA no lo buscas: marcas la caries en el odontograma y su código ya viene propuesto.
+          En odentIA, al marcar la caries en el odontograma, su código ya viene propuesto.
         </p>
       </div>
     </div>

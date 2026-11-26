@@ -46,7 +46,7 @@ export const guide: Guide = {
         rows: [
           ["Caries", "K02.0 esmalte · K02.1 dentina · K02.5 con exposición pulpar"],
           ["Pulpa y periápice", "K04.0 pulpitis · K04.1 necrosis de la pulpa · K04.4 periodontitis apical aguda · K04.5 periodontitis apical crónica · K04.6 absceso con fístula · K04.7 absceso sin fístula"],
-          ["Encía y periodonto", "K05.1 gingivitis crónica · K05.3 periodontitis crónica · K06.0 retracción gingival · K03.6 depósitos (sarro)"],
+          ["Encía y periodonto", "K05.1 gingivitis crónica · K05.2 periodontitis aguda (absceso periodontal, pericoronaritis) · K05.3 periodontitis crónica · K06.0 retracción gingival · K03.6 depósitos (sarro)"],
           ["Pérdida y restos", "K08.1 pérdida por extracción o enfermedad periodontal · K08.3 raíz dental retenida · K01.1 dientes impactados"],
           ["Después de una extracción", "K10.3 alveolitis"],
           ["Desgaste y otros", "K03.0 atrición · K07.6 trastornos de la articulación temporomaxilar · K12.0 estomatitis aftosa recurrente"],
@@ -79,13 +79,13 @@ export const guide: Guide = {
     {
       sheet: "cie10-odontologia",
       label: "Códigos CIE-10 de odontología",
-      detail: "Los de uso diario al frente y la lista completa detrás · PDF",
+      detail: "Para tener a mano: los de uso diario al frente y la lista completa detrás · PDF",
     },
   ],
   tryIt: {
     demo: "cie10",
-    title: "En odentIA, el código no se busca.",
-    text: "Marcas la caries en el odontograma y **su código ya viene propuesto**, con su pieza. Lo que no se dibuja lo encuentras en el buscador de la atención, por nombre o por código y sin tildes, con lo odontológico primero. Si el paciente ya tenía ese diagnóstico, odentIA lo anota como **«Ya diagnosticado antes»**: no se repite.",
+    title: "En odentIA, el odontograma te propone el código.",
+    text: "Marcas una caries, una fractura o un resto radicular en el odontograma y **su código ya viene propuesto**, con su pieza. Lo demás, como una pulpitis o una gingivitis, lo encuentras en el buscador de la atención, por nombre o por código y sin tildes, con lo odontológico primero. Si el paciente ya tenía ese diagnóstico, odentIA lo marca **«Ya diagnosticado antes»**, para que sepas que no es nuevo.",
     note: "Busca un diagnóstico por su nombre o su código: aquí están los de odontología.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },

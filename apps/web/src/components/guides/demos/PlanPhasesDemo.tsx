@@ -49,7 +49,7 @@ const ITEMS: Item[] = [
     id: "destartraje",
     tooth: "Boca",
     treatment: "Destartraje y profilaxis",
-    diagnosis: "K03.6 Depósitos en los dientes",
+    diagnosis: "K03.6 Depósitos · K05.1 Gingivitis crónica",
     sessions: 1,
     phase: "basica",
     why: "Sanar la encía va en la fase básica, antes de operar o rehabilitar.",
@@ -139,6 +139,18 @@ export default function PlanPhasesDemo() {
             Indicar todo
           </button>
         ) : null}
+        <p className={done ? "gx-status ok" : "gx-status"} aria-live="polite">
+          {done
+            ? `Plan listo: ${ITEMS.length} tratamientos en ${new Set(ITEMS.map((item) => item.phase)).size} fases. Cada cita dirá en qué sesión va («Endodoncia · 36 · sesión 1 de 2») y al firmar, el presupuesto se arma con este plan.`
+            : last
+              ? `${last.treatment} · ${last.tooth === "Boca" ? "boca" : last.tooth}: ${PHASES.find(([key]) => key === last.phase)![1]}. ${last.why}`
+              : "odentIA propone la fase de cada tratamiento; en la app la cambias si tu caso lo pide."}
+        </p>
+        {done ? (
+          <button type="button" className="gx-btn gx-btn-soft" ref={again} onClick={reset}>
+            Volver a empezar
+          </button>
+        ) : null}
         <ol className="gx-phases" aria-label="El plan, por fases">
           {PHASES.map(([key, label]) => {
             const items = ITEMS.filter((item) => item.phase === key && placed.includes(item.id))
@@ -160,25 +172,13 @@ export default function PlanPhasesDemo() {
                   </ul>
                 ) : (
                   <span className="gx-phase-empty">
-                    {key === "mantenimiento" ? "La pones tú, con «Planificar…»: el control." : "—"}
+                    {key === "mantenimiento" ? "La pones tú: el control." : "—"}
                   </span>
                 )}
               </li>
             )
           })}
         </ol>
-        <p className={done ? "gx-status ok" : "gx-status"} aria-live="polite">
-          {done
-            ? `Plan listo: ${ITEMS.length} tratamientos en ${new Set(ITEMS.map((item) => item.phase)).size} fases. Cada cita dirá en qué sesión va («Endodoncia · 36 · sesión 1 de 2») y el presupuesto sale de este plan.`
-            : last
-              ? last.why
-              : "odentIA propone la fase de cada tratamiento; tú la mueves si tu caso lo pide."}
-        </p>
-        {done ? (
-          <button type="button" className="gx-btn gx-btn-soft" ref={again} onClick={reset}>
-            Volver a empezar
-          </button>
-        ) : null}
       </div>
     </div>
   )

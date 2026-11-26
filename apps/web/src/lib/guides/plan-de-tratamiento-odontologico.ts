@@ -41,7 +41,7 @@ export const guide: Guide = {
           ["36", "Pulpitis irreversible sintomática (K04.0)"],
           ["15", "Caries de la dentina (K02.1)"],
           ["46", "Ausente: se extrajo (K08.1)"],
-          ["Boca", "Sarro y encía inflamada (K03.6)"],
+          ["Boca", "Sarro (K03.6) y gingivitis crónica (K05.1)"],
         ],
         caption: "El caso de Jorge, que usamos en toda la guía. Los códigos, en la [guía de la CIE-10](/guias/cie-10-odontologia).",
       },
@@ -54,6 +54,7 @@ export const guide: Guide = {
       figure: {
         kind: "tabla",
         head: ["Fase", "Qué va", "En el caso de Jorge"],
+        stack: true,
         rows: [
           ["**Urgencia**", "Dolor, infección o trauma", "Endodoncia del 36"],
           ["**Básica o higiénica**", "Controlar caries y sanar la encía", "Resina del 15 · destartraje y profilaxis"],
@@ -67,9 +68,9 @@ export const guide: Guide = {
       ],
     },
     {
-      title: "Ordena dentro de cada fase",
+      title: "Lo que se apoya en otro, después",
       text: [
-        "Dentro de una fase, lo que sostiene a otro va antes: **la corona después de su endodoncia**, y la corona sobre el implante cuando el implante ya está listo. Aunque el 36 duela, su corona no se adelanta: lo urgente es la endodoncia.",
+        "Lo que sostiene a otro va antes, aunque estén en fases distintas: **la corona después de su endodoncia**, y la corona sobre el implante cuando el implante ya está listo. Aunque el 36 duela, su corona no se adelanta: lo urgente es la endodoncia.",
       ],
     },
     {
@@ -99,14 +100,13 @@ export const guide: Guide = {
     {
       sheet: "plan-de-tratamiento",
       label: "Plan de tratamiento en blanco",
-      detail: "Diagnóstico por pieza y las cinco fases, con sesiones y fechas · PDF",
+      detail: "Si todavía trabajas en papel: el diagnóstico por pieza y las cinco fases, con sesiones y fechas · PDF",
     },
   ],
   tryIt: {
     demo: "plan",
     title: "En odentIA, cada tratamiento cae en su fase.",
-    text: "Indicas el tratamiento y odentIA **propone su fase**: lo de dolor o infección en urgencia, la corona después de su endodoncia. Nace con las sesiones de su servicio, cada cita dice en qué sesión va («sesión 1 de 2»), al firmar te pregunta si terminaste y te ofrece **reservar la siguiente sesión** ahí mismo. Si dictas, Clío te propone el plan y tú lo revisas. Y el presupuesto sale solo del plan.",
-    note: "Toca «Indicar» en cada tratamiento y mira en qué fase cae.",
+    text: "Indicas el tratamiento y odentIA **propone su fase**: lo de dolor o infección en urgencia, la corona después de su endodoncia. Nace con las sesiones de su servicio, cada cita dice en qué sesión va («sesión 1 de 2»), al firmar te pregunta si terminaste y te ofrece **reservar la siguiente sesión** ahí mismo. Si dictas, Clío te propone el plan y tú lo revisas. Y al firmar, el presupuesto se arma solo con lo que indicaste.",
     product: { href: "/presupuestos-dentales", label: "Mira «Presupuestos»" },
   },
   faq: [

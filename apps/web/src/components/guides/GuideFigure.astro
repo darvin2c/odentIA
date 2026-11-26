@@ -88,7 +88,7 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
 ) : (
   <figure class="gf gf-table">
     <div class="gf-scroll" tabindex="0" role="region" aria-label={figure.head.join(" · ")}>
-      <table class:list={{ "gf-stack": figure.head.length > 3 }}>
+      <table class:list={{ "gf-stack": figure.head.length > 3 || figure.stack }}>
         <thead><tr>{figure.head.map((cell) => <th scope="col">{cell}</th>)}</tr></thead>
         <tbody>
           {figure.rows.map((row) => (
@@ -174,7 +174,7 @@ const wide = figure.kind === "fdi" && figure.dentition !== "temporal"
     .gf-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     .gf-stack tr { display: block; border-top: 1px solid var(--line); padding: 8px 0; }
     .gf-stack tbody tr:first-child { border-top: 0; }
-    .gf-stack td { display: grid; grid-template-columns: 5.5em 1fr; gap: 10px; border-top: 0; padding: 2px 14px; white-space: normal; }
+    .gf-stack td { display: grid; grid-template-columns: minmax(5.5em, 8.5em) 1fr; gap: 10px; border-top: 0; padding: 2px 14px; white-space: normal; }
     .gf-stack td::before { content: attr(data-label); font-size: 13px; font-weight: 600; color: var(--ink-2); }
     .gf-stack td:first-child { display: block; padding-top: 4px; font-weight: 700; color: var(--ink); }
     .gf-stack td:first-child::before { content: none; }

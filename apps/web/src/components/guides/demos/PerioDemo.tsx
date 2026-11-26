@@ -33,28 +33,49 @@ const DEPTH_MAX = 15
 const RECESSION_MIN = -10
 const RECESSION_MAX = 15
 
-/** El dibujo: 9 sitios a lo ancho; el límite amelocementario en `CEJ`, cada milímetro `MM` píxeles hacia la raíz. */
+/**
+ * El dibujo, como en la app (`periodontal-chart.tsx`): las piezas de arriba con la raíz hacia arriba y
+ * la corona abajo. 9 sitios a lo ancho; el límite amelocementario a `CROWN` del borde de abajo, y cada
+ * milímetro, `MM` píxeles hacia la raíz (hacia arriba).
+ */
 const W = 360
 const COL = W / 9
-const CEJ = 46
+const CROWN = 46
 const MM = 9
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 export default function PerioDemo() {
   const [sites, setSites] = useState<Site[]>(START)
+  /** Lo escrito en cada campo mientras se escribe («-» antes del número): el número se toma cuando lo es. */
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const set = (index: number, patch: Partial<Site>) =>
     setSites((now) => now.map((site, at) => (at === index ? { ...site, ...patch } : site)))
+  const typed = (field: "depth" | "recession", index: number, text: string) => {
+    const clean = text.replace(/[−–]/g, "-").replace(/[^\d-]/g, "").replace(/(?!^)-/g, "")
+    setDrafts((now) => ({ ...now, [`${field}${index}`]: clean }))
+    if (!/^-?\d+$/.test(clean)) return
+    const value = Number(clean)
+    set(index, field === "depth" ? { depth: clamp(value, 0, DEPTH_MAX) } : { recession: clamp(value, RECESSION_MIN, RECESSION_MAX) })
+  }
+  /** Al salir del campo vuelve a mostrar el número guardado. */
+  const settle = (field: "depth" | "recession", index: number) =>
+    setDrafts((now) => {
+      const { [`${field}${index}`]: _, ...rest } = now
+      return rest
+    })
+  const shownValue = (field: "depth" | "recession", index: number) => drafts[`${field}${index}`] ?? String(sites[index]![field])
 
   const loss = sites.map((site) => site.depth + site.recession)
   const worst = loss.reduce((best, value, index) => (value > loss[best]! ? index : best), 0)
   const bleeding = sites.filter((site) => site.bleeding).length
   const percent = Math.round((100 * bleeding) / sites.length)
 
-  const height = CEJ + 16 * MM
+  const height = CROWN + 16 * MM
+  const CEJ = height - CROWN
   const x = (index: number) => COL * index + COL / 2
   /** Los milímetros hacia la raíz, sin salirse del dibujo (una bolsa de 15 mm con recesión llega abajo). */
-  const y = (mm: number) => Math.min(height - 6, Math.max(8, CEJ + mm * MM))
+  const y = (mm: number) => Math.min(height - 8, Math.max(6, CEJ - mm * MM))
   const margin = sites.map((site, index) => `${x(index)},${y(site.recession)}`).join(" ")
   const bottom = sites.map((site, index) => `${x(index)},${y(site.recession + site.depth)}`).join(" ")
 
@@ -68,12 +89,12 @@ export default function PerioDemo() {
         <svg className="gx-perio-svg" viewBox={`0 0 ${W} ${height}`} role="img" aria-label="La encía y el fondo de la bolsa de cada sitio">
           {TEETH.map((tooth, t) => (
             <g key={tooth}>
-              <rect x={COL * 3 * t + 8} y={6} width={COL * 3 - 16} height={CEJ - 6} rx={10} className="gx-crown" />
+              <rect x={COL * 3 * t + 8} y={CEJ} width={COL * 3 - 16} height={CROWN - 6} rx={10} className="gx-crown" />
               <path
-                d={`M ${COL * 3 * t + 14} ${CEJ} L ${COL * 3 * t + COL * 1.2} ${CEJ + 14 * MM} L ${COL * 3 * t + COL * 1.8} ${CEJ + 14 * MM} L ${COL * 3 * (t + 1) - 14} ${CEJ}`}
+                d={`M ${COL * 3 * t + 14} ${CEJ} L ${COL * 3 * t + COL * 1.2} ${CEJ - 14 * MM} L ${COL * 3 * t + COL * 1.8} ${CEJ - 14 * MM} L ${COL * 3 * (t + 1) - 14} ${CEJ}`}
                 className="gx-root"
               />
-              <text x={COL * 3 * t + COL * 1.5} y={CEJ - 16} textAnchor="middle" className="gx-tooth-n">
+              <text x={COL * 3 * t + COL * 1.5} y={CEJ + 28} textAnchor="middle" className="gx-tooth-n">
                 {tooth}
               </text>
             </g>
@@ -102,33 +123,34 @@ export default function PerioDemo() {
           {sites.map((site, index) => (
             <input
               key={index}
-              type="number"
+              type="text"
               inputMode="numeric"
-              min={0}
-              max={DEPTH_MAX}
-              value={site.depth}
+              value={shownValue("depth", index)}
+              onBlur={() => settle("depth", index)}
               aria-label={`Sondaje de la ${TEETH[Math.floor(index / 3)]}, ${SITE_WORDS[index % 3]}, en milímetros`}
-              onChange={(event) => set(index, { depth: clamp(Number(event.target.value) || 0, 0, DEPTH_MAX) })}
+              onChange={(event) => typed("depth", index, event.target.value)}
             />
           ))}
           <span className="gx-row-k">Recesión</span>
           {sites.map((site, index) => (
             <input
               key={index}
-              type="number"
-              inputMode="numeric"
-              min={RECESSION_MIN}
-              max={RECESSION_MAX}
-              value={site.recession}
+              type="text"
+              // Teclado con el signo «-»: el numérico del iPhone no lo trae.
+              inputMode="text"
+              value={shownValue("recession", index)}
+              onBlur={() => settle("recession", index)}
               aria-label={`Recesión de la ${TEETH[Math.floor(index / 3)]}, ${SITE_WORDS[index % 3]}, en milímetros (negativa si la encía cubre la corona)`}
-              onChange={(event) => set(index, { recession: clamp(Number(event.target.value) || 0, RECESSION_MIN, RECESSION_MAX) })}
+              onChange={(event) => typed("recession", index, event.target.value)}
             />
           ))}
           <span className="gx-row-k">Inserción</span>
           {loss.map((value, index) => (
-            <output key={index} className={value >= 5 ? "hi" : ""} aria-label={`Pérdida de inserción de la ${TEETH[Math.floor(index / 3)]}, ${SITE_WORDS[index % 3]}`}>
+            // Un span y no un <output>: el resumen de abajo ya lo anuncia, sin nueve avisos por tecla.
+            <span key={index} className={value >= 5 ? "gx-out hi" : "gx-out"}>
+              <span className="sr-only">Pérdida de inserción de la {TEETH[Math.floor(index / 3)]}, {SITE_WORDS[index % 3]}: </span>
               {value}
-            </output>
+            </span>
           ))}
           <span className="gx-row-k">Sangra</span>
           {sites.map((site, index) => (

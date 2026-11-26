@@ -36,7 +36,8 @@ export type GuideFigure =
   | { kind: "fdi"; dentition: "permanente" | "temporal" | "mixta"; mark?: number; caption: Rich }
   /** Las cinco caras de un diente de arriba (el 26), como en la hoja. */
   | { kind: "caras"; caption: Rich }
-  | { kind: "tabla"; head: string[]; rows: Rich[][]; caption?: Rich }
+  /** `stack`: en el celular, cada fila en su bloque aunque tenga 3 columnas (lo hace solo con más de 3). */
+  | { kind: "tabla"; head: string[]; rows: Rich[][]; caption?: Rich; stack?: boolean }
 
 export interface GuideStep {
   title: string

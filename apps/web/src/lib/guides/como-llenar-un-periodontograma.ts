@@ -26,7 +26,7 @@ export const guide: Guide = {
     {
       title: "Primero, una revisión rápida",
       text: [
-        "En el día a día, empieza con una **revisión por sextantes**: si algún sextante tiene bolsas o sangra, ahí haces el periodontograma completo. Sonda con **fuerza ligera**, recorriendo el surco.",
+        "En el día a día, empieza con una **revisión por sextantes**: si un sextante tiene una bolsa de **4 mm o más**, ahí haces el periodontograma completo. Si solo sangra, es para tratar la encía, no para sondear la boca entera. Sonda con **fuerza ligera**, recorriendo el surco.",
       ],
     },
     {
@@ -63,7 +63,7 @@ export const guide: Guide = {
       title: "Sangrado, supuración, movilidad y furca",
       text: [
         "Marca en cada sitio si **sangra** o **supura** al sondar. Por pieza, la **movilidad** (de 0 a 3) y la **furca** (grado 1, 2 o 3) en cada entrada: en los molares de arriba, por fuera, mesial por dentro y distal por dentro; en los de abajo, por fuera y por dentro; en el primer premolar de arriba, mesial y distal.",
-        "Anota también las piezas **ausentes** y los **implantes**: se sondean, pero no cuentan en los índices de las piezas.",
+        "Marca las piezas **ausentes**. Los **implantes** se sondean, pero no cuentan en los índices de las piezas.",
       ],
     },
     {
@@ -75,8 +75,8 @@ export const guide: Guide = {
     {
       title: "Qué te dicen los números",
       text: [
-        "Con la pérdida de inserción, el sangrado y la radiografía se clasifica según la clasificación de 2017: si hay periodontitis, su **estadio** (de I a IV) y su **grado** (A, B o C). Para el grado ayudan la pérdida ósea en la radiografía, si fuma y cuánto, y si tiene diabetes.",
-        "En los controles, quien ya tuvo periodontitis está **estable** si sangra menos del 10 % de los sitios y ninguna bolsa pasa de 4 mm (ni las de 4 mm sangran).",
+        "Sin pérdida de inserción, el **sangrado** dice si es salud o **gingivitis**: hay gingivitis cuando sangra el 10 % de los sitios o más. Si hay pérdida de inserción entre dientes, es **periodontitis**: su **estadio** (de I a IV) lo dan la pérdida de inserción, la pérdida ósea en la radiografía y las piezas perdidas por la encía; su **grado** (A, B o C), cuánto avanzó para su edad, si fuma y si tiene diabetes. Es la clasificación de 2017 (Papapanou y otros, y Chapple y otros, J Clin Periodontol 2018).",
+        "En los controles, quien ya tuvo periodontitis está **inestable** si tiene una bolsa de 5 mm o más, o una de 4 mm que sangra; si no, **estable** si sangra menos del 10 % de los sitios y **en remisión** si sangra más.",
       ],
     },
   ],
@@ -84,14 +84,13 @@ export const guide: Guide = {
     {
       sheet: "periodontograma",
       label: "Periodontograma en blanco",
-      detail: "Seis sitios por pieza, sangrado, movilidad, furca y placa · PDF",
+      detail: "Si todavía trabajas en papel: seis sitios por pieza, sangrado, movilidad, furca y placa · PDF",
     },
   ],
   tryIt: {
     demo: "periodontograma",
     title: "En odentIA, el periodontograma no se suma a mano.",
     text: "Se llena a pantalla completa, **una pieza y una cara a la vez**, con campos grandes y el teclado o la pantalla. El gráfico se dibuja al lado mientras escribes, **la pérdida de inserción y los índices salen solos** y te recuerda anotar en negativo la encía que cubre la corona. Cada cambio se guarda solo; si se cae el internet, lo que está en la pantalla se envía al volver. Te **propone la clasificación** con sus razones, tú la confirmas, y en el control lo **comparas con el anterior**.",
-    note: "Cambia el sondaje o la recesión de un sitio y mira cómo se mueve la encía.",
     product: { href: "/historia-clinica-y-odontograma", label: "Mira «Historia y odontograma»" },
   },
   faq: [
@@ -109,7 +108,7 @@ export const guide: Guide = {
     },
     {
       q: "¿Y si no tengo tiempo para la boca entera?",
-      a: "Haz la revisión rápida por sextantes y el periodontograma completo donde haya bolsas o sangrado.",
+      a: "Haz la revisión rápida por sextantes y el periodontograma completo donde haya una bolsa de 4 mm o más.",
     },
   ],
   related: ["como-llenar-un-odontograma", "plan-de-tratamiento-odontologico"],

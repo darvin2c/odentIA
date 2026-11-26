@@ -1423,7 +1423,7 @@ async function blankPeriodontogram(): Promise<Uint8Array> {
   kit.text(
     [
       { text: "Recesión: ", face: "sansSemi" },
-      { text: "positiva si se ve raíz (+2), negativa si la encía cubre la corona (−1). ", tone: "gray" },
+      { text: "positiva si se ve raíz (+2), negativa si la encía cubre la corona (−1); con el signo cambiado, la pérdida de inserción sale mal. ", tone: "gray" },
       { text: "Pérdida de inserción ", face: "sansSemi" },
       { text: "= sondaje + recesión. ", tone: "gray" },
       { text: "Sangrado y supuración: ", face: "sansSemi" },
@@ -1492,6 +1492,7 @@ export const DAILY_DENTAL_ICD10 = [
   "K04.6",
   "K04.7",
   "K05.1",
+  "K05.2",
   "K05.3",
   "K03.6",
   "K06.0",

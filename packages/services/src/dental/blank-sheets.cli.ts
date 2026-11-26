@@ -49,13 +49,20 @@ async function shareImage(page: Buffer, title: string, use = "Para imprimir en A
   // El nombre en dos renglones si es de dos o más palabras («Odontograma / de niños»): en uno se
   // metía bajo la hoja. Cada renglón cabe en unos 580 px de ancho.
   const [first = "", ...rest] = title.split(" ")
-  const lines = rest.length ? [first, rest.join(" ")] : [first]
+  // Si lo que sigue a la primera palabra no cabe en un renglón («de tratamiento odontológico»), se
+  // reparte en dos: el título va en tres.
+  const tail = rest.join(" ")
+  const lines = !rest.length
+    ? [first]
+    : tail.length <= 20
+      ? [first, tail]
+      : [first, rest.slice(0, Math.ceil(rest.length / 2)).join(" "), rest.slice(Math.ceil(rest.length / 2)).join(" ")]
   // Un renglón de más de 16 letras («clínica odontológica») va más chico: si no, toca la hoja.
   const size = Math.max(...lines.map((line) => line.length)) > 16 ? 54 : 64
   const name = lines
-    .map((line, i) => `<text x="80" y="${lines.length > 1 ? 222 + i * 72 : 250}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="${size}" font-weight="700" fill="#ffffff">${escape(line)}</text>`)
+    .map((line, i) => `<text x="80" y="${lines.length > 2 ? 222 + i * 64 : lines.length > 1 ? 222 + i * 72 : 250}" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="${size}" font-weight="700" fill="#ffffff">${escape(line)}</text>`)
     .join("\n  ")
-  const below = lines.length > 1 ? 72 : 0
+  const below = lines.length > 2 ? 104 : lines.length > 1 ? 72 : 0
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
   <rect width="1200" height="630" fill="#0a2129"/>
   <rect x="690" y="40" width="460" height="620" rx="18" fill="#123844"/>
