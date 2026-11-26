@@ -7,7 +7,7 @@ import {
   storeSupportAccess,
 } from "@gestoria/db"
 import type { AdminRequest } from "@odentia/contract"
-import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { StoreSeat } from "./permisos.js"
 import { StoreError } from "./tiendas.js"
@@ -52,6 +52,10 @@ export async function receiveSupportRequest(
   const storeId = data.account
   if (!z.uuid().safeParse(storeId).success)
     return { status: "fallo", message: "Esa tienda no existe en gestorIA." }
+  // Un pedido por vez también si llegan dos a la vez: el segundo espera y ve el primero.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`soporte:${storeId}:${data.staff.userId}`}))`,
+  )
   const [shop] = await tx.select({ id: store.id }).from(store).where(eq(store.id, storeId))
   if (!shop) return { status: "fallo", message: "Esa tienda no existe en gestorIA." }
   const [pending] = await tx
@@ -270,15 +274,18 @@ export type MySupportState =
 /**
  * La entrada de esta persona en la tienda (la regla de la base solo le deja ver las suyas): la
  * vigente si hay; si no, la última. Null si nunca tuvo una: para ella, la tienda no existe. Para
- * decir quién la sacó se entra un momento a la tienda a leer solo ese nombre, y se sale.
+ * decir quién la sacó se entra un momento a la tienda a leer solo ese nombre, y se sale; solo con
+ * el código del personal en esta sesión (sin él, nada del equipo de la tienda).
  */
 export async function supportStateOf(
   tx: Db,
   storeId: string,
   person: { userId: string; staffVerified?: boolean },
   now = new Date(),
+  known?: SupportAccessRow | null,
 ): Promise<MySupportState | null> {
-  const active = await activeSupportOf(tx, storeId, person.userId, now)
+  const active =
+    known !== undefined ? known : await activeSupportOf(tx, storeId, person.userId, now)
   if (active?.expiresAt)
     return person.staffVerified
       ? { state: "puede_mirar", until: active.expiresAt }
@@ -300,7 +307,7 @@ export async function supportStateOf(
   const ending = endingOf(last, now)
   if (!ending) return null
   let byName: string | null = null
-  if (ending.by) {
+  if (ending.reason === "quitado" && ending.by && person.staffVerified) {
     await enterStore(tx, storeId)
     byName = (await namesOf(tx, [ending.by])).get(ending.by) ?? null
     await enterStore(tx, "")

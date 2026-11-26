@@ -267,7 +267,7 @@ async function seatIn(tx: Db, person: Person, storeId: string) {
   if (row) return { role: row.role as StoreSeat, support: null }
   const support = await activeSupportOf(tx, storeId, person.userId)
   if (support && person.staffVerified) return { role: "support" as const, support }
-  const state = await supportStateOf(tx, storeId, person)
+  const state = await supportStateOf(tx, storeId, person, new Date(), support)
   if (state) throw supportStateError(state)
   throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
 }

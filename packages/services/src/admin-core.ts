@@ -19,6 +19,7 @@ import {
   adminTrustedDevice,
   twoFactor,
 } from "@odentia/db/schema/admin-core"
+import { userGlobalBlock } from "@odentia/db/schema/admin-organizations"
 import { account as authAccount, session, user } from "@odentia/db/schema/auth"
 import { generateRandomString, type SecretConfig, symmetricEncrypt } from "better-auth/crypto"
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
@@ -880,10 +881,18 @@ export async function staffVerifiedSession(
     .where(eq(adminStaff.userId, input.userId))
     .limit(1)
   if (!staff?.active || !isAdminRole(staff.role)) return false
-  const blocked = await ownerDb.execute(
-    sql`select 1 from "user_global_block" where "user_id" = ${input.userId} and "active" and ("expires_at" is null or "expires_at" > now()) limit 1`,
-  )
-  if (Array.isArray(blocked) && blocked.length > 0) return false
+  const [blocked] = await ownerDb
+    .select({ userId: userGlobalBlock.userId })
+    .from(userGlobalBlock)
+    .where(
+      and(
+        eq(userGlobalBlock.userId, input.userId),
+        eq(userGlobalBlock.active, true),
+        or(isNull(userGlobalBlock.expiresAt), gt(userGlobalBlock.expiresAt, input.now)),
+      ),
+    )
+    .limit(1)
+  if (blocked) return false
   const binding = await getLiveSessionBinding(ownerDb, input.sessionId, input.now)
   return binding !== null && binding.userId === input.userId && binding.country === input.country
 }

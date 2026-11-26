@@ -373,6 +373,8 @@ describe("la entrada de soporte", () => {
       reason: "quitado",
       byName: "Rosa",
     })
+    // Sin el código en esta sesión, sin nombres del equipo de la tienda.
+    expect((await mine("soporte")).json).toMatchObject({ reason: "quitado", byName: null })
     const team = await call("rosa", "GET", `/api/tiendas/${storeId}/equipo`)
     expect(team.json.support[0]).toMatchObject({
       status: "terminado",
@@ -419,7 +421,8 @@ describe("la entrada de soporte", () => {
     expect((await mine()).json).toMatchObject({
       state: "terminado",
       reason: "rechazado",
-      byName: "Rosa",
+      // A soporte no se le dice quién de la tienda dijo que no.
+      byName: null,
     })
   })
 })

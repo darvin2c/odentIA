@@ -704,6 +704,8 @@ function NotYours({ me, id }: { me: Me; id: string }) {
       return api<MySupportState>(`/api/tiendas/${id}/soporte/mio`)
     },
     retry: false,
+    // Pedir el estado pide un token nuevo si falta el código: no a cada vuelta a la pestaña.
+    refetchOnWindowFocus: false,
   })
   const ready = state.data?.state === "puede_mirar"
   useEffect(() => {
@@ -917,7 +919,7 @@ function SupportAccessPanel({ store, only }: { store: MyStore; only: "actual" | 
       <ul className="flex flex-col divide-y">
         {rows.map((row) => {
           const line = supportLine(row, meId)
-          const sees = `Verá tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Los ${row.minutes ?? ""} minutos empiezan cuando la dejas entrar. Este pedido solo lo puede hacer el equipo de gestorIA.`
+          const sees = `Verá tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Los ${row.minutes} minutos empiezan cuando la dejas entrar. Este pedido solo lo puede hacer el equipo de gestorIA.`
           return (
             <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
               <div className="flex min-w-0 flex-1 basis-60 flex-col gap-1">

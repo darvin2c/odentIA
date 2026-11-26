@@ -88,10 +88,12 @@ export function supportLine(
           ? `Lo aceptó ${row.answeredByName}.`
           : null
       : null
-  const detail = [row.reason ? `Para: ${row.reason}.` : null, answered].filter(Boolean).join(" ")
+  const detail = [row.reason ? sentence(`Para: ${row.reason}`) : null, answered]
+    .filter(Boolean)
+    .join(" ")
   const line = (title: string) => ({ title, detail: detail || null })
   if (row.status === "por_aceptar")
-    return line(`${who} pide mirar tu tienda ${row.minutes ?? ""} minutos`.replace("  ", " "))
+    return line(`${who} pide mirar tu tienda ${row.minutes} minutos`)
   if (row.status === "vigente" && row.expiresAt)
     return line(
       row.usedAt

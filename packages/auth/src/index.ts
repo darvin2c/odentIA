@@ -240,7 +240,9 @@ export function createAuth({
       // Token firmado para otra app (ADR 0201): `sub` es la cuenta y `aud` la app de esta
       // entrada; lleva lo justo para la copia de la cuenta de esa app. Apagado, inerte.
       jwt({
-        disableSettingJwtHeader: !signedTokens,
+        // El token sale solo de `/api/auth/token`: firmarlo en cada `get-session` costaría las
+        // consultas de `tokenClaims` sin que nadie lo lea (gestorIA pide `/token`).
+        disableSettingJwtHeader: true,
         jwt: {
           issuer: baseURL,
           audience: app,

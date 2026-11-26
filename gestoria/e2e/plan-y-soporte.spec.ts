@@ -121,10 +121,11 @@ test("la tienda deja entrar a soporte, solo a mirar, y lo saca", async ({ page }
   await page.goto(`${BASE}/catalogo`)
   await expect(page.getByText("Ana de Soporte pide mirar tu tienda 30 minutos")).toBeVisible()
   // La caja dice qué verá, desde cuándo corren los minutos y quién puede pedirlo.
+  // (El mismo texto va plegado para el celular: se mira el que se ve en escritorio.)
   await expect(
-    page.getByText(
-      /tu equipo \(nombres, correos y roles\).*Los 30 minutos empiezan cuando la dejas entrar/,
-    ),
+    page
+      .locator("span")
+      .filter({ hasText: /tu equipo \(nombres, correos y roles\).*Los 30 minutos empiezan/ }),
   ).toBeVisible()
   await noSideScroll(page)
   await shot(page, "soporte-por-aceptar-escritorio")

@@ -48,7 +48,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // Sin sesión no se reintenta: se manda a entrar.
-      retry: (count, error) => !(error instanceof SignedOut) && count < 1,
+      // Un rechazo de permisos (403) no cambia al reintentarlo.
+      retry: (count, error) =>
+        !(error instanceof SignedOut) &&
+        !(error instanceof ApiError && error.status === 403) &&
+        count < 1,
     },
   },
 })
@@ -239,7 +243,8 @@ const router = createRouter({
 // terminó el acceso (o la tienda todavía no responde), la tienda se vuelve a mirar: deja de salir
 // en su lista y la pantalla dice por qué (ADR 0219).
 queryClient.getQueryCache().subscribe((event) => {
-  const error = event.type === "updated" ? event.query.state.error : null
+  const error =
+    event.type === "updated" && event.action.type === "error" ? event.action.error : null
   if (
     error instanceof ApiError &&
     error.code.startsWith("SUPPORT_") &&
