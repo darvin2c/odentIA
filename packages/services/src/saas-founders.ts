@@ -20,6 +20,7 @@ import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lte, ne, or, type SQ
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { planPrices } from "./saas-actions.js"
+import { assertSaasCurrencyChange } from "./saas-billing.js"
 import { clientForWaitlistRequest, linkClientToOrganization } from "./admin-clients.js"
 import { applyInvitedProposal } from "./admin-sales.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
@@ -1040,6 +1041,8 @@ export async function moveClinicToSpecialPlan(
     .where(and(eq(saasPlan.id, planId), specialPlansOf(await orgProduct(tx, orgId))))
     .limit(1)
   if (!plan) throw invalidField("planId", "Ese plan no es un plan especial de esta app")
+  // Como al elegir plan en el panel: no se deja un saldo pendiente en otra moneda.
+  await assertSaasCurrencyChange(tx, orgId, plan.currency)
   const [before] = await tx
     .select({ discountBps: saasSubscription.discountBps })
     .from(saasSubscription)
