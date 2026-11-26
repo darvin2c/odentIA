@@ -234,7 +234,7 @@ export function localAnesthesiaWords(input: {
   ageYears: number | null | undefined
   /** El tope de epinefrina con sus motivos y si falta tomar la presión (`epinephrineCheckOf`). */
   epinephrine: EpinephrineCheck | null
-}): { cap: string | null; dose: string | null; warnings: string[]; weightIssue?: boolean } {
+}): { cap: string | null; dose: string | null; warnings: string[]; weightIssue?: string } {
   const anesthetic = localAnestheticOf(input.anesthetic)
   if (!anesthetic) return { cap: null, dose: null, warnings: [] }
   const warnings: string[] = []
@@ -266,7 +266,7 @@ export function localAnesthesiaWords(input: {
   if (weight === null || weight === undefined || !(weight > 0)) return { cap, dose: null, warnings }
   // Un peso imposible para su edad («230 kg» a los 7 años) no da una dosis máxima: avisa antes de usarse.
   const impossible = weightForAgeAlert(weight, ageYears)
-  if (impossible) return { cap, dose: null, warnings: [...warnings, impossible], weightIssue: true }
+  if (impossible) return { cap, dose: null, warnings: [...warnings, impossible], weightIssue: impossible }
   const max = maxLocalAnestheticDose(weight, anesthetic)
   if (cap) return { cap, dose: `Máximo por peso (${number(weight)} kg): ${number(max.cartridges)} cartuchos`, warnings }
   const mg = max.capped ? `${number(max.mg)} mg (el tope)` : `${number(max.mg)} mg`

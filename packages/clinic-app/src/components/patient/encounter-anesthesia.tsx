@@ -33,6 +33,12 @@ function usesWords(uses: readonly string[]): string {
   return [listWords(procedures), listWords(anesthetics)].filter(Boolean).join(" · ")
 }
 
+/** «Anestesia local · Exodoncia simple»; sin repetir «Anestesia local» si es el servicio de hoy (revisión final del 25 nov). */
+function anesthesiaTitle(uses: readonly string[]): string {
+  const words = usesWords(uses)
+  return !words || words.toLocaleLowerCase("es").trim() === "anestesia local" ? "Anestesia local" : `Anestesia local · ${words}`
+}
+
 /** Un nombre en medio de una frase: la primera letra en minúscula si no es una sigla. */
 function midSentence(name: string): string {
   return /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLocaleLowerCase("es") + name.slice(1) : name
@@ -226,7 +232,7 @@ export function EncounterAnesthesiaLine({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {usesWords(uses)}
+            {anesthesiaTitle(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {[
@@ -265,7 +271,7 @@ export function EncounterAnesthesiaLine({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <p id={`${ids}-title`} className="font-medium">
-            Anestesia local · {usesWords(uses)}
+            {anesthesiaTitle(uses)}
           </p>
           <p className="text-xs text-muted-foreground">
             {said}
@@ -348,8 +354,8 @@ export function EncounterAnesthesiaLine({
           ) : words.dose ? (
             `${words.dose}.${weightFromOther ? " Con el peso anotado hoy en otra atención." : ""}`
           ) : words.weightIssue ? (
-            // Con un peso imposible para su edad no se calcula: el motivo va en los avisos de abajo.
-            "Revisa su peso en los signos vitales para ver la dosis máxima."
+            // Con un peso imposible para su edad no se calcula: en una sola línea, el motivo y qué hacer.
+            `${words.weightIssue} Corrígelo en los signos vitales para ver la dosis máxima.`
           ) : (
             "Anota su peso en los signos vitales para ver la dosis máxima."
           )}
@@ -363,7 +369,7 @@ export function EncounterAnesthesiaLine({
             </>
           ) : null}
         </p>
-        {words.warnings.map((warning) => (
+        {words.warnings.filter((warning) => warning !== words.weightIssue).map((warning) => (
           <p key={warning} className="text-sm">
             {warning}
           </p>

@@ -90,6 +90,8 @@ import {
   ReviewStateField,
   type SaidForForm,
   withSaidHealth,
+  endedMedicineWords,
+  familyLine,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi, type SubFieldErrors } from "../../product/product-ui"
@@ -1249,7 +1251,7 @@ export function AntecedentesSummary({
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
   /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
-  health?: Pick<PatientHealth, "changed" | "medications" | "asaClassSetAt" | "asaClassSetBy">
+  health?: Pick<PatientHealth, "changed" | "medications" | "asaClassSetAt" | "asaClassSetBy"> & Partial<Pick<PatientHealth, "familyHistory">>
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
@@ -1347,6 +1349,22 @@ export function AntecedentesSummary({
             : "Sin registros",
     },
   ]
+  // Lo de su familia y lo que dejó de tomar se leen aquí, no solo al editar (revisión final del 25 nov).
+  const family = health?.familyHistory ?? []
+  const ended = health ? endedMedicineWords(health.medications, clinicToday()) : []
+  const medicationRow = rows.find((row) => row.title === "Medicación vigente")
+  if (medicationRow && ended.length) medicationRow.detail = `${medicationRow.detail}. Dejó: ${ended.join("; ")}`
+  const familyCard =
+    family.length > 0 ? (
+      <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
+        <span className="font-heading text-sm font-medium">Familiares</span>
+        <ul className="flex flex-col gap-0.5 text-sm text-muted-foreground">
+          {family.map((row) => (
+            <li key={row.id}>{familyLine(row)}</li>
+          ))}
+        </ul>
+      </div>
+    ) : null
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
@@ -1380,6 +1398,7 @@ export function AntecedentesSummary({
           ) : null}
         </div>
       ) : null}
+      {familyCard}
       {rows.map((row) => (
         <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
           <span className="font-heading text-sm font-medium">{row.title}</span>

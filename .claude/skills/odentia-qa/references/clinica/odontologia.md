@@ -153,6 +153,17 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** (21 nov 2026) lo dicho sin confirmar salía distinto en la franja, la línea fija, el Resumen y el panel, y alguno decía «no se le preguntó»; lo corregido otro día seguía ofreciéndose para confirmar. Se corrigió en la rama `fix/clio-lee-la-conversacion`.
 Fuentes que se suman: SDCEP, *Management of Dental Patients Taking Anticoagulants or Antiplatelet Drugs* (verificar la edición); NTS 139-MINSA/2018/DGAIN, 5.3.3; HL7 FHIR `Provenance` y `QuestionnaireResponse.source` (quién lo dijo).
 
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] El familiar se cuenta desde el paciente aunque hable quien acompaña: la madre de un niño dice «su papá» → Padre; «mi papá» → Abuelo materno; la hija de una adulta dice «mi hermana» → Hijo(a); «su hermana» → Hermano(a). Casos: C5 (Tomás) y C6 (Elena) de la revisión del 25 nov.
+- [ ] Lo de un familiar dicho en una pausa nunca desaparece: va a «De su familia» o a «No lo usé» con su frase.
+- [ ] Los antecedentes familiares se ven en la lectura de Antecedentes, en «Antecedentes y última atención» y en la copia de la historia, no solo al editar.
+- [ ] La fila «De su familia» se edita o descarta sola; «Corregir algo» la trae y no queda duplicada.
+- [ ] El familiar fallecido y la edad a la que enfermó tienen dónde ir (HL7 FHIR `FamilyMemberHistory.deceased` y `condition.onset`).
+- [ ] «Ya no toma» deja leer «antes: apixabán, lo dejó (fecha)» en la lectura de Antecedentes; si dijo cuándo («hace dos semanas»), esa es la fecha.
+- [ ] La dosis dicha en palabras («apixabán de cinco dos veces al día») queda como dosis y frecuencia (5 mg cada 12 h), no dentro del nombre; «para la presión» es hipertensión arterial, no «presión».
+- [ ] Un antiagregante dicho (aspirina, clopidogrel) se rotula antiagregante desde la propuesta, no solo después de revisarlo.
+Fuentes: NTS 139-MINSA/2018/DGAIN (anamnesis: antecedentes familiares); HL7 FHIR R4 `FamilyMemberHistory` y `v3-RoleCode`; ATC B01AC (antiagregantes) y B01AF (inhibidores directos del factor Xa).
+
 ## P-ODO-03 Abrir la atención: «Hoy viene a…», motivo y relato
 
 **Dónde:** «Atender» (`CA/new-encounter-button.tsx`), la atención (`CA/encounter-editor.tsx`) y «Hoy viene a…» (`CA/encounter-visit.tsx`, `S/encounter-visit.ts`).
@@ -190,6 +201,11 @@ Fuentes que se suman: SDCEP, *Management of Dental Patients Taking Anticoagulant
 - [ ] La fiebre de 38 °C o más con un absceso, y la saturación baja, se notan en el examen (signos de diseminación). **Verificar** los umbrales antes de pedirlo.
 
 Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compromised Patient* (verificar la edición); AAP 2017 (presión en niños y adolescentes); ACC/AHA 2017 (crisis hipertensiva).
+
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] El peso y la presión dichos «en la balanza…» van a Signos vitales y, si son imposibles para la edad, quedan por revisar con el aviso; nunca «peso dicho, no medido». Caso: E3b, «en la balanza marca doscientos treinta».
+- [ ] Vaciar un campo de los signos no cierra el bloque mientras se edita.
+- [ ] El peso confirmado sigue en la atención después de salir, volver y abrir o descartar un documento.
 
 ## P-ODO-05 Odontograma
 
@@ -368,6 +384,11 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 - [ ] La anestesia dictada que completa el repaso se ve en el cierre y se decide antes de firmar; la línea de anestesia avisa también lo dicho sin confirmar (anticoagulante, alergia).
 
 **Ya falló:** (21 nov 2026) el repaso propuso «anestesia infiltrativa con lidocaína en la 36» y el cierre firmó sin mostrarla; se corrigió en la rama `fix/clio-lee-la-conversacion`. La exodoncia «por decidir» sin aviso del anticoagulante confirmado ya estaba antes y sigue pendiente.
+
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] Con PA de 180/110 o más, la línea de anestesia lo dice junto al tope de epinefrina, no solo bajo los signos. Fuente: Little y Falace, *Dental Management of the Medically Compromised Patient* (verificar la edición).
+- [ ] El máximo por peso dice la unidad («8,3 cartuchos»).
+- Nota: la prilocaína a 6 mg/kg hasta 400 mg (`local-anesthesia.ts`) es más conservadora que la tabla de la AAPD (8 mg/kg hasta 600 mg, verificar); no es inseguro.
 
 ## P-ODO-11 Procedimientos de hoy
 
@@ -583,6 +604,10 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 
 **Ya falló:** (21 nov 2026) la salud dicha sin tildes caía en «Una parte que no supe citar»; «hace como dos semanas» salió «corregido por voz»; la charla con el paciente entró como evolución; la pregunta y la respuesta iban en un solo turno; el repaso repetía lo ya confirmado; la cita propuesta no contaba como «cuándo vuelve»; «Descartar esta atención» borró sin preguntar una consulta con lo que se dijo; «Intentar otra vez» podía perder la frase. Todo se corrigió en la rama `fix/clio-lee-la-conversacion`.
 Fuentes que se suman: NTS 139-MINSA/2018/DGAIN, 5.3.3; HL7 FHIR `Provenance` y `QuestionnaireResponse.source` (para quién habló); ADR 0163 (avisa, nunca frena).
+
+**Revisión final de «salud y familia» (25 nov 2026):**
+- [ ] El repaso de toda la conversación no vuelve a proponer lo que quedó en «No lo usé» como salud de quien acompaña. Caso: C5, «yo soy diabetica».
+- [ ] La frase citada bajo cada dato de salud es la que lo contiene.
 
 ## P-ODO-20 Quién ve lo clínico
 

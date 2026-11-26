@@ -874,7 +874,15 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 60,
-                  "description": "Qué es del paciente ese familiar, contado desde el paciente: dicho por el paciente, «mi mamá» es «madre»; dicho por la madre de un niño, «mi papá» es «abuelo materno»; «su hermana» es «hermana»."
+                  "description": "El parentesco tal como se dijo, sin «su» ni «mi»: «papá», «hermana», «abuela materna»."
+                },
+                "of": {
+                  "type": "string",
+                  "enum": [
+                    "paciente",
+                    "quien_habla"
+                  ],
+                  "description": "De quién es familiar: `paciente` si es familiar del paciente («su papá», «la hermana de Elena», o «mi mamá» dicho por el propio paciente); `quien_habla` si es familiar de quien lo acompaña y habla («mi papá», dicho por la madre de un niño). El sistema cuenta el parentesco con el paciente."
                 },
                 "name": {
                   "type": "string",
@@ -885,6 +893,7 @@
               },
               "required": [
                 "relation",
+                "of",
                 "name"
               ],
               "additionalProperties": false

@@ -504,3 +504,14 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Una leyenda impresa define todas las siglas que la guía enseña (I, IMP, el espigo).
 **Ya falló (mesa del 24 nov 2026, en el lienzo):** «tocas la cara y queda marcada» junto a una demo que no marca; un PDF «Niños 51–85» que no sirve para una dentición mixta.
 **Caso:** Mateo, 7 años, mixta: con la plantilla de la guía de niños se marcan la 36 permanente y la 75 temporal en la misma hoja.
+
+## V-DAT-13 Lo que se dice de la familia y lo que ya no toma (revisión del 25 nov 2026)
+
+- [ ] «Lo revisé con…» en un paciente recién registrado (revisión 0) con lo dicho de su familia y, en la misma pausa, una medicina o su última regla, confirma sin error y deja todo guardado.
+- [ ] Lo familiar dicho se lee sin abrir el editor: en Antecedentes, en «Antecedentes y última atención» y en la atención siguiente, con el mismo parentesco que dijo el aviso.
+- [ ] «Su papá», dicho por la madre de un niño, queda como padre; «mi papá», como abuelo materno.
+- [ ] La medicina que dejó se lee con su fecha de fin en Antecedentes, y el día es el anterior al dicho.
+- [ ] Una frase que está en una sugerencia o en el relato no aparece en «No lo usé»; un peso oído y no usado aparece en «No lo usé».
+- [ ] Un peso dictado en palabras («veintitrés») y en cifras («23») da la misma sugerencia.
+- [ ] Toda cifra de anestesia dice su unidad.
+- [ ] Caso con cuentas: FUR 10/06 y hoy 25/11 = 24 semanas en cajón, ficha, receta, PDF y FHIR; 23 kg con lidocaína 2 % con epinefrina = 101,2 mg = 2,8 cartuchos; 165/95 = epinefrina 0,04 mg = 2,2 cartuchos.

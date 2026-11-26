@@ -180,6 +180,33 @@ Gira del teclado (Clío, 22 nov 2026): tras cada acción de Clío, ¿dónde qued
 - [ ] Tras cambiar quién habló, el foco vuelve a ese turno.
 **Ya falló (corregido en la rama `fix/clio-lee-la-conversacion`):** «no supe dónde va» en el panel con «Es de la salud de un familiar…» en el aviso; «Llevar a su salud» vacío (22–23 nov).
 
+**Revisión final de «salud y familia» (25 nov 2026):**
+
+**M-ATE-11 (medir de nuevo):** a 1440, «Lo revisé con…» queda a 34 Tab desde el principio de la página (31 sin el aviso de soporte de la demo), en la línea del título. A 390, el aviso con «Ya no toma» mide 675 px y sus botones, 44 px. **A mantener.** Comprobación nueva:
+- [ ] Ningún clic del botón principal deja el aviso a medias: tras «Lo revisé con…», la franja no muestra dos antitrombóticos vigentes. **Ya falló:** con apixabán «ya no toma» y aspirina, solo «Lo revisé con su hija» dejó los dos en la franja (26 nov).
+
+**M-ATE-13 Corregir un parentesco de «De su familia» antes de revisarlo** (odontólogo o médico; supuesto: varias veces por semana). **Dónde:** `CA/patient/health-review-notice.tsx` (fila «De su familia»), `CA/patient/patient-health-fields.tsx` (`SAID_HEALTH_IN_FORM`). **Medida (1440, 26 nov 2026):** 9 clics, 1 tecleo, 2 formularios, 2 bajadas de unos 1250 px (32 Tab hasta «Parentesco») y un familiar falso guardado entre medio. **A mejorar** (meta: 3 clics en la fila).
+- [ ] Cada fila de «De su familia» se cambia o se quita ahí mismo, y cita su propia frase.
+- [ ] «Lo revisé con…» nunca guarda una fila que se corrigió por otra vía.
+- **Caso:** la hija dice «mi hermana tiene diabetes»; es hija de la paciente.
+
+**M-ATE-14 Leer lo de su familia y lo que ya no toma, otro día** (odontólogo o médico; supuesto: en cada paciente con antecedentes). **Dónde:** `CA/patient/antecedentes-tab.tsx` (`AntecedentesSummary`), `CA/patient/encounter-context.tsx`. **Medida (1440, 26 nov 2026):** en la ficha, 3 clics y 2137 px dentro de «Editar antecedentes»; en la atención no se puede. **A mejorar** (meta: 0 clics en la lectura de Antecedentes y la sección en el panel de la atención).
+- [ ] «Familiares» y «antes X, lo dejó el …» se leen sin abrir un formulario.
+- [ ] Tras «Lo revisé con…» con solo familia queda la línea «… quedó en sus antecedentes».
+
+**M-ATE-15 El peso medido y la dosis máxima** (odontólogo; supuesto: en cada niño que se anestesia). **Dónde:** `CA/patient/encounter-editor.tsx` (signos), `CA/patient/encounter-anesthesia.tsx`, `CA/patient/vitals-alert.tsx`. **Medida (1440, 26 nov 2026):**
+- Con dictado y «Confirmar las N»: 1 clic. La propuesta queda a 468 px bajo su campo.
+- Con el peso vacío: 2 Enter, 1 tecleo y 2 Tab, con dos saltos guiados.
+- Corregir 230 desde «Corregir su peso»: 1 clic y 1 tecleo.
+
+La confirmación es **a mantener**; la ubicación de la propuesta y el borrado, **a mejorar**.
+- [ ] La propuesta del peso y de la presión sale bajo «Signos vitales».
+- [ ] Vaciar el peso no esconde el examen ni deja el foco en la página entera.
+- [ ] Con un peso imposible, la anestesia lo dice en una línea, con el motivo antes de la acción.
+- [ ] Toda cifra de la anestesia lleva su unidad, y el título no repite «Anestesia local».
+
+**Gira nueva, «el botón principal»:** en cada aviso con más de una manera de confirmar, tocar solo el botón principal y mirar la franja y el aviso. Si algo queda a medias sin decirlo, es un hallazgo.
+
 ## Ficha
 
 ### M-FIC-01 Encontrar al paciente y saber qué sigue

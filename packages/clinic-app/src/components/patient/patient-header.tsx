@@ -592,6 +592,13 @@ export function saidHealthAlerts(
   const latest = [...said].sort((a, b) => b.at.localeCompare(a.at))
   return [...named, ...latest.flatMap((item) =>
     item.rows.flatMap((row) => {
+      // Lo que dijo que dejó y nadie confirmó con «Sí, lo dejó»: la franja lo dice junto a la que sigue
+      // vigente, sin alarma (revisión final del 25 nov, UX-1: quedaban dos antitrombóticos sin explicar).
+      if (row.stopped && !row.newer && !seen.has(row.key)) {
+        seen.add(row.key)
+        const when = item.open === false && shortDay(item.at) ? ` el ${shortDay(item.at)}` : ""
+        return [{ id: `dicho-${row.key}`, key: row.key, label: `Ya no toma: dijo que dejó ${row.value}${when}, sin confirmar`, tone: "secondary" as const }]
+      }
       if (!SAID_IN_STRIP.has(row.key) || seen.has(row.key)) return []
       seen.add(row.key)
       const label = row.key in MEDICATION_CLASSES ? MEDICATION_CLASSES[row.key as MedicationClass].label : row.label

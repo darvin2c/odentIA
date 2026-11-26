@@ -2321,6 +2321,10 @@ export function EncounterEditor({
         </div>
         {/* La presión que pide pensar antes de lo electivo, bajo sus campos: avisa y no frena (QA del 16 nov). */}
         <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
+        {/* El peso y la presión que propone Clío, junto a sus campos y no al pie del examen (revisión final del 25 nov). */}
+        {(dictationOf("examen")?.kinds ?? []).includes("signos") ? (
+          <DictationBlockSuggestions session={dictation} kind="signos" patientName={patient.patient.displayName} />
+        ) : null}
         {weightReturn ? (
           <Button
             type="button"
@@ -2473,8 +2477,8 @@ export function EncounterEditor({
   )
 
   /** Las sugerencias del dictado de una parte, debajo de lo suyo. */
-  const suggestionsOf = (key: SectionKey) =>
-    (dictationOf(key)?.kinds ?? []).map((kind) => (
+  const suggestionsOf = (key: SectionKey, except: readonly DictationKind[] = []) =>
+    (dictationOf(key)?.kinds ?? []).filter((kind) => !except.includes(kind)).map((kind) => (
       <DictationBlockSuggestions
         key={kind}
         session={dictation}
@@ -2940,7 +2944,7 @@ export function EncounterEditor({
                 exam.title,
                 <>
                   {examenBody}
-                  {suggestionsOf("examen")}
+                  {suggestionsOf("examen", ["signos"])}
                 </>,
               )
             : null}

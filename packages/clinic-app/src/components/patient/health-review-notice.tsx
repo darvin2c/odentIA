@@ -484,11 +484,16 @@ export function HealthReviewNotice({
     dictation.confirmHealth.mutate(heardItem, {
       onSuccess: () => {
         toast.success(
-          heard.rows.some((row) => row.denied)
-            ? `Revisado con ${heardWith}: quedó en sus antecedentes. Su «no» sigue aquí: confírmalo en su fila.`
-            : `Revisado con ${heardWith}: quedó en sus antecedentes como lo dijo en la consulta`,
+          heard.rows.some((row) => row.stopped)
+            ? `Revisado con ${heardWith}: quedó en sus antecedentes. Falta confirmar con «Sí, lo dejó» lo que ya no toma.`
+            : heard.rows.some((row) => row.denied)
+              ? `Revisado con ${heardWith}: quedó en sus antecedentes. Su «no» sigue aquí: confírmalo en su fila.`
+              : `Revisado con ${heardWith}: quedó en sus antecedentes como lo dijo en la consulta`,
         )
-        titleRef.current?.focus()
+        // Con lo que ya no toma esperando, el foco va a su «Sí, lo dejó»: no queda a medias sin verlo.
+        const stopButton = document.querySelector<HTMLButtonElement>("[data-stopped-confirm]")
+        if (stopButton) stopButton.focus()
+        else titleRef.current?.focus()
       },
     })
   }
@@ -589,7 +594,10 @@ export function HealthReviewNotice({
           </h2>
           {heardItem ? (
             <p className="text-sm text-muted-foreground">
-              {CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con {heardWith}.
+              {heardToSave
+                ? `${CLINICAL_NAME} lo oyó en la consulta. Nada queda en sus antecedentes hasta que lo revises con ${heardWith}.`
+                : // Lo único que queda es lo que ya no toma: falta su «Sí, lo dejó» (revisión final del 25 nov, UX-1).
+                  "Falta una: confirma con «Sí, lo dejó» la medicina que ya no toma. Hasta entonces sigue vigente."}
             </p>
           ) : unasked.length > 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -724,6 +732,7 @@ export function HealthReviewNotice({
               pending={!!dictation?.confirmStopped.isPending && dictation.confirmStopped.variables?.key === row.key}
               disabled={busy}
               onClick={() => stopRow(row)}
+              data-stopped-confirm=""
             >
               Sí, lo dejó
             </SubmitButton>

@@ -640,6 +640,14 @@ const OWN_FAQS: Record<string, Faq[]> = {
     },
   ],
   pacientes: [
+    // Mesa del 25 nov («salud y familia», entrega 2): la última regla dicha en la consulta.
+    {
+      id: "pacientes-dictado-ultima-regla",
+      q: "¿Dónde queda la fecha de su última regla que dijo en la consulta?",
+      a: "En el aviso «Revisa con… lo que dijo de su salud», como «Última regla», y en «Embarazo» si está embarazada. Con «Lo revisé con…» queda en su entrevista y sus semanas se cuentan desde esa fecha: la receta avisa el embarazo. Lo que cuenta de sus embarazos («es mi segundo embarazo») y de sus vacunas queda escrito en el relato, tal como lo dijo.",
+      forms: ["fecha de ultima regla en la consulta", "dijo su fur", "control prenatal lo que dijo", "le falta una vacuna donde lo anoto"],
+      needs: "clinical.write",
+    },
     {
       id: "pacientes-presion-alta",
       q: "¿Qué hago si la presión sale muy alta?",

@@ -619,6 +619,27 @@
           { "tipo": "signos", "campos": { "peso": 16 } }
         ]
       }
+    },
+    {
+      "id": "od-tomas-papa-alergico",
+      "producto": "odentia",
+      "descripcion": "Revisión final del 25 nov (C5): la madre de Tomás dice «su papá es alérgico a la penicilina» (el padre de Tomás, no su abuelo) y «yo soy diabética, eso es mío» (no es de Tomás ni de su familia en la consulta).",
+      "pausas": [
+        "hola tomas. señora alguna alergia o enfermedad en la familia",
+        "su papá es alérgico a la penicilina. y yo soy diabética pero eso es mío",
+        "y tomas tiene alguna alergia",
+        "no que yo sepa doctora",
+        "a ver abre grande. la setenta y cinco tiene caries profunda"
+      ],
+      "espera": {
+        "salud": [{ "ruta": "family", "con": ["papa|padre", "penicilina"] }],
+        "saludNo": [
+          { "ruta": "family", "con": ["abuel"] },
+          { "ruta": "conditions", "con": ["diabet"] }
+        ],
+        "noPropone": [{ "tipo": "alergia", "con": ["penicilina"] }],
+        "noLoUse": ["yo soy diabética|yo soy diabetica"]
+      }
     }
   ]
 }

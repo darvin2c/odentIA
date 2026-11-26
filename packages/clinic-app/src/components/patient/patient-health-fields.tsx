@@ -18,8 +18,7 @@ import {
   DOSE_UNITS,
   type DoseUnit,
   MEDICATION_FREQUENCIES,
-  MEDICATION_FREQUENCY_LABELS,
-} from "@odentia/clinical"
+  MEDICATION_FREQUENCY_LABELS, FAMILY_KINSHIP_LABELS, kinshipFromWords } from "@odentia/clinical"
 import { Button, Input } from "@odentia/ui"
 import { PastDateInput, withForm } from "@odentia/ui-patterns"
 import { formOptions } from "@tanstack/react-form"
@@ -62,7 +61,35 @@ function nextRowKey(prefix: string): string {
  * Los grupos de lo que dijo en la consulta que «Corregir algo» deja puestos en el formulario: todo
  * menos las alergias, que tienen su propia lista (su «No sabe» se revisa en el aviso).
  */
-export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines", "personal", "gyneco", "medical", "dental"] as const
+export const SAID_HEALTH_IN_FORM = ["conditions", "medications", "anticoagulants", "boneMedicines", "personal", "gyneco", "medical", "dental", "family"] as const
+
+/**
+ * Un familiar como se lee (revisión final del 25 nov): «Hermana: cáncer de boca». Con las palabras que se
+ * dijeron si las guardó (`notes`), y si no, el nombre de su parentesco.
+ */
+export function familyLine(row: { relationship: string; condition: string; notes?: string | null }): string {
+  const label = row.notes?.trim() || FAMILY_KINSHIP_LABELS[row.relationship as keyof typeof FAMILY_KINSHIP_LABELS] || "Otro familiar"
+  return `${label.replace(/^./u, (letter) => letter.toLocaleUpperCase("es"))}: ${row.condition}`
+}
+
+/** El código del parentesco de un familiar dicho («abuelo materno», «tía materna»); sin código, otro familiar. */
+export function familyKinshipFromWords(words: string): string {
+  const plain = words.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^(?:su|sus|mi|mis)\s+/, "").trim()
+  return kinshipFromWords(plain) ?? (/^tia (materna|paterna)$/.test(plain) ? "AUNT" : /^tio (materno|paterno)$/.test(plain) ? "UNCLE" : "FAMMEMB")
+}
+
+/**
+ * Lo que dejó de tomar en el último año, con el día: «apixabán, lo dejó el 24 nov» (revisión final
+ * del 25 nov: lo terminado con «Sí, lo dejó» no se leía en ninguna parte).
+ */
+export function endedMedicineWords(rows: ReadonlyArray<{ name: string; endDate?: string | null }>, today: string): string[] {
+  const yearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`
+  return rows
+    .filter((row) => !!row.endDate && row.endDate < today && row.endDate >= yearAgo)
+    .sort((a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? ""))
+    .slice(0, 5)
+    .map((row) => `${row.name}, lo dejó el ${new Date(`${row.endDate}T12:00:00Z`).toLocaleDateString("es", { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "")}`)
+}
 
 /**
  * Lo que oyó Clío, para el formulario: `health` con la forma de su registro y `interview` ya con
@@ -139,10 +166,19 @@ export function withSaidHealth(values: HealthFormValues, { health: said, intervi
     const isGroup = (item: unknown): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)
     interview[key] = isGroup(value) && isGroup(before) ? { ...before, ...value } : value
   }
+  // Lo de su familia que oyó Clío, para corregirlo antes de guardarlo (revisión final del 25 nov).
+  const familyHistory = [...values.familyHistory]
+  for (const item of items("family")) {
+    const condition = text(item.name)
+    const relationship = familyKinshipFromWords(text(item.relation))
+    if (!condition || familyHistory.some((row) => row.relationship === relationship && loose(row.condition) === loose(condition))) continue
+    familyHistory.push({ key: nextRowKey("fam"), relationship, condition, diagnosisCode: "", diagnosisSystem: null })
+  }
   return {
     ...values,
     conditions,
     medications,
+    familyHistory,
     reviewStatus: { conditions: state("conditions", conditions), medications: state("medications", medications) },
     interview,
   }
