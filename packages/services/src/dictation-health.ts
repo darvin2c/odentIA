@@ -1,5 +1,6 @@
 import {
   CIGARETTE_BAND_LABELS,
+  everydayConditionOf,
   FAMILY_KINSHIP,
   type FamilyKinship,
   findHabitualMedication,
@@ -119,6 +120,112 @@ export function familyFromPatient(item: Record<string, unknown>, speaker: string
 const SELF_TALK = /(?<![\p{L}])(?:yo soy|yo tengo|yo tomo|yo sufro|eso es m[ií]o|es m[ií]o)(?![\p{L}])/u
 const ABOUT_PATIENT = /(?<![\p{L}])(?:él|ella|el niño|la niña|mi hij[oa]|le|lo|la toma|toma)(?![\p{L}])/u
 export const companionSelfTalk = (said: string | undefined) => !!said && SELF_TALK.test(said.toLocaleLowerCase("es")) && !ABOUT_PATIENT.test(said.toLocaleLowerCase("es"))
+
+/*
+ * ---------- La enfermedad dicha como de quien la tiene (QA clínica del 26 nov) ----------
+ *
+ * «Su papá es asmático» quedaba en «No encontré «asma» en lo que se dijo»: la comprobación buscaba el
+ * nombre de la enfermedad y no reconocía cómo se dice de quien la tiene. Solo sirve para comprobar que
+ * se oyó y para leer lo que quien acompaña dice de sí: lo que queda escrito es la enfermedad.
+ */
+const CONDITION_ADJECTIVES: ReadonlyArray<{ word: string; name: string; said: RegExp }> = [
+  { word: "asma", name: "asma", said: /^asmatic[oa]s?$/ },
+  { word: "diabetes", name: "diabetes", said: /^diabetic[oa]s?$/ },
+  { word: "hipertension", name: "hipertensión", said: /^hipertens[oa]s?$/ },
+  { word: "epilepsia", name: "epilepsia", said: /^epileptic[oa]s?$/ },
+  { word: "hemofilia", name: "hemofilia", said: /^hemofilic[oa]s?$/ },
+  { word: "anemia", name: "anemia", said: /^anemic[oa]s?$/ },
+  { word: "artritis", name: "artritis", said: /^artritic[oa]s?$/ },
+  { word: "cardiopatia", name: "cardiopatía", said: /^cardiac[oa]s?$/ },
+  { word: "obesidad", name: "obesidad", said: /^obes[oa]s?$/ },
+]
+
+/** ¿Alguna palabra de lo dicho es la enfermedad dicha de quien la tiene («asmático» por «asma»)? */
+const adjectiveHeard = (word: string, saidWords: readonly string[]) =>
+  CONDITION_ADJECTIVES.some((item) => item.word === word && saidWords.some((one) => item.said.test(one)))
+
+/**
+ * Las enfermedades que quien habla dice de sí («yo también soy diabética», «yo tengo asma»), con su
+ * nombre: «diabetes», «asma». Solo las de la lista de arriba; vacío si no dice ninguna.
+ */
+export function selfConditionsOf(said: string): string[] {
+  const words = plain(said).replace(/[^a-z ]+/g, " ").split(" ").filter(Boolean)
+  const out = new Set<string>()
+  words.forEach((word, index) => {
+    const before = words.slice(Math.max(0, index - 3), index)
+    const adjective = CONDITION_ADJECTIVES.find((item) => item.said.test(word))
+    if (adjective && before.includes("soy")) out.add(adjective.name)
+    const noun = CONDITION_ADJECTIVES.find((item) => item.word === word)
+    if (noun && before.some((one) => one === "tengo" || one === "sufro" || one === "padezco")) out.add(noun.name)
+  })
+  return [...out]
+}
+
+/**
+ * ¿Quien tiene ese vínculo es de la familia de sangre del paciente? Su pareja no: lo suyo no es un
+ * antecedente familiar del paciente. Sin vínculo dicho, tampoco: no se supone.
+ */
+function bloodKin(vinculo: string): boolean {
+  const said = familyRelationWords(vinculo)
+  if (!said) return false
+  const code = familyKinshipOf(vinculo)
+  if (code === "SPS" || code === "DOMPART") return false
+  return code !== "FAMMEMB" || /^(?:bis)?abuel[oa]s?\b|^ti[oa]s?\b|^prim[oa]s?\b|^sobrin[oa]s?\b/.test(said)
+}
+
+/**
+ * Lo que quien acompaña dice de su propia salud («yo soy diabética», dicho por la madre), como un
+ * antecedente de la familia del paciente con su vínculo («Madre: diabetes»; QA clínica del 26 nov,
+ * NTS 139-MINSA/2018/DGAIN y HL7 FHIR `FamilyMemberHistory`). Es una propuesta: se revisa con la
+ * persona. Sin saber su vínculo, o si no es de su familia de sangre, nada: el parentesco no se inventa.
+ */
+export function companionFamily(names: readonly string[], vinculo: string | null | undefined): Array<{ relation: string; name: string }> {
+  const kin = kinSaid(vinculo)
+  if (!kin || !bloodKin(kin)) return []
+  return names.filter((name) => name.trim()).map((name) => ({ relation: kin, name: name.trim() }))
+}
+
+/**
+ * El vínculo de quien acompaña según lo que propone la sugerencia, si es uno solo («madre»). `null`
+ * si no se dijo o si hablaron dos acompañantes distintos: no se elige uno.
+ */
+export function companionKinOf(payload: Record<string, unknown>): string | null {
+  const kin = new Set<string>()
+  const add = (who: HealthSaidBy | null | undefined) => {
+    const said = who?.declarante === "acompanante" ? kinSaid(who.vinculo) : ""
+    if (said) kin.add(said.toLocaleLowerCase("es"))
+  }
+  add(topSaidBy(payload))
+  for (const who of Object.values(storedSaidBy(payload))) add(who)
+  return kin.size === 1 ? ([...kin][0] ?? null) : null
+}
+
+/**
+ * Las enfermedades de la propuesta que nombra `keys` (`healthNamed`), pasadas a lo de su familia con el
+ * vínculo de quien habla: «la diabetes no, eso es mío», dicho por la madre, deja «Madre: diabetes» en
+ * lugar de la diabetes del paciente. `null` si no se puede (sin vínculo de familia o sin nada que pasar).
+ */
+export function withConditionsToFamily(payload: Record<string, unknown>, keys: ReadonlySet<string>, vinculo: string | null): Record<string, unknown> | null {
+  const conditions = payload["conditions"]
+  if (!vinculo || !isRecord(conditions) || conditions["state"] !== "recorded" || !Array.isArray(conditions["items"])) return null
+  const items = conditions["items"] as Array<Record<string, unknown>>
+  const moved = items.filter((item) => keys.has(itemKey("conditions", item)))
+  const family = companionFamily(
+    moved.map((item) => text(item["name"])),
+    vinculo,
+  )
+  if (!family.length) return null
+  const by = healthSaidBy(payload)
+  const kept = items.filter((item) => !moved.includes(item))
+  const { conditions: _gone, ...rest } = payload
+  const before = isRecord(rest["family"]) && Array.isArray(rest["family"]["items"]) ? (rest["family"]["items"] as Array<Record<string, unknown>>) : []
+  const added = family.filter((one) => !before.some((item) => sameItem("family", item, one)))
+  const out: Record<string, unknown> = { ...rest, ...(kept.length ? { conditions: { ...conditions, items: kept } } : {}), family: { state: "recorded", items: [...before, ...added] } }
+  // Lo de su familia lo dijo quien acompaña: queda a su nombre.
+  const companion: HealthSaidBy = { declarante: "acompanante", vinculo }
+  for (const item of added) by[itemKey("family", item)] = companion
+  return withSaidBy(out, by)
+}
 
 /** El parentesco dicho, sin «su» ni «mi», en minúsculas y sin tildes: «Su abuela» → «abuela». */
 export function familyRelationWords(words: unknown): string {
@@ -420,8 +527,19 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
     if (!check?.success) delete health[group]
   }
   // Lo que quien acompaña cuenta de sí misma («yo soy diabética, eso es mío») no es del paciente: el
-  // repaso de toda la conversación se lo proponía al niño (revisión final del 25 nov). Su familia sí.
-  if (declarante === "acompanante" && companionSelfTalk(said)) for (const group of Object.keys(health)) if (group !== "family") delete health[group]
+  // repaso de toda la conversación se lo proponía al niño (revisión final del 25 nov). Su familia sí, y
+  // sus enfermedades, con su vínculo, son lo de la familia del paciente («Madre: diabetes», QA clínica
+  // del 26 nov). Sin su vínculo, no se propone: el parentesco no se inventa.
+  if (declarante === "acompanante" && companionSelfTalk(said)) {
+    const conditions = health["conditions"]
+    const own = isRecord(conditions) && conditions["state"] === "recorded" ? ((conditions["items"] ?? []) as Array<Record<string, unknown>>).map((item) => text(item["name"])) : []
+    const family = companionFamily(own, vinculo)
+    for (const group of Object.keys(health)) if (group !== "family") delete health[group]
+    if (family.length) {
+      const before = isRecord(health["family"]) ? ((health["family"]["items"] ?? []) as Array<Record<string, unknown>>) : []
+      health["family"] = { state: "recorded", items: [...before, ...family.filter((one) => !before.some((item) => sameItem("family", item, one)))] }
+    }
+  }
   // En la misma pausa, la medicina que dijo que dejó no queda también como que la toma.
   if (isRecord(health["stopped"])) {
     const kept = withoutContradictedDrugs(health, { stopped: healthDrugKeysOf({ stopped: health["stopped"] }), taking: new Set() })
@@ -441,6 +559,8 @@ function wordHeard(word: string, said: string): boolean {
   const saidWords = plain(said).split(/[^a-z0-9ñ]+/).filter(Boolean)
   if (saidWords.includes(word)) return true
   if (word.length >= 5 && saidWords.some((one) => one.length >= 5 && one.slice(0, 5) === word.slice(0, 5))) return true
+  // «Su papá es asmático»: el asma dicha de quien la tiene (QA clínica del 26 nov).
+  if (adjectiveHeard(word, saidWords)) return true
   return groundHeard(word, said, heardVocabulary([word])) !== ""
 }
 
@@ -720,11 +840,72 @@ export function healthNamedIn(payload: Record<string, unknown>, said: string): S
 
 /** Lo que nombra la frase (`healthNamedIn`), con los nombres como se leen («diabetes», «Papá: alergia…»). */
 export function healthNamed(payload: Record<string, unknown>, said: string): { keys: Set<string>; names: string[] } {
+  if (!said.trim()) return { keys: new Set(), names: [] }
+  // Un nombre sin ninguna palabra que lo distinga («T4», «DM») no se da por nombrado: cualquier frase lo quitaría.
+  return healthNamedBy(payload, (name) => distinctWords(name).length > 0 && nameHeard(name, said))
+}
+
+/** Lo que dicen al final de un «no» que corrige: «la diabetes no, me equivoqué», «la diabetes no es de él». */
+const NEGATION_TAIL = new Set(["me", "perdon", "eso", "es", "era", "fue", "digo", "sino", "la", "lo", "tiene", "doctora", "doctor"])
+/** Lo que puede ir entre el «no» y lo que niega: «no, la diabetes», «no es diabetes», «no tiene asma». */
+const NEGATION_LEAD = new Set([",", "es", "era", "tiene", "tenia", "sufre", "padece", "toma", "tomaba", "usa", "la", "el", "lo", "los", "las", "de", "del"])
+/** Lo que va justo antes de lo que se niega al final: «la diabetes no», «lo del asma no». Un verbo («es diabético, no») pregunta. */
+const NEGATED_AFTER = new Set(["la", "el", "lo", "los", "las", "de", "del"])
+const CLAUSE_END = /^[,.;:!]$/
+
+/**
+ * Lo de la propuesta que una frase niega, como claves para `withoutHealthKeys` (QA del 26 nov: «no, la
+ * diabetes no» dependía de que Clío mandara `quitar`, y casi nunca lo hacía): el «no» va pegado a lo
+ * que nombra («no, la diabetes no», «la diabetes no, me equivoqué», «no es diabetes», «no tiene asma»).
+ * Un «No» que responde a una pregunta no nombra nada («¿Es diabético?» «No.»), una pregunta no niega y
+ * «es diabético, ¿no?» tampoco: el verbo delante pregunta. Vacío si no niega nada de lo propuesto.
+ */
+export function healthNegated(payload: Record<string, unknown>, said: string): { keys: Set<string>; names: string[] } {
   const keys = new Set<string>()
   const names: string[] = []
-  if (!said.trim()) return { keys, names }
-  // Un nombre sin ninguna palabra que lo distinga («T4», «DM») no se da por nombrado: cualquier frase lo quitaría.
-  const named = (name: string) => distinctWords(name).length > 0 && nameHeard(name, said)
+  for (const sentence of said.split(/(?<=[.!?;])\s+/u)) {
+    if (/[¿?]/u.test(sentence)) continue
+    const tokens = plain(sentence)
+      .replace(/([,.;:!])/g, " $1 ")
+      .replace(/[^a-z0-9ñ,.;:! ]+/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+    const negated = (name: string) => {
+      const words = distinctWords(name)
+      if (!words.length) return false
+      const at = tokens.flatMap((token, index) => (words.some((word) => wordHeard(word, token)) ? [index] : []))
+      return at.some((index) => negatedAt(tokens, index, at))
+    }
+    const found = healthNamedBy(payload, negated)
+    for (const key of found.keys) keys.add(key)
+    for (const name of found.names) if (!names.includes(name)) names.push(name)
+  }
+  return { keys, names }
+}
+
+/** ¿El «no» va pegado a lo que se nombra en `index`? (`healthNegated`) */
+function negatedAt(tokens: readonly string[], index: number, named: readonly number[]): boolean {
+  let first = index
+  while (named.includes(first - 1)) first -= 1
+  let next = index + 1
+  while (named.includes(next)) next += 1
+  const before = tokens[first - 1]
+  const lead = before === undefined || CLAUSE_END.test(before) || NEGATED_AFTER.has(before)
+  const tail = tokens[next + 1]
+  if (lead && (tokens[next] === "tampoco" || (tokens[next] === "no" && (tail === undefined || CLAUSE_END.test(tail) || NEGATION_TAIL.has(tail))))) return true
+  let back = first - 1
+  let skipped = 0
+  while (back >= 0 && skipped < 4 && NEGATION_LEAD.has(tokens[back] ?? "")) {
+    back -= 1
+    skipped += 1
+  }
+  return tokens[back] === "no"
+}
+
+/** Lo de la propuesta cuyo nombre cumple `named`, dato por dato, con su clave y su nombre como se lee. */
+function healthNamedBy(payload: Record<string, unknown>, named: (name: string) => boolean): { keys: Set<string>; names: string[] } {
+  const keys = new Set<string>()
+  const names: string[] = []
   for (const group of GROUPS) {
     const value = payload[group]
     if (!isRecord(value) || INTERVIEW.includes(group)) continue
@@ -913,6 +1094,9 @@ function sameItem(group: HealthGroup, a: Record<string, unknown>, b: Record<stri
     return same && sameName(a["name"], b["name"])
   }
   if (group === "medications" || group === "stopped") return sameName(a["name"], b["name"]) || (drugHead(a["name"]) !== "" && drugHead(a["name"]) === drugHead(b["name"]))
+  // «Presión» dicha y la «Hipertensión arterial» que eligió el profesional son la misma enfermedad: lo
+  // guardado así no se vuelve a proponer (QA clínica del 26 nov).
+  if (group === "conditions") return sameName(a["name"], b["name"]) || sameName(everydayConditionOf(text(a["name"])) ?? a["name"], everydayConditionOf(text(b["name"])) ?? b["name"])
   return sameName(a["name"], b["name"])
 }
 /** La medicina, sin dosis ni frecuencia: «apixabán 5 mg dos veces al día» → «apixaban». */
@@ -1234,7 +1418,19 @@ export interface HealthRow {
   newer?: string | null
   /** La frase en que se oyó, tal cual (la de la última pausa que lo dijo): la fila la muestra. */
   said?: string | null
+  /**
+   * Lo dicho con palabras de todos los días y la enfermedad que sugiere («presión» → «Hipertensión
+   * arterial», `everydayConditionOf`): el profesional la elige; lo que se guarda sigue siendo lo dicho.
+   */
+  suggested?: Array<{ said: string; name: string }>
 }
+
+/** Lo dicho de una lista de enfermedades que sugiere otra del catálogo (`HealthRow.suggested`). */
+const suggestedOf = (names: readonly string[]) =>
+  names.flatMap((said) => {
+    const name = everydayConditionOf(said)
+    return name ? [{ said, name }] : []
+  })
 
 /**
  * La frase en que se oyó cada dato de una propuesta de su salud, por su clave (`healthKeysOf`): la de
@@ -1330,6 +1526,7 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
       for (const item of (value["items"] ?? []) as Array<Record<string, unknown>>) {
         const key = itemKey(group, item)
         const label = group === "family" ? relationLabel(item["relation"]) : GROUP_LABEL[group]
+        const suggested = group === "family" ? suggestedOf([text(item["name"])]) : []
         rows.push({
           key,
           group,
@@ -1339,6 +1536,7 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
           before: null,
           denied: false,
           ...(group === "stopped" ? { stopped: true, drugs: [...healthDrugKeysOf({ stopped: { state: "recorded", items: [item] } })] } : {}),
+          ...(suggested.length ? { suggested } : {}),
         })
       }
       continue
@@ -1363,7 +1561,8 @@ export function healthRows(payload: Record<string, unknown>, earlier: Record<str
       const head = drugHead(value["detail"])
       const atcCode = head.startsWith("atc:") ? head.slice(4) : (findHabitualMedication(head)?.atc ?? null)
       const label = group === "anticoagulants" && text(value["detail"]) ? (medicationKindLabel({ name: text(value["detail"]), atcCode }) ?? GROUP_LABEL[group]) : GROUP_LABEL[group]
-      push({ key: group, group, label, value: words, by, ...(drugs.length ? { drugs } : {}) }, value["state"] === "none", still)
+      const suggested = group === "conditions" ? suggestedOf(items.map((item) => text(item["name"]))) : []
+      push({ key: group, group, label, value: words, by, ...(drugs.length ? { drugs } : {}), ...(suggested.length ? { suggested } : {}) }, value["state"] === "none", still)
       continue
     }
     for (const [key, item] of Object.entries(value)) {
@@ -1391,7 +1590,10 @@ function declarantWords(payload: Record<string, unknown>): string {
 
 /** La tarjeta: cada dato con lo que dijo antes, si lo dijo distinto, y quién lo dijo. */
 export function healthSummary(payload: Record<string, unknown>, earlier: Record<string, string> = {}): string {
-  const lines = healthRows(payload, earlier).map((row) => `${row.label}: ${row.value}${row.before ? ` (antes dijo «${row.before}»)` : ""}`)
+  const lines = healthRows(payload, earlier).map(
+    (row) =>
+      `${row.label}: ${row.value}${row.before ? ` (antes dijo «${row.before}»)` : ""}${row.suggested?.length ? ` (sugerencia: ${row.suggested.map((one) => one.name.toLocaleLowerCase("es")).join(", ")})` : ""}`,
+  )
   return [...lines, declarantWords(payload)].join("\n")
 }
 

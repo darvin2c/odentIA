@@ -5,8 +5,10 @@ import type { MedicalHistory } from "./history.js"
  * Lo que la receta de latidIA revisa además de lo que revisa toda receta
  * (issue 229, decisión 12):
  * - los controlados no salen en la receta común: van en la receta oficial
- *   de cada país;
- * - a un menor de 12 años se le receta con su peso.
+ *   de cada país (convenciones de la ONU de 1961 y 1971, abajo);
+ * - a un menor de 12 años se le pide su peso, para la dosis: sin él, avisa y
+ *   deja emitir (26 nov: lo clínico lo decide quien receta; ninguna norma
+ *   citada en el repo lo exige).
  * El embarazo, la lactancia, lo contraindicado en el embarazo y un AINE con un
  * anticoagulante nacieron aquí y ahora son de toda receta (`prescribingAlerts`
  * de @odentia/clinical), igual en odentIA. Las alergias y el duplicado por
@@ -32,7 +34,7 @@ const CONTROLLED_ATC: ReadonlyArray<readonly [prefix: string, words: string]> = 
   ["N01AX03", "un anestésico disociativo"],
 ]
 
-/** A un menor de esta edad se le receta con su peso. */
+/** A un menor de esta edad se le pide su peso para recetarle (avisa, no frena). */
 export const WEIGHT_REQUIRED_UNDER_YEARS = 12
 
 function prefixOf(
@@ -65,9 +67,11 @@ export interface PrescribingContext {
 }
 
 export interface PrescribingCheck {
-  /** Lo que impide emitir: un controlado, o falta el peso de un niño. */
+  /** Lo que impide emitir: un controlado (norma). */
   errors: string[]
-  /** Si la receta lleva el peso (menor de 12 años). */
+  /** Lo que avisa y deja emitir: falta el peso de un niño. */
+  warnings: string[]
+  /** Si la receta pide el peso (menor de 12 años). */
   weightRequired: boolean
 }
 
@@ -78,6 +82,7 @@ export function checkPrescription(
   weightKg: number | null,
 ): PrescribingCheck {
   const errors: string[] = []
+  const warnings: string[] = []
   for (const item of items) {
     const name = item.genericName.trim()
     if (!name) continue
@@ -90,6 +95,8 @@ export function checkPrescription(
   const age = ageInYears(context.birthDate, context.today)
   const weightRequired = age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS
   if (weightRequired && (weightKg === null || !(weightKg > 0)))
-    errors.push(`Tiene ${age} ${age === 1 ? "año" : "años"}: escribe su peso para recetarle.`)
-  return { errors, weightRequired }
+    warnings.push(
+      `Aviso: tiene ${age} ${age === 1 ? "año" : "años"} y la receta va sin su peso. Con su peso se revisa la dosis.`,
+    )
+  return { errors, warnings, weightRequired }
 }

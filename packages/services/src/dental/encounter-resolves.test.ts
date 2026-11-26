@@ -135,6 +135,42 @@ it("lo que quien firma desmarca (o lo que no se mostró) sigue activo", async ()
   expect(row?.status).toBe("activo")
 })
 
+it("si quien firma desmarca el diagnóstico, su hallazgo del odontograma tampoco queda tratado", async () => {
+  for (const marked of [false, true]) {
+    const f = await clinicalFixture()
+    const rows = await cariesDO(f)
+    const system = await withOrgContext(appDb, "org_a", (tx) => orgDiagnosisSystem(tx, "org_a"))
+    const code = system === "ICD-11" ? "DA08.0" : "K02.1"
+    await seedDiagnosisCodes([{ code, title: "Caries de la dentina" }], system)
+    await f.run((tx) =>
+      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: code, diagnosisType: "confirmed", toothNumber: 46 }),
+    )
+    const endodoncia = await toothService("tooth", `Endodoncia posterior ${marked ? "a" : "b"}`)
+    await f.run((tx) =>
+      addEncounterProcedure(tx, ...f.args, f.encounter.id, {
+        serviceId: endodoncia.id,
+        toothNumber: 46,
+        diagnosisCode: code,
+        odontogramEntryId: rows[0]!.id,
+      }),
+    )
+    await f.ready(f.encounter.id)
+    const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
+    expect(closing.resolvable).toHaveLength(1)
+    await f.run((tx) =>
+      finalizeEncounter(
+        tx,
+        ...f.args,
+        f.encounter.id,
+        marked ? { resolveDiagnosisIds: closing.resolvable[0]!.diagnosisIds } : {},
+      ),
+    )
+    const resolved = await resolvedOf(rows.map((row) => row.id))
+    expect(resolved.get("occlusal")).toBe(marked)
+    expect(resolved.get("distal")).toBe(marked)
+  }
+})
+
 it("sin nada en curso, vuelve para lo aceptado sin empezar y el cierre lo deja por reservar", async () => {
   const f = await clinicalFixture()
   const corona = await toothService("tooth", "Corona metal-cerámica")

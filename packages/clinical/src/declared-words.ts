@@ -106,3 +106,25 @@ export function saidNoWords(by: HealthDeclarant, sex: Sex, answer: "no" | "no sa
   }
   return `Dijo que ${answer}`
 }
+
+/**
+ * La enfermedad que suele decirse con palabras de todos los días (QA clínica del 26 nov: «para la
+ * presión» quedaba como la enfermedad «presión»): «presión», «presión alta» o «la presión» es la
+ * hipertensión arterial; «el azúcar», la diabetes mellitus. Es solo una sugerencia que el profesional
+ * elige: lo que se guarda sigue siendo lo dicho, y así lo comparan quitarlo por voz y lo ya guardado.
+ * `null` si lo dicho no es una de ellas.
+ */
+export function everydayConditionOf(name: string): string | null {
+  const said = name
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:para|de|por|problemas? de|algo de) /, "")
+    .replace(/^(?:la|el|lo de la|lo del) /, "")
+  if (/^(?:presion|presion alta|alta presion|presion arterial alta)$/.test(said)) return "Hipertensión arterial"
+  if (/^(?:azucar|azucar alta|azucar en la sangre)$/.test(said)) return "Diabetes mellitus"
+  return null
+}

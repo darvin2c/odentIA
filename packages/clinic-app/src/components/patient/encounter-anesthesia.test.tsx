@@ -237,14 +237,14 @@ it("lo firmado con tope de epinefrina dice el tope primero y el máximo por peso
         asaSetAt: null,
         weightKg: 64,
         anesthetic: "Lidocaína 2 % con epinefrina 1:100 000",
-        cap: "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos",
+        cap: "Sugerencia: epinefrina hasta 0,04 mg por su ASA III (unos 2,2 cartuchos)",
         dose: "Máximo por peso (64 kg): 7,8",
         warnings: [],
       }}
     />,
   )
-  const item = screen.getByText("Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos").closest("li")
+  const item = screen.getByText("Sugerencia: epinefrina hasta 0,04 mg por su ASA III (unos 2,2 cartuchos)").closest("li")
   expect(item?.textContent).toBe(
-    "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos · Máximo por peso (64 kg): 7,8",
+    "Sugerencia: epinefrina hasta 0,04 mg por su ASA III (unos 2,2 cartuchos) · Máximo por peso (64 kg): 7,8",
   )
 })

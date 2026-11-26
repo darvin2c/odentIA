@@ -1,7 +1,8 @@
 /**
  * La fase «Urgencia» que propone el diagnóstico (reglas clínicas del 18 nov, punto 4, caso C2): lo
  * indicado por dolor, infección aguda o trauma, si su tipo lo dejaría en la básica o la quirúrgica.
- * Nunca lo rehabilitador; el odontólogo la mueve con «Planificar…» y su elección no se pisa.
+ * Nunca lo rehabilitador; el odontólogo la mueve con «Planificar…» y su elección no se pisa. Se
+ * propone al indicar; un diagnóstico anotado después no mueve lo ya indicado.
  */
 import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { expect, it } from "vitest"
@@ -91,23 +92,22 @@ it("cambiar el servicio vuelve a proponer la fase, salvo la que se eligió a man
   expect(await change(moved.id, f.extraction.id)).toMatchObject({ phase: "basica" })
 })
 
-// Revisión de las reglas clínicas del 18 nov: la pulpitis anotada después de indicar la endodoncia
-// también la lleva a «Urgencia», y lo que cambia de fase por la regla entra al final de la nueva.
-it("anotar la pulpitis después de indicar la endodoncia la pasa a «Urgencia», al final de esa fase", async () => {
+// Nada lo decide el sistema (26 nov): la pulpitis anotada después de indicar la endodoncia ya no la
+// mueve sola a «Urgencia». La fase la cambia el odontólogo con «Planificar…».
+it("anotar la pulpitis después de indicar la endodoncia no le cambia la fase ni el orden", async () => {
   const f = await withDentalServices()
-  const first = await f.indicate(f.endodontics.id, { toothNumber: 11 }, "K04.0")
   const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
   expect(endo).toMatchObject({ phase: "basica" })
-  // La que el odontólogo movió a mano con «Planificar…» no se mueve.
   const kept = await f.indicate(f.endodontics.id, { toothNumber: 46 })
   await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, kept.id, { phase: "quirurgica" }))
+  const before = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
   await f.diagnose("K04.0", 36)
   await f.diagnose("K04.0", 46)
   const items = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
-  const of = (id: string) => items.find((item) => item.id === id)!
-  expect(of(endo.id).phase).toBe("urgencia")
-  expect(of(endo.id).sortOrder).toBeGreaterThan(of(first.id).sortOrder)
-  expect(of(kept.id).phase).toBe("quirurgica")
+  const of = (list: typeof items, id: string) => list.find((item) => item.id === id)!
+  expect(of(items, endo.id).phase).toBe("basica")
+  expect(of(items, endo.id).sortOrder).toBe(of(before, endo.id).sortOrder)
+  expect(of(items, kept.id).phase).toBe("quirurgica")
 })
 
 it("cambiar la fase por la regla al cambiar el servicio lo deja al final de la nueva, como «Planificar…»", async () => {

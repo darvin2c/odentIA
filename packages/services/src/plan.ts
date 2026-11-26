@@ -778,76 +778,6 @@ async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise
   return Boolean(row)
 }
 
-/**
- * Un diagnóstico anotado en la atención vuelve a proponer la fase de lo indicado en ella en ese
- * mismo sitio (reglas clínicas del 18 nov): la pulpitis de la 36 anotada después de indicar su
- * endodoncia la lleva a «Urgencia». La misma regla que al indicar (`proposedPhaseOf`); no toca lo
- * que alguien planificó a mano con «Planificar…» ni lo cerrado, y lo que cambia de fase entra al
- * final de la nueva, como con «Planificar…».
- */
-export async function reproposePhasesAtSite(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  encounterId: string,
-  site: { siteSystem: string | null; siteCode: string | null },
-): Promise<void> {
-  if (!site.siteSystem || !site.siteCode) return
-  const items = await tx
-    .select({
-      id: treatmentPlanItem.id,
-      planId: treatmentPlanItem.planId,
-      phase: treatmentPlanItem.phase,
-      status: treatmentPlanItem.status,
-      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
-      diagnosisCode: treatmentPlanItem.diagnosisCode,
-      templateId: serviceCatalog.templateId,
-      specialtyId: serviceCatalog.specialtyId,
-      serviceId: serviceCatalog.id,
-    })
-    .from(treatmentPlanItem)
-    .leftJoin(
-      serviceCatalog,
-      and(eq(serviceCatalog.id, treatmentPlanItem.serviceId), eq(serviceCatalog.organizationId, treatmentPlanItem.organizationId)),
-    )
-    .where(
-      and(
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.sourceEncounterId, encounterId),
-        eq(treatmentPlanItem.siteSystem, site.siteSystem),
-        eq(treatmentPlanItem.siteCode, site.siteCode),
-      ),
-    )
-  const open = items.filter((item) => !CLOSED_STATUSES.includes(item.status))
-  if (open.length === 0) return
-  const hooks = await hooksOf(tx, orgId)
-  for (const item of open) {
-    if (await phaseChosenByHand(tx, orgId, item.id)) continue
-    const phase = await proposedPhaseOf(tx, orgId, hooks, {
-      patientId,
-      service: item.serviceId ? { templateId: item.templateId, specialtyId: item.specialtyId } : null,
-      encounterIds: [encounterId],
-      site,
-      own: { diagnosisSystem: item.diagnosisSystem, diagnosisCode: item.diagnosisCode },
-    })
-    if (phase === item.phase) continue
-    await lockPlanRow(tx, orgId, patientId, item.planId)
-    await tx
-      .update(treatmentPlanItem)
-      .set({ phase, sortOrder: await nextSortOrder(tx, orgId, item.planId), updatedAt: new Date() })
-      .where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
-    await audit(tx, orgId, actorUserId, "plan.item_phase_proposed", "treatment_plan_item", item.id, {
-      patientId,
-      planId: item.planId,
-      from: item.phase,
-      phase,
-      encounterId,
-    })
-  }
-}
-
 function assertPlannedSessions(value: number | null | undefined): number | null {
   if (value === undefined || value === null) return null
   if (!Number.isInteger(value) || value < 1 || value > 60)
@@ -1901,8 +1831,13 @@ export async function reopenPlanItemForSession(
       "ITEM_SESSION_UNSIGNED",
       "Su última sesión está en una atención sin firmar: fírmala y vuelve a intentarlo",
     )
+  // La pantalla no ofrece «Falta otra sesión» en lo que se registra de una vez (QA del 9 nov): si
+  // hace falta volver, es otra consulta o un control, que se indica aparte.
   if (money.oneOff)
-    throw conflict("ITEM_ONE_OFF", "Una consulta, una evaluación o una radiografía se hace de una vez: no le falta otra sesión")
+    throw conflict(
+      "ITEM_ONE_OFF",
+      "Una consulta, una evaluación o una radiografía se registra de una vez. Si hace falta volver, indica otra o un control.",
+    )
   if (!anotherSessionAllowed(item, money)) {
     const planned = Math.max(item.plannedSessions, money.frozen)
     throw conflict(

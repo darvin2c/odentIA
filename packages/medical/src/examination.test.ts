@@ -31,10 +31,14 @@ describe("examen por sistemas (issue 229, decisión 5)", () => {
     expect(parseSystemsExam(null)).toEqual({ ok: true, value: null })
   })
 
-  it("sin alteraciones no lleva texto; un hallazgo puede escribirse después", () => {
+  it("lo normal guarda lo que se dijo («Lasègue negativo»); un hallazgo puede escribirse después", () => {
     expect(
-      parseSystemsExam({ sistemas: { piel: { estado: "sin_alteraciones", hallazgo: "algo" } } }),
-    ).toEqual({ ok: true, value: { sistemas: { piel: { estado: "sin_alteraciones" } } } })
+      parseSystemsExam({ sistemas: { neurologico: { estado: "sin_alteraciones", hallazgo: " Lasègue negativo " } } }),
+    ).toEqual({ ok: true, value: { sistemas: { neurologico: { estado: "sin_alteraciones", hallazgo: "Lasègue negativo" } } } })
+    expect(parseSystemsExam({ sistemas: { piel: { estado: "sin_alteraciones", hallazgo: "  " } } })).toEqual({
+      ok: true,
+      value: { sistemas: { piel: { estado: "sin_alteraciones" } } },
+    })
     expect(parseSystemsExam({ sistemas: { abdomen: { estado: "con_hallazgos" } } })).toEqual({
       ok: true,
       value: { sistemas: { abdomen: { estado: "con_hallazgos" } } },
@@ -80,6 +84,20 @@ describe("examen por sistemas (issue 229, decisión 5)", () => {
     expect(examSummary(markRestNormal(null))).toBe("10 sistemas sin alteraciones")
     expect(examLines(null)).toEqual([])
   })
+
+  it("lo normal con sus palabras sale en la historia con ellas", () => {
+    const exam = {
+      sistemas: {
+        piel: { estado: "sin_alteraciones" as const },
+        neurologico: { estado: "sin_alteraciones" as const, hallazgo: "Lasègue negativo" },
+      },
+    }
+    expect(examLines(exam)).toEqual([
+      "Neurológico, sin alteraciones: Lasègue negativo",
+      "Sin alteraciones: Piel",
+      "No examinado: Estado general, Cabeza y cuello, Boca y garganta, Tórax y pulmones, Corazón, Abdomen, Genital y urinario, Extremidades",
+    ])
+  })
 })
 
 describe("lo dictado de un sistema se suma a lo escrito (ADR 0012)", () => {
@@ -108,6 +126,21 @@ describe("lo dictado de un sistema se suma a lo escrito (ADR 0012)", () => {
   it("«con hallazgos» marcado y aún sin texto no pasa a «sin alteraciones» por lo dictado", () => {
     const marked = { sistemas: { abdomen: { estado: "con_hallazgos" as const } } }
     expect(mergeDictatedSystem(marked, "abdomen", { estado: "sin_alteraciones" }).sistemas.abdomen).toEqual({ estado: "con_hallazgos" })
+  })
+
+  it("lo normal dictado entra con sus palabras, y lo normal dicho otra vez se suma sin repetirse", () => {
+    const said = mergeDictatedSystem(null, "neurologico", { estado: "sin_alteraciones", hallazgo: "Lasègue negativo" })
+    expect(said.sistemas.neurologico).toEqual({ estado: "sin_alteraciones", hallazgo: "Lasègue negativo" })
+    expect(mergeDictatedSystem(said, "neurologico", { estado: "sin_alteraciones", hallazgo: "lasègue negativo" }).sistemas.neurologico).toEqual(said.sistemas.neurologico)
+    expect(mergeDictatedSystem(said, "neurologico", { estado: "sin_alteraciones", hallazgo: "Fuerza conservada" }).sistemas.neurologico).toEqual({
+      estado: "sin_alteraciones",
+      hallazgo: "Lasègue negativo; Fuerza conservada",
+    })
+    // Un hallazgo dictado después lo cambia a «con hallazgos», sin perder lo que ya decía.
+    expect(mergeDictatedSystem(said, "neurologico", { estado: "con_hallazgos", hallazgo: "Hipoestesia en L5 derecha" }).sistemas.neurologico).toEqual({
+      estado: "con_hallazgos",
+      hallazgo: "Lasègue negativo; Hipoestesia en L5 derecha",
+    })
   })
 
   it("en un sistema vacío entra lo dictado, y los demás sistemas quedan como estaban", () => {

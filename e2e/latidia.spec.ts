@@ -654,7 +654,7 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   const dci = prescription.getByLabel("DCI (denominación común)", { exact: true })
   await dci.fill("enalapril")
   await expect(prescription.getByText(/^Está embarazada, 10 semanas \(registrado el/)).toBeVisible()
-  await expect(prescription.getByText(/^Enalapril: está embarazada \(10 semanas\) y los IECA están contraindicados/)).toBeVisible()
+  await expect(prescription.getByText(/^Enalapril: está embarazada \(10 semanas\) y las fichas técnicas desaconsejan los IECA/)).toBeVisible()
   await shot("receta-embarazo")
   await dci.fill("clonazepam")
   await expect(prescription.getByText(/^Clonazepam es una benzodiazepina, un medicamento controlado/)).toBeVisible()

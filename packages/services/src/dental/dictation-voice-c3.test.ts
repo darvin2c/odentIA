@@ -119,3 +119,37 @@ describe("la segunda lectura vale solo con una frase que nombra su pregunta (v02
     expect(prepareFormAnswer(draft, ortho, FDI, `Control de ortodoncia. ${said} La derecha en clase dos.`)).toMatchObject({ status: "por_revisar", payload: { value: 2.5 } })
   })
 })
+
+describe("lo dicho se propone como se dijo (26 nov)", () => {
+  // Lo que tiene la demo de resinas, carillas y limpiezas.
+  const RESTORATIONS = [
+    "Carilla de resina directa",
+    "Carilla de resina indirecta",
+    "Obturación con resina",
+    "Resina fotocurable, 1 superficie, anterior",
+    "Resina fotocurable, 1 superficie, posterior",
+    "Resina fotocurable, 2 superficies, posterior",
+    "Limpieza dental (profilaxis)",
+    "Raspado dental (destartraje)",
+  ]
+
+  it("«resina» en la 46 no ofrece carillas: una carilla es otro tratamiento, hecho de resina", () => {
+    const { match, candidates } = dictatedService("resina", RESTORATIONS, "dental", { toothNumber: 46 }, adult)
+    expect(match).toBeNull()
+    expect(candidates.some((name) => /carilla/i.test(name))).toBe(false)
+    expect(candidates).toContain("Obturación con resina")
+    expect(candidates).toContain("Resina fotocurable, 1 superficie, posterior")
+    // Pedir la carilla de resina sí la ofrece.
+    expect(dictatedService("carilla de resina", RESTORATIONS, "dental", { toothNumber: 11 }, adult).candidates).toEqual(["Carilla de resina directa", "Carilla de resina indirecta"])
+  })
+
+  it("«profilaxis con destartraje» es una sola: el servicio que junta los dos, o elegir entre los dos si se cobran aparte", () => {
+    expect(dictatedService("profilaxis con destartraje", [...RESTORATIONS, "Profilaxis y destartraje"], "dental", {}, adult)).toEqual({ match: "Profilaxis y destartraje", candidates: [] })
+    expect(dictatedService("profilaxis con destartraje", RESTORATIONS, "dental", {}, adult)).toEqual({
+      match: null,
+      candidates: ["Limpieza dental (profilaxis)", "Raspado dental (destartraje)"],
+    })
+    // Con lo que la acompaña («con pasta»), la que se nombró se ofrece para elegir, nunca se da por buena.
+    expect(dictatedService("profilaxis con pasta", RESTORATIONS, "dental", {}, adult)).toEqual({ match: null, candidates: ["Limpieza dental (profilaxis)"] })
+  })
+})

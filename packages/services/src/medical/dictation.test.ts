@@ -29,6 +29,35 @@ beforeAll(async () => {
 })
 
 describe("Clío médica (issue 229, entrega 10)", () => {
+  it("un sistema sin estado dicho queda por revisar con lo dicho, nunca normal (revisión del 26 nov)", async () => {
+    const prepared = await MEDICAL_DICTATION.prepare(appDb, "examen", { system: "extremidades", finding: "Lasègue negativo a la derecha" }, { diagnosisSystem: "ICD-10", product: null, ageYears: null })
+    expect(prepared).toMatchObject({ status: "por_revisar", payload: { system: "extremidades", finding: "Lasègue negativo a la derecha" } })
+    expect(prepared?.payload).not.toHaveProperty("state")
+    expect(prepared?.note).toContain("sin alteraciones o con hallazgos")
+    expect(MEDICAL_DICTATION.summarize("examen", prepared?.payload ?? {})).toBe("Extremidades · sin estado\nLasègue negativo a la derecha")
+  })
+
+  it("lo normal confirmado entra al examen con las palabras del médico (revisión del 26 nov)", async () => {
+    await setProduct("medical")
+    await enable(true)
+    try {
+      const fx = await clinicalFixture()
+      const { suggestions } = await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+          drafts: [{ kind: "examen", payload: { system: "neurologico", state: "sin_alteraciones", finding: "Lasègue negativo" }, sourceText: "Lasègue negativo." }],
+        }),
+      )
+      const [neuro] = suggestions
+      expect(neuro).toMatchObject({ status: "lista", summary: "Neurológico · sin alteraciones\nLasègue negativo" })
+      await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, neuro!.id))
+      const [row] = await ownerDb.select({ examination: encounter.examination }).from(encounter).where(eq(encounter.id, fx.encounter.id))
+      expect(row?.examination).toEqual({ sistemas: { neurologico: { estado: "sin_alteraciones", hallazgo: "Lasègue negativo" } } })
+    } finally {
+      await enable(false)
+      await setProduct("dental")
+    }
+  })
+
   it("los signos, el examen y el descanso dictados se revisan, se confirman sin pisar lo que había y el descanso se emite aparte", async () => {
     await setProduct("medical")
     await enable(true)
@@ -59,7 +88,7 @@ describe("Clío médica (issue 229, entrega 10)", () => {
               finding: "Amígdalas aumentadas, con placas blanquecinas.",
             },
           },
-          // Por su nombre también vale; normal no lleva texto.
+          // Por su nombre también vale; lo normal guarda lo que se dijo.
           {
             kind: "examen",
             payload: {
@@ -110,10 +139,9 @@ describe("Clío médica (issue 229, entrega 10)", () => {
       })
       expect(lungs).toMatchObject({
         status: "lista",
-        payload: { system: "toraxPulmones", state: "sin_alteraciones" },
-        summary: "Tórax y pulmones · sin alteraciones",
+        payload: { system: "toraxPulmones", state: "sin_alteraciones", finding: "Pulmones limpios" },
+        summary: "Tórax y pulmones · sin alteraciones\nPulmones limpios",
       })
-      expect(lungs?.payload).not.toHaveProperty("finding")
       expect(abdomen).toMatchObject({
         status: "por_revisar",
         note: "Dijiste que hay hallazgos, pero no cuáles. Escríbelos.",
@@ -166,7 +194,7 @@ describe("Clío médica (issue 229, entrega 10)", () => {
             estado: "con_hallazgos",
             hallazgo: "Amígdalas aumentadas, con placas blanquecinas.",
           },
-          toraxPulmones: { estado: "sin_alteraciones" },
+          toraxPulmones: { estado: "sin_alteraciones", hallazgo: "Pulmones limpios" },
         },
       })
 

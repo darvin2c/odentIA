@@ -67,7 +67,7 @@ interface Measure {
 function measuresFor(readings: VitalsReading[], age: number | null, bmi: number | null): Measure[] {
   const taken = (key: VitalSignKey) => readings.some((reading) => reading.vitals[key] !== undefined)
   const out: Measure[] = []
-  if (taken("presionSistolica"))
+  if (taken("presionSistolica") || taken("presionDiastolica"))
     out.push({
       key: "presion",
       title: "Presión arterial",
@@ -227,8 +227,9 @@ function LatestCard({ reading }: { reading: VitalsReading }) {
   const vitals: Vitals = reading.vitals
   const bmi = bodyMassIndex(vitals)
   const rows: Array<[string, string]> = []
-  if (vitals.presionSistolica !== undefined && vitals.presionDiastolica !== undefined)
-    rows.push(["Presión arterial", `${vitals.presionSistolica}/${vitals.presionDiastolica} mmHg`])
+  // Con una sola de sus dos cifras (se guarda con aviso), se ve cuál falta.
+  if (vitals.presionSistolica !== undefined || vitals.presionDiastolica !== undefined)
+    rows.push(["Presión arterial", `${vitals.presionSistolica ?? "?"}/${vitals.presionDiastolica ?? "?"} mmHg`])
   for (const key of MEDICAL_VITAL_KEYS) {
     if (key === "presionSistolica" || key === "presionDiastolica") continue
     const value = vitals[key]

@@ -901,3 +901,39 @@ it("tras «Lo revisé con…», con lo que ya no toma esperando, el foco va a su
   fireEvent.click(screen.getByRole("button", { name: /^Lo revisé con/ }))
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, lo dejó" })))
 })
+
+// QA del 26 nov (desarrollo, C3): lo de su salud quitado por voz no tenía marca ni «Deshacer» en el aviso.
+describe("lo de su salud quitado por voz, en el aviso", () => {
+  const conditions = { key: "conditions", group: "conditions", label: "Enfermedades", value: "asma", by: { declarante: "paciente" as const }, before: null, denied: false }
+
+  it("quitado dato por dato: dice qué y con qué frase, y «Deshacer» lo devuelve", () => {
+    const item = suggestion({ id: "salud-voz", healthRows: [conditions], voice: { before: "diabetes", removed: "no, la diabetes no" } })
+    const session = sessionWith({ suggestions: [item] })
+    renderNotice(session)
+    expect(document.body.textContent).toContain("Quitado por voz: diabetes. Dijiste «no, la diabetes no».")
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer" }))
+    expect(session.act.mutate).toHaveBeenCalledWith({ item, action: "undo-voice" })
+  })
+
+  it("quitado entero («quita eso»): tachado, con «Deshacer»", () => {
+    const item = suggestion({ id: "salud-fuera", status: "descartada", healthRows: [conditions], removal: { said: "quita eso" } })
+    const session = sessionWith({ removedByVoice: [item] })
+    renderNotice(session)
+    expect(document.body.textContent).toContain("Quitado por voz: dijiste «quita eso».")
+    expect(screen.getByText("Enfermedades: asma").className).toContain("line-through")
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer" }))
+    expect(session.act.mutate).toHaveBeenCalledWith({ item, action: "undo-voice" }, expect.anything())
+  })
+
+  // QA del 26 nov (clínica, O1): «para la presión» quedaba como la enfermedad «presión».
+  it("«presión» queda como se dijo, con la sugerencia de la del catálogo", () => {
+    const item = suggestion({
+      id: "salud-presion",
+      healthRows: [{ ...conditions, value: "presión", suggested: [{ said: "presión", name: "Hipertensión arterial" }] }],
+    })
+    renderNotice(sessionWith({ suggestions: [item] }))
+    const row = screen.getByRole("heading", { name: "Enfermedades" }).closest("li") as HTMLElement
+    expect(row.textContent).toContain("Presión")
+    expect(row.textContent).toContain("Sugerencia: «presión» puede ser hipertensión arterial. Elígela en «Corregir algo».")
+  })
+})

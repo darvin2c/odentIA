@@ -471,7 +471,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» al indicarlo, si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Un diagnóstico que anotas después no mueve lo ya indicado: si va antes, pásalo tú con «Planificar…». Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },
@@ -659,7 +659,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-anestesia-dosis-maxima",
       q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, avisa el tope de epinefrina (0,04 mg por sesión) y dice por cuál: con el tope son unos 2,2 cartuchos de lidocaína con epinefrina 1:100 000; la hipertensión controlada no lo pide, y si tiene hipertensión y no anotaste la presión de hoy, te dice «toma la presión antes de anestesiar». Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, avisa el tope de epinefrina (0,04 mg por sesión) y dice por cuál: con el tope son unos 2,2 cartuchos de lidocaína con epinefrina 1:100 000; la hipertensión controlada no lo pide, y si tiene hipertensión y no anotaste la presión de hoy, te avisa «la presión de hoy no está anotada». Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
       forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo", "por que me limita la epinefrina", "cuantos cartuchos puedo usar con un hipertenso"],
       area: "clinica",
       needs: "clinical.write",
@@ -667,7 +667,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "registro-signos-vitales-examen-fisico",
       q: "¿Dónde registro los signos vitales y el examen físico?",
-      a: "Dentro de la atención, en su bloque «Examen físico»: los signos vitales (el IMC sale solo del peso y la talla) y cada sistema «Sin alteraciones» o «Con hallazgos», con lo que encontraste y la parte del cuerpo. Lo que no marcas queda «No examinado», nunca normal. En su página, Clínica › Signos vitales los muestra en el tiempo.",
+      a: "Dentro de la atención, en su bloque «Examen físico»: los signos vitales (el IMC sale solo del peso y la talla) y cada sistema «Sin alteraciones» o «Con hallazgos», con lo que encontraste y la parte del cuerpo. Lo normal dictado con tus palabras («Lasègue negativo») queda escrito con ellas, y un sistema dictado sin decir si está normal queda por revisar para que lo elijas. Lo que no marcas queda «No examinado», nunca normal. En su página, Clínica › Signos vitales los muestra en el tiempo.",
       area: "clinica",
       needs: "clinical.write",
     },
@@ -730,7 +730,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-receta-avisos",
       q: "¿Por qué la receta me pide el peso o no me deja un medicamento controlado?",
-      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
+      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)», para revisar la dosis, y propone el último registrado; sin él, avisa y se emite igual. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que se desaconseja en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
       forms: ["no me deja recetar tramadol", "la receta me pide el peso", "aviso de embarazo en la receta"],
       area: "clinica",
       needs: "clinical.write",

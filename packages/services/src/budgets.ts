@@ -3815,7 +3815,8 @@ export async function reviseBudget(
   // Lo hecho o cobrado conserva lo acordado tal cual (también una promoción que ya terminó).
   const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
   const plan = kept.length > 0 ? kept : sources.slice(0, 1)
-  const recommended = plan.find((source) => source.isRecommended) ?? plan[0] ?? null
+  // Varios caminos sin recomendada (el odontólogo no dijo cuál, revisión del 26 nov) siguen sin ella.
+  const recommended = plan.find((source) => source.isRecommended) ?? (plan.length === 1 ? plan[0] : null) ?? null
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
   const billingModes = await readBillingModes(
     tx,

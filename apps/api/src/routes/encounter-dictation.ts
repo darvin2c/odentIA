@@ -281,10 +281,14 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             // Y lo anterior que leyó: un diagnóstico no contradice lo dicho ahí («presenta fístula»).
             context: ready.context,
             formQuestions: ready.forms,
+            // Lo que quien acompaña dice de sí misma se propone como lo de su familia, si se sabe su vínculo.
+            outOfPlace: extracted.outOfPlace,
           })
           // El tramo queda ordenado, con lo que no se usó y por qué: se ve igual al volver a la atención.
           // Una frase reintentada sale de «No lo usé» de su tramo, o vuelve con lo que se sabe ahora.
-          const left = unusedOf(extracted, onConfirmed, result.droppedForms)
+          // Lo de quien acompaña que quedó propuesto como lo de su familia ya no es «No lo usé».
+          const proposed = new Set(result.outOfPlaceUsed ?? [])
+          const left = unusedOf({ ...extracted, outOfPlace: extracted.outOfPlace?.filter((item) => !proposed.has(item.said)) }, onConfirmed, result.droppedForms)
           // Si el reintento no dejó nada ni devolvió la frase, sigue en «No lo usé» con su motivo de antes.
           const used = result.suggestions.length + result.corrected.length + (result.added?.length ?? 0) + result.removed.length > 0
           if (retryOf) await settleDictationRetry(tx, orgId, at.data.encounterId, retryOf, transcript, left, used)

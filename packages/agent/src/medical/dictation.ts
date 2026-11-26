@@ -51,6 +51,7 @@ const indicated = operationAgentSchema("plan.indicacion", WORDS).omit({
   toothNumber: true,
   surfaces: true,
   alternatives: true,
+  recommended: true,
 })
 
 const HEALTH = dictationHealthPart(MEDICAL_DICTATION_HEALTH)
@@ -137,7 +138,7 @@ export function systemPrompt(input: {
     "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo. Pero ya no está pendiente (se confirmó o se descartó): si lo nuevo lo cambia o lo vuelve a indicar con otros datos, es un registro nuevo, no una corrección.",
     "Si el médico nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Los signos vitales van en `signos`, en una sola entrada y en números: la presión «ciento dieciocho con setenta y seis» es 118 de sistólica y 76 de diastólica; la temperatura lleva su decimal («treinta y ocho y medio» = 38.5). Una medida que no dijo no se pone.",
-    "El examen físico va en `examen`: un elemento por cada sistema que nombró, con su clave de la lista de sistemas. Si lo dijo normal («pulmones limpios», «abdomen blando, no doloroso») es sin_alteraciones, sin texto; si describió algo anormal es con_hallazgos, con lo que encontró en sus palabras y la parte del cuerpo («amígdalas aumentadas, con placas blanquecinas»). Un sistema que no nombró no se pone: queda como no examinado. Cada hallazgo va en su sistema: si una frase describe dos («amígdalas con placas, adenopatías submandibulares»), son dos elementos (bocaGarganta y cabezaCuello). Una descripción normal también es sin_alteraciones aunque sea larga («ruidos cardiacos rítmicos, sin soplos», «Lasègue negativo»). En una gestante, la altura uterina y los latidos fetales son del abdomen, no del corazón de la paciente. Un hallazgo del examen que no es de ningún sistema de la lista (el dolor a la palpación de la región lumbar) no se pone en el sistema más parecido.",
+    "El examen físico va en `examen`: un elemento por cada sistema que nombró, con su clave de la lista de sistemas. Si lo dijo normal («pulmones limpios», «abdomen blando, no doloroso») es sin_alteraciones, con lo que dijo en `finding`, en sus palabras: el estado no reemplaza lo que dijo; si describió algo anormal es con_hallazgos, con lo que encontró en sus palabras y la parte del cuerpo («amígdalas aumentadas, con placas blanquecinas»). Un sistema que no nombró no se pone: queda como no examinado. Cada hallazgo va en su sistema: si una frase describe dos («amígdalas con placas, adenopatías submandibulares»), son dos elementos (bocaGarganta y cabezaCuello). Una descripción normal también es sin_alteraciones aunque sea larga («ruidos cardiacos rítmicos, sin soplos», «Lasègue negativo»). En una gestante, la altura uterina y los latidos fetales son del abdomen, no del corazón de la paciente. Un hallazgo del examen que no es de ningún sistema de la lista (el dolor a la palpación de la región lumbar) no se pone en el sistema más parecido.",
     `Lista de sistemas (clave, nombre):\n${input.catalog}`,
     "La parte del cuerpo («rodilla derecha», «región lumbar») se escribe con sus palabras en el hallazgo o en la nota del diagnóstico.",
     `En \`diagnosticos\` van los diagnósticos que nombró, con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Si dice «parece», «probable» o «a descartar», es presuntivo (provisional); si lo da por seguro, es definitivo (confirmed). Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el médico lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.`,
@@ -264,9 +265,8 @@ export function demoExtraction(
       const normal = NORMAL.test(words)
       drafts.push({
         kind: "examen",
-        payload: normal
-          ? { system: system.key, state: "sin_alteraciones" }
-          : { system: system.key, state: "con_hallazgos", finding: part.trim() },
+        // Lo normal también lleva lo que dijo, como lo pide el prompt.
+        payload: { system: system.key, state: normal ? "sin_alteraciones" : "con_hallazgos", finding: part.trim() },
         sourceText: part.trim(),
       })
     }

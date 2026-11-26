@@ -285,3 +285,57 @@ it("el resumen dice su «No» con su día, como el cajón", () => {
   ).replace(/<[^>]+>/g, "|")
   expect(page).toContain("Dijo que no · 13 nov · sin revisar")
 })
+
+// QA del 26 nov (clínica, O2): tras «Lo revisé con su madre», Antecedentes decía «Medicación vigente: No se
+// le preguntó» aunque la madre dijo «no toma ninguna medicina» (su «No» espera en su fila del aviso).
+it("el «No» dicho en la consulta, que espera su fila, no se lee «No se le preguntó»", () => {
+  const page = renderToStaticMarkup(
+    <AntecedentesSummary
+      saved={{ ...EMPTY_HEALTH_FORM, reviewStatus: { conditions: "unknown", medications: "unknown" } }}
+      pendingReview={false}
+      groups={[]}
+      health={
+        {
+          medications: [],
+          changed: null,
+          said: [
+            {
+              suggestionId: "s-1",
+              encounterId: "e-1",
+              by: { kind: "representative", name: null, relation: "madre" },
+              at: "2026-11-26T15:00:00.000Z",
+              open: true,
+              rows: [{ key: "medications", label: "Medicación", value: "dijo que no", denied: true }],
+            },
+          ],
+        } as unknown as Pick<PatientHealth, "changed" | "medications" | "said">
+      }
+      pregnancy={null}
+      sex="M"
+    />,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Medicación vigente||Sin registros||Su madre dijo que no en la consulta · sin confirmar")
+  // Las enfermedades, de las que no dijo nada, siguen sin preguntar.
+  expect(page).toContain("No se le preguntó")
+})
+
+// QA del 26 nov: «dos veces al día» se guardaba y se leía «Cada 12 horas».
+it("la medicación vigente dice cada cuánto como se dijo", () => {
+  const page = renderToStaticMarkup(
+    <AntecedentesSummary
+      saved={{
+        ...EMPTY_HEALTH_FORM,
+        reviewStatus: { conditions: "unknown", medications: "recorded" },
+        medications: [
+          { id: "m1", name: "metformina", dose: "", doseValue: "850", doseUnit: "mg", frequency: "2 veces al día", frequencyCode: "cada_12_h", endDate: "" },
+          { id: "m2", name: "losartán", dose: "", doseValue: "50", doseUnit: "mg", frequency: "", frequencyCode: "cada_24_h", endDate: "" },
+        ] as unknown as typeof EMPTY_HEALTH_FORM.medications,
+      }}
+      pendingReview={false}
+      groups={[]}
+      pregnancy={null}
+      sex="F"
+    />,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("metformina 850 mg 2 veces al día, losartán 50 mg cada 24 horas")
+})

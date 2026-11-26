@@ -12,10 +12,11 @@ import {
   isChildAge,
   localAnestheticOf,
   moneyTotalsText,
-  parseVitals,
+  readVitals,
   VITAL_SIGNS,
   type Vitals,
   vitalsErrors,
+  vitalsWarnings,
 } from "@odentia/clinical"
 import { clinicToday } from "../../lib/inventory"
 import {
@@ -168,7 +169,7 @@ import { EncounterAnesthesiaLine } from "./encounter-anesthesia"
 import { LinkSignedNotice } from "./link-signed-notice"
 import { VitalsPressureAlert } from "./vitals-alert"
 import { REGISTRATION_FIELDS } from "./signature-registration-fields"
-import { useOpenWide } from "./wide-section"
+import { useBeforeOpenWide, useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, useEncounterDocuments } from "./encounter-documents"
@@ -569,8 +570,10 @@ export function EncounterEditor({
   })
   const draftValues = useStore(draftForm.store, (state) => state.values)
   const { reason, evolution, indications, vitals } = draftValues
-  const parsed = parseVitals(vitals, exam.vitals)
+  const parsed = readVitals(vitals, exam.vitals)
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
+  // Lo que se guarda pero conviene revisar (fuera de lo habitual, la presión a medias): avisa junto a su campo.
+  const vitalWarnings = vitalsWarnings(vitals, exam.vitals)
   // Lo que el servidor rechazó del examen, por la ruta de cada dato («extraoral.atm»).
   const [examErrors, setExamErrors] = useState<Record<string, string>>({})
   // Las piezas de la atención se siguen de lo registrado (ya no se eligen a mano en Consulta).
@@ -769,6 +772,9 @@ export function EncounterEditor({
   }
   const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
+  // «Antecedentes y última atención» es de solo lectura: cede la columna a lo que se abre encima
+  // («Corregir algo» no se veía con ella abierta, QA del 26 nov).
+  useBeforeOpenWide(() => setContextOpen(false))
   // Sin colegiatura en el perfil se firma igual (17 nov): el cierre la pide o pide escribir por qué.
   const needsRegistration = closingQuery.isSuccess && Boolean(closingQuery.data.data.registrationMissing)
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
@@ -988,9 +994,9 @@ export function EncounterEditor({
           const filled = Object.fromEntries(
             Object.entries(values.vitals).filter(([, raw]) => raw.trim() !== ""),
           )
-          // Incompletos o fuera de rango no se envían: el error se muestra en línea
-          // y se guardan al corregirlos.
-          if (!parseVitals(filled, exam.vitals).ok) break
+          // Lo que no es una medida no se envía: el error se muestra en línea y se guarda al
+          // corregirlo. Lo fuera de lo habitual y la presión a medias se guardan con su aviso.
+          if (!readVitals(filled, exam.vitals).ok) break
           body.vitals = Object.keys(filled).length > 0 ? filled : null
           break
         }
@@ -2300,6 +2306,7 @@ export function EncounterEditor({
                     </span>
                   }
                   id={`${uid}-vital-${sign.key}`}
+                  description={vitalWarnings[sign.key]}
                 >
                   {(control) => (
                     <Input
@@ -2342,7 +2349,8 @@ export function EncounterEditor({
           </Button>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          La presión se registra completa (sistólica y diastólica).
+          La presión va con sus dos cifras, sistólica y diastólica: si falta una, se guarda la que anotaste
+          y lo avisa.
         </p>
         <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>

@@ -238,14 +238,43 @@ export interface DictationTurnStart {
   empieza?: string | undefined
 }
 
-/** Dónde empiezan en la frase esas palabras: tal cual, o sin mirar mayúsculas; 0 si no están. */
-function startIn(sentence: string, words: string | undefined): number {
+/**
+ * Una frase como se compara: sin tildes, mayúsculas ni signos, y con dónde estaba cada letra en la
+ * original. Clío copia las primeras palabras a veces sin tilde o con una coma («Sí, tomo losartan»).
+ */
+function foldedWithPlaces(text: string): { folded: string; places: number[] } {
+  let folded = ""
+  const places: number[] = []
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text.charAt(at).normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es")
+    for (const letter of char) {
+      const kept = /[\p{L}\p{N}]/u.test(letter) ? letter : " "
+      // Un solo espacio entre palabras.
+      if (kept === " " && (folded === "" || folded.endsWith(" "))) continue
+      folded += kept
+      places.push(at)
+    }
+  }
+  return { folded, places }
+}
+
+/**
+ * Dónde empiezan en la frase esas palabras: tal cual, sin mirar mayúsculas o sin mirar tildes ni
+ * signos; 0 si no se dijeron palabras; null si se dijeron y no están (revisión del 26 nov).
+ */
+function startIn(sentence: string, words: string | undefined): number | null {
   const wanted = words?.trim()
   if (!wanted) return 0
   const at = sentence.indexOf(wanted)
   if (at >= 0) return at
-  const folded = sentence.toLocaleLowerCase("es").indexOf(wanted.toLocaleLowerCase("es"))
-  return folded >= 0 ? folded : 0
+  const lower = sentence.toLocaleLowerCase("es").indexOf(wanted.toLocaleLowerCase("es"))
+  if (lower >= 0) return lower
+  const { folded, places } = foldedWithPlaces(sentence)
+  const needle = foldedWithPlaces(wanted).folded.trim()
+  // Desde donde empieza una palabra: «tomo» no está en «átomo».
+  for (let found = needle ? folded.indexOf(needle) : -1; found >= 0; found = folded.indexOf(needle, found + 1))
+    if (found === 0 || folded.charAt(found - 1) === " ") return places[found] ?? 0
+  return null
 }
 
 /**
@@ -287,23 +316,37 @@ export function turnsFromStarts(
     }
     for (const sentence of dictationSentences(segment.transcript)) {
       number += 1
-      // Dónde empieza cada turno en la frase; dos en el mismo lugar: vale el último.
-      const cuts = new Map<number, DictationTurnStart>()
-      for (const start of byNumber.get(number) ?? []) cuts.set(startIn(sentence, start.empieza), start)
+      // Dónde empieza cada turno en la frase. Uno cuyas primeras palabras no están empieza con la frase.
+      const cuts = new Map<number, DictationTurnStart[]>()
+      for (const start of byNumber.get(number) ?? []) {
+        const at = startIn(sentence, start.empieza) ?? 0
+        cuts.set(at, [...(cuts.get(at) ?? []), start])
+      }
       const ordered = [...cuts.entries()].sort(([a], [b]) => a - b)
       if (!segment.needsTurns) {
-        if (ordered.length) current = ordered.at(-1)?.[1]
+        if (ordered.length) current = ordered.at(-1)?.[1].at(-1)
         continue
       }
       let from = 0
-      for (const [at, start] of ordered) {
+      // Quien sigue hablando después de un pedazo que no se sabe de quién es.
+      let after: DictationTurnStart | undefined
+      for (const [at, list] of ordered) {
         // Lo de antes de las primeras palabras sigue con quien hablaba.
         say(sentence.slice(from, at).trim())
-        current = start
+        // Dos personas que empiezan en el mismo lugar: no se sabe dónde se parte lo que dijo cada una, y
+        // darle el pedazo a la última ponía en boca de la doctora lo que dijo el paciente (revisión del
+        // 26 nov). Ese pedazo no se sabe de quién es; lo que sigue, de la última.
+        const mixed = new Set(list.map((start) => start.quien)).size > 1
+        current = mixed ? { desde: number, quien: "no_se_sabe" } : list.at(-1)
+        after = mixed ? list.at(-1) : undefined
         open = undefined
         from = at
       }
       say(sentence.slice(from).trim())
+      if (after) {
+        current = after
+        open = undefined
+      }
     }
     if (!segment.needsTurns || !turns.length) return null
     if (leading.length) turns.unshift({ quien: "no_se_sabe", texto: leading.join(" ") })
@@ -372,13 +415,37 @@ export async function saveDictationReview(
   input: DictationReviewInput,
 ): Promise<DictationReviewResult> {
   const heard = input.segments.map((segment) => segment.transcript).join("\n")
+  // Quién dijo lo que quien acompaña cuenta de sí misma: el vínculo de su turno, de este repaso o de
+  // antes. Con él se propone como lo de la familia del paciente («Madre: diabetes», QA del 26 nov).
+  const before = await tx
+    .select({ turns: encounterDictationSegment.turns })
+    .from(encounterDictationSegment)
+    .where(
+      and(
+        eq(encounterDictationSegment.organizationId, orgId),
+        eq(encounterDictationSegment.encounterId, encounterId),
+        inArray(
+          encounterDictationSegment.segmentId,
+          input.segments.map((segment) => segment.segmentId),
+        ),
+      ),
+    )
+  const allTurns = [...input.turns.flatMap((item) => item.turns), ...before.flatMap((row) => row.turns ?? [])]
+  const kinOf = (said: string) => {
+    const kin = new Set(
+      allTurns.filter((turn) => turn.quien === "acompanante" && loose(turn.texto).includes(loose(said))).flatMap((turn) => (kinSaid(turn.vinculo) ? [kinSaid(turn.vinculo)] : [])),
+    )
+    return kin.size === 1 ? [...kin][0] : undefined
+  }
   const result = await saveDictationSegment(tx, orgId, actorUserId, patientId, encounterId, {
     drafts: input.drafts,
     segmentId: input.reviewId,
     transcript: heard,
     formQuestions: input.formQuestions,
     review: true,
+    outOfPlace: input.outOfPlace.map((item) => ({ ...item, vinculo: item.why === "familiar" ? kinOf(item.said) : undefined })),
   })
+  const proposed = new Set(result.outOfPlaceUsed ?? [])
   const rows = await tx
     .select()
     .from(encounterDictationSegment)
@@ -439,7 +506,7 @@ export async function saveDictationReview(
   const isUsed = (said: string) => loose(said).trim() !== "" && used.some((text) => text.includes(loose(said)))
   const items: DictationUnusedItem[] = [
     ...input.unused.filter((said) => !isUsed(said)).map((said): DictationUnusedItem => ({ said, why: "sin_lugar" })),
-    ...input.outOfPlace.map(({ said, why }): DictationUnusedItem => {
+    ...input.outOfPlace.filter((item) => !proposed.has(item.said)).map(({ said, why }): DictationUnusedItem => {
       const detail = DICTATION_OUT_OF_PLACE[why]
       return { said, why: "sin_lugar", ...(detail ? { detail } : {}) }
     }),

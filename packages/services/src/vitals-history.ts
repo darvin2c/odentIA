@@ -1,4 +1,4 @@
-import { parseVitals, type Vitals } from "@odentia/clinical"
+import { readVitals, type Vitals } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounter } from "@odentia/db/schema/clinical"
 import { and, desc, eq, isNotNull, ne } from "drizzle-orm"
@@ -48,7 +48,7 @@ export async function listPatientVitals(
     .orderBy(desc(encounter.startedAt), desc(encounter.id))
     .limit(READINGS_LIMIT)
   return rows.reverse().flatMap((row) => {
-    const parsed = parseVitals(row.vitals)
+    const parsed = readVitals(row.vitals)
     if (!parsed.ok || !parsed.value) return []
     return [{ ...row, vitals: parsed.value }]
   })

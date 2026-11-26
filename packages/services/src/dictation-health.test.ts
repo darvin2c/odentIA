@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { declaredMedications } from "./clinical.js"
 import {
+  companionFamily,
+  companionKinOf,
   familyKinshipOf,
   familyRelationWords,
   groundHealthNames,
@@ -8,6 +10,7 @@ import {
   healthByDeclarant,
   healthOfPayload,
   healthNamed,
+  healthNegated,
   healthSupersedingKeysOf,
   healthRows,
   healthSaidBy,
@@ -18,6 +21,7 @@ import {
   saidInDoubt,
   saidStoppedOf,
   sameDrug,
+  selfConditionsOf,
   selfCorrectedHealth,
   speaksOfSelf,
   splitHealthDenials,
@@ -25,6 +29,7 @@ import {
   withoutHealthKeys,
   withoutMisspokenStopped,
   withoutStopped,
+  withConditionsToFamily,
   withSaidPhrases,
 } from "./dictation-health.js"
 import { doubtfulAllergy } from "./encounter-dictation.js"
@@ -381,7 +386,9 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
       "yo soy diabética, eso es mío",
       DENTAL,
     )
-    expect(ready).toBeNull()
+    // No es del paciente: es lo de su familia, con el vínculo de quien habla (QA del 26 nov).
+    expect(ready?.payload["conditions"]).toBeUndefined()
+    expect(ready?.payload["family"]).toEqual({ state: "recorded", items: [{ relation: "madre", name: "diabetes" }] })
     // Lo que cuenta del niño sí lo es.
     expect(prepareHealth({ declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "asma" }] } }, "él tiene asma", DENTAL)).not.toBeNull()
   })
@@ -409,7 +416,8 @@ describe("la dosis dicha en palabras va a su lugar (revisión del 25 nov, H10)",
 
   it("al guardarlo, el nombre queda solo y la dosis y cuándo en sus campos", () => {
     const rows = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } } as never)
-    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "Cada 12 horas", frequencyCode: "cada_12_h", declaredClass: "anticoagulants" })
+    // Cada cuánto, como se dijo, con su código de la lista al lado (QA del 26 nov).
+    expect(rows[0]).toMatchObject({ name: "apixabán", dose: "5 mg", frequency: "cada 12 h", frequencyCode: "cada_12_h", declaredClass: "anticoagulants" })
   })
 })
 
@@ -449,4 +457,92 @@ describe("lo que falta de la dosis se lee de la frase, cada cosa por su lado (QA
     const { payload } = groundHealthNames({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg" } }, "tomo apixabán de cinco miligramos cada doce horas")
     expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
   })
+})
+
+/*
+ * QA clínica del 26 nov («lo que quedó fuera»): lo de su salud que el sistema decidía o perdía, ahora
+ * como propuesta que el profesional confirma.
+ */
+describe("«su papá es asmático»: la enfermedad dicha de quien la tiene (QA del 26 nov, O2)", () => {
+  it("se propone «Papá: asma» y no queda en «No encontré «asma»»", () => {
+    const { payload, notHeard } = groundHealthNames({ family: [{ relation: "papá", of: "paciente", name: "asma" }] }, "su papá es asmático y tiene diabetes desde joven")
+    expect(notHeard).toEqual([])
+    expect(payload?.["family"]).toEqual({ state: "recorded", items: [{ relation: "papá", of: "paciente", name: "asma" }] })
+  })
+  it.each([
+    ["es hipertensa", "hipertensión"],
+    ["es epiléptico", "epilepsia"],
+    ["es diabética", "diabetes"],
+  ])("«%s» se oyó como %s", (said, name) => {
+    expect(groundHealthNames({ conditions: { state: "recorded", items: [{ name }] } }, said).notHeard).toEqual([])
+  })
+  it("lo que no se dijo sigue sin proponerse", () => {
+    expect(groundHealthNames({ conditions: { state: "recorded", items: [{ name: "asma" }] } }, "tiene diabetes").notHeard).toEqual(["asma"])
+  })
+})
+
+describe("lo que quien acompaña dice de sí, como lo de la familia del paciente (QA del 26 nov, O2)", () => {
+  it("«yo también soy diabética», dicho por la madre: «Madre: diabetes»", () => {
+    expect(selfConditionsOf("yo también soy diabética, eso es mío, no de él")).toEqual(["diabetes"])
+    expect(selfConditionsOf("yo tengo asma")).toEqual(["asma"])
+    expect(selfConditionsOf("él es asmático")).toEqual([])
+    const ready = prepareHealth(
+      { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] } },
+      "yo también soy diabética, eso es mío",
+      {},
+    )
+    expect(ready?.payload["conditions"]).toBeUndefined()
+    expect(saidFamilyOf(ready?.payload ?? {})).toEqual([{ relationship: "MTH", relation: "madre", condition: "diabetes" }])
+  })
+  it("sin saber quién habla, o si es su pareja, no se propone: el parentesco no se inventa", () => {
+    const said = "yo soy diabética, eso es mío"
+    expect(prepareHealth({ declarante: "acompanante", conditions: { state: "recorded", items: [{ name: "diabetes" }] } }, said, {})).toBeNull()
+    expect(prepareHealth({ declarante: "acompanante", vinculo: "esposa", conditions: { state: "recorded", items: [{ name: "diabetes" }] } }, said, {})).toBeNull()
+    expect(companionFamily(["diabetes"], "")).toEqual([])
+    expect(companionFamily(["diabetes"], "abuela")).toEqual([{ relation: "abuela", name: "diabetes" }])
+  })
+  it("«la diabetes no, eso es mío» pasa la diabetes propuesta a lo de su familia", () => {
+    const payload = { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }
+    const named = healthNamed(payload, "la diabetes no, eso es mío")
+    const moved = withConditionsToFamily(payload, named.keys, companionKinOf(payload))
+    expect(moved?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+    expect(saidFamilyOf(moved ?? {})).toEqual([{ relationship: "MTH", relation: "madre", condition: "diabetes" }])
+    expect(withConditionsToFamily({ ...payload, declarante: "no_se_sabe", vinculo: undefined }, named.keys, companionKinOf({ declarante: "no_se_sabe" }))).toBeNull()
+  })
+})
+
+describe("«para la presión»: queda lo dicho y se sugiere la del catálogo (QA del 26 nov, O1)", () => {
+  const payload = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "presión" }, { name: "diabetes" }] } }
+  it("la fila dice «presión» y sugiere hipertensión arterial, sin cambiarla", () => {
+    const [row] = healthRows(payload)
+    expect(row?.value).toBe("presión · diabetes")
+    expect(row?.suggested).toEqual([{ said: "presión", name: "Hipertensión arterial" }])
+    expect(payload.conditions.items[0]?.name).toBe("presión")
+  })
+  it("«quita la presión» la quita (en el PR 715 un renombre por texto lo rompía)", () => {
+    const named = healthNamed(payload, "quita la presión")
+    expect(named.names).toEqual(["presión"])
+    expect(withoutHealthKeys(payload, named.keys)?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "diabetes" }] })
+  })
+  it("lo ya guardado como «presión» o como «Hipertensión arterial» no se propone otra vez", () => {
+    const said = { conditions: { state: "recorded", items: [{ name: "presión" }] } }
+    expect(withoutSettledHealth(said, [{ conditions: { state: "recorded", items: [{ name: "Presión" }] } }])).toBeNull()
+    expect(withoutSettledHealth(said, [{ conditions: { state: "recorded", items: [{ name: "Hipertensión arterial" }] } }])).toBeNull()
+    expect(withoutSettledHealth(said, [{ conditions: { state: "recorded", items: [{ name: "asma" }] } }])).toEqual(said)
+  })
+})
+
+describe("«no, la diabetes no» lo lee el servidor, sin esperar a Clío (QA del 26 nov, C3)", () => {
+  const payload = { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }
+  it.each(["no, la diabetes no", "la diabetes no, me equivoqué", "No es diabetes, doctora.", "no tiene diabetes", "Lo de la diabetes no."])("«%s» niega la diabetes", (said) => {
+    const negated = healthNegated(payload, said)
+    expect(negated.names).toEqual(["diabetes"])
+    expect(withoutHealthKeys(payload, negated.keys)?.["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+  })
+  it.each(["¿Es diabético? No.", "es diabético no", "tiene diabetes, no toma nada", "no sé si es diabetes", "no toma nada para la diabetes", "tiene diabetes y asma"])(
+    "«%s» no niega nada de lo propuesto",
+    (said) => {
+      expect(healthNegated(payload, said).keys.size).toBe(0)
+    },
+  )
 })

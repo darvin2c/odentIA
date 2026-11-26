@@ -62,8 +62,9 @@ const isDay = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value))
 
 /**
- * Un sistema del examen. Normal es «Sin alteraciones», sin texto; con hallazgos
- * tiene que decir cuáles: si no, queda por revisar.
+ * Un sistema del examen, con lo que se dijo de él: normal («Lasègue negativo»)
+ * también guarda sus palabras. Con hallazgos tiene que decir cuáles, y sin estado
+ * dicho queda por revisar con lo dicho: nunca se da por normal (revisión del 26 nov).
  */
 function prepareExam(payload: Record<string, unknown>): DictationPrepared {
   const spoken = String(payload["system"] ?? "")
@@ -75,11 +76,16 @@ function prepareExam(payload: Record<string, unknown>): DictationPrepared {
       note: `No reconozco «${spoken}» como un sistema del examen. Regístralo en el examen físico.`,
     }
   }
-  const state: ExamState =
-    payload["state"] === "con_hallazgos" ? "con_hallazgos" : "sin_alteraciones"
   const finding = typeof payload["finding"] === "string" ? payload["finding"].trim() : ""
+  const state = examStateOf(payload["state"])
+  if (!state)
+    return {
+      payload: { system: system.key, ...(finding ? { finding } : {}) },
+      status: "por_revisar",
+      note: "No quedó dicho si está sin alteraciones o con hallazgos. Elígelo.",
+    }
   if (state === "sin_alteraciones")
-    return { payload: { system: system.key, state }, status: "lista", note: null }
+    return { payload: { system: system.key, state, ...(finding ? { finding } : {}) }, status: "lista", note: null }
   if (!finding)
     return {
       payload: { system: system.key, state },
@@ -102,10 +108,14 @@ function prepareLeave(payload: Record<string, unknown>): DictationPrepared {
   return { payload: { ...rest, ...(startsOn ? { startsOn } : {}) }, status: "lista", note: null }
 }
 
+/** El estado dicho; sin él, ninguno: no se supone normal. */
+const examStateOf = (value: unknown): ExamState | null =>
+  value === "con_hallazgos" || value === "sin_alteraciones" ? value : null
+
 function examLine(payload: Record<string, unknown>): string {
   const system = EXAM_SYSTEMS.find((item) => item.key === payload["system"])
-  const state = payload["state"] === "con_hallazgos" ? "con_hallazgos" : "sin_alteraciones"
-  return `${system?.label ?? String(payload["system"] ?? "")} · ${EXAM_STATE_LABELS[state].toLowerCase()}`
+  const state = examStateOf(payload["state"])
+  return `${system?.label ?? String(payload["system"] ?? "")} · ${state ? EXAM_STATE_LABELS[state].toLowerCase() : "sin estado"}`
 }
 
 function leaveLine(payload: Record<string, unknown>): string {
@@ -228,10 +238,10 @@ export const MEDICAL_DICTATION: ProductDictation = {
     const exam = readSystemsExam(current?.examination)
     const system = String(payload["system"]) as ExamSystemKey
     const finding = typeof payload["finding"] === "string" ? payload["finding"] : undefined
-    const entry =
-      payload["state"] === "con_hallazgos"
-        ? { estado: "con_hallazgos" as const, ...(finding ? { hallazgo: finding } : {}) }
-        : { estado: "sin_alteraciones" as const }
+    const estado = examStateOf(payload["state"])
+    if (!estado) throw new ServiceError("EXAM_STATE_MISSING", 409, "Elige si el sistema está sin alteraciones o con hallazgos")
+    // Lo normal también lleva lo que se dijo («Lasègue negativo»).
+    const entry = { estado, ...(finding ? { hallazgo: finding } : {}) }
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, {
       examination: { ...mergeDictatedSystem(exam, system, entry) },
     })

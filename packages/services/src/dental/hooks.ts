@@ -43,6 +43,7 @@ import {
   TREATMENT_PHASES,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
+import { resolvableDiagnosesOf } from "../closing-diagnoses.js"
 import { notFound } from "../errors.js"
 import { serviceKindOf } from "../specialties.js"
 import type { TimelineItem } from "../patient-history.js"
@@ -145,7 +146,10 @@ async function closingPeriodontalOf(
  * nació de un hallazgo deja esa lesión como tratada (sigue en la historia,
  * pero ya no es un problema por tratar). Una caries de dos caras es una
  * lesión: se tratan sus caras juntas, o solo las que cubre una resina
- * (`treatedByItem`).
+ * (`treatedByItem`). Lo decide quien firma: si el cierre le mostró el
+ * diagnóstico de esa pieza «pasa a resuelto» y lo desmarcó, el diagnóstico
+ * sigue activo y su hallazgo también (QA del 26 nov: la lesión quedaba tratada
+ * aunque el odontólogo dijera que sigue).
  */
 async function resolveTreatedFindings(
   tx: Db,
@@ -174,7 +178,15 @@ async function resolveTreatedFindings(
         eq(treatmentPlanItem.status, "realizado"),
       ),
     )
+  if (items.length === 0) return
+  // Lo que sigue activo después de `resolveDiagnosesOnSign`: lo que quien firma desmarcó.
+  const kept = new Set(
+    (await resolvableDiagnosesOf(tx, orgId, patientId, encounterId, { done: true })).flatMap(
+      (found) => found.planItemIds,
+    ),
+  )
   for (const item of items) {
+    if (kept.has(item.id)) continue
     const lesion = await lesionRowsOf(tx, orgId, item.entryId)
     const rows = treatedByItem(lesion, item.entryId, dentalSiteOfRow(item).surfaces)
     const open = rows.filter((row) => row.resolvedAt === null).map((row) => row.id)

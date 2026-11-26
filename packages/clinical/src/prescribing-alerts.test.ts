@@ -18,18 +18,18 @@ describe("lo que avisa toda receta (nació en latidIA; QA final de formularios, 
       "Está embarazada, 12 semanas (registrado el 10/10/2026): revisa que cada medicamento sea seguro en el embarazo.",
     ])
     expect(check.warnings).toEqual([
-      "Enalapril: está embarazada (12 semanas) y los IECA están contraindicados en el embarazo (ATC C09AA02).",
+      "Enalapril: está embarazada (12 semanas) y las fichas técnicas desaconsejan los IECA en el embarazo (ATC C09AA02).",
     ])
     // Un embarazo que por sus semanas ya pasó su término queda «por confirmar», como en la franja de
     // la ficha, y la receta no deja de avisar en silencio: lo contraindicado se avisa con esas palabras.
     const stale = alerts(pregnant("2025-09-01", 20), ["enalapril"])
     expect(stale.reminders[0]).toMatch(/^Embarazo por confirmar \(registrado el 01\/09\/2025\)/)
     expect(stale.warnings).toEqual([
-      "Enalapril: tiene un embarazo por confirmar y los IECA están contraindicados en el embarazo (ATC C09AA02).",
+      "Enalapril: tiene un embarazo por confirmar y las fichas técnicas desaconsejan los IECA en el embarazo (ATC C09AA02).",
     ])
     // Sin las semanas, la misma regla: en pie hasta 42 semanas después de haberlo dicho, no para siempre.
     expect(alerts(pregnant("2026-09-01"), ["enalapril"]).warnings).toEqual([
-      "Enalapril: está embarazada y los IECA están contraindicados en el embarazo (ATC C09AA02).",
+      "Enalapril: está embarazada y las fichas técnicas desaconsejan los IECA en el embarazo (ATC C09AA02).",
     ])
     expect(alerts(pregnant("2025-09-01"), ["enalapril"]).reminders[0]).toMatch(/^Embarazo por confirmar/)
     // Un «no» no avisa nada.

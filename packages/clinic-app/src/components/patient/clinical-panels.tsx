@@ -1049,12 +1049,9 @@ export function RecetasPanel({
               return
             }
           })
-          if (rules.weight.required && weightOf(value.patientWeightKg) === null)
-            ctx.addIssue({
-              code: "custom",
-              path: ["patientWeightKg"],
-              message: value.patientWeightKg.trim() ? WEIGHT_RANGE : "Escribe su peso en kilos.",
-            })
+          // Sin su peso avisa y deja emitir (26 nov); solo un peso escrito que no es un peso se corrige.
+          if (rules.weight.required && value.patientWeightKg.trim() && weightOf(value.patientWeightKg) === null)
+            ctx.addIssue({ code: "custom", path: ["patientWeightKg"], message: WEIGHT_RANGE })
         }),
     [],
   )
@@ -1106,7 +1103,9 @@ export function RecetasPanel({
       // Lo que tiene un aviso se emite igual: la pantalla lo mostró y la receta guarda eso (ADR 0143).
       const shownConflicts = [...new Set(value.items.flatMap((medication) => conflictsOf(medication.genericName.trim())))]
       const acknowledged = shownConflicts.length > 0
-      const alertsShown = [...shownConflicts, ...duplicateWarnings(value.items, takingNow, prescribing.catalog)]
+      // El peso que falta a un niño también avisa y queda como visto.
+      const weightWarnings = rules.check(value.items, weightOf(value.patientWeightKg)).warnings ?? []
+      const alertsShown = [...shownConflicts, ...duplicateWarnings(value.items, takingNow, prescribing.catalog), ...weightWarnings]
       const result = await createMutation.mutateAsync({
         encounterId: encounterId ?? null,
         planItemId: (itemId ?? value.planItemId) || null,
@@ -1390,7 +1389,9 @@ export function RecetasPanel({
             <field.Control
               label="Peso (kg)"
               description={
-                weightIssue ?? `Es menor de 12 años: la receta va con su peso.${rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}`
+                weightIssue ??
+                (ruleCheck.warnings?.[0] ??
+                  `Es menor de 12 años: con su peso se revisa la dosis.${rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}`)
               }
             >
               {(control) => (

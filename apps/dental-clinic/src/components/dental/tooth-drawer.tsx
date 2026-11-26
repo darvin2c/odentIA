@@ -906,6 +906,15 @@ export function ToothDrawer({
                     Anular
                   </Button>
                 ) : null}
+                {/* Lo dibujó el tratamiento al hacerse (en buen estado y, con el odontograma de la norma,
+                    la causa de la ausencia deducida): es una sugerencia que quien atiende ve antes de firmar
+                    y cambia aquí mismo (QA del 26 nov: nada lo decide el sistema). */}
+                {entry.leftByPlanItemId ? (
+                  <p className="w-full text-xs text-muted-foreground">
+                    Sugerencia: lo dibujó el tratamiento al hacerse. Si no es lo que ves, anúlalo y regístralo
+                    como lo observas.
+                  </p>
+                ) : null}
               </li>
             )
           })}

@@ -331,6 +331,8 @@ export const OPERATIONS = {
       detail: { kind: "text", max: 2000, label: "Detalle", description: "Una precisión sobre la indicación.", body: "optional", nullable: true, agent: "fills" },
       // Solo del dictado: «resina, o si no una corona» es una elección del paciente (issue 109, fase 2).
       alternatives: { kind: "textList", maxItems: 2, maxLength: 200, label: "Otros caminos", description: "Otras prestaciones que dijo como alternativa para lo mismo («o si no una corona»), con sus palabras y en el orden en que las dijo. Vacío si no dijo alternativas.", body: "none", agent: "fills" },
+      // Solo del dictado: la recomendada la dice el odontólogo; sin eso, los caminos van sin recomendación (revisión del 26 nov).
+      recommended: { kind: "flag", label: "Recomendada", description: "Solo con otros caminos: true si dijo cuál recomienda («le recomiendo la corona», «lo mejor es la resina»), y esa va en `service`. Si no lo dijo, no va.", body: "none", agent: "fills" },
     },
   },
   // Un medicamento de una receta dictada (issue 109, fase 2): los datos de la Guía de la buena
@@ -388,7 +390,7 @@ export const OPERATIONS = {
     fields: {
       system: { kind: "text", min: 1, max: 40, label: "Sistema", description: "La clave del sistema examinado, de la lista de sistemas que se te da (por ejemplo, toraxPulmones).", body: "required", agent: "requires" },
       state: { kind: "enum", values: ["sin_alteraciones", "con_hallazgos"], label: "Estado", description: "sin_alteraciones si lo dijo normal («pulmones limpios»); con_hallazgos si describió algo anormal.", body: "required", agent: "requires" },
-      finding: { kind: "text", max: 1000, label: "Hallazgo", description: "Lo que encontró, con la parte del cuerpo y con sus palabras («amígdalas aumentadas, con placas blanquecinas»). Vacío si está sin alteraciones.", body: "optional", nullable: true, agent: "fills" },
+      finding: { kind: "text", max: 1000, label: "Hallazgo", description: "Lo que dijo de ese sistema, con la parte del cuerpo y con sus palabras: lo anormal («amígdalas aumentadas, con placas blanquecinas») y también lo normal («Lasègue negativo»).", body: "optional", nullable: true, agent: "fills" },
     },
   },
   // El descanso médico que se dicta (latidIA, issue 229): se emite como siempre, firmado y con el

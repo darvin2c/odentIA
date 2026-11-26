@@ -465,7 +465,9 @@ export async function savePeriodontalTooth(
     }
   }
   if (!chart.expectedTeeth.includes(input.toothNumber)) {
-    throw validation(`La pieza ${input.toothNumber} no se sondea: el odontograma de esta atención la tiene ausente`)
+    // Las piezas del sondaje se fijan al empezarlo con el odontograma de ese momento: la pantalla
+    // solo ofrece esas. Sumar después una que el odontograma tenía ausente pediría un control nuevo en la captura.
+    throw validation(`La pieza ${input.toothNumber} no está en este periodontograma: al empezarlo, el odontograma la tenía ausente`)
   }
   // La pieza se guarda sola mientras se sigue sondeando: el error dice cuál es.
   const errors = validatePeriodontalTooth(input, { implant: chart.implantTeeth.includes(input.toothNumber) })

@@ -3,7 +3,7 @@
  * voz clínica): era solo de latidIA y se mueve aquí para que odentIA lo use igual. Decide quien
  * receta: se avisa como una alergia y la receta guarda que vio el aviso (ADR 0143).
  * - Con embarazo o lactancia registrados, lo recuerda con su fecha.
- * - Lo contraindicado en el embarazo, por su grupo ATC.
+ * - Lo que las fichas técnicas desaconsejan en el embarazo, por su grupo ATC.
  * - Un AINE desde la semana 20 del embarazo (FDA, comunicación del 15 oct 2020).
  * - Un AINE con un anticoagulante o un antiagregante (grupo ATC B01A): más riesgo de sangrado
  *   (SDCEP, «Management of Dental Patients Taking Anticoagulants or Antiplatelet Drugs», 2015).
@@ -16,22 +16,23 @@ import { pregnancyToday } from "./pregnancy.js"
 import { upperFirst } from "./product-words.js"
 
 /**
- * Lo que está contraindicado en el embarazo, por su grupo ATC, dicho como se lee en el aviso: los
- * efectos en el feto están bien establecidos y aparecen en las fichas técnicas.
+ * Lo que las fichas técnicas desaconsejan en el embarazo, por su grupo ATC (sus efectos en el feto
+ * están bien establecidos). El aviso lo dice como dato de la ficha, no como orden: decide quien
+ * receta (26 nov).
  */
 const PREGNANCY_CONTRAINDICATED: ReadonlyArray<readonly [prefix: string, words: string]> = [
-  ["C09A", "los IECA están contraindicados"],
-  ["C09B", "los IECA están contraindicados"],
-  ["C09C", "los ARA II están contraindicados"],
-  ["C09D", "los ARA II están contraindicados"],
-  ["C10AA", "las estatinas están contraindicadas"],
-  ["B01AA", "los antagonistas de la vitamina K están contraindicados"],
-  ["J01AA", "las tetraciclinas están contraindicadas"],
-  ["D10BA", "los retinoides están contraindicados"],
-  ["A02BB01", "el misoprostol está contraindicado"],
-  ["N03AG01", "el ácido valproico está contraindicado"],
-  ["L04AX03", "el metotrexato está contraindicado"],
-  ["L01BA01", "el metotrexato está contraindicado"],
+  ["C09A", "los IECA"],
+  ["C09B", "los IECA"],
+  ["C09C", "los ARA II"],
+  ["C09D", "los ARA II"],
+  ["C10AA", "las estatinas"],
+  ["B01AA", "los antagonistas de la vitamina K"],
+  ["J01AA", "las tetraciclinas"],
+  ["D10BA", "los retinoides"],
+  ["A02BB01", "el misoprostol"],
+  ["N03AG01", "el ácido valproico"],
+  ["L04AX03", "el metotrexato"],
+  ["L01BA01", "el metotrexato"],
 ]
 
 /** Los AINE (M01A) y la aspirina como analgésico (N02BA): la aspirina de 100 mg diaria es antiagregante (B01AC). */
@@ -119,7 +120,7 @@ export function prescribingAlerts(
     if (!name) continue
     const atc = findMedication(name, medications)?.atc
     const avoid = pregnancy ? prefixOf(PREGNANCY_CONTRAINDICATED, atc) : null
-    if (avoid) warnings.push(`${upperFirst(name)}: ${pregnantWords} y ${avoid} en el embarazo (ATC ${atc}).`)
+    if (avoid) warnings.push(`${upperFirst(name)}: ${pregnantWords} y las fichas técnicas desaconsejan ${avoid} en el embarazo (ATC ${atc}).`)
     const nsaid = !!atc && NSAID_ATC.some((prefix) => atc.startsWith(prefix))
     if (!nsaid) continue
     // Sin las semanas no se sabe si ya pasó la 20: se avisa igual.

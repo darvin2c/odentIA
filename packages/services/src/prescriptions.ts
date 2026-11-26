@@ -105,8 +105,8 @@ function scoped(orgId: string, patientId: string, id: string) {
 }
 /**
  * Lo que impide emitir, junto al dato que hay que cambiar: el medicamento que
- * no va en la receta común (`items[i].genericName`) y el peso que falta
- * (`patientWeightKg`). Solo se calcula cuando la receta ya se rechazó.
+ * no va en la receta común (`items[i].genericName`). Solo se calcula cuando la
+ * receta ya se rechazó. El peso que falta no frena: solo avisa.
  */
 async function blockedFields(
   prescribing: ProductPrescribing,
@@ -119,18 +119,9 @@ async function blockedFields(
   },
 ): Promise<Record<string, string>> {
   const fields: Record<string, string> = {}
-  // Sin medicamentos, la revisión solo mira el peso.
-  const weight = await prescribing.review(tx, { ...moment, items: [] })
-  if (weight.errors.length > 0) fields.patientWeightKg = weight.errors.join(" ")
   for (const [index, item] of moment.items.entries()) {
-    // Con un peso cualquiera, la revisión de un medicamento solo dice lo suyo.
-    const own = await prescribing.review(tx, {
-      ...moment,
-      items: [item],
-      weightKg: moment.weightKg ?? 1,
-    })
-    const lines = own.errors.filter((line) => !weight.errors.includes(line))
-    if (lines.length > 0) fields[`items[${index}].genericName`] = lines.join(" ")
+    const own = await prescribing.review(tx, { ...moment, items: [item] })
+    if (own.errors.length > 0) fields[`items[${index}].genericName`] = own.errors.join(" ")
   }
   return fields
 }
@@ -251,7 +242,8 @@ export async function createPrescription(
         eq(patientAllergy.isActive, true),
       ),
     )
-  // Lo que impide emitir (un controlado, el peso de un niño) va antes que los avisos.
+  // Lo que impide emitir (un controlado, que va en la receta oficial) va antes que los avisos. El
+  // peso que falta a un niño solo avisa (26 nov): queda en la receta como visto si se mostró.
   const review = await prescribing.review(tx, { orgId, patientId, items, weightKg })
   if (review.errors.length > 0)
     throw new ServiceError(
@@ -285,7 +277,8 @@ export async function createPrescription(
   // mostró; un duplicado que no se mostró no se firma como visto. Se guardan en palabras, como se
   // leyeron: la directiva del MINSA pide guardar el aviso y la respuesta; la exportación FHIR
   // (`DetectedIssue`) queda para cuando se exporte la receta.
-  const alertsSeen = [...new Set([...conflicts, ...duplicates.filter((line) => shown?.has(line))])]
+  const informative = [...duplicates, ...(review.warnings ?? [])]
+  const alertsSeen = [...new Set([...conflicts, ...informative.filter((line) => shown?.has(line))])]
   if (overrideReason && overrideReason.length > 500)
     throw invalidField(
       "allergyOverrideReason",

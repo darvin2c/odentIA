@@ -254,6 +254,10 @@
               "maxLength": 200
             }
           },
+          "recommended": {
+            "description": "Solo con otros caminos: true si dijo cuál recomienda («le recomiendo la corona», «lo mejor es la resina»), y esa va en `service`. Si no lo dijo, no va.",
+            "type": "boolean"
+          },
           "dicho": {
             "description": "El fragmento del dictado, tal cual, del que sale este registro.",
             "type": "string",

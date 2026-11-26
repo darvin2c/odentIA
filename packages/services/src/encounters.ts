@@ -4,7 +4,7 @@ import {
   doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
-  parseVitals,
+  readVitals,
   sumByCurrency,
   type Vitals,
   vitalsErrors,
@@ -1644,7 +1644,7 @@ export async function updateEncounterDraft(
     if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
   }
   if (patch.vitals !== undefined) {
-    const parsed = parseVitals(patch.vitals, hooks.vitals)
+    const parsed = readVitals(patch.vitals, hooks.vitals)
     if (!parsed.ok) {
       const bySign = vitalsErrors(patch.vitals as Record<string, unknown> | null, hooks.vitals)
       throw validation(

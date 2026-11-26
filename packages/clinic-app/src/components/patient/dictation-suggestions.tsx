@@ -519,7 +519,8 @@ const LETTER = ["A", "B", "C"]
 /**
  * «Pieza 46 · dos caminos, el paciente elige» (issue 109, fase 2): una fila por
  * camino con su prestación y su precio; tocar una la deja recomendada (la
- * opción A del presupuesto). Uno que no se ubicó en los servicios se elige con
+ * opción A del presupuesto). Sin decir cuál recomienda, ninguna va marcada
+ * (revisión del 26 nov). Uno que no se ubicó en los servicios se elige con
  * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones:
  * lo dice el aviso flotante, no la tarjeta.
  */
@@ -538,24 +539,27 @@ function PlanChoices({ session, item, busy, onChosen }: { session: DictationSess
   // Otra elección ya ocupa el presupuesto: se ve lo dicho, sin nada que elegir (la nota dice qué hacer).
   const blocked = item.payload["choiceBlocked"] === true
   const resolved = options.every((option) => option.serviceId)
+  // La recomendada la dice el odontólogo (al dictar o con un toque): sin eso, ninguna va marcada.
+  const recommended = item.payload["recommended"] === true
+  const isRecommended = (index: number) => recommended && index === 0
   return (
     <div className="flex flex-col gap-2 sm:pl-8">
-      {resolved && !blocked ? <p className="text-muted-foreground">Toca la que recomiendas</p> : null}
+      {resolved && !blocked ? <p className="text-muted-foreground">{recommended ? "Toca la que recomiendas" : "Sin recomendada: si recomiendas una, tócala"}</p> : null}
       <ul className="flex flex-col gap-2" aria-label="Caminos para elegir">
         {options.map((option, index) => (
           <li key={LETTER[index]}>
             {option.serviceId ? (
               <button
                 type="button"
-                aria-pressed={index === 0}
-                disabled={disabled || blocked || index === 0}
+                aria-pressed={isRecommended(index)}
+                disabled={disabled || blocked || isRecommended(index)}
                 onClick={() => save({ recommend: index })}
-                className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2 text-left disabled:cursor-default ${index === 0 ? "border-2 border-primary" : "border hover:border-primary/60"}`}
+                className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2 text-left disabled:cursor-default ${isRecommended(index) ? "border-2 border-primary" : "border hover:border-primary/60"}`}
               >
-                <span aria-hidden className={`size-4 shrink-0 rounded-full border-2 ${index === 0 ? "border-primary bg-primary shadow-[inset_0_0_0_3px_var(--background)]" : "border-muted-foreground"}`} />
+                <span aria-hidden className={`size-4 shrink-0 rounded-full border-2 ${isRecommended(index) ? "border-primary bg-primary shadow-[inset_0_0_0_3px_var(--background)]" : "border-muted-foreground"}`} />
                 <span className="min-w-0 flex-1">{option.serviceName}</span>
                 <span className="whitespace-nowrap font-semibold">{price(option.priceCents ?? 0, option.currency ?? "")}</span>
-                {index === 0 ? <Badge variant="secondary">Recomendada</Badge> : null}
+                {isRecommended(index) ? <Badge variant="secondary">Recomendada</Badge> : null}
               </button>
             ) : blocked ? (
               <p className="rounded-lg border bg-background px-3 py-2 text-muted-foreground">Dijiste «{option.service}».</p>

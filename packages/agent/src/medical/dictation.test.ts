@@ -71,7 +71,8 @@ describe("Clío médica: modo de demostración", () => {
           state: "con_hallazgos",
           finding: "Amígdalas aumentadas con placas blanquecinas",
         },
-        { system: "toraxPulmones", state: "sin_alteraciones" },
+        // Lo normal también lleva lo que dijo.
+        { system: "toraxPulmones", state: "sin_alteraciones", finding: "pulmones limpios." },
       ],
     )
     expect(drafts.find((draft) => draft.kind === "diagnostico")?.payload).toEqual({

@@ -3426,7 +3426,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(handoff.handoffs).toHaveLength(1)
     expect(handoff.handoffs[0]).toMatchObject({
       reason: "Pide hablar con una persona",
-      priority: "baja",
+      // La urgencia baja no la baja de «media»: solo puede subirla (26 nov).
+      priority: "media",
       summary: "Escribió: «Tengo una queja y quiero hablar con una persona»",
       // Lo que lee quien toma el caso: qué pide, qué falta y el aviso que de verdad salió.
       asks: "Hablar con una persona por una queja",
