@@ -7,6 +7,7 @@ import {
   markRestNormal,
   parseSystemsExam,
   readSystemsExam,
+  withExamState,
 } from "./examination.js"
 
 describe("examen por sistemas (issue 229, decisión 5)", () => {
@@ -97,6 +98,24 @@ describe("examen por sistemas (issue 229, decisión 5)", () => {
       "Sin alteraciones: Piel",
       "No examinado: Estado general, Cabeza y cuello, Boca y garganta, Tórax y pulmones, Corazón, Abdomen, Genital y urinario, Extremidades",
     ])
+  })
+})
+
+describe("el estado cambiado a mano (revisión de código del 26 nov)", () => {
+  it("de «con hallazgos» a «sin alteraciones» se borra el hallazgo: no queda «sin alteraciones: edema»", () => {
+    expect(withExamState({ estado: "con_hallazgos", hallazgo: "edema en MMII" }, "sin_alteraciones")).toEqual({ estado: "sin_alteraciones" })
+  })
+  it("lo normal dicho con sus palabras se conserva, y al pasar a «con hallazgos» también", () => {
+    expect(withExamState({ estado: "sin_alteraciones", hallazgo: "Lasègue negativo" }, "sin_alteraciones")).toEqual({
+      estado: "sin_alteraciones",
+      hallazgo: "Lasègue negativo",
+    })
+    expect(withExamState({ estado: "sin_alteraciones", hallazgo: "Lasègue negativo" }, "con_hallazgos")).toEqual({
+      estado: "con_hallazgos",
+      hallazgo: "Lasègue negativo",
+    })
+    expect(withExamState({ estado: "con_hallazgos", hallazgo: "edema" }, "con_hallazgos")).toEqual({ estado: "con_hallazgos", hallazgo: "edema" })
+    expect(withExamState(undefined, "sin_alteraciones")).toEqual({ estado: "sin_alteraciones" })
   })
 })
 

@@ -92,12 +92,13 @@ export function familyKinshipOf(words: string): FamilyKinship {
 /**
  * El parentesco con el paciente de un familiar que nombra quien lo acompaña (`speaker`: su vínculo,
  * «madre»): «mi papá» dicho por la madre es su abuelo materno; «mi hermana», dicho por la hija, es su
- * hija. Lo que no se puede contar con certeza queda con sus palabras («hermana de su esposa»).
+ * hija. Lo que no se puede contar con certeza queda con sus palabras («hermana de su esposa»). Si
+ * habla el propio paciente (`patientSpeaks`), «quien habla» es el paciente: «mi mamá» es su mamá.
  */
-export function familyFromPatient(item: Record<string, unknown>, speaker: string): Record<string, unknown> {
+export function familyFromPatient(item: Record<string, unknown>, speaker: string, patientSpeaks = false): Record<string, unknown> {
   const { of, relation, ...rest } = item
   const words = familyRelationWords(relation)
-  if (of !== "quien_habla" || !words) return { ...rest, relation: kinSaid(relation) }
+  if (of !== "quien_habla" || !words || patientSpeaks) return { ...rest, relation: kinSaid(relation) }
   const by = familyKinshipOf(speaker)
   // «Papá» termina en «a» sin la tilde: el femenino se lee de la palabra, no de su última letra.
   const female = /^(madre|mama|hermana|abuela|tia|hija|nieta|prima)$/.test(words.split(" ")[0] ?? "")
@@ -162,13 +163,16 @@ const adjectiveHeard = (word: string, saidWords: readonly string[]) =>
 
 /**
  * Las enfermedades que quien habla dice de sí («yo también soy diabética», «yo tengo asma»), con su
- * nombre: «diabetes», «asma». Solo las de la lista de arriba; vacío si no dice ninguna.
+ * nombre: «diabetes», «asma». Solo las de la lista de arriba; vacío si no dice ninguna o si la niega
+ * («yo no soy diabética»).
  */
 export function selfConditionsOf(said: string): string[] {
   const words = plain(said).replace(/[^a-z ]+/g, " ").split(" ").filter(Boolean)
   const out = new Set<string>()
   words.forEach((word, index) => {
     const before = words.slice(Math.max(0, index - 3), index)
+    // «Yo no soy diabética», «yo tampoco tengo asma»: lo que niega de sí no propone nada.
+    if (words.slice(Math.max(0, index - 4), index).some((one) => one === "no" || one === "nunca" || one === "tampoco" || one === "ni")) return
     const adjective = CONDITION_ADJECTIVES.find((item) => item.said.test(word))
     if (adjective && before.includes("soy")) out.add(adjective.name)
     const noun = CONDITION_ADJECTIVES.find((item) => item.word === word)
@@ -520,7 +524,7 @@ export function prepareHealth(payload: Record<string, unknown>, said: string | u
     // del 25 nov: «su papá», dicho por la madre, quedaba «abuelo materno»).
     const list = Array.isArray(payload[group])
       ? group === "family"
-        ? (payload[group] as unknown[]).map((item) => (isRecord(item) ? familyFromPatient(item, declarante === "acompanante" ? vinculo : "") : item))
+        ? (payload[group] as unknown[]).map((item) => (isRecord(item) ? familyFromPatient(item, declarante === "acompanante" ? vinculo : "", declarante === "paciente") : item))
         : payload[group]
       : undefined
     const raw = list ? { state: "recorded", items: list } : payload[group]
@@ -861,24 +865,39 @@ export function healthNamed(payload: Record<string, unknown>, said: string): { k
   return healthNamedBy(payload, (name) => distinctWords(name).length > 0 && nameHeard(name, said))
 }
 
-/** Lo que dicen al final de un «no» que corrige: «la diabetes no, me equivoqué», «la diabetes no es de él». */
-const NEGATION_TAIL = new Set(["me", "perdon", "eso", "es", "era", "fue", "digo", "sino", "la", "lo", "tiene", "doctora", "doctor"])
-/** Lo que puede ir entre el «no» y lo que niega: «no, la diabetes», «no es diabetes», «no tiene asma». */
-const NEGATION_LEAD = new Set([",", "es", "era", "tiene", "tenia", "sufre", "padece", "toma", "tomaba", "usa", "la", "el", "lo", "los", "las", "de", "del"])
+/** Lo que puede ir entre el «no» y lo que niega: «no es diabetes», «no tiene asma», «no tiene la diabetes». Sin coma: «No, tiene diabetes» afirma. */
+const NEGATION_LEAD = new Set(["es", "era", "tiene", "tenia", "sufre", "padece", "toma", "tomaba", "usa", "la", "el", "lo", "los", "las", "de", "del"])
 /** Lo que va justo antes de lo que se niega al final: «la diabetes no», «lo del asma no». Un verbo («es diabético, no») pregunta. */
 const NEGATED_AFTER = new Set(["la", "el", "lo", "los", "las", "de", "del"])
 const CLAUSE_END = /^[,.;:!]$/
+/** Lo que matiza en vez de negar: «su papá sí», «no la tiene controlada», «no es grave», «no sé si…». */
+const NEGATION_HEDGE = /^(?:si|pero|sino|aunque|controlad[oa]s?|compensad[oa]s?|graves?|leves?)$/
+/** Palabras que solas no distinguen un nombre: «insuficiencia renal» no es «insuficiencia cardiaca». */
+const GENERIC_HEAD = new Set(["insuficiencia", "enfermedad", "sindrome", "alergia", "trastorno", "infeccion", "cancer", "tumor", "problema", "problemas", "dolor", "deficit", "falla", "acido"])
+/** Los familiares que se nombran al hablar de su salud: el «no» de esa frase es de ese familiar. */
+const KIN_SAID = /^(?:papa|mama|padre|madre|hermano|hermana|hermanos|hermanas|abuelo|abuela|abuelos|abuelas|tio|tia|tios|tias|primo|prima|primos|primas|sobrino|sobrina)$/
+/** Quien no es de su familia de sangre: lo que se diga de su salud no es del paciente ni de su familia. */
+const OTHER_SAID = /^(?:esposo|esposa|pareja|novio|novia)$/
 
 /**
  * Lo de la propuesta que una frase niega, como claves para `withoutHealthKeys` (QA del 26 nov: «no, la
- * diabetes no» dependía de que Clío mandara `quitar`, y casi nunca lo hacía): el «no» va pegado a lo
- * que nombra («no, la diabetes no», «la diabetes no, me equivoqué», «no es diabetes», «no tiene asma»).
- * Un «No» que responde a una pregunta no nombra nada («¿Es diabético?» «No.»), una pregunta no niega y
- * «es diabético, ¿no?» tampoco: el verbo delante pregunta. Vacío si no niega nada de lo propuesto.
+ * diabetes no» dependía de que Clío mandara `quitar`, y casi nunca lo hacía). La lectura es estricta,
+ * porque en la duda no se propone quitar (revisión de código del 26 nov):
+ * - lo negado es el nombre entero del dato o su palabra distintiva exacta («hipertensión» por
+ *   «Hipertensión arterial»), sin raíces ni parecidos: «hipertiroidismo» no es «hipertensión», ni
+ *   «insuficiencia cardiaca» es «insuficiencia renal»;
+ * - el «no» va pegado al nombre, sin coma entre medio: «no tiene diabetes», «no es diabetes», «no, la
+ *   diabetes no», «la diabetes no, me equivoqué»; «No, tiene diabetes» afirma;
+ * - nada lo matiza: «la diabetes no la tiene controlada», «la hipertensión no es grave», «su papá sí»;
+ * - solo es de quien se habla: con un familiar nombrado («su papá no tiene diabetes»), lo de ese
+ *   familiar; sin ninguno, lo del paciente.
+ * Un «No» que responde a una pregunta no nombra nada («¿Es diabético?» «No.») y una pregunta no niega.
+ * Vacío si no niega nada de lo propuesto.
  */
 export function healthNegated(payload: Record<string, unknown>, said: string): { keys: Set<string>; names: string[] } {
   const keys = new Set<string>()
   const names: string[] = []
+  const ownWords = payload["declarante"] === "paciente"
   for (const sentence of said.split(/(?<=[.!?;])\s+/u)) {
     if (/[¿?]/u.test(sentence)) continue
     const tokens = plain(sentence)
@@ -886,32 +905,52 @@ export function healthNegated(payload: Record<string, unknown>, said: string): {
       .replace(/[^a-z0-9ñ,.;:! ]+/g, " ")
       .split(/\s+/)
       .filter(Boolean)
-    const negated = (name: string) => {
-      const words = distinctWords(name)
-      if (!words.length) return false
-      const at = tokens.flatMap((token, index) => (words.some((word) => wordHeard(word, token)) ? [index] : []))
-      return at.some((index) => negatedAt(tokens, index, at))
+    if (tokens.some((token) => NEGATION_HEDGE.test(token) || OTHER_SAID.test(token))) continue
+    // El familiar de quien se habla. «Mi papá» dicho por quien acompaña es otro parentesco: no se cuenta.
+    const kin = tokens.filter((token) => KIN_SAID.test(token))
+    if (!ownWords && tokens.some((token, index) => KIN_SAID.test(token) && tokens[index - 1] === "mi")) continue
+    if (new Set(kin.map((one) => familyKinshipOf(one))).size > 1) continue
+    const whose = (group: HealthGroup, item: Record<string, unknown>) => {
+      if (!kin.length) return group !== "family"
+      if (group !== "family") return false
+      const code = familyKinshipOf(text(item["relation"]))
+      return kin.some((one) => (code !== "FAMMEMB" ? familyKinshipOf(one) === code : familyRelationWords(item["relation"]) === one))
     }
-    const found = healthNamedBy(payload, negated)
+    const negated = (name: string) => spansOf(tokens, name).some(([first, last]) => negatedSpan(tokens, first, last))
+    const found = healthNamedBy(payload, negated, { whose, byRelation: false })
     for (const key of found.keys) keys.add(key)
     for (const name of found.names) if (!names.includes(name)) names.push(name)
   }
   return { keys, names }
 }
 
-/** ¿El «no» va pegado a lo que se nombra en `index`? (`healthNegated`) */
-function negatedAt(tokens: readonly string[], index: number, named: readonly number[]): boolean {
-  let first = index
-  while (named.includes(first - 1)) first -= 1
-  let next = index + 1
-  while (named.includes(next)) next += 1
+/** Dónde nombra la frase ese dato: su nombre entero, o su palabra distintiva exacta (`healthNegated`). */
+function spansOf(tokens: readonly string[], name: string): Array<[number, number]> {
+  const whole = plain(name)
+    .split(/[^a-z0-9ñ]+/)
+    .filter(Boolean)
+  const words = distinctWords(name)
+  const head = words.length === 1 ? words[0] : words[0] && !GENERIC_HEAD.has(words[0]) ? words[0] : undefined
+  const spans: Array<[number, number]> = []
+  tokens.forEach((token, index) => {
+    if (whole.length && whole.every((word, at) => tokens[index + at] === word)) spans.push([index, index + whole.length - 1])
+    else if (head && token === head) spans.push([index, index])
+  })
+  return spans
+}
+
+/** ¿El «no» va pegado al nombre que ocupa `first`…`last`, y nada lo sigue que diga otra cosa? (`healthNegated`) */
+function negatedSpan(tokens: readonly string[], first: number, last: number): boolean {
+  const ends = (index: number) => tokens[index] === undefined || CLAUSE_END.test(tokens[index] ?? "")
+  // «La diabetes no», «lo del asma tampoco»: el «no» cierra la frase o va antes de una coma.
   const before = tokens[first - 1]
   const lead = before === undefined || CLAUSE_END.test(before) || NEGATED_AFTER.has(before)
-  const tail = tokens[next + 1]
-  if (lead && (tokens[next] === "tampoco" || (tokens[next] === "no" && (tail === undefined || CLAUSE_END.test(tail) || NEGATION_TAIL.has(tail))))) return true
+  if (lead && (tokens[last + 1] === "no" || tokens[last + 1] === "tampoco") && ends(last + 2)) return true
+  // «No tiene diabetes», «no es diabetes, doctora», «no tiene diabetes ni asma»: lo que sigue al nombre lo cierra.
+  if (!ends(last + 1) && tokens[last + 1] !== "ni") return false
   let back = first - 1
   let skipped = 0
-  while (back >= 0 && skipped < 4 && NEGATION_LEAD.has(tokens[back] ?? "")) {
+  while (back >= 0 && skipped < 3 && NEGATION_LEAD.has(tokens[back] ?? "")) {
     back -= 1
     skipped += 1
   }
@@ -919,21 +958,27 @@ function negatedAt(tokens: readonly string[], index: number, named: readonly num
 }
 
 /** Lo de la propuesta cuyo nombre cumple `named`, dato por dato, con su clave y su nombre como se lee. */
-function healthNamedBy(payload: Record<string, unknown>, named: (name: string) => boolean): { keys: Set<string>; names: string[] } {
+function healthNamedBy(
+  payload: Record<string, unknown>,
+  named: (name: string) => boolean,
+  only: { whose?: (group: HealthGroup, item: Record<string, unknown>) => boolean; byRelation?: boolean } = {},
+): { keys: Set<string>; names: string[] } {
   const keys = new Set<string>()
   const names: string[] = []
+  const whose = only.whose ?? (() => true)
+  const byRelation = only.byRelation ?? true
   for (const group of GROUPS) {
     const value = payload[group]
     if (!isRecord(value) || INTERVIEW.includes(group)) continue
     if (DIRECTED.includes(group)) {
-      if (text(value["detail"]) && named(text(value["detail"]))) {
+      if (text(value["detail"]) && whose(group, value) && named(text(value["detail"]))) {
         keys.add(group)
         names.push(text(value["detail"]))
       }
       continue
     }
     for (const item of (Array.isArray(value["items"]) ? value["items"] : []) as Array<Record<string, unknown>>) {
-      if (!(named(text(item["name"])) || (group === "family" && named(text(item["relation"]))))) continue
+      if (!whose(group, item) || !(named(text(item["name"])) || (byRelation && group === "family" && named(text(item["relation"]))))) continue
       // Dato por dato: «no, la diabetes no» quita la diabetes, no las demás enfermedades.
       if (group === "medications" && drugKey(item["name"])) keys.add(drugKey(item["name"]))
       else keys.add(itemKey(group, item))

@@ -381,6 +381,14 @@ describe("entrega 2 · su familia y lo que ya no toma", () => {
     expect(familyKinshipOf("hija")).toBe("CHILD")
   })
 
+  it("si habla el propio paciente, «quien habla» es el paciente: «mi mamá» es su mamá (revisión de código del 26 nov)", () => {
+    const own = prepareHealth({ declarante: "paciente", family: [{ relation: "mamá", of: "quien_habla", name: "diabetes" }] }, "mi mamá es diabética", DENTAL)!.payload
+    expect(own["family"]).toEqual({ state: "recorded", items: [{ relation: "mamá", name: "diabetes" }] })
+    // Sin saber quién habla, no se supone: queda con sus palabras.
+    const unknown = prepareHealth({ declarante: "no_se_sabe", family: [{ relation: "mamá", of: "quien_habla", name: "diabetes" }] }, "mi mamá es diabética", DENTAL)!.payload
+    expect(unknown["family"]).toEqual({ state: "recorded", items: [{ relation: "mamá de quien lo acompaña", name: "diabetes" }] })
+  })
+
   it("lo que quien acompaña dice de sí misma no es del paciente, ni en el repaso; su familia sí", () => {
     const ready = prepareHealth(
       { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] } },
@@ -487,6 +495,11 @@ describe("lo que quien acompaña dice de sí, como lo de la familia del paciente
     expect(selfConditionsOf("yo también soy diabética, eso es mío, no de él")).toEqual(["diabetes"])
     expect(selfConditionsOf("yo tengo asma")).toEqual(["asma"])
     expect(selfConditionsOf("él es asmático")).toEqual([])
+    // Lo que niega de sí no propone nada (revisión de código del 26 nov).
+    expect(selfConditionsOf("yo no soy diabética")).toEqual([])
+    expect(selfConditionsOf("yo no tengo asma")).toEqual([])
+    expect(selfConditionsOf("yo tampoco soy diabética")).toEqual([])
+    expect(selfConditionsOf("yo nunca he tenido asma, pero sí tengo diabetes")).toEqual(["diabetes"])
     const ready = prepareHealth(
       { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] } },
       "yo también soy diabética, eso es mío",
@@ -557,4 +570,36 @@ describe("«no, la diabetes no» lo lee el servidor, sin esperar a Clío (QA del
       expect(healthNegated(payload, said).keys.size).toBe(0)
     },
   )
+
+  // Revisión de código del 26 nov: la lectura es estricta; en la duda, no se propone quitar.
+  const wide = {
+    declarante: "acompanante",
+    vinculo: "madre",
+    conditions: { state: "recorded", items: [{ name: "Hipertensión arterial" }, { name: "Insuficiencia renal" }, { name: "diabetes" }] },
+    family: { state: "recorded", items: [{ relation: "Padre", name: "diabetes" }] },
+  }
+  it.each([
+    "No tiene hipertiroidismo.",
+    "No tiene insuficiencia cardiaca.",
+    "No, tiene diabetes.",
+    "No, es diabético.",
+    "La diabetes no la tiene controlada.",
+    "La hipertensión no es grave.",
+    "No tiene hipertensión pulmonar.",
+  ])("«%s» no propone quitar nada", (said) => {
+    expect(healthNegated(wide, said).names).toEqual([])
+  })
+  it("«El niño no tiene diabetes, su papá sí.» no quita la diabetes del niño ni la de su papá", () => {
+    expect(healthNegated(wide, "El niño no tiene diabetes, su papá sí.").names).toEqual([])
+  })
+  it("cada «no» quita solo lo de quien se habla: el paciente o el familiar que nombra", () => {
+    expect(healthNegated(wide, "El niño no tiene diabetes.").names).toEqual(["diabetes"])
+    expect(healthNegated(wide, "Su papá no tiene diabetes.").names).toEqual(["Padre: diabetes"])
+    expect(healthNegated(wide, "Su mamá no tiene diabetes.").names).toEqual([])
+  })
+  it("el nombre entero o su palabra distintiva sí lo niegan", () => {
+    expect(healthNegated(wide, "No tiene hipertensión.").names).toEqual(["Hipertensión arterial"])
+    expect(healthNegated(wide, "No tiene insuficiencia renal.").names).toEqual(["Insuficiencia renal"])
+    expect(healthNegated(wide, "No, la insuficiencia renal no.").names).toEqual(["Insuficiencia renal"])
+  })
 })

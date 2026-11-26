@@ -29,6 +29,10 @@ describe("el control dicho por su edad", () => {
     expect(controlByAge("su próximo control a los dos años", { birthDate: null, today: "2026-11-26" })).toBeNull()
     // «A los dos años de la cirugía» no es su edad.
     expect(controlByAge("control a los dos años de la cirugía", toddler)).toBeNull()
+    // Ni lo que cuenta desde un tratamiento, ni una edad sin su unidad (revisión de código del 26 nov).
+    expect(controlByAge("control al cumplir los seis meses del tratamiento", toddler)).toBeNull()
+    expect(controlByAge("cuando cumpla un mes de la cirugía", toddler)).toBeNull()
+    expect(controlByAge("que vuelva cuando cumpla dos", toddler)).toBeNull()
     expect(controlByAge(undefined, toddler)).toBeNull()
   })
 

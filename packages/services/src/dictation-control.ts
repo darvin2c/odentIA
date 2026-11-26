@@ -3,7 +3,7 @@
  *
  * «Su próximo control a los dos años», dicho de un niño de 18 meses, es cuando cumpla dos años: Clío
  * lo contaba desde hoy. Con su fecha de nacimiento y una frase de edad («a los dos años», «cuando
- * cumpla tres»), el servidor propone esa fecha y lo dice; «en dos años» o «dentro de dos años» siguen
+ * cumpla tres años»), el servidor propone esa fecha y lo dice; «en dos años» o «dentro de dos años» siguen
  * contándose desde hoy, y una edad que ya pasó también (un adulto «a los seis meses»). Es una
  * propuesta: el profesional la ve en la tarjeta y la cambia.
  */
@@ -14,11 +14,13 @@ const NUMBERS: Record<string, number> = {
 }
 
 /**
- * «a los dos años», «al cumplir los 3 años», «cuando cumpla dos (años)», «a los seis meses»; no «a los
- * dos años de la cirugía» (eso cuenta desde otra cosa), sí «a los dos años de edad».
+ * «a los dos años», «al cumplir los 3 años», «cuando cumpla dos años», «a los seis meses»; no «a los
+ * dos años de la cirugía» ni «al cumplir los seis meses del tratamiento» (eso cuenta desde otra cosa),
+ * sí «a los dos años de edad». La unidad se tiene que decir: «cuando cumpla dos» no dice si son años o
+ * meses y no se supone (revisión de código del 26 nov: así se volvía su sexto cumpleaños).
  */
 const AGE_SAID =
-  /\b(a los|al cumplir(?: los)?|cuando cumpla(?: los)?)\s+(\d{1,2}|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho)(?:\s+(a[ñn]os?|meses|mes)\b)?(?!\s+(?:de|del|despu[eé]s|luego)\b(?!\s+edad))/u
+  /\b(a los|al cumplir(?: los)?|cuando cumpla(?: los)?)\s+(\d{1,2}|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho)\s+(a[ñn]os?|meses|mes)\b(?!\s+(?:de|del|despu[eé]s|luego)\b(?!\s+edad))/u
 
 /** AAAA-MM-DD más esos años o meses; el 29 de febrero, o el 31 de un mes corto, cae el último día del mes. */
 function addToDay(day: string, months: number): string {
@@ -49,8 +51,7 @@ export function controlByAge(said: string | undefined, patient: { birthDate?: st
   const found = AGE_SAID.exec(said.toLocaleLowerCase("es"))
   if (!found?.[2]) return null
   const count = /^\d+$/.test(found[2]) ? Number(found[2]) : NUMBERS[found[2]]
-  // «cuando cumpla dos» sin unidad son años; «a los dos» sin unidad no dice qué: no se adivina.
-  const unit = found[3] ?? (found[1]?.startsWith("a los") ? null : "años")
+  const unit = found[3]
   if (!count || !unit) return null
   const months = unit.startsWith("mes") ? count : count * 12
   const day = addToDay(patient.birthDate.slice(0, 10), months)

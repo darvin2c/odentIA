@@ -130,3 +130,19 @@ it("anotar la pulpitis después de indicar la endodoncia no le cambia la fase ni
   expect(of(shown, kept.id).phaseSuggestion).toBeUndefined()
   expect(of(items, endo.id).phaseSuggestion).toBeUndefined()
 })
+
+// Revisión de código del 26 nov: la fase que una persona eligió al indicar también es suya; el Plan no
+// le sugiere cambiarla para siempre.
+it("la fase elegida al indicar cuenta como elegida: el Plan no sugiere cambiarla", async () => {
+  const f = await withDentalServices()
+  const chosen = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.extraction.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, toothNumber: 18, phase: "basica" }),
+  )
+  expect(chosen).toMatchObject({ phase: "basica" })
+  // Sin elegirla, lo que la regla pondría en otra fase sí lleva la sugerencia.
+  const other = await f.indicate(f.endodontics.id, { toothNumber: 38 })
+  await f.diagnose("K04.0", 38)
+  const shown = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))
+  expect(shown.find((item) => item.id === chosen.id)?.phaseSuggestion).toBeUndefined()
+  expect(shown.find((item) => item.id === other.id)?.phaseSuggestion).toContain("iría en «Urgencia»")
+})

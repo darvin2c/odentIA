@@ -9,6 +9,7 @@ import {
   comparePeriodontal,
   emptyPeriodontalTooth,
   FDI_ADULT_ROWS,
+  FDI_CHILD_ROWS,
   type FindingRecord,
   type FurcationRecord,
   normalizePeriodontalTooth,
@@ -244,18 +245,30 @@ async function previousPeriodontitis(
 /**
  * En borrador, las piezas del sondaje con las que el odontograma vigente ya no tiene ausentes (lo
  * corrigió durante el sondaje): la pantalla las ofrece y sondearlas las suma (`savePeriodontalTooth`).
+ * El cierre cuenta las mismas, para que los dos digan lo mismo de lo que falta.
  */
-async function withCorrectedTeeth(tx: Db, orgId: string, chart: ChartRow): Promise<ChartRow> {
+export async function withCorrectedTeeth<T extends Pick<ChartRow, "patientId" | "expectedTeeth" | "implantTeeth">>(tx: Db, orgId: string, chart: T): Promise<T> {
   const now = periodontalDentition(activeFindingsAsOf(await patientFindings(tx, orgId, chart.patientId)))
   const added = now.teeth.filter((tooth) => !chart.expectedTeeth.includes(tooth))
   if (added.length === 0) return chart
-  const order = FDI_ADULT_ROWS.flat()
-  const byOrder = (a: number, b: number) => order.indexOf(a) - order.indexOf(b)
   return {
     ...chart,
-    expectedTeeth: [...chart.expectedTeeth, ...added].sort(byOrder),
-    implantTeeth: [...chart.implantTeeth, ...added.filter((tooth) => now.implants.includes(tooth))].sort(byOrder),
+    expectedTeeth: chartTeethInOrder([...chart.expectedTeeth, ...added]),
+    implantTeeth: chartTeethInOrder([...chart.implantTeeth, ...added.filter((tooth) => now.implants.includes(tooth))]),
   }
+}
+
+/** El orden de las piezas en el sondaje: las permanentes por filas de la FDI y después las temporales. */
+const CHART_ORDER = [...FDI_ADULT_ROWS.flat(), ...FDI_CHILD_ROWS.flat()]
+const chartRank = (tooth: number) => {
+  const at = CHART_ORDER.indexOf(tooth)
+  // Una pieza que no está en ninguna fila va al final, por su número: nunca delante de la 18.
+  return at === -1 ? CHART_ORDER.length + tooth : at
+}
+
+/** Las piezas del sondaje en su orden (`CHART_ORDER`), sin repetir. */
+export function chartTeethInOrder(teeth: readonly number[]): number[] {
+  return [...new Set(teeth)].sort((a, b) => chartRank(a) - chartRank(b))
 }
 
 async function chartView(tx: Db, orgId: string, stored: ChartRow, birthDate: string | null | undefined): Promise<PeriodontalChartView> {
@@ -492,9 +505,8 @@ export async function savePeriodontalTooth(
     if (!now.teeth.includes(input.toothNumber)) {
       throw validation(`La pieza ${input.toothNumber} no está en este periodontograma: el odontograma la tiene ausente`)
     }
-    const order = FDI_ADULT_ROWS.flat()
-    const expectedTeeth = [...chart.expectedTeeth, input.toothNumber].sort((a, b) => order.indexOf(a) - order.indexOf(b))
-    const implantTeeth = now.implants.includes(input.toothNumber) ? [...chart.implantTeeth, input.toothNumber].sort((a, b) => order.indexOf(a) - order.indexOf(b)) : chart.implantTeeth
+    const expectedTeeth = chartTeethInOrder([...chart.expectedTeeth, input.toothNumber])
+    const implantTeeth = now.implants.includes(input.toothNumber) ? chartTeethInOrder([...chart.implantTeeth, input.toothNumber]) : chart.implantTeeth
     const [grown] = await tx
       .update(periodontalChart)
       .set({ expectedTeeth, implantTeeth, updatedAt: new Date() })

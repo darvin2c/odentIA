@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PortalBudget } from "../../lib/portal"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { BudgetResponder } from "./budget-responder"
@@ -184,7 +186,21 @@ describe("BudgetResponder", () => {
     expect(page).not.toContain("La recomienda tu")
     expect(page).not.toContain('font-medium">Endodoncia del molar 46')
     expect(page).not.toContain("Aceptas")
-    expect(page).toMatch(/<button[^>]*disabled[^>]*>[^]*Elige una opción/)
+  })
+
+  // Revisión de código del 26 nov: como antes, dejarlo para después no pide elegir; solo aceptar.
+  afterEach(cleanup)
+  it("sin elegir ninguna, se puede dejar todo para después: sin opción y cada tratamiento una vez", () => {
+    const onAnswer = vi.fn()
+    render(<BudgetResponder budget={twoOptions(false)} pending={false} error={null} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole("button", { name: "Lo dejo para después" }))
+    expect(onAnswer).toHaveBeenCalledWith({
+      optionId: null,
+      decisions: [
+        { planItemId: "i1", decision: "pospuesto" },
+        { planItemId: "i2", decision: "pospuesto" },
+      ],
+    })
   })
 
   it("con la recomendada marcada, esa va elegida de antemano", () => {

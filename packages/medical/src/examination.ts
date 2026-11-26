@@ -131,6 +131,17 @@ export function mergeDictatedSystem(
   return { sistemas: { ...(exam?.sistemas ?? {}), [system]: entry } }
 }
 
+/**
+ * El sistema con el estado que se eligió a mano. De «con hallazgos» a «sin alteraciones» se borra lo
+ * que encontró: no queda «Cardiovascular, sin alteraciones: edema en MMII» (revisión de código del 26
+ * nov). Lo normal dicho con sus palabras («Lasègue negativo») se conserva, y lo escrito también al pasar
+ * a «con hallazgos».
+ */
+export function withExamState(entry: ExamSystemEntry | undefined, estado: ExamState): ExamSystemEntry {
+  const kept = entry?.estado === "con_hallazgos" && estado === "sin_alteraciones" ? "" : (entry?.hallazgo ?? "")
+  return kept ? { estado, hallazgo: kept } : { estado }
+}
+
 /** Lo guardado, leído sin fallar: lo que no se entiende queda «No examinado». */
 export function readSystemsExam(value: unknown): SystemsExam | null {
   const parsed = parseSystemsExam(value)

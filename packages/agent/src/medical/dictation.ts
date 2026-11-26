@@ -157,7 +157,7 @@ export function systemPrompt(input: {
       measured: "`signos` ni en ",
     }),
     // Mesa del 25 nov (C8): la FUR sola no avisaba el embarazo en la receta, y «G2P1» se partía en números.
-    "La fecha de su última regla (FUR) va en `salud`, en `gyneco.fur`. Si está embarazada (un control prenatal, «es mi segundo embarazo»), va también `personal.embarazo`. Lo que cuenta de sus embarazos («es mi segundo embarazo», «G2P1, una cesárea») va en el relato tal como lo dijo: no lo partas en números.",
+    "La fecha de su última regla (FUR) va en `salud`, en `gyneco.fur`. Si está embarazada (un control prenatal, «es mi segundo embarazo»), va también `personal.embarazo`. Lo que cuenta de sus embarazos («es mi segundo embarazo», «G2P1, una cesárea») va en el relato tal como lo dijo, además de `salud`: no lo partas en números. Lo que va a `salud` no le quita el motivo a la consulta (las náuseas de un control prenatal).",
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",

@@ -20,6 +20,7 @@ import {
   mergeDictatedSystem,
   readSystemsExam,
   type SystemsExam,
+  withExamState,
 } from "@odentia/medical"
 import { Button, Field, FieldError, FieldLabel, Textarea } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
@@ -118,8 +119,8 @@ function SystemsExamFields({ idPrefix, draft, onChange, disabled, errors }: Exam
                 invalid={stateError.invalid}
                 aria-describedby={stateError.describedBy}
                 onChange={(estado) =>
-                  // Lo que dijo o escribió se queda al cambiar el estado: es lo que encontró.
-                  set(system.key, entry?.hallazgo ? { estado, hallazgo: entry.hallazgo } : { estado })
+                  // De «con hallazgos» a «sin alteraciones» se borra lo que encontró; lo normal dicho con sus palabras se queda.
+                  set(system.key, withExamState(entry, estado))
                 }
                 onClear={() => set(system.key, null)}
               />

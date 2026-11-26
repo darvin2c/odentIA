@@ -761,7 +761,10 @@ async function proposedPhaseOf(
   )
 }
 
-/** Alguien eligió su fase con «Planificar…»: lo que se recalcula al cambiarlo no se la pisa. */
+/** Donde queda la fase que eligió una persona: al indicar (`addPlanItem`) o con «Planificar…». */
+const PHASE_CHOSEN_ACTIONS = ["plan.item_added", "plan.item_planned"]
+
+/** Alguien eligió su fase al indicar o con «Planificar…»: lo que se recalcula al cambiarlo no se la pisa. */
 async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise<boolean> {
   const [row] = await tx
     .select({ id: auditEvent.id })
@@ -771,7 +774,7 @@ async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "treatment_plan_item"),
         eq(auditEvent.entityId, itemId),
-        eq(auditEvent.action, "plan.item_planned"),
+        inArray(auditEvent.action, PHASE_CHOSEN_ACTIONS),
         sql`${auditEvent.metadata}->>'phase' is not null`,
       ),
     )
@@ -781,7 +784,7 @@ async function phaseChosenByHand(tx: Db, orgId: string, itemId: string): Promise
 
 /**
  * La fase que la regla de siempre (`proposedPhaseOf`) le daría a lo indicado, cuando difiere de la
- * que tiene y nadie la eligió con «Planificar…»: el Plan la sugiere en la fila, con texto, y la fase
+ * que tiene y nadie la eligió (al indicar o con «Planificar…»): el Plan la sugiere en la fila, con texto, y la fase
  * no cambia sola (revisión del 26 nov, ADR 0221). La misma regla que al indicar, en lote: un
  * diagnóstico suyo o uno vigente de su atención en el mismo sitio. Con una sola fase, nada.
  */
@@ -806,7 +809,7 @@ async function phaseSuggestionsOf(
             eq(auditEvent.organizationId, orgId),
             eq(auditEvent.entity, "treatment_plan_item"),
             inArray(auditEvent.entityId, open.map((item) => item.id)),
-            eq(auditEvent.action, "plan.item_planned"),
+            inArray(auditEvent.action, PHASE_CHOSEN_ACTIONS),
             sql`${auditEvent.metadata}->>'phase' is not null`,
           ),
         )
@@ -1321,8 +1324,9 @@ export async function addPlanItem(
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca y, en odentIA,
   // su diagnóstico o el de la atención en la misma pieza (la pulpitis propone «Urgencia»).
+  const chosenPhase = assertPhase(hooks, input.phase)
   const phase =
-    assertPhase(hooks, input.phase) ??
+    chosenPhase ??
     (await proposedPhaseOf(tx, orgId, hooks, {
       patientId,
       service,
@@ -1371,6 +1375,8 @@ export async function addPlanItem(
     codings: codings.length,
     priceCents: service.priceCents,
     currency: service.currency,
+    // La fase que eligió quien indica es suya, como la de «Planificar…» (`phaseChosenByHand`).
+    ...(chosenPhase ? { phase: chosenPhase } : {}),
   })
   // Entra ya al presupuesto en borrador, si lo hay: lo que la persona ve es lo que queda (E3).
   await quoteNow(tx, orgId, actorUserId, patientId, encounterId, [row.id])

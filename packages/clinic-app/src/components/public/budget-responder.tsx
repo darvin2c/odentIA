@@ -132,21 +132,28 @@ export function BudgetResponder({
   const totalText = portalTotalsText(several && viewedOption ? viewedOption : budget, budget)
   const anyOpen = (choosing ? budget.items : lines).some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")
+  // Sin elegir opción, todo queda para después: cada tratamiento una vez, sin camino elegido. Solo
+  // aceptar pide elegir una (revisión de código del 26 nov), como lo responde el servidor.
+  const postponedItems = [...new Map(budget.items.filter((item) => open(item.decision)).map((item) => [item.planItemId, item])).values()]
   const answer = () =>
-    onAnswer({
-      optionId: several ? (viewedOption?.id ?? null) : null,
-      decisions: lines
-        .filter((item) => open(item.decision))
-        .map((item) => ({
-          planItemId: item.planItemId,
-          decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
-        })),
-    })
+    onAnswer(
+      choosing
+        ? { optionId: null, decisions: postponedItems.map((item) => ({ planItemId: item.planItemId, decision: "pospuesto" as const })) }
+        : {
+            optionId: several ? (viewedOption?.id ?? null) : null,
+            decisions: lines
+              .filter((item) => open(item.decision))
+              .map((item) => ({
+                planItemId: item.planItemId,
+                decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
+              })),
+          },
+    )
   const noneMarked = lines
     .filter((item) => open(item.decision))
     .every((item) => unchecked.has(item.planItemId))
   const label = choosing
-    ? "Elige una opción"
+    ? "Lo dejo para después"
     : several && !chosen && viewedOption
       ? `Elijo la ${viewedOption.label.toLowerCase()}`
       : noneMarked
@@ -391,7 +398,6 @@ export function BudgetResponder({
           type="button"
           className="min-h-11 w-full"
           pending={pending}
-          disabled={several && !viewedOption}
           onClick={answer}
         >
           {label}

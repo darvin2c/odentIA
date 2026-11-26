@@ -45,6 +45,7 @@ import {
   prescription,
   serviceCatalog,
   treatmentBudget,
+  treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -4301,30 +4302,53 @@ async function confirmPlanChoice(
   for (const option of payload["options"] as PlanChoice[]) others.push(await indicate(String(option.serviceId)))
   const tooth = typeof site["toothNumber"] === "number" ? ` para la ${site["toothNumber"]}` : ""
   const draft = await findDraftBudget(tx, orgId, patientId)
-  const budget = draft
-    ? await addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: [main.id] })
-    : await createBudget(tx, orgId, actorUserId, patientId, {
-        planId: main.planId,
-        itemIds: [main.id],
-        notes: `${others.length === 1 ? "Dos caminos" : "Tres caminos"}${tooth}: elige uno.`,
-      })
-  const optionA = budget.options[0]
+  let budgetId: string
+  if (draft) {
+    budgetId = draft.id
+    // Con un borrador, lo que se acaba de indicar ya entró a su opción (`quoteIndicatedNow`): la principal
+    // se queda en la A y cada otro camino sale de ella para ir a su propia opción (revisión de código del
+    // 26 nov: confirmar contra un borrador fallaba con «El tratamiento ya está en ese presupuesto»).
+    const quoted = new Set(
+      (
+        await tx
+          .select({ planItemId: treatmentBudgetItem.planItemId })
+          .from(treatmentBudgetItem)
+          .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, draft.id)))
+      ).map((row) => row.planItemId),
+    )
+    const strays = [...new Set(others.map((other) => other.id))].filter((id) => id !== main.id && quoted.has(id))
+    if (strays.length) await removeBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: strays })
+    if (!quoted.has(main.id)) await addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: [main.id] })
+  } else {
+    const created = await createBudget(tx, orgId, actorUserId, patientId, {
+      planId: main.planId,
+      itemIds: [main.id],
+      notes: `${others.length === 1 ? "Dos caminos" : "Tres caminos"}${tooth}: elige uno.`,
+    })
+    budgetId = created.id
+  }
+  const [optionA] = await tx
+    .select({ id: treatmentBudgetOption.id })
+    .from(treatmentBudgetOption)
+    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budgetId)))
+    .orderBy(asc(treatmentBudgetOption.position))
+    .limit(1)
   if (!optionA) throw new Error("El presupuesto quedó sin opción")
   for (const other of others) {
-    const copied = await duplicateBudgetOption(tx, orgId, actorUserId, patientId, budget.id, optionA.id)
+    const copied = await duplicateBudgetOption(tx, orgId, actorUserId, patientId, budgetId, optionA.id)
     const created = copied.options.at(-1)
     if (!created) throw new Error("No se pudo crear la opción")
-    await removeBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [main.id], optionId: created.id })
-    await addBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [other.id], optionId: created.id })
+    await removeBudgetItems(tx, orgId, actorUserId, patientId, budgetId, { itemIds: [main.id], optionId: created.id })
+    await addBudgetItems(tx, orgId, actorUserId, patientId, budgetId, { itemIds: [other.id], optionId: created.id })
   }
-  // Ninguna nace recomendada: la A lo es solo si el odontólogo dijo que la recomienda. Si no, el
-  // paciente ve las opciones sin recomendación, y se marca después con «Marcar como recomendada»
-  // (revisión del 26 nov). Un borrador de antes con su A marcada también queda sin marca.
-  await tx
-    .update(treatmentBudgetOption)
-    .set({ isRecommended: false, updatedAt: new Date() })
-    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budget.id)))
+  // Las opciones nacen sin recomendada: la A lo es solo si el odontólogo dijo que la recomienda; si no,
+  // se marca después con «Marcar como recomendada» (revisión del 26 nov). Solo se toca lo que el
+  // dictado decide: la marca que una persona puso en el borrador se queda (revisión de código del 26 nov).
   if (payload["recommended"] === true) {
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: false, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budgetId)))
     await tx
       .update(treatmentBudgetOption)
       .set({ isRecommended: true, updatedAt: new Date() })

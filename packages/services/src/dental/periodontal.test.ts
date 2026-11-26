@@ -11,6 +11,7 @@ import { finalizeEncounter, getEncounterClosing } from "../encounters.js"
 import { getPatientSummary, getTimeline } from "../patient-history.js"
 import { nextPatientNumber } from "../patients.js"
 import {
+  chartTeethInOrder,
   classifyPeriodontalChart,
   comparePeriodontalCharts,
   getPeriodontalChart,
@@ -93,6 +94,14 @@ it("la pieza que el odontograma ya no tiene ausente se sondea y se suma a las de
   const offered = await f.run((tx) => getPeriodontalChart(tx, f.orgId, f.patientId, chart.id))
   expect(offered.expectedTeeth.slice(0, 2)).toEqual([18, 17])
   expect(offered.summary.pendingTeeth).toContain(18)
+  // El cierre dice lo mismo que la pantalla: la 18 también falta (revisión de código del 26 nov).
+  await f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { toothNumber: 17, probingDepth: [3, 2, 3, 3, 2, 3] }))
+  const shown = await f.run((tx) => getPeriodontalChart(tx, f.orgId, f.patientId, chart.id))
+  const closing = await f.run((tx) => getEncounterClosing(tx, f.orgId, f.actor, f.patientId, f.first))
+  const probing = closing.periodontal as { teeth: number; pending: string | null } | undefined
+  expect(probing?.teeth).toBe(shown.expectedTeeth.length - shown.implantTeeth.length)
+  expect(shown.pending).toMatch(/^arriba por fuera, la 18 y /)
+  expect(probing?.pending).toBe(shown.pending)
   const saved = await f.run((tx) =>
     savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { toothNumber: 18, probingDepth: [3, 2, 3, 3, 2, 3] }),
   )
@@ -109,6 +118,11 @@ it("la pieza que el odontograma ya no tiene ausente se sondea y se suma a las de
   await expect(
     f.run((tx) => tx.execute(sql`update periodontal_chart set expected_teeth = '{17}' where id = ${chart.id}`)),
   ).rejects.toThrow()
+})
+
+it("las piezas del sondaje van en su orden, también una temporal: nunca delante de la 18", () => {
+  expect(chartTeethInOrder([17, 55, 18, 48, 11, 21])).toEqual([18, 17, 11, 21, 48, 55])
+  expect(chartTeethInOrder([18, 18, 17])).toEqual([18, 17])
 })
 
 it("solo quien lleva la atención escribe, solo en borrador y solo las piezas que se sondean", async () => {

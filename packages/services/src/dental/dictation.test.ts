@@ -16,7 +16,8 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { assembleEncounterBudget, decideBudget, deliverBudget, findDraftBudget, getBudgetDetail } from "../budgets.js"
+import { assembleEncounterBudget, createBudget, decideBudget, deliverBudget, findDraftBudget, getBudgetDetail, recommendBudgetOption } from "../budgets.js"
+import { addPlanItem } from "../plan.js"
 import { getPatientAccount } from "../payments.js"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -347,6 +348,41 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     expect(untouched?.payload).not.toHaveProperty("recommended")
     const chosen = await other.run((tx) => updateDictationSuggestion(tx, ...other.args, other.encounter.id, untouched!.id, { recommend: 0 }))
     expect(chosen).toMatchObject({ payload: { recommended: true, serviceName: "Onlay de disilicato de prueba" }, summary: expect.stringContaining("Opción A · recomendada") })
+    await enable(false)
+  })
+
+  it("confirmar dos caminos sin recomendada no le quita la marca a la opción que una persona marcó (revisión de código del 26 nov)", async () => {
+    await enable(true)
+    const fx = await openSession("Incrustación de prueba marcada", "tooth")
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: "Corona de prueba marcada", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+    // El borrador ya tiene su A, que el odontólogo marcó como recomendada a mano.
+    const [fluor] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Fluorización de prueba marcada", scope: "general", source: "custom", priceCents: 10000, currency: "PEN" })
+      .returning()
+    const item = await fx.run((tx) => addPlanItem(tx, ...fx.args, { serviceId: fluor!.id, planId: null, sourceEncounterId: fx.encounter.id }))
+    const draft = (await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))) ?? (await fx.run((tx) => createBudget(tx, ...fx.args, { planId: item.planId, itemIds: [item.id] })))
+    const [first] = await ownerDb.select().from(treatmentBudgetOption).where(eq(treatmentBudgetOption.budgetId, draft.id))
+    await fx.run((tx) => recommendBudgetOption(tx, ...fx.args, draft.id, first!.id))
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [choice] = (await segment({ drafts: [{ kind: "plan", payload: { service: "incrustación de prueba marcada", toothNumber: 46, alternatives: ["corona de prueba marcada"] } }] })).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id))
+    const options = await ownerDb.select().from(treatmentBudgetOption).where(eq(treatmentBudgetOption.budgetId, draft.id))
+    expect(options.map((option) => [option.position, option.isRecommended]).sort()).toEqual([
+      [1, true],
+      [2, false],
+    ])
+    // Cada camino en su opción, con lo que ya tenía el borrador (antes, confirmar contra un borrador fallaba).
+    const lines = await ownerDb.select().from(treatmentBudgetItem).where(eq(treatmentBudgetItem.budgetId, draft.id))
+    const byOption = (position: number) =>
+      lines
+        .filter((line) => line.optionId === options.find((option) => option.position === position)!.id)
+        .map((line) => line.title)
+        .sort()
+    expect([byOption(1), byOption(2)]).toEqual([
+      ["Fluorización de prueba marcada", "Incrustación de prueba marcada"],
+      ["Corona de prueba marcada", "Fluorización de prueba marcada"],
+    ])
     await enable(false)
   })
 
