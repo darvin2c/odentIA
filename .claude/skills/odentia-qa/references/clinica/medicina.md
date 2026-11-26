@@ -107,6 +107,14 @@ Igual que en odentIA (`odontologia.md`, «Cómo recorrerlo en una ronda»): una 
 - [ ] En la primera consulta de un paciente sin antecedentes, «Lo revisé con…» con familia y otro dato guarda todo; nunca «otra sesión guardó…» sin otra sesión. Caso: C9 de la revisión del 25 nov.
 - [ ] «Es mi segundo embarazo» propone «Embarazos: 2» en gineco-obstétricos, además del relato.
 
+**QA de «lo que quedó fuera» de salud y familia (26 nov 2026):**
+- [ ] La dosis del anticoagulante dicha («apixabán de cinco miligramos cada doce horas») llega a su fila con dosis y frecuencia, igual por el grupo «Anticoagulante» que por «Medicación». Caso: un adulto con apixabán y losartán.
+- [ ] Ninguna dosis lleva una unidad que no se dijo («losartán cincuenta» no es «50 mg»), venga del modelo o de la regla. La dosis dicha con su unidad queda en sus campos (número, unidad y frecuencia), no solo como «Escrita antes».
+- [ ] Lo que dice la madre o el padre de su propia salud («yo soy diabética») se ofrece como antecedente familiar del hijo («Madre: diabetes»), no solo como «No lo usé». Fuente: NTS 139-MINSA/2018/DGAIN, anamnesis.
+- [ ] Una enfermedad dicha como adjetivo («asmático», «diabético», «hipertenso») se propone igual que dicha como nombre.
+- [ ] «Corregir algo» trae lo de «De su familia», y guardar no lo pierde.
+- [ ] Si lo oído de su salud es solo un «No» (no toma medicinas), el aviso no habla de «Sí, lo dejó», y después de revisarlo Antecedentes no dice «no se le preguntó».
+
 ## P-MED-04 Vacunas
 
 **Dónde:** la lista `{vacuna, fecha}` de antecedentes (`M history.ts`).
@@ -182,6 +190,11 @@ Igual que en odentIA (`odontologia.md`, «Cómo recorrerlo en una ronda»): una 
 
 **Revisión final de «salud y familia» (25 nov 2026):**
 - [ ] «Control si hay fiebre» es una indicación condicional, no un control con fecha para reservar. Caso: Valentina, 25 nov.
+
+**QA de «lo que quedó fuera» de salud y familia (26 nov 2026):**
+- [ ] «Próximo control a los dos años» en un niño es a esa **edad** (24 meses), no dentro de dos años. Caso: un niño de 18 meses → control a los 24 meses, no dentro de dos años. Fuente: norma técnica CRED del MINSA.
+- [ ] La vacuna que falta, dicha en un control del niño sano, queda donde se ven las vacunas (o en «No lo usé»), además de en Indicaciones.
+- [ ] Volver solo si pasa algo («control si hay fiebre», «si no mejora en tres días que regrese») queda en las indicaciones, no como control con fecha.
 
 ## P-MED-10 Receta
 
