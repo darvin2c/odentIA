@@ -131,8 +131,11 @@ describe("las guías en cada web", () => {
     expect(footerGroups.find((group) => group.title === "Guías")?.links.map((link) => link.href)).toEqual([
       "/guias/como-llenar-un-odontograma",
       "/guias/odontograma-en-ninos",
+      "/guias/como-llenar-un-periodontograma",
       "/guias/historia-clinica-odontologica",
+      "/guias/cie-10-odontologia",
       "/guias/consentimiento-informado-dental",
+      "/guias/plan-de-tratamiento-odontologico",
       "/guias/presupuesto-dental",
       "/guias/cierre-de-caja-dental",
       "/guias",

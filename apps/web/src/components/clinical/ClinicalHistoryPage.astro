@@ -126,7 +126,16 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <div class="faqwrap">
     <Faq items={faq} />
   </div>
-  <TopicGuides slugs={["como-llenar-un-odontograma", "odontograma-en-ninos", "historia-clinica-odontologica", "consentimiento-informado-dental"]} />
+  <TopicGuides
+    slugs={[
+      "como-llenar-un-odontograma",
+      "odontograma-en-ninos",
+      "como-llenar-un-periodontograma",
+      "historia-clinica-odontologica",
+      "cie-10-odontologia",
+      "consentimiento-informado-dental",
+    ]}
+  />
   <CtaBand title="Tu historia clínica, en orden desde hoy." />
 </Base>
 

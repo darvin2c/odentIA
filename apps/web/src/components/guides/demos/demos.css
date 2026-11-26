@@ -1,0 +1,74 @@
+/* Las demos de «Pruébalo aquí» de las guías del plan, el periodontograma y la CIE-10. */
+.gx { display: flex; justify-content: center; width: 100%; }
+.gx-card { width: 100%; max-width: 560px; background: var(--bg); border-radius: 26px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 60px -34px rgba(15, 23, 42, .45); min-width: 0; align-items: stretch; box-sizing: border-box; }
+.gx-head { display: flex; flex-direction: column; gap: 2px; }
+.gx-head b { font-size: 18px; }
+.gx-head span { font-size: 13.5px; color: var(--muted); }
+.gx-btn { min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--teal); color: #fff; font: 700 14px var(--font); cursor: pointer; flex: none; }
+.gx-btn:hover { background: var(--teal-hover); }
+.gx-btn-soft { align-self: flex-start; background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
+.gx-btn-soft:hover { background: var(--teal-soft); }
+.gx-btn:focus-visible, .gx-bl:focus-visible, .gx-perio-grid input:focus-visible, .gx-search input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.gx-status { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.gx-status.ok { color: #166534; font-weight: 600; }
+.gx-chip { flex: none; font-size: 12px; font-weight: 700; color: var(--teal); background: var(--teal-soft); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+
+/* El plan por fases. */
+.gx-todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.gx-todo li { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 8px 8px 8px 14px; }
+.gx-todo-t { display: flex; flex-direction: column; min-width: 0; }
+.gx-todo-t b { font-size: 14.5px; }
+.gx-todo-t span { font-size: 12.5px; color: var(--muted); }
+.gx-phases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gx-phases > li { background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.gx-phases > li.on { border-left-color: var(--teal); }
+.gx-phase-t { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.gx-phases ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gx-phases ul li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; border-radius: 6px; }
+.gx-phases ul li.new { animation: gx-in .6s ease; }
+.gx-phase-empty { font-size: 13px; color: var(--soft); }
+@keyframes gx-in { from { background: var(--teal-soft); } to { background: transparent; } }
+
+/* El periodontograma. */
+.gx-perio-svg { width: 100%; height: auto; display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.gx-crown { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; }
+.gx-root { fill: #fdf6ec; stroke: #cbd5e1; stroke-width: 1.5; }
+.gx-tooth-n { font: 800 13px var(--font); fill: var(--ink); }
+.gx-cej { stroke: #94a3b8; stroke-dasharray: 4 4; }
+.gx-margin { fill: none; stroke: #e11d48; stroke-width: 2.5; stroke-linejoin: round; }
+.gx-bottom { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-linejoin: round; }
+.gx-bleed { fill: #e11d48; }
+.gx-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
+.gx-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.gx-legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+.gx-l-margin { background: #e11d48; }
+.gx-l-bottom { background: #2563eb; }
+.gx-legend i.gx-l-bleed { width: 9px; height: 9px; border-radius: 50%; background: #e11d48; }
+.gx-perio-grid { display: grid; grid-template-columns: auto repeat(9, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.gx-row-k { font-size: 12px; font-weight: 700; color: var(--muted); padding-right: 4px; }
+.gx-col-k { display: flex; flex-direction: column; align-items: center; font-size: 11.5px; color: var(--muted); font-weight: 700; }
+.gx-col-k b { color: var(--ink); font-size: 12.5px; }
+.gx-perio-grid input { width: 100%; min-width: 0; min-height: 40px; text-align: center; font: 800 15px var(--mono); border: 1.5px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); padding: 0; }
+.gx-perio-grid .gx-out { text-align: center; font: 800 15px var(--mono); color: var(--ink); min-height: 32px; display: grid; place-items: center; border-radius: 8px; background: var(--teal-soft); }
+.gx-perio-grid .gx-out.hi { background: #fde2e7; color: #9f1239; }
+.gx-bl { min-height: 36px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--paper); font: 700 12px var(--font); color: var(--muted); cursor: pointer; padding: 0; }
+.gx-bl.on { background: #e11d48; border-color: #e11d48; color: #fff; }
+
+/* La CIE-10. */
+.gx-search input { width: 100%; min-height: 48px; border: 1.5px solid var(--line); border-radius: 12px; padding: 0 14px; font: 600 16px var(--font); color: var(--ink); background: var(--paper); box-sizing: border-box; }
+.gx-count { margin: 0; font-size: 13px; color: var(--muted); }
+.gx-codes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
+.gx-codes li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.4; }
+.gx-codes li b { font-family: var(--mono); color: var(--teal); }
+.gx-codes li.cat span { font-weight: 700; }
+.gx-note { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink); background: var(--teal-soft); border-radius: 10px; padding: 10px 12px; }
+
+@media (max-width: 720px) {
+  .gx-card { padding: 14px; border-radius: 20px; }
+  .gx-perio-grid { gap: 3px; }
+  .gx-perio-grid input, .gx-perio-grid .gx-out { font-size: 13px; }
+  .gx-row-k { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-phases ul li.new { animation: none; }
+}
