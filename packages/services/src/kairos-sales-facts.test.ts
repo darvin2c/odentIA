@@ -53,7 +53,7 @@ describe("kairosSalesFactsOf", () => {
   it("con plan de lista, se empieza gratis y al momento, sin invitación ni Fundadores", () => {
     const facts = kairosSalesFactsOf("medical", pricing)
     const prices = facts.prices.join("\n")
-    expect(facts.prices).toContain("Se empieza gratis: se crea la cuenta y se abre tu consultorio al momento, sin invitación ni tarjeta.")
+    expect(facts.prices).toContain("Se empieza gratis: se crea la cuenta y se abre tu consultorio al momento y sin tarjeta.")
     expect(prices).not.toMatch(/Fundadores|por invitación|solicitar-invitacion/)
     expect(facts.facts.join("\n")).not.toMatch(/Fundadores|solicitar-invitacion/)
     expect(facts.percents).toEqual([])

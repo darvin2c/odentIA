@@ -35,7 +35,16 @@ export const Route = createFileRoute("/register")({
 })
 
 const signUpInfoSchema = z.object({
-  offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
+  offer: z
+    .object({
+      currency: z.string(),
+      creditCents: z.number(),
+      days: z.number(),
+      // La API de antes no los manda: sin ellos no se dice qué sigue a la prueba.
+      priceCents: z.number().optional(),
+      monthCreditCents: z.number().optional(),
+    })
+    .nullable(),
   legalVersion: z.string(),
   agreementVersion: z.string(),
 })
@@ -88,7 +97,15 @@ function RegisterPage() {
     : offer
   const credit = trial && trial.creditCents > 0 ? creditText(trial.currency, trial.creditCents) : null
   // Quien entra invitado a un equipo no abre una clínica: no recibe el crédito.
-  const cta = credit && !invitationId && !founder ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  // Lo que sigue a la prueba, con las cifras del plan de lista: «USD 29 al mes, que vuelven como crédito».
+  const afterTrial =
+    !invitationId && !founder && offer?.priceCents
+      ? offer.monthCreditCents === offer.priceCents
+        ? `${creditText(offer.currency, offer.priceCents)} al mes, que vuelven como crédito`
+        : `${creditText(offer.currency, offer.priceCents)} al mes`
+      : null
+  // Fijo: no cambia cuando llegan los precios.
+  const cta = "Crear mi cuenta"
   // Tras verificar el correo (o con Google), quien viene invitado al equipo de una clínica va a
   // aceptar su invitación; los demás, a «/», que sin clínicas ni invitaciones pendientes sigue
   // solo a abrir la clínica (y con una invitación pendiente la muestra antes).
@@ -318,7 +335,7 @@ function RegisterPage() {
           <p className="text-center text-xs text-muted-foreground">
             {founder
               ? `Sin tarjeta. Tu clínica abre con ${founder.offer.planName}.`
-              : "Sin tarjeta. Al terminar la prueba eliges tu plan y pagas con tu comprobante."}
+              : `Sin tarjeta. Al terminar la prueba eliges tu plan${afterTrial ? ` (${afterTrial})` : ""} y pagas con tu comprobante.`}
           </p>
         </FieldGroup>
       </form>

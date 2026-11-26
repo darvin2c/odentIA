@@ -84,13 +84,13 @@ export function startText(pricing: Pricing, limits: string): string | null {
 
 /**
  * La nota bajo el botón de cada portada, con el precio de después junto a «Empieza gratis»: «Empieza
- * hoy, sin invitación ni tarjeta: 30 días con USD 100 de regalo para tus agentes. Después, USD 59 al
+ * hoy, sin tarjeta: 30 días con USD 100 de regalo para tus agentes. Después, USD 59 al
  * mes que vuelven como crédito.». Null sin plan publicado.
  */
 export function startNote(pricing: Pricing): string | null {
   const trial = trialText(pricing)
   const after = afterTrialText(pricing)
-  return trial && after ? `Empieza hoy, sin invitación ni tarjeta: ${trial}. ${after}` : null
+  return trial && after ? `Empieza hoy, sin tarjeta: ${trial}. ${after}` : null
 }
 
 /** Parte un texto en lo que va antes del regalo, el regalo y lo que sigue, para pintarlo en ámbar. */

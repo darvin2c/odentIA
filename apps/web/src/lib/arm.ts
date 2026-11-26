@@ -6,7 +6,7 @@
 // packages/auth/src/permissions.ts). Cada alternativa es una categoría en general, sin nombrar a nadie
 // ni decir «los únicos» (veracidad publicitaria); donde hacen algo a medias, se dice «a medias».
 import type { FaqItem } from "./faq"
-import { HAS_CLIO, ofProduct, WORDS } from "./product"
+import { DEFAULT_DOMAIN, HAS_CLIO, ofProduct, WORDS } from "./product"
 
 export const ARM_PATH = "/comparar"
 
@@ -227,10 +227,13 @@ export const AREAS = ofProduct({
   optical: "la recepción y la administración",
 })
 
+/** El correo de soporte de esta web, como `supportEmail` de `site.ts` (que importa este archivo: no se importa de vuelta). */
+const SUPPORT_EMAIL = `soporte@${import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN}`
+
 /** Traer a los pacientes: la misma respuesta que las portadas (la carga la hace nuestro equipo). */
 const IMPORT_FAQ: FaqItem = {
   q: `¿Puedo traer a mis ${P}?`,
-  a: `Sí. Nos envías tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${P} por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan.`,
+  a: `Sí. Escribe a ${SUPPORT_EMAIL} con tu Excel o lo que exporta tu sistema, tal como lo tienes, y nuestro equipo carga a tus ${P} por ti; lo dudoso lo revisamos contigo antes de cargarlo. Las citas, los saldos y la historia anterior todavía no se cargan.`,
 }
 
 export interface AltPage {

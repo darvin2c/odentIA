@@ -40,7 +40,7 @@ describe("la oferta cuenta una sola historia", () => {
     expect(feeText(LIST)).toBe("USD 59 al mes, que vuelven enteros como crédito")
     expect(afterTrialText(LIST)).toBe("Después, USD 59 al mes que vuelven como crédito.")
     expect(startNote(LIST)).toBe(
-      "Empieza hoy, sin invitación ni tarjeta: 30 días con USD 100 de regalo para tus agentes. Después, USD 59 al mes que vuelven como crédito.",
+      "Empieza hoy, sin tarjeta: 30 días con USD 100 de regalo para tus agentes. Después, USD 59 al mes que vuelven como crédito.",
     )
     expect(startText(LIST, "sin límite de usuarios")).toBe(
       "30 días con USD 100 de regalo para tus agentes, sin tarjeta y sin límite de usuarios. Después, USD 59 al mes que vuelven como crédito.",

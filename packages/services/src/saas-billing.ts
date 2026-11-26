@@ -611,21 +611,27 @@ export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRo
 
 /**
  * Lo que recibe una clínica nueva al registrarse: el crédito y los días de
- * prueba del plan por defecto. Es lo único del catálogo que ve alguien sin
- * cuenta (el botón «Obtén USD 100 de crédito» del registro); sin plan por
- * defecto no hay oferta y la pantalla no promete un monto.
+ * prueba del plan por defecto, y su cuota y el crédito del mes para decir qué
+ * sigue a la prueba. Es lo único del catálogo que ve alguien sin cuenta en el
+ * registro; sin plan por defecto no hay oferta y la pantalla no promete un monto.
  */
 export async function getPublicTrialOffer(
   tx: Db,
   product: ClinicalProduct = "dental",
-): Promise<{ currency: string; creditCents: number; days: number } | null> {
+): Promise<{ currency: string; creditCents: number; days: number; priceCents: number; monthCreditCents: number } | null> {
   const [plan] = await tx
-    .select({ currency: saasPlan.currency, creditCents: saasPlan.trialCreditCents, days: saasPlan.trialDays })
+    .select({
+      currency: saasPlan.currency,
+      creditCents: saasPlan.trialCreditCents,
+      days: saasPlan.trialDays,
+      priceCents: saasPlan.priceCents,
+      monthCreditCents: saasPlan.creditCents,
+    })
     .from(saasPlan)
     .where(defaultPlanOf(product))
     .limit(1)
   if (!plan) return null
-  return { currency: plan.currency, creditCents: plan.creditCents, days: plan.days }
+  return plan
 }
 
 export async function createSaasPlan(

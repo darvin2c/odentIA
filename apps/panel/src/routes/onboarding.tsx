@@ -523,18 +523,13 @@ function OnboardingPage() {
 
   /**
    * Pasos visibles. Al abrir una clínica, la cuenta sigue la del registro
-   * («Paso 3 de 5»): los pasos de la cuenta se ven hechos. En la reanudada no
-   * se crea la organización y la cuenta es solo la del alta que falta.
+   * («Paso 3 de 5»). En la reanudada no se crea la organización y la cuenta es
+   * solo la del alta que falta.
    */
   const shownIndexes = STEPS.map((_, index) => index).filter((index) => index >= firstStep)
   const lead = skipOrg ? 0 : SIGNUP_ACCOUNT_STEPS.length
-  const visibleSteps = [...(skipOrg ? [] : SIGNUP_ACCOUNT_STEPS), ...shownIndexes.map((index) => STEPS[index])]
   const total = skipOrg ? shownIndexes.length : SIGNUP_STEP_TOTAL
   const currentPosition = lead + shownIndexes.indexOf(step)
-  const shownVisited = [
-    ...SIGNUP_ACCOUNT_STEPS.map((_, index) => index).slice(0, lead),
-    ...visited.map((v) => shownIndexes.indexOf(v)).filter((v) => v >= 0).map((v) => v + lead),
-  ]
 
   const personaFields = showPersona ? (
     <>
@@ -554,15 +549,13 @@ function OnboardingPage() {
           title={skipOrg ? "Termina el alta de tu clínica" : "Configura tu clínica"}
           subtitle={`Paso ${currentPosition + 1} de ${total}: ${STEP_TOPICS[step] ?? ""}`}
         />
+        {/* La barra muestra solo los pasos de la clínica: con los cinco no caben a 390 px. La
+            cuenta entera de principio a fin la dice el subtítulo («Paso 3 de 5»). */}
         <WizardSteps
-          steps={visibleSteps}
-          current={currentPosition}
-          visited={shownVisited}
-          // Los pasos de la cuenta ya están hechos: se ven, pero no se vuelve a ellos desde aquí.
-          onGo={(index) => {
-            const target = shownIndexes[index - lead]
-            if (target !== undefined) goTo(target)
-          }}
+          steps={shownIndexes.map((index) => STEPS[index])}
+          current={shownIndexes.indexOf(step)}
+          visited={visited.map((v) => shownIndexes.indexOf(v)).filter((v) => v >= 0)}
+          onGo={(index) => goTo(shownIndexes[index] ?? 0)}
           className="mt-6"
         />
         <form
