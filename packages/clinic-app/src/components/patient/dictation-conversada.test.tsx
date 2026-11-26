@@ -883,3 +883,18 @@ describe("revisión final · la familia y lo que ya no toma", () => {
     expect(familyKinshipFromWords("tía materna")).toBe("AUNT")
   })
 })
+
+it("tras «Lo revisé con…», con lo que ya no toma esperando, el foco va a su «Sí, lo dejó»", async () => {
+  const elena = suggestion({
+    id: "salud-3",
+    payload: { declarante: "paciente", anticoagulants: { state: "recorded", detail: "aspirina" }, stopped: { state: "recorded", items: [{ name: "apixabán" }] } },
+    healthRows: [
+      { key: "anticoagulants", group: "anticoagulants", label: "Antiagregante", value: "aspirina", by: { declarante: "paciente" }, before: null, denied: false },
+      { key: "stopped:apixaban", group: "stopped", label: "Ya no toma", value: "apixabán", by: { declarante: "paciente" }, before: null, denied: false, stopped: true },
+    ],
+  })
+  const confirmHealth = { ...mutation(), mutate: vi.fn((_item: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.()) }
+  renderNotice(sessionWith({ suggestions: [elena], confirmHealth }))
+  fireEvent.click(screen.getByRole("button", { name: /^Lo revisé con/ }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, lo dejó" })))
+})

@@ -247,7 +247,7 @@ export function HealthReviewNotice({
     // Mientras se guarda, el botón está deshabilitado y no toma el foco: se intenta hasta que se habilita.
     let tries = 0
     const timer = setInterval(() => {
-      const button = document.querySelector<HTMLButtonElement>("[data-stopped-confirm]")
+      const button = document.querySelector<HTMLButtonElement>("[data-stopped-row] button")
       tries += 1
       if (button && !button.disabled) {
         button.focus()
@@ -741,7 +741,8 @@ export function HealthReviewNotice({
           </li>
         ) : null}
         {heardStopped.map((row) => (
-          <li key={row.key} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+          // La marca va en la fila: `SubmitButton` no pasa atributos propios al botón.
+          <li key={row.key} data-stopped-row="" className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
               <h3 className="text-sm font-medium">Ya no toma</h3>
               {heardLine(row)}
@@ -755,7 +756,6 @@ export function HealthReviewNotice({
               pending={!!dictation?.confirmStopped.isPending && dictation.confirmStopped.variables?.key === row.key}
               disabled={busy}
               onClick={() => stopRow(row)}
-              data-stopped-confirm=""
             >
               Sí, lo dejó
             </SubmitButton>
