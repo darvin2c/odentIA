@@ -357,10 +357,10 @@ export function ConsumptionCard({
             description={
               data.creditExhaustedAt
                 ? trial
-                  ? `Se acabó el ${day(data.creditExhaustedAt)}: los agentes quedaron en pausa.`
+                  ? `Se acabó el ${day(data.creditExhaustedAt)}: los agentes quedaron en pausa hasta que termine la prueba.`
                   : `Se acabó el ${day(data.creditExhaustedAt)}. Desde entonces cada acción se cobra con su precio.`
                 : trial
-                  ? "Cuando se acabe, los agentes se pausan hasta que elijas tu plan."
+                  ? "Cuando se acabe, los agentes se pausan hasta que termine la prueba; tu equipo ve las conversaciones en la Bandeja."
                   : "Lo que pase del crédito se cobra por acción, con tu precio."
             }
           />

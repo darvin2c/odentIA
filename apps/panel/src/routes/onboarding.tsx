@@ -36,7 +36,7 @@ import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "..
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
-import { SIGNUP_ACCOUNT_STEPS, SIGNUP_CLINIC_STEPS, SIGNUP_STEP_TOTAL } from "../lib/signup-steps"
+import { SIGNUP_CLINIC_STEPS } from "../lib/signup-steps"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ location }) => {
@@ -522,14 +522,13 @@ function OnboardingPage() {
   }
 
   /**
-   * Pasos visibles. Al abrir una clínica, la cuenta sigue la del registro
-   * («Paso 3 de 5»). En la reanudada no se crea la organización y la cuenta es
-   * solo la del alta que falta.
+   * Pasos visibles: los de la clínica. En la reanudada no se crea la
+   * organización y la cuenta es solo la del alta que falta.
    */
   const shownIndexes = STEPS.map((_, index) => index).filter((index) => index >= firstStep)
-  const lead = skipOrg ? 0 : SIGNUP_ACCOUNT_STEPS.length
-  const total = skipOrg ? shownIndexes.length : SIGNUP_STEP_TOTAL
-  const currentPosition = lead + shownIndexes.indexOf(step)
+  // Se cuentan los pasos de la clínica, los mismos de la barra: la cuenta ya quedó hecha antes.
+  const total = shownIndexes.length
+  const currentPosition = shownIndexes.indexOf(step)
 
   const personaFields = showPersona ? (
     <>

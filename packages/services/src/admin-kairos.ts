@@ -2077,14 +2077,26 @@ class Pass {
   }
 }
 
-/** (11) Cuenta sin cliente: la liga al cliente de su solicitud o crea uno (las demos nunca son clientes). */
+/**
+ * (11) Cuenta sin cliente: la liga al cliente de su solicitud o, con el alta libre (ADR 0221), al
+ * cliente que ya estaba en la venta con el correo de quien la abrió; si no hay, crea uno (las demos
+ * nunca son clientes). Así quien se registra solo no queda como un cliente duplicado.
+ */
 async function ruleAccountsWithoutClient(pass: Pass): Promise<void> {
   const { tx } = pass
   const orphans = await rows<{ id: string; client_id: string | null }>(
     tx,
     sql`select o.id,
-      (select r.client_id from saas_waitlist_request r join saas_client c on c.id = r.client_id
-        where r.organization_id = o.id and c.organization_id is null order by r.created_at desc limit 1) as client_id
+      coalesce(
+        (select r.client_id from saas_waitlist_request r join saas_client c on c.id = r.client_id
+          where r.organization_id = o.id and c.organization_id is null order by r.created_at desc limit 1),
+        (select c.id from saas_client c
+          join saas_client_contact cc on cc.client_id = c.id
+          join member m on m.organization_id = o.id and m.role = 'owner'
+          join "user" u on u.id = m.user_id
+          where c.organization_id is null and cc.email = lower(u.email)
+          order by c.updated_at desc limit 1)
+      ) as client_id
     from organization o
     where not exists (select 1 from saas_subscription s where s.organization_id = o.id and s.is_demo)
       and not exists (select 1 from saas_demo d where d.organization_id = o.id)

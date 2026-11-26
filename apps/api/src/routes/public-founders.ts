@@ -171,7 +171,11 @@ export function createPublicFoundersRoute(deps: {
         : null
     const offer =
       !result.hasAccount && shown && gift
-        ? `Empieza gratis: ${shown.trialDays} días con ${gift} de regalo para tus agentes, sin tarjeta.`
+        ? `Empieza gratis: ${shown.trialDays} días con ${gift} de regalo para tus agentes, sin tarjeta.${
+            shown.priceCents > 0
+              ? ` Después, ${moneyText(shown.currency, shown.priceCents)} al mes${shown.creditCents === shown.priceCents ? " que vuelven como crédito" : ""}.`
+              : ""
+          }`
         : null
     const attachments = await Promise.all(
       result.sheets.map(async (sheet) => ({

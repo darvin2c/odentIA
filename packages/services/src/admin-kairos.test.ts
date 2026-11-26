@@ -825,6 +825,20 @@ beforeAll(async () => {
   first = await pass()
 })
 
+describe("el alta libre une la clínica al cliente que ya estaba en la venta", () => {
+  it("con el correo de quien la abrió, sin duplicar el cliente", async () => {
+    // El cliente estaba en la venta, sin cuenta, con el correo de su contacto (ADR 0221).
+    const clientId = await client("libre", "Clínica Libre (ficticia)", { email: "libre-duena@kairos.test" })
+    await insertOrg(ownerDb, "kz-libre", "kz-libre")
+    await ownerDb.insert(user).values({ id: "kz-libre-duena", name: "Dueña Libre", email: "Libre-Duena@kairos.test" })
+    await ownerDb.insert(member).values({ id: "kz-libre-m", organizationId: "kz-libre", userId: "kz-libre-duena", role: "owner", createdAt: NOW })
+    const result = await pass()
+    expect(result.clientsLinked).toBeGreaterThanOrEqual(1)
+    const linked = await ownerDb.select().from(saasClient).where(eq(saasClient.organizationId, "kz-libre"))
+    expect(linked.map((row) => row.id)).toEqual([clientId])
+  })
+})
+
 describe("la pasada de Kairós", () => {
   it("crea el cliente de cada cuenta sin cliente, con su venta entrada; la demo nunca es cliente", async () => {
     expect(first.clientsCreated).toBeGreaterThanOrEqual(1)

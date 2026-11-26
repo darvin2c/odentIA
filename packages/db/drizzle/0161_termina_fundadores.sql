@@ -5,7 +5,8 @@
 UPDATE admin.saas_plan SET show_on_web = false, updated_at = now() WHERE seat_limit IS NOT NULL AND show_on_web;
 --> statement-breakpoint
 -- El código nuevo ya no lee cómo se abren las clínicas; se deja abierta en odentIA y latidIA para que
--- la API de antes, mientras se publica la nueva, tampoco pida invitación. vistIA no cambia: sin plan
--- de lista todavía no abre clínicas. La tabla, la lista de espera y los lugares se borran en un cambio
--- aparte, cuando este ya esté en producción.
+-- la API de antes, mientras se publica la nueva, tampoco pida invitación. vistIA no cambia aquí: la
+-- API nueva ya no lee la política, y su web dice «Escríbenos» mientras no tenga plan de lista. La
+-- tabla, la lista de espera y los lugares se borran en un cambio aparte, cuando este ya esté en
+-- producción.
 UPDATE admin.saas_signup_policy SET mode = 'abierta', medical_mode = 'abierta', updated_at = now();

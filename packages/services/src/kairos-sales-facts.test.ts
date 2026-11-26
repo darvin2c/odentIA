@@ -50,11 +50,13 @@ const pricing: PublicPricing = {
 }
 
 describe("kairosSalesFactsOf", () => {
-  it("con plan de lista, se empieza gratis y al momento, sin invitación ni Fundadores", () => {
+  it("con plan de lista, se empieza gratis y al momento, y Fundadores solo se nombra para decir que terminó", () => {
     const facts = kairosSalesFactsOf("medical", pricing)
     const prices = facts.prices.join("\n")
-    expect(facts.prices).toContain("Se empieza gratis: se crea la cuenta y se abre tu consultorio al momento y sin tarjeta.")
-    expect(prices).not.toMatch(/Fundadores|por invitación|solicitar-invitacion/)
+    expect(facts.prices).toContain("Se empieza gratis: se crea la cuenta y se abre tu consultorio al momento y sin tarjeta. El programa Fundadores ya terminó: no hay invitación, cupos ni precio de Fundadores; hoy se empieza gratis y después rige el plan de lista.")
+    // Fundadores aparece una sola vez: en la frase que dice que terminó, sin precio ni descuento.
+    expect(prices.match(/Fundadores/g)).toHaveLength(2)
+    expect(prices).not.toMatch(/por invitación|solicitar-invitacion|% menos/)
     expect(facts.facts.join("\n")).not.toMatch(/Fundadores|solicitar-invitacion/)
     expect(facts.percents).toEqual([])
   })

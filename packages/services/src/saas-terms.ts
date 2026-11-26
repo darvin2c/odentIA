@@ -780,7 +780,7 @@ export async function assertAgentsNotPaused(tx: Db, orgId: string): Promise<void
     throw new ServiceError(
       "AGENTS_PAUSED",
       409,
-      "Los agentes están en pausa: se usó todo el saldo de prueba. Quien administra la clínica puede elegir el plan en Plan y pagos.",
+      "Los agentes están en pausa: se usó todo el saldo de prueba. Vuelven cuando termine la prueba y empiece el plan.",
     )
   }
 }

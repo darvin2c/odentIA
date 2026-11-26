@@ -22,7 +22,6 @@ import { creditText } from "../lib/credit"
 import { forgetInvitation, invitationQuery, rememberInvitation } from "../lib/founders"
 import { GoogleAuthButton } from "../lib/google-auth"
 import { webUrl } from "../lib/host"
-import { signupStepOf } from "../lib/signup-steps"
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -172,25 +171,17 @@ function RegisterPage() {
   }, [founder, form])
 
   const trialChip = trial && trial.days > 0 ? (credit ? `${trial.days} días con ${credit} para tus agentes` : `${trial.days} días de prueba`) : null
-  const trust = [
-    "Sin tarjeta",
-    ...(founder ? [founder.offer.planName] : []),
-    ...(trialChip ? [trialChip] : []),
-  ]
+  // Quien entra invitado al equipo de una clínica no abre la suya: ni prueba ni regalo que prometerle.
+  const trust = invitationId
+    ? []
+    : ["Sin tarjeta", ...(founder ? [founder.offer.planName] : []), ...(trialChip ? [trialChip] : [])]
   const headline = "Crea tu cuenta."
-  const accent = "Tu clínica empieza hoy."
-  const tag = founder ? "Tu invitación" : "Prueba gratis"
+  const accent = invitationId ? "Y entra a tu equipo." : "Tu clínica empieza hoy."
+  const tag = invitationId ? "Invitación de tu equipo" : founder ? "Tu invitación" : "Prueba gratis"
 
   return (
     <AuthSplit
-      title={
-        <span className="flex items-center justify-between gap-3">
-          Crea tu cuenta
-          <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
-            {signupStepOf(1)}
-          </span>
-        </span>
-      }
+      title="Crea tu cuenta"
       aside={
         <AuthAside tag={tag} title={headline} accent={accent}>
           <TrustChips items={trust} />
@@ -332,11 +323,11 @@ function RegisterPage() {
               </SubmitButton>
             )}
           </form.Subscribe>
-          <p className="text-center text-xs text-muted-foreground">
+          {invitationId ? null : <p className="text-center text-xs text-muted-foreground">
             {founder
               ? `Sin tarjeta. Tu clínica abre con ${founder.offer.planName}.`
               : `Sin tarjeta. Al terminar la prueba eliges tu plan${afterTrial ? ` (${afterTrial})` : ""} y pagas con tu comprobante.`}
-          </p>
+          </p>}
         </FieldGroup>
       </form>
     </AuthSplit>

@@ -295,7 +295,7 @@ function OrgsPage() {
           <Button render={<Link to="/onboarding" search={{ continue: undefined, invitacion: founderToken }} />}>Abrir mi clínica</Button>
         ) : (
           // Sin clínicas, crear la suya es lo que sigue: el botón principal.
-          <Button variant={todas.length > 0 || organizations.isPending ? "outline" : "default"} render={<Link to="/onboarding" search={{ continue: undefined }} />}><Plus className="size-4" aria-hidden />{todas.length > 0 ? "Crear otra clínica" : "Crear mi clínica"}</Button>
+          <Button variant={todas.length > 0 || pendientes.length > 0 || organizations.isPending ? "outline" : "default"} render={<Link to="/onboarding" search={{ continue: undefined }} />}><Plus className="size-4" aria-hidden />{todas.length > 0 ? "Crear otra clínica" : "Crear mi clínica"}</Button>
         )}
         <p className="text-sm text-muted-foreground">¿Necesitas ayuda? <Link to="/support" className="underline">Contacta con soporte</Link></p>
       </footer>

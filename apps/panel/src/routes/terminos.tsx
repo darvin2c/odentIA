@@ -12,7 +12,6 @@ import { creditText } from "../lib/credit"
 import { requireVerifiedSession } from "../lib/guards"
 import { legalLinks } from "../lib/host"
 import { safeNext } from "../lib/safe-next"
-import { signupStepOf } from "../lib/signup-steps"
 import { initials } from "../lib/welcome"
 import { panelWords } from "../lib/brand"
 
@@ -161,14 +160,7 @@ function TermsStepPage() {
   return (
     <AuthSplit
       title={
-        <span className="flex items-center justify-between gap-3">
-          Un paso antes de seguir
-          {opens ? (
-            <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
-              {signupStepOf(2)}
-            </span>
-          ) : null}
-        </span>
+        "Un paso antes de seguir"
       }
       aside={
         opens ? (

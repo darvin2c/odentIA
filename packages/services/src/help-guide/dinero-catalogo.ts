@@ -338,6 +338,8 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
           "cuanto voy a pagar y cuando me cobran",
           "se cobra solo al terminar la prueba",
           "que pasa despues de los 30 dias",
+          "se me acabo el regalo antes de los 30 dias",
+          "se acabo el saldo de prueba",
         ],
       },
       {

@@ -197,7 +197,7 @@ export function kairosSalesFactsOf(product: string, pricing: PublicPricing): Kai
   // El alta es libre (ADR 0221): sin plan publicado, el producto todavía no abre cuentas por la web.
   prices.push(
     list
-      ? `Se empieza gratis: se crea la cuenta y se abre ${line.yourPlace} al momento y sin tarjeta.`
+      ? `Se empieza gratis: se crea la cuenta y se abre ${line.yourPlace} al momento y sin tarjeta. El programa Fundadores ya terminó: no hay invitación, cupos ni precio de Fundadores; hoy se empieza gratis y después rige el plan de lista.`
       : `Todavía no se abren cuentas nuevas de ${line.name} por la web: para empezar, el equipo de Sallca agenda una presentación.`,
   )
   // La moneda de los planes, dicha una vez además de en cada importe.
