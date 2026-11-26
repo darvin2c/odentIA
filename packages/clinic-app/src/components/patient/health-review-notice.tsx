@@ -244,15 +244,25 @@ export function HealthReviewNotice({
   // El foco a «Sí, lo dejó», después de que el aviso se pinta otra vez tras «Lo revisé con…».
   useEffect(() => {
     if (!focusStopped) return
-    const timer = setTimeout(() => {
+    // Mientras se guarda, el botón está deshabilitado y no toma el foco: se intenta hasta que se habilita.
+    let tries = 0
+    const timer = setInterval(() => {
       const button = document.querySelector<HTMLButtonElement>("[data-stopped-confirm]")
-      if (button) {
+      tries += 1
+      if (button && !button.disabled) {
         button.focus()
+        if (document.activeElement === button) {
+          clearInterval(timer)
+          setFocusStopped(false)
+        }
+      } else if (tries > 40) {
+        clearInterval(timer)
         setFocusStopped(false)
+        titleRef.current?.focus()
       }
-    }, 400)
-    return () => clearTimeout(timer)
-  })
+    }, 100)
+    return () => clearInterval(timer)
+  }, [focusStopped])
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
   const today = clinicToday()
