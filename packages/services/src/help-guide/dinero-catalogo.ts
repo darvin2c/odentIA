@@ -329,6 +329,18 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
     topic: "plan-y-pagos",
     faqs: [
       {
+        id: "plan-y-pagos-fin-de-la-prueba",
+        q: "¿Qué pasa cuando se acaba mi prueba gratis?",
+        a: "Durante la prueba tus agentes trabajan con el crédito de regalo y no pagas nada. Para seguir, quien es propietario o administrador elige el plan en Configuración › Plan y pagos («Activar plan»): tu mes empieza el día que termina la prueba, o ese mismo día si ya terminó. La cuota del plan vuelve como crédito para el trabajo de tus agentes, y lo que hagan de más se suma al cargo del mes. No se pide tarjeta: cuando llega el cargo, pagas y subes el comprobante. Te avisamos 7 y 2 días antes de que termine la prueba. Si no eliges un plan, la clínica queda en solo lectura, sin perder ningún dato, y los agentes se pausan hasta que lo elijas. Si el regalo se acaba antes, los agentes se pausan hasta que termine la prueba.",
+        forms: [
+          "que pasa cuando se acabe mi prueba gratis",
+          "cuando termina la prueba",
+          "cuanto voy a pagar y cuando me cobran",
+          "se cobra solo al terminar la prueba",
+          "que pasa despues de los 30 dias",
+        ],
+      },
+      {
         id: "plan-y-pagos-registrar-comprobante",
         q: "¿Cómo registro el comprobante de mi pago?",
         a: "En Configuración › Plan y pagos, «Próximo cobro» dice el monto, cuándo vence y cómo pagar. Después de pagar, «Registrar comprobante»: eliges el cargo y el medio usado, escribes el importe y subes el archivo (PNG, JPG, WebP o PDF, hasta 10 MB). Queda «Pendiente de confirmación» hasta que se confirme, y lo sigues en «Historial de pagos». Si no se pudo confirmar, el historial dice «Rechazado» con el motivo, «Próximo cobro» lo repite y puedes registrar otro en el mismo cargo. Un comprobante en revisión no frena la solo lectura: la frena que confirmemos el pago. Si el cargo ya venció y la clínica está en sus días de gracia, el comprobante que cubre todo lo que debes da unos días más (las veces que permiten las condiciones comerciales) y el aviso de arriba de la pantalla dice el día; en solo lectura ya no da días. Solo propietario y administrador.",
