@@ -443,3 +443,10 @@ describe("la dosis de su clase, leída de la frase (QA del 26 nov)", () => {
     expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "Apixabán 5 mg cada 12 h" })
   })
 })
+
+describe("lo que falta de la dosis se lee de la frase, cada cosa por su lado (QA del 26 nov)", () => {
+  it("Clío trae «apixabán 5 mg» sin cuándo: «cada doce horas» sale de lo dicho", () => {
+    const { payload } = groundHealthNames({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg" } }, "tomo apixabán de cinco miligramos cada doce horas")
+    expect(payload?.["anticoagulants"]).toEqual({ state: "recorded", detail: "apixabán 5 mg cada 12 h" })
+  })
+})

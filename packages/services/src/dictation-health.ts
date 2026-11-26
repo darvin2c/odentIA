@@ -538,7 +538,8 @@ export function groundHealthNames(
         }
         // La dosis dentro del nombre, o si no, la que se dijo junto a su nombre en la frase.
         const named = medicineWords(text(item["name"]))
-        const parts = named.dose ? named : { ...named, ...doseFromSaid(named.name, said) }
+        const heard = doseFromSaid(named.name, said)
+        const parts = { name: named.name, dose: named.dose ?? heard.dose, frequency: named.frequency ?? heard.frequency }
         return { ...item, name: parts.name, ...(parts.dose ? { dose: parts.dose } : {}), ...(parts.frequency && !text(item["frequency"]) ? { frequency: parts.frequency } : {}) }
       }),
     }
@@ -548,8 +549,10 @@ export function groundHealthNames(
     // La misma medicina también en lo que toma (QA del 26 nov, latidIA: «apixabán» dos veces, y la dosis
     // se perdía al guardar): una sola fila, la de su clase, con la dosis y cuándo que se dijeron.
     const written = medicineWords(text(value["detail"]))
-    // Clío suele poner en su clase solo el nombre: la dosis y cuándo se leen de la frase dicha.
-    const detail = written.dose ? written : { ...written, ...doseFromSaid(written.name, said) }
+    // Clío suele poner en su clase solo el nombre, o la dosis sin cuándo: lo que falta se lee de la
+    // frase dicha, cada cosa por su lado (QA del 26 nov: «apixabán 5 mg» perdía «cada doce horas»).
+    const heard = doseFromSaid(written.name, said)
+    const detail = { name: written.name, dose: written.dose ?? heard.dose, frequency: written.frequency ?? heard.frequency }
     const list = out["medications"]
     const found = isRecord(list) && Array.isArray(list["items"]) ? (list["items"] as Array<Record<string, unknown>>).find((item) => sameDrug(item["name"], detail.name)) : undefined
     const line = medicineLine({ name: detail.name, dose: detail.dose ?? (text(found?.["dose"]) || undefined), frequency: detail.frequency ?? (text(found?.["frequency"]) || undefined) })
