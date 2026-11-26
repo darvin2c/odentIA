@@ -15,7 +15,7 @@ export const guide: Guide = {
   description:
     "Cómo hacer un presupuesto dental por fases: un renglón por tratamiento, forma de pago, adelanto y vigencia. Plantilla de presupuesto dental en PDF gratis.",
   lead: "Del odontograma al presupuesto: un renglón por tratamiento, ordenado por fases y con su forma de pago. Con el presupuesto en blanco en PDF.",
-  updated: "2026-11-25",
+  updated: "2026-11-26",
   published: "2026-11-25",
   // Su lista en el canal: un video que se suma ahí aparece solo en la guía.
   playlist: "PLCnWdOlMGuYU",
@@ -56,7 +56,7 @@ export const guide: Guide = {
     {
       title: "Ordénalo por fases, con la alternativa dentro de su fase",
       text: [
-        "Las fases van en el orden en que se atiende: **urgencia** (dolor o infección), **básica** (limpieza y caries), **quirúrgica** (extracciones e implantes), **rehabilitadora** (coronas, puentes, prótesis) y **mantenimiento** (controles). La corona de un diente va después de su endodoncia.",
+        "Las fases van en el orden en que se atiende: **urgencia** (dolor o infección), **básica** (limpieza y caries), **quirúrgica** (extracciones e implantes), **rehabilitadora** (coronas, puentes, prótesis) y **mantenimiento** (controles). La corona de un diente va después de su endodoncia. Cómo armar el plan, fase por fase, está en la [guía del plan de tratamiento](/guias/plan-de-tratamiento-odontologico).",
         "Si hay dos caminos para lo mismo, como reponer el 47 con un implante o con un puente, marca cada renglón con su opción, **A o B**, **dentro de su fase**: el implante es quirúrgico; su corona y el puente, rehabilitadores. Cada opción tiene su total: el paciente elige una y **no se suman**. Lo demás va igual en las dos.",
       ],
       figure: {

@@ -32,6 +32,7 @@ import {
   findingDefinition,
   type PeriodontalToothRecord,
   pendingProbingWords,
+  isImplantProsthesisLibraryKey,
   isSurgicalLibraryKey,
   phaseForTreatment,
   type SameFaceFinding,
@@ -504,6 +505,9 @@ export const dentalHooks: ProductHooks = {
       const key = service.libraryKey
       // La cirugía que la biblioteca pone en otra especialidad (`isSurgicalLibraryKey`).
       if (isSurgicalLibraryKey(key)) out.add(service.id)
+      // Lo que va sobre el implante ya puesto (la corona, el pilar, la prótesis) no abre hueso: no es
+      // cirugía aunque la biblioteca lo ponga en implantología, como en su fase (`phaseForTreatment`).
+      else if (isImplantProsthesisLibraryKey(key)) continue
       else if (SURGICAL_KINDS.has(await serviceKindOf(tx, orgId, service))) out.add(service.id)
     }
     return out

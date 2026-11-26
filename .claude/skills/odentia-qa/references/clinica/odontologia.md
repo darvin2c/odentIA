@@ -164,6 +164,14 @@ Fuentes que se suman: SDCEP, *Management of Dental Patients Taking Anticoagulant
 - [ ] Un antiagregante dicho (aspirina, clopidogrel) se rotula antiagregante desde la propuesta, no solo después de revisarlo.
 Fuentes: NTS 139-MINSA/2018/DGAIN (anamnesis: antecedentes familiares); HL7 FHIR R4 `FamilyMemberHistory` y `v3-RoleCode`; ATC B01AC (antiagregantes) y B01AF (inhibidores directos del factor Xa).
 
+**QA de «lo que quedó fuera» de salud y familia (26 nov 2026):**
+- [ ] La dosis del anticoagulante dicha («apixabán de cinco miligramos cada doce horas») llega a su fila con dosis y frecuencia, igual por el grupo «Anticoagulante» que por «Medicación». Caso: un adulto con apixabán y losartán.
+- [ ] Ninguna dosis lleva una unidad que no se dijo («losartán cincuenta» no es «50 mg»), venga del modelo o de la regla. La dosis dicha con su unidad queda en sus campos (número, unidad y frecuencia), no solo como «Escrita antes».
+- [ ] Lo que dice la madre o el padre de su propia salud («yo soy diabética») se ofrece como antecedente familiar del hijo («Madre: diabetes»), no solo como «No lo usé». Fuente: NTS 139-MINSA/2018/DGAIN, anamnesis.
+- [ ] Una enfermedad dicha como adjetivo («asmático», «diabético», «hipertenso») se propone igual que dicha como nombre.
+- [ ] «Corregir algo» trae lo de «De su familia», y guardar no lo pierde.
+- [ ] Si lo oído de su salud es solo un «No» (no toma medicinas), el aviso no habla de «Sí, lo dejó», y después de revisarlo Antecedentes no dice «no se le preguntó».
+
 ## P-ODO-03 Abrir la atención: «Hoy viene a…», motivo y relato
 
 **Dónde:** «Atender» (`CA/new-encounter-button.tsx`), la atención (`CA/encounter-editor.tsx`) y «Hoy viene a…» (`CA/encounter-visit.tsx`, `S/encounter-visit.ts`).
@@ -259,6 +267,9 @@ Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compr
 - [ ] Cada fuente lleva su edición y su página (AAPD, Reference Manual 2026, p. 675).
 - [ ] El odontograma de adultos en blanco, con su leyenda, se imprime en una sola hoja.
 - [ ] Nada que no tenga fuente se enseña como regla (por ejemplo, qué se marca en la mixta con un diente que todavía no sale): queda por confirmar con una clínica real.
+- [ ] El periodontograma de la guía y de su plantilla anota la recesión con el signo de la app (positiva si se ve raíz, negativa si la encía cubre la corona) y avisa con un ejemplo qué pasa con el signo contrario.
+- [ ] La lista CIE-10 de la guía, de su plantilla y de su buscador sale del archivo oficial del MINSA que carga la app, con sus títulos y sus códigos; nunca de la semilla de desarrollo.
+- [ ] El plan por fases de la guía pone cada tratamiento donde lo propone la app: la endodoncia de una pulpitis en urgencia, el implante en la quirúrgica y lo que va sobre el implante en la rehabilitadora.
 
 **Fuentes:** AAPD, *Reference Manual of Pediatric Dentistry*, «Dental Growth and Development» (2026, p. 675); ISO 3950.
 **Caso:** C2 a C5 del banco de la mesa del 24 nov 2026 (Jorge, 42 años; Valentina, 4; Mateo, 7; el presupuesto por fases con implante o puente).
@@ -412,6 +423,10 @@ Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endo
 **Ya falló:** el procedimiento sin nota de la sesión y el tratamiento duplicado en la lista (8 nov).
 **Huecos conocidos:** ningún procedimiento tiene datos propios de su especialidad.
 **Fuentes:** CPMS (MINSA); guías clínicas de la AAE (endodoncia).
+
+**QA de «lo que quedó fuera» de salud y familia (26 nov 2026):**
+- [ ] «Profilaxis con destartraje» dictada propone una sola prestación (la que la clínica tenga para la limpieza con destartraje), no dos cargos.
+- [ ] Lo dicho para otro día («para la resina de la 46 lo vemos la próxima») no queda también como hecho hoy.
 
 ## P-ODO-12 Periodontograma
 

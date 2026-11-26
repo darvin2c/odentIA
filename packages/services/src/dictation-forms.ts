@@ -1528,6 +1528,14 @@ function noteWords(sentence: string): { stems: string[]; numbers: number[]; nega
   return { stems: stemsOf(sentence), numbers: saidNumbers(sentence, { articles: false }), negations: [...new Set(negationsOf(sentence))].sort() }
 }
 
+/** Cómo se cuenta lo dicho («refiere», «comenta»): en el repaso no hace que una oración sea otra. */
+const REPORTING_WORDS = "refiere refieren dice dicen comenta comentan cuenta cuentan menciona indica manifiesta"
+/**
+ * Quién lo cuenta («la mamá refiere…»): solo si la oración dice que lo cuenta alguien. Sin eso es de
+ * quién se habla, y otra persona es otra cosa («su padre tuvo un infarto» no repite «su madre…»).
+ */
+const TELLER_WORDS = "mama mamá papa papá madre padre paciente señora señor hija hijo esposa esposo"
+
 /**
  * La nota de una pausa sin las oraciones que ya dice una nota pendiente de la atención: lo que cortó
  * la pausa llega otra vez al comienzo de lo nuevo (`withPauseBridge`) y Clío lo vuelve a contar
@@ -1536,15 +1544,30 @@ function noteWords(sentence: string): { stems: string[]; numbers: number[]; nega
  * con sus números y las mismas negaciones: «No refiere dolor» no repite «Refiere dolor», ni «en la 46»
  * repite «en la 36». Si la nota queda vacía, no se propone.
  */
-export function withoutRepeatedNotes<T extends FormDraftLike>(drafts: readonly T[], pendingNotes: readonly string[]): T[] {
-  const before = pendingNotes.flatMap(sentencesOf).map(noteWords)
+export function withoutRepeatedNotes<T extends FormDraftLike>(
+  drafts: readonly T[],
+  pendingNotes: readonly string[],
+  /**
+   * El repaso relee toda la conversación y cuenta otra vez lo que ya cuenta la consulta, con quién lo
+   * dijo delante («la mamá refiere que le falta…» por «le falta…») y con otra puntuación (una coma
+   * por un «;»): ahí no cuentan las palabras de quién lo cuenta y cómo, y se compara también con cada nota
+   * entera (revisión del 25 nov: el relato firmado salía dos veces). Lo demás tiene que estar todo:
+   * otro lado u otro estímulo es otra cosa.
+   */
+  options: { review?: boolean } = {},
+): T[] {
+  const before = [...pendingNotes.flatMap(sentencesOf), ...(options.review ? pendingNotes : [])].map(noteWords)
   if (!before.length) return [...drafts]
+  const reporting = options.review ? new Set(stemsOf(REPORTING_WORDS)) : new Set<string>()
+  const tellers = new Set(stemsOf(TELLER_WORDS))
   const repeated = (sentence: string) => {
     const now = noteWords(sentence)
+    const told = now.stems.some((stem) => reporting.has(stem))
+    const stems = now.stems.filter((stem) => !reporting.has(stem) && !(told && tellers.has(stem)))
     return (
-      now.stems.length >= 3 &&
+      stems.length >= 3 &&
       before.some(
-        (old) => now.stems.every((stem) => old.stems.includes(stem)) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join(),
+        (old) => stems.every((stem) => old.stems.includes(stem)) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join(),
       )
     )
   }

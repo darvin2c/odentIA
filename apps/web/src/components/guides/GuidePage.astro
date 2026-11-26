@@ -25,12 +25,18 @@ import BudgetDemo from "../budgets/BudgetDemo"
 import ChartPreview from "../clinical/ChartPreview"
 import ChildChartPreview from "../clinical/ChildChartPreview"
 import ConsentDemo from "../consent/ConsentDemo"
+import Cie10Search from "./demos/Cie10Search"
+import PerioDemo from "./demos/PerioDemo"
+import PlanPhasesDemo from "./demos/PlanPhasesDemo"
 import Faq from "../Faq.astro"
 import GuideCards from "./GuideCards.astro"
 import GuideDownloads from "./GuideDownloads"
 import GuideFigure from "./GuideFigure.astro"
 import GuideStart from "./GuideStart.astro"
 import RichText from "./RichText.astro"
+// Los códigos odontológicos de la CIE-10 para el buscador de su guía: los escribe el mismo comando que
+// las plantillas, del archivo oficial que carga la app (`blank-sheets.cli.ts`).
+import cie10 from "../../lib/guides/cie10-odontologia.json"
 import { CHANNEL_URL, embedUrl, guideVideos, thumbUrl, videoJsonLd, watchUrl } from "../../lib/guides/videos"
 
 interface Props {
@@ -78,6 +84,9 @@ const START_TITLES: Record<Guide["topic"], string> = {
   "Historia clínica": "Tu historia clínica, sin papel.",
   Consentimiento: "Tus consentimientos, sin papel.",
   Caja: "Tu caja, sin cuadernos.",
+  Periodontograma: "Tu periodontograma, sin sumar a mano.",
+  "Plan de tratamiento": "Tus planes, con cada cita en su lugar.",
+  "CIE-10": "Tus diagnósticos, con su código sin buscarlo.",
 }
 const startTitle = START_TITLES[guide.topic]
 ---
@@ -192,6 +201,12 @@ const startTitle = START_TITLES[guide.topic]
           <ConsentDemo client:visible />
         ) : guide.tryIt.demo === "caja" ? (
           <CloseSheet client:visible />
+        ) : guide.tryIt.demo === "plan" ? (
+          <PlanPhasesDemo client:visible />
+        ) : guide.tryIt.demo === "periodontograma" ? (
+          <PerioDemo client:visible />
+        ) : guide.tryIt.demo === "cie10" ? (
+          <Cie10Search client:visible codes={cie10.codes} daily={cie10.daily} />
         ) : (
           <BudgetDemo client:visible />
         )}

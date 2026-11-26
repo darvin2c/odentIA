@@ -10,10 +10,11 @@ describe("declaredMedications", () => {
       boneMedicines: { state: "recorded", detail: "Alendronato" },
       medications: { state: "recorded", items: [{ name: "Losartán" }] },
     })
-    expect(rows.map((row) => [row.name, row.declaredClass])).toEqual([
-      ["Warfarina 5 mg", "anticoagulants"],
-      ["Alendronato", "boneMedicines"],
-      ["Losartán", null],
+    // La dosis escrita con el nombre va a su campo (revisión del 25 nov).
+    expect(rows.map((row) => [row.name, row.dose ?? null, row.declaredClass])).toEqual([
+      ["Warfarina", "5 mg", "anticoagulants"],
+      ["Alendronato", null, "boneMedicines"],
+      ["Losartán", null, null],
     ])
   })
 
@@ -78,4 +79,11 @@ it("la medicina para los huesos que ya no toma queda terminada, con por qué y c
   // Terminada el día antes: con fin hoy se leería vigente hoy.
   expect(row).toMatchObject({ name: "zoledronato", declaredClass: "boneMedicines", endDate: "2026-11-13" })
   expect(row?.notes).toBe("Por un cáncer · inyección · dijo que ya no la toma")
+})
+
+describe("la dosis declarada en los campos de la lista (QA del 26 nov)", () => {
+  it("con su unidad y cada cuánto de la lista, por cualquier camino que se guarde", () => {
+    const [row] = declaredMedications({ anticoagulants: { state: "recorded", detail: "apixabán 5 mg cada 12 h" } })
+    expect(row).toMatchObject({ name: "apixabán", doseValue: 5, doseUnit: "mg", frequencyCode: "cada_12_h" })
+  })
 })

@@ -621,7 +621,8 @@ describe("otro día corrige lo que dijo (QA del 21 nov, H3)", () => {
     const { health } = await fx.run((tx) => confirmSaidHealth(tx, ...fx.args, before!.suggestionId))
     // Antes registraba el apixabán y el losartán 50 como vigentes.
     expect(health.medications.map((row) => row.name)).toEqual([])
-    expect((await said()).map((entry) => entry.rows.map((row) => row.value).sort())).toEqual([["apixabán, ya no la toma", "losartán 100 mg"]])
+    // «Ahora es de 100», sin unidad dicha: la dosis no inventa los «mg» (QA del 26 nov).
+    expect((await said()).map((entry) => entry.rows.map((row) => row.value).sort())).toEqual([["apixabán, ya no la toma", "losartán 100"]])
     await enable(false)
   })
 })

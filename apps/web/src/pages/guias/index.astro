@@ -10,7 +10,7 @@ import { GUIDES, GUIDES_PATH, guidePath, sheetImages } from "../../lib/guides"
 
 const title = "Guías para tu clínica dental, paso a paso"
 const description =
-  "Guías para odontólogos: odontograma, historia clínica, consentimiento informado, presupuesto dental y cierre de caja, cada una con su plantilla en PDF gratis."
+  "Guías para odontólogos: odontograma, periodontograma, historia clínica, CIE-10, consentimiento, plan de tratamiento, presupuesto y caja, con plantilla PDF gratis."
 const jsonLd = [
   breadcrumbJsonLd(Astro.site, [
     ["Inicio", "/"],
@@ -29,14 +29,14 @@ const jsonLd = [
   },
 ]
 ---
-<Base title={title} description={description} jsonLd={jsonLd} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma, historia clínica, consentimiento, presupuesto y cierre de caja, para imprimir y llenar a mano." }}>
+<Base title={title} description={description} jsonLd={jsonLd} share={{ image: sheetImages("odontograma").share, alt: "Plantillas gratis en PDF: odontograma, periodontograma, historia clínica, códigos CIE-10, consentimiento, plan de tratamiento, presupuesto y cierre de caja." }}>
   <section class="hero gi">
     <div class="grain" aria-hidden="true"></div>
     <div class="wrap gi-wrap">
       <div class="gi-in">
         <span class="tag tag-d rise">[ Guías ]</span>
         <h1 class="gi-h1 rise d1">Guías para tu clínica dental, <span class="acc">paso a paso.</span></h1>
-        <p class="lead lead-d rise d2">Cómo llenar el odontograma y la historia clínica, el consentimiento, el presupuesto y el cierre de caja. Cada una con su plantilla para descargar, sin pedir tu correo.</p>
+        <p class="lead lead-d rise d2">Cómo llenar el odontograma, el periodontograma y la historia clínica con sus códigos CIE-10, el consentimiento, el plan de tratamiento, el presupuesto y el cierre de caja. Cada una con su plantilla para descargar, sin pedir tu correo.</p>
       </div>
     </div>
   </section>

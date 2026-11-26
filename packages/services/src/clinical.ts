@@ -17,6 +17,10 @@ import {
   type DirectedMedicineDeclaration,
   BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
+  frequencyCodeOf,
+  medicineName,
+  medicineWords,
+  structuredDose,
   type MedicationClass,
   type MedicineClassAnswer,
   medicineClassAnswers,
@@ -996,9 +1000,11 @@ export function changedHealthOf(input: {
         if (row.status === "activa" && before(row.createdAt) && !sayNow.has(normalizeDrugText(row.name))) out.conditions.push(row.id)
     }
     // Lo que nombró ahora de cualquier medicina: si la repitió, sigue igual, en el grupo que sea.
-    const sayNow = new Set(declaredMedications(health).map((row) => normalizeDrugText(row.name)))
+    const sayNow = declaredMedications(health)
     for (const row of input.medications) {
-      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name))) continue
+      // La misma medicina con la misma dosis, o una de las dos sin dosis («Losartán 50» y «losartán»):
+      // sigue igual. Otra dosis es un cambio («warfarina 5 mg» → «2,5 mg»).
+      if (!before(row.createdAt) || sayNow.some((said) => sameMedicine(said, row))) continue
       const group = medicationClassOf(row.atcCode)
       if (answered(group ? health[group]?.state : health.medications?.state)) out.medications.push(row.id)
     }
@@ -1405,20 +1411,35 @@ export function declaredMedications(
     const answer = declared[group]
     if (answer?.state !== "recorded") continue
     // Sin decir cuál, la fila lo dice (`MEDICATION_CLASSES[group].unnamed`).
-    const name = answer.detail?.trim() || MEDICATION_CLASSES[group].unnamed
+    // «Apixabán de cinco cada doce horas»: el nombre, la dosis y cuándo, cada uno en su lugar (revisión del 25 nov).
+    const said = answer.detail?.trim() ? medicineWords(answer.detail) : { name: MEDICATION_CLASSES[group].unnamed }
+    const name = said.name
     seen.add(normalizeDrugText(name))
     // Los huesos: por qué y cómo, y si ya no la toma, terminada (B3): sigue contando, no está vigente.
     const notes = directedMedicineNotes(answer)
     rows.push({
       name,
+      ...(said.dose ? { dose: said.dose } : {}),
+      ...(said.frequency ? { frequency: said.frequency } : {}),
       declaredClass: group,
       ...(notes.length ? { notes: upperFirst(notes.join(" · ")) } : {}),
       // Terminada el día antes de decirlo: una medicina con fin hoy todavía se lee como vigente hoy.
       ...(answer.now === false && saidOn ? { endDate: dayBefore(saidOn) } : {}),
     })
   }
-  for (const item of declared.medications?.state === "recorded" ? declared.medications.items : []) {
+  for (const declaredItem of declared.medications?.state === "recorded" ? declared.medications.items : []) {
+    // Sin dosis aparte, la que dijo dentro del nombre («apixabán 5 mg») va a su campo.
+    const said = declaredItem.dose ? { name: declaredItem.name } : medicineWords(declaredItem.name)
+    const item = { ...declaredItem, name: said.name, ...(said.dose ? { dose: said.dose } : {}), ...(said.frequency && !declaredItem.frequency ? { frequency: said.frequency } : {}) }
     const key = normalizeDrugText(item.name)
+    // La misma medicina dicha también al responder por su clase: una sola fila, con la dosis y cuándo
+    // que se dijeron aquí si allá no estaban (QA del 26 nov, latidIA: el apixabán perdía su dosis).
+    const directed = rows.find((row) => row.declaredClass !== null && normalizeDrugText(row.name) === key)
+    if (directed) {
+      if (!directed.dose && item.dose) directed.dose = item.dose
+      if (!directed.frequency && item.frequency) directed.frequency = item.frequency
+      continue
+    }
     if (seen.has(key)) continue
     seen.add(key)
     rows.push({ ...item, declaredClass: null })
@@ -1426,7 +1447,50 @@ export function declaredMedications(
   // «Sí» a «algún otro» sin decir cuál, que ahora es opcional como en las dos clases (QA del 14 nov, B15).
   if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
-  return rows
+  // La dosis con su unidad y cada cuánto, en los campos de la lista, por cualquier camino que se guarde
+  // (la primera consulta de un paciente nuevo también; QA del 26 nov). Lo que no calza queda como texto.
+  return rows.map((row) => {
+    const structured = row.dose?.trim() ? structuredDose(row.dose) : null
+    const code = row.frequency?.trim() ? frequencyCodeOf(row.frequency) : null
+    return {
+      ...row,
+      ...(structured ? { dose: doseText(structured.doseValue, structured.doseUnit), doseValue: structured.doseValue, doseUnit: structured.doseUnit } : {}),
+      ...(code ? { frequency: MEDICATION_FREQUENCY_LABELS[code], frequencyCode: code } : {}),
+    }
+  })
+}
+
+/**
+ * ¿Es la misma medicina? Por su nombre sin la dosis, y con la misma dosis si las dos la tienen: una
+ * fila de antes con la dosis en el nombre («Losartán 50») es «losartán», pero «warfarina 5 mg» y
+ * «warfarina 2,5 mg» son un cambio (QA del 26 nov).
+ */
+function sameMedicine(a: { name: string; dose?: string | null }, b: { name: string; dose?: string | null }): boolean {
+  if (normalizeDrugText(medicineName(a.name)) !== normalizeDrugText(medicineName(b.name))) {
+    // Como antes, el nombre escrito igual («Warfarina 5 mg» y «Warfarina 5 mg»).
+    return a.name.trim().toLocaleLowerCase("es") === b.name.trim().toLocaleLowerCase("es") && (a.dose ?? "") === (b.dose ?? "")
+  }
+  // La dosis con sus cifras (`normalizeDrugText` las quita): «2,5 mg» no es «5 mg».
+  const doseOf = (row: { name: string; dose?: string | null }) =>
+    (row.dose?.trim() || medicineWords(row.name).dose || numberAfterName(row.name)).toLocaleLowerCase("es").replace(/\s+/g, " ").trim()
+  const [one, other] = [doseOf(a), doseOf(b)]
+  return !one || !other || one === other || one.replace(/[^0-9,.]/g, "") === other.replace(/[^0-9,.]/g, "")
+}
+
+/** El número que queda después del nombre en una fila de antes («Losartán 50» → «50»). */
+const numberAfterName = (name: string) => name.trim().slice(medicineName(name).length).trim()
+
+/** La dosis y cada cuánto de lo declarado, en los campos de su fila (`validateMedicationRow`). */
+function declaredDoseFields(dose: string | null | undefined, frequency: string | null | undefined) {
+  const structured = dose?.trim() ? structuredDose(dose) : null
+  const code = frequency?.trim() ? frequencyCodeOf(frequency) : null
+  return {
+    dose: structured ? doseText(structured.doseValue, structured.doseUnit) : dose?.trim() || null,
+    doseValue: structured ? String(structured.doseValue) : null,
+    doseUnit: structured?.doseUnit ?? null,
+    frequency: code ? MEDICATION_FREQUENCY_LABELS[code] : frequency?.trim() || null,
+    frequencyCode: code,
+  }
 }
 
 /**
@@ -1750,7 +1814,8 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
     const what =
       row.name === MEDICATION_CLASSES[group].unnamed
         ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
-        : drugMidSentence(row.name)
+        : // Con su dosis, ahora que va en su campo: «Toma warfarina 5 mg» (QA del 26 nov).
+          drugMidSentence([row.name, row.dose].filter(Boolean).join(" "))
     const vitaminK =
       atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || isVitaminKAntagonistName(row.name)
     // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
@@ -1764,7 +1829,8 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
             : "riesgo de sangrado"
     lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: ${advice}.`)
   }
-  const registered = new Set(health.medications.map((row) => row.name.toLocaleLowerCase("es")))
+  // Por su nombre sin la dosis: lo dicho «apixabán 5 mg cada 12 h» es la fila «apixabán».
+  const registered = new Set(health.medications.map((row) => normalizeDrugText(medicineName(row.name))))
   return [...lines, ...saidExtractionLines(saidNow, registered)]
 }
 
@@ -1774,7 +1840,7 @@ function saidExtractionLines(
   registered: ReadonlySet<string>,
 ): string[] {
   return said
-    .filter((medicine) => !(medicine.name && registered.has(medicine.name.toLocaleLowerCase("es"))))
+    .filter((medicine) => !(medicine.name && registered.has(normalizeDrugText(medicineName(medicine.name)))))
     .map((medicine) => {
       const what = medicine.name
         ? drugMidSentence(medicine.name)
@@ -2131,13 +2197,20 @@ export async function addDeclaredHealth(
   const currentMedications = new Set(
     (
       await tx
-        .select({ name: patientMedication.name, endDate: patientMedication.endDate })
+        .select({ name: patientMedication.name, dose: patientMedication.dose, endDate: patientMedication.endDate })
         .from(patientMedication)
         .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
     )
       .filter((row) => isCurrentMedication(row, today))
       .map((row) => normalizeDrugText(row.name)),
   )
+  // Lo vigente con su dosis: la misma medicina con la misma dosis (o sin dosis en una) no se duplica.
+  const currentRows = (
+    await tx
+      .select({ name: patientMedication.name, dose: patientMedication.dose, endDate: patientMedication.endDate })
+      .from(patientMedication)
+      .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
+  ).filter((row) => isCurrentMedication(row, today))
   // Lo que dijo al responder «Sí» a la pregunta de una clase entra con el código de ese grupo; lo
   // demás, con el de la lista si lo escrito es exactamente una DCI (la regla de `validateMedicationRow`).
   const hooks = await productHooks(tx, orgId)
@@ -2145,8 +2218,9 @@ export async function addDeclaredHealth(
   let addedMedications = 0
   for (const item of declaredMedications(declared, saidOn)) {
     const key = normalizeDrugText(item.name)
-    if (!key || currentMedications.has(key)) continue
+    if (!key || currentRows.some((row) => sameMedicine(item, row))) continue
     currentMedications.add(key)
+    currentRows.push({ name: item.name, dose: item.dose ?? null, endDate: null })
     const name = item.name.trim().slice(0, 200)
     await tx.insert(patientMedication).values({
       organizationId: orgId,
@@ -2155,8 +2229,9 @@ export async function addDeclaredHealth(
       atcCode: item.declaredClass
         ? declaredMedicineAtc(item.declaredClass, name, habitual)
         : (findHabitualMedication(name, habitual)?.atc ?? null),
-      dose: item.dose?.trim() || null,
-      frequency: item.frequency?.trim() || null,
+      // Con número y unidad de la lista, y cada cuánto de la lista, como lo guarda Antecedentes: así no
+      // se lee «Escrita antes» ni «Otra» (QA del 26 nov). Lo que no calza queda como texto.
+      ...declaredDoseFields(item.dose, item.frequency),
       endDate: item.endDate ?? null,
       notes: withNote(item.notes ?? undefined),
       createdBy: actorUserId,
