@@ -67,6 +67,7 @@ export interface OrderList {
 
 export interface OrderLine {
   id: string
+  variantId: string
   productName: string
   variantName: string
   sku: string
@@ -112,6 +113,10 @@ export interface OrderEvent {
     | "entregado"
     | "anulado"
     | "aviso"
+    | "cambiado"
+    | "no_entregado"
+    | "reprogramado"
+    | "pago_deshecho"
   detail: Record<string, unknown>
   createdAt: string
   actorName: string | null
@@ -129,6 +134,8 @@ export interface OrderDetail {
   customerPhone: string | null
   address: string
   notes: string
+  /** La forma de entrega de la tienda con que se armó: con ella se abre «Cambiar». */
+  deliveryMethodId: string | null
   deliveryName: string
   deliveryType: DeliveryType
   deliveryZone: string | null
@@ -186,6 +193,41 @@ export interface Quote {
   marginUsedCents: number
   totalCents: number
   negotiated: boolean
+}
+
+/**
+ * Cómo quedaría un pedido con «Cambiar», sin guardarlo: lo calcula el servidor con la misma
+ * operación que al guardar (el total, el saldo con sus pagos y si alcanza el stock).
+ */
+export interface ChangePreview {
+  changes: string[]
+  fields: Record<string, string>
+  totalCents: number | null
+  balance: Balance | null
+  stockPending: boolean
+}
+
+/** Lo que todavía no salió: se cambia o se pasa a otro día. */
+export const NOT_SHIPPED: OrderState[] = ["por_pagar", "por_confirmar", "por_salir"]
+
+/** Los motivos de «No se entregó»; si es otro, se escribe. */
+export const MISSED_REASONS = ["No contestó", "Dirección errada", "No lo quiso"] as const
+
+/** El día siguiente a `date` («2026-11-26» → «2026-11-27»), en el calendario. */
+export function nextDay(date: string): string {
+  const day = new Date(`${date}T12:00:00Z`)
+  day.setUTCDate(day.getUTCDate() + 1)
+  return day.toISOString().slice(0, 10)
+}
+
+/**
+ * Si volvió sin entregar y todavía no sale otra vez: el motivo de la última vez, o null. Sale de su
+ * historia («No se entregó» después del último «Salió»).
+ */
+export function missedReason(order: Pick<OrderDetail, "state" | "events">): string | null {
+  if (order.state !== "por_salir") return null
+  const last = order.events.findLast((e) => e.action === "salio" || e.action === "no_entregado")
+  return last?.action === "no_entregado" ? String(last.detail.motivo ?? "") : null
 }
 
 export interface SellableVariant {

@@ -17,7 +17,6 @@ import {
   productVariant,
   saleOrder,
   saleOrderLine,
-  stockMovement,
   store,
   storeDeliveryMethod,
   storeEvent,
@@ -37,7 +36,7 @@ import { can } from "./permisos.js"
 import {
   autoUnitCents,
   floorUnitCents,
-  NEGOTIATED_PRICE_MS,
+  negotiatedUntil,
   type PricedVariant,
   type Quote,
   type QuoteLine,
@@ -45,7 +44,7 @@ import {
 } from "./precio.js"
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret, sealSecret } from "./secretos.js"
-import { cancelSale, recordSale } from "./stock.js"
+import { cancelSale, heldBy, recordSale } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -65,14 +64,39 @@ import { inStore, StoreError } from "./tiendas.js"
  * - «Hoy» es el de la tienda, con su hora (`hora.ts`): nunca el del servidor ni el del navegador.
  * - Los avisos al cliente quedan escritos en la historia del pedido; hoy no salen, porque
  *   WhatsApp llega con B2.
+ * - Un pedido se corrige sin anularlo (ADR 0226): «Cambiar» (productos, entrega y total, con su
+ *   pago y su número), «No se entregó» y «Pasar a…». Cada cambio mueve en el kardex solo la
+ *   diferencia, con su propia referencia, y lo que sobra o falta queda en el saldo.
  */
 
 export const pad = (number: number) => String(number).padStart(4, "0")
-/** La referencia del pedido en el kardex: «Pedido 0142». */
+/** La referencia del pedido en el kardex: «Pedido 0142» (y cada cambio, «Pedido 0142 · cambio 1»). */
 const stockReference = (number: number) => `Pedido ${pad(number)}`
+
+/**
+ * Si un pedido (`o`, el alias de `sale_order` en la consulta) no tiene fuera del stock lo que dicen
+ * sus líneas: lo vendido menos lo que volvió, en todas sus referencias (`stock.ts`), no da sus
+ * cantidades. Lo usan el pedido y Argos para decir «falta stock».
+ */
+export function stockShortSql(o: string) {
+  const a = sql.raw(o)
+  return sql`exists (
+    select 1 from (
+      select l.variant_id, sum(l.quantity)::int as q from sale_order_line l
+        where l.order_id = ${a}.id group by l.variant_id
+      union all
+      select m.variant_id, sum(m.quantity)::int from stock_movement m
+        where m.store_id = ${a}.store_id and m.kind in ('venta', 'anulacion')
+          and (m.reference = 'Pedido ' || lpad(${a}.number::text, 4, '0')
+            or m.reference like 'Pedido ' || lpad(${a}.number::text, 4, '0') || ' · %')
+        group by m.variant_id
+    ) d group by d.variant_id having sum(d.q) <> 0)`
+}
 
 const OPEN: OrderState[] = ["por_pagar", "por_confirmar", "por_salir", "en_camino"]
 const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
+/** Lo que se cambia o se pasa a otro día: lo que todavía no salió. */
+const NOT_SHIPPED: OrderState[] = ["por_pagar", "por_confirmar", "por_salir"]
 
 /**
  * Los filtros de la lista (tablero 5). «Pago por confirmar» es todo pedido con un pago que espera
@@ -184,6 +208,30 @@ export const deliverInput = z.object({
 
 export const cancelInput = z.object({ reason })
 
+/**
+ * «Cambiar» un pedido: sus productos (talla, color, cantidad, otro producto), su forma de entrega,
+ * su dirección y su día. El cliente, el canal y el medio de pago siguen siendo los suyos.
+ */
+export const changeInput = orderInput.pick({
+  lines: true,
+  deliveryMethodId: true,
+  zone: true,
+  deliveryListCents: true,
+  deliveryCents: true,
+  address: true,
+  deliverOn: true,
+})
+export type ChangeInput = z.infer<typeof changeInput>
+
+/** «No se entregó»: con su motivo (de la lista o escrito) y el día en que vuelve a salir. */
+export const missedInput = z.object({ reason, deliverOn: dateOnly })
+
+/** «Pasar a…»: otro día. */
+export const rescheduleInput = z.object({ deliverOn: dateOnly })
+
+/** «Deshacer» la confirmación de un pago, con motivo escrito. */
+export const undoInput = z.object({ reason })
+
 /** Qué día es en la tienda (su hora, `hora.ts`). */
 async function todayIn(tx: Db, storeId: string, now = new Date()) {
   return (await storeClockIn(tx, storeId, now)).today
@@ -212,7 +260,8 @@ interface Priced {
     { productId: string; productName: string; variantName: string; sku: string }
   >
   delivery: typeof storeDeliveryMethod.$inferSelect
-  payment: typeof storePaymentMethod.$inferSelect
+  /** Nulo al cambiar un pedido: su medio de pago no se vuelve a elegir. */
+  payment: typeof storePaymentMethod.$inferSelect | null
 }
 
 /**
@@ -294,6 +343,11 @@ async function priceOrder(
   currency: string,
   input: OrderInput,
   today: string,
+  /**
+   * Al cambiar un pedido: se cobra como ya se acordó (su medio de pago no se vuelve a elegir) y el
+   * stock no frena (lo que el pedido ya tiene fuera cuenta; si falta, queda «falta stock»).
+   */
+  change: { collection: PaymentCollection } | null = null,
 ): Promise<{ ok: true; priced: Priced } | { ok: false; fields: Record<string, string> }> {
   const fields: Record<string, string> = {}
   const ids = input.lines.map((line) => line.variantId)
@@ -318,7 +372,7 @@ async function priceOrder(
       return
     }
     if (row.removedAt) fields[`lines.${i}.variantId`] = "Esa variante ya no se vende"
-    else if (row.stock < line.quantity)
+    else if (!change && row.stock < line.quantity)
       fields[`lines.${i}.quantity`] =
         row.stock === 0 ? "Está agotado" : `Quedan ${row.stock}: registra una entrada si hay más`
     const auto = autoUnitCents(row.pricing, bought.get(row.productId) ?? 0)
@@ -354,20 +408,28 @@ async function priceOrder(
     else deliveryList = input.deliveryListCents
   }
 
-  const [payment] = await tx
-    .select()
-    .from(storePaymentMethod)
-    .where(
-      and(
-        eq(storePaymentMethod.id, input.paymentMethodId),
-        eq(storePaymentMethod.storeId, storeId),
-      ),
-    )
-  if (!payment?.isActive) fields.paymentMethodId = "Ese medio de pago ya no está encendido"
-  else if (payment.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery)
-    fields.paymentMethodId = "Esa forma de entrega no acepta pago al recibir"
+  let payment: typeof storePaymentMethod.$inferSelect | null = null
+  if (change) {
+    if (change.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery)
+      fields.deliveryMethodId =
+        "Esa forma de entrega no acepta pago al recibir, y este pedido se paga así"
+  } else {
+    ;[payment = null] = await tx
+      .select()
+      .from(storePaymentMethod)
+      .where(
+        and(
+          eq(storePaymentMethod.id, input.paymentMethodId),
+          eq(storePaymentMethod.storeId, storeId),
+        ),
+      )
+    if (!payment?.isActive) fields.paymentMethodId = "Ese medio de pago ya no está encendido"
+    else if (payment.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery)
+      fields.paymentMethodId = "Esa forma de entrega no acepta pago al recibir"
+  }
 
-  if (Object.keys(fields).length > 0 || !delivery || !payment) return { ok: false, fields }
+  if (Object.keys(fields).length > 0 || !delivery || (!change && !payment))
+    return { ok: false, fields }
   const result = quote(
     lines,
     {
@@ -448,6 +510,7 @@ type Notice =
   | "en_camino"
   | "entregado"
   | "anulado"
+  | "cambiado"
 
 /**
  * Un aviso al cliente. Queda en la historia del pedido con lo que diría; hoy no sale (B2 lo
@@ -482,6 +545,9 @@ async function notifyCustomer(
     en_camino: `Tu pedido ${n} va en camino.${extra.tracking ? ` Número de envío: ${extra.tracking}.` : ""}`,
     entregado: `Tu pedido ${n} fue entregado. ¡Gracias por tu compra!`,
     anulado: `Tu pedido ${n} fue anulado. Si es un error, escríbenos.`,
+    cambiado: extra.dueCents
+      ? `Cambiamos tu pedido ${n}. Nuevo total: ${total}. Falta pagar ${formatMoney(extra.dueCents, currency)}.`
+      : `Cambiamos tu pedido ${n}. Nuevo total: ${total}.`,
   }
   await logEvent(tx, order.storeId, order.id, actorUserId, "aviso", {
     tipo: kind,
@@ -497,13 +563,23 @@ async function notifyCustomer(
  * Arma un pedido dentro de la transacción de la tienda. Es la operación que llamará la
  * conversación (B2 y Sofi en B5) con su `conversationId`; el equipo la usa con «Anotar un
  * pedido». Con pago al recibir, empieza en «por salir»: se cobra en la puerta.
+ *
+ * Un precio negociado vence a las 24 horas (ADR 0207). Sofi puede pasar la hora que ya le dijo a
+ * la clienta al ofrecerlo (`priceExpiresAt`): nunca más tarde que esas 24 horas, para que el
+ * pedido venza a la misma hora que la oferta.
  */
 export async function createOrderIn(
   tx: Db,
   storeId: string,
   actorUserId: string,
   input: OrderInput,
-  options: { conversationId?: string | null; now?: Date; today?: string; test?: boolean } = {},
+  options: {
+    conversationId?: string | null
+    now?: Date
+    today?: string
+    test?: boolean
+    priceExpiresAt?: Date | null
+  } = {},
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
@@ -516,7 +592,12 @@ export async function createOrderIn(
       Object.values(result.fields)[0] ?? "Revisa el pedido",
       result.fields,
     )
-  const { quote: q, variants, delivery, payment } = result.priced
+  const { quote: q, variants, delivery } = result.priced
+  const payment = result.priced.payment!
+  // El trato que ya venció no se renueva solo: quien arma el pedido vuelve a cotizar.
+  const expiresAt = q.negotiated ? negotiatedUntil(now, options.priceExpiresAt) : null
+  if (q.negotiated && !expiresAt)
+    throw new StoreError(409, "PRICE_EXPIRED", "El precio acordado ya venció: vuelve a cotizar.")
   // La ficha de la clienta: la elegida, la de su conversación o una nueva (nunca por el teléfono).
   const client = await customerForOrderIn(tx, storeId, actorUserId, input, {
     conversationId: options.conversationId,
@@ -564,7 +645,7 @@ export async function createOrderIn(
       totalCents: q.totalCents,
       marginCents: q.marginCents,
       marginUsedCents: q.marginUsedCents,
-      priceExpiresAt: q.negotiated ? new Date(now.getTime() + NEGOTIATED_PRICE_MS) : null,
+      priceExpiresAt: expiresAt,
       deliverOn: input.deliverOn,
       test: options.test ?? false,
       createdBy: actorUserId,
@@ -820,23 +901,17 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
         ).map((row) => [row.userId, row.name])
       : [],
   )
-  // Pagado y por salir sin venta en el kardex: no alcanzaba el stock al pagar.
+  // Pagado y por salir sin tener fuera lo de sus líneas: no alcanzaba el stock al pagar, o al
+  // cambiarlo.
   const stockPending =
     order.state === "por_salir" &&
     order.paymentCollection !== "al_recibir" &&
+    !order.test &&
     (
-      await tx
-        .select({ id: stockMovement.id })
-        .from(stockMovement)
-        .where(
-          and(
-            eq(stockMovement.storeId, storeId),
-            eq(stockMovement.reference, stockReference(order.number)),
-            eq(stockMovement.kind, "venta"),
-          ),
-        )
-        .limit(1)
-    ).length === 0
+      await tx.execute<{ short: boolean }>(
+        sql`select ${stockShortSql("o")} as short from sale_order o where o.id = ${order.id}`,
+      )
+    )[0]?.short === true
   // La primera foto de cada producto.
   const photos = await tx
     .selectDistinctOn([productPhoto.productId], {
@@ -855,14 +930,7 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     )
     .orderBy(productPhoto.productId, asc(productPhoto.position))
   const photoBy = new Map(photos.map((p) => [p.productId, p.id]))
-  const {
-    storeId: _s,
-    linkRef: _r,
-    paymentMethodId: _p,
-    deliveryMethodId: _d,
-    conversationId: _c,
-    ...rest
-  } = order
+  const { storeId: _s, linkRef: _r, paymentMethodId: _p, conversationId: _c, ...rest } = order
   // El link solo se ofrece a un pedido por pagar.
   const linkConnected =
     order.state === "por_pagar" &&
@@ -1272,6 +1340,79 @@ export async function reviewPayment(
   })
 }
 
+/**
+ * «Deshacer» la confirmación de una captura (tablero 7), con motivo escrito: se confirmó por error.
+ * El pago vuelve a esperar a una persona y queda en la historia. Si era lo único confirmado de un
+ * pedido que todavía no sale, vuelve a «Pago por confirmar» y lo que salió del stock vuelve: el
+ * stock baja al confirmar el pago. Lo que llegó por el link o se cobró en la puerta no se deshace,
+ * ni el pago de un pedido entregado o anulado.
+ */
+export async function undoPayment(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  paymentId: string,
+  input: z.infer<typeof undoInput>,
+) {
+  if (!z.uuid().safeParse(paymentId).success)
+    throw new StoreError(404, "NOT_FOUND", "Ese pago ya no está")
+  return inStore(appDb, person, storeId, "pagos.confirmar", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    const [payment] = await tx
+      .select()
+      .from(orderPayment)
+      .where(and(eq(orderPayment.id, paymentId), eq(orderPayment.orderId, orderId)))
+    if (!payment) throw new StoreError(404, "NOT_FOUND", "Ese pago ya no está")
+    if (payment.status !== "confirmado")
+      throw new StoreError(
+        409,
+        "PAYMENT_REVIEWED",
+        "Ese pago no está confirmado. Recarga para verlo.",
+      )
+    if (payment.kind !== "comprobante")
+      throw new StoreError(
+        409,
+        "PAYMENT_UNDO",
+        payment.kind === "link"
+          ? "Un pago por el link lo confirmó el link: no se deshace."
+          : "Lo cobrado en la puerta no se deshace.",
+      )
+    if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
+    const undone = `Se deshizo la confirmación: ${input.reason}`
+    await tx
+      .update(orderPayment)
+      .set({
+        status: "por_confirmar",
+        reviewedBy: null,
+        reviewedAt: null,
+        note: (payment.note ? `${payment.note}. ${undone}` : undone).slice(0, 300),
+      })
+      .where(eq(orderPayment.id, paymentId))
+    // Sin otro pago confirmado, lo que todavía no sale vuelve a esperar su pago.
+    let back = 0
+    let state: OrderState = order.state
+    if (
+      order.state === "por_salir" &&
+      order.paymentCollection !== "al_recibir" &&
+      (await balanceIn(tx, order)).confirmedCents === 0
+    ) {
+      if (!order.test)
+        back = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
+      state = "por_confirmar"
+      await setState(tx, order, state)
+    }
+    await logEvent(tx, storeId, orderId, person.userId, "pago_deshecho", {
+      monto: payment.amountCents,
+      medio: payment.methodName,
+      motivo: input.reason,
+      ...(state !== order.state ? { estado: state } : {}),
+      ...(back > 0 ? { stockDevuelto: back } : {}),
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
 /** «Salió»: el pedido va en camino. Si se paga al recibir, aquí baja el stock (decisión 3). */
 export async function markShipped(
   appDb: Db,
@@ -1296,8 +1437,9 @@ export async function markShipped(
 
 /**
  * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
- * pagó una parte antes, en la puerta se cobra lo que falta. Un recojo en tienda pasa de «por
- * salir» a entregado sin «Salió».
+ * pagó una parte antes, en la puerta se cobra lo que falta. Cualquier paso completa los anteriores
+ * (tableros 6 y 7): si nadie marcó «Salió», queda también «Salió», con la misma hora. Un recojo en
+ * tienda no sale: pasa de «por salir» a entregado.
  */
 export async function markDelivered(
   appDb: Db,
@@ -1340,6 +1482,8 @@ export async function markDelivered(
     }
     await mustSale(tx, order, person.userId)
     await setState(tx, order, "entregado")
+    if (order.state === "por_salir" && order.deliveryType !== "OnSitePickup")
+      await logEvent(tx, storeId, orderId, person.userId, "salio", { completado: true })
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
       ...(collected
         ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
@@ -1347,6 +1491,415 @@ export async function markDelivered(
       ...(collected?.short ? { porRevisar: collected.short } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/* ------------------------------------------------------------- corregir sin anular */
+
+/** «Sandalia beige 38», «Medias × 2». */
+function lineName(line: { productName: string; variantName: string; quantity: number }) {
+  return `${line.productName}${line.variantName === "Única" ? "" : ` ${line.variantName}`}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`
+}
+
+/** «mar 25 nov», contado en el calendario (la fecha ya es la de la tienda). */
+export function dayText(date: string | null) {
+  if (!date) return "sin día"
+  return new Intl.DateTimeFormat("es-PE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T12:00:00Z`))
+}
+
+export interface LineView {
+  productId: string
+  productName: string
+  variantName: string
+  quantity: number
+  unitCents: number
+  gift: boolean
+}
+
+export interface ChangeView {
+  lines: LineView[]
+  deliveryName: string
+  zone: string | null
+  deliveryCents: number
+  address: string
+  deliverOn: string | null
+  subtotalCents: number
+  totalCents: number
+}
+
+/**
+ * Lo que cambió, como lo lee la persona en la historia: «Sandalia beige 37 → 38», «entrega: Surco →
+ * San Isidro», «envío S/ 10,00 → S/ 12,00». Un producto que estaba una vez y sigue una vez se
+ * compara consigo mismo; lo demás se dice como quitado o sumado.
+ */
+export function describeChange(before: ChangeView, after: ChangeView, currency: string): string[] {
+  const changes: string[] = []
+  const once = (lines: LineView[], productId: string) =>
+    lines.filter((l) => l.productId === productId).length === 1
+  const paired = new Set<string>()
+  for (const old of before.lines) {
+    if (!once(before.lines, old.productId) || !once(after.lines, old.productId)) continue
+    const now = after.lines.find((l) => l.productId === old.productId)!
+    paired.add(old.productId)
+    if (old.variantName !== now.variantName)
+      changes.push(`${old.productName} ${old.variantName} → ${now.variantName}`)
+    if (old.quantity !== now.quantity)
+      changes.push(`${old.productName}: ${old.quantity} → ${now.quantity} unidades`)
+  }
+  const key = (l: LineView) => `${l.productId}|${l.variantName}|${l.quantity}`
+  const kept = new Set(after.lines.map(key))
+  const had = new Set(before.lines.map(key))
+  for (const old of before.lines)
+    if (!paired.has(old.productId) && !kept.has(key(old))) changes.push(`quitó ${lineName(old)}`)
+  for (const now of after.lines)
+    if (!paired.has(now.productId) && !had.has(key(now))) changes.push(`sumó ${lineName(now)}`)
+  const where = (name: string, zone: string | null) => (zone ? `${name} (${zone})` : name)
+  if (before.deliveryName !== after.deliveryName || before.zone !== after.zone)
+    changes.push(
+      `entrega: ${where(before.deliveryName, before.zone)} → ${where(after.deliveryName, after.zone)}`,
+    )
+  if (before.deliveryCents !== after.deliveryCents)
+    changes.push(
+      `envío ${formatMoney(before.deliveryCents, currency)} → ${formatMoney(after.deliveryCents, currency)}`,
+    )
+  if (before.address !== after.address)
+    changes.push(after.address ? `dirección: ${after.address}` : "sin dirección")
+  if (before.deliverOn !== after.deliverOn)
+    changes.push(`día: ${dayText(before.deliverOn)} → ${dayText(after.deliverOn)}`)
+  // El precio acordado de lo que se queda también cuenta: otro descuento es un cambio.
+  const samePrices =
+    before.lines.length === after.lines.length &&
+    before.lines.every(
+      (l, i) => l.unitCents === after.lines[i]!.unitCents && l.gift === after.lines[i]!.gift,
+    )
+  if (changes.length === 0 && !samePrices)
+    changes.push(
+      `productos ${formatMoney(before.subtotalCents, currency)} → ${formatMoney(after.subtotalCents, currency)}`,
+    )
+  // El total se dice al final, si cambió.
+  if (changes.length > 0 && before.totalCents !== after.totalCents)
+    changes.push(
+      `total ${formatMoney(before.totalCents, currency)} → ${formatMoney(after.totalCents, currency)}`,
+    )
+  return changes
+}
+
+function notShippedError(order: OrderRow): StoreError {
+  if (order.state === "en_camino")
+    return new StoreError(
+      409,
+      "ORDER_STATE",
+      `El pedido ${pad(order.number)} ya va en camino. Si volvió sin entregar, usa «No se entregó».`,
+    )
+  return stateError(order)
+}
+
+/**
+ * «Cambiar» dentro de la transacción de la tienda (ADR 0226): el mismo pedido, con su número, sus
+ * pagos y su historia. Vuelve a calcular el precio con lo de hoy (nunca bajo el mínimo), cambia
+ * sus líneas y su entrega, y el saldo sale de la base con el total nuevo: lo pagado no se pierde y
+ * lo que falta o sobra queda en el saldo. Si el pedido ya tenía su stock fuera, se mueve solo la
+ * diferencia, con la referencia del cambio; si la variante nueva no alcanza, se guarda igual,
+ * vuelve lo que ya no va y queda «falta stock» hasta que entre (solo frena al salir).
+ */
+export async function changeOrderIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  orderId: string,
+  input: ChangeInput,
+  now = new Date(),
+) {
+  const order = await lockOrder(tx, storeId, orderId)
+  if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
+  const { currency } = await storeRow(tx, storeId)
+  const today = await todayIn(tx, storeId, now)
+  // Un día nuevo no puede ser uno que ya pasó; el que ya tenía se queda aunque haya pasado.
+  if (input.deliverOn && input.deliverOn !== order.deliverOn && input.deliverOn < today)
+    throw new StoreError(400, "VALIDATION_ERROR", "Elige hoy o un día que viene", {
+      deliverOn: "Elige hoy o un día que viene",
+    })
+  const result = await priceOrder(
+    tx,
+    storeId,
+    currency,
+    {
+      ...input,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      channel: order.channel,
+      notes: order.notes,
+      paymentMethodId: order.paymentMethodId ?? "",
+    },
+    today,
+    { collection: order.paymentCollection },
+  )
+  if (!result.ok)
+    throw new StoreError(
+      400,
+      "VALIDATION_ERROR",
+      Object.values(result.fields)[0] ?? "Revisa el pedido",
+      result.fields,
+    )
+  const { quote: q, variants, delivery } = result.priced
+  const before = await tx
+    .select()
+    .from(saleOrderLine)
+    .where(eq(saleOrderLine.orderId, orderId))
+    .orderBy(asc(saleOrderLine.position))
+  const lines = input.lines.map((line, i) => {
+    const v = variants.get(line.variantId)!
+    const priced = q.lines[i]!
+    return {
+      storeId,
+      orderId,
+      position: i,
+      productId: v.productId,
+      variantId: line.variantId,
+      productName: v.productName,
+      variantName: v.variantName,
+      sku: v.sku,
+      quantity: line.quantity,
+      listUnitCents: priced.listUnitCents,
+      autoUnitCents: priced.autoUnitCents,
+      floorUnitCents: priced.floorUnitCents,
+      unitCents: priced.unitCents,
+      gift: priced.gift,
+    }
+  })
+  const zone = delivery.cost === "por_zona" ? input.zone : null
+  const changes = describeChange(
+    {
+      lines: before,
+      deliveryName: order.deliveryName,
+      zone: order.deliveryZone,
+      deliveryCents: order.deliveryCents,
+      address: order.address,
+      deliverOn: order.deliverOn,
+      subtotalCents: order.subtotalCents,
+      totalCents: order.totalCents,
+    },
+    {
+      lines,
+      deliveryName: delivery.name,
+      zone,
+      deliveryCents: q.deliveryCents,
+      address: input.address,
+      deliverOn: input.deliverOn,
+      subtotalCents: q.subtotalCents,
+      totalCents: q.totalCents,
+    },
+    currency,
+  )
+  // Un precio acordado que venció se vuelve a acordar con «Cambiar», aunque sea el mismo.
+  if (
+    changes.length === 0 &&
+    q.negotiated &&
+    order.priceExpiresAt &&
+    order.priceExpiresAt.getTime() <= now.getTime()
+  )
+    changes.push("el precio acordado vale 24 horas más")
+  if (changes.length === 0) throw new StoreError(409, "NO_CHANGE", "No cambiaste nada del pedido")
+  // El link vigente era por el total de antes: ya no vale y se crea otro.
+  const linkGone = order.linkUrl !== null && q.totalCents !== order.totalCents
+  await tx
+    .update(saleOrder)
+    .set({
+      address: input.address,
+      deliveryMethodId: delivery.id,
+      deliveryName: delivery.name,
+      deliveryType: delivery.type,
+      deliveryZone: zone,
+      deliveryListCents: q.deliveryListCents,
+      deliveryCents: q.deliveryCents,
+      deliveryFreeByPolicy: q.deliveryFreeByPolicy,
+      itemsAutoCents: q.itemsAutoCents,
+      subtotalCents: q.subtotalCents,
+      discountCents: q.discountCents,
+      giftCents: q.giftCents,
+      totalCents: q.totalCents,
+      marginCents: q.marginCents,
+      marginUsedCents: q.marginUsedCents,
+      // Lo negociado al cambiar vale 24 horas desde ahora, como al anotarlo.
+      priceExpiresAt: q.negotiated ? negotiatedUntil(now) : null,
+      deliverOn: input.deliverOn,
+      ...(linkGone ? { linkUrl: null, linkRef: null, linkExpiresAt: null } : {}),
+      updatedAt: now,
+    })
+    .where(eq(saleOrder.id, orderId))
+  await tx.delete(saleOrderLine).where(eq(saleOrderLine.orderId, orderId))
+  await tx.insert(saleOrderLine).values(lines)
+
+  // El stock: solo si el pedido ya lo tenía fuera (se pagó); si no, baja al pagar o al salir.
+  let stockPending = false
+  const reference = stockReference(order.number)
+  if (!order.test && (await heldBy(tx, storeId, reference)).size > 0) {
+    const wanted = input.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity }))
+    try {
+      await tx.transaction((sp) =>
+        recordSale(sp as unknown as Db, storeId, actorUserId, reference, wanted),
+      )
+    } catch (error) {
+      if (
+        !(error instanceof StoreError) ||
+        (error.code !== "NOT_ENOUGH_STOCK" && error.code !== "VARIANT_REMOVED")
+      )
+        throw error
+      await recordSale(tx, storeId, actorUserId, reference, wanted, { returnsOnly: true })
+      stockPending = true
+    }
+  }
+
+  const balance = await balanceIn(tx, { id: orderId, totalCents: q.totalCents })
+  await logEvent(tx, storeId, orderId, actorUserId, "cambiado", {
+    cambios: changes,
+    antes: order.totalCents,
+    total: q.totalCents,
+    ...(balance.dueCents > 0 && balance.confirmedCents + balance.pendingCents > 0
+      ? { falta: balance.dueCents }
+      : {}),
+    ...(balance.overCents > 0
+      ? {
+          porRevisar: `Sobra ${formatMoney(balance.overCents, currency)} de lo pagado: revisa si hay que devolverlo`,
+        }
+      : {}),
+    ...(stockPending ? { faltaStock: true } : {}),
+    ...(linkGone ? { linkAnterior: true } : {}),
+  })
+  if (q.totalCents !== order.totalCents)
+    await notifyCustomer(
+      tx,
+      { ...order, totalCents: q.totalCents },
+      actorUserId,
+      currency,
+      "cambiado",
+      { dueCents: balance.dueCents },
+    )
+  return { changes, stockPending, totalCents: q.totalCents as number | null, balance }
+}
+
+export async function changeOrder(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: ChangeInput,
+) {
+  uuidOr404(orderId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    await changeOrderIn(tx, storeId, person.userId, orderId, input)
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+type ChangeResult = Awaited<ReturnType<typeof changeOrderIn>>
+
+/** Lo que corre la vista previa y se deshace: no guarda nada. */
+class PreviewDone extends Error {
+  constructor(readonly result: ChangeResult) {
+    super("vista previa")
+  }
+}
+
+/**
+ * Cómo quedaría el pedido con el cambio, sin guardarlo: la misma operación, dentro de un paso que
+ * se deshace. Así el total, el saldo y el stock salen de las mismas reglas que al guardar.
+ */
+export async function previewChange(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: ChangeInput,
+): Promise<
+  Omit<ChangeResult, "balance"> & {
+    balance: ChangeResult["balance"] | null
+    fields: Record<string, string>
+  }
+> {
+  uuidOr404(orderId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    try {
+      await tx.transaction(async (sp) => {
+        throw new PreviewDone(
+          await changeOrderIn(sp as unknown as Db, storeId, person.userId, orderId, input),
+        )
+      })
+    } catch (error) {
+      if (error instanceof PreviewDone) return { ...error.result, fields: {} }
+      const nothing = { changes: [], stockPending: false, totalCents: null, balance: null }
+      if (error instanceof StoreError && error.code === "VALIDATION_ERROR")
+        return { ...nothing, fields: error.fields ?? {} }
+      if (error instanceof StoreError && error.code === "NO_CHANGE")
+        return { ...nothing, fields: {} }
+      throw error
+    }
+    throw new Error("La vista previa del cambio no terminó")
+  })
+}
+
+/** Un día desde hoy (el de la tienda): no se entrega en el pasado. */
+async function dayFromToday(tx: Db, storeId: string, day: string) {
+  if (day < (await todayIn(tx, storeId)))
+    throw new StoreError(400, "VALIDATION_ERROR", "Elige hoy o un día que viene", {
+      deliverOn: "Elige hoy o un día que viene",
+    })
+}
+
+/**
+ * «No se entregó»: volvió sin entregar (no contestó, dirección errada, no lo quiso u otro motivo
+ * escrito). Vuelve a «Por salir» el día que se elige, sin anular nada; el stock no se mueve.
+ */
+export async function markMissed(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof missedInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (order.state !== "en_camino" && order.state !== "por_salir") throw stateError(order)
+    await dayFromToday(tx, storeId, input.deliverOn)
+    await setState(tx, order, "por_salir", { deliverOn: input.deliverOn })
+    await logEvent(tx, storeId, orderId, person.userId, "no_entregado", {
+      motivo: input.reason,
+      dia: dayText(input.deliverOn),
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/** «Pasar a…»: otro día de entrega, sin anular nada. */
+export async function reschedule(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof rescheduleInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
+    if (order.deliverOn === input.deliverOn)
+      throw new StoreError(409, "NO_CHANGE", `Ya sale el ${dayText(input.deliverOn)}`, {
+        deliverOn: `Ya sale el ${dayText(input.deliverOn)}`,
+      })
+    await dayFromToday(tx, storeId, input.deliverOn)
+    await tx
+      .update(saleOrder)
+      .set({ deliverOn: input.deliverOn, updatedAt: new Date() })
+      .where(eq(saleOrder.id, orderId))
+    await logEvent(tx, storeId, orderId, person.userId, "reprogramado", {
+      dia: `${dayText(order.deliverOn)} → ${dayText(input.deliverOn)}`,
+    })
     return orderDetailIn(tx, storeId, orderId)
   })
 }
@@ -1501,7 +2054,7 @@ export async function createPaymentLinkWith(
       throw new StoreError(
         409,
         "PRICE_EXPIRED",
-        "El precio acordado venció (vale 24 horas). Si sigue en pie, anula el pedido y anótalo de nuevo.",
+        "El precio acordado venció (vale 24 horas). Si sigue en pie, usa «Cambiar» para volver a acordarlo.",
       )
     const [connection] = await tx
       .select()

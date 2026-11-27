@@ -10,6 +10,8 @@ import {
   FieldLegend,
   FieldSet,
   Input,
+  RadioGroup,
+  RadioGroupItem,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -27,7 +29,19 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useSearch } from "@tanstack/react-router"
-import { Copy, ImageOff, Link2, PackageCheck, Plus, ReceiptText, Trash2, Truck } from "lucide-react"
+import {
+  CalendarClock,
+  Copy,
+  ImageOff,
+  Link2,
+  PackageCheck,
+  PackageX,
+  Pencil,
+  Plus,
+  ReceiptText,
+  Trash2,
+  Truck,
+} from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { api } from "./lib/api"
 import {
@@ -39,8 +53,13 @@ import {
 } from "./lib/clientes"
 import {
   CHANNELS,
+  type ChangePreview,
   dayName,
   FILTERS,
+  MISSED_REASONS,
+  missedReason,
+  NOT_SHIPPED,
+  nextDay,
   type OrderChannel,
   type OrderDetail,
   type OrderFilter,
@@ -77,6 +96,10 @@ import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
  *
  * Un pedido acepta varios pagos, cada uno con su medio; lo que falta cobrar lo dice el servidor
  * (el mismo saldo en el pedido, la lista y Reportes). «Hoy» es el de la tienda, con su hora.
+ *
+ * Un pedido se corrige sin anularlo: «Cambiar» (productos, entrega, dirección y día, con su
+ * número y sus pagos), «No se entregó» y «Pasar a…». La confirmación de una captura se deshace
+ * con su motivo.
  */
 
 const ORDERS_KEY = (storeId: string) => ["pedidos", storeId]
@@ -336,11 +359,28 @@ function OrderBody({ order }: { order: OrderDetail }) {
   const absorbed = order.deliveryListCents - order.deliveryCents
   const open = !["entregado", "anulado"].includes(order.state)
   const cancelAllowed = open && (!order.moneyIn || can("pagos.confirmar"))
+  const notShipped = NOT_SHIPPED.includes(order.state)
+  const [changing, setChanging] = useState(false)
   const { balance } = order
 
   return (
     <div className="flex flex-col">
       <NextStep order={order} />
+      {notShipped && can("ventas.atender") ? (
+        <div className="flex flex-wrap gap-2 pb-2">
+          <Button variant="outline" onClick={() => setChanging(true)}>
+            <Pencil aria-hidden />
+            Cambiar
+          </Button>
+        </div>
+      ) : null}
+      {changing ? (
+        <NewOrderSheet
+          editing={order}
+          onClose={() => setChanging(false)}
+          onCreated={() => setChanging(false)}
+        />
+      ) : null}
       <Block title="Productos">
         <ul className="flex flex-col gap-3">
           {order.lines.map((line) => (
@@ -434,6 +474,11 @@ function OrderBody({ order }: { order: OrderDetail }) {
             ) : balance.paid ? (
               <Row label="Falta cobrar">Nada: está pagado</Row>
             ) : null}
+            {balance.overCents > 0 ? (
+              <p className="text-sm text-warning">
+                Sobra {money(balance.overCents, cur)} de lo pagado: revisa si hay que devolverlo.
+              </p>
+            ) : null}
           </div>
         ) : null}
         {order.state === "por_pagar" ? (
@@ -472,6 +517,7 @@ function OrderBody({ order }: { order: OrderDetail }) {
         {(order.state === "por_salir" || order.state === "en_camino") && can("entregas") ? (
           <DeliveryActions order={order} />
         ) : null}
+        {notShipped && can("entregas") ? <MoveToDay order={order} /> : null}
       </Block>
 
       <Block title="Lo que pasó">
@@ -495,13 +541,13 @@ function NextStep({ order }: { order: OrderDetail }) {
   const dueText = money(due, store.currency)
   const text: Record<OrderDetail["state"], string | null> = {
     por_pagar: order.priceExpired
-      ? "El precio acordado venció: si sigue en pie, anúlalo y anótalo de nuevo."
+      ? "El precio acordado venció: si sigue en pie, usa «Cambiar» para volver a acordarlo."
       : order.linkConnected
         ? "Falta que pague. Mándale el link de pago o anota su captura cuando llegue."
         : "Falta que pague. Anota su captura cuando llegue.",
     por_confirmar: "Revisa la cuenta de la tienda y confirma el pago, o di que no coincide.",
     por_salir: order.stockPending
-      ? "Ya pagó, pero no alcanzaba el stock: registra la entrada en el catálogo antes de que salga."
+      ? "Ya pagó, pero no alcanza el stock de lo que lleva: registra la entrada en el catálogo antes de que salga."
       : due > 0
         ? `Listo para salir. Falta cobrar ${dueText}: se cobra al entregar.`
         : order.balance.paid
@@ -514,7 +560,11 @@ function NextStep({ order }: { order: OrderDetail }) {
     entregado: due > 0 ? `Entregado, pero falta cobrar ${dueText}.` : null,
     anulado: order.cancelReason ? `Anulado: ${order.cancelReason}` : null,
   }
-  const message = text[order.state]
+  const missed = missedReason(order)
+  const message =
+    missed !== null && !order.stockPending
+      ? `Volvió sin entregar («${missed}»). Sale ${order.deliverOn ? dayName(order.deliverOn, storeToday(store.timeZone)) : "cuando elijas"}${due > 0 ? `; al entregar, cobra ${dueText}` : ""}.`
+      : text[order.state]
   if (!message) return null
   const warn =
     order.priceExpired ||
@@ -580,8 +630,22 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
   const cur = store.currency
   const canConfirm = store.permissions.includes("pagos.confirmar")
   const [rejecting, setRejecting] = useState(false)
+  const [undoing, setUndoing] = useState(false)
   const [reason, setReason] = useState("")
-  const action = useOrderAction(store.id, order.id, () => setRejecting(false))
+  const action = useOrderAction(store.id, order.id, () => {
+    setRejecting(false)
+    setUndoing(false)
+  })
+  // Deshacer: solo una captura confirmada, de un pedido que no se entregó ni se anuló.
+  const undoable =
+    canConfirm &&
+    payment.kind === "comprobante" &&
+    payment.status === "confirmado" &&
+    !["entregado", "anulado"].includes(order.state)
+  const onlyConfirmed =
+    order.payments.filter((p) => p.status === "confirmado").length === 1 &&
+    order.state === "por_salir" &&
+    order.paymentCollection !== "al_recibir"
   const review = (body: { decision: "confirmar" } | { decision: "no_coincide"; reason: string }) =>
     action.mutate({
       path: `pagos/${payment.id}/revision`,
@@ -614,6 +678,11 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
           : ""}
       </p>
       {payment.note ? <p className="text-sm">{payment.note}</p> : null}
+      {undoable ? (
+        <Button variant="ghost" size="sm" className="self-start" onClick={() => setUndoing(true)}>
+          Deshacer
+        </Button>
+      ) : null}
       {payment.hasPhoto ? (
         <ReceiptImage storeId={store.id} orderId={order.id} paymentId={payment.id} />
       ) : null}
@@ -682,6 +751,35 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
           value={reason}
           onChange={setReason}
           placeholder="Por ejemplo: no aparece en la cuenta, el monto es otro"
+        />
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={undoing}
+        variant="default"
+        title="Deshacer la confirmación"
+        description={
+          onlyConfirmed
+            ? "El pago vuelve a «Por confirmar» y el pedido espera su pago: lo que salió del stock vuelve hasta que se confirme otra vez."
+            : "El pago vuelve a «Por confirmar» para revisarlo otra vez."
+        }
+        confirmLabel="Deshacer"
+        cancelLabel="Volver"
+        pending={action.isPending}
+        confirmDisabled={reason.trim().length < 3}
+        error={action.isError && undoing ? action.error.message : null}
+        onConfirm={() =>
+          action.mutate({
+            path: `pagos/${payment.id}/deshacer`,
+            body: { reason },
+            done: "Confirmación deshecha: el pago queda por confirmar",
+          })
+        }
+        onClose={() => setUndoing(false)}
+      >
+        <ReasonField
+          value={reason}
+          onChange={setReason}
+          placeholder="Por ejemplo: lo confirmé en el pedido equivocado"
         />
       </ConfirmDialog>
     </li>
@@ -997,6 +1095,7 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
           <PackageCheck aria-hidden />
           {cashOnDelivery ? "Entregado y cobrado" : "Entregado"}
         </Button>
+        {order.state === "en_camino" ? <Missed order={order} /> : null}
       </div>
       <ConfirmDialog
         open={asking === "salio"}
@@ -1074,6 +1173,173 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
   )
 }
 
+/** «Pasar a…»: otro día de entrega, sin anular nada. */
+function MoveToDay({ order }: { order: OrderDetail }) {
+  const { store } = useStoreContext()
+  const today = storeToday(store.timeZone)
+  const [asking, setAsking] = useState(false)
+  const [day, setDay] = useState(
+    order.deliverOn && order.deliverOn >= today ? order.deliverOn : today,
+  )
+  const action = useOrderAction(store.id, order.id, () => setAsking(false))
+  const errors = fieldErrors(action.error)
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      <Button variant="outline" onClick={() => setAsking(true)}>
+        <CalendarClock aria-hidden />
+        Pasar a…
+      </Button>
+      <ConfirmDialog
+        open={asking}
+        variant="default"
+        title={`Pasar a… · pedido ${order.number}`}
+        description={
+          order.deliverOn
+            ? `Ahora sale ${dayName(order.deliverOn, today)}. Elige el día nuevo: nada se anula.`
+            : "Elige el día en que sale: nada se anula."
+        }
+        confirmLabel="Pasar a ese día"
+        cancelLabel="Volver"
+        pending={action.isPending}
+        confirmDisabled={!day}
+        error={action.isError && !errors.deliverOn ? action.error.message : null}
+        onConfirm={() =>
+          action.mutate({
+            path: "pasar-a",
+            body: { deliverOn: day },
+            done: `Sale ${dayName(day, today)}`,
+          })
+        }
+        onClose={() => setAsking(false)}
+      >
+        <DayChoice today={today} value={day} onChange={setDay} error={errors.deliverOn} />
+      </ConfirmDialog>
+    </div>
+  )
+}
+
+/** Hoy, mañana u otro día (desde hoy, el de la tienda). */
+function DayChoice({
+  today,
+  value,
+  onChange,
+  error,
+  label = "Día de entrega",
+}: {
+  today: string
+  value: string
+  onChange: (day: string) => void
+  error?: string
+  label?: string
+}) {
+  const tomorrow = nextDay(today)
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={value === today ? "default" : "outline"}
+          aria-pressed={value === today}
+          onClick={() => onChange(today)}
+        >
+          Hoy
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={value === tomorrow ? "default" : "outline"}
+          aria-pressed={value === tomorrow}
+          onClick={() => onChange(tomorrow)}
+        >
+          Mañana
+        </Button>
+      </div>
+      <DateField label={label} value={value} onChange={onChange} min={today} error={error} />
+    </div>
+  )
+}
+
+/** «No se entregó»: volvió sin entregar. Vuelve a «Por salir» el día que se elige. */
+function Missed({ order }: { order: OrderDetail }) {
+  const { store } = useStoreContext()
+  const today = storeToday(store.timeZone)
+  const [asking, setAsking] = useState(false)
+  const [choice, setChoice] = useState<string>(MISSED_REASONS[0])
+  const [other, setOther] = useState("")
+  const [day, setDay] = useState(nextDay(today))
+  const action = useOrderAction(store.id, order.id, () => setAsking(false))
+  const errors = fieldErrors(action.error)
+  const reason = choice === "otro" ? other.trim() : choice
+  const id = useId()
+  return (
+    <>
+      <Button variant="ghost" onClick={() => setAsking(true)}>
+        <PackageX aria-hidden />
+        No se entregó
+      </Button>
+      <ConfirmDialog
+        open={asking}
+        variant="default"
+        title={`No se entregó · ${order.number}`}
+        description="Vuelve a «Por salir» el día que elijas. El stock no se mueve y nada se anula."
+        confirmLabel="Guardar"
+        cancelLabel="Volver"
+        pending={action.isPending}
+        confirmDisabled={reason.length < 3 || !day}
+        error={action.isError && !errors.deliverOn ? action.error.message : null}
+        onConfirm={() =>
+          action.mutate({
+            path: "no-se-entrego",
+            body: { reason, deliverOn: day },
+            done: `Vuelve a salir ${dayName(day, today)}`,
+          })
+        }
+        onClose={() => setAsking(false)}
+      >
+        <FieldGroup>
+          <FieldSet>
+            <FieldLegend variant="label">¿Qué pasó?</FieldLegend>
+            <RadioGroup
+              aria-label="¿Qué pasó?"
+              value={choice}
+              onValueChange={(value) => setChoice(String(value))}
+            >
+              {/* El id va con el número: un motivo con espacios no sirve de id y el botón se
+                  quedaría sin nombre. */}
+              {[...MISSED_REASONS, "otro"].map((option, i) => (
+                <Field key={option} orientation="horizontal">
+                  <RadioGroupItem id={`${id}-motivo-${i}`} value={option} />
+                  <FieldLabel htmlFor={`${id}-motivo-${i}`} className="font-normal">
+                    {option === "otro" ? "Otro motivo" : option}
+                  </FieldLabel>
+                </Field>
+              ))}
+            </RadioGroup>
+            {choice === "otro" ? (
+              <TextField
+                label="Escribe el motivo"
+                value={other}
+                onChange={setOther}
+                maxLength={300}
+                error={errors.reason}
+                autoFocus
+              />
+            ) : null}
+          </FieldSet>
+          <DayChoice
+            today={today}
+            value={day}
+            onChange={setDay}
+            label="¿Cuándo va?"
+            error={errors.deliverOn}
+          />
+        </FieldGroup>
+      </ConfirmDialog>
+    </>
+  )
+}
+
 function CancelOrder({ order }: { order: OrderDetail }) {
   const { store } = useStoreContext()
   const [asking, setAsking] = useState(false)
@@ -1124,6 +1390,10 @@ const EVENT_TEXT: Record<Exclude<OrderDetail["events"][number]["action"], "aviso
   salio: "Salió",
   entregado: "Entregado",
   anulado: "Anuló el pedido",
+  cambiado: "Cambió el pedido",
+  no_entregado: "No se entregó",
+  reprogramado: "Lo pasó a otro día",
+  pago_deshecho: "Deshizo la confirmación del pago",
 }
 
 function History({ order }: { order: OrderDetail }) {
@@ -1144,8 +1414,17 @@ function History({ order }: { order: OrderDetail }) {
               </span>
             </li>
           )
+        const changes = event.detail.cambios
         const extra = [
+          Array.isArray(changes) ? changes.join(" · ") : null,
           typeof d.motivo === "string" ? `«${d.motivo}»` : null,
+          typeof d.dia === "string"
+            ? event.action === "no_entregado"
+              ? `sale el ${d.dia}`
+              : d.dia
+            : null,
+          d.completado ? "al marcar «Entregado»" : null,
+          d.linkAnterior ? "el link de pago de antes ya no vale" : null,
           typeof d.monto === "number" ? money(d.monto, store.currency) : null,
           typeof d.medio === "string" ? d.medio : null,
           typeof d.cobrado === "number" ? `cobró ${money(d.cobrado, store.currency)}` : null,
@@ -1204,15 +1483,23 @@ export interface OrderDraft {
   paymentMethodId?: string | null
 }
 
+/**
+ * «Anotar un pedido» y, con `editing`, «Cambiar» uno que todavía no salió: el mismo formulario, con
+ * lo que ya tiene. Al cambiar, la clienta, el canal y el medio de pago siguen siendo los suyos; el
+ * resumen lo calcula el servidor con la misma operación que al guardar (el total nuevo, lo pagado
+ * y lo que falta o sobra).
+ */
 export function NewOrderSheet({
   onClose,
   onCreated,
   draft,
+  editing,
 }: {
   onClose: () => void
   onCreated: (id: string) => void
   /** Desde la ficha de la clienta: ella elegida y, al repetir, lo de su última compra. */
   draft?: OrderDraft
+  editing?: OrderDetail
 }) {
   const { store } = useStoreContext()
   const cur = store.currency
@@ -1237,25 +1524,45 @@ export function NewOrderSheet({
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
   const [channel, setChannel] = useState<OrderChannel>(draft?.channel ?? "otro")
-  const nextKey = useRef(draft?.lines?.length || 1)
+  const nextKey = useRef(editing ? editing.lines.length : draft?.lines?.length || 1)
+  // Al cambiar, una línea negociada guarda su precio acordado; la que iba a su precio, o la que
+  // cambia de variante, toma el de hoy.
   const [lines, setLines] = useState<LineDraft[]>(() =>
-    draft?.lines?.length
-      ? draft.lines.map((l, key) => ({
-          key,
+    editing
+      ? editing.lines.map((l, i) => ({
+          key: i,
           variantId: l.variantId,
           quantity: String(l.quantity),
-          price: "",
-          gift: false,
-          before: l.text,
+          price: l.gift || l.unitCents >= l.autoUnitCents ? "" : moneyInput(l.unitCents, cur),
+          gift: l.gift,
         }))
-      : [{ key: 0, variantId: "", quantity: "1", price: "", gift: false }],
+      : draft?.lines?.length
+        ? draft.lines.map((l, key) => ({
+            key,
+            variantId: l.variantId,
+            quantity: String(l.quantity),
+            price: "",
+            gift: false,
+            before: l.text,
+          }))
+        : [{ key: 0, variantId: "", quantity: "1", price: "", gift: false }],
   )
-  const [deliveryId, setDeliveryId] = useState(draft?.deliveryMethodId ?? "")
-  const [zone, setZone] = useState(draft?.zone ?? "")
-  const [deliveryCost, setDeliveryCost] = useState("")
-  const [deliveryCharged, setDeliveryCharged] = useState("")
-  const [address, setAddress] = useState(draft?.address ?? "")
-  const [deliverOn, setDeliverOn] = useState(storeToday(store.timeZone))
+  const [deliveryId, setDeliveryId] = useState(
+    editing?.deliveryMethodId ?? draft?.deliveryMethodId ?? "",
+  )
+  const [zone, setZone] = useState(editing?.deliveryZone ?? draft?.zone ?? "")
+  const [deliveryCost, setDeliveryCost] = useState(
+    editing ? moneyInput(editing.deliveryListCents, cur) : "",
+  )
+  const [deliveryCharged, setDeliveryCharged] = useState(
+    editing && !editing.deliveryFreeByPolicy && editing.deliveryCents !== editing.deliveryListCents
+      ? moneyInput(editing.deliveryCents, cur)
+      : "",
+  )
+  const [address, setAddress] = useState(editing?.address ?? draft?.address ?? "")
+  const [deliverOn, setDeliverOn] = useState(
+    editing ? (editing.deliverOn ?? "") : storeToday(store.timeZone),
+  )
   const [paymentId, setPaymentId] = useState(draft?.paymentMethodId ?? "")
   const [notes, setNotes] = useState("")
   const dirty = useDirty({
@@ -1319,9 +1626,20 @@ export function NewOrderSheet({
     paymentMethodId: paymentId,
     deliverOn: deliverOn || null,
   }
+  // Lo que se manda al cambiar: lo que se puede cambiar, nada más.
+  const changeBody = {
+    lines: body.lines,
+    deliveryMethodId: body.deliveryMethodId,
+    zone: body.zone,
+    deliveryListCents: body.deliveryListCents,
+    deliveryCents: body.deliveryCents,
+    address: body.address,
+    deliverOn: body.deliverOn,
+  }
+  const sentBody = editing ? changeBody : body
   // El resumen lo calcula el servidor, con la misma regla que al guardar.
-  const ready = body.lines.length > 0 && deliveryId !== "" && paymentId !== ""
-  const quoteKey = JSON.stringify(body)
+  const ready = body.lines.length > 0 && deliveryId !== "" && (editing || paymentId !== "")
+  const quoteKey = JSON.stringify(sentBody)
   const [debounced, setDebounced] = useState(quoteKey)
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(quoteKey), 300)
@@ -1334,23 +1652,38 @@ export function NewOrderSheet({
         `/api/tiendas/${store.id}/pedidos/calcular`,
         { method: "POST", body: JSON.parse(debounced) },
       ),
-    enabled: ready && debounced === quoteKey,
+    enabled: !editing && ready && debounced === quoteKey,
+    placeholderData: (previous) => previous,
+  })
+  // Al cambiar: cómo quedaría, con la misma operación que al guardar (no guarda nada).
+  const preview = useQuery({
+    queryKey: ["cambiar", store.id, editing?.id, debounced],
+    queryFn: () =>
+      api<ChangePreview>(`/api/tiendas/${store.id}/pedidos/${editing?.id}/cambiar/calcular`, {
+        method: "POST",
+        body: JSON.parse(debounced),
+      }),
+    enabled: Boolean(editing) && ready && debounced === quoteKey,
     placeholderData: (previous) => previous,
   })
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos`, {
-        method: "POST",
-        body,
-      }),
+      api<{ order: OrderDetail }>(
+        editing
+          ? `/api/tiendas/${store.id}/pedidos/${editing.id}/cambiar`
+          : `/api/tiendas/${store.id}/pedidos`,
+        { method: "POST", body: sentBody },
+      ),
     onSuccess: async (data) => {
       queryClient.setQueryData(["pedido", store.id, data.order.id], data.order)
       await queryClient.invalidateQueries({ queryKey: ORDERS_KEY(store.id) })
       await queryClient.invalidateQueries({ queryKey: ["para-vender", store.id] })
       await queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY(store.id) })
       await queryClient.invalidateQueries({ queryKey: CUSTOMER_KEY(store.id) })
-      toast.success(`Pedido ${data.order.number} anotado`)
+      toast.success(
+        editing ? `Pedido ${data.order.number} cambiado` : `Pedido ${data.order.number} anotado`,
+      )
       onCreated(data.order.id)
     },
   })
@@ -1362,22 +1695,25 @@ export function NewOrderSheet({
   // Lo que el servidor dijo al guardar manda; si no, lo que dice el resumen. Los errores de
   // `lines.N` vuelven a la línea de la pantalla.
   const serverErrors = Object.fromEntries(
-    Object.entries(create.error ? fieldErrors(create.error) : (quote.data?.fields ?? {})).map(
-      ([key, message]) => [
-        key.replace(/^lines\.(\d+)\./, (_, n: string) => `lines.${sent[Number(n)] ?? n}.`),
-        message,
-      ],
-    ),
+    Object.entries(
+      create.error
+        ? fieldErrors(create.error)
+        : ((editing ? preview.data?.fields : quote.data?.fields) ?? {}),
+    ).map(([key, message]) => [
+      key.replace(/^lines\.(\d+)\./, (_, n: string) => `lines.${sent[Number(n)] ?? n}.`),
+      message,
+    ]),
   )
   const errors = { ...serverErrors, ...localErrors }
   const quotedLine = (i: number) => q?.lines[sent.indexOf(i)]
 
   const submit = () => {
     const next: Record<string, string> = {}
-    if (!chosen && !customerName.trim()) next.customerName = "Escribe el nombre de la clienta"
+    if (!editing && !chosen && !customerName.trim())
+      next.customerName = "Escribe el nombre de la clienta"
     if (body.lines.length === 0) next.lines = "Agrega al menos un producto"
     if (!deliveryId) next.deliveryMethodId = "Elige cómo se entrega"
-    if (!paymentId) next.paymentMethodId = "Elige cómo paga"
+    if (!editing && !paymentId) next.paymentMethodId = "Elige cómo paga"
     lines.forEach((l, i) => {
       if (l.variantId && !(Number(l.quantity) >= 1)) next[`lines.${i}.quantity`] = "Al menos 1"
       if (!l.gift && l.price.trim() && money_(l.price) === null)
@@ -1389,20 +1725,30 @@ export function NewOrderSheet({
 
   const update = (key: number, patch: Partial<LineDraft>) =>
     setLines((all) => all.map((l) => (l.key === key ? { ...l, ...patch } : l)))
-  const q = quote.data?.quote
+  const q = editing ? undefined : quote.data?.quote
   const absorbed = q ? q.deliveryListCents - q.deliveryCents : 0
+  const change = editing ? preview.data : undefined
+  const changeBalance = change?.balance
 
   return (
     <FormSheet
       open
       wide
-      title={draft ? `Nuevo pedido para ${draft.customer.name}` : "Anotar un pedido"}
-      description={
-        draft?.number
-          ? `Lo mismo de su pedido ${draft.number}, con los precios de hoy. Cambia lo que haga falta.`
+      title={
+        editing
+          ? `Cambiar el pedido ${editing.number}`
           : draft
-            ? "Va a su ficha. Se arma con los mismos precios y límites que usa Sofi."
-            : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
+            ? `Nuevo pedido para ${draft.customer.name}`
+            : "Anotar un pedido"
+      }
+      description={
+        editing
+          ? "El mismo pedido, con su número y sus pagos. Lo que cambies queda en su historia, y lo que falte o sobre, en lo que falta cobrar."
+          : draft?.number
+            ? `Lo mismo de su pedido ${draft.number}, con los precios de hoy. Cambia lo que haga falta.`
+            : draft
+              ? "Va a su ficha. Se arma con los mismos precios y límites que usa Sofi."
+              : "Para la venta que llegó por otro lado, como una llamada o la tienda. Se arma con los mismos precios y límites que usa Sofi."
       }
       onClose={onClose}
       onSubmit={submit}
@@ -1413,7 +1759,7 @@ export function NewOrderSheet({
             Cancelar
           </Button>
           <SubmitButton type="submit" pending={create.isPending}>
-            Anotar pedido
+            {editing ? "Guardar cambios" : "Anotar pedido"}
           </SubmitButton>
         </>
       }
@@ -1422,56 +1768,63 @@ export function NewOrderSheet({
         <ErrorBlock error={sellable.error ?? lists.error} />
       ) : null}
       <FieldGroup>
-        <FieldSet>
-          <FieldLegend>Clienta</FieldLegend>
-          {chosen ? (
-            <ChosenCustomerRow
-              customer={chosen}
-              error={errors.customerId}
-              onChange={() => setChosen(null)}
-            />
-          ) : (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextField
-                  label="Nombre"
-                  value={customerName}
-                  onChange={setCustomerName}
-                  maxLength={120}
-                  error={errors.customerName}
-                  autoFocus
-                />
-                <TextField
-                  label="Teléfono (opcional)"
-                  value={customerPhone}
-                  onChange={setCustomerPhone}
-                  maxLength={30}
-                  inputMode="text"
-                  placeholder="+51 987 654 321"
-                  error={errors.customerPhone}
-                />
-              </div>
-              <CustomerMatches
-                name={customerName}
-                phone={customerPhone}
-                onChoose={(customer) => {
-                  // Si su ficha no tiene teléfono, el pedido lleva el que se escribió.
-                  setChosen({
-                    ...customer,
-                    phone: customer.phone ?? (customerPhone.trim() || null),
-                  })
-                  setLocalErrors(({ customerName: _, ...rest }) => rest)
-                }}
+        {editing ? (
+          <p className="text-sm text-muted-foreground">
+            {editing.customerName} · paga con {editing.paymentName}. La clienta y el medio de pago
+            no cambian aquí.
+          </p>
+        ) : (
+          <FieldSet>
+            <FieldLegend>Clienta</FieldLegend>
+            {chosen ? (
+              <ChosenCustomerRow
+                customer={chosen}
+                error={errors.customerId}
+                onChange={() => setChosen(null)}
               />
-            </>
-          )}
-          <SelectField
-            label="Por dónde llegó"
-            value={channel}
-            onChange={(v) => setChannel(v as OrderChannel)}
-            options={Object.entries(CHANNELS).map(([value, label]) => ({ value, label }))}
-          />
-        </FieldSet>
+            ) : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    label="Nombre"
+                    value={customerName}
+                    onChange={setCustomerName}
+                    maxLength={120}
+                    error={errors.customerName}
+                    autoFocus
+                  />
+                  <TextField
+                    label="Teléfono (opcional)"
+                    value={customerPhone}
+                    onChange={setCustomerPhone}
+                    maxLength={30}
+                    inputMode="text"
+                    placeholder="+51 987 654 321"
+                    error={errors.customerPhone}
+                  />
+                </div>
+                <CustomerMatches
+                  name={customerName}
+                  phone={customerPhone}
+                  onChoose={(customer) => {
+                    // Si su ficha no tiene teléfono, el pedido lleva el que se escribió.
+                    setChosen({
+                      ...customer,
+                      phone: customer.phone ?? (customerPhone.trim() || null),
+                    })
+                    setLocalErrors(({ customerName: _, ...rest }) => rest)
+                  }}
+                />
+              </>
+            )}
+            <SelectField
+              label="Por dónde llegó"
+              value={channel}
+              onChange={(v) => setChannel(v as OrderChannel)}
+              options={Object.entries(CHANNELS).map(([value, label]) => ({ value, label }))}
+            />
+          </FieldSet>
+        )}
 
         <FieldSet>
           <FieldLegend>Productos</FieldLegend>
@@ -1492,7 +1845,8 @@ export function NewOrderSheet({
                     options={variants.map((x) => ({
                       value: x.id,
                       label: `${x.productName}${x.variantName === "Única" ? "" : ` · ${x.variantName}`} — ${money(x.autoUnitCents, cur)}${x.stock === 0 ? " · agotado" : ` · quedan ${x.stock}`}`,
-                      disabled: x.stock === 0,
+                      // Al cambiar se puede: se guarda y no sale hasta que entre.
+                      disabled: x.stock === 0 && !editing,
                     }))}
                   />
                   {lines.length > 1 ? (
@@ -1584,7 +1938,10 @@ export function NewOrderSheet({
             <SelectField
               label="Zona"
               value={zone}
-              onChange={setZone}
+              onChange={(next) => {
+                setZone(next)
+                setDeliveryCharged("")
+              }}
               error={errors.zone}
               placeholder="Elige la zona"
               options={delivery.zones.map((z) => ({
@@ -1626,44 +1983,100 @@ export function NewOrderSheet({
               maxLength={300}
               error={errors.address}
             />
-            <DateField label="Día de entrega" value={deliverOn} onChange={setDeliverOn} />
+            <DateField
+              label="Día de entrega"
+              value={deliverOn}
+              onChange={setDeliverOn}
+              error={errors.deliverOn}
+            />
           </div>
         </FieldSet>
 
-        <FieldSet>
-          <FieldLegend>Pago</FieldLegend>
-          <SelectField
-            label="Medio de pago"
-            value={paymentId}
-            onChange={setPaymentId}
-            error={errors.paymentMethodId}
-            placeholder="Elige cómo paga"
-            options={payments.map((p) => ({
-              value: p.id,
-              label:
-                p.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery
-                  ? `${p.name} (esta entrega no acepta pago al recibir)`
-                  : p.name,
-              disabled:
-                p.collection === "al_recibir" &&
-                delivery !== undefined &&
-                !delivery.acceptsPayOnDelivery,
-            }))}
-          />
-          {payment?.collection === "al_recibir" ? (
-            <FieldDescription>
-              Se cobra en la puerta: el pedido queda listo para salir.
-            </FieldDescription>
-          ) : null}
-          <TextField label="Nota (opcional)" value={notes} onChange={setNotes} maxLength={500} />
-        </FieldSet>
+        {editing ? null : (
+          <FieldSet>
+            <FieldLegend>Pago</FieldLegend>
+            <SelectField
+              label="Medio de pago"
+              value={paymentId}
+              onChange={setPaymentId}
+              error={errors.paymentMethodId}
+              placeholder="Elige cómo paga"
+              options={payments.map((p) => ({
+                value: p.id,
+                label:
+                  p.collection === "al_recibir" && delivery && !delivery.acceptsPayOnDelivery
+                    ? `${p.name} (esta entrega no acepta pago al recibir)`
+                    : p.name,
+                disabled:
+                  p.collection === "al_recibir" &&
+                  delivery !== undefined &&
+                  !delivery.acceptsPayOnDelivery,
+              }))}
+            />
+            {payment?.collection === "al_recibir" ? (
+              <FieldDescription>
+                Se cobra en la puerta: el pedido queda listo para salir.
+              </FieldDescription>
+            ) : null}
+            <TextField label="Nota (opcional)" value={notes} onChange={setNotes} maxLength={500} />
+          </FieldSet>
+        )}
 
         <section
           aria-live="polite"
           className="flex flex-col gap-1 rounded-lg bg-surface-muted px-4 py-3"
         >
           <h3 className="text-sm font-semibold">Resumen</h3>
-          {!ready ? (
+          {editing ? (
+            !ready ? (
+              <p className="text-sm text-muted-foreground">
+                Elige los productos y la entrega para ver el total nuevo.
+              </p>
+            ) : change && change.totalCents !== null && changeBalance ? (
+              <>
+                <Row label="Total nuevo" strong>
+                  {money(change.totalCents, cur)}
+                </Row>
+                {change.totalCents !== editing.totalCents ? (
+                  <Row label="Antes">{money(editing.totalCents, cur)}</Row>
+                ) : null}
+                {changeBalance.confirmedCents > 0 ? (
+                  <Row label="Pagado">{money(changeBalance.confirmedCents, cur)}</Row>
+                ) : null}
+                {changeBalance.pendingCents > 0 ? (
+                  <Row label="Por confirmar">{money(changeBalance.pendingCents, cur)}</Row>
+                ) : null}
+                {changeBalance.dueCents > 0 &&
+                changeBalance.confirmedCents + changeBalance.pendingCents > 0 ? (
+                  <Row label="Falta cobrar" strong>
+                    {money(changeBalance.dueCents, cur)}
+                  </Row>
+                ) : null}
+                {changeBalance.overCents > 0 ? (
+                  <p className="text-xs text-warning">
+                    Sobra {money(changeBalance.overCents, cur)} de lo pagado: queda anotado para
+                    revisar si se devuelve.
+                  </p>
+                ) : null}
+                {change.stockPending ? (
+                  <p className="text-xs text-warning">
+                    No alcanza el stock de lo nuevo: se guarda igual y no sale hasta que entre.
+                  </p>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  Queda en su historia: {change.changes.join(" · ")}.
+                </p>
+              </>
+            ) : preview.isFetching || debounced !== quoteKey ? (
+              <p className="text-sm text-muted-foreground">Calculando…</p>
+            ) : change && Object.keys(change.fields).length > 0 ? (
+              <p className="text-sm text-warning">Revisa lo marcado arriba para ver el total.</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Todavía no cambiaste nada: el total es {money(editing.totalCents, cur)}.
+              </p>
+            )
+          ) : !ready ? (
             <p className="text-sm text-muted-foreground">
               Elige los productos, la entrega y el pago para ver el total.
             </p>
@@ -1874,16 +2287,29 @@ function DateField({
   label,
   value,
   onChange,
+  min,
+  error,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
+  min?: string
+  error?: string
 }) {
   const id = useId()
   return (
-    <Field>
+    <Field data-invalid={error ? true : undefined}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input id={id} type="date" value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input
+        id={id}
+        type="date"
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
     </Field>
   )
 }

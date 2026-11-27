@@ -143,16 +143,30 @@
       "breakpoints": true
     },
     {
+      "idx": 20,
+      "version": "7",
+      "when": 1795781577601,
+      "tag": "0020_corregir_sin_anular",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795781578972,
+      "tag": "0021_reglas_corregir_sin_anular",
+      "breakpoints": true
+    },
+    {
       "idx": 22,
       "version": "7",
-      "when": 1795782272979,
+      "when": 1795786511015,
       "tag": "0022_tu_marca_y_los_datos_de_la_tienda",
       "breakpoints": true
     },
     {
       "idx": 23,
       "version": "7",
-      "when": 1795782274100,
+      "when": 1795786516332,
       "tag": "0023_reglas_tu_marca",
       "breakpoints": true
     }

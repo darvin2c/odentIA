@@ -13,6 +13,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { SOFI_ACTOR, withAgent } from "./agente.js"
 import { createApp } from "./app.js"
+import { conversationCustomerOrdersIn } from "./clientes.js"
 import { createOrderIn, orderInput } from "./pedidos.js"
 
 const ACCOUNT = "https://api.gestoria.test"
@@ -449,6 +450,52 @@ describe("Sofi", () => {
     expect(b).toBe(a)
     const [row] = await db.ownerDb.select().from(customer).where(eq(customer.id, a))
     expect(row?.createdBy).toBe(SOFI_ACTOR)
+  })
+
+  it("lo que compró la clienta sale de su ficha, por cualquier chat, nunca del teléfono", async () => {
+    const chats = await db.ownerDb
+      .insert(conversation)
+      .values([
+        { storeId, channel: "whatsapp", customerName: "Carla", createdBy: "canal" },
+        { storeId, channel: "instagram", customerName: "Carla", createdBy: "canal" },
+      ])
+      .returning({ id: conversation.id })
+    const carla = () => ({ ...input(), customerName: "Carla Mendoza" })
+    const made: string[] = []
+    for (const chat of chats)
+      made.push(
+        (
+          await withAgent(db.appDb, SOFI_ACTOR, storeId, (tx) =>
+            createOrderIn(tx, storeId, SOFI_ACTOR, carla(), { conversationId: chat.id }),
+          )
+        ).id,
+      )
+    const story = (chat: string) =>
+      withAgent(db.appDb, SOFI_ACTOR, storeId, (tx) =>
+        conversationCustomerOrdersIn(tx, storeId, chat),
+      )
+    // Mismo nombre, dos chats: dos fichas, y cada chat sabe solo lo suyo.
+    expect((await story(chats[1]!.id)).map((o) => o.id)).toEqual([made[1]])
+    const fichas = await Promise.all(
+      made.map(
+        async (id) => (await call("lucia", "GET", `${base}/pedidos/${id}`)).json.order.customerId,
+      ),
+    )
+    expect(fichas[0]).not.toBe(fichas[1])
+    // Una persona dice que son la misma: Sofi ve las dos compras desde cualquiera de los chats.
+    const merged = await call("lucia", "POST", `${base}/clientes/unir`, {
+      a: fichas[0],
+      b: fichas[1],
+    })
+    expect(merged.status).toBe(200)
+    for (const chat of chats)
+      expect((await story(chat.id)).map((o) => o.id).sort()).toEqual([...made].sort())
+    // Un chat sin pedidos no tiene ficha: no se adivina por el nombre ni por el teléfono.
+    const [nuevo] = await db.ownerDb
+      .insert(conversation)
+      .values({ storeId, channel: "messenger", customerName: "Carla", createdBy: "canal" })
+      .returning({ id: conversation.id })
+    expect(await story(nuevo!.id)).toEqual([])
   })
 
   it("un pedido de «Probar a Sofi» no abre ficha", async () => {

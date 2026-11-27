@@ -30,7 +30,7 @@ import { agentStopIn } from "../acuerdo.js"
 import { ARGOS_ACTOR, withAgent } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { storeClockIn } from "../hora.js"
-import { pad, variantPrices } from "../pedidos.js"
+import { pad, stockShortSql, variantPrices } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
 import { inStore } from "../tiendas.js"
 import { moneyText as formatMoney } from "./herramientas.js"
@@ -339,13 +339,13 @@ export async function argosBoard(appDb: Db, person: Person, storeId: string, now
         at: p.at,
       })
 
-    // Con su pago confirmado (todo o una parte) y sin poder salir: no alcanzaba el stock al pagar.
+    // Con su pago confirmado (todo o una parte) y sin poder salir: no alcanzaba el stock al pagar,
+    // o al cambiarlo (lo que tiene fuera no es lo de sus líneas).
     const unpaidStock = await tx.execute<{ id: string; number: number; customer_name: string }>(sql`
       select o.id, o.number, o.customer_name from sale_order o
       where o.store_id = ${storeId} and o.state = 'por_salir' and o.test = false
         and o.payment_collection <> 'al_recibir'
-        and not exists (select 1 from stock_movement m where m.store_id = o.store_id
-          and m.kind = 'venta' and m.reference = 'Pedido ' || lpad(o.number::text, 4, '0'))`)
+        and ${stockShortSql("o")}`)
     for (const o of unpaidStock)
       toDo.push({
         kind: "stock_pedido",

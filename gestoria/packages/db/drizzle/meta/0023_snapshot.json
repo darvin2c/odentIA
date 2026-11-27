@@ -1,6 +1,6 @@
 {
-  "id": "c6c3b711-af5b-45b9-93ce-aff008a953c1",
-  "prevId": "30dede7e-4649-496b-9aa3-b93fc3bd12dc",
+  "id": "f9ce9aff-2ca5-4c0f-916b-d67a4489580f",
+  "prevId": "f76cd110-8c8f-4ace-bf04-1943cb9c5c55",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1281,7 +1281,7 @@
       "checkConstraints": {
         "order_event_action_check": {
           "name": "order_event_action_check",
-          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso')"
+          "value": "action IN ('creado','link','comprobante','pago_confirmado','pago_no_coincide','pago_link','salio','entregado','anulado','aviso','cambiado','no_entregado','reprogramado','pago_deshecho')"
         }
       },
       "isRLSEnabled": false

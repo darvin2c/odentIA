@@ -139,6 +139,16 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         needs: "entregas",
         screen: "pedidos",
       },
+      {
+        id: "deshacer-pago",
+        q: "Confirmé un pago por error, ¿cómo lo deshago?",
+        a: [
+          "En el pedido, en ese pago, «Deshacer» con su motivo. El pago vuelve a «Por confirmar» y el motivo queda escrito en el pedido. Si era lo único que había pagado y el pedido todavía no sale, el pedido vuelve a esperar su pago y lo que salió del stock vuelve.",
+          "Se deshace la confirmación de una captura. Lo que llegó por el link o se cobró en la puerta no se deshace, ni el pago de un pedido entregado.",
+        ],
+        needs: "pagos.confirmar",
+        screen: "pedidos",
+      },
     ],
   },
   {
@@ -149,8 +159,9 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "corregir-pedido",
         q: "¿Cómo corrijo un pedido que ya anoté?",
         a: [
-          "Lo acordado no se cambia: en el pedido, «Anular pedido» con su motivo, y se anota otro bien. Lo que salió del stock vuelve solo.",
-          "Un pedido pagado lo anula solo quien puede confirmar pagos, y la devolución del dinero se hace fuera de gestorIA. Un pedido entregado ya no se anula.",
+          "En el pedido, «Cambiar»: la talla, el color, la cantidad, otro producto, la entrega, la dirección o el día, y «Guardar cambios». Es el mismo pedido, con su número y sus pagos: antes de guardar ves el total nuevo y lo que falta cobrar, y lo que cambió queda en su historia. Lo que ya salió del stock se mueve solo.",
+          "Se cambia mientras no sale. Si la talla nueva no tiene stock, se guarda igual y no sale hasta que entre. Si sobra de lo que pagó, queda anotado para ver si se devuelve.",
+          "Si ya no va, «Anular pedido» con su motivo. Un pedido pagado lo anula solo quien puede confirmar pagos, y la devolución del dinero se hace fuera de gestorIA. Un pedido entregado ya no se anula.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -159,7 +170,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "precio-vencido",
         q: "Dice que el precio acordado venció, ¿qué hago?",
         a: [
-          "Un precio negociado vale 24 horas. Si el cliente sigue de acuerdo, anula el pedido con su motivo y anótalo de nuevo con el precio que acuerden.",
+          "Un precio negociado vale 24 horas. Si el cliente sigue de acuerdo, en el pedido, «Cambiar» con el precio que acuerden y «Guardar cambios»: vale otras 24 horas.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -175,6 +186,25 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo marco que un pedido salió o llegó?",
         a: [
           "En Pedidos, en «Para entregar hoy» o «Para entregar». En el pedido, «Salió» lo pasa a «En camino» (si va por agencia, pega su número de envío) y «Entregado» lo cierra cuando llega. Si lo recogen en la tienda, va directo a «Entregado».",
+          "Si nadie marcó «Salió», «Entregado» deja las dos, con la misma hora.",
+        ],
+        needs: "entregas",
+        screen: "pedidos",
+      },
+      {
+        id: "no-se-entrego",
+        q: "¿Qué hago si un pedido volvió sin entregar?",
+        a: [
+          "En el pedido en camino, «No se entregó»: elige qué pasó (no contestó, dirección errada, no lo quiso u otro motivo) y cuándo va. Vuelve a «Por salir» ese día, sin anular nada, y el stock no se mueve.",
+        ],
+        needs: "entregas",
+        screen: "pedidos",
+      },
+      {
+        id: "pasar-a",
+        q: "¿Cómo paso un pedido a otro día?",
+        a: [
+          "En el pedido, «Pasar a…» y elige el día: hoy, mañana u otro. Se puede mientras no sale, y no se anula nada.",
         ],
         needs: "entregas",
         screen: "pedidos",
@@ -228,6 +258,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo dejo que Sofi negocie el precio?",
         a: [
           "En el producto, «Precio y negociación»: pon el precio mínimo de venta. Sofi nunca baja de ahí y lo que cede queda escrito en el pedido. Sin mínimo, ese producto no se negocia.",
+          "Sofi primero cuenta lo bueno del producto y ofrece algo solo cuando ve que puede perder la venta: una sola vez, sin mejorarlo si el cliente insiste, y siempre a cambio de pagar dentro de 24 horas, con la hora exacta. Con pago al recibir no hay rebaja.",
           "Ahí también van los precios por cantidad y las promociones con sus fechas.",
         ],
         needs: "configuracion",

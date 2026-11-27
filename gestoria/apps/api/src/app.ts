@@ -84,6 +84,8 @@ import {
   addReceipt,
   cancelInput,
   cancelOrder,
+  changeInput,
+  changeOrder,
   connectPaymentLink,
   createOrder,
   createPaymentLink,
@@ -93,21 +95,28 @@ import {
   linkConnectionInput,
   listOrders,
   markDelivered,
+  markMissed,
   markShipped,
+  missedInput,
   ORDER_FILTERS,
   type OrderFilter,
   orderDetail,
   orderInput,
   paymentLinkStatus,
+  previewChange,
   quoteInput,
   quoteOrder,
   receiptInput,
   receiptPhoto,
   receiveLinkNotice,
+  reschedule,
+  rescheduleInput,
   reviewInput,
   reviewPayment,
   sellable,
   shipInput,
+  undoInput,
+  undoPayment,
 } from "./pedidos.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
@@ -619,6 +628,13 @@ export function createApp(deps: AppDeps) {
       order: await reviewPayment(deps.appDb, c.get("person"), id, orderId, paymentId, input),
     })
   })
+  app.post("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/deshacer", async (c) => {
+    const input = await bodyOf(c, undoInput)
+    const { id, orderId, paymentId } = c.req.param()
+    return c.json({
+      order: await undoPayment(deps.appDb, c.get("person"), id, orderId, paymentId, input),
+    })
+  })
   app.get("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/captura", async (c) => {
     const { id, orderId, paymentId } = c.req.param()
     const photo = await receiptPhoto(deps.appDb, c.get("person"), id, orderId, paymentId)
@@ -640,6 +656,27 @@ export function createApp(deps: AppDeps) {
     return c.json({
       order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
     })
+  })
+  // Corregir sin anular (ADR 0226): cambiar, no se entregó y pasar a otro día.
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambiar/calcular", async (c) => {
+    const input = await bodyOf(c, changeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await previewChange(deps.appDb, c.get("person"), id, orderId, input))
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambiar", async (c) => {
+    const input = await bodyOf(c, changeInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await changeOrder(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/no-se-entrego", async (c) => {
+    const input = await bodyOf(c, missedInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await markMissed(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/pasar-a", async (c) => {
+    const input = await bodyOf(c, rescheduleInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await reschedule(deps.appDb, c.get("person"), id, orderId, input) })
   })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)

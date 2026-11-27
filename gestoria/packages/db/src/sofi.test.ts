@@ -17,6 +17,7 @@ import {
   product,
   productVariant,
   saleOrder,
+  saleOrderLine,
   stockMovement,
   store,
   storeAgent,
@@ -195,6 +196,46 @@ describe("Sofi en la base", () => {
         tx.insert(saleOrder).values({ ...anOrder(4, "agente:sofi"), state: "por_salir" }),
       ),
     ).rejects.toThrow()
+  })
+
+  it("no quita las líneas de un pedido, ni del suyo: cambiar lo que se acordó es de una persona", async () => {
+    const line = {
+      storeId: calzados,
+      orderId,
+      position: 0,
+      productId: "",
+      variantId,
+      productName: "Zapatilla",
+      variantName: "38",
+      sku: "ZAP-38",
+      quantity: 1,
+      listUnitCents: 12900,
+      autoUnitCents: 12900,
+      floorUnitCents: 10000,
+      unitCents: 12900,
+    }
+    const [v] = await inRosa((tx) =>
+      tx
+        .select({ productId: productVariant.productId })
+        .from(productVariant)
+        .where(eq(productVariant.id, variantId)),
+    )
+    await inRosa((tx) => tx.insert(saleOrderLine).values({ ...line, productId: v!.productId }))
+    const removed = await asSofi((tx) =>
+      tx
+        .delete(saleOrderLine)
+        .where(eq(saleOrderLine.orderId, orderId))
+        .returning({ id: saleOrderLine.id }),
+    )
+    expect(removed).toEqual([])
+    // Una persona sí, al cambiar el pedido.
+    const replaced = await inRosa((tx) =>
+      tx
+        .delete(saleOrderLine)
+        .where(eq(saleOrderLine.orderId, orderId))
+        .returning({ id: saleOrderLine.id }),
+    )
+    expect(replaced).toHaveLength(1)
   })
 
   it("no mueve el stock ni cambia el catálogo, la configuración o lo que puso el dueño", async () => {

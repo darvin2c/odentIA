@@ -75,7 +75,16 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Una sola operación arma un pedido para el equipo y para Sofi: `createOrderIn` (`apps/api/src/pedidos.ts`),
   con el precio de `precio.ts`. Ningún precio baja del mínimo; lo cedido (descuento, envío que pone
   la tienda, regalo a su mínimo) sale de un solo margen y queda escrito; el precio negociado vence
-  a las 24 horas (ADR 0207). Lo acordado no se cambia: un pedido se anula con motivo y se anota otro.
+  a las 24 horas (ADR 0207).
+- Un pedido se corrige sin anularlo (ADR 0226): «Cambiar» (`changeOrderIn`) es el mismo pedido,
+  con su número y sus pagos, mientras no sale; vuelve a calcular el precio y el saldo con el total
+  nuevo. Las líneas se reemplazan enteras, nunca se editan. «No se entregó» y «Pasar a…» solo
+  mueven el día. «Entregado» sin «Salió» deja las dos. Deshacer la confirmación de una captura
+  pide motivo; un pago solo da los pasos de su revisión (`order_payment_step`).
+- Lo que un pedido tiene fuera del stock es lo vendido menos lo que volvió en todas sus
+  referencias («Pedido 0147», «Pedido 0147 · cambio 1»). Cada paso mueve solo la diferencia con
+  sus líneas (`recordSale`), con su propia referencia; nunca se vuelve a descontar por la
+  referencia del pedido. «Falta stock» compara las líneas con eso (`stockShortSql`).
 - El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
   pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
 - «Hoy» es el de la tienda, con su zona horaria (`store.time_zone`, `apps/api/src/hora.ts`; ADR
@@ -125,6 +134,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
+  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos
