@@ -1,0 +1,824 @@
+import {
+  accountCopy,
+  type CustomerEventAction,
+  customer,
+  customerEvent,
+  type Db,
+  type OrderChannel,
+  type OrderState,
+  type PaymentCollection,
+  saleOrder,
+  saleOrderLine,
+} from "@gestoria/db"
+import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm"
+import { z } from "zod"
+import type { Person } from "./cuenta.js"
+import { inStore, StoreError } from "./tiendas.js"
+
+/**
+ * Las clientas de una tienda (entrega 4 de «gestorIA como odentIA», tablero 8; ADR 0221): la
+ * ficha de cada una con sus compras, «¿Es la misma clienta?» con separar y «Repetir pedido».
+ *
+ * - La clienta es la persona: un pedido anotado o armado por Sofi se suma a su ficha
+ *   (`customerForOrderIn`, que usa `createOrderIn`) y nunca se abre otra a sabiendas.
+ * - Que dos fichas sean la misma lo dice una persona del equipo. El nombre o el teléfono iguales
+ *   solo lo sugieren (`similarPairs`); la sugerencia no frena ninguna venta.
+ * - Unir deja la ficha más nueva dentro de la más antigua, sin mover ni borrar nada; «Separar» la
+ *   deja sola otra vez. Lo que decidió cada persona queda en la historia de la ficha.
+ * - Al estrenar Clientes, los pedidos de antes no tienen ficha: no se unen solos por el teléfono.
+ *
+ * Lo ve y lo decide todo el equipo que atiende (`ventas.atender`): Dueño, Administrador y Ventas.
+ * Lo que debe cada clienta llega con el saldo único de cada pedido (entrega 1), no se calcula aquí.
+ */
+
+/** Hasta cuántas fichas lista la pantalla de una vez; con más, se busca. */
+export const MAX_LISTED = 100
+/** Hasta cuántas sugerencias de «¿Es la misma clienta?» se ofrecen de una vez. */
+export const MAX_SIMILAR = 20
+
+const orderNumber = (number: number) => String(number).padStart(4, "0")
+
+function uuidOr404(id: string) {
+  if (!z.uuid().safeParse(id).success)
+    throw new StoreError(404, "NOT_FOUND", "Esa clienta ya no está")
+}
+
+const phone = z
+  .string()
+  .trim()
+  .max(30, "Máximo 30 caracteres")
+  .regex(/^[+\d\s()-]*$/, "Escribe solo el número")
+  .transform((value) => value || null)
+
+export const customerPatch = z.object({
+  name: z.string().trim().min(1, "Escribe su nombre").max(120, "Máximo 120 caracteres").optional(),
+  phone: phone.optional(),
+  note: z.string().trim().max(1000, "Máximo 1000 caracteres").optional(),
+})
+
+export const pairInput = z.object({
+  a: z.uuid("Elige las dos fichas"),
+  b: z.uuid("Elige las dos fichas"),
+})
+
+/* ------------------------------------------------------------- sugerir, nunca unir solo */
+
+/** La clave de un nombre para sugerir: sin mayúsculas, sin tildes y sin espacios de más. */
+export function nameKey(name: string): string {
+  return name.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim()
+}
+
+/**
+ * La clave de un teléfono para sugerir: sus últimos 8 dígitos, que son los mismos con o sin el
+ * código del país («+51 987 654 321» y «987654321»). Con menos de 8, no sugiere nada.
+ */
+export function phoneKey(digits: string | null): string | null {
+  return digits && digits.length >= 8 ? digits.slice(-8) : null
+}
+
+export interface MemberRow {
+  id: string
+  /** La ficha a la que pertenece: ella misma si está sola. */
+  root: string
+  name: string
+  phoneDigits: string | null
+  createdAt: Date
+}
+
+export interface SimilarPair {
+  /** La ficha más antigua: si son la misma, la otra queda dentro de ella. */
+  a: string
+  b: string
+  reason: "telefono" | "nombre"
+}
+
+const pairKey = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`)
+
+/**
+ * Las fichas que podrían ser la misma clienta: el mismo teléfono (primero) o el mismo nombre,
+ * en fichas distintas, sin contar lo que una persona ya contestó (que son distintas, o que las
+ * separó). Las más nuevas primero: la que acaba de llegar es la que conviene mirar.
+ */
+export function similarPairs(
+  members: MemberRow[],
+  decided: { a: string; b: string }[],
+  limit = MAX_SIMILAR,
+): SimilarPair[] {
+  const rootOf = new Map(members.map((m) => [m.id, m.root]))
+  const born = new Map(members.filter((m) => m.id === m.root).map((m) => [m.id, m.createdAt]))
+  const answered = new Set<string>()
+  for (const d of decided) {
+    const ra = rootOf.get(d.a)
+    const rb = rootOf.get(d.b)
+    if (ra && rb && ra !== rb) answered.add(pairKey(ra, rb))
+  }
+  const groups = new Map<string, Set<string>>()
+  const add = (key: string, root: string) => {
+    const roots = groups.get(key) ?? new Set<string>()
+    roots.add(root)
+    groups.set(key, roots)
+  }
+  for (const m of members) {
+    const phone = phoneKey(m.phoneDigits)
+    if (phone) add(`telefono:${phone}`, m.root)
+    const name = nameKey(m.name)
+    if (name) add(`nombre:${name}`, m.root)
+  }
+  const pairs = new Map<string, SimilarPair>()
+  // El teléfono primero: si coinciden las dos cosas, se dice por el teléfono.
+  const keys = [...groups.keys()].sort((x, y) =>
+    x.startsWith("telefono:") === y.startsWith("telefono:")
+      ? 0
+      : x.startsWith("telefono:")
+        ? -1
+        : 1,
+  )
+  for (const key of keys) {
+    const roots = [...groups.get(key)!].sort(
+      (x, y) => (born.get(x)?.getTime() ?? 0) - (born.get(y)?.getTime() ?? 0) || (x < y ? -1 : 1),
+    )
+    // Un nombre muy común no arma decenas de parejas: las primeras alcanzan para empezar.
+    const some = roots.slice(0, 8)
+    for (let i = 0; i < some.length; i++)
+      for (let j = i + 1; j < some.length; j++) {
+        const id = pairKey(some[i]!, some[j]!)
+        if (answered.has(id) || pairs.has(id)) continue
+        pairs.set(id, {
+          a: some[i]!,
+          b: some[j]!,
+          reason: key.startsWith("telefono:") ? "telefono" : "nombre",
+        })
+      }
+  }
+  const newest = (p: SimilarPair) => born.get(p.b)?.getTime() ?? 0
+  return [...pairs.values()].sort((x, y) => newest(y) - newest(x)).slice(0, limit)
+}
+
+async function membersOf(tx: Db, storeId: string): Promise<MemberRow[]> {
+  const rows = await tx
+    .select({
+      id: customer.id,
+      name: customer.name,
+      phoneDigits: customer.phoneDigits,
+      mergedInto: customer.mergedInto,
+      createdAt: customer.createdAt,
+    })
+    .from(customer)
+    .where(eq(customer.storeId, storeId))
+  return rows.map(({ mergedInto, ...row }) => ({ ...row, root: mergedInto ?? row.id }))
+}
+
+/** Lo que una persona ya contestó: que son distintas, o que las separó. */
+async function answeredPairs(tx: Db, storeId: string) {
+  const rows = await tx
+    .select({ a: customerEvent.customerId, b: customerEvent.otherId })
+    .from(customerEvent)
+    .where(
+      and(
+        eq(customerEvent.storeId, storeId),
+        inArray(customerEvent.action, ["distintas", "separada"] satisfies CustomerEventAction[]),
+      ),
+    )
+  return rows
+}
+
+/* ------------------------------------------------------------------------ las fichas */
+
+type CustomerRow = typeof customer.$inferSelect
+
+/** La ficha y aquella dentro de la que está (la que se ve), o 404. */
+async function rootRow(tx: Db, storeId: string, id: string): Promise<CustomerRow> {
+  const [row] = await tx
+    .select()
+    .from(customer)
+    .where(and(eq(customer.id, id), eq(customer.storeId, storeId)))
+  if (!row) throw new StoreError(404, "NOT_FOUND", "Esa clienta ya no está")
+  if (!row.mergedInto) return row
+  const [root] = await tx.select().from(customer).where(eq(customer.id, row.mergedInto))
+  return root ?? row
+}
+
+/** Unir, separar o decir que son distintas: de a una por tienda, para que no se crucen. */
+async function lockCustomers(tx: Db, storeId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`clientes:${storeId}`}))`)
+}
+
+export interface CustomerSummary {
+  id: string
+  name: string
+  /** Sus teléfonos, el de la ficha primero y después los de las que están dentro. */
+  phones: string[]
+  /** Por dónde compró (sin «otro»). */
+  channels: OrderChannel[]
+  /** Las compras que cuentan: sin las anuladas ni las de prueba. */
+  purchases: number
+  lastPurchaseAt: Date | null
+  /** La zona de su última compra, para reconocerla en la lista. */
+  lastZone: string | null
+  /** «0098 · Zapatilla urbana · blanca 38»: su última compra. */
+  lastOrder: { number: string; createdAt: Date; text: string } | null
+  lastAddress: string | null
+  since: Date
+}
+
+const ACCENTS_FROM = "áàäâãéèëêíìïîóòöôõúùüûñç"
+const ACCENTS_TO = "aaaaaeeeeiiiiooooouuuunc"
+
+/**
+ * Cada ficha con lo que la reconoce: la que se ve y las que están dentro de ella, juntas. Con
+ * `roots`, solo esas; con `search`, las que coinciden por nombre o por teléfono.
+ */
+async function summariesOf(
+  tx: Db,
+  storeId: string,
+  filter: { roots?: string[]; search?: string } = {},
+): Promise<CustomerSummary[]> {
+  if (filter.roots && filter.roots.length === 0) return []
+  const text = filter.search ? nameKey(filter.search) : ""
+  const digits = filter.search ? filter.search.replace(/\D/g, "") : ""
+  const rows = await tx.execute<{
+    id: string
+    name: string
+    phones: string[] | null
+    channels: OrderChannel[] | null
+    purchases: number | string
+    last_at: Date | string | null
+    last_zone: string | null
+    last_order: string | null
+    last_address: string | null
+    since: Date | string
+  }>(sql`
+    with groups as (
+      select coalesce(c.merged_into, c.id) as root, c.id, c.name, c.phone, c.phone_digits,
+        c.created_at
+      from customer c
+      where c.store_id = ${storeId}
+    ),
+    found as (
+      select g.root from groups g
+      ${
+        filter.roots
+          ? sql`where g.root in (${sql.join(
+              filter.roots.map((id) => sql`${id}::uuid`),
+              sql`, `,
+            )})`
+          : sql``
+      }
+      group by g.root
+      ${
+        text || digits.length >= 3
+          ? sql`having bool_or(
+              ${text ? sql`translate(lower(g.name), ${ACCENTS_FROM}, ${ACCENTS_TO}) like ${`%${text}%`}` : sql`false`}
+              or ${digits.length >= 3 ? sql`coalesce(g.phone_digits, '') like ${`%${digits}%`}` : sql`false`})`
+          : sql``
+      }
+    )
+    select r.id, r.name,
+      (select array_agg(g.phone order by (g.id = r.id) desc, g.created_at)
+        from groups g where g.root = r.id and g.phone is not null) as phones,
+      (select array_agg(distinct o.channel) from sale_order o join groups g on g.id = o.customer_id
+        where g.root = r.id and o.test = false and o.channel <> 'otro') as channels,
+      (select count(*) from sale_order o join groups g on g.id = o.customer_id
+        where g.root = r.id and o.test = false and o.state <> 'anulado') as purchases,
+      last.created_at as last_at, last.delivery_zone as last_zone, last.id as last_order,
+      nullif(last.address, '') as last_address,
+      (select min(g.created_at) from groups g where g.root = r.id) as since
+    from found f
+    join customer r on r.id = f.root
+    left join lateral (
+      select o.id, o.created_at, o.delivery_zone, o.address from sale_order o
+      join groups g on g.id = o.customer_id
+      where g.root = r.id and o.test = false and o.state <> 'anulado'
+      order by o.created_at desc limit 1
+    ) last on true
+    order by last.created_at desc nulls last, r.created_at desc
+    limit ${MAX_LISTED}`)
+  const list = [...rows]
+  const lastIds = list.map((row) => row.last_order).filter((id): id is string => Boolean(id))
+  const lastOrders = lastIds.length
+    ? await tx
+        .select({
+          id: saleOrder.id,
+          number: saleOrder.number,
+          createdAt: saleOrder.createdAt,
+          productName: saleOrderLine.productName,
+          variantName: saleOrderLine.variantName,
+          quantity: saleOrderLine.quantity,
+        })
+        .from(saleOrder)
+        .innerJoin(saleOrderLine, eq(saleOrderLine.orderId, saleOrder.id))
+        .where(and(inArray(saleOrder.id, lastIds), eq(saleOrderLine.position, 0)))
+    : []
+  const lastBy = new Map(lastOrders.map((o) => [o.id, o]))
+  return list.map((row) => {
+    const last = row.last_order ? lastBy.get(row.last_order) : undefined
+    return {
+      id: row.id,
+      name: row.name,
+      phones: row.phones ?? [],
+      channels: row.channels ?? [],
+      purchases: Number(row.purchases),
+      lastPurchaseAt: row.last_at ? new Date(row.last_at) : null,
+      lastZone: row.last_zone,
+      lastOrder: last
+        ? {
+            number: orderNumber(last.number),
+            createdAt: last.createdAt,
+            text: lineText(last),
+          }
+        : null,
+      lastAddress: row.last_address,
+      since: new Date(row.since),
+    }
+  })
+}
+
+function lineText(line: { productName: string; variantName: string; quantity: number }) {
+  const variant = line.variantName === "Única" ? "" : ` · ${line.variantName}`
+  return `${line.productName}${variant}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`
+}
+
+/** Clientes: la lista, o lo que coincide con lo que se busca (nombre o teléfono). */
+export async function listCustomers(appDb: Db, person: Person, storeId: string, search = "") {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const query = search.trim().slice(0, 80)
+    const customers = await summariesOf(tx, storeId, query ? { search: query } : {})
+    // Sin buscar, también cuántas podrían ser la misma clienta (el aviso de la lista).
+    const similar = query
+      ? null
+      : similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId)).length
+    return { customers, similar, limited: customers.length >= MAX_LISTED }
+  })
+}
+
+/** «¿Es la misma clienta?»: las parejas por mirar, con lo que reconoce a cada una. */
+export async function similarCustomers(appDb: Db, person: Person, storeId: string) {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const pairs = similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId))
+    const summaries = await summariesOf(tx, storeId, {
+      roots: [...new Set(pairs.flatMap((p) => [p.a, p.b]))],
+    })
+    const byId = new Map(summaries.map((s) => [s.id, s]))
+    return {
+      pairs: pairs
+        .filter((p) => byId.has(p.a) && byId.has(p.b))
+        .map((p) => ({ reason: p.reason, a: byId.get(p.a)!, b: byId.get(p.b)! })),
+    }
+  })
+}
+
+/** Lo que dice la historia de la ficha. */
+const EVENT_LIMIT = 30
+/** Las compras que muestra la ficha (las más nuevas). */
+const ORDER_LIMIT = 50
+
+/**
+ * La ficha de una clienta: sus datos, sus compras, sus direcciones, lo que el equipo sabe de ella,
+ * su historia (con «Separar») y lo de su última compra para «Repetir pedido». Si la ficha pedida
+ * está dentro de otra, devuelve esa otra: es la misma clienta.
+ */
+export async function customerDetail(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  customerId: string,
+) {
+  uuidOr404(customerId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const head = await rootRow(tx, storeId, customerId)
+    const members = await tx
+      .select()
+      .from(customer)
+      .where(
+        and(
+          eq(customer.storeId, storeId),
+          or(eq(customer.id, head.id), eq(customer.mergedInto, head.id)),
+        ),
+      )
+      .orderBy(asc(customer.createdAt))
+    const ids = members.map((m) => m.id)
+    const orders = await tx
+      .select({
+        id: saleOrder.id,
+        customerId: saleOrder.customerId,
+        number: saleOrder.number,
+        state: saleOrder.state,
+        channel: saleOrder.channel,
+        paymentCollection: saleOrder.paymentCollection,
+        totalCents: saleOrder.totalCents,
+        address: saleOrder.address,
+        deliveryName: saleOrder.deliveryName,
+        deliveryZone: saleOrder.deliveryZone,
+        deliveryMethodId: saleOrder.deliveryMethodId,
+        paymentMethodId: saleOrder.paymentMethodId,
+        createdAt: saleOrder.createdAt,
+      })
+      .from(saleOrder)
+      .where(
+        and(
+          eq(saleOrder.storeId, storeId),
+          inArray(saleOrder.customerId, ids),
+          // Lo anulado no es una compra; lo de «Probar a Sofi», tampoco.
+          ne(saleOrder.state, "anulado"),
+          eq(saleOrder.test, false),
+        ),
+      )
+      .orderBy(desc(saleOrder.createdAt))
+      .limit(ORDER_LIMIT)
+    // Cuántas son todas (la lista de abajo trae solo las más nuevas).
+    const [counted] = await tx
+      .select({ n: count() })
+      .from(saleOrder)
+      .where(
+        and(
+          eq(saleOrder.storeId, storeId),
+          inArray(saleOrder.customerId, ids),
+          ne(saleOrder.state, "anulado"),
+          eq(saleOrder.test, false),
+        ),
+      )
+    const lines = orders.length
+      ? await tx
+          .select({
+            orderId: saleOrderLine.orderId,
+            variantId: saleOrderLine.variantId,
+            productName: saleOrderLine.productName,
+            variantName: saleOrderLine.variantName,
+            quantity: saleOrderLine.quantity,
+            gift: saleOrderLine.gift,
+          })
+          .from(saleOrderLine)
+          .where(
+            inArray(
+              saleOrderLine.orderId,
+              orders.map((o) => o.id),
+            ),
+          )
+          .orderBy(asc(saleOrderLine.position))
+      : []
+    const linesBy = Map.groupBy(lines, (line) => line.orderId)
+    const events = await tx
+      .select({
+        id: customerEvent.id,
+        action: customerEvent.action,
+        customerId: customerEvent.customerId,
+        otherId: customerEvent.otherId,
+        createdAt: customerEvent.createdAt,
+        actorName: accountCopy.name,
+      })
+      .from(customerEvent)
+      .leftJoin(accountCopy, eq(accountCopy.userId, customerEvent.actorUserId))
+      .where(
+        and(
+          eq(customerEvent.storeId, storeId),
+          or(inArray(customerEvent.customerId, ids), inArray(customerEvent.otherId, ids)),
+        ),
+      )
+      .orderBy(desc(customerEvent.createdAt))
+      .limit(EVENT_LIMIT)
+    // Las fichas que nombra la historia (también las de otra clienta, si se dijo que son distintas).
+    const named = [...new Set(events.flatMap((e) => [e.customerId, e.otherId]))]
+    const fichas = new Map(
+      (named.length
+        ? await tx
+            .select({ id: customer.id, name: customer.name, mergedInto: customer.mergedInto })
+            .from(customer)
+            .where(inArray(customer.id, named))
+        : []
+      ).map((row) => [row.id, row]),
+    )
+    const channelsOf = (id: string) =>
+      [...new Set(orders.filter((o) => o.customerId === id).map((o) => o.channel))].filter(
+        (c) => c !== "otro",
+      )
+    const noteBy = head.noteBy
+      ? ((
+          await tx
+            .select({ name: accountCopy.name })
+            .from(accountCopy)
+            .where(eq(accountCopy.userId, head.noteBy))
+        )[0]?.name ?? null)
+      : null
+    // Las direcciones a las que se le envió, la última primero y sin repetir.
+    const seen = new Set<string>()
+    const addresses: { address: string; deliveryName: string; zone: string | null }[] = []
+    for (const o of orders) {
+      const key = nameKey(`${o.deliveryName}|${o.deliveryZone ?? ""}|${o.address}`)
+      if (seen.has(key) || (!o.address && !o.deliveryZone)) continue
+      seen.add(key)
+      addresses.push({ address: o.address, deliveryName: o.deliveryName, zone: o.deliveryZone })
+      if (addresses.length === 5) break
+    }
+    // La última vez que se unió cada ficha que sigue dentro: ahí se ofrece «Separar».
+    const separable = new Set<string>()
+    const lastJoin = new Set<string>()
+    for (const e of events) {
+      if (e.action !== "unida" || lastJoin.has(e.otherId)) continue
+      lastJoin.add(e.otherId)
+      if (fichas.get(e.otherId)?.mergedInto === head.id) separable.add(e.id)
+    }
+    const last = orders[0]
+    const similar = similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId))
+      .filter((p) => p.a === head.id || p.b === head.id)
+      .map((p) => (p.a === head.id ? p.b : p.a))
+    const similarNames = new Map(
+      (similar.length
+        ? await tx
+            .select({ id: customer.id, name: customer.name, phone: customer.phone })
+            .from(customer)
+            .where(inArray(customer.id, similar))
+        : []
+      ).map((row) => [row.id, row]),
+    )
+    return {
+      id: head.id,
+      name: head.name,
+      phone: head.phone,
+      phones: members.map((m) => m.phone).filter((p): p is string => Boolean(p)),
+      channels: [...new Set(orders.map((o) => o.channel))].filter((c) => c !== "otro"),
+      since: members[0]?.createdAt ?? head.createdAt,
+      note: head.note,
+      noteByName: noteBy,
+      noteAt: head.noteAt,
+      purchases: counted?.n ?? orders.length,
+      orders: orders.map((o) => ({
+        id: o.id,
+        number: orderNumber(o.number),
+        state: o.state as OrderState,
+        paymentCollection: o.paymentCollection as PaymentCollection,
+        channel: o.channel,
+        totalCents: o.totalCents,
+        createdAt: o.createdAt,
+        text: (linesBy.get(o.id) ?? []).map(lineText).join(", "),
+      })),
+      addresses,
+      /** Las fichas que están dentro de esta: por dónde llegó cada una. */
+      members: members
+        .filter((m) => m.id !== head.id)
+        .map((m) => ({ id: m.id, name: m.name, phone: m.phone, channels: channelsOf(m.id) })),
+      /**
+       * Lo que decidió el equipo, lo último primero. `self`: la decisión habla de esta ficha frente
+       * a otra (la unieron a otra, o la separaron de otra); si no, de `with` frente a esta.
+       */
+      history: events.map((e) => {
+        const self = !ids.includes(e.customerId)
+        const other = self ? e.customerId : e.otherId
+        return {
+          id: e.id,
+          action: e.action,
+          createdAt: e.createdAt,
+          actorName: e.actorName,
+          self,
+          with: { id: other, name: fichas.get(other)?.name ?? "otra ficha" },
+          /** «Separar»: la ficha que se separa (la que se unió y sigue dentro de esta). */
+          separates: separable.has(e.id) ? e.otherId : null,
+        }
+      }),
+      /** «Repetir pedido»: lo de su última compra, con los precios de hoy al anotarlo. */
+      repeat: last
+        ? {
+            number: orderNumber(last.number),
+            channel: last.channel,
+            lines: (linesBy.get(last.id) ?? [])
+              .filter((line) => !line.gift)
+              .map(({ variantId, productName, variantName, quantity }) => ({
+                variantId,
+                productName,
+                variantName,
+                quantity,
+              })),
+            deliveryMethodId: last.deliveryMethodId,
+            zone: last.deliveryZone,
+            address: last.address,
+            paymentMethodId: last.paymentMethodId,
+          }
+        : null,
+      /** Las fichas que podrían ser ella (el mismo teléfono o el mismo nombre), por mirar. */
+      similar: similar.map((id) => ({
+        id,
+        name: similarNames.get(id)?.name ?? "",
+        phone: similarNames.get(id)?.phone ?? null,
+      })),
+    }
+  })
+}
+
+/** «Editar»: su nombre, su teléfono y «Lo que sabemos». Se corrige la ficha que se ve. */
+export async function updateCustomer(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  customerId: string,
+  patch: z.infer<typeof customerPatch>,
+) {
+  uuidOr404(customerId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const head = await rootRow(tx, storeId, customerId)
+    const now = new Date()
+    const noteChanged = patch.note !== undefined && patch.note !== head.note
+    await tx
+      .update(customer)
+      .set({
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+        ...(noteChanged
+          ? patch.note
+            ? { note: patch.note, noteBy: person.userId, noteAt: now }
+            : { note: "", noteBy: null, noteAt: null }
+          : {}),
+        updatedAt: now,
+      })
+      .where(eq(customer.id, head.id))
+    return { id: head.id }
+  })
+}
+
+/**
+ * «Sí, es la misma»: la ficha más nueva queda dentro de la más antigua, con lo que ya estaba
+ * dentro de ella. Nada se mueve ni se borra: los pedidos siguen con su ficha y «Separar» lo
+ * deshace. Devuelve la ficha que queda.
+ */
+export async function mergeCustomers(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof pairInput>,
+) {
+  return inStore(appDb, person, storeId, "ventas.atender", (tx) =>
+    mergeCustomersIn(tx, storeId, person.userId, input),
+  )
+}
+
+/** Unir dentro de la transacción de la tienda, a nombre de quien lo decidió. */
+export async function mergeCustomersIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  input: z.infer<typeof pairInput>,
+) {
+  await lockCustomers(tx, storeId)
+  const one = await rootRow(tx, storeId, input.a)
+  const two = await rootRow(tx, storeId, input.b)
+  if (one.id === two.id)
+    throw new StoreError(409, "SAME_CUSTOMER", "Ya son la misma ficha. Recarga para verla.")
+  const [keep, join] =
+    one.createdAt.getTime() < two.createdAt.getTime() ||
+    (one.createdAt.getTime() === two.createdAt.getTime() && one.id < two.id)
+      ? [one, two]
+      : [two, one]
+  const now = new Date()
+  // Primero lo que estaba dentro de la que se une: así nadie queda dentro de una que está dentro.
+  await tx
+    .update(customer)
+    .set({ mergedInto: keep.id, updatedAt: now })
+    .where(and(eq(customer.storeId, storeId), eq(customer.mergedInto, join.id)))
+  await tx
+    .update(customer)
+    .set({ mergedInto: keep.id, updatedAt: now })
+    .where(eq(customer.id, join.id))
+  await tx.insert(customerEvent).values({
+    storeId,
+    customerId: keep.id,
+    otherId: join.id,
+    action: "unida",
+    actorUserId,
+  })
+  return { id: keep.id }
+}
+
+/** «Separar»: la ficha que estaba dentro de otra vuelta a estar sola, con sus pedidos. */
+export async function separateCustomer(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  customerId: string,
+) {
+  uuidOr404(customerId)
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    await lockCustomers(tx, storeId)
+    const [row] = await tx
+      .select({ id: customer.id, mergedInto: customer.mergedInto })
+      .from(customer)
+      .where(and(eq(customer.id, customerId), eq(customer.storeId, storeId)))
+    if (!row) throw new StoreError(404, "NOT_FOUND", "Esa clienta ya no está")
+    if (!row.mergedInto)
+      throw new StoreError(409, "NOT_MERGED", "Esa ficha ya está sola. Recarga para verla.")
+    await tx
+      .update(customer)
+      .set({ mergedInto: null, updatedAt: new Date() })
+      .where(eq(customer.id, row.id))
+    await tx.insert(customerEvent).values({
+      storeId,
+      customerId: row.mergedInto,
+      otherId: row.id,
+      action: "separada",
+      actorUserId: person.userId,
+    })
+    return { id: row.id, from: row.mergedInto }
+  })
+}
+
+/** «No, son distintas»: queda dicho y no se vuelve a preguntar por esas dos. */
+export async function markDistinct(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof pairInput>,
+) {
+  return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    await lockCustomers(tx, storeId)
+    const one = await rootRow(tx, storeId, input.a)
+    const two = await rootRow(tx, storeId, input.b)
+    if (one.id === two.id)
+      throw new StoreError(
+        409,
+        "SAME_CUSTOMER",
+        "Ya son la misma ficha: si no lo son, sepáralas desde su ficha.",
+      )
+    await tx.insert(customerEvent).values({
+      storeId,
+      customerId: one.id,
+      otherId: two.id,
+      action: "distintas",
+      actorUserId: person.userId,
+    })
+  })
+}
+
+/* ------------------------------------------------------------ la ficha de cada pedido */
+
+/**
+ * La ficha de la clienta de un pedido nuevo, dentro de la transacción del pedido (la usa
+ * `createOrderIn`, para el equipo y para Sofi). La elegida al anotarlo; en el chat, la de los
+ * pedidos anteriores de esa conversación; si no hay, una nueva con el nombre y el teléfono del
+ * pedido. Nunca la busca por el teléfono: que dos fichas sean la misma lo dice una persona. Un
+ * pedido de «Probar a Sofi» no tiene ficha.
+ */
+export async function customerForOrderIn(
+  tx: Db,
+  storeId: string,
+  actorUserId: string,
+  input: { customerId: string | null; customerName: string; customerPhone: string | null },
+  options: { conversationId?: string | null; test?: boolean } = {},
+): Promise<{ id: string; name: string; phone: string | null } | null> {
+  if (options.test) return null
+  if (input.customerId) {
+    const [row] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(and(eq(customer.id, input.customerId), eq(customer.storeId, storeId)))
+    if (!row)
+      throw new StoreError(400, "VALIDATION_ERROR", "Esa clienta ya no está", {
+        customerId: "Esa clienta ya no está: búscala otra vez",
+      })
+    const head = await rootRow(tx, storeId, row.id)
+    return { id: head.id, name: head.name, phone: input.customerPhone ?? head.phone }
+  }
+  if (options.conversationId) {
+    // Sofi vuelve a anotar el pedido en la misma conversación: es la misma clienta.
+    const [previous] = await tx
+      .select({ customerId: saleOrder.customerId })
+      .from(saleOrder)
+      .where(
+        and(
+          eq(saleOrder.storeId, storeId),
+          eq(saleOrder.conversationId, options.conversationId),
+          isNotNull(saleOrder.customerId),
+        ),
+      )
+      .orderBy(desc(saleOrder.createdAt))
+      .limit(1)
+    if (previous?.customerId) {
+      const head = await rootRow(tx, storeId, previous.customerId)
+      return {
+        id: head.id,
+        name: input.customerName || head.name,
+        phone: input.customerPhone ?? head.phone,
+      }
+    }
+  }
+  if (!input.customerName)
+    throw new StoreError(400, "VALIDATION_ERROR", "Escribe el nombre de la clienta", {
+      customerName: "Escribe el nombre de la clienta",
+    })
+  const [created] = await tx
+    .insert(customer)
+    .values({
+      storeId,
+      name: input.customerName,
+      phone: input.customerPhone,
+      createdBy: actorUserId,
+    })
+    .returning({ id: customer.id, name: customer.name, phone: customer.phone })
+  return created!
+}
+
+/** La ficha que se ve de la de un pedido (si quedó dentro de otra, esa otra). */
+export async function shownCustomerId(tx: Db, customerId: string | null): Promise<string | null> {
+  if (!customerId) return null
+  const [row] = await tx
+    .select({ id: customer.id, mergedInto: customer.mergedInto })
+    .from(customer)
+    .where(eq(customer.id, customerId))
+  return row ? (row.mergedInto ?? row.id) : null
+}

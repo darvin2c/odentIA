@@ -31,6 +31,17 @@ import {
   variantPatch,
 } from "./catalogo.js"
 import {
+  customerDetail,
+  customerPatch,
+  listCustomers,
+  markDistinct,
+  mergeCustomers,
+  pairInput,
+  separateCustomer,
+  similarCustomers,
+  updateCustomer,
+} from "./clientes.js"
+import {
   createDelivery,
   createPayment,
   deleteDelivery,
@@ -590,6 +601,38 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, cancelInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await cancelOrder(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+
+  // Las clientas (entrega 4): la lista, la ficha, «¿Es la misma clienta?», unir y separar.
+  app.get("/api/tiendas/:id/clientes", async (c) =>
+    c.json(
+      await listCustomers(deps.appDb, c.get("person"), c.req.param("id"), c.req.query("buscar")),
+    ),
+  )
+  app.get("/api/tiendas/:id/clientes/parecidas", async (c) =>
+    c.json(await similarCustomers(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/clientes/unir", async (c) => {
+    const input = await bodyOf(c, pairInput)
+    return c.json(await mergeCustomers(deps.appDb, c.get("person"), c.req.param("id"), input))
+  })
+  app.post("/api/tiendas/:id/clientes/distintas", async (c) => {
+    const input = await bodyOf(c, pairInput)
+    await markDistinct(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
+  })
+  app.get("/api/tiendas/:id/clientes/:customerId", async (c) => {
+    const { id, customerId } = c.req.param()
+    return c.json({ customer: await customerDetail(deps.appDb, c.get("person"), id, customerId) })
+  })
+  app.patch("/api/tiendas/:id/clientes/:customerId", async (c) => {
+    const patch = await bodyOf(c, customerPatch)
+    const { id, customerId } = c.req.param()
+    return c.json(await updateCustomer(deps.appDb, c.get("person"), id, customerId, patch))
+  })
+  app.post("/api/tiendas/:id/clientes/:customerId/separar", async (c) => {
+    const { id, customerId } = c.req.param()
+    return c.json(await separateCustomer(deps.appDb, c.get("person"), id, customerId))
   })
 
   // El link de pago de la tienda (B4): se conecta en Pagos y entregas.
