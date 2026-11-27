@@ -1297,6 +1297,9 @@ importers:
 
   packages/clinical:
     dependencies:
+      '@odentia/ui':
+        specifier: workspace:*
+        version: link:../../shared/packages/ui
       zod:
         specifier: 4.6.2
         version: 4.6.2
