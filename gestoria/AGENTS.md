@@ -55,7 +55,26 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Ventas ve el catálogo y el stock (`catalogo.ver`), sin cambiarlos (`configuracion`); la API le
   da lo de la tienda que necesita para vender (`tienda.ver`), pero no ve Configuración. Lo que costó cada producto (costo de las entradas y aviso del mínimo) es
   `costos.ver`: la API no se lo devuelve a Ventas.
-- Las fotos van en la base, por su contenido (JPEG, PNG o WebP); la hoja del catálogo, en CSV.
+- La hoja del catálogo llega en CSV o Excel (.xlsx), con las tallas en filas o en columnas
+  (`leer-hoja.ts`); todo pasa por la misma revisión (`planSheet`) y se guarda con `createPlanned`.
+
+## Las fotos y los videos (ADR 0236)
+
+- Van al bucket privado de gestorIA (`archivos.ts`, variables `GESTORIA_S3_*`), nunca a la base ni
+  al de las clínicas: la base guarda su carpeta (`object_key`). Una foto nueva no lleva `content`
+  (regla de la base); las de antes se mudan solas (`moveStoredPhotos`).
+- Subir pasa por el servidor (`medios.ts`): permiso, tipo por sus primeros bytes y tamaño (foto 8
+  MB; video 16 MB y 30 s, listo para WhatsApp según `video.ts`). La original se guarda tal cual;
+  las copias (miniatura, vitrina, WhatsApp) las arma `imagenes.ts`. El video no se rearma.
+- Ver es un enlace firmado que vence: la app (`catalogo.ver`), la vitrina pública
+  (`/vitrina/:link/:producto/medios`, solo lo que se ve en la web, nunca la original) y Sofi
+  (`sofiMediaIn`, la copia de WhatsApp de la foto del color pedido).
+- La foto sin fondo es una propuesta (`cutout`); la original no se borra nunca. Nadie borra un
+  archivo directo: la base anota la carpeta en `media_trash` al borrar la fila (también en
+  cascada) y el servidor la borra (`emptyMediaTrash`).
+- «Cargar muchos» (`cargas.ts`): una carga abierta con sus productos y sus fotos; nada pasa al
+  catálogo hasta «Crear», que guarda todo o nada y deja las fotos en su misma carpeta. Una carga
+  creada o descartada ya no cambia. El agente no ve las cargas ni toca videos.
 
 ## La ficha del producto (lienzo «La ficha del producto»)
 

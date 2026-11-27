@@ -11,6 +11,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { MAX_PRODUCTS, makeSku, productInput } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { parseMoney } from "./dinero.js"
+import { SheetReadError, sheetSource, toExampleColumns } from "./leer-hoja.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -179,6 +180,8 @@ interface PlannedVariant {
 }
 
 export interface PlannedProduct {
+  /** Los archivos de sus fotos, si la hoja trae la columna «Foto» (en «Cargar muchos»). */
+  photoFiles: string[]
   name: string
   category: string | null
   description: string
@@ -199,14 +202,15 @@ const sameText = (a: string, b: string) => fold(a) === fold(b)
  * fila. `existing` son los nombres que ya están en el catálogo y `skus` los códigos en uso.
  */
 export function planSheet(
-  text: string,
+  source: string | string[][],
   currency: string,
   existing: Set<string>,
   skus: Set<string>,
+  extraColumns: readonly string[] = [],
 ): SheetPlan {
   const errors: SheetError[] = []
   // Excel guarda «CSV (delimitado por comas)» sin UTF-8: las tildes llegan rotas.
-  if (text.includes("\uFFFD"))
+  if (typeof source === "string" && source.includes("\uFFFD"))
     return {
       products: [],
       errors: [
@@ -217,7 +221,12 @@ export function planSheet(
         },
       ],
     }
-  const rows = parseCsv(text)
+  // Las tallas en columnas y «Talla» o «Color» sueltas pasan a las columnas de la hoja de ejemplo.
+  const read = toExampleColumns(typeof source === "string" ? parseCsv(source) : source, [
+    ...Object.values(COLUMNS),
+    ...extraColumns,
+  ])
+  const rows = read.rows
   if (rows.length < 2)
     return {
       products: [],
@@ -296,6 +305,7 @@ export function planSheet(
     let planned = byName.get(key)
     if (!planned) {
       planned = {
+        photoFiles: [],
         name,
         category: cell(r, "categoria").slice(0, 60) || null,
         description: cell(r, "descripcion").slice(0, 2000),
@@ -324,10 +334,18 @@ export function planSheet(
     })
     if (!planned.description) planned.description = cell(r, "descripcion").slice(0, 2000)
     combos.add(combo)
+    const fotoAt = header.indexOf("foto")
+    if (fotoAt >= 0)
+      for (const file of (r[fotoAt] ?? "")
+        .split(/[,;]/)
+        .map((f) => f.trim())
+        .filter(Boolean))
+        if (!planned.photoFiles.includes(file) && planned.photoFiles.length < 20)
+          planned.photoFiles.push(file.slice(0, 200))
     planned.variants.push({ row, values, sku, priceCents, stock: Number(stockText), costCents })
     return true
   }
-  for (const [i, r] of rows.slice(1).entries()) readRow(r, i + 2)
+  for (const [i, r] of rows.slice(1).entries()) readRow(r, read.sourceRows[i + 1] ?? i + 2)
   // Cada producto cumple las mismas reglas que al crearlo a mano; el error va en su primera fila.
   for (const planned of byName.values()) {
     const checked = productInput.safeParse({
@@ -365,89 +383,127 @@ function summary(plan: SheetPlan) {
   }
 }
 
+/** Lo que la hoja necesita de la tienda: su moneda, los nombres y los códigos que ya usa. */
+export async function sheetContext(tx: Db, storeId: string) {
+  const [{ currency }] = (await tx
+    .select({ currency: store.currency })
+    .from(store)
+    .where(eq(store.id, storeId))) as [{ currency: string }]
+  const names = await tx
+    .select({ name: product.name })
+    .from(product)
+    .where(eq(product.storeId, storeId))
+  const skus = new Set(
+    (
+      await tx
+        .select({ sku: productVariant.sku })
+        .from(productVariant)
+        .where(and(eq(productVariant.storeId, storeId), isNull(productVariant.removedAt)))
+    ).map((v) => v.sku.toLowerCase()),
+  )
+  return { currency, names: new Set(names.map((n) => n.name)), skus }
+}
+
 /**
- * Revisa la hoja y, con `confirm` y sin errores, la guarda entera en una transacción: cada
- * producto, cada variante con su código (si no trae, se arma uno) y su entrada de stock.
+ * Guarda productos ya revisados, en la transacción de quien llama: cada producto, cada variante
+ * con su código (si no trae, se arma uno) y su entrada de stock en el kardex (con `reason`). Lo
+ * usan «Subir una hoja» y «Cargar muchos». Devuelve el id de cada producto por su nombre.
+ */
+export async function createPlanned(
+  tx: Db,
+  storeId: string,
+  person: Person,
+  products: PlannedProduct[],
+  skus: Set<string>,
+  reason: string,
+): Promise<Map<string, string>> {
+  // Los códigos que traen quedan tomados antes de armar los que faltan.
+  for (const p of products) for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
+  // De a tantas filas por consulta: tres consultas por bloque, no tres por fila.
+  const created = await tx
+    .insert(product)
+    .values(
+      products.map((p) => ({
+        storeId,
+        name: p.name,
+        category: p.category,
+        description: p.description,
+        listPriceCents: p.listPriceCents,
+        options: p.options,
+      })),
+    )
+    .returning({ id: product.id, name: product.name })
+  const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
+  const rows = products.flatMap((p) =>
+    p.variants.map((v) => ({
+      planned: v,
+      values: {
+        storeId,
+        productId: idOf.get(fold(p.name))!,
+        optionValues: v.values,
+        sku: v.sku ?? makeSku(p.name, v.values, skus),
+        priceCents: v.priceCents === p.listPriceCents ? null : v.priceCents,
+      },
+    })),
+  )
+  for (let at = 0; at < rows.length; at += 500) {
+    const chunk = rows.slice(at, at + 500)
+    const variants = await tx
+      .insert(productVariant)
+      .values(chunk.map((row) => row.values))
+      .returning({ id: productVariant.id, sku: productVariant.sku })
+    const variantOf = new Map(variants.map((v) => [v.sku.toLowerCase(), v.id]))
+    const entries = chunk
+      .filter((row) => row.planned.stock > 0)
+      .map((row) => ({
+        storeId,
+        variantId: variantOf.get(row.values.sku.toLowerCase())!,
+        kind: "entrada" as const,
+        quantity: row.planned.stock,
+        unitCostCents: row.planned.costCents,
+        reason,
+        actorUserId: person.userId,
+      }))
+    // El disparador pone el saldo fila por fila, en este orden.
+    if (entries.length > 0) await tx.insert(stockMovement).values(entries)
+  }
+  return idOf
+}
+
+/** La hoja tal como llegó (CSV o Excel), lista para `planSheet`; o el error de leerla. */
+export function readSheetBytes(bytes: Uint8Array): string | string[][] | SheetError {
+  try {
+    const source = sheetSource(bytes)
+    return "text" in source ? source.text : source.rows
+  } catch (error) {
+    if (error instanceof SheetReadError) return { row: 0, message: error.message }
+    throw error
+  }
+}
+
+export const sheetNameKey = fold
+
+/**
+ * Revisa la hoja (CSV o Excel, con las tallas en filas o en columnas) y, con `confirm` y sin
+ * errores, la guarda entera en una transacción.
  */
 export async function uploadSheet(
   appDb: Db,
   person: Person,
   storeId: string,
-  text: string,
+  bytes: Uint8Array,
   confirm: boolean,
 ) {
+  const source = readSheetBytes(bytes)
+  if (typeof source === "object" && !Array.isArray(source))
+    return { products: [], errors: [source], saved: false }
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [{ currency }] = (await tx
-      .select({ currency: store.currency })
-      .from(store)
-      .where(eq(store.id, storeId))) as [{ currency: string }]
-    const names = await tx
-      .select({ name: product.name })
-      .from(product)
-      .where(eq(product.storeId, storeId))
-    const skus = new Set(
-      (
-        await tx
-          .select({ sku: productVariant.sku })
-          .from(productVariant)
-          .where(and(eq(productVariant.storeId, storeId), isNull(productVariant.removedAt)))
-      ).map((v) => v.sku.toLowerCase()),
-    )
-    const plan = planSheet(text, currency, new Set(names.map((n) => n.name)), skus)
+    const { currency, names, skus } = await sheetContext(tx, storeId)
+    const plan = planSheet(source, currency, names, skus)
     const result = summary(plan)
     if (!confirm || plan.errors.length > 0 || plan.products.length === 0)
       return { ...result, saved: false }
-    // Los códigos que trae la hoja quedan tomados antes de armar los que faltan.
-    for (const p of plan.products)
-      for (const v of p.variants) if (v.sku) skus.add(v.sku.toLowerCase())
-    // De a tantas filas por consulta: tres consultas por bloque, no tres por fila.
-    const created = await tx
-      .insert(product)
-      .values(
-        plan.products.map((p) => ({
-          storeId,
-          name: p.name,
-          category: p.category,
-          description: p.description,
-          listPriceCents: p.listPriceCents,
-          options: p.options,
-        })),
-      )
-      .returning({ id: product.id, name: product.name })
-    const idOf = new Map(created.map((row) => [fold(row.name), row.id]))
-    const rows = plan.products.flatMap((p) =>
-      p.variants.map((v) => ({
-        planned: v,
-        values: {
-          storeId,
-          productId: idOf.get(fold(p.name))!,
-          optionValues: v.values,
-          sku: v.sku ?? makeSku(p.name, v.values, skus),
-          priceCents: v.priceCents === p.listPriceCents ? null : v.priceCents,
-        },
-      })),
-    )
-    for (let at = 0; at < rows.length; at += 500) {
-      const chunk = rows.slice(at, at + 500)
-      const variants = await tx
-        .insert(productVariant)
-        .values(chunk.map((row) => row.values))
-        .returning({ id: productVariant.id, sku: productVariant.sku })
-      const variantOf = new Map(variants.map((v) => [v.sku.toLowerCase(), v.id]))
-      const entries = chunk
-        .filter((row) => row.planned.stock > 0)
-        .map((row) => ({
-          storeId,
-          variantId: variantOf.get(row.values.sku.toLowerCase())!,
-          kind: "entrada" as const,
-          quantity: row.planned.stock,
-          unitCostCents: row.planned.costCents,
-          reason: "Hoja subida",
-          actorUserId: person.userId,
-        }))
-      // El disparador pone el saldo fila por fila, en este orden.
-      if (entries.length > 0) await tx.insert(stockMovement).values(entries)
-    }
+    await createPlanned(tx, storeId, person, plan.products, skus, "Hoja subida")
     await tx.insert(storeEvent).values({
       storeId,
       actorUserId: person.userId,

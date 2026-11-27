@@ -21,6 +21,7 @@ import {
   productQuantityPrice,
   productQuestion,
   productVariant,
+  productVideo,
   saleOrder,
   saleOrderLine,
   stockMovement,
@@ -1165,6 +1166,20 @@ export async function dropGoneColors(tx: Db, productId: string) {
   const gone = looks.filter((l) => !values.some((v) => sameText(v, l.value))).map((l) => l.id)
   if (gone.length === 0) return
   await tx.update(productPhoto).set({ colorId: null }).where(inArray(productPhoto.colorId, gone))
+  // El video de un color que se va queda como el del producto si no tiene uno; si lo tiene, se
+  // quita (la base anota su carpeta para borrarla del almacenamiento).
+  const videos = await tx
+    .select({ id: productVideo.id, colorId: productVideo.colorId })
+    .from(productVideo)
+    .where(eq(productVideo.productId, productId))
+  let productSlot = videos.some((v) => v.colorId === null)
+  for (const video of videos.filter((v) => v.colorId && gone.includes(v.colorId))) {
+    if (productSlot) await tx.delete(productVideo).where(eq(productVideo.id, video.id))
+    else {
+      await tx.update(productVideo).set({ colorId: null }).where(eq(productVideo.id, video.id))
+      productSlot = true
+    }
+  }
   await tx.delete(productColor).where(inArray(productColor.id, gone))
 }
 
@@ -1329,67 +1344,6 @@ export function imageType(bytes: Uint8Array): PhotoType | null {
   return null
 }
 
-export async function addPhoto(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  productId: string,
-  bytes: Uint8Array,
-) {
-  if (bytes.length === 0 || bytes.length > MAX_PHOTO_BYTES)
-    throw new StoreError(
-      400,
-      "PHOTO_TOO_LARGE",
-      "La foto pesa demasiado. Prueba con otra más chica.",
-    )
-  const contentType = imageType(bytes)
-  if (!contentType) throw new StoreError(400, "PHOTO_TYPE", "Sube una foto en JPG, PNG o WebP")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    await productRow(tx, storeId, productId)
-    const existing = await tx
-      .select({ position: productPhoto.position })
-      .from(productPhoto)
-      .where(eq(productPhoto.productId, productId))
-    if (existing.length >= MAX_PRODUCT_PHOTOS)
-      throw new StoreError(409, "TOO_MANY_PHOTOS", `Hasta ${MAX_PRODUCT_PHOTOS} fotos por producto`)
-    const [row] = await tx
-      .insert(productPhoto)
-      .values({
-        storeId,
-        productId,
-        position: Math.max(-1, ...existing.map((p) => p.position)) + 1,
-        contentType,
-        content: Buffer.from(bytes),
-        createdBy: person.userId,
-      })
-      .returning({ id: productPhoto.id, position: productPhoto.position })
-    return row!
-  })
-}
-
-export async function removePhoto(appDb: Db, person: Person, storeId: string, photoId: string) {
-  uuidOr404(photoId, "Esa foto ya no está")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    // La variante y el color que la usaban vuelven a la foto del producto.
-    await tx
-      .update(productVariant)
-      .set({ photoId: null, updatedAt: new Date() })
-      .where(and(eq(productVariant.storeId, storeId), eq(productVariant.photoId, photoId)))
-    await tx
-      .update(productColor)
-      .set({ photoId: null, updatedAt: new Date() })
-      .where(and(eq(productColor.storeId, storeId), eq(productColor.photoId, photoId)))
-    const [row] = await tx
-      .delete(productPhoto)
-      .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
-      .returning({ id: productPhoto.id, productId: productPhoto.productId })
-    if (!row) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
-    await logProductEvent(tx, storeId, row.productId, person.userId, "foto", [
-      { field: "photos", from: photoId, to: null },
-    ])
-  })
-}
-
 export const photoPatch = z.object({
   /** El color al que pertenece (de `colors[].id`); nulo: vale para todos. */
   colorId: z.uuid().nullable().optional(),
@@ -1486,17 +1440,5 @@ export async function updatePhoto(
         ...changes,
       ])
     return detailIn(tx, storeId, photo.productId)
-  })
-}
-
-export async function photoContent(appDb: Db, person: Person, storeId: string, photoId: string) {
-  uuidOr404(photoId, "Esa foto ya no está")
-  return inStore(appDb, person, storeId, "catalogo.ver", async (tx) => {
-    const [row] = await tx
-      .select({ contentType: productPhoto.contentType, content: productPhoto.content })
-      .from(productPhoto)
-      .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
-    if (!row) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
-    return row
   })
 }

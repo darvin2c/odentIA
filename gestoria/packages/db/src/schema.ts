@@ -255,6 +255,8 @@ export const STORE_EVENT_ACTIONS = [
   "configuracion.marca",
   // La plantilla de un rubro que ajustó la tienda (lienzo «La ficha del producto», decisión 1).
   "catalogo.plantilla",
+  // «Cargar muchos»: lo que pasó al catálogo con «Crear» (ADR 0236).
+  "catalogo.carga",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 
@@ -629,6 +631,19 @@ export type PhotoType = (typeof PHOTO_TYPES)[number]
 export const MAX_PHOTO_BYTES = 1_500_000
 export const MAX_PRODUCT_PHOTOS = 8
 
+/**
+ * Las fotos y los videos del producto van al almacenamiento (ADR 0236), no a la base: la base
+ * guarda dónde están (`object_key`) y lo que se sabe de ellos. Una foto del producto pesa hasta
+ * 8 MB al subirla (la pantalla la achica antes); el video, hasta 16 MB y 30 segundos, lo que
+ * acepta WhatsApp (Cloud API: MP4 con H.264 y AAC, hasta 16 MB).
+ */
+export const MAX_MEDIA_PHOTO_BYTES = 8_000_000
+export const MAX_VIDEO_BYTES = 16_000_000
+export const MAX_VIDEO_MS = 30_000
+/** La propuesta de quitar el fondo: la que se ve (`usada`) o solo propuesta. La original se guarda siempre. */
+export const CUTOUT_STATES = ["propuesta", "usada"] as const
+export type CutoutState = (typeof CUTOUT_STATES)[number]
+
 /** Las imágenes de «Tu marca»: el logo y la foto de portada, una de cada una por tienda. */
 export const STORE_IMAGE_KINDS = ["logo", "portada"] as const
 export type StoreImageKind = (typeof STORE_IMAGE_KINDS)[number]
@@ -697,7 +712,20 @@ export const productPhoto = pgTable(
     productId: uuid("product_id").notNull(),
     position: smallint("position").notNull().default(0),
     contentType: text("content_type").$type<PhotoType>().notNull(),
-    content: bytea("content").notNull(),
+    /**
+     * Lo de antes del almacenamiento (ADR 0236): la foto en la base. Las nuevas no lo llevan; las
+     * de antes se mudan solas al arrancar el servidor (`moveStoredPhotos`) y la columna se borra
+     * en otra entrega, cuando ninguna imagen del servidor la lea.
+     */
+    content: bytea("content"),
+    /** Dónde está en el almacenamiento: la carpeta de la foto, con su original y sus copias. */
+    objectKey: text("object_key"),
+    /** La original, como llegó: su peso y su tamaño en píxeles. */
+    sizeBytes: integer("size_bytes"),
+    width: integer("width"),
+    height: integer("height"),
+    /** La propuesta de quitar el fondo (decisión 9): nula si no hay; la original se guarda siempre. */
+    cutout: text("cutout").$type<CutoutState>(),
     /** El color al que pertenece (decisión 9); nulo: vale para todos. */
     colorId: uuid("color_id"),
     createdBy: text("created_by").notNull(),
@@ -712,7 +740,11 @@ export const productPhoto = pgTable(
     }),
     check(
       "product_photo_size_check",
-      sql`octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+      sql`${table.content} is null or octet_length(${table.content}) between 1 and ${sql.raw(String(MAX_PHOTO_BYTES))}`,
+    ),
+    check(
+      "product_photo_where_check",
+      sql`(${table.content} is not null or ${table.objectKey} is not null) and (${table.objectKey} is null or ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$') and (${table.sizeBytes} is null or ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}) and (${table.cutout} is null or (${table.objectKey} is not null and ${inList("cutout", CUTOUT_STATES)}))`,
     ),
     foreignKey({
       name: "product_photo_product_fkey",
@@ -763,6 +795,189 @@ export const productColor = pgTable(
     uniqueIndex("product_color_value_uidx").on(table.productId, sql`lower(${table.value})`),
   ],
 )
+
+/**
+ * El video corto de un producto o de uno de sus colores (decisión 9, «Puesta, caminando · 0:12»):
+ * Sofi lo manda cuando la clienta pide verla puesta. Uno por producto y color (nulo: el del
+ * producto). Está en el almacenamiento (ADR 0236), listo para WhatsApp: MP4 con H.264 sin
+ * cuadros B y AAC, hasta 16 MB y 30 segundos, con su póster (la imagen que se ve antes de darle).
+ */
+export const productVideo = pgTable(
+  "product_video",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    productId: uuid("product_id").notNull(),
+    colorId: uuid("color_id"),
+    /** Lo que muestra, como lo dice la tienda: «Puesta, caminando». */
+    label: text("label").notNull().default(""),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    check(
+      "product_video_check",
+      sql`char_length(${table.label}) <= 60 and ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$' and ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_VIDEO_BYTES))} and ${table.durationMs} between 1 and ${sql.raw(String(MAX_VIDEO_MS))} and ${table.width} between 1 and 4096 and ${table.height} between 1 and 4096`,
+    ),
+    foreignKey({
+      name: "product_video_product_fkey",
+      columns: [table.storeId, table.productId],
+      foreignColumns: [product.storeId, product.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "product_video_color_fkey",
+      columns: [table.storeId, table.colorId],
+      foreignColumns: [productColor.storeId, productColor.id],
+    }),
+    // Uno por producto y por color: el del producto lleva el color nulo.
+    uniqueIndex("product_video_color_uidx").on(
+      table.productId,
+      sql`coalesce(${table.colorId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+  ],
+)
+
+/** «Cargar muchos» (decisiones 3 y 4): una carga abierta se revisa; nada pasa al catálogo hasta «Crear». */
+export const BULK_LOAD_STATES = ["abierta", "creada", "descartada"] as const
+export type BulkLoadState = (typeof BULK_LOAD_STATES)[number]
+/** Cada producto de la carga: por revisar, listo o quitado (no se crea). */
+export const BULK_ITEM_STATES = ["revisar", "listo", "quitado"] as const
+export type BulkItemState = (typeof BULK_ITEM_STATES)[number]
+/** Lo más que lleva una carga: fotos y productos. */
+export const MAX_BULK_PHOTOS = 500
+export const MAX_BULK_ITEMS = 300
+
+/** Una variante de un producto de la carga: los valores de sus opciones, su stock y, si quiere, su código, su precio y su costo. */
+export interface BulkVariant {
+  values: string[]
+  stock: number
+  sku?: string | null
+  priceCents?: number | null
+  costCents?: number | null
+}
+
+/**
+ * Una carga de muchos productos: la abre una persona y queda abierta hasta «Crear» o «Descartar».
+ * Sus fotos ya están en el almacenamiento; sus productos, solo aquí.
+ */
+export const bulkLoad = pgTable(
+  "bulk_load",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    state: text("state").$type<BulkLoadState>().notNull().default("abierta"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Quién la creó o la descartó, cuándo y cuántos productos pasaron al catálogo. */
+    finishedBy: text("finished_by"),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdProducts: integer("created_products"),
+  },
+  (table) => [
+    check(
+      "bulk_load_state_check",
+      sql`${inList("state", BULK_LOAD_STATES)} and (${table.state} = 'abierta') = (${table.finishedAt} is null) and (${table.state} = 'creada') = (${table.createdProducts} is not null)`,
+    ),
+    foreignKey({
+      name: "bulk_load_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    unique("bulk_load_store_id_key").on(table.storeId, table.id),
+    index("bulk_load_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/** Un producto de la carga, armado desde sus fotos o desde la hoja: todavía no está en el catálogo. */
+export const bulkLoadItem = pgTable(
+  "bulk_load_item",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    loadId: uuid("load_id").notNull(),
+    position: integer("position").notNull().default(0),
+    state: text("state").$type<BulkItemState>().notNull().default("revisar"),
+    name: text("name").notNull().default(""),
+    category: text("category"),
+    description: text("description").notNull().default(""),
+    listPriceCents: bigint("list_price_cents", { mode: "number" }),
+    options: jsonb("options").$type<ProductOption[]>().notNull().default([]),
+    variants: jsonb("variants").$type<BulkVariant[]>().notNull().default([]),
+    /** La duda que se muestra en amarillo («¿Material? No se ve»); no frena «Crear». */
+    doubt: text("doubt"),
+    /** La fila de la hoja de donde salió (la cabecera es la 1). */
+    sheetRow: integer("sheet_row"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "bulk_load_item_check",
+      sql`${inList("state", BULK_ITEM_STATES)} and char_length(${table.name}) <= 120 and (${table.category} is null or char_length(${table.category}) <= 60) and char_length(${table.description}) <= 2000 and (${table.doubt} is null or char_length(${table.doubt}) <= 200) and (${table.listPriceCents} is null or ${table.listPriceCents} between 1 and 100000000) and jsonb_typeof(${table.options}) = 'array' and jsonb_typeof(${table.variants}) = 'array' and jsonb_array_length(${table.variants}) <= 200`,
+    ),
+    foreignKey({
+      name: "bulk_load_item_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    unique("bulk_load_item_store_id_key").on(table.storeId, table.id),
+    index("bulk_load_item_load_idx").on(table.loadId, table.position),
+  ],
+)
+
+/** Una foto de la carga, ya en el almacenamiento, con el producto de la carga al que va (nulo: suelta). */
+export const bulkLoadPhoto = pgTable(
+  "bulk_load_photo",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    loadId: uuid("load_id").notNull(),
+    itemId: uuid("item_id"),
+    position: integer("position").notNull().default(0),
+    /** El nombre del archivo, para unirla a la fila de la hoja que la nombra. */
+    fileName: text("file_name").notNull().default(""),
+    contentType: text("content_type").$type<PhotoType>().notNull(),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "bulk_load_photo_check",
+      sql`${inList("content_type", PHOTO_TYPES)} and char_length(${table.fileName}) <= 200 and ${table.objectKey} ~ '^[a-z0-9/-]{1,200}$' and ${table.sizeBytes} between 1 and ${sql.raw(String(MAX_MEDIA_PHOTO_BYTES))}`,
+    ),
+    foreignKey({
+      name: "bulk_load_photo_load_fkey",
+      columns: [table.storeId, table.loadId],
+      foreignColumns: [bulkLoad.storeId, bulkLoad.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "bulk_load_photo_item_fkey",
+      columns: [table.storeId, table.itemId],
+      foreignColumns: [bulkLoadItem.storeId, bulkLoadItem.id],
+    }),
+    index("bulk_load_photo_load_idx").on(table.loadId, table.position),
+  ],
+)
+
+/**
+ * Lo que hay que borrar del almacenamiento (ADR 0236): la base anota la carpeta al borrar la fila
+ * que la usaba (también al borrar el producto, la tienda o la carga entera) y el servidor la
+ * borra después, con el dueño de la base. Una carpeta que otra fila sigue usando no se anota.
+ * La aplicación no la lee ni la escribe.
+ */
+export const mediaTrash = pgTable("media_trash", {
+  objectKey: text("object_key").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+})
 
 /**
  * Una variante: una combinación de las opciones del producto, con su código, su stock y, si

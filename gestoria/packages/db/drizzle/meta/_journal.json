@@ -267,6 +267,20 @@
       "when": 1795811414235,
       "tag": "0037_reglas_precio_de_la_ficha",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795816882339,
+      "tag": "0038_las_fotos_y_videos_del_producto",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795816883711,
+      "tag": "0039_reglas_fotos_y_videos",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
+import { memoryStorage } from "./archivos.js"
 import { cancelSale, recordSale } from "./stock.js"
 
 const ACCOUNT = "https://api.gestoria.test"
@@ -81,6 +82,7 @@ beforeAll(async () => {
     ownerDb: db.ownerDb,
     account: { url: ACCOUNT, eventsSecret: "", keys: createLocalJWKSet({ keys: [jwk] }) },
     webURL: WEB,
+    storage: memoryStorage(),
   })
   // Cada persona entra una vez (queda su copia) y se arma el equipo de Calzados Rosa.
   for (const who of Object.keys(people) as Who[]) await call(who, "GET", "/api/yo")
@@ -610,11 +612,13 @@ describe("las fotos", () => {
         })
       ).status,
     ).toBe(403)
+    // Lo que se ve es su copia para la ficha (ADR 0236), armada en el servidor.
     const seen = await call("lucia", "GET", `${base}/fotos/${up.json.photo.id}`)
     expect(seen.status).toBe(200)
-    expect(seen.response.headers.get("content-type")).toBe("image/png")
+    expect(seen.response.headers.get("content-type")).toBe("image/webp")
     expect(seen.response.headers.get("x-content-type-options")).toBe("nosniff")
-    expect(Buffer.from(await seen.response.arrayBuffer())).toEqual(png)
+    const webp = Buffer.from(await seen.response.arrayBuffer())
+    expect(webp.subarray(8, 12).toString("ascii")).toBe("WEBP")
     expect((await call("ajena", "GET", `${base}/fotos/${up.json.photo.id}`)).status).toBe(404)
     // Una variante la usa; al borrarla, vuelve a la del producto.
     const detail = (await call("rosa", "GET", `${base}/productos/${zapatilla}`)).json.product
