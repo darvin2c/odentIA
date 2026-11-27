@@ -27,6 +27,7 @@ import { agentName, SOFI_ACTOR } from "./agente.js"
 import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
+import { storeClockIn } from "./hora.js"
 import type { LinkAdapters } from "./link-de-pago.js"
 import { can } from "./permisos.js"
 import {
@@ -53,6 +54,7 @@ import { inStore, StoreError } from "./tiendas.js"
  *   dinero ya llegó) y el stock se descuenta al salir: sin stock, no sale.
  * - El cobro va en orden: link de pago (se confirma solo), captura (la confirma una persona) y
  *   al recibir. Una captura es lo único que espera a alguien.
+ * - «Hoy» es el de la tienda, con su hora (`hora.ts`): nunca el del servidor ni el del navegador.
  * - Los avisos al cliente quedan escritos en la historia del pedido; hoy no salen, porque
  *   WhatsApp llega con B2.
  */
@@ -162,9 +164,9 @@ export const deliverInput = z.object({
 
 export const cancelInput = z.object({ reason })
 
-/** Hoy, en UTC (como las promociones de B3; la zona horaria de la tienda llega con B5). */
-export function todayUTC(now = new Date()): string {
-  return now.toISOString().slice(0, 10)
+/** Qué día es en la tienda (su hora, `hora.ts`). */
+async function todayIn(tx: Db, storeId: string, now = new Date()) {
+  return (await storeClockIn(tx, storeId, now)).today
 }
 
 function uuidOr404(id: string) {
@@ -396,9 +398,10 @@ export async function quoteOrder(
   person: Person,
   storeId: string,
   input: OrderInput,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const today = await todayIn(tx, storeId, now)
     const { quote: q, fields } = await quoteOrderIn(tx, storeId, input, today)
     return { quote: q, fields }
   })
@@ -473,7 +476,8 @@ export async function createOrderIn(
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
-  const result = await priceOrder(tx, storeId, currency, input, options.today ?? todayUTC(now))
+  const today = options.today ?? (await todayIn(tx, storeId, now))
+  const result = await priceOrder(tx, storeId, currency, input, today)
   if (!result.ok)
     throw new StoreError(
       400,
@@ -575,10 +579,10 @@ export async function createOrder(
   person: Person,
   storeId: string,
   input: OrderInput,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const created = await createOrderIn(tx, storeId, person.userId, input, { today })
+    const created = await createOrderIn(tx, storeId, person.userId, input, { now })
     return orderDetailIn(tx, storeId, created.id)
   })
 }
@@ -590,9 +594,10 @@ export async function listOrders(
   person: Person,
   storeId: string,
   filter: OrderFilter,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const today = await todayIn(tx, storeId, now)
     const dueToday = and(inArray(saleOrder.state, TO_DELIVER), lte(saleOrder.deliverOn, today))
     const where = and(
       eq(saleOrder.storeId, storeId),
@@ -667,6 +672,8 @@ export async function listOrders(
     const linesBy = Map.groupBy(lines, (line) => line.orderId)
     const confirmedBy = new Map(confirmed.map((c) => [c.orderId, c]))
     return {
+      /** El día de hoy en la tienda: con él se dice «hoy», «mañana» o «ayer». */
+      today,
       orders: rows.map((row) => {
         const own = linesBy.get(row.id) ?? []
         const paid = confirmedBy.get(row.id)
@@ -851,9 +858,9 @@ export async function orderDetail(appDb: Db, person: Person, storeId: string, or
 }
 
 /** Lo que se puede vender hoy, con su precio sin negociar y su mínimo, para armar un pedido. */
-export async function sellable(appDb: Db, person: Person, storeId: string, today = todayUTC()) {
+export async function sellable(appDb: Db, person: Person, storeId: string, now = new Date()) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const rows = await variantPrices(tx, storeId, today)
+    const rows = await variantPrices(tx, storeId, await todayIn(tx, storeId, now))
     return {
       // El precio de una unidad; el precio por cantidad lo aplica el resumen del pedido.
       variants: rows.map((row) => {

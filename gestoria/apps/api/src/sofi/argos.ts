@@ -29,7 +29,8 @@ import {
 import { agentStopIn } from "../acuerdo.js"
 import { ARGOS_ACTOR, withAgent } from "../agente.js"
 import type { Person } from "../cuenta.js"
-import { pad, todayUTC, variantPrices } from "../pedidos.js"
+import { storeClockIn } from "../hora.js"
+import { pad, variantPrices } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
 import { inStore } from "../tiendas.js"
 import { moneyText as formatMoney } from "./herramientas.js"
@@ -172,7 +173,8 @@ async function dueIn(tx: Db, storeId: string, now: Date) {
       ? await variantPrices(
           tx,
           storeId,
-          todayUTC(now),
+          // El día de la tienda, con su hora: la promoción vale de un día a otro de su calendario.
+          (await storeClockIn(tx, storeId, now)).today,
           rows.map((r) => r.variant.id),
         )
       : []

@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
+import { dayIn } from "./hora.js"
 import { mercadoPago } from "./link-de-pago.js"
 
 const ACCOUNT = "https://api.gestoria.test"
@@ -643,16 +644,40 @@ describe("si al pagar no alcanza el stock", () => {
   })
 })
 
+describe("la hora de la tienda", () => {
+  it("la cambia quien configura; con ella se cuenta «hoy»", async () => {
+    const me = await call("rosa", "GET", "/api/yo")
+    expect((me.json.stores as Json[]).find((s) => s.id === storeId)?.timeZone).toBe("America/Lima")
+    expect((await call("lucia", "PATCH", `${base}/hora`, { timeZone: "Asia/Tokyo" })).status).toBe(
+      403,
+    )
+    const bad = await call("rosa", "PATCH", `${base}/hora`, { timeZone: "America/Narnia" })
+    expect(bad.status).toBe(400)
+    expect(bad.json.error.fields).toHaveProperty("timeZone")
+    const ok = await call("rosa", "PATCH", `${base}/hora`, { timeZone: "Asia/Tokyo" })
+    expect(ok.json.store.timeZone).toBe("Asia/Tokyo")
+    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)
+    expect(list.json.today).toBe(dayIn("Asia/Tokyo"))
+    await call("rosa", "PATCH", `${base}/hora`, { timeZone: "America/Lima" })
+    expect((await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)).json.today).toBe(
+      dayIn("America/Lima"),
+    )
+  })
+})
+
 describe("la lista y quién puede", () => {
-  it("filtra por estado y cuenta «Para entregar hoy»", async () => {
-    const today = new Date().toISOString().slice(0, 10)
+  it("filtra por estado y cuenta «Para entregar hoy» con el día de la tienda", async () => {
+    // El de Lima, no el del servidor: desde las 19:00 de Lima, en UTC ya es mañana.
+    const today = dayIn("America/Lima")
     await call(
       "lucia",
       "POST",
       `${base}/pedidos`,
       order({ paymentMethodId: ids.efectivo, deliverOn: today }),
     )
-    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy&hoy=${today}`)
+    // Lo que diga el navegador no cuenta.
+    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy&hoy=1999-01-01`)
+    expect(list.json.today).toBe(today)
     expect(list.json.orders.length).toBeGreaterThan(0)
     expect(list.json.counts.hoy).toBe(list.json.orders.length)
     expect(list.json.orders.every((o: Json) => ["por_salir", "en_camino"].includes(o.state))).toBe(

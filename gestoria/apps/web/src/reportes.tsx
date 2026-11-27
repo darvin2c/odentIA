@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { api } from "./lib/api"
-import { CHANNELS, localToday, when } from "./lib/pedidos"
+import { CHANNELS, when } from "./lib/pedidos"
 import { type ArgosBoard, type StoreReport, usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
@@ -26,11 +26,10 @@ const PERIODS: { value: Period; label: string }[] = [
 export function ReportsPage() {
   const { store } = useStoreContext()
   const [period, setPeriod] = useState<Period>("mes")
-  const today = localToday()
+  // Los periodos los cuenta el servidor con la hora de la tienda.
   const report = useQuery({
-    queryKey: ["reportes", store.id, period, today],
-    queryFn: () =>
-      api<StoreReport>(`/api/tiendas/${store.id}/reportes?periodo=${period}&hoy=${today}`),
+    queryKey: ["reportes", store.id, period],
+    queryFn: () => api<StoreReport>(`/api/tiendas/${store.id}/reportes?periodo=${period}`),
   })
   const m = (cents: number) => money(cents, store.currency)
   const r = report.data

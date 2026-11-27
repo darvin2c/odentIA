@@ -17,6 +17,7 @@ import { ConfirmDialog, EmptyState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CreditCard, Plus, Trash2, Truck } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
+import { StoreTimeSection } from "./hora"
 import { api } from "./lib/api"
 import {
   COLLECTIONS,
@@ -130,6 +131,7 @@ export function PaymentsPage() {
           </ul>
         )}
       </Section>
+      <StoreTimeSection key={store.timeZone} store={store} />
       {payment ? (
         <PaymentForm
           storeId={store.id}

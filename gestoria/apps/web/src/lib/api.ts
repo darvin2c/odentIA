@@ -9,6 +9,8 @@ export interface MyStore {
   id: string
   name: string
   currency: string
+  /** La hora de la tienda (IANA, «America/Lima»): con ella se cuenta «hoy». */
+  timeZone: string
   /** «support»: soporte de gestorIA con una entrada aceptada, solo a mirar. */
   role: StoreRole | "support"
   permissions: string[]

@@ -28,7 +28,6 @@ import {
   CHANNELS,
   dayName,
   FILTERS,
-  localToday,
   type OrderChannel,
   type OrderDetail,
   type OrderFilter,
@@ -39,6 +38,7 @@ import {
   type SellableVariant,
   STATE_TONE,
   stateName,
+  storeToday,
   when,
 } from "./lib/pedidos"
 import { type DeliveryMethod, money, moneyInput, type PaymentMethod, readMoney } from "./lib/tienda"
@@ -87,12 +87,13 @@ export function OrdersPage() {
     if (search.pedido) setOpen(search.pedido)
   }, [search.pedido])
   const [adding, setAdding] = useState(false)
-  const today = localToday()
   const list = useQuery({
-    queryKey: [...ORDERS_KEY(store.id), filter, today],
-    queryFn: () => api<OrderList>(`/api/tiendas/${store.id}/pedidos?filtro=${filter}&hoy=${today}`),
+    queryKey: [...ORDERS_KEY(store.id), filter],
+    queryFn: () => api<OrderList>(`/api/tiendas/${store.id}/pedidos?filtro=${filter}`),
     refetchInterval: 60_000,
   })
+  // El día de la tienda: «hoy», «mañana» o «ayer» se cuentan con su hora, no con la del equipo.
+  const today = list.data?.today ?? storeToday(store.timeZone)
   const orders = list.data?.orders ?? []
   const counts = list.data?.counts
 
@@ -397,7 +398,9 @@ function OrderBody({ order }: { order: OrderDetail }) {
 
       <Block title="Entrega">
         <Row label="Forma">{order.deliveryName}</Row>
-        {order.deliverOn ? <Row label="Día">{dayName(order.deliverOn)}</Row> : null}
+        {order.deliverOn ? (
+          <Row label="Día">{dayName(order.deliverOn, storeToday(store.timeZone))}</Row>
+        ) : null}
         {order.address ? <Row label="Dirección">{order.address}</Row> : null}
         {order.customerPhone ? (
           <Row label="Teléfono">
@@ -1039,9 +1042,7 @@ function NewOrderSheet({
   const sellable = useQuery({
     queryKey: ["para-vender", store.id],
     queryFn: () =>
-      api<{ variants: SellableVariant[] }>(
-        `/api/tiendas/${store.id}/pedidos/para-vender?hoy=${localToday()}`,
-      ),
+      api<{ variants: SellableVariant[] }>(`/api/tiendas/${store.id}/pedidos/para-vender`),
   })
   const lists = useQuery({
     queryKey: ["pagos-y-entregas", store.id],
@@ -1066,7 +1067,7 @@ function NewOrderSheet({
   const [deliveryCost, setDeliveryCost] = useState("")
   const [deliveryCharged, setDeliveryCharged] = useState("")
   const [address, setAddress] = useState("")
-  const [deliverOn, setDeliverOn] = useState(localToday())
+  const [deliverOn, setDeliverOn] = useState(storeToday(store.timeZone))
   const [paymentId, setPaymentId] = useState("")
   const [notes, setNotes] = useState("")
   const dirty = useDirty({
@@ -1121,7 +1122,7 @@ function NewOrderSheet({
     queryKey: ["calcular", store.id, debounced],
     queryFn: () =>
       api<{ quote: Quote | null; fields: Record<string, string> }>(
-        `/api/tiendas/${store.id}/pedidos/calcular?hoy=${localToday()}`,
+        `/api/tiendas/${store.id}/pedidos/calcular`,
         { method: "POST", body: JSON.parse(debounced) },
       ),
     enabled: ready && debounced === quoteKey,
@@ -1130,7 +1131,7 @@ function NewOrderSheet({
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos?hoy=${localToday()}`, {
+      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos`, {
         method: "POST",
         body,
       }),

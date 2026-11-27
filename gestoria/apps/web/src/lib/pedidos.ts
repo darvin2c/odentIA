@@ -44,6 +44,8 @@ export interface OrderRow {
 }
 
 export interface OrderList {
+  /** Qué día es en la tienda, con su hora. */
+  today: string
   orders: OrderRow[]
   counts: Record<OrderFilter, number>
 }
@@ -224,14 +226,28 @@ export const FILTERS: { value: OrderFilter; label: string }[] = [
   { value: "anulados", label: "Anulados" },
 ]
 
-/** La fecha de hoy en el equipo de la persona («2026-11-19»). */
-export function localToday(now = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+/**
+ * Qué día es en la tienda («2026-11-19»), con su hora: la misma que usa el servidor para «Para
+ * entregar hoy» y Reportes, aunque el equipo de la persona esté en otra.
+ */
+export function storeToday(timeZone: string, now = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now)
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ""
+    return `${part("year")}-${part("month")}-${part("day")}`
+  } catch {
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
 }
 
-/** «hoy», «mañana», «ayer» o «jue 20 nov». */
-export function dayName(date: string, today = localToday()): string {
+/** «hoy», «mañana», «ayer» o «jue 20 nov», contados desde `today` (el de la tienda). */
+export function dayName(date: string, today: string): string {
   const day = (text: string) =>
     Date.UTC(Number(text.slice(0, 4)), Number(text.slice(5, 7)) - 1, Number(text.slice(8, 10)))
   const diff = Math.round((day(date) - day(today)) / 86_400_000)

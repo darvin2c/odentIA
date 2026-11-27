@@ -162,6 +162,7 @@ export async function supportStoresOf(
       id: store.id,
       name: store.name,
       currency: store.currency,
+      timeZone: store.timeZone,
       until: storeSupportAccess.expiresAt,
     })
     .from(storeSupportAccess)

@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
 import type { Person } from "../cuenta.js"
+import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
 
 /**
@@ -10,7 +11,8 @@ import { inStore } from "../tiendas.js"
  * pedidos, pagos, kardex y conversaciones que usa todo lo demás. Solo Dueño y Administrador
  * (`reportes.ver`). Los pedidos de prueba no cuentan.
  *
- * Los días van en UTC, como «hoy» de los pedidos: la zona horaria de la tienda queda pendiente.
+ * Los periodos empiezan a las 00:00 de la tienda, con su hora (`hora.ts`): «hoy», desde el lunes
+ * o desde el día 1.
  */
 
 export const REPORT_PERIODS = ["hoy", "semana", "mes"] as const
@@ -19,13 +21,11 @@ export const reportPeriod = z.enum(REPORT_PERIODS).default("mes")
 
 const DAY = 86_400_000
 
-/** Desde cuándo cuenta el periodo: hoy, desde el lunes o desde el día 1, en UTC. */
-export function periodStart(period: ReportPeriod, today: string): Date {
-  const day = new Date(`${today}T00:00:00Z`)
-  if (period === "hoy") return day
-  if (period === "mes") return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1))
-  const weekday = (day.getUTCDay() + 6) % 7
-  return new Date(day.getTime() - weekday * DAY)
+/** Desde cuándo cuenta el periodo: hoy, desde el lunes o desde el día 1, a las 00:00 de la tienda. */
+export function periodStart(period: ReportPeriod, today: string, timeZone: string): Date {
+  if (period === "hoy") return startOfDay(timeZone, today)
+  if (period === "mes") return startOfDay(timeZone, `${today.slice(0, 8)}01`)
+  return startOfDay(timeZone, addDays(today, -weekdayOf(today)))
 }
 
 const n = (value: unknown) => Number(value ?? 0)
@@ -35,14 +35,14 @@ export async function storeReport(
   person: Person,
   storeId: string,
   period: ReportPeriod,
-  today: string,
   now = new Date(),
 ) {
-  const from = periodStart(period, today)
-  // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
-  const since = from.toISOString()
-  const at = now.toISOString()
   return inStore(appDb, person, storeId, "reportes.ver", async (tx) => {
+    const { timeZone, today } = await storeClockIn(tx, storeId, now)
+    const from = periodStart(period, today, timeZone)
+    // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
+    const since = from.toISOString()
+    const at = now.toISOString()
     // Vendido y cobrado: los pagos confirmados del periodo, por pedido.
     const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
       select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders

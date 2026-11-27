@@ -15,6 +15,7 @@ import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { noteStoreAccount, noteStoreTeam } from "./acuerdo.js"
 import type { Person } from "./cuenta.js"
+import { DEFAULT_TIME_ZONE, type timeZoneInput } from "./hora.js"
 import {
   can,
   canAssign,
@@ -123,7 +124,13 @@ export const roleInput = z.object({ role: z.enum(STORE_ROLES) })
 export async function myStores(appDb: Db, person: Person) {
   return withPerson(appDb, person, async (tx) => {
     const stores = await tx
-      .select({ id: store.id, name: store.name, currency: store.currency, role: storeMember.role })
+      .select({
+        id: store.id,
+        name: store.name,
+        currency: store.currency,
+        timeZone: store.timeZone,
+        role: storeMember.role,
+      })
       .from(storeMember)
       .innerJoin(store, eq(store.id, storeMember.storeId))
       .where(eq(storeMember.userId, person.userId))
@@ -249,6 +256,7 @@ export async function createStore(appDb: Db, person: Person, input: z.infer<type
     id,
     name: input.name,
     currency: input.currency,
+    timeZone: DEFAULT_TIME_ZONE,
     role: "owner" as const,
     permissions: ROLE_PERMISSIONS.owner,
   }
@@ -299,12 +307,45 @@ export async function inStore<T>(
 export async function storeSummary(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "tienda.ver", async (tx, role) => {
     const [row] = await tx
-      .select({ id: store.id, name: store.name, currency: store.currency })
+      .select({
+        id: store.id,
+        name: store.name,
+        currency: store.currency,
+        timeZone: store.timeZone,
+      })
       .from(store)
       .where(eq(store.id, storeId))
     if (!row) throw new StoreError(404, "NOT_FOUND", "No encontramos esa tienda en tu cuenta")
     return { ...row, role, permissions: ROLE_PERMISSIONS[role] }
   })
+}
+
+/**
+ * La hora de la tienda (ADR 0221): con ella se cuentan «hoy», «mañana», los periodos de Reportes y
+ * las promociones. La cambia quien tiene `configuracion`, y queda anotado quién y de qué a qué.
+ */
+export async function setStoreTimeZone(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  input: z.infer<typeof timeZoneInput>,
+) {
+  await inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const [before] = await tx
+      .select({ timeZone: store.timeZone })
+      .from(store)
+      .where(eq(store.id, storeId))
+    if (!before || before.timeZone === input.timeZone) return
+    await tx.update(store).set({ timeZone: input.timeZone }).where(eq(store.id, storeId))
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: person.userId,
+      action: "configuracion.tienda",
+      subject: "Hora de la tienda",
+      detail: { antes: before.timeZone, ahora: input.timeZone },
+    })
+  })
+  return storeSummary(appDb, person, storeId)
 }
 
 export async function storeTeam(appDb: Db, person: Person, storeId: string) {

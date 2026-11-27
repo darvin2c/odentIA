@@ -85,6 +85,12 @@ export const store = pgTable(
      * 0211). Nulo en las tiendas de antes o si no lo eligió.
      */
     country: text("country"),
+    /**
+     * La hora de la tienda: su zona horaria de la base de datos de zonas horarias de IANA
+     * («America/Lima»). Con ella se cuenta qué es «hoy», «mañana», los periodos de Reportes y las
+     * promociones (ADR 0221). La aplicación comprueba que exista; aquí, solo su forma.
+     */
+    timeZone: text("time_zone").notNull().default("America/Lima"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -92,6 +98,10 @@ export const store = pgTable(
     check("store_name_check", sql`char_length(btrim(${table.name})) between 1 and 80`),
     check("store_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("store_country_check", sql`${table.country} is null or ${table.country} ~ '^[A-Z]{2}$'`),
+    check(
+      "store_time_zone_check",
+      sql`char_length(${table.timeZone}) <= 64 and ${table.timeZone} ~ '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$'`,
+    ),
     foreignKey({
       name: "store_created_by_fkey",
       columns: [table.createdBy],
@@ -202,6 +212,8 @@ export const STORE_EVENT_ACTIONS = [
   "soporte.entro",
   // Soporte terminó su mirada con «Salir» (ADR 0219).
   "soporte.salio",
+  // Los datos de la tienda: su hora (ADR 0221).
+  "configuracion.tienda",
 ] as const
 export type StoreEventAction = (typeof STORE_EVENT_ACTIONS)[number]
 

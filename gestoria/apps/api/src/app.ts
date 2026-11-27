@@ -53,6 +53,7 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
+import { timeZoneInput } from "./hora.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import {
   addReceipt,
@@ -82,7 +83,6 @@ import {
   reviewPayment,
   sellable,
   shipInput,
-  todayUTC,
 } from "./pedidos.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
@@ -116,6 +116,7 @@ import {
   revokeInvitation,
   roleInput,
   StoreError,
+  setStoreTimeZone,
   storeSummary,
   storeTeam,
 } from "./tiendas.js"
@@ -156,18 +157,6 @@ const PLAN_RECEIPT_UPLOAD = /^\/api\/tiendas\/[^/]+\/plan\/comprobante$/
  */
 const MAX_TEST_MESSAGES = 60
 const TEST_WINDOW_MS = 10 * 60_000
-
-/**
- * La fecha de hoy de la persona («2026-11-19»): con ella se arma «Para entregar hoy» y se elige
- * la promoción vigente, igual en el resumen y al guardar. Solo vale a un día de la de UTC (las
- * zonas horarias van de −12 a +14): así no se elige el día de una promoción. Si no, la de UTC.
- */
-function todayOf(c: Context): string {
-  const value = c.req.query("hoy") ?? ""
-  const now = Date.now()
-  const near = [-1, 0, 1].map((days) => todayUTC(new Date(now + days * 86_400_000)))
-  return near.includes(value) ? value : todayUTC()
-}
 
 function errorBody(c: Context, code: string, message: string, fields?: Record<string, string>) {
   return {
@@ -346,6 +335,14 @@ export function createApp(deps: AppDeps) {
     c.json({ store: await storeSummary(deps.appDb, c.get("person"), c.req.param("id")) }),
   )
 
+  // La hora de la tienda (ADR 0221): con ella se cuenta «hoy».
+  app.patch("/api/tiendas/:id/hora", async (c) => {
+    const input = await bodyOf(c, timeZoneInput)
+    return c.json({
+      store: await setStoreTimeZone(deps.appDb, c.get("person"), c.req.param("id"), input),
+    })
+  })
+
   app.get("/api/tiendas/:id/equipo", async (c) =>
     c.json(await storeTeam(deps.appDb, c.get("person"), c.req.param("id"))),
   )
@@ -507,28 +504,18 @@ export function createApp(deps: AppDeps) {
     const filter = (c.req.query("filtro") ?? "abiertos") as OrderFilter
     if (!Object.hasOwn(ORDER_FILTERS, filter))
       throw new StoreError(400, "VALIDATION_ERROR", "Ese filtro no existe")
-    return c.json(
-      await listOrders(deps.appDb, c.get("person"), c.req.param("id"), filter, todayOf(c)),
-    )
+    return c.json(await listOrders(deps.appDb, c.get("person"), c.req.param("id"), filter))
   })
   app.get("/api/tiendas/:id/pedidos/para-vender", async (c) =>
-    c.json(await sellable(deps.appDb, c.get("person"), c.req.param("id"), todayOf(c))),
+    c.json(await sellable(deps.appDb, c.get("person"), c.req.param("id"))),
   )
   app.post("/api/tiendas/:id/pedidos/calcular", async (c) => {
     const input = await bodyOf(c, quoteInput)
-    return c.json(
-      await quoteOrder(deps.appDb, c.get("person"), c.req.param("id"), input, todayOf(c)),
-    )
+    return c.json(await quoteOrder(deps.appDb, c.get("person"), c.req.param("id"), input))
   })
   app.post("/api/tiendas/:id/pedidos", async (c) => {
     const input = await bodyOf(c, orderInput)
-    const order = await createOrder(
-      deps.appDb,
-      c.get("person"),
-      c.req.param("id"),
-      input,
-      todayOf(c),
-    )
+    const order = await createOrder(deps.appDb, c.get("person"), c.req.param("id"), input)
     return c.json({ order }, 201)
   })
   app.get("/api/tiendas/:id/pedidos/:orderId", async (c) => {
@@ -657,9 +644,7 @@ export function createApp(deps: AppDeps) {
   // Reportes y Argos (B5): solo Dueño y Administrador.
   app.get("/api/tiendas/:id/reportes", async (c) => {
     const period = reportPeriod.parse(c.req.query("periodo") ?? undefined)
-    return c.json(
-      await storeReport(deps.appDb, c.get("person"), c.req.param("id"), period, todayOf(c)),
-    )
+    return c.json(await storeReport(deps.appDb, c.get("person"), c.req.param("id"), period))
   })
   app.get("/api/tiendas/:id/argos", async (c) =>
     c.json(await argosBoard(deps.appDb, c.get("person"), c.req.param("id"))),

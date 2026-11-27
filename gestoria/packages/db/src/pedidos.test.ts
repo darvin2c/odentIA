@@ -224,4 +224,33 @@ describe("los pedidos de cada tienda", () => {
       ),
     ).rejects.toThrow()
   })
+
+  it("la hora de la tienda la cambia solo su tienda, y nada más que la hora", async () => {
+    const zone = (tx: Db, id: string) =>
+      tx.select({ timeZone: store.timeZone }).from(store).where(eq(store.id, id))
+    expect(await inRosa((tx) => zone(tx, calzados))).toEqual([{ timeZone: "America/Lima" }])
+    await inRosa((tx) =>
+      tx.update(store).set({ timeZone: "America/Bogota" }).where(eq(store.id, calzados)),
+    )
+    expect(await inRosa((tx) => zone(tx, calzados))).toEqual([{ timeZone: "America/Bogota" }])
+    // Desde otra tienda no se toca.
+    const other = await inMario((tx) =>
+      tx
+        .update(store)
+        .set({ timeZone: "Europe/London" })
+        .where(eq(store.id, calzados))
+        .returning({ id: store.id }),
+    )
+    expect(other).toEqual([])
+    // El nombre y la moneda no se cambian desde la aplicación.
+    await expect(
+      inRosa((tx) => tx.update(store).set({ currency: "USD" }).where(eq(store.id, calzados))),
+    ).rejects.toThrow()
+    // Lo que no tiene forma de zona horaria no entra.
+    await expect(
+      inRosa((tx) =>
+        tx.update(store).set({ timeZone: "'; drop table store" }).where(eq(store.id, calzados)),
+      ),
+    ).rejects.toThrow()
+  })
 })

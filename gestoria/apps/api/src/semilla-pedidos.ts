@@ -9,6 +9,7 @@ import {
 import { and, eq } from "drizzle-orm"
 import type { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { addDays, storeClockIn } from "./hora.js"
 import {
   addReceipt,
   cancelOrder,
@@ -17,7 +18,6 @@ import {
   markShipped,
   orderInput,
   reviewPayment,
-  todayUTC,
 } from "./pedidos.js"
 
 /**
@@ -74,8 +74,9 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
   const [yape, plin, transferencia, efectivo] = await Promise.all(
     ["Yape", "Plin", "Transferencia BCP", "Efectivo al recibir"].map(payment),
   )
-  const today = todayUTC()
-  const tomorrow = todayUTC(new Date(Date.now() + 86_400_000))
+  // El día de la tienda, con su hora (la de Lima).
+  const { today } = await storeClockIn(tx, storeId)
+  const tomorrow = addDays(today, 1)
 
   // Como lo arma «Anotar un pedido»: con los mismos valores por omisión.
   const create = async (input: Partial<z.input<typeof orderInput>>) =>
