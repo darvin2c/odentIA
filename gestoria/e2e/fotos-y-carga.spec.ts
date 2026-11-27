@@ -144,12 +144,13 @@ test("la ficha: subir, ordenar, la foto de cada color y el video", async ({ page
     buffer: readFileSync(resolve("../apps/api/semilla/video-calzado.mp4")),
   })
   const video = card.getByRole("listitem", { name: /^Video de 0:0\d/ })
-  await expect(video.or(page.getByText(/no puede preparar videos/))).toBeVisible({
-    timeout: 60_000,
-  })
+  await expect(page.getByText("Agregaste el video")).toBeVisible({ timeout: 60_000 })
+  await expect(video).toBeVisible()
   await noSideScroll(page)
   await shot(page, "pr4-ficha-fotos-1440-claro")
   await page.emulateMedia({ colorScheme: "dark" })
+  // Los colores pasan con su transición: la captura espera a que terminen.
+  await page.waitForTimeout(600)
   await shot(page, "pr4-ficha-fotos-1440-oscuro")
   await page.emulateMedia({ colorScheme: "light" })
 
@@ -162,6 +163,8 @@ test("la ficha: subir, ordenar, la foto de cada color y el video", async ({ page
   await noSideScroll(page)
   await shot(page, "pr4-ficha-fotos-390-claro")
   await page.emulateMedia({ colorScheme: "dark" })
+  // Los colores pasan con su transición: la captura espera a que terminen.
+  await page.waitForTimeout(600)
   await shot(page, "pr4-ficha-fotos-390-oscuro")
   await page.emulateMedia({ colorScheme: "light" })
 })
@@ -198,11 +201,11 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
 
   // Nombre a cada uno y el precio y las tallas a los dos a la vez.
   const names = page.getByRole("textbox", { name: "Nombre" })
-  await names.nth(0).fill("Zapatilla plataforma")
+  await names.nth(0).fill("Plataforma de la carga")
   await names.nth(0).press("Enter")
-  await names.nth(1).fill("Botín marrón")
+  await names.nth(1).fill("Sandalia de la carga")
   await names.nth(1).press("Enter")
-  await expect(names.nth(1)).toHaveValue("Botín marrón")
+  await expect(names.nth(1)).toHaveValue("Sandalia de la carga")
   await page.getByRole("checkbox", { name: "Elegir todos" }).check()
   await page.getByRole("textbox", { name: "Precio para los elegidos" }).fill("129")
   await page.getByRole("textbox", { name: "Tallas para los elegidos" }).fill("36 a 38")
@@ -213,12 +216,16 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   await noSideScroll(page)
   await shot(page, "pr4-cargar-revisar-1440-claro")
   await page.emulateMedia({ colorScheme: "dark" })
+  // Los colores pasan con su transición: la captura espera a que terminen.
+  await page.waitForTimeout(600)
   await shot(page, "pr4-cargar-revisar-1440-oscuro")
   await page.emulateMedia({ colorScheme: "light" })
   await page.setViewportSize(PHONE)
   await noSideScroll(page)
   await shot(page, "pr4-cargar-revisar-390-claro")
   await page.emulateMedia({ colorScheme: "dark" })
+  // Los colores pasan con su transición: la captura espera a que terminen.
+  await page.waitForTimeout(600)
   await shot(page, "pr4-cargar-revisar-390-oscuro")
   await page.emulateMedia({ colorScheme: "light" })
   await page.setViewportSize(DESKTOP)
@@ -227,13 +234,13 @@ test("cargar muchos: fotos, juntar, el precio a varios y «Crear»", async ({ pa
   await page.getByRole("button", { name: "Crear 2 productos" }).click()
   await expect(page.getByText("Creaste 2 productos")).toBeVisible()
   await expect(page).toHaveURL(/\/catalogo$/)
-  await expect(page.getByRole("row", { name: /Zapatilla plataforma/ })).toBeVisible()
+  await expect(page.getByRole("row", { name: /Plataforma de la carga/ })).toBeVisible()
   const catalog = (await json("GET", `${STORE}/catalogo`)).products as {
     name: string
     id: string
     stock: number
   }[]
-  const made = catalog.find((p) => p.name === "Zapatilla plataforma")!
+  const made = catalog.find((p) => p.name === "Plataforma de la carga")!
   expect(made.stock).toBe(6)
   const media = await json("GET", `${STORE}/productos/${made.id}/medios`)
   expect(media.photos).toHaveLength(2)

@@ -8,7 +8,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
   toast,
@@ -543,6 +542,10 @@ function LoadView({
     [detail.data],
   )
   const loose = detail.data?.loosePhotos ?? []
+  // Las columnas no cambian con los datos: si cambiaran, cada fila se volvería a montar al
+  // guardar otra y se perdería lo que se está escribiendo.
+  const live = useRef({ items, errors })
+  live.current = { items, errors }
   const allPhotos = items.reduce((n, i) => n + i.photos.length, 0) + loose.length
   const chosen = Object.keys(selection).filter((id) => selection[id])
 
@@ -561,6 +564,7 @@ function LoadView({
     () => [
       {
         id: "elegir",
+        meta: { view: { role: "select" } },
         header: ({ table }) => (
           <Checkbox
             checked={table.getIsAllRowsSelected()}
@@ -569,7 +573,6 @@ function LoadView({
             aria-label="Elegir todos"
           />
         ),
-        meta: { view: { tableOnly: true } },
         cell: ({ row }) => (
           <Checkbox
             checked={row.getIsSelected()}
@@ -586,7 +589,7 @@ function LoadView({
         cell: ({ row }) => (
           <PhotoStack
             photos={row.original.photos}
-            items={items}
+            items={live.current.items}
             itemId={row.original.id}
             onMove={moveTo}
             onDrop={(photoId) => moveTo(photoId, row.original.id)}
@@ -603,7 +606,7 @@ function LoadView({
               label="Nombre"
               value={row.original.name}
               placeholder="Ponle nombre"
-              invalid={Boolean(errors[row.original.id])}
+              invalid={Boolean(live.current.errors[row.original.id])}
               onSave={(name) => save(row.original.id, { name })}
             />
             <TextCell
@@ -632,7 +635,6 @@ function LoadView({
       {
         id: "tallas",
         header: "Tallas",
-        meta: { view: { tableOnly: true } },
         cell: ({ row }) => (
           <TextCell
             label="Tallas"
@@ -665,7 +667,6 @@ function LoadView({
       {
         id: "stock",
         header: "Stock c/u",
-        meta: { view: { tableOnly: true } },
         cell: ({ row }) => {
           const stocks = new Set(row.original.variants.map((v) => v.stock))
           return (
@@ -687,12 +688,13 @@ function LoadView({
         id: "estado",
         header: "Estado",
         meta: { view: { primary: true } },
-        cell: ({ row }) => <ItemState item={row.original} error={errors[row.original.id]} />,
+        cell: ({ row }) => (
+          <ItemState item={row.original} error={live.current.errors[row.original.id]} />
+        ),
       },
       {
-        id: "acciones",
+        id: "actions",
         header: () => <span className="sr-only">Acciones</span>,
-        meta: { view: { tableOnly: true } },
         cell: ({ row }) => (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -709,16 +711,6 @@ function LoadView({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem
-                onClick={() =>
-                  save(row.original.id, {
-                    state: row.original.state === "listo" ? "revisar" : "listo",
-                  })
-                }
-              >
-                {row.original.state === "listo" ? "Volver a revisar" : "Marcar como listo"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
                 variant="destructive"
                 onClick={() => save(row.original.id, { state: "quitado" })}
               >
@@ -730,7 +722,7 @@ function LoadView({
         ),
       },
     ],
-    [items, errors, store.currency],
+    [store.currency],
   )
   const table = useReactTable({
     data: items,
@@ -751,7 +743,7 @@ function LoadView({
         title="Cargar muchos"
         subtitle={
           counts
-            ? `${allPhotos} ${allPhotos === 1 ? "foto" : "fotos"} en ${counts.items} ${counts.items === 1 ? "producto" : "productos"} · ${counts.ready} listos${counts.doubts ? ` · ${counts.doubts} con dudas` : ""}${counts.withoutPrice ? ` · ${counts.withoutPrice} sin precio` : ""}`
+            ? `${allPhotos} ${allPhotos === 1 ? "foto" : "fotos"} en ${counts.items} ${counts.items === 1 ? "producto" : "productos"} · ${ready} ${ready === 1 ? "listo" : "listos"}${counts.doubts ? ` · ${counts.doubts} con dudas` : ""}${counts.withoutPrice ? ` · ${counts.withoutPrice} sin precio` : ""}`
             : "Nada pasa al catálogo hasta «Crear»."
         }
         primary={{
@@ -935,11 +927,7 @@ function ItemState({ item, error }: { item: LoadItem; error?: string }) {
     )
   if (!item.name.trim()) return <Badge variant="outline">Sin nombre</Badge>
   if (!item.listPriceCents) return <Badge variant="outline">Sin precio</Badge>
-  return item.state === "listo" ? (
-    <Badge variant="success">Listo</Badge>
-  ) : (
-    <Badge variant="secondary">Por revisar</Badge>
-  )
+  return <Badge variant="success">Listo para crear</Badge>
 }
 
 /** Las fotos de un producto de la carga: se arrastran a otro producto o se mueven con «Mover a…». */
