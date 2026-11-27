@@ -287,6 +287,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda».
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
+## Las piezas comunes
+
+- gestorIA no repite lo de `@odentia/ui-patterns`: todo formulario es `useAppForm` con sus campos
+  (`field.TextField`, `field.SelectField`, `field.Control`, `RadioChips`) dentro de `FormDrawer` o
+  `FormPanel`, en la columna lateral del armazón (`SideDockProvider`/`SideDockSlot` en `Shell`), con
+  el aviso de borrador común (`useDraftSaved`, `UnsavedDialog`); detalles con `DetailDrawer`; estados
+  con `EmptyState`, `ErrorState`, `LoadingState`; fechas con los controles de `dates/`. Lo único
+  propio es lo que lo común no tiene (`campos.tsx`: el monto con la moneda de la tienda). Una pieza
+  que falta se suma a `shared/` en su propio cambio, no se copia aquí. Lo vigila
+  `apps/web/src/lib/sin-duplicar.test.ts`: falla si vuelve un `Sheet` propio de formulario o una de
+  las piezas que se quitaron (`FormSheet`, `useDirty`, `SELECT_CLASSES`, `FormAlert`, `ErrorBlock`…).
+
 ## Trabajo
 
 - La mesa y la QA llevan las voces de gestorIA: comercial (la experta en vender), novato, desarrollo,
