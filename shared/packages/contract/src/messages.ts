@@ -26,6 +26,8 @@ export const CONTRACT_PATHS = {
   state: "/api/contract/state",
   /** La app le pregunta a Ariadna, la de la Ayuda, con su propia guía. */
   help: "/api/contract/help",
+  /** Lo que dijo la persona de esa respuesta: «¿Te sirvió?» o «Ninguna es lo que busco». */
+  helpFeedback: "/api/contract/help/feedback",
 } as const
 
 /**
@@ -470,8 +472,11 @@ const helpRef = z.string().regex(/^(faq|tema):.+$/, "Va como faq:<id> o tema:<id
  * - `verdict`: `seguro` (se muestra `shown` tal cual, o `written` si la redactó uniendo las de
  *   `shown`), `duda` (se ofrecen `offered` para elegir, de la más probable a la menos),
  *   `ninguna` (no está en la guía) o `datos` (pregunta por las cifras de su cuenta).
+ * - `askId`: la pregunta en la administración, para decir después qué le pareció a la persona
+ *   (`CONTRACT_PATHS.helpFeedback`).
  */
 export const helpAskAnswer = z.object({
+  askId: z.uuid(),
   via: z.enum(["jev", "respaldo"]),
   verdict: z.enum(["seguro", "duda", "ninguna", "datos"]),
   shown: z.array(helpRef),
@@ -479,3 +484,21 @@ export const helpAskAnswer = z.object({
   written: z.string().nullable(),
 })
 export type HelpAskAnswer = z.infer<typeof helpAskAnswer>
+
+/**
+ * Lo que dijo la persona de una respuesta (`POST` a `CONTRACT_PATHS.helpFeedback`, firmado), como
+ * en las clínicas: «¿Te sirvió?» (`helpful`) o, en la duda, «Ninguna es lo que busco»
+ * (`noneFits`). Uno de los dos, sin texto. Repetido, vale el último. La administración responde
+ * 200 (`{ ok: true }`), o 404 si esa pregunta no es de la app.
+ */
+export const helpFeedback = z
+  .object({
+    askId: z.uuid(),
+    helpful: z.boolean().optional(),
+    noneFits: z.literal(true).optional(),
+  })
+  .refine(
+    (input) => (input.helpful === undefined) !== (input.noneFits === undefined),
+    "Va «helpful» o «noneFits», uno de los dos",
+  )
+export type HelpFeedback = z.infer<typeof helpFeedback>

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   char,
   check,
   foreignKey,
@@ -178,9 +179,10 @@ export const APP_HELP_ASK_VERDICTS = ["seguro", "duda", "ninguna", "datos", "red
 /**
  * Una pregunta de una app que es otro sistema a la Ayuda (`CONTRACT_PATHS.help`): como
  * `help_ask` de las clínicas, sin el texto de la pregunta ni la guía, solo la app, cómo se decidió
- * y qué. Se reserva antes de decidir (el tope diario de cada app) y se completa al responder; si
- * algo falla en medio, queda contada y sin respuesta. Sin `GRANT`: la escribe la conexión
- * propietaria al responder el acuerdo.
+ * y qué, y lo que dijo la persona de la respuesta («¿Te sirvió?», «Ninguna es lo que busco»). Se
+ * reserva antes de decidir (el tope diario de cada app) y se completa al responder; si algo falla
+ * en medio, queda contada y sin respuesta. Sin `GRANT`: la escribe la conexión propietaria al
+ * responder el acuerdo.
  */
 export const appHelpAsk = adminSchema.table(
   "app_help_ask",
@@ -189,6 +191,10 @@ export const appHelpAsk = adminSchema.table(
     app: text("app").notNull(),
     via: text("via"),
     verdict: text("verdict"),
+    /** «¿Te sirvió?» en el panel de la app: un sí o un no sobre la respuesta, sin texto. */
+    helpful: boolean("helpful"),
+    /** En la duda, la persona tocó «Ninguna es lo que busco». */
+    noneFits: boolean("none_fits").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

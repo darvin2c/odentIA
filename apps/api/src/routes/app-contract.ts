@@ -16,6 +16,7 @@ import {
   CONTRACT_MAX_HELP_BYTES,
   CONTRACT_PATHS,
   helpAskQuestion,
+  helpFeedback,
   stateQuestion,
 } from "@odentia/contract"
 import { verifySignedMessage } from "@odentia/contract/signing"
@@ -25,6 +26,7 @@ import {
   answerAppHelp,
   answerAppState,
   type HelpDecider,
+  rateAppHelp,
   receiveAppEvent,
   recordAppAiUsage,
   type Storage,
@@ -50,7 +52,7 @@ export interface AppContractDeps {
 
 /** ¿Es una de las direcciones del acuerdo? */
 export function isContractPath(path: string): boolean {
-  return path === CONTRACT_PATHS.events || path === CONTRACT_PATHS.state || path === CONTRACT_PATHS.help
+  return (Object.values(CONTRACT_PATHS) as string[]).includes(path)
 }
 
 /**
@@ -127,6 +129,14 @@ export async function answerAppContract(
         (entries) => deps.ownerDb.transaction((tx) => recordAppAiUsage(tx as Db, peer.app, "ayuda", entries)),
       ),
     )
+  }
+  if (c.req.path === CONTRACT_PATHS.helpFeedback) {
+    const parsed = helpFeedback.safeParse(json)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => {
+      await rateAppHelp(deps.ownerDb, peer.app, parsed.data)
+      return { ok: true as const }
+    })
   }
   const parsed = stateQuestion.safeParse(json)
   if (!parsed.success) return validationError(c, parsed.error.issues)

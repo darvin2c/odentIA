@@ -23,6 +23,8 @@ CREATE TABLE "admin"."app_help_ask" (
 	"app" text NOT NULL,
 	"via" text,
 	"verdict" text,
+	"helpful" boolean,
+	"none_fits" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "app_help_ask_app_check" CHECK ("admin"."app_help_ask"."app" IN ('gestoria')),
 	CONSTRAINT "app_help_ask_via_check" CHECK ("admin"."app_help_ask"."via" IS NULL OR "admin"."app_help_ask"."via" IN ('jev','respaldo')),

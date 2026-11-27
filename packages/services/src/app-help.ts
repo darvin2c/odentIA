@@ -1,5 +1,11 @@
 import { withoutPersonData } from "@odentia/clinical"
-import { HELP_GUIDE_MAX_OPTIONS, type HelpAskAnswer, type HelpAskQuestion, type HelpGuideTopic } from "@odentia/contract"
+import {
+  HELP_GUIDE_MAX_OPTIONS,
+  type HelpAskAnswer,
+  type HelpAskQuestion,
+  type HelpFeedback,
+  type HelpGuideTopic,
+} from "@odentia/contract"
 import type { Db } from "@odentia/db"
 import {
   APP_AI_USAGE_ORIGINS,
@@ -10,7 +16,7 @@ import {
 } from "@odentia/db/schema/admin-accounts"
 import { and, count, eq, gte, sql } from "drizzle-orm"
 import type { AiUsageEntry } from "./ai-usage.js"
-import { invalidField, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { decideHelp, type HelpDecided, readHelpPrevious } from "./help.js"
 import { type HelpDecider, type HelpOption, helpOptions, helpScreenName, type HelpWriter } from "./help-decision.js"
 import type { HelpTopic } from "./help-guide.js"
@@ -116,12 +122,27 @@ export async function answerAppHelp(
     .set({ via, verdict: via !== "jev" ? null : decided.written ? "redactada" : selection.verdict })
     .where(eq(appHelpAsk.id, askId))
   return {
+    askId,
     via,
     verdict: selection.verdict,
     shown: selection.shown.map(appHelpRef),
     offered: selection.offered.map(appHelpRef),
     written: decided.written ?? null,
   }
+}
+
+/**
+ * Lo que dijo la persona de una respuesta en el panel de la app (`CONTRACT_PATHS.helpFeedback`):
+ * «¿Te sirvió?» o «Ninguna es lo que busco», sin texto, sobre la fila de esa pregunta, como
+ * `rateHelp` y `markHelpNoneFits` en las clínicas. Solo una pregunta de esa misma app.
+ */
+export async function rateAppHelp(ownerDb: Db, app: SaasAccountExternalApp, input: HelpFeedback): Promise<void> {
+  const [row] = await ownerDb
+    .update(appHelpAsk)
+    .set(input.noneFits ? { noneFits: true } : { helpful: input.helpful ?? null })
+    .where(and(eq(appHelpAsk.app, app), eq(appHelpAsk.id, input.askId)))
+    .returning({ id: appHelpAsk.id })
+  if (!row) throw notFound("Consulta de ayuda")
 }
 
 const cleanInt = (v: number | null | undefined) =>

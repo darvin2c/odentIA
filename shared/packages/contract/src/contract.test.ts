@@ -11,6 +11,7 @@ import {
   HELP_GUIDE_MAX_TOPICS,
   helpAskAnswer,
   helpAskQuestion,
+  helpFeedback,
   MAX_TEAM_MEMBERS,
   stateQuestion,
 } from "./messages.js"
@@ -383,10 +384,29 @@ describe("la app le pregunta a la Ayuda", () => {
     )
   })
 
-  it("responde con ids de la guía, nunca frases", () => {
-    const answer = { via: "jev", verdict: "duda", shown: [], offered: ["faq:pedido-anular", "tema:pedidos"], written: null }
+  const ASK_ID = "6f1d8a52-3c1b-4b8e-9f3e-2a7c5d9e0b11"
+
+  it("responde con ids de la guía, nunca frases, y el id de la pregunta", () => {
+    const answer = { askId: ASK_ID, via: "jev", verdict: "duda", shown: [], offered: ["faq:pedido-anular", "tema:pedidos"], written: null }
     expect(helpAskAnswer.safeParse(answer).success).toBe(true)
     expect(helpAskAnswer.safeParse({ ...answer, offered: ["¿Cómo anulo un pedido?"] }).success).toBe(false)
     expect(helpAskAnswer.safeParse({ ...answer, via: "exacta" }).success).toBe(false)
+    expect(helpAskAnswer.safeParse({ ...answer, askId: "pregunta-1" }).success).toBe(false)
+    const { askId: _, ...withoutId } = answer
+    expect(helpAskAnswer.safeParse(withoutId).success).toBe(false)
+  })
+
+  it("lo que dijo la persona: «¿Te sirvió?» o «Ninguna es lo que busco», uno de los dos", () => {
+    expect(CONTRACT_PATHS.helpFeedback).toBe("/api/contract/help/feedback")
+    expect(helpFeedback.safeParse({ askId: ASK_ID, helpful: true }).success).toBe(true)
+    expect(helpFeedback.safeParse({ askId: ASK_ID, helpful: false }).success).toBe(true)
+    expect(helpFeedback.safeParse({ askId: ASK_ID, noneFits: true }).success).toBe(true)
+    for (const bad of [
+      { askId: ASK_ID },
+      { askId: ASK_ID, helpful: true, noneFits: true },
+      { askId: ASK_ID, noneFits: false },
+      { askId: "pregunta-1", helpful: true },
+    ])
+      expect(helpFeedback.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
   })
 })

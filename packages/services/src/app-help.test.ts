@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto"
 import { HELP_GUIDE_MAX_OPTIONS, type HelpAskQuestion } from "@odentia/contract"
 import { appAiUsage, appHelpAsk } from "@odentia/db/schema/admin-accounts"
 import { desc, eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import type { AdminAnswer } from "./admin-request.js"
-import { APP_HELP_DAILY_LIMIT, answerAppHelp, recordAppAiUsage } from "./app-help.js"
+import { APP_HELP_DAILY_LIMIT, answerAppHelp, rateAppHelp, recordAppAiUsage } from "./app-help.js"
 import { HELP_AREA_QUESTION, HELP_DATA_QUESTION, HELP_SELECT_MAX_OPTIONS, HELP_SELECT_QUESTION, type HelpDecider } from "./help-decision.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -92,7 +93,7 @@ describe("la Ayuda de una app", () => {
   it("segura: muestra la pregunta frecuente por su id, con las palabras de la app", async () => {
     const jev = fakeJev({ "¿Cómo anulo un pedido?": 0.96 })
     const answer = await answerAppHelp(ownerDb, "gestoria", ask("quiero anular una venta"), jev.decider)
-    expect(answer).toEqual({ via: "jev", verdict: "seguro", shown: ["faq:pedido-anular"], offered: [], written: null })
+    expect(answer).toEqual({ askId: expect.any(String), via: "jev", verdict: "seguro", shown: ["faq:pedido-anular"], offered: [], written: null })
     // Jev lee la pantalla por su nombre (nunca la ruta con su id) y el producto de la app.
     const select = jev.seen.find((item) => item.id === HELP_SELECT_QUESTION)
     expect(select?.state).toContain("Pantalla: Pedidos")
@@ -113,6 +114,19 @@ describe("la Ayuda de una app", () => {
     expect(answer.offered).toEqual(["faq:pedido-anular", "faq:pedido-cobrar"])
   })
 
+  it("«¿Te sirvió?» y «Ninguna es lo que busco» quedan en la pregunta, solo de esa app", async () => {
+    const { askId } = await answerAppHelp(ownerDb, "gestoria", ask("¿qué hago con un pedido?"), fakeJev({ "¿Cómo anulo un pedido?": 0.5, "¿Cómo cobro un pedido?": 0.4 }).decider)
+    const row = async () => (await ownerDb.select().from(appHelpAsk).where(eq(appHelpAsk.id, askId)))[0]
+    expect(await row()).toMatchObject({ helpful: null, noneFits: false })
+    await rateAppHelp(ownerDb, "gestoria", { askId, noneFits: true })
+    await rateAppHelp(ownerDb, "gestoria", { askId, helpful: false })
+    expect(await row()).toMatchObject({ helpful: false, noneFits: true })
+    // Otra app no la alcanza, ni una pregunta que no existe.
+    await expect(rateAppHelp(ownerDb, "otra" as "gestoria", { askId, helpful: true })).rejects.toMatchObject({ status: 404 })
+    await expect(rateAppHelp(ownerDb, "gestoria", { askId: randomUUID(), helpful: true })).rejects.toMatchObject({ status: 404 })
+    expect(await row()).toMatchObject({ helpful: false, noneFits: true })
+  })
+
   it("sin Jev: responden las palabras (respaldo)", async () => {
     const answer = await answerAppHelp(ownerDb, "gestoria", ask("¿Cómo anulo un pedido?"), null)
     expect(answer.via).toBe("respaldo")
@@ -124,7 +138,7 @@ describe("la Ayuda de una app", () => {
   it("lo que solo es el dato de una persona no viaja a Jev: no está en la guía", async () => {
     const jev = fakeJev({ "¿Cómo anulo un pedido?": 0.96 })
     const answer = await answerAppHelp(ownerDb, "gestoria", ask("ana@correo.com 987 654 321"), jev.decider)
-    expect(answer).toEqual({ via: "respaldo", verdict: "ninguna", shown: [], offered: [], written: null })
+    expect(answer).toEqual({ askId: expect.any(String), via: "respaldo", verdict: "ninguna", shown: [], offered: [], written: null })
     expect(jev.seen).toEqual([])
   })
 
