@@ -220,7 +220,6 @@ export default function PatientPhone() {
                         <b>Opción A · Resina</b>
                         <b>S/ 300</b>
                       </span>
-                      <span className="dpp-sub">Recomendada por la Dra. Paredes</span>
                     </span>
                     <span className="dpp-opt">
                       <span className="dpp-opt-row">
