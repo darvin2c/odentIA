@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
 import type { Person } from "../cuenta.js"
+import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
 
 /**
@@ -10,7 +11,9 @@ import { inStore } from "../tiendas.js"
  * pedidos, pagos, kardex y conversaciones que usa todo lo demás. Solo Dueño y Administrador
  * (`reportes.ver`). Los pedidos de prueba no cuentan.
  *
- * Los días van en UTC, como «hoy» de los pedidos: la zona horaria de la tienda queda pendiente.
+ * Los periodos empiezan a las 00:00 de la tienda, con su hora (`hora.ts`): «hoy», desde el lunes
+ * o desde el día 1. Lo que falta cobrar sale del saldo de cada pedido (`order_balance`, ADR 0222),
+ * el mismo que ve el pedido.
  */
 
 export const REPORT_PERIODS = ["hoy", "semana", "mes"] as const
@@ -19,13 +22,11 @@ export const reportPeriod = z.enum(REPORT_PERIODS).default("mes")
 
 const DAY = 86_400_000
 
-/** Desde cuándo cuenta el periodo: hoy, desde el lunes o desde el día 1, en UTC. */
-export function periodStart(period: ReportPeriod, today: string): Date {
-  const day = new Date(`${today}T00:00:00Z`)
-  if (period === "hoy") return day
-  if (period === "mes") return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1))
-  const weekday = (day.getUTCDay() + 6) % 7
-  return new Date(day.getTime() - weekday * DAY)
+/** Desde cuándo cuenta el periodo: hoy, desde el lunes o desde el día 1, a las 00:00 de la tienda. */
+export function periodStart(period: ReportPeriod, today: string, timeZone: string): Date {
+  if (period === "hoy") return startOfDay(timeZone, today)
+  if (period === "mes") return startOfDay(timeZone, `${today.slice(0, 8)}01`)
+  return startOfDay(timeZone, addDays(today, -weekdayOf(today)))
 }
 
 const n = (value: unknown) => Number(value ?? 0)
@@ -35,38 +36,35 @@ export async function storeReport(
   person: Person,
   storeId: string,
   period: ReportPeriod,
-  today: string,
   now = new Date(),
 ) {
-  const from = periodStart(period, today)
-  // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
-  const since = from.toISOString()
-  const at = now.toISOString()
   return inStore(appDb, person, storeId, "reportes.ver", async (tx) => {
+    const { timeZone, today } = await storeClockIn(tx, storeId, now)
+    const from = periodStart(period, today, timeZone)
+    // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
+    const since = from.toISOString()
+    const at = now.toISOString()
     // Vendido y cobrado: los pagos confirmados del periodo, por pedido.
     const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
       select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
       from order_payment p join sale_order o on o.id = p.order_id
       where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
         and p.reviewed_at >= ${since}`)
-    // Falta cobrar: lo abierto, hoy.
+    // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
+    // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
     const [pending] = await tx.execute<{
       to_confirm: string
       to_confirm_cents: string
-      to_pay: string
-      to_pay_cents: string
-      on_delivery: string
-      on_delivery_cents: string
+      due: string
+      due_cents: string
     }>(sql`
       select
-        count(*) filter (where o.state = 'por_confirmar') as to_confirm,
-        coalesce(sum(o.total_cents) filter (where o.state = 'por_confirmar'), 0) as to_confirm_cents,
-        count(*) filter (where o.state = 'por_pagar') as to_pay,
-        coalesce(sum(o.total_cents) filter (where o.state = 'por_pagar'), 0) as to_pay_cents,
-        count(*) filter (where o.state in ('por_salir','en_camino') and o.payment_collection = 'al_recibir') as on_delivery,
-        coalesce(sum(o.total_cents) filter (where o.state in ('por_salir','en_camino') and o.payment_collection = 'al_recibir'), 0) as on_delivery_cents
-      from sale_order o
-      where o.store_id = ${storeId} and o.test = false
+        count(*) filter (where b.pending_cents > 0) as to_confirm,
+        coalesce(sum(b.pending_cents), 0) as to_confirm_cents,
+        count(*) filter (where b.due_cents > 0) as due,
+        coalesce(sum(b.due_cents), 0) as due_cents
+      from order_balance b join sale_order o on o.id = b.order_id
+      where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and (o.state <> 'por_pagar' or o.price_expires_at is null or o.price_expires_at > ${at})`)
     // Conversaciones del periodo y cuántas compraron; quienes volvieron a comprar (siempre).
     const [talks] = await tx.execute<{ total: string; bought: string }>(sql`
@@ -143,9 +141,10 @@ export async function storeReport(
         ticketCents: soldOrders ? Math.round(n(sold?.cents) / soldOrders) : 0,
       },
       pending: {
+        /** Los pagos que esperan a una persona: no son «falta cobrar». */
         toConfirm: { orders: n(pending?.to_confirm), cents: n(pending?.to_confirm_cents) },
-        toPay: { orders: n(pending?.to_pay), cents: n(pending?.to_pay_cents) },
-        onDelivery: { orders: n(pending?.on_delivery), cents: n(pending?.on_delivery_cents) },
+        /** Falta cobrar = total − confirmado − por confirmar, pedido por pedido. */
+        due: { orders: n(pending?.due), cents: n(pending?.due_cents) },
       },
       conversations: { total: n(talks?.total), bought: n(talks?.bought) },
       returning: n(again?.customers),

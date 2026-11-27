@@ -434,6 +434,62 @@ describe("Sofi vende con las reglas de la tienda", () => {
     expect(lastSofi(sent).text).toContain("Te paso con una persona")
     expect(sent.conversation.waitingReason).toBe("Un reclamo: llegó roto")
   })
+
+  it("un adelanto: anota la captura y dice cuánto falta, con el mismo saldo que ve el equipo", async () => {
+    const id = await newTest()
+    const args = {
+      lineas: [{ variante_id: ids.t38, cantidad: 1 }],
+      entrega_id: ids.reparto,
+      envio_cobrado: 0,
+    }
+    await write(
+      id,
+      "La quiero, soy Diana",
+      use("cotizar", () => args),
+      (r) => ({
+        content: `Te queda en ${lastTool(r).total} con envío gratis. ¿Lo confirmo?`,
+      }),
+    )
+    let number = ""
+    await write(
+      id,
+      "Sí, confirmo",
+      use("armar_pedido", () => ({ ...args, nombre: "Diana", direccion: "Av. Caminos del Inca" })),
+      (r) => {
+        number = lastTool(r).pedido
+        return { content: `Listo, tu pedido ${number} por S/ 129.` }
+      },
+    )
+    // Paga S/ 80 de S/ 129: Sofi sabe que faltan S/ 49 y lo puede decir.
+    const part = await write(
+      id,
+      "Te yapeé 80 de adelanto, el resto al recibir",
+      use("anotar_pago", () => ({ pedido: number, monto: 80 })),
+      (r) => {
+        expect(lastTool(r)).toMatchObject({
+          ok: true,
+          monto_anotado: "S/ 80",
+          falta_pagar: "S/ 49",
+        })
+        return { toolCalls: [toolCall("ver_pedidos", {})] }
+      },
+      (r) => {
+        const [order] = lastTool(r).pedidos as Json[]
+        // Lo que espera a una persona no se dice cobrado: «pagado_confirmado» no aparece.
+        expect(order).toMatchObject({ por_confirmar: "S/ 80", falta_pagar: "S/ 49" })
+        expect(order).not.toHaveProperty("pagado_confirmado")
+        return {
+          content:
+            "Anoté tu adelanto de S/ 80: una persona del equipo lo revisa. Falta pagar S/ 49 al recibir.",
+        }
+      },
+    )
+    expect(lastSofi(part).text).toContain("Falta pagar S/ 49")
+    expect(part.conversation.orders[0].balance).toMatchObject({
+      pendingCents: 8000,
+      dueCents: 4900,
+    })
+  })
 })
 
 describe("lo que escribe el cliente mientras Sofi responde", () => {

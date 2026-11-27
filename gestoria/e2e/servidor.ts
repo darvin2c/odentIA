@@ -2,8 +2,8 @@
  * El entorno del recorrido de gestorIA en un navegador (ADR 0214): su base de verdad
  * (testcontainers), su servidor de verdad (`createApp`), una cuenta de mentira que firma el token
  * de quien se elija y una administración de mentira que responde el estado de la tienda. Siembra
- * una tienda abierta por la administración, un pedido de soporte por aceptar y una conversación
- * que espera a una persona porque Sofi está apagada. Solo pruebas: nunca corre en producción.
+ * una tienda abierta por la administración, con Lucía en Ventas, un pedido de soporte por aceptar
+ * y una conversación que espera a una persona porque Sofi está apagada. Solo pruebas: nunca corre en producción.
  *
  * La cuenta de mentira: `GET /api/auth/get-session` y `/api/auth/token` responden por quien diga
  * `POST /__como/<persona>` (`nadie`: sin sesión), o por quien entró con su correo y `CLAVE`.
@@ -13,7 +13,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:http"
-import { conversation, conversationMessage } from "@gestoria/db"
+import { accountCopy, conversation, conversationMessage, storeMember } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { serve } from "@hono/node-server"
 import {
@@ -141,6 +141,14 @@ await ask({
     owner: { userId: rosa.id, name: rosa.name, email: rosa.email },
   },
 })
+// Lucía atiende con el rol de Ventas: la Ayuda le dice lo que su rol no hace.
+const lucia = PEOPLE.lucia
+await db.ownerDb
+  .insert(accountCopy)
+  .values({ userId: lucia.id, name: lucia.name, email: lucia.email })
+await db.ownerDb
+  .insert(storeMember)
+  .values({ storeId: STORE_ID, userId: lucia.id, role: "sales", addedBy: rosa.id })
 await ask({
   type: "soporte.entrar",
   timestamp: now(),

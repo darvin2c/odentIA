@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
+import { dayIn } from "./hora.js"
 import { mercadoPago } from "./link-de-pago.js"
 
 const ACCOUNT = "https://api.gestoria.test"
@@ -536,8 +537,9 @@ describe("el link de pago (Mercado Pago, con un proveedor controlado)", () => {
     })
     expect((await mpNotice("9002")).status).toBe(200)
     const detail = (await call("lucia", "GET", `${base}/pedidos/${other}`)).json.order
-    // El dinero llegó: cuenta como recibido, pero espera a una persona.
-    expect(detail).toMatchObject({ state: "por_confirmar", paid: true })
+    // El dinero llegó: cuenta como recibido, pero espera a una persona; no está «Pagado».
+    expect(detail).toMatchObject({ state: "por_confirmar", moneyIn: true, paid: false })
+    expect(detail.balance).toMatchObject({ confirmedCents: 0, pendingCents: 10000, dueCents: 3900 })
     expect(detail.payments[0].note).toContain("no coincide")
     mp.payments.set("9003", { id: 9003, status: "rejected", external_reference: other })
     // Un pago rechazado o que la cuenta no conoce no hace nada, y responde igual que los demás.
@@ -643,23 +645,166 @@ describe("si al pagar no alcanza el stock", () => {
   })
 })
 
+describe("el pago en partes (Diana, tablero 7)", () => {
+  let id = ""
+  const capture = async (amountCents: number, extra: Record<string, string> = {}) => {
+    const form = new FormData()
+    form.set("amountCents", String(amountCents))
+    for (const [key, value] of Object.entries(extra)) form.set(key, value)
+    return call("lucia", "POST", `${base}/pedidos/${id}/comprobante`, undefined, form)
+  }
+  const dueInReports = async () =>
+    (await call("rosa", "GET", `${base}/reportes?periodo=hoy`)).json.pending.due.cents as number
+
+  it("un adelanto de S/ 80 de S/ 117 deja listo para salir, sin «Pagado» ni «Pago doble»", async () => {
+    // Zapatilla a S/ 107 (negociada) + envío S/ 10 = S/ 117.
+    id = (
+      await call(
+        "lucia",
+        "POST",
+        `${base}/pedidos`,
+        order({
+          customerName: "Diana Flores",
+          lines: [{ variantId: ids.t38, quantity: 1, unitCents: 10700 }],
+        }),
+      )
+    ).json.order.id
+    const stock = (await stockOf(ids.t38)).stock
+    const sent = await capture(8000, { methodId: ids.yape })
+    expect(sent.json.order.state).toBe("por_confirmar")
+    expect(sent.json.order.balance).toMatchObject({
+      confirmedCents: 0,
+      pendingCents: 8000,
+      dueCents: 3700,
+    })
+    const payment = sent.json.order.payments[0]
+    expect(payment).toMatchObject({ methodName: "Yape", methodType: "68", overIfConfirmedCents: 0 })
+    const ok = await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${payment.id}/revision`, {
+      decision: "confirmar",
+    })
+    expect(ok.json.order).toMatchObject({ state: "por_salir", paid: false, stockPending: false })
+    expect(ok.json.order.balance).toMatchObject({ confirmedCents: 8000, dueCents: 3700 })
+    expect(ok.json.order.payments[0].note).toBeNull()
+    // El primer pago confirmado baja el stock, como un pago completo.
+    expect((await stockOf(ids.t38)).stock).toBe(stock - 1)
+    // El aviso dice cuánto falta.
+    const notice = (ok.json.order.events as Json[]).filter((e) => e.action === "aviso").at(-1)
+    expect(String(notice?.detail.texto)).toMatch(/Falta pagar S\/\s37/)
+    // La lista dice la misma cifra.
+    const list = await call("lucia", "GET", `${base}/pedidos?filtro=para_entregar`)
+    const row = (list.json.orders as Json[]).find((o) => o.id === id)
+    expect(row?.balance).toMatchObject({ dueCents: 3700 })
+    expect(row?.paid).toBe(false)
+  })
+
+  it("la captura del resto que no coincide: sigue por salir, le falta lo mismo y se le pide otra", async () => {
+    const rest = await capture(3700, { methodId: ids.yape })
+    expect(rest.json.order).toMatchObject({ state: "por_salir", paid: false })
+    expect(rest.json.order.balance).toMatchObject({ pendingCents: 3700, dueCents: 0 })
+    // Aparece en «Pago por confirmar» aunque el pedido ya salga.
+    const waiting = await call("lucia", "GET", `${base}/pedidos?filtro=por_confirmar`)
+    expect((waiting.json.orders as Json[]).some((o) => o.id === id)).toBe(true)
+    const payment = (rest.json.order.payments as Json[]).find((p) => p.status === "por_confirmar")
+    const rejected = await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos/${id}/pagos/${payment?.id}/revision`,
+      { decision: "no_coincide", reason: "No llegó a la cuenta" },
+    )
+    expect(rejected.json.order).toMatchObject({ state: "por_salir", paid: false })
+    expect(rejected.json.order.balance).toMatchObject({ pendingCents: 0, dueCents: 3700 })
+    const notice = (rejected.json.order.events as Json[]).filter((e) => e.action === "aviso").at(-1)
+    expect(String(notice?.detail.texto)).toContain("No pudimos confirmar el pago")
+  })
+
+  it("al entregar se cobra lo que falta, con su medio, y queda «Pagado»", async () => {
+    const before = await dueInReports()
+    const missing = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {})
+    expect(missing.status).toBe(400)
+    expect(missing.json.error.fields).toHaveProperty("collectedCents")
+    // Un medio que no se cobra al recibir no vale en la puerta.
+    const wrong = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 3700,
+      methodId: ids.yape,
+    })
+    expect(wrong.status).toBe(400)
+    expect(wrong.json.error.fields).toHaveProperty("methodId")
+    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 3700,
+      methodId: ids.efectivo,
+    })
+    expect(done.json.order).toMatchObject({ state: "entregado", paid: true })
+    expect(done.json.order.balance).toMatchObject({ confirmedCents: 11700, dueCents: 0 })
+    // Cada pago con su medio; el que no coincidió queda en la lista, sin contar.
+    expect(
+      done.json.order.payments.map((p: Json) => [p.methodName, p.amountCents, p.status]),
+    ).toEqual([
+      ["Yape", 8000, "confirmado"],
+      ["Yape", 3700, "no_coincide"],
+      ["Efectivo", 3700, "confirmado"],
+    ])
+    expect(done.json.order.payments[2]).toMatchObject({ kind: "al_recibir", note: null })
+    // Reportes deja de contarlo en «Falta cobrar».
+    expect(before - (await dueInReports())).toBe(3700)
+  })
+
+  it("ya pagado no acepta otra captura; con una por confirmar, tampoco por lo mismo", async () => {
+    const again = await capture(1000)
+    expect(again.status).toBe(409)
+    expect(again.json.error.code).toBe("NOTHING_DUE")
+    // Otro pedido: la captura del total espera; otra más no cabe hasta revisarla.
+    id = (await call("lucia", "POST", `${base}/pedidos`, order())).json.order.id
+    expect((await capture(13900)).status).toBe(200)
+    const second = await capture(13900)
+    expect(second.status).toBe(409)
+    expect(second.json.error.message).toContain("por confirmar")
+  })
+})
+
+describe("la hora de la tienda", () => {
+  it("la cambia quien configura; con ella se cuenta «hoy»", async () => {
+    const me = await call("rosa", "GET", "/api/yo")
+    expect((me.json.stores as Json[]).find((s) => s.id === storeId)?.timeZone).toBe("America/Lima")
+    expect((await call("lucia", "PATCH", `${base}/hora`, { timeZone: "Asia/Tokyo" })).status).toBe(
+      403,
+    )
+    const bad = await call("rosa", "PATCH", `${base}/hora`, { timeZone: "America/Narnia" })
+    expect(bad.status).toBe(400)
+    expect(bad.json.error.fields).toHaveProperty("timeZone")
+    const ok = await call("rosa", "PATCH", `${base}/hora`, { timeZone: "Asia/Tokyo" })
+    expect(ok.json.store.timeZone).toBe("Asia/Tokyo")
+    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)
+    expect(list.json.today).toBe(dayIn("Asia/Tokyo"))
+    await call("rosa", "PATCH", `${base}/hora`, { timeZone: "America/Lima" })
+    expect((await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)).json.today).toBe(
+      dayIn("America/Lima"),
+    )
+  })
+})
+
 describe("la lista y quién puede", () => {
-  it("filtra por estado y cuenta «Para entregar hoy»", async () => {
-    const today = new Date().toISOString().slice(0, 10)
+  it("filtra por estado y cuenta «Para entregar hoy» con el día de la tienda", async () => {
+    // El de Lima, no el del servidor: desde las 19:00 de Lima, en UTC ya es mañana.
+    const today = dayIn("America/Lima")
     await call(
       "lucia",
       "POST",
       `${base}/pedidos`,
       order({ paymentMethodId: ids.efectivo, deliverOn: today }),
     )
-    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy&hoy=${today}`)
+    // Lo que diga el navegador no cuenta.
+    const list = await call("lucia", "GET", `${base}/pedidos?filtro=hoy&hoy=1999-01-01`)
+    expect(list.json.today).toBe(today)
     expect(list.json.orders.length).toBeGreaterThan(0)
     expect(list.json.counts.hoy).toBe(list.json.orders.length)
     expect(list.json.orders.every((o: Json) => ["por_salir", "en_camino"].includes(o.state))).toBe(
       true,
     )
+    // «Pago por confirmar»: todo pedido con un pago que espera a una persona.
     const confirm = await call("lucia", "GET", `${base}/pedidos?filtro=por_confirmar`)
-    expect(confirm.json.orders.every((o: Json) => o.state === "por_confirmar")).toBe(true)
+    expect(confirm.json.orders.length).toBeGreaterThan(0)
+    expect(confirm.json.orders.every((o: Json) => o.balance.pendingCents > 0)).toBe(true)
+    expect(confirm.json.counts.por_confirmar).toBe(confirm.json.orders.length)
     expect((await call("lucia", "GET", `${base}/pedidos?filtro=nada`)).status).toBe(400)
   })
 

@@ -43,6 +43,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@ta
 import {
   Bot,
   ChartColumn,
+  CircleHelp,
   Copy,
   CreditCard,
   KeyRound,
@@ -83,6 +84,7 @@ import {
 } from "./lib/api"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
+import { AskForHelpSheet } from "./pedir-ayuda"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
 export function useMe() {
@@ -141,18 +143,24 @@ function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void
 }
 
 /**
- * «Pedir ayuda» en la cabecera (lienzo «Una cuenta, todas las apps», decisión 6): lleva a la
- * ayuda del soporte de gestorIA, en «Plan y pagos», mientras gestorIA no tenga su propia Ayuda.
- * Es del Dueño, como el plan (el servidor lo exige igual).
+ * Abre «Pedir ayuda» de la tienda, o `null` si el rol de quien está no pide ayuda (soporte). Es un
+ * solo panel para la cabecera y la Ayuda, montado en el armazón: lo escrito sin enviar sigue ahí
+ * al volver a abrirlo, desde cualquier pantalla de la tienda.
  */
-function AskForHelp({ store }: { store: MyStore }) {
+const AskForHelpContext = createContext<(() => void) | null>(null)
+
+export function useAskForHelp(): (() => void) | null {
+  return useContext(AskForHelpContext)
+}
+
+/**
+ * «Pedir ayuda» en la cabecera, para todo el equipo (`ayuda.pedir`; lienzo «gestorIA como
+ * odentIA», tablero 19): abre «Pedir ayuda» ahí mismo, con la pantalla en la que está.
+ */
+function AskForHelp({ onOpen }: { onOpen: () => void }) {
   const compact = useHeaderCompact()
   return (
-    <Button
-      variant="outline"
-      className="elevated h-9 gap-2 rounded-full px-3"
-      render={<Link to="/tiendas/$id/plan" params={{ id: store.id }} hash="plan-ayuda" />}
-    >
+    <Button variant="outline" className="elevated h-9 gap-2 rounded-full px-3" onClick={onOpen}>
       <LifeBuoy className="size-4" aria-hidden />
       <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
     </Button>
@@ -284,6 +292,9 @@ export function Shell({
   children: ReactNode
 }) {
   const { pathname } = useLocation()
+  const [asking, setAsking] = useState(false)
+  const canAsk = store?.permissions.includes("ayuda.pedir") ?? false
+  const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
   const items: AppShellNavItem[] = store
@@ -325,6 +336,10 @@ export function Shell({
               },
             ]
       }
+      // La Ayuda, al pie del menú y para todos (tablero 19), como en las clínicas.
+      footerItems={
+        store ? [{ label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp }] : undefined
+      }
       brand={<Brand />}
       brandIcon={<Brand compact />}
       switcher={store ? <StoreSwitcher me={me} store={store} /> : undefined}
@@ -337,13 +352,26 @@ export function Shell({
       }
       onSignOut={() => void signOut()}
     >
-      <HeaderUtilitiesProvider
-        value={{
-          utilities: store?.permissions.includes("plan") ? <AskForHelp store={store} /> : undefined,
-        }}
-      >
-        {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
-      </HeaderUtilitiesProvider>
+      <AskForHelpContext.Provider value={openAsk}>
+        <HeaderUtilitiesProvider
+          value={{
+            // En la Ayuda, «Pedir ayuda» ya es el botón de la página.
+            utilities:
+              openAsk && !pathname.endsWith("/ayuda") ? <AskForHelp onOpen={openAsk} /> : undefined,
+          }}
+        >
+          {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+        </HeaderUtilitiesProvider>
+        {/* Uno por tienda: lo escrito en una no aparece en otra. */}
+        {store && openAsk ? (
+          <AskForHelpSheet
+            key={store.id}
+            store={store}
+            open={asking}
+            onClose={() => setAsking(false)}
+          />
+        ) : null}
+      </AskForHelpContext.Provider>
     </AppShell>
   )
 }
