@@ -827,7 +827,7 @@ describe("la lista y quién puede", () => {
   })
 })
 
-describe("corregir sin anular (Andrea, tablero 7)", () => {
+describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
   const v = { t37: "", t38: "", zonas: "" }
   let today = ""
   /** El día siguiente al de la tienda («2026-11-26»). */
@@ -1032,5 +1032,78 @@ describe("corregir sin anular (Andrea, tablero 7)", () => {
     const saved = await change(created, { lines: [{ variantId: v.t37, quantity: 2 }] })
     expect(saved.json.order).toMatchObject({ state: "por_pagar", totalCents: 26800 })
     expect([await stock(v.t37), await stock(v.t38)]).toEqual(before)
+  })
+
+  it("«No se entregó» vuelve a «Por salir» el día elegido, sin mover el stock", async () => {
+    const jorge = (
+      await call(
+        "lucia",
+        "POST",
+        `${base}/pedidos`,
+        andrea({ customerName: "Jorge Paredes", paymentMethodId: ids.efectivo, deliverOn: today }),
+      )
+    ).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${jorge}/salio`, {})
+    const before = await stock(v.t37)
+    const past = await call("lucia", "POST", `${base}/pedidos/${jorge}/no-se-entrego`, {
+      reason: "No contestó",
+      deliverOn: "2020-01-01",
+    })
+    expect(past.status).toBe(400)
+    expect(past.json.error.fields).toHaveProperty("deliverOn")
+    const missed = await call("lucia", "POST", `${base}/pedidos/${jorge}/no-se-entrego`, {
+      reason: "No contestó",
+      deliverOn: tomorrow(),
+    })
+    expect(missed.json.order).toMatchObject({ state: "por_salir", deliverOn: tomorrow() })
+    expect((missed.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "no_entregado",
+      detail: { motivo: "No contestó" },
+    })
+    expect(await stock(v.t37)).toBe(before)
+    // Vuelve a salir sin descontar otra vez, y se cobra en la puerta.
+    await call("lucia", "POST", `${base}/pedidos/${jorge}/salio`, {})
+    expect(await stock(v.t37)).toBe(before)
+    const done = await call("lucia", "POST", `${base}/pedidos/${jorge}/entregado`, {
+      collectedCents: 13900,
+    })
+    expect(done.json.order.state).toBe("entregado")
+  })
+
+  it("«Pasar a…» cambia el día sin anular nada; uno en camino, no", async () => {
+    const created = (await call("lucia", "POST", `${base}/pedidos`, andrea({ deliverOn: today })))
+      .json.order.id
+    const moved = await call("lucia", "POST", `${base}/pedidos/${created}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(moved.json.order).toMatchObject({ state: "por_pagar", deliverOn: tomorrow() })
+    expect((moved.json.order.events as Json[]).at(-1)?.action).toBe("reprogramado")
+    const again = await call("lucia", "POST", `${base}/pedidos/${created}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(again.status).toBe(409)
+    const onTheWay = (
+      await call("lucia", "POST", `${base}/pedidos`, andrea({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${onTheWay}/salio`, {})
+    const late = await call("lucia", "POST", `${base}/pedidos/${onTheWay}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(late.status).toBe(409)
+    expect(late.json.error.message).toContain("No se entregó")
+  })
+
+  it("«Entregado» sin «Salió» deja las dos, con la misma hora", async () => {
+    const created = (
+      await call("lucia", "POST", `${base}/pedidos`, andrea({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    const done = await call("lucia", "POST", `${base}/pedidos/${created}/entregado`, {
+      collectedCents: 13900,
+    })
+    const steps = (done.json.order.events as Json[]).filter((e) =>
+      ["salio", "entregado"].includes(e.action),
+    )
+    expect(steps.map((e) => e.action)).toEqual(["salio", "entregado"])
+    expect(steps[0].createdAt).toBe(steps[1].createdAt)
   })
 })

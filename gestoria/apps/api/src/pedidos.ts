@@ -222,6 +222,12 @@ export const changeInput = orderInput.pick({
 })
 export type ChangeInput = z.infer<typeof changeInput>
 
+/** «No se entregó»: con su motivo (de la lista o escrito) y el día en que vuelve a salir. */
+export const missedInput = z.object({ reason, deliverOn: dateOnly })
+
+/** «Pasar a…»: otro día. */
+export const rescheduleInput = z.object({ deliverOn: dateOnly })
+
 /** Qué día es en la tienda (su hora, `hora.ts`). */
 async function todayIn(tx: Db, storeId: string, now = new Date()) {
   return (await storeClockIn(tx, storeId, now)).today
@@ -1334,8 +1340,9 @@ export async function markShipped(
 
 /**
  * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
- * pagó una parte antes, en la puerta se cobra lo que falta. Un recojo en tienda pasa de «por
- * salir» a entregado sin «Salió».
+ * pagó una parte antes, en la puerta se cobra lo que falta. Cualquier paso completa los anteriores
+ * (tableros 6 y 7): si nadie marcó «Salió», queda también «Salió», con la misma hora. Un recojo en
+ * tienda no sale: pasa de «por salir» a entregado.
  */
 export async function markDelivered(
   appDb: Db,
@@ -1378,6 +1385,8 @@ export async function markDelivered(
     }
     await mustSale(tx, order, person.userId)
     await setState(tx, order, "entregado")
+    if (order.state === "por_salir" && order.deliveryType !== "OnSitePickup")
+      await logEvent(tx, storeId, orderId, person.userId, "salio", { completado: true })
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
       ...(collected
         ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
@@ -1722,6 +1731,65 @@ export async function previewChange(
       throw error
     }
     throw new Error("La vista previa del cambio no terminó")
+  })
+}
+
+/** Un día desde hoy (el de la tienda): no se entrega en el pasado. */
+async function dayFromToday(tx: Db, storeId: string, day: string) {
+  if (day < (await todayIn(tx, storeId)))
+    throw new StoreError(400, "VALIDATION_ERROR", "Elige hoy o un día que viene", {
+      deliverOn: "Elige hoy o un día que viene",
+    })
+}
+
+/**
+ * «No se entregó»: volvió sin entregar (no contestó, dirección errada, no lo quiso u otro motivo
+ * escrito). Vuelve a «Por salir» el día que se elige, sin anular nada; el stock no se mueve.
+ */
+export async function markMissed(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof missedInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (order.state !== "en_camino" && order.state !== "por_salir") throw stateError(order)
+    await dayFromToday(tx, storeId, input.deliverOn)
+    await setState(tx, order, "por_salir", { deliverOn: input.deliverOn })
+    await logEvent(tx, storeId, orderId, person.userId, "no_entregado", {
+      motivo: input.reason,
+      dia: dayText(input.deliverOn),
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/** «Pasar a…»: otro día de entrega, sin anular nada. */
+export async function reschedule(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof rescheduleInput>,
+) {
+  return inStore(appDb, person, storeId, "entregas", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
+    if (order.deliverOn === input.deliverOn)
+      throw new StoreError(409, "NO_CHANGE", `Ya sale el ${dayText(input.deliverOn)}`, {
+        deliverOn: `Ya sale el ${dayText(input.deliverOn)}`,
+      })
+    await dayFromToday(tx, storeId, input.deliverOn)
+    await tx
+      .update(saleOrder)
+      .set({ deliverOn: input.deliverOn, updatedAt: new Date() })
+      .where(eq(saleOrder.id, orderId))
+    await logEvent(tx, storeId, orderId, person.userId, "reprogramado", {
+      dia: `${dayText(order.deliverOn)} → ${dayText(input.deliverOn)}`,
+    })
+    return orderDetailIn(tx, storeId, orderId)
   })
 }
 

@@ -73,7 +73,9 @@ import {
   linkConnectionInput,
   listOrders,
   markDelivered,
+  markMissed,
   markShipped,
+  missedInput,
   ORDER_FILTERS,
   type OrderFilter,
   orderDetail,
@@ -85,6 +87,8 @@ import {
   receiptInput,
   receiptPhoto,
   receiveLinkNotice,
+  reschedule,
+  rescheduleInput,
   reviewInput,
   reviewPayment,
   sellable,
@@ -580,7 +584,7 @@ export function createApp(deps: AppDeps) {
       order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
     })
   })
-  // Corregir sin anular (ADR 0224): cambiar el pedido.
+  // Corregir sin anular (ADR 0224): cambiar, no se entregó y pasar a otro día.
   app.post("/api/tiendas/:id/pedidos/:orderId/cambiar/calcular", async (c) => {
     const input = await bodyOf(c, changeInput)
     const { id, orderId } = c.req.param()
@@ -590,6 +594,16 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, changeInput)
     const { id, orderId } = c.req.param()
     return c.json({ order: await changeOrder(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/no-se-entrego", async (c) => {
+    const input = await bodyOf(c, missedInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await markMissed(deps.appDb, c.get("person"), id, orderId, input) })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/pasar-a", async (c) => {
+    const input = await bodyOf(c, rescheduleInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await reschedule(deps.appDb, c.get("person"), id, orderId, input) })
   })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)

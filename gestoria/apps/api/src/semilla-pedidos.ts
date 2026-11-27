@@ -16,6 +16,7 @@ import {
   changeOrderIn,
   createOrderIn,
   markDelivered,
+  markMissed,
   markShipped,
   orderInput,
   reviewPayment,
@@ -263,7 +264,8 @@ export async function seedDemoPartPayment(tx: Db, storeId: string): Promise<void
 /**
  * Corregir sin anular (lienzo «gestorIA como odentIA», tableros 6 y 7): Andrea pagó la sandalia
  * beige 37 por Plin y pide la 38 a su oficina del Callao; se cambia el mismo pedido y le falta
- * cobrar la diferencia del envío. Se agrega una vez, aunque la tienda ya tenga sus pedidos.
+ * cobrar la diferencia del envío. Jorge no contestó cuando llegó Kevin: vuelve a salir mañana. Se
+ * agrega una vez, aunque la tienda ya tenga sus pedidos.
  */
 export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void> {
   const [already] = await tx
@@ -296,12 +298,14 @@ export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void
         eq(storeDeliveryMethod.name, "Reparto en Lima"),
       ),
     )
-  const [b37, b38, plin] = [
+  const [b37, b38, z39, plin, efectivo] = [
     await variant("Sandalia", "beige 37"),
     await variant("Sandalia", "beige 38"),
+    await variant("Zapatilla urbana", "negra 39"),
     await method("Plin"),
+    await method("Efectivo al recibir"),
   ]
-  if (!b37 || !b38 || !plin || !reparto) return
+  if (!b37 || !b38 || !z39 || !plin || !efectivo || !reparto) return
   const { today } = await storeClockIn(tx, storeId)
   const create = async (input: Partial<z.input<typeof orderInput>>) =>
     createOrderIn(
@@ -343,5 +347,19 @@ export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void
     deliveryCents: null,
     address: "Av. Sáenz Peña 501, of. 802, Callao",
     deliverOn: today,
+  })
+
+  const jorge = await create({
+    customerName: "Jorge Paredes",
+    customerPhone: "+51 923 445 566",
+    address: "Av. Sáenz Peña 820, Callao",
+    zone: "Callao",
+    lines: [{ variantId: z39, quantity: 1 }],
+    paymentMethodId: efectivo,
+  })
+  await markShipped(tx, lucia, storeId, jorge.id, { tracking: null })
+  await markMissed(tx, lucia, storeId, jorge.id, {
+    reason: "No contestó",
+    deliverOn: addDays(today, 1),
   })
 }
