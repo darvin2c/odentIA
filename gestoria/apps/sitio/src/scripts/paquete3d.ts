@@ -97,7 +97,12 @@ function sombra(): CanvasTexture {
 
 export function crearPaquete(canvas: HTMLCanvasElement, modo: Modo, reducido: boolean): Paquete {
   const tactil = matchMedia("(pointer: coarse)").matches
-  const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" })
+  const renderer = new WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true,
+    powerPreference: "high-performance",
+  })
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, tactil ? 1.25 : 1.5))
   renderer.outputColorSpace = SRGBColorSpace
   renderer.toneMapping = ACESFilmicToneMapping
@@ -142,7 +147,8 @@ export function crearPaquete(canvas: HTMLCanvasElement, modo: Modo, reducido: bo
   // Las solapas giran sobre su bisagra: un grupo en el borde de arriba y la tapa corrida hacia dentro.
   const solapa = (largo: number, ancho: number, eje: "x" | "z", lado: 1 | -1, y: number) => {
     const bisagra = new Group()
-    const geo = eje === "x" ? new BoxGeometry(largo, t * 0.8, ancho) : new BoxGeometry(ancho, t * 0.8, largo)
+    const geo =
+      eje === "x" ? new BoxGeometry(largo, t * 0.8, ancho) : new BoxGeometry(ancho, t * 0.8, largo)
     const mesh = new Mesh(geo, carton)
     if (eje === "x") {
       bisagra.position.set(0, y, (lado * D) / 2)
@@ -177,13 +183,22 @@ export function crearPaquete(canvas: HTMLCanvasElement, modo: Modo, reducido: bo
 
   // La zapatilla, en su caja: blanca con la tapa naranja. Cae dentro del paquete al armar el pedido.
   const zapatilla = new Group()
-  const cajaZ = new Mesh(new BoxGeometry(1.25, 0.46, 0.78), new MeshStandardMaterial({ color: "#f6f1ea", roughness: 0.6 }))
-  const tapaZ = new Mesh(new BoxGeometry(1.29, 0.1, 0.82), new MeshStandardMaterial({ color: MARCA, roughness: 0.5 }))
+  const cajaZ = new Mesh(
+    new BoxGeometry(1.25, 0.46, 0.78),
+    new MeshStandardMaterial({ color: "#f6f1ea", roughness: 0.6 }),
+  )
+  const tapaZ = new Mesh(
+    new BoxGeometry(1.29, 0.1, 0.82),
+    new MeshStandardMaterial({ color: MARCA, roughness: 0.5 }),
+  )
   tapaZ.position.y = 0.26
   zapatilla.add(cajaZ, tapaZ)
   paquete.add(zapatilla)
 
-  const piso = new Mesh(new PlaneGeometry(5.4, 4.2), new MeshBasicMaterial({ map: sombra(), transparent: true, depthWrite: false }))
+  const piso = new Mesh(
+    new PlaneGeometry(5.4, 4.2),
+    new MeshBasicMaterial({ map: sombra(), transparent: true, depthWrite: false }),
+  )
   piso.rotation.x = -Math.PI / 2
   piso.position.y = 0.002
   scene.add(piso)
@@ -219,7 +234,11 @@ export function crearPaquete(canvas: HTMLCanvasElement, modo: Modo, reducido: bo
     zapatilla.rotation.set(0.35 * (1 - cae), 0.5 * (1 - cae), -0.25 * (1 - cae))
 
     // El paquete sale por la derecha: se levanta un poco, gira y se va.
-    paquete.position.set(7.5 * sale ** 1.6, 0.04 + flota + Math.sin(sale * Math.PI) * 0.5, -1.2 * sale)
+    paquete.position.set(
+      7.5 * sale ** 1.6,
+      0.04 + flota + Math.sin(sale * Math.PI) * 0.5,
+      -1.2 * sale,
+    )
     const base = modo === "cierre" ? -0.55 + tiempo * (reducido ? 0 : 0.25) : -0.42 + 0.3 * aparece
     paquete.rotation.set(rx * 0.35, base + ry * 0.6 + sale * 0.5, -0.06 * sale)
     piso.position.x = paquete.position.x

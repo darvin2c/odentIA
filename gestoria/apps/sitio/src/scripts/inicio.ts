@@ -24,8 +24,11 @@ import Lenis from "lenis"
 import { MENSAJES } from "../lib/venta"
 import type { Paquete } from "./paquete3d"
 
-const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector<T>(s)
-const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => [...root.querySelectorAll<T>(s)]
+const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) =>
+  root.querySelector<T>(s)
+const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => [
+  ...root.querySelectorAll<T>(s),
+]
 
 export function iniciar(): void {
   const reducido = matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -86,7 +89,12 @@ function heroe(): void {
     for (const h of hizo) h.classList.remove("is-on", "is-hecho")
     lista.scrollTop = 0
   }
-  const alFinal = () => gsap.to(lista, { scrollTop: () => lista.scrollHeight - lista.clientHeight, duration: 0.5, ease: "power2.out" })
+  const alFinal = () =>
+    gsap.to(lista, {
+      scrollTop: () => lista.scrollHeight - lista.clientHeight,
+      duration: 0.5,
+      ease: "power2.out",
+    })
 
   const tl = gsap.timeline({ paused: true, repeat: -1, repeatDelay: 0.6, onRepeat: ocultar })
   tl.call(ocultar)
@@ -111,14 +119,20 @@ function heroe(): void {
     })
     tl.fromTo(
       el,
-      { autoAlpha: 0, y: 14, scale: 0.94, transformOrigin: m.de === "clienta" ? "100% 100%" : "0% 100%" },
+      {
+        autoAlpha: 0,
+        y: 14,
+        scale: 0.94,
+        transformOrigin: m.de === "clienta" ? "100% 100%" : "0% 100%",
+      },
       { autoAlpha: 1, y: 0, scale: 1, duration: 0.45, ease: "back.out(1.6)" },
       "<",
     )
     if (m.hizo) {
       const chip = hizo.find((h) => h.dataset.hizo === String(i))
       tl.call(() => {
-        for (const h of hizo) if (h.classList.contains("is-on")) h.classList.replace("is-on", "is-hecho")
+        for (const h of hizo)
+          if (h.classList.contains("is-on")) h.classList.replace("is-on", "is-hecho")
         chip?.classList.add("is-on")
       })
     }
@@ -147,9 +161,29 @@ function heroe(): void {
   })
 
   // La entrada: el teléfono sube de frente y la luz se enciende detrás.
-  gsap.from(".wa__phone", { y: 90, rotateX: 18, autoAlpha: 0, duration: 1.3, ease: "expo.out", delay: 0.15 })
-  gsap.from(".v4-hero__luz", { scale: 0.4, autoAlpha: 0, duration: 2, ease: "power2.out", stagger: 0.2 })
-  gsap.from([".v4-hero__nota", ".v4-canales li"], { y: 16, autoAlpha: 0, duration: 0.7, ease: "power3.out", stagger: 0.06, delay: 0.5 })
+  gsap.from(".wa__phone", {
+    y: 90,
+    rotateX: 18,
+    autoAlpha: 0,
+    duration: 1.3,
+    ease: "expo.out",
+    delay: 0.15,
+  })
+  gsap.from(".v4-hero__luz", {
+    scale: 0.4,
+    autoAlpha: 0,
+    duration: 2,
+    ease: "power2.out",
+    stagger: 0.2,
+  })
+  gsap.from([".v4-hero__nota", ".v4-canales li"], {
+    y: 16,
+    autoAlpha: 0,
+    duration: 0.7,
+    ease: "power3.out",
+    stagger: 0.06,
+    delay: 0.5,
+  })
 
   // Del héroe a la venta: el héroe se queda, se encoge y se apaga; la venta sube encima.
   gsap.to(".v4-hero__wrap", {
@@ -201,29 +235,67 @@ function ventaEscena(): void {
   for (let i = 0; i < N; i++) paso(i)
 
   // 1. El mensaje de la clienta entra volando desde el borde.
-  tl.fromTo(tarjeta(0), { autoAlpha: 0, x: 160, rotate: 8, scale: 0.8 }, { autoAlpha: 1, x: 0, rotate: -2, scale: 1, duration: 0.6, ease: "back.out(1.4)" }, 0.05)
+  tl.fromTo(
+    tarjeta(0),
+    { autoAlpha: 0, x: 160, rotate: 8, scale: 0.8 },
+    { autoAlpha: 1, x: 0, rotate: -2, scale: 1, duration: 0.6, ease: "back.out(1.4)" },
+    0.05,
+  )
   // 2. El producto del catálogo; el mensaje se hace a un lado.
   tl.to(tarjeta(0), { autoAlpha: 0.35, scale: 0.82, y: -30, duration: 0.4 }, 0.95)
-  tl.fromTo(tarjeta(1), { autoAlpha: 0, y: 60, scale: 0.9 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.5 }, 1)
+  tl.fromTo(
+    tarjeta(1),
+    { autoAlpha: 0, y: 60, scale: 0.9 },
+    { autoAlpha: 1, y: 0, scale: 1, duration: 0.5 },
+    1,
+  )
   // 3. La oferta: la cifra baja de 129 y se detiene en 120, antes del mínimo.
   tl.to([tarjeta(0), tarjeta(1)], { autoAlpha: 0, y: -40, duration: 0.35 }, 1.9)
   tl.fromTo(tarjeta(2), { autoAlpha: 0, y: 60 }, { autoAlpha: 1, y: 0, duration: 0.45 }, 2)
   const cifra = { v: 129 }
-  tl.to(cifra, { v: 120, duration: 0.6, ease: "power2.inOut", onUpdate: () => (precio.textContent = String(Math.round(cifra.v))) }, 2.25)
-  tl.fromTo(medidor, { scaleX: 1 }, { scaleX: (120 - 100) / (129 - 100), duration: 0.6, ease: "power2.inOut", transformOrigin: "0 50%" }, 2.25)
+  tl.to(
+    cifra,
+    {
+      v: 120,
+      duration: 0.6,
+      ease: "power2.inOut",
+      onUpdate: () => (precio.textContent = String(Math.round(cifra.v))),
+    },
+    2.25,
+  )
+  tl.fromTo(
+    medidor,
+    { scaleX: 1 },
+    {
+      scaleX: (120 - 100) / (129 - 100),
+      duration: 0.6,
+      ease: "power2.inOut",
+      transformOrigin: "0 50%",
+    },
+    2.25,
+  )
   // 4. El pedido: la zapatilla cae al paquete (en 3D) y aparece el pedido anotado.
   tl.to(tarjeta(2), { autoAlpha: 0, y: -40, duration: 0.35 }, 2.9)
   tl.fromTo(tarjeta(3), { autoAlpha: 0, x: 80 }, { autoAlpha: 1, x: 0, duration: 0.5 }, 3.15)
   // 5. El pago confirmado: el estado del pedido cambia, el paquete se cierra y se sella.
   tl.call(() => estado.classList.remove("is-pagado"), [], 3.9)
   tl.to(estado, { scale: 1.15, duration: 0.15, yoyo: true, repeat: 1 }, 4.3)
-  tl.call(() => {
-    const pagado = tl.time() >= 4.4
-    estado.classList.toggle("is-pagado", pagado)
-    estado.textContent = pagado ? "Pagado" : "Pago por confirmar"
-  }, [], 4.4)
+  tl.call(
+    () => {
+      const pagado = tl.time() >= 4.4
+      estado.classList.toggle("is-pagado", pagado)
+      estado.textContent = pagado ? "Pagado" : "Pago por confirmar"
+    },
+    [],
+    4.4,
+  )
   // El pago confirmado se siente: una onda naranja sale del paquete al sellarse.
-  tl.fromTo(".venta__pulso", { scale: 0.2, autoAlpha: 0.9 }, { scale: 2.6, autoAlpha: 0, duration: 0.6, ease: "power2.out" }, 4.45)
+  tl.fromTo(
+    ".venta__pulso",
+    { scale: 0.2, autoAlpha: 0.9 },
+    { scale: 2.6, autoAlpha: 0, duration: 0.6, ease: "power2.out" },
+    4.45,
+  )
   // 6. Sale: el pedido se va con el paquete y se dibuja la ruta.
   tl.to(tarjeta(3), { autoAlpha: 0, x: 120, duration: 0.4 }, 5.05)
   tl.fromTo(tarjeta(5), { autoAlpha: 0, y: 40 }, { autoAlpha: 1, y: 0, duration: 0.4 }, 5.1)
@@ -254,7 +326,13 @@ function pedidos(): void {
   gsap.fromTo(
     ".tablero__marco",
     { rotateX: 34, scale: 0.84, y: 90, transformOrigin: "50% 100%" },
-    { rotateX: 0, scale: 1, y: 0, ease: "none", scrollTrigger: { trigger: t, start: "top 95%", end: "top 30%", scrub: true } },
+    {
+      rotateX: 0,
+      scale: 1,
+      y: 0,
+      ease: "none",
+      scrollTrigger: { trigger: t, start: "top 95%", end: "top 30%", scrub: true },
+    },
   )
   gsap.from($$("[data-nota]", t), {
     autoAlpha: 0,
@@ -271,7 +349,18 @@ function regla(): void {
   gsap.fromTo(
     "[data-cel]",
     { y: 220, rotate: 8, scale: 0.9 },
-    { y: 0, rotate: -3, scale: 1, ease: "none", scrollTrigger: { trigger: "#entrega", start: "top bottom", end: "center center", scrub: true } },
+    {
+      y: 0,
+      rotate: -3,
+      scale: 1,
+      ease: "none",
+      scrollTrigger: {
+        trigger: "#entrega",
+        start: "top bottom",
+        end: "center center",
+        scrub: true,
+      },
+    },
   )
 }
 
@@ -281,7 +370,12 @@ function ficha(): void {
   gsap.fromTo(
     img,
     { clipPath: "inset(18% 12% 18% 12% round 28px)", scale: 0.94 },
-    { clipPath: "inset(0% 0% 0% 0% round 28px)", scale: 1, ease: "none", scrollTrigger: { trigger: img, start: "top 90%", end: "top 30%", scrub: true } },
+    {
+      clipPath: "inset(0% 0% 0% 0% round 28px)",
+      scale: 1,
+      ease: "none",
+      scrollTrigger: { trigger: img, start: "top 90%", end: "top 30%", scrub: true },
+    },
   )
   gsap.from($$("[data-datos] li"), {
     autoAlpha: 0,
@@ -289,7 +383,11 @@ function ficha(): void {
     stagger: 0.12,
     duration: 0.5,
     ease: "power3.out",
-    scrollTrigger: { trigger: "[data-datos]", start: "top 85%", toggleActions: "play none none reverse" },
+    scrollTrigger: {
+      trigger: "[data-datos]",
+      start: "top 85%",
+      toggleActions: "play none none reverse",
+    },
   })
 }
 
@@ -301,7 +399,11 @@ function rubros(lenis: Lenis): void {
     gsap.fromTo(
       f,
       { xPercent: dir > 0 ? 0 : -30 },
-      { xPercent: dir > 0 ? -30 : 0, ease: "none", scrollTrigger: { trigger: "#rubros", start: "top bottom", end: "bottom top", scrub: true } },
+      {
+        xPercent: dir > 0 ? -30 : 0,
+        ease: "none",
+        scrollTrigger: { trigger: "#rubros", start: "top bottom", end: "bottom top", scrub: true },
+      },
     )
   }
   // La velocidad del scroll inclina las cintas un poco: se siente que corren.
@@ -344,13 +446,16 @@ async function paquetes(reducido: boolean): Promise<void> {
             paqueteVenta = p
             p.setProgress(reducido ? 0.86 : progresoVenta)
           }
-          const zona = modo === "venta" ? canvas.closest(".venta__escena") : canvas.closest("footer")
+          const zona =
+            modo === "venta" ? canvas.closest(".venta__escena") : canvas.closest("footer")
           zona?.addEventListener("pointermove", (ev) => {
             const r = canvas.getBoundingClientRect()
             const pe = ev as PointerEvent
-            p.setPointer(((pe.clientX - r.left) / r.width) * 2 - 1, ((pe.clientY - r.top) / r.height) * 2 - 1)
+            p.setPointer(
+              ((pe.clientX - r.left) / r.width) * 2 - 1,
+              ((pe.clientY - r.top) / r.height) * 2 - 1,
+            )
           })
-          canvas.classList.add("is-listo")
         } catch {
           // Sin WebGL, la escena se queda con sus tarjetas: la venta se entiende igual.
           canvas.closest(".venta__escena, .cierre3d")?.classList.add("sin-3d")
