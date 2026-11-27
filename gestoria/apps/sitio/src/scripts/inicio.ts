@@ -638,11 +638,10 @@ export function cierre() {
 
 /**
  * Carga a Sofi aparte (three.js pesa) y devuelve con qué pedirle cosas: mientras llega, lo que se le
- * pide no hace nada. La página que la carga así lo marca (`data-sofi-propia`) para que sitio.ts no
- * la cargue otra vez.
+ * pide no hace nada. La página que la carga así lo dice en su HTML (`sofiPropia` de Base.astro)
+ * para que sitio.ts no la cargue otra vez.
  */
 export function cargarSofi(quieta: boolean): Sofi {
-  document.documentElement.setAttribute("data-sofi-propia", "")
   let real: Sofi | null = null
   import("./sofi").then((m) => {
     real = m.crearSofi(quieta)

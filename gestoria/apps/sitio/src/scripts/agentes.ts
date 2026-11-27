@@ -29,7 +29,8 @@ function entrada(escena: string) {
       0.1,
     )
     .from("[data-entra]", { y: 24, opacity: 0, duration: 1.2, stagger: 0.08 }, 0.35)
-    .from(escena, { scale: 0.85, opacity: 0, duration: 1.6 }, 0.2)
+    // Sin dejar transform al final: así los chats que le llegan pueden ir delante de Sofi.
+    .from(escena, { scale: 0.85, opacity: 0, duration: 1.6, clearProps: "transform,opacity" }, 0.2)
   gsap.to(".ag-heroe__texto", {
     yPercent: -12,
     opacity: 0.4,

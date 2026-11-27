@@ -7,12 +7,11 @@
   padding: calc(var(--cabecera) + clamp(30px, 5vh, 70px)) 0 clamp(60px, 8vh, 100px);
   background: linear-gradient(180deg, #fff, var(--papel-2));
   overflow: clip;
-  isolation: isolate;
 }
+/* Sin contexto de apilado propio: así los chats que le llegan pueden ir delante de Sofi. */
 .ag-heroe__fondo {
   position: absolute;
   inset: 0;
-  z-index: -1;
   background:
     radial-gradient(ellipse 45% 60% at 72% 45%, rgba(254, 79, 2, 0.18), transparent 70%),
     radial-gradient(rgba(17, 17, 19, 0.09) 1.1px, transparent 1.3px) 0 0 / 24px 24px;
@@ -20,6 +19,7 @@
   mask-image: radial-gradient(ellipse 80% 80% at 65% 45%, #000 20%, transparent 80%);
 }
 .ag-heroe__marco {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: clamp(28px, 4vw, 64px);
@@ -135,6 +135,8 @@ html:not(.mueve) .ag-heroe__pista {
 .llegan {
   position: absolute;
   inset: 0;
+  z-index: 45;
+  pointer-events: none;
 }
 .llega {
   position: absolute;

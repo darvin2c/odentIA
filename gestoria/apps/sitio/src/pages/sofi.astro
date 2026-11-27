@@ -26,7 +26,7 @@ const flecha =
   '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 const llegan = [
-  { canal: "WhatsApp", icono: whatsapp, texto: "¿La tienen en 38?" },
+  { canal: "WhatsApp", icono: whatsapp, texto: "Hola, ¿tienes la zapatilla blanca en talla 38?" },
   { canal: "Instagram", icono: instagram, texto: "¿Hacen envíos a Arequipa?" },
   { canal: "Messenger", icono: messenger, texto: "¿Me la separas hasta mañana?" },
 ]
@@ -34,8 +34,8 @@ const oficio = [
   {
     t: "Atiende",
     d: "Contesta al instante, a la hora que sea, con tu catálogo y tu stock.",
-    ella: "¿La tienen en 38?",
-    sofi: "Sí, en 38 me quedan 2. ¿Te la envío?",
+    ella: "¿Tienes la zapatilla blanca en talla 38?",
+    sofi: "Sí, en talla 38 me quedan 2. ¿Te la envío?",
   },
   {
     t: "Muestra el valor",
@@ -84,6 +84,7 @@ const app = {
 }
 ---
 <Base
+  sofiPropia
   title="Sofi: vendedora con IA para WhatsApp, Instagram y Messenger"
   description="Sofi atiende tus chats a toda hora con tu catálogo y tu stock, negocia sin bajar de tu precio mínimo y cobra antes de entregar. Es la vendedora de gestorIA."
   ld={[app, faqLd(preguntas)]}
