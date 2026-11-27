@@ -192,20 +192,59 @@ export async function storeBrand(appDb: Db, person: Person, storeId: string) {
   return inStore(appDb, person, storeId, "tienda.ver", (tx) => brandIn(tx, storeId))
 }
 
+export function imageKindOf(kind: string): StoreImageKind {
+  const found = STORE_IMAGE_KINDS.find((known) => known === kind)
+  if (!found) throw new StoreError(404, "NOT_FOUND", "Esa imagen no está")
+  return found
+}
+
+const IMAGE_NAMES: Record<StoreImageKind, string> = {
+  logo: "El logo",
+  portada: "La foto de portada",
+}
+
+/** Lo que cambia de una imagen al guardar: una nueva (su contenido) o quitarla. */
+export type ImageChange = Uint8Array | "quitar"
+
+/** Mira una imagen por su contenido antes de abrir la transacción: tamaño y tipo. */
+export function checkedImage(kind: StoreImageKind, bytes: Uint8Array) {
+  if (bytes.length === 0 || bytes.length > MAX_PHOTO_BYTES)
+    throw new StoreError(
+      400,
+      "PHOTO_TOO_LARGE",
+      `${IMAGE_NAMES[kind]} pesa demasiado. Prueba con una más chica.`,
+      { [kind]: `${IMAGE_NAMES[kind]} pesa demasiado. Prueba con una más chica.` },
+    )
+  const contentType = imageType(bytes)
+  if (!contentType)
+    throw new StoreError(400, "PHOTO_TYPE", "Sube una imagen en JPG, PNG o WebP", {
+      [kind]: "Sube una imagen en JPG, PNG o WebP",
+    })
+  return { contentType, content: Buffer.from(bytes) }
+}
+
 /**
- * Guarda el nombre que ve el cliente, el color y el nombre del link. El nombre del link de antes
- * se queda con la tienda: nadie más lo toma y el catálogo lo llevará al nuevo. Volver a uno propio
- * de antes lo vuelve a usar; uno de otra tienda, no (la base lo rechaza aunque no se vea).
+ * «Guardar» de Tu marca (tablero 04 del lienzo «gestorIA · Configuración, de nuevo»): el nombre
+ * que ve la clienta, el color, el nombre del link, el logo y la portada, todo de una vez. Si algo
+ * no se puede (el link ya es de otra tienda), no se guarda nada: nunca queda un logo nuevo con el
+ * link de antes. El nombre del link de antes se queda con la tienda: nadie más lo toma. Volver a
+ * uno propio de antes lo vuelve a usar; uno de otra tienda, no (la base lo rechaza aunque no se
+ * vea).
  */
-export async function setStoreBrand(
+export async function saveStoreBrand(
   appDb: Db,
   person: Person,
   storeId: string,
   input: z.infer<typeof brandInput>,
+  images: Partial<Record<StoreImageKind, ImageChange>> = {},
 ) {
+  const checked = Object.entries(images).map(([kind, change]) => {
+    const known = kind as StoreImageKind
+    return [known, change === "quitar" ? null : checkedImage(known, change)] as const
+  })
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const before = await brandIn(tx, storeId)
-    const changes: Record<string, { antes: unknown; ahora: unknown }> = {}
+    const changes: Record<string, unknown> = {}
     if (before.publicName !== input.publicName || before.brandColor !== input.brandColor) {
       await tx
         .update(store)
@@ -231,6 +270,26 @@ export async function setStoreBrand(
         await tx.insert(storeLink).values({ name: input.link, storeId, createdBy: person.userId })
       changes.link = { antes: before.link, ahora: input.link }
     }
+    for (const [kind, image] of checked) {
+      if (image) {
+        const values = {
+          ...image,
+          updatedBy: person.userId,
+          updatedAt: sql`clock_timestamp()`,
+        }
+        await tx
+          .insert(storeImage)
+          .values({ storeId, kind, ...values })
+          .onConflictDoUpdate({ target: [storeImage.storeId, storeImage.kind], set: values })
+        changes[kind] = "cambiado"
+      } else {
+        const removed = await tx
+          .delete(storeImage)
+          .where(and(eq(storeImage.storeId, storeId), eq(storeImage.kind, kind)))
+          .returning({ kind: storeImage.kind })
+        if (removed.length > 0) changes[kind] = "quitado"
+      }
+    }
     if (Object.keys(changes).length > 0)
       await tx.insert(storeEvent).values({
         storeId,
@@ -243,75 +302,59 @@ export async function setStoreBrand(
   })
 }
 
-export function imageKindOf(kind: string): StoreImageKind {
-  const found = STORE_IMAGE_KINDS.find((known) => known === kind)
-  if (!found) throw new StoreError(404, "NOT_FOUND", "Esa imagen no está")
-  return found
+/** Cuántos nombres libres se prueban para sugerir uno (la función de la base mira hasta 10). */
+const SUGGESTION_TRIES = 6
+
+/** Otros nombres para sugerir cuando el pedido ya es de otra tienda: «calzadosrosa-lima». */
+export function linkSuggestions(name: string, timeZone: string, country: string | null): string[] {
+  const city = (timeZone.split("/").at(-1) ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
+  const tails = [city, "tienda", "oficial", country?.toLowerCase() ?? "", "store", "1"]
+  return tails
+    .filter(Boolean)
+    .map((tail) => `${name.slice(0, LINK_NAME_MAX - tail.length - 1)}-${tail}`)
+    .filter((candidate) => linkNameProblem(candidate) === null)
+    .slice(0, SUGGESTION_TRIES)
 }
 
-const IMAGE_NAMES: Record<StoreImageKind, string> = {
-  logo: "El logo",
-  portada: "La foto de portada",
-}
+export type LinkCheck =
+  | { name: string; state: "libre" | "tuyo" | "vigente" }
+  | { name: string; state: "no-vale"; message: string }
+  | { name: string; state: "ocupado"; message: string; suggestion: string | null }
 
-/** Pone el logo o la portada (reemplaza el que había). Se mira por su contenido, no su nombre. */
-export async function putStoreImage(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  kind: StoreImageKind,
-  bytes: Uint8Array,
-) {
-  if (bytes.length === 0 || bytes.length > MAX_PHOTO_BYTES)
-    throw new StoreError(
-      400,
-      "PHOTO_TOO_LARGE",
-      `${IMAGE_NAMES[kind]} pesa demasiado. Prueba con una más chica.`,
-    )
-  const contentType = imageType(bytes)
-  if (!contentType) throw new StoreError(400, "PHOTO_TYPE", "Sube una imagen en JPG, PNG o WebP")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const values = {
-      contentType,
-      content: Buffer.from(bytes),
-      updatedBy: person.userId,
-      updatedAt: sql`clock_timestamp()`,
+/**
+ * Lo que la pantalla dice del nombre del link mientras se escribe: si vale, si es el vigente, si
+ * es uno propio de antes, si está libre o si ya es de otra tienda, con un nombre libre parecido.
+ * De otras tiendas solo se sabe si tienen el nombre (`store_link_taken`), nunca cuál.
+ */
+export async function checkLinkName(appDb: Db, person: Person, storeId: string, raw: string) {
+  const name = raw.trim().toLowerCase()
+  return inStore(appDb, person, storeId, "configuracion", async (tx): Promise<LinkCheck> => {
+    const problem = linkNameProblem(name)
+    if (problem) return { name, state: "no-vale", message: problem }
+    const [own] = await tx
+      .select({ current: storeLink.current })
+      .from(storeLink)
+      .where(and(eq(storeLink.storeId, storeId), eq(storeLink.name, name)))
+    if (own) return { name, state: own.current ? "vigente" : "tuyo" }
+    const [shop] = await tx
+      .select({ timeZone: store.timeZone, country: store.country })
+      .from(store)
+      .where(eq(store.id, storeId))
+    const candidates = [name, ...linkSuggestions(name, shop?.timeZone ?? "", shop?.country ?? null)]
+    const [row] = (await tx.execute(
+      sql`select store_link_taken(array[${sql.join(
+        candidates.map((candidate) => sql`${candidate}`),
+        sql`, `,
+      )}]::text[]) as taken`,
+    )) as unknown as Array<{ taken: string[] }>
+    const taken = new Set(row?.taken ?? [])
+    if (!taken.has(name)) return { name, state: "libre" }
+    return {
+      name,
+      state: "ocupado",
+      message: "Ese nombre ya es de otra tienda.",
+      suggestion: candidates.slice(1).find((candidate) => !taken.has(candidate)) ?? null,
     }
-    await tx
-      .insert(storeImage)
-      .values({ storeId, kind, ...values })
-      .onConflictDoUpdate({ target: [storeImage.storeId, storeImage.kind], set: values })
-    await tx.insert(storeEvent).values({
-      storeId,
-      actorUserId: person.userId,
-      action: "configuracion.marca",
-      subject: "Tu marca",
-      detail: { [kind]: "cambiado" },
-    })
-    return brandIn(tx, storeId)
-  })
-}
-
-export async function removeStoreImage(
-  appDb: Db,
-  person: Person,
-  storeId: string,
-  kind: StoreImageKind,
-) {
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const removed = await tx
-      .delete(storeImage)
-      .where(and(eq(storeImage.storeId, storeId), eq(storeImage.kind, kind)))
-      .returning({ kind: storeImage.kind })
-    if (removed.length > 0)
-      await tx.insert(storeEvent).values({
-        storeId,
-        actorUserId: person.userId,
-        action: "configuracion.marca",
-        subject: "Tu marca",
-        detail: { [kind]: "quitado" },
-      })
-    return brandIn(tx, storeId)
   })
 }
 

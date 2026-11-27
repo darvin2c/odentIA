@@ -12,7 +12,8 @@ import { ACCOUNT, STORE_ID, type Who } from "./entorno"
  * - En el teléfono, Configuración es un índice: una parte por pantalla, sin «Cambiar sección».
  * - El pedido de soporte sale una vez, en la franja de arriba, y se responde en Equipo.
  * - Datos de la tienda: la «Hora de la tienda» se cambia y se vuelve a la de Lima.
- * - Tu marca: un nombre reservado se dice en su campo; el color elegido pinta la app al guardar.
+ * - Tu marca: el logo se elige, se suelta o se pega; sus colores se tocan; el link se mira al
+ *   escribirlo; salir sin guardar pregunta; «Guardar» lo manda todo y el color pinta la app.
  * - Ventas, al abrir Configuración, llega a sus avisos al celular, y si abre otra dirección se le
  *   dice.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`.
@@ -179,25 +180,74 @@ test("la hora de la tienda se cambia en Datos de la tienda", async ({ page }) =>
   await expect(page.getByText("Aún no se guarda")).toHaveCount(0)
 })
 
-test("Tu marca: el link reservado se dice en su campo y el color pinta la app", async ({
+test("Tu marca: se suelta o se pega el logo, sus colores se eligen con un toque y se guarda todo de una vez", async ({
   page,
 }) => {
   await as("rosa")
   await page.setViewportSize(DESKTOP)
   await page.goto(`${BASE}/configuracion/marca`)
-  const link = page.getByLabel("Nombre del link")
-  // Se escribe como se guarda: sin tildes, mayúsculas ni espacios.
+  await expect(page.getByText("Suelta aquí tu logo")).toBeVisible()
+  // Elegir un SVG: se pasa a imagen en el navegador y sus colores salen para tocarlos.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#be185d"/><circle cx="50" cy="50" r="20" fill="#fbcfe8"/></svg>`
+  await page
+    .locator('input[type="file"][accept*="svg"]')
+    .setInputFiles({ name: "logo-rosa.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) })
+  await expect(page.getByText(/logo-rosa\.svg · 1024 × 1024/)).toBeVisible()
+  await expect(page.getByText("De tu logo")).toBeVisible()
+  const bar = page.getByRole("region", { name: "Cambios sin guardar" })
+  await expect(bar.getByText("Tienes cambios sin guardar")).toBeVisible()
+  await page
+    .getByRole("button", { name: /^Rosa #/ })
+    .first()
+    .click()
+  await expect(page.getByText("Se lee bien")).toBeVisible()
+  // Pegar con Ctrl + V también vale: una imagen chica avisa que se verá borrosa, y deja seguir.
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas")
+    canvas.width = 200
+    canvas.height = 200
+    const context = canvas.getContext("2d")
+    if (context) {
+      context.fillStyle = "#be185d"
+      context.fillRect(0, 0, 200, 200)
+    }
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
+    const data = new DataTransfer()
+    if (blob) data.items.add(new File([blob], "pegado.png", { type: "image/png" }))
+    document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }))
+  })
+  await expect(page.getByText(/pegado\.png · 200 × 200/)).toBeVisible()
+  await expect(page.getByText(/se verá borroso en el catálogo/)).toBeVisible()
+  // Ajustar: el recorte común, en la columna lateral.
+  await page.getByRole("button", { name: "Ajustar" }).click()
+  await page.getByRole("button", { name: "Usar así" }).click()
+  await expect(page.getByText(/pegado\.png · 200 × 200/)).toBeVisible()
+  // El link se mira al escribirlo: los reservados se dicen ahí, sin esperar a guardar.
+  const link = page.getByLabel("Tu link")
   await link.fill("Admin")
   await expect(link).toHaveValue("admin")
-  await page.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText(/Ese nombre está reservado/)).toBeVisible()
   await link.fill("Calzados Rosa")
   await link.blur()
   await expect(link).toHaveValue("calzados-rosa")
-  const code = page.getByRole("textbox", { name: "Otro color" })
-  await code.fill("#BE185D")
-  await page.getByRole("button", { name: "Guardar" }).click()
+  await expect(page.getByText(/Está libre/)).toBeVisible()
+  // La clienta lo ve al lado, en grande: catálogo, carrito y link.
+  const preview = page.getByRole("complementary", { name: "Así lo ve tu clienta" })
+  await expect(preview.getByText("calzados-rosa.gestoria24.com").first()).toBeVisible()
+  await preview.getByRole("tab", { name: "Link en WhatsApp" }).click()
+  await expect(preview.getByText("https://calzados-rosa.gestoria24.com")).toBeVisible()
+  // Salir antes de guardar pregunta.
+  await page.getByRole("link", { name: "Datos de la tienda" }).first().click()
+  const unsaved = page.getByRole("alertdialog")
+  await expect(unsaved).toBeVisible()
+  await unsaved.getByRole("button").first().click()
+  await expect(page).toHaveURL(/\/configuracion\/marca$/)
+  await noSideScroll(page)
+  await shot(page, "tu-marca-escritorio")
+  await bar.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText("Tu marca quedó guardada")).toBeVisible()
+  await expect(bar).toHaveCount(0)
+  await expect(page.getByText(/Tu logo de ahora/)).toBeVisible()
   // El color de la tienda ya es el primario de la app.
   await expect
     .poll(() =>
@@ -206,15 +256,19 @@ test("Tu marca: el link reservado se dice en su campo y el color pinta la app", 
       ),
     )
     .not.toBe("#cc4604")
-  await noSideScroll(page)
-  await shot(page, "tu-marca-escritorio")
   await page.setViewportSize(PHONE)
   await noSideScroll(page)
   await shot(page, "tu-marca-telefono")
-  // Vuelve al naranja de gestorIA, para los demás recorridos.
+  await page.getByRole("button", { name: "Ver cómo queda" }).click()
+  await expect(page.getByRole("dialog", { name: "Así lo ve tu clienta" })).toBeVisible()
+  await shot(page, "tu-marca-vista-telefono")
+  await page.keyboard.press("Escape")
+  // Vuelve al naranja de gestorIA y sin logo, para los demás recorridos.
   await page.setViewportSize(DESKTOP)
-  await page.getByRole("button", { name: "Naranja, el de gestorIA" }).click()
-  await page.getByRole("button", { name: "Guardar" }).click()
+  await page.getByRole("button", { name: "Quitar" }).first().click()
+  await page.getByRole("button", { name: "Otro color" }).click()
+  await page.getByRole("textbox", { name: "Otro color" }).fill("#CC4604")
+  await bar.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText("Tu marca quedó guardada").first()).toBeVisible()
 })
 

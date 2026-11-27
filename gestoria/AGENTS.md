@@ -89,7 +89,14 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - «Tu marca» (`apps/api/src/marca.ts`): el color pinta la app con `brandColorCss` de
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
-  los bloquea `linkNameProblem`.
+  los bloquea `linkNameProblem`. Si está libre se dice al escribirlo (`checkLinkName`); de otra
+  tienda solo se sabe si tiene el nombre (`store_link_taken`, `0034`), nunca cuál.
+- Tu marca se guarda una sola vez (`saveStoreBrand`): el nombre, el color, el link, el logo y la
+  portada en una transacción; si algo no se puede, no queda nada a medias. El logo se suelta, se
+  elige o se pega (arrastrar nunca es la única forma), se recorta con `ImageAdjust` y sube como
+  imagen con `renderAdjustedImage`: un SVG se pasa a imagen en el navegador, nunca se guarda como
+  SVG (el servidor mira el contenido). La vista previa de la clienta dice que el catálogo con link
+  aún no se publica.
 
 ## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
 

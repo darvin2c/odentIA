@@ -1,5 +1,6 @@
 /**
- * Lo de «Tu marca» que se calcula en la pantalla (lienzo «gestorIA como odentIA», tablero 10).
+ * Lo de «Tu marca» que se calcula en la pantalla (lienzo «gestorIA · Configuración, de nuevo»,
+ * tablero 04).
  * Qué nombres del link valen lo decide el servidor (`apps/api/src/marca.ts`); aquí solo se escribe
  * como se guarda, para que nadie tenga que saber quitar una tilde.
  */
@@ -33,4 +34,55 @@ export interface BrandView {
   link: string | null
   logo: { version: number } | null
   cover: { version: number } | null
+}
+
+/** Lo que el servidor dice del nombre del link mientras se escribe (`checkLinkName`). */
+export type LinkCheck =
+  | { name: string; state: "libre" }
+  | { name: string; state: "tuyo" }
+  | { name: string; state: "vigente" }
+  | { name: string; state: "no-vale"; message: string }
+  | { name: string; state: "ocupado"; message: string; suggestion: string | null }
+
+/** Desde aquí un logo se ve nítido en el catálogo; más chico, se avisa y se deja seguir. */
+export const MIN_LOGO_SIDE = 512
+
+/** Lo que se puede soltar, elegir o pegar como logo. El SVG se pasa a imagen antes de subir. */
+export const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"]
+/** La portada es una foto: sin SVG. */
+export const COVER_TYPES = ["image/png", "image/jpeg", "image/webp"]
+/** Lo más que pesa lo que se elige (se achica antes de subir), como en `ImageAdjust`. */
+export const MAX_PICK_BYTES = 20 * 1024 * 1024
+
+/** Qué tiene mal un archivo para ser el logo o la portada, dicho a la persona; null si vale. */
+export function pickProblem(file: { type: string; size: number }, kind: "logo" | "portada") {
+  const types = kind === "logo" ? LOGO_TYPES : COVER_TYPES
+  if (!types.includes(file.type))
+    return kind === "logo"
+      ? "Ese archivo no es una imagen. Usa PNG, JPG, WebP o SVG."
+      : "Ese archivo no es una foto. Usa JPG, PNG o WebP."
+  if (file.size > MAX_PICK_BYTES) return "Pesa más de 20 MB. Elige una más chica."
+  return null
+}
+
+/**
+ * Los colores para elegir con un toque: los del logo y, si el elegido no está entre ellos (el que
+ * ya tenía o uno escrito), también ese, primero. Sin logo, el de gestorIA.
+ */
+export function colorChoices(fromLogo: string[], chosen: string): string[] {
+  const base = fromLogo.length > 0 ? fromLogo : [GESTORIA_COLOR]
+  const all = base.includes(chosen) ? base : [chosen, ...base]
+  return [...new Set(all)]
+}
+
+/** Las iniciales de la tienda, para cuando no tiene logo: «Calzados Rosa» → «CR». */
+export function initialsOf(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word.charAt(0).toUpperCase())
+      .join("") || "?"
+  )
 }

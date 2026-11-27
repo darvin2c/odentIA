@@ -1,16 +1,4 @@
-import {
-  Button,
-  cn,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  Input,
-  toast,
-} from "@odentia/ui"
+import { Button, cn, Input, toast } from "@odentia/ui"
 import {
   type BrandPalette,
   brandColorName,
@@ -19,35 +7,75 @@ import {
   normalizeBrandColor,
 } from "@odentia/ui/lib/brand-color"
 import {
-  ConfirmDialog,
+  DetailDrawer,
   ErrorState,
+  type FieldControl,
+  FormDrawer,
+  FormField,
+  ImageAdjust,
+  type ImageAdjustValue,
   LoadingState,
+  renderAdjustedImage,
   SubmitButton,
-  submitErrorMessage,
   useAppForm,
+  useFieldContext,
   useFormSurface,
+  ViewTabs,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Camera, Check, ImagePlus, TriangleAlert } from "lucide-react"
-import { type MouseEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { api, type MyStore } from "./lib/api"
-import { type BrandView, GESTORIA_COLOR, LINK_DOMAIN, linkFromText } from "./lib/marca"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  Check,
+  CircleAlert,
+  CircleCheck,
+  Crop,
+  Eye,
+  ImagePlus,
+  Info,
+  ShoppingBag,
+  TriangleAlert,
+  Upload,
+} from "lucide-react"
+import {
+  type DragEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
 import { z } from "zod"
-import { shrinkPhoto } from "./piezas"
+import { api, type MyStore } from "./lib/api"
+import { DraftGuard } from "./lib/draft-guard"
+import {
+  type BrandView,
+  COVER_TYPES,
+  colorChoices,
+  GESTORIA_COLOR,
+  initialsOf,
+  LINK_DOMAIN,
+  type LinkCheck,
+  LOGO_TYPES,
+  linkFromText,
+  MIN_LOGO_SIDE,
+  pickProblem,
+} from "./lib/marca"
+import { type CatalogItem, money } from "./lib/tienda"
+import { Photo, shrinkPhoto } from "./piezas"
 import { StoreHeader, useStoreContext } from "./tiendas"
 
 /**
- * Configuración › Tu marca (lienzo «gestorIA como odentIA», tablero 10): el kit básico de la
- * tienda. El logo, el nombre que ve el cliente, la foto de portada, el nombre del link y el color
- * de marca. Lo usan la app del equipo (el color, como en las clínicas) y, más adelante, el catálogo.
+ * Configuración › Tu marca (lienzo «gestorIA · Configuración, de nuevo», tablero 04): el logo, el
+ * color, la portada, el nombre que ve la clienta y el link, con la vista previa grande de lo que
+ * ve la clienta al lado.
  *
- * - El logo y la portada se suben al elegirlos (se miran por su contenido en el servidor).
- * - El nombre, el link y el color se guardan juntos con «Guardar». Elegir un color solo cambia la
- *   vista previa hasta guardar.
- * - Cualquier color vale (ADR 0162): los tonos para que se lea se calculan solos; lo que el sistema
- *   ajusta o se parece al rojo de los errores se dice, sin frenar.
- * - Se sugieren los colores del logo y de una foto del letrero, que se lee en el navegador y no
- *   se guarda.
+ * - El logo y la portada se sueltan, se eligen o se pegan (Ctrl + V): arrastrar nunca es la única
+ *   forma. El logo se recorta con `ImageAdjust` (flechas y + y −, sin arrastrar) y se sube como
+ *   imagen con `renderAdjustedImage`: un SVG se pasa a imagen antes, nunca se guarda como SVG.
+ * - Los colores salen del logo, leídos en el navegador; cualquier color vale (ADR 0162) y lo que
+ *   el sistema ajusta para que se lea se dice, sin frenar.
+ * - Nada se guarda hasta «Guardar», que lo manda todo junto (logo, portada, color, nombre y link):
+ *   si algo no se puede, no se guarda nada. Salir antes pregunta (`DraftGuard`).
  */
 
 const BRAND_KEY = (storeId: string) => ["marca", storeId]
@@ -71,7 +99,13 @@ export function BrandPage() {
       ) : (
         <BrandEditor
           // Lo guardado manda cuando cambia: el formulario vuelve a empezar desde ahí.
-          key={`${brand.data.brand.publicName}|${brand.data.brand.link}|${brand.data.brand.brandColor}`}
+          key={[
+            brand.data.brand.publicName,
+            brand.data.brand.link,
+            brand.data.brand.brandColor,
+            brand.data.brand.logo?.version,
+            brand.data.brand.cover?.version,
+          ].join("|")}
           store={store}
           brand={brand.data.brand}
         />
@@ -80,108 +114,107 @@ export function BrandPage() {
   )
 }
 
-/** El logo o la portada como URL del navegador, pedidos con la sesión (no son públicos). */
-function useBrandImage(storeId: string, kind: "logo" | "portada", version: number | null) {
+/** El logo o la portada guardados, como URL del navegador (se piden con la sesión). */
+function useSavedImage(storeId: string, kind: "logo" | "portada", version: number | null) {
   const blob = useQuery({
     queryKey: ["marca-imagen", storeId, kind, version],
     queryFn: () => api<Blob>(`/api/tiendas/${storeId}/marca/${kind}?v=${version}`, { as: "blob" }),
     enabled: version !== null,
     staleTime: Number.POSITIVE_INFINITY,
   })
+  return useBlobUrl(version === null ? null : (blob.data ?? null))
+}
+
+function useBlobUrl(blob: Blob | null): string | null {
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
-    if (!blob.data || version === null) {
+    if (!blob) {
       setUrl(null)
       return
     }
-    const next = URL.createObjectURL(blob.data)
+    const next = URL.createObjectURL(blob)
     setUrl(next)
     return () => URL.revokeObjectURL(next)
-  }, [blob.data, version])
-  return { url, blob: version === null ? null : (blob.data ?? null) }
+  }, [blob])
+  return url
 }
 
-/** Lado mayor de lo que se lee de una imagen para sacar sus colores: basta y no pesa. */
-const READ_SIDE = 320
+async function loadImage(source: string): Promise<HTMLImageElement> {
+  const image = new Image()
+  image.decoding = "async"
+  image.src = source
+  await image.decode()
+  return image
+}
 
-async function pixelsOf(source: Blob): Promise<{ pixels: ImageData; url: string }> {
-  const bitmap = await createImageBitmap(source)
-  const scale = Math.min(1, READ_SIDE / Math.max(bitmap.width, bitmap.height))
-  const canvas = document.createElement("canvas")
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-  const context = canvas.getContext("2d")
-  if (!context) throw new Error("El navegador no deja leer la imagen")
-  // Lo transparente (un logo sin fondo) se lee sobre blanco, como el papel.
-  context.fillStyle = "#ffffff"
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  bitmap.close()
-  return {
-    pixels: context.getImageData(0, 0, canvas.width, canvas.height),
-    url: canvas.toDataURL("image/jpeg", 0.85),
+/**
+ * Lo elegido, listo para mostrarlo y recortarlo. Un SVG se dibuja a 1024 px por su lado mayor y
+ * pasa a PNG aquí mismo: lo que se guarda es siempre una imagen, nunca el SVG (puede llevar
+ * código). Lo demás se usa tal cual.
+ */
+async function rasterOf(file: Blob): Promise<{ source: string; width: number; height: number }> {
+  const url = URL.createObjectURL(file)
+  try {
+    const image = await loadImage(url)
+    if (file.type !== "image/svg+xml")
+      return { source: url, width: image.naturalWidth, height: image.naturalHeight }
+    const naturalWidth = image.naturalWidth || 1024
+    const naturalHeight = image.naturalHeight || 1024
+    const scale = 1024 / Math.max(naturalWidth, naturalHeight)
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(naturalWidth * scale)
+    canvas.height = Math.round(naturalHeight * scale)
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    URL.revokeObjectURL(url)
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
+    if (!png) throw new Error("svg")
+    return { source: URL.createObjectURL(png), width: canvas.width, height: canvas.height }
+  } catch (error) {
+    URL.revokeObjectURL(url)
+    throw error
   }
 }
 
-/** El color donde se tocó la foto: el promedio de un cuadrito, para que un píxel suelto no mande. */
-function colorAt(pixels: ImageData, x: number, y: number): string {
-  const total = [0, 0, 0]
-  let count = 0
-  for (let dy = -3; dy <= 3; dy++)
-    for (let dx = -3; dx <= 3; dx++) {
-      const px = Math.min(pixels.width - 1, Math.max(0, Math.round(x) + dx))
-      const py = Math.min(pixels.height - 1, Math.max(0, Math.round(y) + dy))
-      const at = (py * pixels.width + px) * 4
-      for (let channel = 0; channel < 3; channel++)
-        total[channel] = (total[channel] ?? 0) + (pixels.data[at + channel] ?? 0)
-      count++
-    }
-  return `#${total
-    .map((sum) =>
-      Math.round(sum / count)
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`
+/** Los colores de una imagen, leídos en el navegador sobre blanco (lo transparente es papel). */
+async function colorsOf(source: string): Promise<string[]> {
+  const image = await loadImage(source)
+  const scale = Math.min(1, 320 / Math.max(image.naturalWidth || 1, image.naturalHeight || 1))
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale))
+  canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale))
+  const context = canvas.getContext("2d")
+  if (!context) return []
+  context.fillStyle = "#ffffff"
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return dominantColors(context.getImageData(0, 0, canvas.width, canvas.height).data, 4, 3)
 }
 
-/** Los colores del logo, leídos en el navegador con la misma cuenta que los de una foto. */
-function useLogoColors(logo: Blob | null): string[] {
-  const [colors, setColors] = useState<string[]>([])
-  useEffect(() => {
-    let live = true
-    if (!logo) {
-      setColors([])
-      return
-    }
-    pixelsOf(logo)
-      .then(({ pixels }) => {
-        if (live) setColors(dominantColors(pixels.data, 4, 3))
-      })
-      .catch(() => {
-        if (live) setColors([])
-      })
-    return () => {
-      live = false
-    }
-  }, [logo])
-  return colors
+/** El logo nuevo, aún sin guardar: lo elegido (ya en imagen y recortado), su nombre y su tamaño. */
+interface NewLogo {
+  source: string
+  fileName: string
+  width: number
+  height: number
 }
 
-interface SignPhoto {
-  url: string
-  pixels: ImageData
-  colors: string[]
-  picked: string | null
-}
+/** Quién recibe lo que se pega con Ctrl + V: el logo o la portada. */
+type Pickers = RefObject<{ logo?: (file: File) => void; portada?: (file: File) => void }>
+type LogoDraft = { kind: "igual" } | { kind: "quitar" } | ({ kind: "nuevo" } & NewLogo)
+type CoverDraft =
+  | { kind: "igual" }
+  | { kind: "quitar" }
+  | { kind: "nuevo"; file: File; url: string }
 
 const CODE_PROBLEM = "El código del color tiene 6 cifras, como #BE185D."
 
 const brandSchema = z.object({
-  publicName: z.string(),
+  publicName: z.string().max(80, "Máximo 80 caracteres"),
   link: z.string(),
-  chosen: z.string(),
+  color: z.string(),
   code: z.string().refine((value) => normalizeBrandColor(value) !== null, CODE_PROBLEM),
+  logo: z.any(),
+  cover: z.any(),
 })
 
 function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
@@ -189,272 +222,150 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
   const queryClient = useQueryClient()
   const id = useId()
   const saved = brand.brandColor ?? GESTORIA_COLOR
-  const [photo, setPhoto] = useState<SignPhoto | null>(null)
-  const [photoError, setPhotoError] = useState<string | null>(null)
-  const photoInput = useRef<HTMLInputElement>(null)
-  const logo = useBrandImage(store.id, "logo", brand.logo?.version ?? null)
-  const cover = useBrandImage(store.id, "portada", brand.cover?.version ?? null)
-  const fromLogo = useLogoColors(logo.blob)
+  const savedLogo = useSavedImage(store.id, "logo", brand.logo?.version ?? null)
+  const savedCover = useSavedImage(store.id, "portada", brand.cover?.version ?? null)
+  const [adjusting, setAdjusting] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const coverZone = useRef<HTMLDivElement>(null)
 
-  const save = useMutation({
-    mutationFn: (body: { publicName: string; brandColor: string; link: string | null }) =>
-      api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca`, { method: "PATCH", body }),
-  })
   const form = useAppForm({
     defaultValues: {
       publicName: brand.publicName ?? "",
       link: brand.link ?? "",
-      // `chosen` pinta la vista previa; `code` es lo escrito, que vale cuando tiene 6 cifras.
-      chosen: saved,
+      // `color` pinta la vista previa; `code` es lo escrito, que vale cuando tiene 6 cifras.
+      color: saved,
       code: saved.toUpperCase(),
+      logo: { kind: "igual" } as LogoDraft,
+      cover: { kind: "igual" } as CoverDraft,
     },
     validators: { onSubmit: brandSchema },
-    onSubmit: async ({ value, formApi }) => {
-      const { brand: next } = await save.mutateAsync({
-        publicName: value.publicName.trim(),
-        // El de gestorIA no se guarda: queda sin color propio.
-        brandColor: value.chosen === GESTORIA_COLOR ? "" : value.chosen,
-        link: linkFromText(value.link) || null,
+    onSubmit: async ({ value }) => {
+      const body = new FormData()
+      body.set("publicName", value.publicName.trim())
+      // El de gestorIA no se guarda: queda sin color propio.
+      body.set("brandColor", value.color === GESTORIA_COLOR ? "" : value.color)
+      const link = linkFromText(value.link)
+      if (link) body.set("link", link)
+      if (value.logo.kind === "nuevo") {
+        const { blob } = await renderAdjustedImage({
+          shape: "logo",
+          source: value.logo.source,
+          area: { x: 0, y: 0, width: value.logo.width, height: value.logo.height },
+        })
+        body.set("logo", blob, "logo")
+      } else if (value.logo.kind === "quitar") body.append("quitar", "logo")
+      if (value.cover.kind === "nuevo")
+        body.set("portada", await shrinkPhoto(value.cover.file), "portada")
+      else if (value.cover.kind === "quitar") body.append("quitar", "portada")
+      const { brand: next } = await api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca`, {
+        method: "POST",
+        form: body,
       })
-      queryClient.setQueryData(BRAND_KEY(store.id), { brand: next })
-      // Un link puesto no se quita (se cambia por otro): si se borró, vuelve el guardado.
-      formApi.setFieldValue("link", next.link ?? "")
       // El color pinta la app de todo el equipo: llega con la tienda.
       await queryClient.invalidateQueries({ queryKey: ["yo"] })
+      await queryClient.invalidateQueries({ queryKey: ["configuracion-resumen", store.id] })
+      queryClient.setQueryData(BRAND_KEY(store.id), { brand: next })
       toast.success("Tu marca quedó guardada")
     },
   })
   const { onSubmit, isSubmitting, error } = useFormSurface(form, {
-    fieldMap: { brandColor: "code" },
+    fieldMap: { brandColor: "code", portada: "cover" },
   })
 
-  const pick = (hex: string) => {
-    form.setFieldValue("chosen", hex)
-    form.setFieldValue("code", hex.toUpperCase())
-  }
-  const onPhoto = async (file: File | undefined) => {
-    if (!file) return
-    setPhotoError(null)
-    try {
-      const { pixels, url } = await pixelsOf(file)
-      setPhoto({ url, pixels, colors: dominantColors(pixels.data, 4, 4), picked: null })
-    } catch {
-      setPhotoError("No pudimos leer esa foto. Prueba con otra, en JPG o PNG.")
+  // Pegar una imagen (Ctrl + V) la pone de logo, o de portada si se está en la portada.
+  const pickers: Pickers = useRef({})
+  useEffect(() => {
+    if (!canEdit) return
+    const onPaste = (event: ClipboardEvent) => {
+      const file = [...(event.clipboardData?.files ?? [])].find((item) =>
+        item.type.startsWith("image/"),
+      )
+      if (!file) return
+      event.preventDefault()
+      const inCover = coverZone.current?.contains(document.activeElement) ?? false
+      pickers.current[inCover ? "portada" : "logo"]?.(file)
     }
-  }
-  const pickInPhoto = (event: MouseEvent<HTMLImageElement>) => {
-    if (!photo) return
-    const box = event.currentTarget.getBoundingClientRect()
-    const hex = colorAt(
-      photo.pixels,
-      ((event.clientX - box.left) / box.width) * photo.pixels.width,
-      ((event.clientY - box.top) / box.height) * photo.pixels.height,
-    )
-    setPhoto({ ...photo, picked: hex })
-    pick(hex)
-  }
-  const photoColors = photo
-    ? [...new Set([photo.picked, ...photo.colors].filter((hex): hex is string => !!hex))]
-    : []
-
-  const reset = () => {
-    form.reset()
-    save.reset()
-  }
+    document.addEventListener("paste", onPaste)
+    return () => document.removeEventListener("paste", onPaste)
+  }, [canEdit])
 
   return (
     <form.Subscribe selector={(state) => state.values}>
       {(values) => {
-        const { chosen } = values
-        const palette = brandPalette(chosen)
         const shownName = values.publicName.trim() || brand.storeName
+        const palette = brandPalette(values.color)
+        const logoSource =
+          values.logo.kind === "nuevo"
+            ? values.logo.source
+            : values.logo.kind === "quitar"
+              ? null
+              : savedLogo
+        const coverUrl =
+          values.cover.kind === "nuevo"
+            ? values.cover.url
+            : values.cover.kind === "quitar"
+              ? null
+              : savedCover
         const dirty =
           values.publicName.trim() !== (brand.publicName ?? "") ||
-          linkFromText(values.link) !== (brand.link ?? "") ||
-          chosen !== saved
-        const swatch = (hex: string, name: string) => {
-          const selected = chosen === hex
-          return (
-            <button
-              key={`${name}-${hex}`}
-              type="button"
-              aria-pressed={selected}
-              disabled={!canEdit}
-              onClick={() => pick(hex)}
-              className={cn(
-                "flex min-h-11 items-center gap-2.5 rounded-xl bg-card pr-3.5 pl-1.5 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-60",
-                selected
-                  ? "border-2 border-foreground"
-                  : "border border-input hover:border-foreground/40",
-              )}
-            >
-              <span
-                aria-hidden
-                className="flex size-8 items-center justify-center rounded-lg border border-foreground/10"
-                style={{ backgroundColor: hex, color: brandPalette(hex).light.fillForeground }}
-              >
-                {selected ? <Check className="size-4" strokeWidth={3} /> : null}
-              </span>
-              <span className="text-sm font-medium">{name}</span>
-            </button>
-          )
+          (linkFromText(values.link) || null) !== (brand.link ?? null) ||
+          values.color !== saved ||
+          values.logo.kind !== "igual" ||
+          values.cover.kind !== "igual"
+        const pickColor = (hex: string) => {
+          form.setFieldValue("color", hex)
+          form.setFieldValue("code", hex.toUpperCase())
         }
+        const preview = (
+          <ClientPreview
+            store={store}
+            palette={palette}
+            name={shownName}
+            logo={values.logo.kind === "nuevo" ? values.logo : logoSource}
+            cover={coverUrl}
+            link={linkFromText(values.link) || linkFromText(brand.storeName)}
+          />
+        )
         return (
           <form
             noValidate
             onSubmit={onSubmit}
             aria-label="Tu marca"
-            className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]"
+            className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
           >
-            <div className="elevated flex min-w-0 flex-col gap-6 rounded-xl border bg-card p-5">
-              <FieldGroup className="gap-6">
-                <BrandImageField
-                  store={store}
-                  kind="logo"
-                  label="Logo"
-                  url={logo.url}
-                  canEdit={canEdit}
-                  empty={<Initials name={shownName} color={palette.light} />}
-                  help="Va en tu gestorIA y, más adelante, en tu catálogo. De él te sugerimos colores."
-                />
-                <form.AppField name="publicName">
+            <DraftGuard dirty={dirty && canEdit} />
+            <div className="flex min-w-0 flex-col gap-5">
+              <Section title="Logo">
+                <form.AppField name="logo">
                   {(field) => (
-                    <field.TextField
-                      label="Nombre que ve el cliente"
-                      id={`${id}-nombre`}
-                      placeholder={brand.storeName}
-                      maxLength={80}
-                      disabled={!canEdit}
-                      description={`Si lo dejas vacío, es el de la tienda: ${brand.storeName}.`}
+                    <LogoField
+                      name={shownName}
+                      palette={palette}
+                      saved={savedLogo}
+                      draft={field.state.value}
+                      canEdit={canEdit}
+                      pickers={pickers}
+                      onPicked={(logo) => field.handleChange({ kind: "nuevo", ...logo })}
+                      onRemove={() =>
+                        field.handleChange(brand.logo ? { kind: "quitar" } : { kind: "igual" })
+                      }
+                      onAdjust={() => setAdjusting(true)}
+                      error={field.state.meta.errors[0]}
                     />
                   )}
                 </form.AppField>
-                <form.AppField name="link">
-                  {(field) => (
-                    <field.Control
-                      label="Nombre del link"
-                      id={`${id}-link`}
-                      description="La dirección de tu catálogo, que llega más adelante. Sin tildes ni espacios; algunos nombres están reservados (app, api, admin, acceso, pago…). Si lo cambias, el de antes sigue siendo tuyo."
-                    >
-                      {(control) => (
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Input
-                            {...control.props}
-                            value={field.state.value}
-                            placeholder={linkFromText(brand.storeName)}
-                            maxLength={63}
-                            disabled={!canEdit}
-                            autoComplete="off"
-                            spellCheck={false}
-                            // Se escribe como se guarda: sin tildes, mayúsculas ni espacios.
-                            onChange={(event) =>
-                              field.handleChange(linkFromText(event.target.value, true))
-                            }
-                            onBlur={() => {
-                              field.handleChange(linkFromText(field.state.value))
-                              control.onBlur()
-                            }}
-                            className="min-w-0 flex-1"
-                          />
-                          <span className="shrink-0 text-sm text-muted-foreground">
-                            {LINK_DOMAIN}
-                          </span>
-                        </div>
-                      )}
-                    </field.Control>
-                  )}
-                </form.AppField>
-                <BrandImageField
-                  store={store}
-                  kind="portada"
-                  label="Foto de portada"
-                  url={cover.url}
-                  canEdit={canEdit}
-                  wide
-                  empty={
-                    <span className="px-3 text-center text-xs text-muted-foreground">
-                      Tu vitrina o tus productos
-                    </span>
-                  }
-                  help="Va arriba en tu catálogo, más adelante: la vitrina o tus productos."
-                />
+              </Section>
 
-                <FieldSet>
-                  <FieldLegend>Color de marca</FieldLegend>
-                  <FieldDescription>
-                    Lo ve todo tu equipo en gestorIA. Cualquier color vale: los tonos para que se
-                    lea bien se calculan solos.
-                  </FieldDescription>
-                  <FieldGroup className="gap-4">
-                    {fromLogo.length > 0 ? (
-                      <div className="flex flex-col gap-2">
-                        <p className="text-sm font-semibold">Del logo</p>
-                        <div className="flex flex-wrap gap-2">
-                          {fromLogo.map((hex) => swatch(hex, brandColorName(hex)))}
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="flex flex-col gap-2">
-                      <p className="text-sm font-semibold">De gestorIA</p>
-                      <div className="flex flex-wrap gap-2">
-                        {swatch(GESTORIA_COLOR, "Naranja, el de gestorIA")}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <p className="text-sm font-semibold">De una foto del letrero</p>
-                      {photo ? (
-                        <>
-                          {/* biome-ignore lint/a11y/useKeyWithClickEvents: tocar la foto es un atajo; con teclado se eligen los colores sacados de ella, aquí debajo. */}
-                          <img
-                            src={photo.url}
-                            alt="Tu foto. Tócala donde está el color de tu letrero."
-                            onClick={canEdit ? pickInPhoto : undefined}
-                            className="max-h-48 max-w-full cursor-crosshair self-start rounded-lg border"
-                          />
-                          <div className="flex flex-wrap gap-2">
-                            {photoColors.map((hex) =>
-                              swatch(
-                                hex,
-                                hex === photo.picked
-                                  ? `${brandColorName(hex)}, donde tocaste`
-                                  : brandColorName(hex),
-                              ),
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {photoColors.length > 0
-                              ? "Elige uno, o toca en la foto el color de tu letrero. La foto no se guarda."
-                              : "No encontramos un color en la foto: tócala donde está tu color, o prueba con otra más de cerca. La foto no se guarda."}
-                          </p>
-                        </>
-                      ) : null}
-                      {canEdit ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="min-h-11 self-start"
-                          onClick={() => photoInput.current?.click()}
-                        >
-                          <Camera aria-hidden />
-                          {photo ? "Otra foto" : "Subir foto"}
-                        </Button>
-                      ) : null}
-                      <input
-                        ref={photoInput}
-                        type="file"
-                        accept="image/*"
-                        hidden
-                        onChange={(event) => {
-                          void onPhoto(event.target.files?.[0])
-                          event.target.value = ""
-                        }}
-                      />
-                      {photoError ? (
-                        <p role="alert" className="text-sm text-danger">
-                          {photoError}
-                        </p>
-                      ) : null}
-                    </div>
+              <Section
+                title="Color de tu marca"
+                description="Pinta los botones y enlaces de tu catálogo y tu gestorIA."
+              >
+                <ColorPicker
+                  canEdit={canEdit}
+                  chosen={values.color}
+                  logoSource={logoSource}
+                  onPick={pickColor}
+                  other={
                     <form.AppField
                       name="code"
                       validators={{
@@ -462,68 +373,142 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
                           normalizeBrandColor(value) ? undefined : CODE_PROBLEM,
                       }}
                     >
-                      {(field) => (
-                        <field.Control
-                          label="Otro color"
+                      {() => (
+                        <OtherColor
                           id={`${id}-codigo`}
-                          description="Toca el color para elegir en la paleta, o escribe el código de tu marca."
-                        >
-                          {(control) => (
-                            <div className="flex flex-wrap items-center gap-3">
-                              <input
-                                type="color"
-                                aria-label="Elegir en la paleta"
-                                value={chosen}
-                                disabled={!canEdit}
-                                onChange={(event) => pick(event.target.value.toLowerCase())}
-                                className="h-11 w-16 cursor-pointer rounded-lg border border-input-border bg-card p-0.5"
-                              />
-                              <Input
-                                {...control.props}
-                                value={field.state.value}
-                                disabled={!canEdit}
-                                onChange={(event) => {
-                                  field.handleChange(event.target.value)
-                                  const valid = normalizeBrandColor(event.target.value)
-                                  if (valid) form.setFieldValue("chosen", valid)
-                                }}
-                                autoComplete="off"
-                                spellCheck={false}
-                                className="w-36 uppercase"
-                              />
-                            </div>
-                          )}
-                        </field.Control>
+                          chosen={values.color}
+                          canEdit={canEdit}
+                          onPick={pickColor}
+                          onValid={(hex) => form.setFieldValue("color", hex)}
+                        />
                       )}
                     </form.AppField>
-                    <ColorNotices palette={palette} chosen={chosen} />
-                  </FieldGroup>
-                </FieldSet>
-              </FieldGroup>
-              {canEdit ? (
-                <div className="flex flex-col gap-2">
-                  {error ? (
-                    <p role="alert" className="text-sm text-danger">
-                      {error}
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <SubmitButton type="submit" pending={isSubmitting}>
-                      Guardar
-                    </SubmitButton>
-                    {dirty ? (
-                      <Button type="button" variant="ghost" onClick={reset} disabled={isSubmitting}>
-                        Cancelar
-                      </Button>
-                    ) : null}
-                    {dirty && !isSubmitting ? (
-                      <span className="text-sm font-medium text-warning">Aún no se guarda</span>
-                    ) : null}
-                  </div>
+                  }
+                />
+              </Section>
+
+              <Section
+                title="Portada"
+                description="Va arriba en tu catálogo y en la vista previa de tu link."
+              >
+                <div ref={coverZone}>
+                  <form.AppField name="cover">
+                    {(field) => (
+                      <CoverField
+                        url={coverUrl}
+                        canEdit={canEdit}
+                        pickers={pickers}
+                        onPicked={(file, url) => field.handleChange({ kind: "nuevo", file, url })}
+                        onRemove={() =>
+                          field.handleChange(brand.cover ? { kind: "quitar" } : { kind: "igual" })
+                        }
+                        error={field.state.meta.errors[0]}
+                      />
+                    )}
+                  </form.AppField>
                 </div>
+              </Section>
+
+              <Section title="Tu nombre y tu link">
+                <div className="flex flex-col gap-5">
+                  <form.AppField name="publicName">
+                    {(field) => (
+                      <field.TextField
+                        label="Nombre que ve la clienta"
+                        id={`${id}-nombre`}
+                        placeholder={brand.storeName}
+                        maxLength={80}
+                        disabled={!canEdit}
+                        description={`Si lo dejas vacío, es el de la tienda: ${brand.storeName}.`}
+                      />
+                    )}
+                  </form.AppField>
+                  <form.AppField name="link">
+                    {() => (
+                      <LinkField
+                        store={store}
+                        id={`${id}-link`}
+                        saved={brand.link}
+                        placeholder={linkFromText(brand.storeName)}
+                        canEdit={canEdit}
+                      />
+                    )}
+                  </form.AppField>
+                </div>
+              </Section>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 xl:hidden"
+                onClick={() => setPreviewOpen(true)}
+              >
+                <Eye aria-hidden />
+                Ver cómo queda
+              </Button>
+
+              {canEdit && dirty ? (
+                <section
+                  aria-label="Cambios sin guardar"
+                  className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl bg-foreground p-3 pl-4 text-background shadow-lg"
+                >
+                  <span className="mr-auto text-sm font-medium">Tienes cambios sin guardar</span>
+                  {error ? (
+                    <span
+                      role="alert"
+                      className="basis-full text-sm text-background/90 sm:order-first"
+                    >
+                      <CircleAlert aria-hidden className="mr-1.5 inline size-4" />
+                      {error}
+                    </span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 border-background/30 bg-transparent text-background hover:bg-background/10 hover:text-background"
+                    disabled={isSubmitting}
+                    onClick={() => form.reset()}
+                  >
+                    Descartar
+                  </Button>
+                  <SubmitButton type="submit" className="min-h-11" pending={isSubmitting}>
+                    Guardar
+                  </SubmitButton>
+                </section>
               ) : null}
             </div>
-            <Preview palette={palette} name={shownName} logo={logo.url} cover={cover.url} />
+
+            <aside
+              aria-label="Así lo ve tu clienta"
+              className="sticky top-4 hidden flex-col gap-3 xl:flex"
+            >
+              {preview}
+            </aside>
+
+            <DetailDrawer
+              open={previewOpen}
+              onClose={() => setPreviewOpen(false)}
+              title="Así lo ve tu clienta"
+              dock={false}
+            >
+              {preview}
+            </DetailDrawer>
+
+            <form.AppField name="logo">
+              {(field) => (
+                <AdjustLogo
+                  open={adjusting}
+                  name={shownName}
+                  logo={field.state.value}
+                  savedSource={savedLogo}
+                  onClose={() => setAdjusting(false)}
+                  onDone={(next) => {
+                    field.handleChange({ kind: "nuevo", ...next })
+                    setAdjusting(false)
+                  }}
+                />
+              )}
+            </form.AppField>
           </form>
         )
       }}
@@ -531,265 +516,879 @@ function BrandEditor({ store, brand }: { store: MyStore; brand: BrandView }) {
   )
 }
 
-/** Sin logo, sus iniciales en el color: como el cuadro del selector de tiendas. */
-function Initials({ name, color }: { name: string; color: BrandPalette["light"] }) {
-  const initials =
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((word) => word.charAt(0).toUpperCase())
-      .join("") || "?"
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  const id = useId()
   return (
-    <span
-      aria-hidden
-      className="flex size-full items-center justify-center text-sm font-bold"
-      style={{ backgroundColor: color.fill, color: color.fillForeground }}
+    <section
+      aria-labelledby={id}
+      className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-5"
     >
-      {initials}
-    </span>
+      <div className="flex flex-col gap-0.5">
+        <h2 id={id} className="text-base font-semibold">
+          {title}
+        </h2>
+        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      </div>
+      {children}
+    </section>
   )
 }
 
-/** El logo o la portada: lo que hay, y «Cambiar»/«Quitar»; se sube al elegirla. */
-function BrandImageField({
-  store,
-  kind,
-  label,
-  url,
+/** Soltar un archivo sobre la zona: lo marca mientras se arrastra encima. */
+function useDrop(onFile: (file: File) => void, enabled: boolean) {
+  const [over, setOver] = useState(false)
+  const handlers = {
+    onDragOver: (event: DragEvent) => {
+      if (!enabled || !event.dataTransfer.types.includes("Files")) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "copy"
+      setOver(true)
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false)
+    },
+    onDrop: (event: DragEvent) => {
+      if (!enabled) return
+      event.preventDefault()
+      setOver(false)
+      const file = event.dataTransfer.files[0]
+      if (file) onFile(file)
+    },
+  }
+  return { over, handlers }
+}
+
+/** Fondo de cuadros: lo transparente del logo se ve transparente. */
+const CHECKERBOARD =
+  "bg-[repeating-conic-gradient(var(--color-muted)_0_25%,var(--color-card)_0_50%)] bg-[length:12px_12px]"
+
+function LogoField({
+  name,
+  palette,
+  saved,
+  draft,
   canEdit,
-  empty,
-  help,
-  wide = false,
+  pickers,
+  onPicked,
+  onRemove,
+  onAdjust,
+  error,
 }: {
-  store: MyStore
-  kind: "logo" | "portada"
-  label: string
-  url: string | null
+  name: string
+  palette: BrandPalette
+  saved: string | null
+  draft: LogoDraft
   canEdit: boolean
-  empty: ReactNode
-  help: string
-  wide?: boolean
+  pickers: Pickers
+  onPicked: (logo: NewLogo) => void
+  onRemove: () => void
+  onAdjust: () => void
+  /** Lo que dijo el servidor del logo al guardar. */
+  error?: unknown
 }) {
   const id = useId()
-  const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
-  const [removing, setRemoving] = useState(false)
-  const done = (next: BrandView) => queryClient.setQueryData(BRAND_KEY(store.id), { brand: next })
-  const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const blob = await shrinkPhoto(file)
-      return api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca/${kind}`, {
-        method: "POST",
-        raw: { type: blob.type, data: blob },
+  const [problem, setProblem] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [savedSize, setSavedSize] = useState<{ width: number; height: number } | null>(null)
+  useEffect(() => {
+    if (!saved) return
+    let live = true
+    loadImage(saved)
+      .then((image) => {
+        if (live) setSavedSize({ width: image.naturalWidth, height: image.naturalHeight })
       })
-    },
-    onSuccess: ({ brand }) => {
-      done(brand)
-      toast.success(kind === "logo" ? "Logo guardado" : "Foto de portada guardada")
-    },
-  })
-  const remove = useMutation({
-    mutationFn: () =>
-      api<{ brand: BrandView }>(`/api/tiendas/${store.id}/marca/${kind}`, { method: "DELETE" }),
-    onSuccess: ({ brand }) => {
-      setRemoving(false)
-      done(brand)
-      toast.success(kind === "logo" ? "Logo quitado" : "Foto de portada quitada")
-    },
-  })
-  const busy = upload.isPending || remove.isPending
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [saved])
+
+  const choose = async (file: File) => {
+    const bad = pickProblem(file, "logo")
+    setProblem(bad)
+    if (bad) return
+    setBusy(true)
+    try {
+      const raster = await rasterOf(file)
+      onPicked({ ...raster, fileName: file.name || "Imagen pegada" })
+    } catch {
+      setProblem("No se pudo abrir esa imagen. Prueba con otra.")
+    } finally {
+      setBusy(false)
+    }
+  }
+  pickers.current.logo = (file) => void choose(file)
+
+  const { over, handlers } = useDrop((file) => void choose(file), canEdit && !busy)
+  const shown = draft.kind === "nuevo" ? draft.source : draft.kind === "quitar" ? null : saved
+  const size =
+    draft.kind === "nuevo" ? { width: draft.width, height: draft.height } : shown ? savedSize : null
+  const small = size !== null && Math.max(size.width, size.height) < MIN_LOGO_SIDE
+  const pickButton = (label: string, variant: "secondary" | "outline" = "outline") => (
+    <Button
+      type="button"
+      variant={variant}
+      className="min-h-11"
+      disabled={!canEdit || busy}
+      onClick={() => input.current?.click()}
+      aria-describedby={`${id}-ayuda`}
+    >
+      {label === "Elegir imagen" ? <ImagePlus aria-hidden /> : null}
+      {busy ? "Abriendo…" : label}
+    </Button>
+  )
+
   return (
-    <Field data-invalid={upload.isError ? true : undefined}>
-      <FieldLabel htmlFor={`${id}-subir`}>{label}</FieldLabel>
-      <div className="flex flex-wrap items-center gap-3">
-        <span
-          className={cn(
-            "flex shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted",
-            wide ? "h-20 w-36" : "size-16",
-          )}
-        >
-          {url ? (
-            <img
-              src={url}
-              alt={kind === "logo" ? "Tu logo" : "Tu foto de portada"}
-              className={cn("size-full", kind === "logo" ? "object-contain" : "object-cover")}
-            />
-          ) : (
-            empty
-          )}
-        </span>
-        {canEdit ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              id={`${id}-subir`}
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={() => input.current?.click()}
-              aria-describedby={`${id}-ayuda`}
-            >
-              <ImagePlus aria-hidden />
-              {upload.isPending
-                ? "Subiendo…"
-                : url
-                  ? kind === "logo"
-                    ? "Cambiar logo"
-                    : "Cambiar foto"
-                  : kind === "logo"
-                    ? "Subir logo"
-                    : "Subir foto de portada"}
-            </Button>
-            {url ? (
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => setRemoving(true)}
-              >
-                Quitar
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+    <div className="flex flex-col gap-2">
       <input
         ref={input}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
-        hidden
+        accept={LOGO_TYPES.join(",")}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
         onChange={(event) => {
           const file = event.target.files?.[0]
-          if (file) upload.mutate(file)
+          if (file) void choose(file)
           event.target.value = ""
         }}
       />
-      {upload.isError ? (
-        <FieldError id={`${id}-ayuda`}>{submitErrorMessage(upload.error)}</FieldError>
-      ) : (
-        <FieldDescription id={`${id}-ayuda`}>{help}</FieldDescription>
-      )}
-      <ConfirmDialog
-        open={removing}
-        title={kind === "logo" ? "¿Quitar el logo?" : "¿Quitar la foto de portada?"}
-        description="Puedes subir otra cuando quieras."
-        confirmLabel="Quitar"
-        cancelLabel="Dejarla"
-        onConfirm={() => remove.mutate()}
-        onClose={() => setRemoving(false)}
-      />
-    </Field>
-  )
-}
-
-/** Lo que el sistema ajusta o nota del color elegido: informa, no frena. */
-function ColorNotices({ palette, chosen }: { palette: BrandPalette; chosen: string }) {
-  return (
-    <div className="flex flex-col gap-2" aria-live="polite">
-      {palette.lightened ? (
-        <p className="rounded-xl bg-muted p-3 text-sm">
-          {palette.light.fill === chosen
-            ? "Tu color es claro: los botones lo llevan tal cual y los textos, un tono más oscuro para que se lean."
-            : "Para que se lea, los botones y los textos llevan un tono más oscuro. Tu logo no cambia."}
+      <div
+        {...handlers}
+        className={cn(
+          "rounded-xl border-2 border-dashed transition-colors",
+          over
+            ? "border-primary bg-primary-soft"
+            : shown
+              ? "border-transparent"
+              : "border-border bg-muted/40",
+        )}
+      >
+        {shown ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
+            <span
+              className={cn(
+                "flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border p-1",
+                CHECKERBOARD,
+              )}
+            >
+              <LogoImage logo={draft.kind === "nuevo" ? draft : shown} className="size-full" />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-sm font-semibold">{name}</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {draft.kind === "nuevo" ? draft.fileName : "Tu logo de ahora"}
+                {size ? ` · ${size.width} × ${size.height}` : ""}
+              </span>
+              {canEdit ? (
+                <span className="text-xs text-muted-foreground">
+                  {over ? "Suéltalo para cambiarlo" : "Suelta otro aquí para cambiarlo"}
+                </span>
+              ) : null}
+            </div>
+            {canEdit ? (
+              <div className="flex flex-wrap gap-1.5">
+                <Button type="button" variant="outline" className="min-h-11" onClick={onAdjust}>
+                  <Crop aria-hidden />
+                  Ajustar
+                </Button>
+                {pickButton("Cambiar")}
+                <Button type="button" variant="ghost" className="min-h-11" onClick={onRemove}>
+                  Quitar
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 px-4 py-7 text-center">
+            <span
+              aria-hidden
+              className="flex size-14 items-center justify-center rounded-full font-serif text-lg font-bold"
+              style={{ backgroundColor: palette.light.fill, color: palette.light.fillForeground }}
+            >
+              {initialsOf(name)}
+            </span>
+            <div className="flex flex-col gap-1">
+              <p className="flex items-center justify-center gap-1.5 text-sm font-semibold">
+                <Upload aria-hidden className="size-4" />
+                {over ? "Suéltalo aquí" : "Suelta aquí tu logo"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                PNG, JPG, WebP o SVG · desde {MIN_LOGO_SIDE} px
+              </p>
+            </div>
+            {canEdit ? pickButton("Elegir imagen", "secondary") : null}
+          </div>
+        )}
+      </div>
+      <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
+        {shown
+          ? "También puedes pegar otro con Ctrl + V."
+          : `Sin logo, tu clienta ve tus iniciales en tu color. También puedes pegarlo con Ctrl + V.`}
+      </p>
+      {small ? (
+        <p className="flex items-start gap-2 rounded-lg bg-warning-soft p-3 text-sm text-warning">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          Mide {size ? Math.max(size.width, size.height) : 0} px: se verá borroso en el catálogo.
+          Puedes usarlo igual o subir uno de {MIN_LOGO_SIDE} px o más.
         </p>
       ) : null}
-      {palette.nearWhite ? (
-        <p className="flex items-start gap-2 rounded-xl bg-warning-soft p-3 text-sm text-warning">
-          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-          Es casi blanco y no se distingue del fondo: los botones saldrán en un gris. Puedes usarlo
-          igual.
-        </p>
-      ) : null}
-      {palette.reddish ? (
-        <p className="flex items-start gap-2 rounded-xl bg-warning-soft p-3 text-sm text-warning">
-          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-          Se parece al rojo de los errores: un botón tuyo podría confundirse con un aviso. Puedes
-          usarlo igual.
+      {problem || typeof error === "string" ? (
+        <p role="alert" className="text-sm text-danger">
+          {problem ?? String(error)}
         </p>
       ) : null}
     </div>
   )
 }
 
-/** Así se ve: tu gestorIA y tu catálogo con lo elegido, aún sin guardar. */
-function Preview({
+/** El logo como se verá: el nuevo (ya recortado) o el guardado. */
+function LogoImage({ logo, className }: { logo: NewLogo | string; className?: string }) {
+  const source = typeof logo === "string" ? logo : logo.source
+  return <img src={source} alt="" className={cn("object-contain", className)} />
+}
+
+/** «Ajustar»: el recorte común (`ImageAdjust`, modo logo), en la columna lateral. */
+function AdjustLogo({
+  open,
+  name,
+  logo,
+  savedSource,
+  onClose,
+  onDone,
+}: {
+  open: boolean
+  name: string
+  logo: LogoDraft
+  savedSource: string | null
+  onClose: () => void
+  onDone: (logo: NewLogo) => void
+}) {
+  const source = logo.kind === "nuevo" ? logo.source : savedSource
+  const [value, setValue] = useState<ImageAdjustValue | null>(null)
+  const [baking, setBaking] = useState(false)
+  useEffect(() => {
+    if (open) setValue(null)
+  }, [open])
+  return (
+    <FormDrawer
+      open={open && source !== null}
+      onClose={onClose}
+      title="Ajustar el logo"
+      description="Deja solo tu logo, sin bordes de más. Con el teclado: las flechas mueven el recuadro."
+      submitLabel="Usar así"
+      submitDisabled={value === null}
+      isDirty={value !== null}
+      isSubmitting={baking}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!value) return
+        setBaking(true)
+        // El recorte queda hecho aquí: lo que muestra `ImageAdjust` se libera al cerrarlo.
+        renderAdjustedImage(value, 1024, { png: true })
+          .then(async ({ blob }) => {
+            const next = URL.createObjectURL(blob)
+            const image = await loadImage(next)
+            onDone({
+              source: next,
+              fileName: logo.kind === "nuevo" ? logo.fileName : "Tu logo, ajustado",
+              width: image.naturalWidth,
+              height: image.naturalHeight,
+            })
+          })
+          .catch(() => onClose())
+          .finally(() => setBaking(false))
+      }}
+    >
+      {source ? (
+        <ImageAdjust
+          key={source}
+          shape="logo"
+          name={name}
+          defaultSource={source}
+          onChange={setValue}
+        />
+      ) : null}
+    </FormDrawer>
+  )
+}
+
+function ColorPicker({
+  canEdit,
+  chosen,
+  logoSource,
+  onPick,
+  other: otherField,
+}: {
+  canEdit: boolean
+  chosen: string
+  logoSource: string | null
+  onPick: (hex: string) => void
+  other: ReactNode
+}) {
+  const [fromLogo, setFromLogo] = useState<string[]>([])
+  const [other, setOther] = useState(false)
+  useEffect(() => {
+    let live = true
+    if (!logoSource) {
+      setFromLogo([])
+      return
+    }
+    colorsOf(logoSource)
+      .then((colors) => {
+        if (live) setFromLogo(colors)
+      })
+      .catch(() => {
+        if (live) setFromLogo([])
+      })
+    return () => {
+      live = false
+    }
+  }, [logoSource])
+  const choices = colorChoices(fromLogo, chosen)
+  const palette = brandPalette(chosen)
+  const name = brandColorName(chosen).toLowerCase()
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <fieldset className="flex flex-wrap gap-2">
+          <legend className="sr-only">Colores para elegir</legend>
+          {choices.map((hex) => {
+            const selected = hex === chosen
+            return (
+              <button
+                key={hex}
+                type="button"
+                aria-pressed={selected}
+                aria-label={`${brandColorName(hex)} ${hex.toUpperCase()}`}
+                title={`${brandColorName(hex)} ${hex.toUpperCase()}`}
+                disabled={!canEdit}
+                onClick={() => onPick(hex)}
+                className={cn(
+                  "flex size-11 items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-shadow focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground disabled:opacity-60",
+                  selected
+                    ? "ring-2 ring-foreground"
+                    : "ring-1 ring-foreground/15 hover:ring-foreground/40",
+                )}
+                style={{ backgroundColor: hex, color: brandPalette(hex).light.fillForeground }}
+              >
+                {selected ? <Check aria-hidden className="size-5" strokeWidth={3} /> : null}
+              </button>
+            )
+          })}
+        </fieldset>
+        <span className="text-sm text-muted-foreground">
+          {fromLogo.length > 0 ? "De tu logo" : "El de gestorIA, hasta que pongas el tuyo"}
+        </span>
+        {canEdit ? (
+          <Button
+            type="button"
+            variant="link"
+            className="ml-auto min-h-11 px-0"
+            aria-expanded={other}
+            onClick={() => setOther((open) => !open)}
+          >
+            Otro color
+          </Button>
+        ) : null}
+      </div>
+      {other ? otherField : null}
+      <div aria-live="polite" className="flex flex-col gap-2">
+        {palette.nearWhite ? (
+          <Notice tone="warning" title="Casi blanco">
+            No se distingue del fondo: los botones saldrán en un gris. Puedes usarlo igual.
+          </Notice>
+        ) : palette.lightened ? (
+          <Notice tone="warning" title="Color claro">
+            Los botones usarán un tono más oscuro para que se lean. Tú decides.
+          </Notice>
+        ) : (
+          <Notice tone="success" title="Se lee bien">
+            El texto blanco sobre este {name} se lee bien en botones y enlaces.
+          </Notice>
+        )}
+        {palette.reddish ? (
+          <Notice tone="warning" title="Parecido al rojo de los errores">
+            Un botón tuyo podría confundirse con un aviso. Puedes usarlo igual.
+          </Notice>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** «Otro color»: la paleta del navegador o el código de la marca. */
+function OtherColor({
+  id,
+  chosen,
+  canEdit,
+  onPick,
+  onValid,
+}: {
+  id: string
+  chosen: string
+  canEdit: boolean
+  onPick: (hex: string) => void
+  onValid: (hex: string) => void
+}) {
+  const field = useFieldContext<string>()
+  return (
+    <FormField
+      label="Otro color"
+      id={id}
+      description="Toca el cuadro para elegir en la paleta, o escribe el código de tu marca."
+    >
+      {(control: FieldControl) => (
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="color"
+            aria-label="Elegir en la paleta"
+            value={chosen}
+            disabled={!canEdit}
+            onChange={(event) => onPick(event.target.value.toLowerCase())}
+            className="h-11 w-16 cursor-pointer rounded-lg border border-input-border bg-card p-0.5"
+          />
+          <Input
+            {...control.props}
+            value={field.state.value}
+            disabled={!canEdit}
+            onChange={(event) => {
+              field.handleChange(event.target.value)
+              const valid = normalizeBrandColor(event.target.value)
+              if (valid) onValid(valid)
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-36 uppercase"
+          />
+        </div>
+      )}
+    </FormField>
+  )
+}
+
+function Notice({
+  tone,
+  title,
+  children,
+}: {
+  tone: "success" | "warning"
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <p
+      className={cn(
+        "flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg p-3 text-sm",
+        tone === "success" ? "bg-success-soft" : "bg-warning-soft",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 font-semibold",
+          tone === "success" ? "text-success" : "text-warning",
+        )}
+      >
+        {tone === "success" ? (
+          <CircleCheck aria-hidden className="size-4" />
+        ) : (
+          <Info aria-hidden className="size-4" />
+        )}
+        {title}
+      </span>
+      <span className="text-foreground">{children}</span>
+    </p>
+  )
+}
+
+function CoverField({
+  url,
+  canEdit,
+  pickers,
+  onPicked,
+  onRemove,
+  error,
+}: {
+  url: string | null
+  canEdit: boolean
+  pickers: Pickers
+  onPicked: (file: File, url: string) => void
+  onRemove: () => void
+  error?: unknown
+}) {
+  const id = useId()
+  const input = useRef<HTMLInputElement>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const choose = (file: File) => {
+    const bad = pickProblem(file, "portada")
+    setProblem(bad)
+    if (bad) return
+    onPicked(file, URL.createObjectURL(file))
+  }
+  pickers.current.portada = choose
+  const { over, handlers } = useDrop(choose, canEdit)
+  const serverError = typeof error === "string" ? error : null
+  return (
+    <div className="flex flex-col gap-2">
+      <input
+        ref={input}
+        type="file"
+        accept={COVER_TYPES.join(",")}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) choose(file)
+          event.target.value = ""
+        }}
+      />
+      <div
+        {...handlers}
+        className={cn(
+          "flex flex-col items-stretch gap-3 rounded-xl border-2 border-dashed p-3 sm:flex-row sm:items-center",
+          over ? "border-primary bg-primary-soft" : "border-border bg-muted/40",
+        )}
+      >
+        <span className="flex aspect-[16/7] w-full shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted sm:w-56">
+          {url ? (
+            <img src={url} alt="Tu portada" className="size-full object-cover" />
+          ) : (
+            <ImagePlus aria-hidden className="size-6 text-muted-foreground" />
+          )}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <p className="text-sm font-semibold">
+            {over
+              ? "Suéltala aquí"
+              : url
+                ? "Tu vitrina o tus productos"
+                : "Suelta una foto horizontal"}
+          </p>
+          <p id={`${id}-ayuda`} className="text-xs text-muted-foreground">
+            JPG, PNG o WebP.{" "}
+            {url ? "Suelta otra aquí para cambiarla." : "Tu vitrina o tus productos."}
+          </p>
+          {canEdit ? (
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                variant={url ? "outline" : "secondary"}
+                className="min-h-11"
+                aria-describedby={`${id}-ayuda`}
+                onClick={() => input.current?.click()}
+              >
+                {url ? "Cambiar" : "Elegir foto"}
+              </Button>
+              {url ? (
+                <Button type="button" variant="ghost" className="min-h-11" onClick={onRemove}>
+                  Quitar
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      {problem || serverError ? (
+        <p role="alert" className="text-sm text-danger">
+          {problem ?? serverError}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** Espera a que se deje de escribir antes de preguntar. */
+function useSettled<T>(value: T, ms = 400): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms)
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return settled
+}
+
+function LinkField({
+  store,
+  id,
+  saved,
+  placeholder,
+  canEdit,
+}: {
+  store: MyStore
+  id: string
+  saved: string | null
+  placeholder: string
+  canEdit: boolean
+}) {
+  const field = useFieldContext<string>()
+  const name = useSettled(linkFromText(field.state.value))
+  const check = useQuery({
+    queryKey: ["marca-link", store.id, name],
+    queryFn: () =>
+      api<{ check: LinkCheck }>(
+        `/api/tiendas/${store.id}/marca/link?nombre=${encodeURIComponent(name)}`,
+      ),
+    enabled: canEdit && name.length > 0 && name !== saved,
+    staleTime: 30_000,
+  })
+  const result = name === saved ? null : check.data?.check
+  return (
+    <FormField label="Tu link" id={id}>
+      {(control: FieldControl) => (
+        <div className="flex flex-col gap-2">
+          <div className="flex min-w-0 items-stretch overflow-hidden rounded-lg border border-input-border bg-card focus-within:ring-3 focus-within:ring-ring/30">
+            <Input
+              {...control.props}
+              value={field.state.value}
+              placeholder={placeholder}
+              maxLength={63}
+              disabled={!canEdit}
+              autoComplete="off"
+              spellCheck={false}
+              // Se escribe como se guarda: sin tildes, mayúsculas ni espacios.
+              onChange={(event) => field.handleChange(linkFromText(event.target.value, true))}
+              onBlur={() => {
+                field.handleChange(linkFromText(field.state.value))
+                control.onBlur()
+              }}
+              className="min-w-0 flex-1 rounded-none border-0 shadow-none focus-visible:ring-0"
+            />
+            <span className="flex shrink-0 items-center border-l bg-muted px-3 text-sm text-muted-foreground">
+              {LINK_DOMAIN}
+            </span>
+          </div>
+          <div aria-live="polite" className="text-sm">
+            {!result ? (
+              <span className="text-muted-foreground">
+                {saved
+                  ? "Sin tildes ni espacios. Si lo cambias, el de antes sigue siendo tuyo."
+                  : "Sin tildes ni espacios: el nombre de tu tienda, como se escribe en internet."}
+              </span>
+            ) : result.state === "libre" ? (
+              <span className="inline-flex items-center gap-1.5 text-success">
+                <CircleCheck aria-hidden className="size-4" />
+                Está libre.{saved ? " Si lo cambias, el de antes sigue siendo tuyo." : ""}
+              </span>
+            ) : result.state === "tuyo" ? (
+              <span className="inline-flex items-center gap-1.5 text-success">
+                <CircleCheck aria-hidden className="size-4" />
+                Es un link tuyo de antes: vuelve a ser el de ahora.
+              </span>
+            ) : result.state === "vigente" ? null : result.state === "no-vale" ? (
+              <span className="text-danger">{result.message}</span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-danger">
+                {result.message}
+                {result.suggestion ? (
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto min-h-11 px-0 sm:min-h-0"
+                    onClick={() => field.handleChange(result.suggestion ?? "")}
+                  >
+                    Usar «{result.suggestion}»
+                  </Button>
+                ) : null}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </FormField>
+  )
+}
+
+type PreviewView = "catalogo" | "carrito" | "link"
+
+/**
+ * «Así lo ve tu clienta»: el catálogo, el carrito y la vista previa del link, con lo elegido aún
+ * sin guardar. Los productos son los primeros del catálogo de la tienda.
+ */
+function ClientPreview({
+  store,
   palette,
   name,
   logo,
   cover,
+  link,
 }: {
+  store: MyStore
   palette: BrandPalette
   name: string
-  logo: string | null
+  logo: NewLogo | string | null
   cover: string | null
+  link: string
 }) {
-  const id = useId()
+  const [view, setView] = useState<PreviewView>("catalogo")
+  const seesCatalog = store.permissions.includes("catalogo.ver")
+  const catalog = useQuery({
+    queryKey: ["catalogo", store.id],
+    queryFn: () => api<{ products: CatalogItem[] }>(`/api/tiendas/${store.id}/catalogo`),
+    enabled: seesCatalog,
+  })
+  const products = (catalog.data?.products ?? []).slice(0, 3)
   const { light } = palette
-  const mark = logo ? (
-    <img src={logo} alt="" className="size-7 shrink-0 rounded-md object-contain" />
-  ) : (
-    <span className="size-7 shrink-0 overflow-hidden rounded-md">
-      <Initials name={name} color={light} />
-    </span>
-  )
+  const mark = (size: string) =>
+    logo ? (
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-white",
+          size,
+        )}
+      >
+        <LogoImage logo={logo} className="size-full p-0.5" />
+      </span>
+    ) : (
+      <span
+        aria-hidden
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-full border-2 border-white font-serif font-bold",
+          size,
+        )}
+        style={{ backgroundColor: light.fill, color: light.fillForeground }}
+      >
+        {initialsOf(name)}
+      </span>
+    )
+  const first = products[0]
+  const price = (item: CatalogItem) => money(item.fromCents, store.currency)
+  const domain = `${link}${LINK_DOMAIN}`
   return (
-    <section aria-labelledby={`${id}-titulo`} className="flex flex-col gap-2 self-start">
-      <h2 id={`${id}-titulo`} className="text-sm font-semibold">
-        Así se ve
-      </h2>
-      <div className="theme-light overflow-hidden rounded-xl border bg-card text-card-foreground">
-        <div className="border-b bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
-          Tu gestorIA
-        </div>
-        <div className="flex flex-col gap-1.5 p-3 text-xs">
-          <div className="flex min-w-0 items-center gap-2">
-            {mark}
-            <span className="truncate font-semibold">{name}</span>
-          </div>
-          <span
-            className="rounded-md px-2 py-1.5 font-semibold"
-            style={{ backgroundColor: light.soft, color: light.softForeground }}
-          >
-            Pedidos
-          </span>
-          <span className="px-2 py-1">Catálogo</span>
-          <span
-            className="self-start rounded-md px-2.5 py-1.5 font-semibold"
-            style={{ backgroundColor: light.fill, color: light.fillForeground }}
-          >
-            Anotar un pedido
-          </span>
-        </div>
-      </div>
-      <div className="theme-light overflow-hidden rounded-xl border bg-card text-card-foreground">
-        <div className="border-b bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
-          Tu catálogo, más adelante
-        </div>
-        <div className="flex flex-col text-xs">
-          <span className="flex h-20 items-center justify-center overflow-hidden bg-muted">
-            {cover ? (
-              <img src={cover} alt="" className="size-full object-cover" />
-            ) : (
-              <span className="text-muted-foreground">Foto de portada</span>
-            )}
-          </span>
-          <div className="flex flex-col gap-2 p-3">
-            <div className="flex min-w-0 items-center gap-2">
-              {mark}
-              <span className="truncate font-semibold">{name}</span>
+    <div className="flex flex-col gap-3">
+      <ViewTabs
+        label="Qué ver"
+        value={view}
+        onValueChange={setView}
+        options={[
+          { value: "catalogo", label: "Catálogo" },
+          { value: "carrito", label: "Carrito" },
+          { value: "link", label: "Link en WhatsApp" },
+        ]}
+      />
+      <div className="theme-light mx-auto w-full max-w-[19rem] overflow-hidden rounded-[2rem] border-[7px] border-neutral-900 bg-white text-neutral-900 shadow-xl">
+        {view === "catalogo" ? (
+          <div className="flex min-h-[27rem] flex-col">
+            <div className="relative h-28 shrink-0" style={{ backgroundColor: light.soft }}>
+              {cover ? <img src={cover} alt="" className="size-full object-cover" /> : null}
             </div>
-            <span
-              className="self-start rounded-full px-3 py-1.5 font-semibold"
-              style={{ backgroundColor: light.fill, color: light.fillForeground }}
-            >
-              Pedir por WhatsApp
-            </span>
+            <div className="-mt-7 flex flex-col gap-1 px-4">
+              {mark("size-14 text-lg")}
+              <p
+                className="mt-1 truncate font-serif text-lg font-bold"
+                style={{ color: light.primary }}
+              >
+                {name}
+              </p>
+              <p className="text-xs text-neutral-500">Pide por WhatsApp · {domain}</p>
+            </div>
+            <div className="flex flex-1 flex-col gap-2 p-4">
+              {(products.length > 0 ? products : [null, null]).map((item, index) => (
+                <div
+                  key={item?.id ?? `ejemplo-${index}`}
+                  className="flex items-center gap-3 rounded-xl border border-neutral-200 p-2"
+                >
+                  {item ? (
+                    <Photo storeId={store.id} photoId={item.photoId} alt="" className="size-11" />
+                  ) : (
+                    <span className="flex size-11 items-center justify-center rounded-lg bg-neutral-100">
+                      <ShoppingBag aria-hidden className="size-4 text-neutral-400" />
+                    </span>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-semibold">
+                      {item?.name ?? "Tu producto"}
+                    </span>
+                    <span className="truncate text-xs text-neutral-500">
+                      {item?.options[0]
+                        ? `${item.options[0].name}: ${item.options[0].values.slice(0, 3).join(", ")}`
+                        : "Con su foto y su precio"}
+                    </span>
+                  </div>
+                  <span className="text-sm font-semibold">{item ? price(item) : "—"}</span>
+                </div>
+              ))}
+              <span
+                className="mt-auto rounded-full py-2.5 text-center text-sm font-semibold"
+                style={{ backgroundColor: light.fill, color: light.fillForeground }}
+              >
+                Lo quiero
+              </span>
+            </div>
           </div>
-        </div>
+        ) : view === "carrito" ? (
+          <div className="flex min-h-[27rem] flex-col">
+            <div className="flex items-center gap-2 border-b border-neutral-200 p-3">
+              {mark("size-9 text-xs")}
+              <span className="truncate text-sm font-semibold">{name}</span>
+            </div>
+            <div className="flex flex-1 flex-col gap-3 p-4">
+              <p className="text-sm font-semibold">Tu pedido</p>
+              {first ? (
+                <div className="flex items-center gap-3">
+                  <Photo storeId={store.id} photoId={first.photoId} alt="" className="size-12" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm">{first.name}</span>
+                    <span className="text-xs text-neutral-500">1 unidad</span>
+                  </div>
+                  <span className="text-sm font-semibold">{price(first)}</span>
+                </div>
+              ) : (
+                <p className="text-sm text-neutral-500">Tu producto, con su foto y su precio.</p>
+              )}
+              <p className="text-xs">
+                <span className="font-semibold underline" style={{ color: light.primary }}>
+                  Agregar otro producto
+                </span>
+              </p>
+              <div className="mt-auto flex items-center justify-between border-t border-neutral-200 pt-3 text-sm">
+                <span>Total</span>
+                <span className="font-bold">{first ? price(first) : "—"}</span>
+              </div>
+              <span
+                className="rounded-full py-2.5 text-center text-sm font-semibold"
+                style={{ backgroundColor: light.fill, color: light.fillForeground }}
+              >
+                Pedir por WhatsApp
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[27rem] flex-col justify-end gap-2 bg-[#efe7dd] p-3">
+            <div className="ml-auto w-[88%] overflow-hidden rounded-xl rounded-tr-sm bg-[#d9fdd3] p-1 shadow-sm">
+              <div className="overflow-hidden rounded-lg bg-white/70">
+                <div className="h-28" style={{ backgroundColor: light.soft }}>
+                  {cover ? <img src={cover} alt="" className="size-full object-cover" /> : null}
+                </div>
+                <div className="flex flex-col gap-0.5 p-2">
+                  <span className="text-xs font-semibold">
+                    {name}
+                    {first ? ` · ${first.name} ${price(first)}` : ""}
+                  </span>
+                  <span className="text-[11px] text-neutral-500">{domain}</span>
+                </div>
+              </div>
+              <p className="break-all px-1.5 py-1 text-xs text-sky-700 underline">
+                https://{domain}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Los colores de error, listo y aviso no cambian.
+        Es una vista previa: tu catálogo con link aún no está publicado. Lo que no cambia por
+        tienda: el orden, la letra y los colores de «agotado» y de error, para que se lea siempre
+        bien.
       </p>
-    </section>
+    </div>
   )
 }

@@ -408,8 +408,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "tu-marca",
         q: "¿Cómo pongo mi logo y el color de mi marca?",
         a: [
-          "En Configuración, en Tu marca: el logo, el nombre que ve el cliente, la foto de portada, el nombre del link de tu tienda y el color. Te sugerimos colores de tu logo y de una foto de tu letrero; cualquier color vale, y los tonos para que se lea bien se calculan solos.",
-          "El color se ve en gestorIA para todo tu equipo. El nombre del link va sin tildes ni espacios, y algunos nombres están reservados.",
+          "En Configuración, en Tu marca: suelta tu logo en el recuadro, elígelo con «Elegir imagen» o pégalo con Ctrl + V. Con «Ajustar» lo recortas. Salen los colores de tu logo: toca uno, o usa «Otro color». Cualquier color vale; si no se lee bien, te lo dice y los botones usan un tono más oscuro.",
+          "También pones la portada, el nombre que ve la clienta y tu link, sin tildes ni espacios: al escribirlo te dice si está libre. Al lado (en el celular, «Ver cómo queda») ves cómo lo verá tu clienta. Nada se guarda hasta «Guardar»; si sales antes, te pregunta.",
         ],
         needs: "configuracion",
         screen: "marca",

@@ -239,6 +239,13 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795808838829,
+      "tag": "0034_el_link_libre",
+      "breakpoints": true
     }
   ]
 }
