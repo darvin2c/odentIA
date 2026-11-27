@@ -12,25 +12,12 @@ import {
   store,
   storeAgent,
 } from "@gestoria/db"
-import {
-  and,
-  count,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  ne,
-  sql,
-} from "drizzle-orm"
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { agentStopIn } from "../acuerdo.js"
 import { ARGOS_ACTOR, withAgent } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { storeClockIn } from "../hora.js"
-import { pad, stockShortSql, variantPrices } from "../pedidos.js"
+import { pad, variantPrices } from "../pedidos.js"
 import { autoUnitCents } from "../precio.js"
 import { inStore } from "../tiendas.js"
 import { moneyText as formatMoney } from "./herramientas.js"
@@ -38,7 +25,7 @@ import { moneyText as formatMoney } from "./herramientas.js"
 /**
  * Argos, el administrador de la tienda (paso B5, tablero 13): vigila los pedidos y las
  * conversaciones. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado se lo trae al
- * equipo («Te toca»). Como en las clínicas, las cifras salen de cálculos fijos: el modelo no
+ * equipo («Te toca», en Inicio). Como en las clínicas, las cifras salen de cálculos fijos: el modelo no
  * escribe ninguna.
  *
  * Los seguimientos (decisión 5) son uno por cliente y por motivo, nunca masivos: recordar un
@@ -292,123 +279,12 @@ const FOLLOW_WORDS: Record<FollowUp, string> = {
   volver: "invitar a volver",
 }
 
-/** «Te toca» y «Hecho» de Argos, y el resumen de la semana (tablero 13). */
+/**
+ * Lo que hizo Argos (tablero 13) y el resumen de la semana, en Reportes. Lo que le toca al equipo
+ * se mudó a Inicio («Te toca», `inicio.ts`), para cada rol.
+ */
 export async function argosBoard(appDb: Db, person: Person, storeId: string, now = new Date()) {
   return inStore(appDb, person, storeId, "reportes.ver", async (tx) => {
-    const [shop] = await tx
-      .select({ currency: store.currency })
-      .from(store)
-      .where(eq(store.id, storeId))
-    const money = (cents: number) => formatMoney(cents, shop!.currency)
-    const toDo: {
-      kind: string
-      title: string
-      detail: string
-      orderId?: string
-      conversationId?: string
-      at?: Date
-    }[] = []
-
-    // Los pagos por captura (o por link que no coincidió) que esperan a una persona.
-    const waiting = await tx
-      .select({
-        orderId: saleOrder.id,
-        number: saleOrder.number,
-        customer: saleOrder.customerName,
-        amount: orderPayment.amountCents,
-        kind: orderPayment.kind,
-        method: orderPayment.methodName,
-        at: orderPayment.createdAt,
-      })
-      .from(orderPayment)
-      .innerJoin(saleOrder, eq(saleOrder.id, orderPayment.orderId))
-      .where(
-        and(
-          eq(orderPayment.storeId, storeId),
-          eq(orderPayment.status, "por_confirmar"),
-          eq(saleOrder.test, false),
-        ),
-      )
-      .orderBy(orderPayment.createdAt)
-    for (const p of waiting)
-      toDo.push({
-        kind: "pago",
-        title: "Confirmar un pago",
-        detail: `Pedido ${pad(p.number)} de ${p.customer}, ${money(p.amount)} ${p.kind === "link" ? "por el link (no coincide)" : `por ${p.method} (captura)`}`,
-        orderId: p.orderId,
-        at: p.at,
-      })
-
-    // Con su pago confirmado (todo o una parte) y sin poder salir: no alcanzaba el stock al pagar,
-    // o al cambiarlo (lo que tiene fuera no es lo de sus líneas).
-    const unpaidStock = await tx.execute<{ id: string; number: number; customer_name: string }>(sql`
-      select o.id, o.number, o.customer_name from sale_order o
-      where o.store_id = ${storeId} and o.state = 'por_salir' and o.test = false
-        and o.payment_collection <> 'al_recibir'
-        and ${stockShortSql("o")}`)
-    for (const o of unpaidStock)
-      toDo.push({
-        kind: "stock_pedido",
-        title: "Falta stock para un pedido con su pago confirmado",
-        detail: `Pedido ${pad(o.number)} de ${o.customer_name}: registra la entrada para que salga`,
-        orderId: o.id,
-      })
-
-    // Lo agotado que alguien pidió: cuando entre, Sofi les avisa sola.
-    const asked = await tx
-      .select({
-        variantId: productVariant.id,
-        productId: product.id,
-        productName: product.name,
-        values: productVariant.optionValues,
-        people: count(stockRequest.id),
-      })
-      .from(stockRequest)
-      .innerJoin(productVariant, eq(productVariant.id, stockRequest.variantId))
-      .innerJoin(product, eq(product.id, productVariant.productId))
-      .innerJoin(conversation, eq(conversation.id, stockRequest.conversationId))
-      .where(
-        and(
-          eq(stockRequest.storeId, storeId),
-          isNull(stockRequest.notifiedAt),
-          eq(productVariant.stock, 0),
-          ne(conversation.channel, "prueba"),
-        ),
-      )
-      .groupBy(productVariant.id, product.id, product.name, productVariant.optionValues)
-    for (const a of asked)
-      toDo.push({
-        kind: "reponer",
-        title: `Reponer ${a.productName}${a.values.length ? ` ${a.values.join(" · ")}` : ""}`,
-        detail: `Se acabó y ${a.people === 1 ? "1 persona la pidió" : `${a.people} personas la pidieron`}. Cuando registres la entrada, Sofi les avisa sola.`,
-      })
-
-    // Las conversaciones que esperan a una persona.
-    const people = await tx
-      .select({
-        id: conversation.id,
-        name: conversation.customerName,
-        reason: conversation.waitingReason,
-        at: conversation.updatedAt,
-      })
-      .from(conversation)
-      .where(
-        and(
-          eq(conversation.storeId, storeId),
-          eq(conversation.handler, "persona"),
-          ne(conversation.channel, "prueba"),
-        ),
-      )
-      .orderBy(conversation.updatedAt)
-    for (const c of people)
-      toDo.push({
-        kind: "conversacion",
-        title: "Una conversación espera a una persona",
-        detail: `${c.name ?? "Un cliente"}: ${c.reason ?? "Sofi la pasó"}`,
-        conversationId: c.id,
-        at: c.at,
-      })
-
     // Lo que Argos le encargó a Sofi en la última semana.
     const since = new Date(now.getTime() - 7 * DAY)
     const followUps = await tx
@@ -479,7 +355,6 @@ export async function argosBoard(appDb: Db, person: Person, storeId: string, now
         ),
       )
     return {
-      toDo,
       done,
       week: {
         collectedCents: thisWeek,
