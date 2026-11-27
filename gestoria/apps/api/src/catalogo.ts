@@ -1,27 +1,37 @@
 import {
+  accountCopy,
   type Db,
   MAX_PHOTO_BYTES,
+  MAX_PRODUCT_KEYWORDS,
   MAX_PRODUCT_OPTIONS,
   MAX_PRODUCT_PHOTOS,
   type PhotoType,
   PRODUCT_RELATIONS,
+  PRODUCT_RUBROS,
+  type ProductChange,
+  type ProductEventAction,
   type ProductOption,
+  type ProductStatus,
   product,
+  productColor,
+  productEvent,
   productLink,
   productPhoto,
   productPromotion,
   productQuantityPrice,
+  productQuestion,
   productVariant,
   saleOrder,
   saleOrderLine,
   stockMovement,
   storeEvent,
 } from "@gestoria/db"
-import { and, asc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
-import { can } from "./permisos.js"
+import { can, type StoreSeat } from "./permisos.js"
+import { applyRubroData, RUBROS, readinessOf, templateIn } from "./rubros.js"
 import { lastEntryCost } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -37,7 +47,7 @@ import { inStore, StoreError } from "./tiendas.js"
 export const MAX_VARIANTS = 200
 export const MAX_PRODUCTS = 2000
 
-const money = z
+export const money = z
   .number()
   .int("Escribe un monto válido")
   .min(1, "Debe ser mayor que 0")
@@ -53,7 +63,8 @@ const optionInput = z.object({
     .max(40, "Hasta 40 valores por opción"),
 })
 
-const sameText = (a: string, b: string) => a.localeCompare(b, "es", { sensitivity: "base" }) === 0
+export const sameText = (a: string, b: string) =>
+  a.localeCompare(b, "es", { sensitivity: "base" }) === 0
 
 const options = z
   .array(optionInput)
@@ -79,6 +90,89 @@ const options = z
         message: `Son ${combinations} combinaciones: el máximo es ${MAX_VARIANTS}`,
       })
   })
+
+/**
+ * Un GTIN de GS1 (EAN-13, UPC-A, EAN-8 o GTIN-14) con su dígito verificador (módulo 10): el
+ * estándar del código de barras que leen las cajas y piden los catálogos de Meta y Google.
+ */
+export function isGtin(code: string): boolean {
+  if (!/^(\d{8}|\d{12,14})$/.test(code)) return false
+  const digits = [...code].map(Number)
+  const check = digits.pop()!
+  const sum = digits.reverse().reduce((total, digit, i) => total + digit * (i % 2 === 0 ? 3 : 1), 0)
+  return (10 - (sum % 10)) % 10 === check
+}
+
+export const barcodeInput = z
+  .string()
+  .trim()
+  .transform((v) => v.replace(/[\s-]/g, ""))
+  .refine(isGtin, "Ese código de barras no es válido: revisa sus números (EAN-13 de 13 cifras)")
+  .nullable()
+
+export const codeInput = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9._/-]{1,40}$/, "Hasta 40 letras, números, puntos o guiones, sin espacios")
+
+/** Lo que dice la tienda del producto; nulo: «disponible» o «agotado», según su stock. */
+const statusInput = z
+  .discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("encargo"),
+      days: z.number().int().min(1, "Al menos 1 día").max(365),
+    }),
+    z.object({ kind: z.literal("cupo"), perDay: z.number().int().min(1, "Al menos 1").max(1000) }),
+    z.object({ kind: z.literal("preventa"), date: z.iso.date("Elige el día que llega") }),
+    z.object({ kind: z.literal("liquidacion") }),
+    z.object({ kind: z.literal("no_se_vende") }),
+  ])
+  .nullable()
+
+const packageInput = z
+  .object({
+    /** En gramos y milímetros (la pantalla los muestra en kg y cm). */
+    weightG: z.number().int().min(1).max(1_000_000).nullable(),
+    lengthMm: z.number().int().min(1).max(10_000).nullable(),
+    widthMm: z.number().int().min(1).max(10_000).nullable(),
+    heightMm: z.number().int().min(1).max(10_000).nullable(),
+  })
+  .refine(
+    (p) =>
+      [p.lengthMm, p.widthMm, p.heightMm].every((v) => v === null) ||
+      [p.lengthMm, p.widthMm, p.heightMm].every((v) => v !== null),
+    { message: "Escribe el largo, el ancho y el alto", path: ["lengthMm"] },
+  )
+
+const keywordsInput = z
+  .array(z.string().trim().min(1).max(40, "Máximo 40 caracteres"))
+  .max(MAX_PRODUCT_KEYWORDS, `Hasta ${MAX_PRODUCT_KEYWORDS} palabras`)
+  .transform((list) =>
+    list.filter((word, i) => list.findIndex((other) => sameText(other, word)) === i),
+  )
+
+const webInput = z.object({
+  visible: z.boolean(),
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Solo letras sin tilde, números y guiones")
+    .max(80, "Máximo 80 caracteres")
+    .nullable(),
+})
+
+/** El nombre del producto en el link: sin tildes, en minúsculas y con guiones («zapatilla-de-lona»). */
+export function slugOf(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+    .replace(/-+$/, "")
+}
 
 /** Los datos de un producto, sin valores por omisión: un cambio solo toca lo que trae. */
 const productFields = {
@@ -137,6 +231,14 @@ export const productPatch = z
     links: z
       .array(z.object({ productId: z.uuid(), kind: z.enum(PRODUCT_RELATIONS) }))
       .max(30, "Hasta 30 productos relacionados"),
+    rubro: z.enum(PRODUCT_RUBROS).nullable(),
+    /** Solo los datos que cambian: `null` borra uno; «No aplica» es `{ "noAplica": true }`. */
+    rubroData: z.record(z.string(), z.unknown()),
+    code: codeInput.nullable(),
+    status: statusInput,
+    package: packageInput,
+    keywords: keywordsInput,
+    web: webInput.partial(),
   })
   .partial()
   .superRefine((p, ctx) => {
@@ -169,13 +271,10 @@ export const productPatch = z
   })
 
 export const variantPatch = z.object({
-  sku: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9._/-]{1,40}$/, "Hasta 40 letras, números, puntos o guiones, sin espacios")
-    .optional(),
+  sku: codeInput.optional(),
   priceCents: money.nullable().optional(),
   photoId: z.uuid().nullable().optional(),
+  barcode: barcodeInput.optional(),
 })
 
 /** Lo que identifica un texto para un código: sin tildes, en mayúsculas, solo letras y números. */
@@ -213,11 +312,11 @@ export function combinations(list: ProductOption[]): string[][] {
 const sameCombo = (a: string[], b: string[]) =>
   a.length === b.length && a.every((value, i) => sameText(value, b[i]!))
 
-function uuidOr404(id: string, message: string) {
+export function uuidOr404(id: string, message: string) {
   if (!z.uuid().safeParse(id).success) throw new StoreError(404, "NOT_FOUND", message)
 }
 
-async function takenSkus(tx: Db, storeId: string): Promise<Set<string>> {
+export async function takenSkus(tx: Db, storeId: string): Promise<Set<string>> {
   const rows = await tx
     .select({ sku: productVariant.sku })
     .from(productVariant)
@@ -278,7 +377,7 @@ export async function catalog(appDb: Db, person: Person, storeId: string) {
   })
 }
 
-async function productRow(tx: Db, storeId: string, productId: string) {
+export async function productRow(tx: Db, storeId: string, productId: string) {
   uuidOr404(productId, "Ese producto ya no está")
   const [row] = await tx
     .select()
@@ -288,13 +387,55 @@ async function productRow(tx: Db, storeId: string, productId: string) {
   return row
 }
 
-async function detailIn(tx: Db, storeId: string, productId: string) {
+/** Lo que el producto muestra: «disponible» y «agotado» salen del stock; lo demás lo pone la tienda. */
+export type SaleState = "disponible" | "agotado" | ProductStatus
+
+export function saleStateOf(status: ProductStatus | null, stock: number): SaleState {
+  return status ?? (stock > 0 ? "disponible" : "agotado")
+}
+
+/** Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre. */
+export const SELLS_WITHOUT_STOCK: readonly ProductStatus[] = ["encargo", "cupo", "preventa"]
+
+/** El nombre de quien anotó algo: el de su cuenta, o «Sofi» si fue ella. */
+export async function namesOf(tx: Db, ids: (string | null)[]): Promise<Map<string, string>> {
+  const people = [...new Set(ids.filter((id): id is string => !!id && !id.startsWith("agente:")))]
+  const rows = people.length
+    ? await tx
+        .select({ id: accountCopy.userId, name: accountCopy.name })
+        .from(accountCopy)
+        .where(inArray(accountCopy.userId, people))
+    : []
+  const names = new Map(rows.map((row) => [row.id, row.name]))
+  for (const id of ids) if (id?.startsWith("agente:")) names.set(id, "Sofi")
+  return names
+}
+
+/** Los colores del producto, en el orden de su opción, con cómo se ven y su foto. */
+async function colorsIn(tx: Db, row: typeof product.$inferSelect) {
+  if (row.colorOption === null) return []
+  const values = row.options[row.colorOption]?.values ?? []
+  const looks = await tx.select().from(productColor).where(eq(productColor.productId, row.id))
+  return values.map((value) => {
+    const look = looks.find((l) => sameText(l.value, value))
+    return {
+      id: look?.id ?? null,
+      value,
+      hex: look?.hex ?? null,
+      hex2: look?.hex2 ?? null,
+      photoId: look?.photoId ?? null,
+    }
+  })
+}
+
+export async function detailIn(tx: Db, storeId: string, productId: string) {
   const row = await productRow(tx, storeId, productId)
   const variants = await tx
     .select({
       id: productVariant.id,
       optionValues: productVariant.optionValues,
       sku: productVariant.sku,
+      barcode: productVariant.barcode,
       priceCents: productVariant.priceCents,
       photoId: productVariant.photoId,
       stock: productVariant.stock,
@@ -303,7 +444,7 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
     .where(and(eq(productVariant.productId, productId), isNull(productVariant.removedAt)))
     .orderBy(asc(productVariant.createdAt), asc(productVariant.sku))
   const photos = await tx
-    .select({ id: productPhoto.id, position: productPhoto.position })
+    .select({ id: productPhoto.id, position: productPhoto.position, colorId: productPhoto.colorId })
     .from(productPhoto)
     .where(eq(productPhoto.productId, productId))
     .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
@@ -336,16 +477,38 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
         .from(product)
         .where(inArray(product.id, otherIds))
     : []
+  const questionRows = await tx
+    .select()
+    .from(productQuestion)
+    .where(eq(productQuestion.productId, productId))
+    .orderBy(desc(productQuestion.askedAt))
+    .limit(100)
+  const who = await namesOf(
+    tx,
+    questionRows.flatMap((q) => [q.askedBy, q.answeredBy, q.savedBy]),
+  )
+  const colors = await colorsIn(tx, row)
+  const template = row.rubro ? await templateIn(tx, storeId, row.rubro) : []
   const lastCostCents = await lastEntryCost(tx, productId)
   const prices = variants.map((v) => v.priceCents ?? row.listPriceCents)
+  const stock = variants.reduce((sum, v) => sum + v.stock, 0)
+  const pkg = {
+    weightG: row.packageWeightG,
+    lengthMm: row.packageLengthMm,
+    widthMm: row.packageWidthMm,
+    heightMm: row.packageHeightMm,
+  }
   return {
     id: row.id,
     name: row.name,
     category: row.category,
     description: row.description,
+    code: row.code,
     listPriceCents: row.listPriceCents,
     minPriceCents: row.minPriceCents,
     options: row.options,
+    colorOption: row.colorOption,
+    colors,
     variants,
     photos,
     quantityPrices,
@@ -356,18 +519,125 @@ async function detailIn(tx: Db, storeId: string, productId: string) {
         return { productId: id, kind: l.kind, name: names.find((n) => n.id === id)?.name ?? "" }
       })
       .sort((x, y) => x.name.localeCompare(y.name, "es")),
+    state: saleStateOf(row.status, stock),
+    status: row.status,
+    statusDays: row.statusDays,
+    statusPerDay: row.statusPerDay,
+    statusDate: row.statusDate,
+    rubro: row.rubro,
+    rubroData: row.rubroData,
+    template,
+    package: pkg,
+    keywords: row.keywords,
+    web: { visible: row.webVisible, slug: row.webSlug },
+    questions: questionRows.map((q) => ({
+      id: q.id,
+      question: q.question,
+      conversationId: q.conversationId,
+      askedBy: who.get(q.askedBy) ?? null,
+      askedAt: q.askedAt,
+      answer: q.answer,
+      answeredBy: q.answeredBy ? (who.get(q.answeredBy) ?? null) : null,
+      answeredAt: q.answeredAt,
+      saveRequested: q.saveRequested,
+      savedBy: q.savedBy ? (who.get(q.savedBy) ?? null) : null,
+      savedAt: q.savedAt,
+    })),
+    readiness: readinessOf({
+      listPriceCents: row.listPriceCents,
+      minPriceCents: row.minPriceCents,
+      stock,
+      sellsWithoutStock: row.status !== null && SELLS_WITHOUT_STOCK.includes(row.status),
+      colors: colors.map((c) => ({
+        value: c.value,
+        hasPhoto: !!c.photoId || (!!c.id && photos.some((p) => p.colorId === c.id)),
+      })),
+      photoCount: photos.length,
+      rowLabel: row.rubro ? RUBROS[row.rubro].rowLabel : "Color",
+      template,
+      rubroData: row.rubroData,
+      keywordCount: row.keywords.length,
+      hasPackage: pkg.weightG !== null && pkg.lengthMm !== null,
+    }),
     fromCents: prices.length ? Math.min(...prices) : row.listPriceCents,
     toCents: prices.length ? Math.max(...prices) : row.listPriceCents,
     lastCostCents,
     costWarning: costWarning(row.minPriceCents, lastCostCents),
+    updatedAt: row.updatedAt,
   }
 }
 
+export type ProductDetail = Awaited<ReturnType<typeof detailIn>>
+
+/** Lo que costó es del dueño: quien no puede ver costos no lo recibe, ni el aviso que lo nombra. */
+export function forRole<T extends { lastCostCents: number | null; costWarning: unknown }>(
+  detail: T,
+  role: StoreSeat,
+): T {
+  return can(role, "costos.ver") ? detail : { ...detail, lastCostCents: null, costWarning: null }
+}
+
 export async function productDetail(appDb: Db, person: Person, storeId: string, productId: string) {
+  return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) =>
+    forRole(await detailIn(tx, storeId, productId), role),
+  )
+}
+
+/** Anota un cambio de la ficha en su historial, con quién y cuándo (lo pone la base). */
+export async function logProductEvent(
+  tx: Db,
+  storeId: string,
+  productId: string,
+  actorUserId: string,
+  action: ProductEventAction,
+  changes: ProductChange[],
+  reason: string | null = null,
+) {
+  await tx.insert(productEvent).values({ storeId, productId, actorUserId, action, changes, reason })
+}
+
+/** Lo que cambió entre dos versiones, campo por campo (solo los que trae `after`). */
+export function changesOf(before: Record<string, unknown>, after: Record<string, unknown>) {
+  const out: ProductChange[] = []
+  for (const [field, to] of Object.entries(after)) {
+    const from = before[field]
+    if (JSON.stringify(from ?? null) !== JSON.stringify(to ?? null))
+      out.push({ field, from: from ?? null, to: to ?? null })
+  }
+  return out
+}
+
+/** El historial de la ficha, del más nuevo al más viejo, con el nombre de quien lo hizo. */
+export async function productHistory(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  productId: string,
+) {
   return inStore(appDb, person, storeId, "catalogo.ver", async (tx, role) => {
-    const detail = await detailIn(tx, storeId, productId)
-    // Lo que costó es del dueño: quien no puede ver costos no lo recibe, ni el aviso que lo nombra.
-    return can(role, "costos.ver") ? detail : { ...detail, lastCostCents: null, costWarning: null }
+    await productRow(tx, storeId, productId)
+    const rows = await tx
+      .select()
+      .from(productEvent)
+      .where(eq(productEvent.productId, productId))
+      .orderBy(desc(productEvent.createdAt), desc(productEvent.id))
+      .limit(200)
+    const who = await namesOf(
+      tx,
+      rows.map((r) => r.actorUserId),
+    )
+    // Lo que costó solo lo ve quien puede ver costos.
+    const costs = can(role, "costos.ver")
+    return {
+      events: rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        actorName: who.get(r.actorUserId) ?? null,
+        changes: costs ? r.changes : r.changes.filter((c) => c.field !== "unitCostCents"),
+        reason: r.reason,
+        createdAt: r.createdAt,
+      })),
+    }
   })
 }
 
@@ -436,6 +706,7 @@ export async function createProduct(
         minPriceCents: input.minPriceCents,
       },
     })
+    await logProductEvent(tx, storeId, created.id, person.userId, "creado", [])
     return { id: created.id }
   })
 }
@@ -520,6 +791,7 @@ export async function updateProduct(
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     const current = await productRow(tx, storeId, productId)
+    const before = sheetOf(await detailIn(tx, storeId, productId))
     const listPriceCents = patch.listPriceCents ?? current.listPriceCents
     const minPriceCents =
       patch.minPriceCents !== undefined ? patch.minPriceCents : current.minPriceCents
@@ -533,16 +805,55 @@ export async function updateProduct(
         },
       )
     if (patch.options) await applyOptions(tx, storeId, current, patch.options)
+    const rubro = patch.rubro !== undefined ? patch.rubro : current.rubro
+    let rubroData = current.rubroData
+    if (patch.rubroData) {
+      if (!rubro)
+        throw new StoreError(400, "VALIDATION_ERROR", "Elige primero el rubro del producto", {
+          rubro: "Elige el rubro",
+        })
+      const template = await templateIn(tx, storeId, rubro)
+      const applied = applyRubroData(template, rubroData, patch.rubroData)
+      if (!applied.ok)
+        throw new StoreError(
+          400,
+          "VALIDATION_ERROR",
+          Object.values(applied.fields)[0]!,
+          applied.fields,
+        )
+      rubroData = applied.data
+    }
+    const colorGone =
+      patch.options !== undefined &&
+      current.colorOption !== null &&
+      current.colorOption >= patch.options.length
     const changes = {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.category !== undefined ? { category: patch.category } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.options !== undefined ? { options: patch.options } : {}),
+      ...(colorGone ? { colorOption: null } : {}),
+      ...(patch.rubro !== undefined ? { rubro: patch.rubro } : {}),
+      ...(patch.rubroData !== undefined ? { rubroData } : {}),
+      ...(patch.code !== undefined ? { code: patch.code } : {}),
+      ...(patch.status !== undefined ? statusColumns(patch.status) : {}),
+      ...(patch.package !== undefined
+        ? {
+            packageWeightG: patch.package.weightG,
+            packageLengthMm: patch.package.lengthMm,
+            packageWidthMm: patch.package.widthMm,
+            packageHeightMm: patch.package.heightMm,
+          }
+        : {}),
+      ...(patch.keywords !== undefined ? { keywords: patch.keywords } : {}),
+      ...(patch.web?.visible !== undefined ? { webVisible: patch.web.visible } : {}),
+      ...(patch.web?.slug !== undefined ? { webSlug: patch.web.slug } : {}),
       listPriceCents,
       minPriceCents,
       updatedAt: new Date(),
     }
     await tx.update(product).set(changes).where(eq(product.id, productId))
+    if (patch.options) await dropGoneColors(tx, productId)
     if (patch.quantityPrices) {
       for (const tier of patch.quantityPrices)
         if (tier.unitPriceCents >= listPriceCents)
@@ -612,8 +923,82 @@ export async function updateProduct(
           minPriceCents: { from: current.minPriceCents, to: minPriceCents },
         },
       })
-    return detailIn(tx, storeId, productId)
+    const after = await detailIn(tx, storeId, productId)
+    const sheet = sheetOf(after)
+    const touched = Object.keys(patch).filter((key) => key in sheet) as (keyof typeof sheet)[]
+    const diff = changesOf(
+      Object.fromEntries(touched.map((key) => [key, before[key]])),
+      Object.fromEntries(touched.map((key) => [key, sheet[key]])),
+    )
+    if (diff.length > 0)
+      await logProductEvent(tx, storeId, productId, person.userId, "cambiado", diff)
+    return after
   })
+}
+
+/** Las columnas del estado que pone la tienda (nulo: disponible o agotado, por su stock). */
+function statusColumns(status: z.infer<typeof statusInput>) {
+  return {
+    status: status?.kind ?? null,
+    statusDays: status?.kind === "encargo" ? status.days : null,
+    statusPerDay: status?.kind === "cupo" ? status.perDay : null,
+    statusDate: status?.kind === "preventa" ? status.date : null,
+  }
+}
+
+/**
+ * La ficha con la forma de `productPatch`: así el historial guarda cada cambio como se pide, y
+ * deshacer es volver a pedir los valores de antes.
+ */
+export function sheetOf(detail: ProductDetail) {
+  const status =
+    detail.status === "encargo"
+      ? { kind: "encargo" as const, days: detail.statusDays }
+      : detail.status === "cupo"
+        ? { kind: "cupo" as const, perDay: detail.statusPerDay }
+        : detail.status === "preventa"
+          ? { kind: "preventa" as const, date: detail.statusDate }
+          : detail.status
+            ? { kind: detail.status }
+            : null
+  return {
+    name: detail.name,
+    category: detail.category,
+    description: detail.description,
+    listPriceCents: detail.listPriceCents,
+    minPriceCents: detail.minPriceCents,
+    options: detail.options,
+    quantityPrices: detail.quantityPrices,
+    promotions: detail.promotions,
+    links: detail.links.map((l) => ({ productId: l.productId, kind: l.kind })),
+    rubro: detail.rubro,
+    rubroData: detail.rubroData,
+    code: detail.code,
+    status,
+    package: detail.package,
+    keywords: detail.keywords,
+    web: detail.web,
+  }
+}
+
+/**
+ * Los colores que ya no están en la opción del color se borran, y sus fotos quedan para todos: el
+ * color existe por su valor en la opción, no por su fila.
+ */
+export async function dropGoneColors(tx: Db, productId: string) {
+  const [row] = await tx
+    .select({ options: product.options, colorOption: product.colorOption })
+    .from(product)
+    .where(eq(product.id, productId))
+  const values = row?.colorOption != null ? (row.options[row.colorOption]?.values ?? []) : []
+  const looks = await tx
+    .select({ id: productColor.id, value: productColor.value })
+    .from(productColor)
+    .where(eq(productColor.productId, productId))
+  const gone = looks.filter((l) => !values.some((v) => sameText(v, l.value))).map((l) => l.id)
+  if (gone.length === 0) return
+  await tx.update(productPhoto).set({ colorId: null }).where(inArray(productPhoto.colorId, gone))
+  await tx.delete(productColor).where(inArray(productColor.id, gone))
 }
 
 /** Borra un producto que nunca movió stock (un error al crearlo). Con kardex, no se borra. */
@@ -679,11 +1064,26 @@ export async function updateVariant(
         )
       if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está en el producto")
     }
-    // Un código repetido lo rechaza el índice único de la base (`SKU_TAKEN`).
+    // Un código repetido lo rechaza el índice único de la base (`SKU_TAKEN`, `BARCODE_TAKEN`).
     await tx
       .update(productVariant)
       .set({ ...patch, updatedAt: new Date() })
       .where(eq(productVariant.id, variantId))
+    const before: Record<string, unknown> = {
+      sku: variant.sku,
+      priceCents: variant.priceCents,
+      photoId: variant.photoId,
+      barcode: variant.barcode,
+    }
+    const diff = changesOf(
+      Object.fromEntries(Object.keys(patch).map((key) => [key, before[key]])),
+      patch,
+    )
+    if (diff.length > 0)
+      await logProductEvent(tx, storeId, variant.productId, person.userId, "cambiado", [
+        { field: "variant", from: variant.optionValues, to: variant.optionValues },
+        ...diff,
+      ])
     return detailIn(tx, storeId, variant.productId)
   })
 }
@@ -743,6 +1143,10 @@ export async function removeVariant(appDb: Db, person: Person, storeId: string, 
       .update(product)
       .set({ options, updatedAt: now })
       .where(eq(product.id, variant.productId))
+    await dropGoneColors(tx, variant.productId)
+    await logProductEvent(tx, storeId, variant.productId, person.userId, "cambiado", [
+      { field: "variant", from: variant.optionValues, to: null },
+    ])
     return detailIn(tx, storeId, variant.productId)
   })
 }
@@ -799,16 +1203,122 @@ export async function addPhoto(
 export async function removePhoto(appDb: Db, person: Person, storeId: string, photoId: string) {
   uuidOr404(photoId, "Esa foto ya no está")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    // La variante que la usaba vuelve a la foto del producto.
+    // La variante y el color que la usaban vuelven a la foto del producto.
     await tx
       .update(productVariant)
       .set({ photoId: null, updatedAt: new Date() })
       .where(and(eq(productVariant.storeId, storeId), eq(productVariant.photoId, photoId)))
+    await tx
+      .update(productColor)
+      .set({ photoId: null, updatedAt: new Date() })
+      .where(and(eq(productColor.storeId, storeId), eq(productColor.photoId, photoId)))
     const [row] = await tx
       .delete(productPhoto)
       .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
-      .returning({ id: productPhoto.id })
+      .returning({ id: productPhoto.id, productId: productPhoto.productId })
     if (!row) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
+    await logProductEvent(tx, storeId, row.productId, person.userId, "foto", [
+      { field: "photos", from: photoId, to: null },
+    ])
+  })
+}
+
+export const photoPatch = z.object({
+  /** El color al que pertenece (de `colors[].id`); nulo: vale para todos. */
+  colorId: z.uuid().nullable().optional(),
+  /** Su lugar entre las fotos: la primera es la que ve la clienta en el catálogo. */
+  position: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_PRODUCT_PHOTOS - 1)
+    .optional(),
+  /** Que sea la foto que manda Sofi cuando piden su color. */
+  colorMain: z.boolean().optional(),
+})
+
+/**
+ * Cambia a qué color pertenece una foto, su lugar o si es la que manda Sofi por su color. Moverla
+ * de lugar corre las demás, sin huecos: «Mover» hace lo mismo que arrastrar.
+ */
+export async function updatePhoto(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  photoId: string,
+  patch: z.infer<typeof photoPatch>,
+) {
+  uuidOr404(photoId, "Esa foto ya no está")
+  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const [photo] = await tx
+      .select({
+        id: productPhoto.id,
+        productId: productPhoto.productId,
+        colorId: productPhoto.colorId,
+        position: productPhoto.position,
+      })
+      .from(productPhoto)
+      .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
+    if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
+    const changes: ProductChange[] = []
+    const colorId = patch.colorId !== undefined ? patch.colorId : photo.colorId
+    if (colorId) {
+      const [color] = await tx
+        .select({ id: productColor.id })
+        .from(productColor)
+        .where(and(eq(productColor.id, colorId), eq(productColor.productId, photo.productId)))
+      if (!color) throw new StoreError(404, "NOT_FOUND", "Ese color ya no está en el producto")
+    }
+    if (patch.colorId !== undefined && patch.colorId !== photo.colorId) {
+      // Si era la foto de su color y cambia de color, ese color se queda sin la suya.
+      await tx
+        .update(productColor)
+        .set({ photoId: null, updatedAt: new Date() })
+        .where(and(eq(productColor.productId, photo.productId), eq(productColor.photoId, photoId)))
+      await tx
+        .update(productPhoto)
+        .set({ colorId: patch.colorId })
+        .where(eq(productPhoto.id, photoId))
+      changes.push({ field: "photoColor", from: photo.colorId, to: patch.colorId })
+    }
+    if (patch.colorMain !== undefined) {
+      if (patch.colorMain && !colorId)
+        throw new StoreError(400, "VALIDATION_ERROR", "Elige primero de qué color es la foto", {
+          colorId: "Elige el color",
+        })
+      if (colorId) {
+        const [look] = await tx
+          .select({ photoId: productColor.photoId })
+          .from(productColor)
+          .where(eq(productColor.id, colorId))
+        const next = patch.colorMain ? photoId : look?.photoId === photoId ? null : look?.photoId
+        if (next !== look?.photoId) {
+          await tx
+            .update(productColor)
+            .set({ photoId: next ?? null, updatedAt: new Date() })
+            .where(eq(productColor.id, colorId))
+          changes.push({ field: "colorPhoto", from: look?.photoId ?? null, to: next ?? null })
+        }
+      }
+    }
+    if (patch.position !== undefined && patch.position !== photo.position) {
+      const all = await tx
+        .select({ id: productPhoto.id })
+        .from(productPhoto)
+        .where(eq(productPhoto.productId, photo.productId))
+        .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
+      const order = all.map((p) => p.id).filter((id) => id !== photoId)
+      order.splice(Math.min(patch.position, order.length), 0, photoId)
+      for (const [position, id] of order.entries())
+        await tx.update(productPhoto).set({ position }).where(eq(productPhoto.id, id))
+      changes.push({ field: "photoPosition", from: photo.position, to: patch.position })
+    }
+    if (changes.length > 0)
+      await logProductEvent(tx, storeId, photo.productId, person.userId, "foto", [
+        { field: "photo", from: photoId, to: photoId },
+        ...changes,
+      ])
+    return detailIn(tx, storeId, photo.productId)
   })
 }
 

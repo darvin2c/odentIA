@@ -18,7 +18,6 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   choicesInput,
   deviceInput,
@@ -29,6 +28,7 @@ import {
   storeChoices,
   subscribeInput,
 } from "./avisos.js"
+import { cashBox, cashDay, receiveCash, receiveInput } from "./caja.js"
 import {
   createExchange,
   exchangeInput,
@@ -43,11 +43,14 @@ import {
   deleteProduct,
   imageType,
   photoContent,
+  photoPatch,
   productDetail,
+  productHistory,
   productInput,
   productPatch,
   removePhoto,
   removeVariant,
+  updatePhoto,
   updateProduct,
   updateVariant,
   variantPatch,
@@ -86,6 +89,7 @@ import {
   syncAccountCopy,
 } from "./cuenta.js"
 import { dayQuery, dispatchBoard, dispatchCount } from "./despachos.js"
+import { gridInput, saveGrid } from "./ficha.js"
 import { exampleSheet, MAX_SHEET_BYTES, uploadSheet } from "./hoja.js"
 import { timeZoneInput } from "./hora.js"
 import { storeHome } from "./inicio.js"
@@ -145,8 +149,19 @@ import {
   undoInput,
   undoPayment,
 } from "./pedidos.js"
+import {
+  addSavedQuestion,
+  answerInput,
+  answerQuestion,
+  openQuestions,
+  savedQuestionInput,
+  saveInput,
+  saveQuestion,
+  unsaveQuestion,
+} from "./preguntas.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
+import { saveTemplate, storeTemplates, templateInput } from "./rubros.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
   agentSettings,
@@ -587,6 +602,58 @@ export function createApp(deps: AppDeps) {
     const { id, photoId } = c.req.param()
     await removePhoto(deps.appDb, c.get("person"), id, photoId)
     return c.body(null, 204)
+  })
+  app.patch("/api/tiendas/:id/fotos/:photoId", async (c) => {
+    const patch = await bodyOf(c, photoPatch)
+    const { id, photoId } = c.req.param()
+    return c.json({ product: await updatePhoto(deps.appDb, c.get("person"), id, photoId, patch) })
+  })
+
+  // La ficha del producto: la plantilla de cada rubro, la cuadrícula de tallas y colores, el
+  // historial y lo que Sofi no supo (lienzo «La ficha del producto»).
+  app.get("/api/tiendas/:id/plantillas", async (c) =>
+    c.json(await storeTemplates(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.patch("/api/tiendas/:id/plantillas/:rubro", async (c) => {
+    const input = await bodyOf(c, templateInput)
+    const { id, rubro } = c.req.param()
+    return c.json({ template: await saveTemplate(deps.appDb, c.get("person"), id, rubro, input) })
+  })
+  app.get("/api/tiendas/:id/productos/:productId/historial", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await productHistory(deps.appDb, c.get("person"), id, productId))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/cuadricula", async (c) => {
+    const input = await bodyOf(c, gridInput)
+    const { id, productId } = c.req.param()
+    return c.json(await saveGrid(deps.appDb, c.get("person"), id, productId, input))
+  })
+  app.get("/api/tiendas/:id/preguntas", async (c) =>
+    c.json(await openQuestions(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/productos/:productId/preguntas", async (c) => {
+    const input = await bodyOf(c, savedQuestionInput)
+    const { id, productId } = c.req.param()
+    const product = await addSavedQuestion(deps.appDb, c.get("person"), id, productId, input)
+    return c.json({ product }, 201)
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/respuesta", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    const { id, questionId } = c.req.param()
+    return c.json({
+      product: await answerQuestion(deps.appDb, c.get("person"), id, questionId, input),
+    })
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/guardar", async (c) => {
+    const input = await bodyOf(c, saveInput)
+    const { id, questionId } = c.req.param()
+    return c.json({
+      product: await saveQuestion(deps.appDb, c.get("person"), id, questionId, input),
+    })
+  })
+  app.post("/api/tiendas/:id/preguntas/:questionId/quitar", async (c) => {
+    const { id, questionId } = c.req.param()
+    return c.json({ product: await unsaveQuestion(deps.appDb, c.get("person"), id, questionId) })
   })
   app.patch("/api/tiendas/:id/variantes/:variantId", async (c) => {
     const patch = await bodyOf(c, variantPatch)
