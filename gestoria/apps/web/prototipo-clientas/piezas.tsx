@@ -8,6 +8,7 @@ import {
   PackagePlus,
   RefreshCw,
   ShoppingCart,
+  Sunrise,
   Sparkles,
   Tag,
 } from "lucide-react"
@@ -22,6 +23,7 @@ export const ICONOS: Record<AccionId, LucideIcon> = {
   cumple: CalendarHeart,
   vip: Crown,
   recuperar: HeartHandshake,
+  despertar: Sunrise,
   nuevo: Sparkles,
   liq: Tag,
 }
@@ -120,7 +122,7 @@ export function Burbuja({
             {botones.map((b) => (
               <span
                 key={b}
-                className="flex-1 rounded-lg bg-card px-2 py-1.5 text-center text-[13px] font-medium text-info shadow-xs"
+                className="flex-1 rounded-lg bg-card px-2 py-1.5 text-center text-[13px] font-medium text-primary shadow-xs"
               >
                 {b}
               </span>

@@ -17,18 +17,18 @@ import {
 import {
   DetailField,
   DetailList,
-  EmptyState,
   PageHeader,
   PageNotice,
   PageShell,
   PersonAvatar,
 } from "@odentia/ui-patterns"
-import { ArrowLeft, History, Lock, MessageCircle, Pencil, Repeat, UserRoundX } from "lucide-react"
-import { type ReactNode, useState } from "react"
+import { ArrowLeft, History, Lock, MessageCircle, Pencil, Repeat } from "lucide-react"
+import { type ReactNode, useEffect, useState } from "react"
 import {
   ACC,
   ACCIONES,
   type Clienta,
+  encargoDe,
   type Dato,
   type DatoKey,
   fecha,
@@ -42,6 +42,7 @@ import {
   soles,
 } from "./datos"
 import { cambiar, corregir, planOf, useDb } from "./estado"
+import { CampanaHecha, EncargoCard, enviosDe } from "./campanas"
 import { DeArgos, SegBadge, Tarjeta } from "./piezas"
 import { ir, useRuta } from "./ruta"
 
@@ -164,7 +165,11 @@ function DatoRow({
           ) : (
             <DeArgos>
               Argos lo anotó{" "}
-              {dato.fuente === "chat" ? `del ${dato.de.replace(/^el /, "")}` : FUENTE[dato.fuente]}
+              {dato.fuente === "chat"
+                ? dato.de.startsWith("el ")
+                  ? `del ${dato.de.slice(3)}`
+                  : `de ${dato.de}`
+                : FUENTE[dato.fuente]}
               {dato.cita ? <>: «{dato.cita}»</> : <> · {dato.cuando}</>}
             </DeArgos>
           )}
@@ -309,17 +314,12 @@ export function FichaPage({ id }: { id: string }) {
   const d = useDb(ruta.rubro)
   const [comparar, setComparar] = useState(false)
   const c = d.cl.find((x) => x.id === id && !x.oculta)
-  if (!c)
-    return (
-      <PageShell>
-        <EmptyState
-          icon={UserRoundX}
-          title="Esta ficha se unió a otra"
-          actionLabel="Volver a Clientes"
-          onAction={() => ir("/clientes")}
-        />
-      </PageShell>
-    )
+  const unida = d.cl.find((x) => x.id === id)?.parecida
+  // Una ficha que se unió a otra abre la que quedó, sin una pantalla de por medio.
+  useEffect(() => {
+    if (!c) ir(unida ? `/clientes/${unida}` : "/clientes")
+  }, [c, unida])
+  if (!c) return null
   const k = perfil(c)
   const plan = planOf(ruta.rubro)
   const otra = c.parecida ? d.cl.find((x) => x.id === c.parecida && !x.oculta) : undefined
@@ -334,6 +334,7 @@ export function FichaPage({ id }: { id: string }) {
     plan[a.id].out.filter((o) => o.c.id === c.id).map((o) => o.why),
   )[0]
   const ventanaGratis = c.lastH < 24
+  const mias = enviosDe(d, R, plan).filter((e) => e.c.id === c.id)
   const chatRes = (): ReactNode => {
     if (c.id === "c5")
       return d.paid ? (
@@ -398,7 +399,7 @@ export function FichaPage({ id }: { id: string }) {
           Unirlas lo decide una persona.
         </PageNotice>
       ) : null}
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_27rem]">
         <div className="flex min-w-0 flex-col gap-5">
           <Tarjeta
             title="Lo que Argos sabe de ella"
@@ -478,18 +479,18 @@ export function FichaPage({ id }: { id: string }) {
                   {k.sens ? k.sens[0]!.toUpperCase() + k.sens.slice(1) : "Paga el precio normal"}
                 </Mini>
                 <Mini
-                  label="Cómo responde a Argos"
+                  label="Cómo responde a Sofi"
                   hint={
                     c.hist.length
                       ? compro
                         ? `compró ${compro} ${compro === 1 ? "vez" : "veces"}`
-                        : "todavía no compró por un mensaje"
-                      : "sin mensajes todavía"
+                        : "todavía no compró por una campaña"
+                      : "sin campañas todavía"
                   }
                 >
                   {c.hist.length
                     ? `Respondió ${respondio} de ${c.hist.length}`
-                    : "Aún no le escribe"}
+                    : "Aún no le escribió"}
                 </Mini>
                 {c.asked.length || c.cart ? (
                   <Mini label="Lo que quiso y no compró" wide>
@@ -546,8 +547,13 @@ export function FichaPage({ id }: { id: string }) {
                         <span className="text-xs text-muted-foreground">
                           {fecha(b.d)}
                           {b.reb ? " · con rebaja" : b.liq ? " · en liquidación" : ""}
-                          {b.argos ? ` · la vendió Argos («${ACC[b.argos].t(R)}»)` : ""}
                         </span>
+                        {b.argos ? (
+                          <span className="text-xs text-primary">
+                            {b.pedido ? `Pedido ${b.pedido} · ` : ""}Venta de la campaña «
+                            {ACC[b.argos].t(R)}»{b.motivo ? ` · porque ${b.motivo}` : ""}
+                          </span>
+                        ) : null}
                       </span>
                       <span className="font-medium tabular-nums">{soles(b.price)}</span>
                     </li>
@@ -557,6 +563,59 @@ export function FichaPage({ id }: { id: string }) {
           ) : null}
         </div>
         <div className="flex min-w-0 flex-col gap-5">
+          <Tarjeta
+            title="Sus campañas"
+            subtitle="Argos decide la campaña y se la encarga a Sofi. Sofi le escribe, conversa y vende."
+          >
+            {mias
+              .filter((e) => e.cuandoTipo === "hara")
+              .map((e) => (
+                <EncargoCard
+                  key={e.a}
+                  e={encargoDe(e.a, c, R)}
+                  estado={
+                    <Badge variant={e.resTexto.startsWith("Sofi") ? "soft" : "warning"}>
+                      {ruta.ventas && e.resTexto.startsWith("Espera el sí")
+                        ? `Sofi le escribe ${ACC[e.a].when}`
+                        : e.resTexto}
+                    </Badge>
+                  }
+                />
+              ))}
+            {!mias.some((e) => e.cuandoTipo === "hara") && fuera && !c.sentWeek ? (
+              <p className="text-sm text-muted-foreground">
+                Esta semana no le toca ninguna: {fuera[0]?.toLowerCase()}
+                {fuera.slice(1)}.
+              </p>
+            ) : null}
+            {mias.filter((e) => e.cuandoTipo !== "hara").length ? (
+              <ol className="flex flex-col divide-y">
+                {mias
+                  .filter((e) => e.cuandoTipo !== "hara")
+                  .map((e) => (
+                    <li key={`${e.a}-${e.cuando}`} className="py-3 first:pt-0 last:pb-0">
+                      <CampanaHecha
+                        e={e}
+                        R={R}
+                        accion={
+                          e.chat ? (
+                            <span>
+                              <Button
+                                variant="outline"
+                                size="xs"
+                                onClick={() => ir(`/conversaciones/${e.chat}`)}
+                              >
+                                Ver la conversación
+                              </Button>
+                            </span>
+                          ) : null
+                        }
+                      />
+                    </li>
+                  ))}
+              </ol>
+            ) : null}
+          </Tarjeta>
           <Tarjeta title="Cuándo se le puede escribir">
             <DetailList columns={1}>
               <DetailField label="Promociones">
@@ -580,69 +639,16 @@ export function FichaPage({ id }: { id: string }) {
                 {c.sentWeek ? `1 de ${d.tope}` : `0 de ${d.tope}`}{" "}
                 {d.tope === 1 ? "mensaje" : "mensajes"} (el tope de la tienda)
               </DetailField>
-              <DetailField label="Si le escribe hoy, Meta cobra">
-                {c.consent.estado !== "si" || !c.ch.includes("wa")
-                  ? "No se le escribe"
-                  : ventanaGratis
-                    ? `Nada: escribió hace ${c.lastH} h`
-                    : `${soles(META)}, con plantilla`}
-              </DetailField>
+              {ruta.ventas ? null : (
+                <DetailField label="Si le escribe hoy, Meta cobra">
+                  {c.consent.estado !== "si" || !c.ch.includes("wa")
+                    ? "No se le escribe"
+                    : ventanaGratis
+                      ? `Nada: escribió hace ${c.lastH} h`
+                      : `${soles(META)}, con plantilla`}
+                </DetailField>
+              )}
             </DetailList>
-          </Tarjeta>
-          <Tarjeta title="Argos con ella">
-            <ol className="flex flex-col divide-y text-sm">
-              {proximos.map(({ a, e }) => (
-                <li key={a.id} className="flex flex-col gap-1 py-2.5 first:pt-0">
-                  <span className="flex items-center gap-2">
-                    <span className="font-medium">{a.t(R)}</span>
-                    <span className="ml-auto">
-                      {d.pausa[a.id] ? (
-                        <Badge variant="secondary">En pausa</Badge>
-                      ) : e.estado === "presupuesto" ? (
-                        <Badge variant="warning">Espera tu sí</Badge>
-                      ) : e.estado === "permiso" ? (
-                        <Badge variant="warning">Te pide permiso</Badge>
-                      ) : (
-                        <Badge variant="soft">Sale {a.when}</Badge>
-                      )}
-                    </span>
-                  </span>
-                  <span className="text-muted-foreground">«{e.text}»</span>
-                </li>
-              ))}
-              {!proximos.length && fuera ? (
-                <li className="py-2.5 text-muted-foreground first:pt-0">
-                  Esta semana no le escribe: {fuera.toLowerCase()}.
-                </li>
-              ) : null}
-              {c.sentWeek ? (
-                <li className="flex flex-col gap-1 py-2.5 first:pt-0">
-                  <span className="flex items-center gap-2">
-                    <span className="font-medium">{ACC[c.sentWeek].t(R)}</span>
-                    <span className="ml-auto">{chatRes()}</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">Lunes 23 · le escribió solo</span>
-                </li>
-              ) : null}
-              {c.hist.map(([dd, a, res, v], i) => (
-                <li key={i} className="flex items-center gap-2 py-2.5 first:pt-0">
-                  <span className="flex min-w-0 flex-col">
-                    <span>{ACC[a].t(R)}</span>
-                    <span className="text-xs text-muted-foreground">{fecha(dd)}</span>
-                  </span>
-                  <span className="ml-auto">
-                    {res === "Compró" ? (
-                      <Badge variant="success">Compró {soles(v ?? 0)}</Badge>
-                    ) : (
-                      <Badge variant="outline">{res}</Badge>
-                    )}
-                  </span>
-                </li>
-              ))}
-              {!proximos.length && !fuera && !c.sentWeek && !c.hist.length ? (
-                <li className="text-muted-foreground">Esta semana no hay nada para {nombre(c)}.</li>
-              ) : null}
-            </ol>
           </Tarjeta>
         </div>
       </div>

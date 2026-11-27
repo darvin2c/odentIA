@@ -234,7 +234,7 @@ export function ClientesPage() {
                       (f) => f.c.consent.estado === "si" && f.c.ch.includes("wa"),
                     ).length
                     toast.success(
-                      `Argos les escribe a ${plural(n, "clienta", "clientas")} hoy a las 16:00, dentro del tope. Meta: ${soles(n * 0.2339)}.`,
+                      `Argos le encarga a Sofi escribirles a ${plural(n, "clienta", "clientas")} hoy a las 16:00, dentro del tope. Meta: ${soles(n * 0.2339)}.`,
                     )
                   },
                 }

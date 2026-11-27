@@ -28,7 +28,8 @@ export interface Db extends Reglas {
   noRecl: boolean
   noRuta: boolean
   grupos: { id: string; name: string; q: Record<string, string> }[]
-  extra: Partial<Record<AccionId, { c: number; v: number; b: number; r: number }>>
+  /** Lo que pasó en los chats de ejemplo: respondieron, conversaron, compraron, vendido, bajas. */
+  extra: Partial<Record<AccionId, { r: number; k: number; c: number; v: number; b: number }>>
 }
 
 function fresh(r: RubroId): Db {

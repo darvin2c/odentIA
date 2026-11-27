@@ -5,29 +5,11 @@ import {
   AppShell,
   type AppShellNavEntry,
   Brand,
-  EmptyState,
-  PageHeader,
-  PageShell,
   PlaceSwitcher,
   type ShellLinkComponent,
 } from "@odentia/ui-patterns"
-import {
-  Banknote,
-  Bot,
-  ChartColumn,
-  CircleHelp,
-  Construction,
-  House,
-  Info,
-  ListChecks,
-  MessagesSquare,
-  Package,
-  ReceiptText,
-  RotateCcw,
-  Settings,
-  Truck,
-  UserRound,
-} from "lucide-react"
+import { Bot, House, Info, ListChecks, MessagesSquare, RotateCcw, UserRound } from "lucide-react"
+import { useEffect } from "react"
 import { ArgosPage, totales } from "./argos"
 import { ClientesPage } from "./clientes"
 import { ConversacionesPage } from "./conversaciones"
@@ -43,15 +25,17 @@ const HashLink: ShellLinkComponent = ({ to, className, children, title, onClick 
   </a>
 )
 
-const RECORRIDOS: [string, string][] = [
-  ["1 · Clientas y sus grupos", "/clientes"],
-  ["2 · La ficha de una clienta", "/clientes/c1"],
-  ["3 · Lo que hizo Argos", "/argos"],
-  ["4 · Lo que hará Argos", "/argos/hara"],
-  ["5 · Reglas y presupuesto", "/argos/reglas"],
-  ["6 · Chat: Rocío vuelve y compra", "/conversaciones/rocio"],
-  ["7 · Chat: «ya no me mandes»", "/conversaciones/fio"],
-  ["8 · Inicio: lo que espera a una persona", "/inicio"],
+const RECORRIDOS: [string, string, boolean][] = [
+  ["Clientas y sus grupos", "/clientes", false],
+  ["La ficha: lo que Argos anotó", "/clientes/c1", false],
+  ["La ficha: el encargo de Argos a Sofi", "/clientes/c3", false],
+  ["Chat: Rocío vuelve y compra", "/conversaciones/rocio", false],
+  ["Chat: «ya no me mandes»", "/conversaciones/fio", false],
+  ["Inicio: lo que te toca", "/inicio", false],
+  ["Argos: lo que hizo", "/argos", true],
+  ["Argos: lo que hará", "/argos/hara", true],
+  ["Argos: las campañas", "/argos/campanas", true],
+  ["Argos: reglas y presupuesto", "/argos/reglas", true],
 ]
 
 const BAR =
@@ -117,7 +101,7 @@ function PrototypeBar() {
             Recorridos
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80 gap-1 p-1.5">
-            {RECORRIDOS.map(([l, p]) => (
+            {RECORRIDOS.filter(([, , dueno]) => !(dueno && ruta.ventas)).map(([l, p], i) => (
               <a
                 key={p}
                 href={href(p)}
@@ -126,9 +110,14 @@ function PrototypeBar() {
                   ruta.path === p && "bg-primary-soft text-primary-soft-foreground",
                 )}
               >
-                {l}
+                {i + 1} · {l}
               </a>
             ))}
+            {ruta.ventas ? (
+              <p className="px-2.5 py-2 text-xs text-muted-foreground">
+                Como Dueño se ven también las pantallas de Argos.
+              </p>
+            ) : null}
           </PopoverContent>
         </Popover>
         <Popover>
@@ -147,9 +136,10 @@ function PrototypeBar() {
           <PopoverContent align="end" className="w-80 text-sm">
             <p className="font-semibold">Todo es de ejemplo</p>
             <p className="text-muted-foreground">
-              Tiendas, clientas, mensajes y resultados son de ejemplo, en memoria. Nada se envía. La
+              Tiendas, clientas, campañas y resultados son de ejemplo, en memoria. Nada se envía. La
               tarifa de Meta es la que publica para Perú (S/ 0,2339 por promoción, desde el 1 de
-              octubre de 2026). Fotos de Wikimedia Commons, recortadas.
+              octubre de 2026). El menú muestra solo las pantallas del prototipo. Fotos de Wikimedia
+              Commons, recortadas.
             </p>
           </PopoverContent>
         </Popover>
@@ -170,31 +160,6 @@ function PrototypeBar() {
   )
 }
 
-function Pending({ title }: { title: string }) {
-  return (
-    <PageShell className="flex flex-col gap-6">
-      <PageHeader title={title} />
-      <EmptyState
-        icon={Construction}
-        title="Esta pantalla no es parte del prototipo"
-        description="El prototipo muestra Clientes, Argos, las conversaciones de ejemplo e Inicio."
-        actionLabel="Ir a Clientes"
-        onAction={() => ir("/clientes")}
-      />
-    </PageShell>
-  )
-}
-
-const TITLES: Record<string, string> = {
-  "/despachos": "Despachos",
-  "/pedidos": "Pedidos",
-  "/catalogo": "Catálogo",
-  "/caja": "Caja",
-  "/reportes": "Reportes",
-  "/configuracion": "Configuración",
-  "/ayuda": "Ayuda",
-}
-
 export function App() {
   const ruta = useRuta()
   const R = RUBROS[ruta.rubro]
@@ -202,61 +167,61 @@ export function App() {
   const owner = !ruta.ventas
   const t = totales(planOf(ruta.rubro), d)
   const p = ruta.path
+  const ficha = /^\/clientes\/(c\d+)$/.exec(p)?.[1]
+  const chat = /^\/conversaciones\/(rocio|fio)$/.exec(p)?.[1] as "rocio" | "fio" | undefined
+  const argos = p === "/argos" || /^\/argos\/(hara|campanas|reglas)$/.test(p)
+  const conocida =
+    p === "/clientes" ||
+    !!ficha ||
+    p === "/conversaciones" ||
+    !!chat ||
+    p === "/inicio" ||
+    (argos && owner)
+  // Lo que no existe en el prototipo, o Argos para Ventas: directo a Clientes, sin pantalla de por medio.
+  useEffect(() => {
+    if (!conocida) location.replace(href("/clientes"))
+  }, [conocida])
+
+  // Solo las pantallas del prototipo; Argos, para quien decide lo que cuesta.
   const items: AppShellNavEntry[] = [
     { label: "Inicio", to: "/inicio", icon: House },
-    { label: "Despachos", to: "/despachos", icon: Truck },
-    { label: "Pedidos", to: "/pedidos", icon: ReceiptText },
     { label: "Clientes", to: "/clientes", icon: UserRound },
     { label: "Conversaciones", to: "/conversaciones", icon: MessagesSquare },
-    {
-      label: "Gestión",
-      children: [
-        { label: "Catálogo", to: "/catalogo", icon: Package },
-        ...(owner
-          ? [
+    ...(owner
+      ? [
+          {
+            label: "Gestión",
+            children: [
               {
                 label: "Argos",
                 to: "/argos",
                 icon: Bot,
                 ...(t.espera ? { badge: t.espera, badgeLabel: "esperan tu sí" } : {}),
               },
-              { label: "Caja", to: "/caja", icon: Banknote },
-              { label: "Reportes", to: "/reportes", icon: ChartColumn },
-            ]
-          : []),
-      ],
-    },
+            ],
+          },
+        ]
+      : []),
   ]
-  const ficha = /^\/clientes\/(c\d+)$/.exec(p)?.[1]
-  const chat = /^\/conversaciones\/(rocio|fio)$/.exec(p)?.[1] as "rocio" | "fio" | undefined
   let page: React.ReactNode
-  if (p === "/clientes") page = <ClientesPage />
-  else if (ficha) page = <FichaPage key={`${ruta.rubro}-${ficha}`} id={ficha} />
-  else if (p === "/argos" || p === "/argos/hara" || p === "/argos/reglas")
-    page = owner ? (
-      <ArgosPage tab={p === "/argos" ? "hizo" : (p.slice(7) as "hara" | "reglas")} />
-    ) : (
-      <PageShell>
-        <EmptyState
-          icon={Bot}
-          title="Argos lo ven el Dueño y el Administrador"
-          description="Lo que Argos hace con cada clienta está en su ficha."
-          actionLabel="Ir a Clientes"
-          onAction={() => ir("/clientes")}
-        />
-      </PageShell>
+  if (ficha) page = <FichaPage key={`${ruta.rubro}-${ficha}`} id={ficha} />
+  else if (argos && owner)
+    page = (
+      <ArgosPage tab={p === "/argos" ? "hizo" : (p.slice(7) as "hara" | "campanas" | "reglas")} />
     )
   else if (p === "/conversaciones" || chat)
     page = <ConversacionesPage key={`${ruta.rubro}-${chat ?? ""}`} inicial={chat} />
   else if (p === "/inicio") page = <InicioPage />
-  else page = <Pending title={TITLES[p] ?? "gestorIA"} />
+  else page = <ClientesPage />
   const navPath = ficha
     ? "/clientes"
     : chat
       ? "/conversaciones"
-      : p.startsWith("/argos")
+      : argos
         ? "/argos"
-        : p
+        : conocida
+          ? p
+          : "/clientes"
 
   const css = brandColorCss(R.store.color)
   return (
@@ -273,10 +238,7 @@ export function App() {
           avatarUrl: null,
         }}
         userMenuItems={[]}
-        footerItems={[
-          ...(owner ? [{ label: "Configuración", to: "/configuracion", icon: Settings }] : []),
-          { label: "Ayuda", to: "/ayuda", icon: CircleHelp },
-        ]}
+        footerItems={[]}
         brand={<Brand />}
         brandIcon={<Brand compact />}
         switcher={
@@ -298,7 +260,7 @@ export function App() {
               {
                 label: owner ? "Ver como Ventas" : "Ver como Dueño",
                 icon: <UserRound aria-hidden />,
-                onSelect: () => ir(p, { ventas: owner }),
+                onSelect: () => ir(argos ? "/clientes" : p, { ventas: owner }),
               },
               {
                 label: "Empezar de nuevo",

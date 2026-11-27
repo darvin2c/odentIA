@@ -174,6 +174,7 @@ export const fecha = (d: number) => {
   return `${x.getUTCDate()} ${MES[x.getUTCMonth()]}${x.getUTCFullYear() !== 2026 ? ` ${x.getUTCFullYear()}` : ""}`
 }
 export const nombre = (c: { name: string }) => c.name.split(" ")[0] ?? c.name
+export const cap = (x: string) => (x ? x[0]!.toUpperCase() + x.slice(1) : x)
 
 /* --------------------------------------------------------------------------- grupos */
 
@@ -226,6 +227,7 @@ export type AccionId =
   | "cumple"
   | "vip"
   | "recuperar"
+  | "despertar"
   | "nuevo"
   | "liq"
 export type DatoKey = "talla" | "distrito" | "cumple" | "canal" | "ig" | "gustos"
@@ -259,7 +261,21 @@ export interface Compra {
   price: number
   reb: boolean
   liq: boolean
+  /** La vendió Sofi por una campaña de Argos: cuál, por qué y el pedido. */
   argos?: AccionId
+  motivo?: string
+  pedido?: string
+}
+
+/** Lo que Sofi ya le escribió esta semana por encargo de Argos, y cómo terminó. */
+export interface Semana {
+  a: AccionId
+  dia: string
+  motivo: string
+  res: "Compró" | "Respondió" | "Sin respuesta"
+  conv: string
+  v?: number
+  pedido?: string
 }
 export interface Clienta {
   id: string
@@ -278,6 +294,7 @@ export interface Clienta {
   asked: { d: number; text: string; why: string }[]
   hist: [number, AccionId, string, number?][]
   sentWeek?: AccionId
+  semana?: Semana
   cumpleIn?: number
   tags: string[]
   /** La ficha que podría ser la misma clienta: Argos lo sugiere, lo decide una persona. */
@@ -301,6 +318,12 @@ type Seed = {
   asked?: [number, number][]
   hist?: [number, AccionId, string, number?][]
   sentWeek?: AccionId
+  /** Lo que Sofi le escribió esta semana por encargo de Argos; `compra`, el pedido que salió. */
+  semana?: Omit<Semana, "motivo" | "conv"> & {
+    motivo: (R: RubroC, size: string) => string
+    conv: (R: RubroC, size: string) => string
+    compra?: { d: number; slot: number | "nuevo" | "extra"; price?: number }
+  }
   cumpleIn?: number
   cumple?: string
   tags?: string[]
@@ -362,10 +385,13 @@ const SEEDS: Seed[] = [
     phone: "912 004 551",
     ig: "@andre.castillo",
     s: 2,
-    buys: [[6, 0]],
-    delivered: 3,
-    consent: { estado: "si", nota: "Aceptó en su primera compra (21 nov)" },
-    lastH: 72,
+    buys: [
+      [62, 0],
+      [102, 0],
+      [142, 0],
+    ],
+    consent: { estado: "si", nota: "Aceptó en su primera compra (16 jul)" },
+    lastH: 900,
     tags: ["Oficina en San Isidro"],
   },
   {
@@ -397,7 +423,7 @@ const SEEDS: Seed[] = [
     ],
     consent: { estado: "si", nota: "Aceptó en el chat del 8 may" },
     lastH: 72,
-    sentWeek: "recuperar",
+    sentWeek: "despertar",
   },
   {
     id: "c6",
@@ -559,13 +585,138 @@ const SEEDS: Seed[] = [
     phone: "962 870 115",
     s: 5,
     buys: [
-      [15, 1, 0, 1],
+      [6, 1, 0, 1],
       [47, 5, 1],
       [80, 0, 0, 1],
     ],
     consent: { estado: "si", nota: "Aceptó en el chat del 30 jul" },
     lastH: 260,
+    delivered: 4,
     hist: [[16, "liq", "Compró", 79]],
+  },
+  {
+    id: "c18",
+    name: "Natalia Gómez",
+    dist: "Surco",
+    ch: ["wa"],
+    phone: "984 112 650",
+    s: 3,
+    buys: [
+      [9, 0],
+      [40, 0],
+      [75, 0],
+    ],
+    consent: { estado: "si", nota: "Aceptó en su primera compra" },
+    lastH: 70,
+    sentWeek: "cruzada",
+    semana: {
+      a: "cruzada",
+      dia: "Mar 24",
+      res: "Compró",
+      pedido: "0158",
+      motivo: (R) => `recibió su ${R.P[0]!.name.toLowerCase()} el sábado`,
+      conv: (R) =>
+        `Preguntó cómo se usa ${R.extra.name}; Sofi se lo explicó y lo sumó a su próximo envío.`,
+      compra: { d: 3, slot: "extra" },
+    },
+  },
+  {
+    id: "c19",
+    name: "Cecilia Ramos",
+    dist: "Miraflores",
+    ch: ["wa"],
+    phone: "945 330 187",
+    s: 2,
+    buys: [
+      [120, 3],
+      [180, 3],
+    ],
+    consent: { estado: "si", nota: "Aceptó en el chat del 2 jun" },
+    lastH: 90,
+    sentWeek: "despertar",
+    semana: {
+      a: "despertar",
+      dia: "Lun 23",
+      res: "Respondió",
+      motivo: (R, size) =>
+        `no compra hace 120 días y compraba ${R.P[3]!.cat.toLowerCase()} ${size} · dormida`,
+      conv: () =>
+        "Pidió fotos; Sofi le mandó dos y le ofreció la rebaja con plazo. Dijo «lo pienso» y Sofi no insistió.",
+    },
+  },
+  {
+    id: "c20",
+    name: "Lorena Vargas",
+    dist: "San Borja",
+    ch: ["wa"],
+    phone: "967 554 031",
+    s: 4,
+    buys: [
+      [75, 0],
+      [115, 0],
+    ],
+    consent: { estado: "si", nota: "Aceptó en el chat del 12 ago" },
+    lastH: 90,
+    sentWeek: "recuperar",
+    semana: {
+      a: "recuperar",
+      dia: "Lun 23",
+      res: "Compró",
+      pedido: "0159",
+      motivo: (R) =>
+        `compró ${R.P[0]!.cat.toLowerCase()} ${R.P[0]!.pl} hace 71 días y su ritmo es cada 40 · en riesgo`,
+      conv: (R, size) =>
+        `Respondió «sí, mándame»; Sofi le mostró ${R.nuevo.name.toLowerCase()} ${R.fit(size)} y le dejó la rebaja pagando ese día. Pagó por link.`,
+      compra: { d: 4, slot: "nuevo", price: -10 },
+    },
+  },
+  {
+    id: "c21",
+    name: "Daniela Cruz",
+    dist: "Lince",
+    ch: ["wa"],
+    phone: "952 008 413",
+    s: 1,
+    buys: [
+      [28, 3],
+      [64, 3],
+    ],
+    consent: { estado: "si", nota: "Aceptó en su primera compra" },
+    lastH: 400,
+    sentWeek: "nuevo",
+    semana: {
+      a: "nuevo",
+      dia: "Mar 24",
+      res: "Sin respuesta",
+      motivo: (R, size) =>
+        `compró ${R.P[3]!.cat.toLowerCase()} 2 veces y llegó ${R.nuevo.name.toLowerCase()} ${R.fit(size)}`,
+      conv: () => "No respondió. Sofi no volvió a escribir: la campaña cierra sola el domingo.",
+    },
+  },
+  {
+    id: "c22",
+    name: "Teresa Huerta",
+    dist: "Barranco",
+    ch: ["wa"],
+    phone: "936 771 205",
+    s: 3,
+    buys: [
+      [30, 0],
+      [70, 5],
+    ],
+    consent: { estado: "si", nota: "Aceptó en su primera compra" },
+    lastH: 50,
+    sentWeek: "cart",
+    semana: {
+      a: "cart",
+      dia: "Mié 25",
+      res: "Compró",
+      pedido: "0160",
+      motivo: (R, size) =>
+        `dejó en su carrito ${R.P[1]!.name.toLowerCase()} ${R.P[1]!.color} ${size} hace 3 horas`,
+      conv: () => "Volvió al carrito desde el mensaje de Sofi y tocó «Pagar ahora».",
+      compra: { d: 2, slot: 1 },
+    },
   },
   {
     id: "c17",
@@ -734,6 +885,34 @@ export function clientasDe(r: RubroId): Clienta[] {
         liq: !!liq,
       }
     })
+    const sem = sd.semana
+    if (sem?.compra) {
+      const cp = sem.compra
+      const pr =
+        cp.slot === "nuevo"
+          ? R.nuevo
+          : cp.slot === "extra"
+            ? p(
+                cap(R.extra.name.replace(/^(el|la|los|las) /, "")),
+                "Cuidado",
+                "",
+                "",
+                "",
+                R.extra.price,
+              )
+            : R.P[cp.slot]!
+      buys.unshift({
+        d: cp.d,
+        p: pr,
+        size,
+        price: pr.price + (cp.price ?? 0),
+        reb: (cp.price ?? 0) < 0,
+        liq: false,
+        argos: sem.a,
+        motivo: sem.motivo(R, size),
+        pedido: sem.pedido,
+      })
+    }
     return {
       id: sd.id,
       name: sd.name,
@@ -758,6 +937,17 @@ export function clientasDe(r: RubroId): Clienta[] {
       }),
       hist: sd.hist ?? [],
       sentWeek: sd.sentWeek,
+      semana: sem
+        ? {
+            a: sem.a,
+            dia: sem.dia,
+            res: sem.res,
+            pedido: sem.pedido,
+            motivo: sem.motivo(R, size),
+            conv: sem.conv(R, size),
+            v: buys.find((b) => b.pedido && b.pedido === sem.pedido)?.price,
+          }
+        : undefined,
       cumpleIn: sd.cumpleIn,
       tags: sd.tags ?? [],
       parecida: sd.parecida,
@@ -916,9 +1106,16 @@ export const ACCIONES: Accion[] = [
   },
   {
     id: "recuperar",
-    t: () => "Recuperar a las que se van",
-    who: () => "En riesgo o dormidas, con algo de su talla",
+    t: () => "Recuperar en riesgo",
+    who: () => "En riesgo: ya pasó su ritmo de compra",
     when: "hoy, 16:00",
+    tpl: "Llegó algo para ti",
+  },
+  {
+    id: "despertar",
+    t: () => "Despertar a las dormidas",
+    who: () => "Dormidas: más de 90 días sin comprar",
+    when: "hoy, 16:30",
     tpl: "Volvió algo para ti",
   },
   {
@@ -938,16 +1135,20 @@ export const ACCIONES: Accion[] = [
 ]
 export const ACC = Object.fromEntries(ACCIONES.map((a) => [a.id, a])) as Record<AccionId, Accion>
 
-/** Lo que pasó en las últimas 4 semanas (ejemplo): enviados, cobrados por Meta, respondieron, compraron, vendido, bajas. */
-export const HIST: Record<AccionId, [number, number, number, number, number, number]> = {
-  cart: [11, 0, 7, 5, 640, 0],
-  cruzada: [18, 12, 8, 5, 140, 0],
-  recompra: [9, 6, 6, 4, 316, 0],
-  cumple: [3, 3, 2, 1, 129, 0],
-  vip: [6, 6, 4, 3, 610, 0],
-  recuperar: [14, 14, 6, 3, 390, 1],
-  nuevo: [22, 20, 9, 4, 520, 1],
-  liq: [15, 15, 5, 3, 237, 1],
+/**
+ * Lo que pasó en las últimas 4 semanas (ejemplo), con lo de esta semana: recibieron, de esos los
+ * que cobró Meta, respondieron, conversaron con Sofi, compraron, vendido y bajas.
+ */
+export const HIST: Record<AccionId, [number, number, number, number, number, number, number]> = {
+  cart: [11, 0, 7, 6, 5, 640, 0],
+  cruzada: [18, 12, 8, 6, 5, 140, 0],
+  recompra: [9, 6, 6, 5, 4, 316, 0],
+  cumple: [3, 3, 2, 2, 1, 129, 0],
+  vip: [6, 6, 4, 4, 3, 610, 0],
+  recuperar: [8, 8, 4, 3, 2, 258, 0],
+  despertar: [6, 6, 2, 2, 1, 129, 0],
+  nuevo: [22, 20, 9, 7, 4, 520, 1],
+  liq: [15, 15, 5, 4, 3, 237, 1],
 }
 
 export function bloqueo(c: Clienta, k: Perfil): string {
@@ -966,7 +1167,8 @@ function entra(a: AccionId, c: Clienta, k: Perfil, R: RubroC): boolean {
     return c.buys.some((x) => x.p.dura && x.d >= x.p.dura - 10 && x.d <= x.p.dura + 15)
   if (a === "cumple") return !!c.datos.cumple && c.cumpleIn != null && c.cumpleIn <= 6
   if (a === "vip") return k.seg === "vip"
-  if (a === "recuperar") return k.seg === "riesgo" || k.seg === "dormida"
+  if (a === "recuperar") return k.seg === "riesgo"
+  if (a === "despertar") return k.seg === "dormida"
   if (a === "nuevo") return c.buys.some((x) => x.p.cat === R.nuevo.cat)
   return !!k.sens
 }
@@ -994,7 +1196,11 @@ export function mensaje(a: AccionId, c: Clienta, R: RubroC): string {
     return `¡Feliz cumpleaños, ${n}! Esta semana tu envío va gratis en ${st}. ¿Te muestro lo nuevo?`
   if (a === "vip")
     return `Hola, ${n}. Por ser de nuestras mejores clientas, la liquidación empieza para ti un día antes: ${R.liq.name.toLowerCase()} a ${soles(R.liq.price)} (antes ${soles(R.liq.before)}). ¿Te lo separo ${fit}?`
-  if (a === "recuperar")
+  if (a === "recuperar") {
+    const top = c.buys[0]?.p ?? R.P[0]!
+    return `Hola, ${n}. ¿Qué tal tus ${top.cat.toLowerCase()}? Llegó ${R.nuevo.name.toLowerCase()} ${R.nuevo.color} y hay ${fit}. ¿Te mando fotos?`
+  }
+  if (a === "despertar")
     return `Hola, ${n}. Hace tiempo no te vemos por ${st}. Llegó ${R.nuevo.name.toLowerCase()} ${R.nuevo.color} y hay ${fit}. ¿Te mando fotos?`
   if (a === "nuevo")
     return `Hola, ${n}. Llegó ${R.nuevo.name.toLowerCase()} ${R.nuevo.color}, ${fit}. Cuesta ${soles(R.nuevo.price)}. ¿Te mando fotos?`
@@ -1092,4 +1298,119 @@ export function planDe(cl: Clienta[], R: RubroC, g: Reglas): Record<AccionId, Pl
     pl.sentWeek = cl.filter((c) => c.sentWeek === a.id)
   }
   return out
+}
+
+/* ----------------------------------------------------- el encargo de Argos a Sofi */
+
+/** Lo que Argos le pasa a Sofi para cada clienta: con eso, Sofi escribe, conversa y vende. */
+export interface Encargo {
+  campana: string
+  para: string
+  porque: string
+  ofrecer: string
+  plazo: string
+  noHacer: string[]
+}
+
+/** El precio más bajo que Sofi puede dar: el mínimo que dejó la tienda en el catálogo. */
+export const minimo = (price: number) => Math.round(price * 0.93)
+
+/** Por qué le toca esta campaña, con su dato. */
+export function motivoDe(a: AccionId, c: Clienta, R: RubroC): string {
+  const k = perfil(c)
+  const size = c.datos.talla?.valor ?? k.sizes[0]?.[0] ?? ""
+  const top = c.buys[0]
+  const cat = (k.cats[0]?.[0] ?? "").toLowerCase()
+  if (a === "cart") {
+    const pr = R.P[c.cart?.slot ?? 0]!
+    return `dejó en su carrito ${pr.name.toLowerCase()} ${pr.color} ${size} hace ${c.cart?.h ?? 0} horas`
+  }
+  if (a === "cruzada")
+    return `recibió su ${top?.p.name.toLowerCase() ?? "pedido"} hace ${c.delivered ?? 0} días`
+  if (a === "recompra") {
+    const x = c.buys.find((b) => b.p.dura)
+    return x ? `compró ${x.p.name.toLowerCase()} hace ${x.d} días y dura unos ${x.p.dura}` : ""
+  }
+  if (a === "cumple") return `cumple el ${c.datos.cumple?.valor ?? ""} (lo dijo ella)`
+  if (a === "vip") return `es VIP: ${k.why.replace(/\.$/, "")}`
+  if (a === "recuperar")
+    return `compró ${cat}${top?.p.pl ? ` ${top.p.pl}` : ""} hace ${k.last} días y su ritmo es cada ${k.ritmo} · en riesgo`
+  if (a === "despertar") return `no compra hace ${k.last} días y compraba ${cat} ${size} · dormida`
+  if (a === "nuevo") {
+    const n = c.buys.filter((b) => b.p.cat === R.nuevo.cat).length
+    return `compró ${R.nuevo.cat.toLowerCase()} ${n === 1 ? "una vez" : `${n} veces`} y llegó ${R.nuevo.name.toLowerCase()} ${R.fit(size)}`
+  }
+  return `${k.sens}: ${k.sensWhy}`
+}
+
+export function encargoDe(a: AccionId, c: Clienta, R: RubroC, porque?: string): Encargo {
+  const size = c.datos.talla?.valor ?? c.buys[0]?.size ?? R.sizes[c.s] ?? ""
+  const nv = R.nuevo
+  const tope = soles(minimo(nv.price))
+  const base = [
+    "No escribir de nuevo si no responde: la campaña cierra sola.",
+    "Si pide que no le escriban, anotar la baja y no ofrecer nada más.",
+  ]
+  const of: Record<AccionId, [string, string, string[]]> = {
+    cart: [
+      "El mismo carrito, al precio guardado. Sin rebaja nueva.",
+      "Hasta hoy a las 18:40, cuando vence el precio del carrito.",
+      ["No sumar productos que no pidió."],
+    ],
+    cruzada: [
+      `${cap(R.extra.name)} a ${soles(R.extra.price)}, en su próximo envío sin cobrar envío otra vez.`,
+      "Esta semana.",
+      ["Sin descuento: ya es un precio bajo."],
+    ],
+    recompra: [
+      "Lo mismo que compró, al precio de hoy y con su envío de siempre.",
+      "Antes de que se le acabe: esta semana.",
+      ["No cambiarle el producto ni el tono sin preguntar."],
+    ],
+    cumple: [
+      "Envío gratis en su próxima compra de esta semana (lo pone la tienda).",
+      "Hasta el domingo 29.",
+      ["No sumar otra rebaja al envío gratis."],
+    ],
+    vip: [
+      `${R.liq.name} a ${soles(R.liq.price)} (antes ${soles(R.liq.before)}) ${R.fit(size)}, un día antes que el resto.`,
+      "Hoy y mañana, antes de que abra la liquidación.",
+      ["Sin rebaja extra: el precio de liquidación ya es el mínimo."],
+    ],
+    recuperar: [
+      `${nv.name} ${nv.color} ${R.fit(size)} a ${soles(nv.price)}. Si duda, una sola rebaja hasta ${tope}, pagando hoy.`,
+      "La rebaja vale hasta las 18:00 del día que responda; la campaña cierra el domingo 29.",
+      [
+        `No bajar de ${tope}: es el mínimo que dejó la tienda.`,
+        "Una sola oferta: no mejorarla si insiste.",
+      ],
+    ],
+    despertar: [
+      `${nv.name} ${nv.color} ${R.fit(size)} a ${soles(nv.price)}. Si duda, una sola rebaja hasta ${tope}, pagando hoy.`,
+      "La rebaja vale hasta las 18:00 del día que responda; la campaña cierra el domingo 29.",
+      [
+        `No bajar de ${tope}: es el mínimo que dejó la tienda.`,
+        "Una sola oferta: no mejorarla si insiste.",
+      ],
+    ],
+    nuevo: [
+      `${nv.name} ${nv.color} ${R.fit(size)} a ${soles(nv.price)}. Rebaja solo si la pide, hasta ${tope}.`,
+      "Mientras haya stock en su talla; la campaña cierra el domingo 29.",
+      [`No bajar de ${tope}: es el mínimo que dejó la tienda.`],
+    ],
+    liq: [
+      `${R.liq.name} a ${soles(R.liq.price)} (antes ${soles(R.liq.before)}) ${R.fit(size)}.`,
+      "Hasta el domingo 29, o mientras haya stock.",
+      ["Sin rebaja extra: el precio de liquidación ya es el mínimo."],
+    ],
+  }
+  const [ofrecer, plazo, no] = of[a]
+  return {
+    campana: ACC[a].t(R),
+    para: c.name,
+    porque: porque ?? motivoDe(a, c, R),
+    ofrecer,
+    plazo,
+    noHacer: [...no, ...base],
+  }
 }

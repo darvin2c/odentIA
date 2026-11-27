@@ -1,9 +1,19 @@
-import { Badge, Button, cn, toast, useIsMobile } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  cn,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  toast,
+  useIsMobile,
+} from "@odentia/ui"
 import { AgentMark, PageHeader, PageShell, PersonAvatar } from "@odentia/ui-patterns"
 import { ArrowLeft, Check, CircleAlert, CircleCheck, UserRoundX } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
-import { ACC, foto, META, mensaje, nombre, perfil, RUBROS, SEG, soles } from "./datos"
-import { cambiar, useDb } from "./estado"
+import { EncargoCard, enviosDe } from "./campanas"
+import { ACC, encargoDe, foto, META, mensaje, nombre, perfil, RUBROS, SEG, soles } from "./datos"
+import { cambiar, planOf, useDb } from "./estado"
 import { SegBadge } from "./piezas"
 import { ir, useRuta } from "./ruta"
 
@@ -41,17 +51,18 @@ function useMsgs(key: Key): Msg[] {
   const step = d.chat[key]
   const size = c.datos.talla?.valor ?? R.sizes[c.s] ?? ""
   const nv = R.nuevo
-  const a = key === "rocio" ? "recuperar" : "nuevo"
+  const a = key === "rocio" ? "despertar" : "nuevo"
+  const campana = `«${ACC[a].t(R)}»`
   const out: Msg[] = [
     {
       k: "sys",
-      t: `Lun 23 · 16:00 · Argos le escribió solo: «${ACC[a].t(R)}» · plantilla «${ACC[a].tpl}» · Meta ${soles(META)}`,
+      t: `Lun 23 · 16:00 · Sofi le escribió por la campaña ${campana}, con la plantilla «${ACC[a].tpl}»${ruta.ventas ? "" : ` · Meta ${soles(META)}`}`,
     },
     {
       k: "out",
       t: mensaje(a, c, R),
       h: "16:00",
-      tag: "Argos · promoción",
+      tag: `Sofi · campaña ${campana}`,
       botones: ["Sí, mándame", "Ahora no"],
     },
   ]
@@ -75,9 +86,9 @@ function useMsgs(key: Key): Msg[] {
       out.push({ k: "in", t: "ya, me gusta. ¿me la dejas en 120?", h: "10:14" })
       out.push({
         k: "out",
-        t: `Te la dejo en ${soles(nv.price - 10)} si la pagas hoy antes de las 18:00. Con el envío, ${soles(nv.price)}.`,
+        t: `A 120 no llego, pero te la dejo en ${soles(nv.price - 10)} si la pagas hoy antes de las 18:00. Con el envío, ${soles(nv.price)}.`,
         h: "10:14",
-        used: ["Rebaja dentro de tu margen", "Una sola oferta, con plazo"],
+        used: [`El encargo: hasta ${soles(nv.price - 10)}, no menos`, "Una sola oferta, con plazo"],
       })
     }
     if (step >= 3) {
@@ -87,7 +98,7 @@ function useMsgs(key: Key): Msg[] {
         t: `Listo, Rocío. Tu pedido 0161: ${nv.name.toLowerCase()} ${nv.color} ${size}, ${soles(nv.price - 10)} + envío S/ 10 = ${soles(nv.price)}. Yapea al 987 654 321 y mándame la captura.`,
         h: "10:15",
       })
-      out.push({ k: "sys", t: "Pedido 0161 · lo generó Argos («Recuperar») · por pagar" })
+      out.push({ k: "sys", t: `Pedido 0161 · Venta de la campaña ${campana} · por pagar` })
     }
     if (step >= 4) {
       out.push({ k: "in", t: "[Captura del Yape] listo", h: "10:19" })
@@ -97,7 +108,7 @@ function useMsgs(key: Key): Msg[] {
           ? {
               k: "sys",
               tone: "ok",
-              t: `Pago confirmado · Rocío pasó de Dormida a ${SEG[perfil(c).seg].label} · «Recuperar» suma ${soles(nv.price)} y cuenta para el 1 %`,
+              t: `Pago confirmado · Venta de la campaña ${campana}: ${soles(nv.price)} · Rocío pasó de Dormida a ${SEG[perfil(c).seg].label}`,
             }
           : {
               k: "sys",
@@ -116,10 +127,35 @@ function useMsgs(key: Key): Msg[] {
     out.push({
       k: "sys",
       tone: "baja",
-      t: "Argos anotó la baja solo: «ya no me mandes estas cosas porfa». Desde hoy, 09:48, no le escribe promociones. Queda en su ficha.",
+      t: "Sofi le confirmó y Argos anotó la baja en su ficha. Desde hoy, 09:48, no recibe promociones.",
     })
   }
   return out
+}
+
+/** Arriba del chat: por qué Sofi le escribió, con el encargo de Argos a la mano. */
+function PorQue({ k }: { k: Key }) {
+  const ruta = useRuta()
+  const R = RUBROS[ruta.rubro]
+  const d = useDb(ruta.rubro)
+  const e = enviosDe(d, R, planOf(ruta.rubro)).find((x) => x.chat === k)
+  if (!e) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-agent-soft/40 px-4 py-2 text-sm">
+      <AgentMark size="sm" />
+      <span className="min-w-0 flex-1">
+        Sofi le escribe por la campaña <b>«{ACC[e.a].t(R)}»</b> · porque {e.motivo}
+      </span>
+      <Popover>
+        <PopoverTrigger render={<Button variant="ghost" size="xs" />}>
+          Ver el encargo
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-[min(30rem,calc(100vw-2rem))] p-0">
+          <EncargoCard e={encargoDe(e.a, e.c, R, e.motivo)} className="border-0" />
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
 }
 
 function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
@@ -141,7 +177,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
     cambiar(ruta.rubro, (x) => {
       x.chat[k] += 1
       const n = x.chat[k]
-      if (k === "rocio" && n === 1) x.extra.recuperar = { c: 0, v: 0, b: 0, r: 1 }
+      if (k === "rocio" && n === 1) x.extra.despertar = { r: 1, k: 1, c: 0, v: 0, b: 0 }
       if (k === "fio" && n === 1) {
         const f = x.cl.find((y) => y.id === "c8")
         if (f)
@@ -149,7 +185,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
             estado: "baja",
             nota: "Lo pidió en el chat el 27 nov, 09:48: «ya no me mandes estas cosas porfa». Solo vuelve si ella lo pide.",
           }
-        x.extra.nuevo = { c: 0, v: 0, b: 1, r: 1 }
+        x.extra.nuevo = { r: 1, k: 0, c: 0, v: 0, b: 1 }
       }
     })
   return (
@@ -175,6 +211,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
           Ficha
         </Button>
       </div>
+      <PorQue k={k} />
       <div
         ref={caja}
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-surface-muted/40 px-4 py-4"
@@ -183,6 +220,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
         {msgs.map((m, i) =>
           m.k === "sys" ? (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: los mensajes solo se agregan al final
               key={i}
               className={cn(
                 "entra flex max-w-[92%] items-center gap-2 self-center rounded-2xl px-3 py-1.5 text-center text-xs font-medium",
@@ -204,6 +242,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
             </div>
           ) : (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: los mensajes solo se agregan al final
               key={i}
               className={cn(
                 "entra flex max-w-[85%] flex-col gap-1",
@@ -219,8 +258,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
                 )}
               >
                 {m.tag ? (
-                  <span className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                    <AgentMark size="sm" />
+                  <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">
                     {m.tag}
                   </span>
                 ) : null}
@@ -237,7 +275,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
                     {m.botones.map((b) => (
                       <span
                         key={b}
-                        className="flex-1 rounded-lg bg-card px-2 py-1.5 text-center text-[13px] font-medium text-info shadow-xs"
+                        className="flex-1 rounded-lg bg-card px-2 py-1.5 text-center text-[13px] font-medium text-primary shadow-xs"
                       >
                         {b}
                       </span>
@@ -286,11 +324,13 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
                       price: R.nuevo.price - 10,
                       reb: true,
                       liq: false,
-                      argos: "recuperar",
+                      argos: "despertar",
+                      pedido: "0161",
+                      motivo: "no compraba hace 140 días",
                     })
-                  x.extra.recuperar = { c: 1, v: R.nuevo.price, b: 0, r: 1 }
+                  x.extra.despertar = { r: 1, k: 1, c: 1, v: R.nuevo.price, b: 0 }
                 })
-                toast.success("Pago confirmado. La venta suma en «Recuperar».")
+                toast.success(`Pago confirmado. Suma en la campaña «${ACC.despertar.t(R)}».`)
               }}
             >
               Confirmar el pago de S/ {R.nuevo.price}
@@ -315,7 +355,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
               Fin del ejemplo
             </span>
             <Button
-              variant="ghost"
+              variant="outline"
               onClick={() =>
                 cambiar(ruta.rubro, (x) => {
                   x.chat[k] = 0
@@ -327,7 +367,7 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
                     x.paid = false
                     const r = x.cl.find((y) => y.id === "c5")
                     if (r) r.buys = r.buys.filter((b) => !b.argos)
-                    delete x.extra.recuperar
+                    delete x.extra.despertar
                   }
                 })
               }
@@ -341,9 +381,10 @@ function Conversacion({ k, onBack }: { k: Key; onBack?: () => void }) {
   )
 }
 
-/** Las conversaciones: lo que pasa cuando Argos escribe y la clienta responde. */
+/** Las conversaciones: cuando Sofi escribe por una campaña de Argos y la clienta responde. */
 export function ConversacionesPage({ inicial }: { inicial?: Key }) {
   const ruta = useRuta()
+  const R = RUBROS[ruta.rubro]
   const d = useDb(ruta.rubro)
   const isMobile = useIsMobile()
   const [sel, setSel] = useState<Key | null>(inicial ?? (isMobile ? null : "rocio"))
@@ -354,10 +395,10 @@ export function ConversacionesPage({ inicial }: { inicial?: Key }) {
       d.chat.rocio
         ? d.paid
           ? "Pedido 0161 pagado"
-          : "Respondió a Argos"
-        : "Argos: «Volvió algo para ti»",
+          : "Le respondió a Sofi"
+        : `Sofi: «${ACC.despertar.t(R)}»`,
     ],
-    ["fio", "c8", d.chat.fio ? "Pidió no recibir promociones" : "Argos: «Llegó algo nuevo»"],
+    ["fio", "c8", d.chat.fio ? "Pidió no recibir promociones" : `Sofi: «${ACC.nuevo.t(R)}»`],
   ]
   const list = (
     <ul className="flex flex-col divide-y">
@@ -394,7 +435,7 @@ export function ConversacionesPage({ inicial }: { inicial?: Key }) {
       {isMobile && sel ? null : (
         <PageHeader
           title="Conversaciones"
-          subtitle="Cuando Argos escribe y la clienta responde, Sofi sigue la conversación."
+          subtitle="Sofi escribe por las campañas de Argos y sigue la conversación hasta vender."
         />
       )}
       {isMobile ? (
@@ -409,7 +450,6 @@ export function ConversacionesPage({ inicial }: { inicial?: Key }) {
         <div className="elevated grid h-[calc(100svh-var(--notice-strip-h,0px)-9rem)] min-h-[34rem] grid-cols-[20rem_minmax(0,1fr)] overflow-hidden rounded-xl border bg-card">
           <div className="flex min-h-0 flex-col border-r">
             <div className="flex items-center gap-2 border-b px-4 py-3 text-sm text-muted-foreground">
-              <AgentMark size="sm" />
               Los dos chats de ejemplo
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">{list}</div>
