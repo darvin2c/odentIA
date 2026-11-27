@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, budgetStateWithDelivery, finalizedBudgetText, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetDeliveryLine, budgetPaths, budgetStateWithDelivery, finalizedBudgetText, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -300,5 +300,27 @@ describe("el estado de lo entregado dice si le llegó (pedido del 27 nov)", () =
   })
   it("lo que ya respondió dice su respuesta, no la entrega", () => {
     expect(budgetStateWithDelivery({ status: "aceptado", stateText: "Aceptó todo", delivery: delivery("no_llego", "No le llegó") })).toBe("Aceptó todo")
+  })
+})
+
+describe("la línea de la entrega en la tarjeta del Plan", () => {
+  const failed = {
+    state: "no_llego" as const,
+    channel: "whatsapp" as const,
+    at: "2026-11-27T15:00:00.000Z",
+    text: "No llegó por WhatsApp · enviado el 27 nov",
+    problem: "Su número no tiene WhatsApp. Sugerencia: vuélvelo a enviar.",
+    reached: false,
+    label: "No le llegó",
+  }
+  it("mientras espera respuesta, el motivo y la sugerencia", () => {
+    expect(budgetDeliveryLine({ status: "presentado", delivery: failed })).toEqual({
+      text: "No llegó por WhatsApp · enviado el 27 nov. Su número no tiene WhatsApp. Sugerencia: vuélvelo a enviar.",
+      notReached: true,
+    })
+  })
+  it("ya respondido, solo el hecho: no pide reenviarlo", () => {
+    expect(budgetDeliveryLine({ status: "pospuesto", delivery: failed })).toEqual({ text: "No llegó por WhatsApp · enviado el 27 nov", notReached: false })
+    expect(budgetDeliveryLine({ status: "aceptado", delivery: failed })?.text).not.toContain("Sugerencia")
   })
 })

@@ -269,10 +269,8 @@ export interface BudgetDelivery {
   at: string
   /** «Entregado el 27 nov», «Enviado por WhatsApp el 27 nov», «No llegó por WhatsApp · enviado el 27 nov». */
   text: string
-  /** Por qué no llegó y qué hacer. */
+  /** Por qué no llegó, con una sugerencia. */
   problem: string | null
-  /** Solo por qué no llegó. */
-  reason?: string | null
   /** Falso si todos sus envíos fallaron: no le llegó. */
   reached: boolean
   /** El estado de lo entregado que espera respuesta, dicho con su entrega («Enviado · espera respuesta», «No le llegó»). */
@@ -286,6 +284,23 @@ export interface BudgetDelivery {
  */
 export function budgetStateWithDelivery(budget: Pick<BudgetWithTotals, "status" | "stateText" | "delivery">): string {
   return budget.status === "presentado" && budget.delivery ? budget.delivery.label : budget.stateText
+}
+
+/**
+ * La línea de la entrega en la tarjeta del Plan: solo lo que salió por un mensaje (lo
+ * entregado en mano ya dice su fecha). El motivo y la sugerencia, solo mientras espera
+ * respuesta: lo ya respondido no pide reenviarse.
+ */
+export function budgetDeliveryLine(
+  budget: Pick<BudgetWithTotals, "status" | "delivery">,
+): { text: string; notReached: boolean } | null {
+  const delivery = budget.delivery
+  if (budget.status === "borrador" || !delivery?.channel) return null
+  const waiting = budget.status === "presentado"
+  return {
+    text: waiting && delivery.problem ? `${delivery.text}. ${delivery.problem}` : delivery.text,
+    notReached: waiting && !delivery.reached,
+  }
 }
 
 /** La opción que vale: la elegida o, mientras decide, la recomendada. */
@@ -628,6 +643,14 @@ export function updateBudgetApi(
 /** Entregar el presupuesto al imprimirlo: lo entrega en mano. */
 export function deliverBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
   return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/deliver`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
+/** «Ya se lo di en mano»: lo que no le llegó por mensaje se le entregó impreso (queda su traza). */
+export function markBudgetHandedApi(patientId: string, budgetId: string): Promise<{ data: { handed: true } }> {
+  return apiFetch<{ data: { handed: true } }>(`${budgetsBase(patientId)}/${budgetId}/handed`, {
     method: "POST",
     body: JSON.stringify({}),
   })

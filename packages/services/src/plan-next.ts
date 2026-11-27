@@ -1328,7 +1328,8 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
           ? awaitingLinesText(open, locale, names)
           : budgetLine(budget, locale, budget.options.length > 1 ? undefined : names || undefined),
         budget.delivery?.text ?? (budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null),
-        budget.delivery?.problem ?? null,
+        // Lo ya respondido («Lo piensa») no pide reenviarse.
+        budget.status === "presentado" ? (budget.delivery?.problem ?? null) : null,
       ]
         .filter(Boolean)
         .join(" · "),

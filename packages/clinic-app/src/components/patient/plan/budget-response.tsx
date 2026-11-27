@@ -858,7 +858,9 @@ export function BudgetResponse({
   const statusLine =
     // Si le llegó, lo dice su mensaje: «enviado por WhatsApp el…» hasta que lo confirma (pedido del 27 nov).
     budget.status === "presentado" && budget.delivery
-      ? `${budget.delivery.label} · ${budget.delivery.text.charAt(0).toLowerCase()}${budget.delivery.text.slice(1)}`
+      ? budget.delivery.reached
+        ? `Espera respuesta · ${budget.delivery.text.charAt(0).toLowerCase()}${budget.delivery.text.slice(1)}`
+        : budget.delivery.text.replace(/^No llegó/, "No le llegó")
       : budget.status === "presentado" && budget.presentedAt
       ? `${budgetChoiceWords(budget)} · entregado el ${formatDay(budget.presentedAt)}`
       : budget.decidedAt && ["aceptado", "parcial", "rechazado", "pospuesto"].includes(budget.status)

@@ -216,12 +216,7 @@ export function PatientPendingCard({
         title: `${signedByLink ? "Consentimiento por confirmar" : "Consentimiento sin firmar"}: ${consent.title}`,
         detail:
           consents.isError ? "No se pudo leer el documento." :
-          consentLinkWords({
-            status: "pendiente",
-            personSignedAt: consent.personSignedAt ?? null,
-            linkSentAt: consent.linkSentAt ?? null,
-            linkDelivery: document?.linkDelivery ?? null,
-          }) ??
+          consentLinkWords({ status: "pendiente", personSignedAt: consent.personSignedAt ?? null, linkSentAt: consent.linkSentAt ?? null }) ??
           "Emitido y pendiente de la firma de la persona o su representante.",
         // Mientras se lee el documento, el botón espera: pulsarlo no abriría nada.
         action: !canSign ? null : consents.isError ? (

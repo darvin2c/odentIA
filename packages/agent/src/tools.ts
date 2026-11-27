@@ -626,11 +626,6 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: MoneyZone): string
     lines.push(
       `- Presupuesto ${budgetNumberText(budget.budgetNumber)}: ${budget.stateText}.${budget.answerable ? " Puede responderlo." : ""} [budgetId ${budget.budgetId}]`,
     )
-    // Lo que no le llegó no «sigue pendiente»: la persona no lo tiene. Se le puede reenviar si lo pide.
-    if (budget.notReached)
-      lines.push(
-        `  No le llegó: ${budget.notReached}. No le digas que lo tiene ni que sigue pendiente; si lo pide, reenvíaselo con reenviar_presupuesto.`,
-      )
     const several = budget.options.length > 1
     for (const option of budget.options) {
       const head = several

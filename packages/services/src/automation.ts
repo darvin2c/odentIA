@@ -76,7 +76,6 @@ import {
 } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
-import { budgetNotReachedSql } from "./budget-delivery.js"
 import { answerBudgetButton } from "./budget-send.js"
 import {
   applyTemplateStatuses,
@@ -1379,8 +1378,6 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
         eq(treatmentBudget.status, "presentado"),
         lte(treatmentBudget.presentedAt, cutoff),
         gte(treatmentBudget.presentedAt, since),
-        // «Sigue pendiente» no se le dice de lo que no le llegó: eso lo reenvía la clínica, que lo ve en «Qué sigue».
-        sql`not ${budgetNotReachedSql(orgId, treatmentBudget.id)}`,
         notYetQueued(orgId, "seguimiento_presupuesto", treatmentBudget.id),
         patientNotLocked(treatmentBudget.patientId),
       ),

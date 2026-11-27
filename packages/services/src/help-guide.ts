@@ -1122,7 +1122,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "presupuesto-enviado-entregado-no-llego",
         q: "¿Qué quiere decir «Enviado», «Entregado» y «No llegó» en el presupuesto?",
-        a: "Es lo que pasó con el mensaje. «Enviado» por WhatsApp: salió y WhatsApp todavía no confirma que le llegó. «Entregado» (o «Leído»): WhatsApp lo confirmó. «No llegó»: WhatsApp lo rechazó, con el motivo, por ejemplo que su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica; corrige su número en sus Datos y vuelve a enviarlo desde su presupuesto, o imprímelo y entrégaselo. Mientras no le llegue, dice «No le llegó» en su Plan, en «Qué sigue» y en «Te espera», Sofi no le pregunta por él y no cuenta como recibido en Reportes. Por correo no hay confirmación: dice «Enviado» por correo. Lo impreso o mostrado en la atención dice «Entregado» con su fecha. El consentimiento enviado a firmar y la receta enviada dicen lo mismo de su mensaje.",
+        a: "Es lo que pasó con el mensaje. «Enviado» por WhatsApp: salió y WhatsApp todavía no confirma que le llegó. «Entregado» (o «Leído»): WhatsApp lo confirmó. «No llegó»: WhatsApp lo rechazó, con el motivo (por ejemplo, que su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica) y una sugerencia: revisar su número y volver a enviarlo desde su presupuesto. Mientras tanto, su Plan y «Qué sigue» dicen «No le llegó». Si se lo entregaste impreso, «Ya se lo di en mano» lo anota y desde ahí cuenta como entregado. Por correo no hay confirmación: dice «Enviado» por correo. Lo impreso o mostrado en la atención dice «Entregado» con su fecha.",
         forms: [
           "no le llego el presupuesto",
           "dice no llego",

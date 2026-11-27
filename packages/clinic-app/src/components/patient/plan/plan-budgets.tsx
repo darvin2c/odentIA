@@ -50,11 +50,13 @@ import {
   budgetNumberLabel,
   budgetOptionApi,
   budgetPdfUrl,
+  budgetDeliveryLine,
   budgetStateWithDelivery,
   cancelBudgetApi,
   createBudgetApi,
   deliverBudgetApi,
   fetchBudgets,
+  markBudgetHandedApi,
   optionLines,
   PLAN_QUERY_KEYS,
   removeBudgetItemsApi,
@@ -552,8 +554,21 @@ function BudgetCard({
     : budgetStateWithDelivery(budget)
   // Lo enviado dice si le llegó, con lo que dice su mensaje; lo que no le llegó, por qué y qué hacer
   // (pedido del 27 nov). Lo entregado en mano ya dice su fecha arriba.
-  const delivery = budget.status !== "borrador" && budget.delivery?.channel ? budget.delivery : null
+  const deliveryLine = budgetDeliveryLine(budget)
   const notReached = budget.status === "presentado" && budget.delivery?.reached === false
+  const [handing, setHanding] = useState(false)
+  const markHanded = async () => {
+    if (handing) return
+    setHanding(true)
+    setActionError(null)
+    try {
+      await runWrite(() => markBudgetHandedApi(patientId, budget.id))
+    } catch (err) {
+      setActionError(submitErrorMessage(err))
+    } finally {
+      setHanding(false)
+    }
+  }
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
@@ -599,11 +614,21 @@ function BudgetCard({
               </span>
             ) : null}
           </span>
-          {delivery ? (
-            <span className={`text-xs ${notReached ? "text-destructive" : "text-muted-foreground"}`}>
-              {delivery.text}
-              {delivery.problem ? `. ${delivery.problem}` : ""}
+          {deliveryLine ? (
+            <span className={`text-xs ${deliveryLine.notReached ? "text-destructive" : "text-muted-foreground"}`}>
+              {deliveryLine.text}
             </span>
+          ) : null}
+          {notReached && maySend ? (
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto justify-start p-0 text-xs"
+              disabled={handing}
+              onClick={() => void markHanded()}
+            >
+              Ya se lo di en mano
+            </Button>
           ) : null}
           {own ? null : (
             <span className="text-xs text-muted-foreground">

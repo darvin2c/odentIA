@@ -42,7 +42,7 @@ import {
 } from "../../lib/clinical-journey"
 import { hasRisksDraft, useRisksDrafts } from "../../lib/consent-risks-draft"
 import { personalRisksOf } from "../../lib/consent-shown"
-import { CHANNEL_WORDS, fetchHealthDocumentSent, type HealthDocumentSent } from "../../lib/encounter-documents"
+import { CHANNEL_WORDS, fetchHealthDocumentSent } from "../../lib/encounter-documents"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { cancelMedicalLeaveApi, type MedicalLeave } from "../../lib/medical-leaves"
@@ -110,20 +110,8 @@ function sentDay(iso: string): string {
 /**
  * «Ya se le envió el 6 nov por WhatsApp: avísale que no la use.» Una receta
  * anulada que ya salió sigue limpia en su chat: el sello solo cubre lo que se
- * descarga después (ADR 0156). No frena nada: se dice donde se decide. Con lo que
- * pasó con su mensaje (pedido del 27 nov): «Enviado…» o «Entregado…» y que avise;
- * si no le llegó, por qué, y que no hace falta avisarle.
+ * descarga después (ADR 0156). No frena nada: se dice donde se decide.
  */
-export function sentWarningWords(last: HealthDocumentSent): string {
-  const channel = CHANNEL_WORDS[last.channel] ?? last.channel
-  const to = last.recipientName ? ` a ${last.recipientName}` : ""
-  const delivery = last.delivery
-  if (delivery?.state === "no_llego")
-    return `${delivery.text}${to}. ${delivery.reason ? `${delivery.reason} ` : ""}No hace falta avisarle: no la tiene en su chat.`
-  if (delivery) return `${delivery.text}${to}: avísale que no la use.`
-  return `Ya se le envió el ${sentDay(last.at)} por ${channel}${to}: avísale que no la use.`
-}
-
 function useSentWarning(patientId: string, prescriptionId: string, enabled: boolean): string | null {
   const sent = useQuery({
     queryKey: ["health-document-sent", patientId, "prescription", prescriptionId],
@@ -131,7 +119,10 @@ function useSentWarning(patientId: string, prescriptionId: string, enabled: bool
     enabled,
   })
   const last = sent.data?.data
-  return last ? sentWarningWords(last) : null
+  if (!last) return null
+  const channel = CHANNEL_WORDS[last.channel] ?? last.channel
+  const to = last.recipientName ? ` a ${last.recipientName}` : ""
+  return `Ya se le envió el ${sentDay(last.at)} por ${channel}${to}: avísale que no la use.`
 }
 
 /** Anular con motivo: la receta o el descanso conservan su contenido y quedan con sello. */

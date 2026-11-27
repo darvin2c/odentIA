@@ -10,30 +10,23 @@ import { channelConnection, contactIdentity, conversation, message } from "@oden
 import { and, eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { auditEvent } from "@odentia/db/schema/org"
-import { getAgentPatientBudgets } from "./agent-operations.js"
 import { previewMessageRoute } from "./automation-routing.js"
 import { BUDGET_READY_MESSAGE_KEY } from "./automation-messages.js"
 import { budgetDeliveries, budgetDeliveryOf, budgetNotReachedSql, type BudgetSendFact } from "./budget-delivery.js"
-import { previewBudgetSend, sendBudget } from "./budget-send.js"
+import { markBudgetHanded, previewBudgetSend, sendBudget } from "./budget-send.js"
 import { createBudget, deliverBudget, getBudgetDetail } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
-import { createConsentDocument, createConsentTemplate, listConsentDocuments, markConsentSentByLink, publishConsentTemplate } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { applyStatus } from "./conversations.js"
 import { addPlanItem } from "./plan.js"
 import { getPlanNextSteps } from "./plan-next.js"
-import { lastHealthDocumentSend } from "./health-documents.js"
-import { createPatient, patientPersonId } from "./patients.js"
-import { configurePublicLinks } from "./public-links.js"
-import { secretsKeyFromEnv } from "./secrets.js"
-import { sendConsentToSign } from "./su-enlace.js"
+import { patientPersonId } from "./patients.js"
 import type { Storage } from "./storage.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
 const ORG = "org_a"
-const KEY = secretsKeyFromEnv("cd".repeat(32))
 const ZONE = { locale: "es-PE", timezone: "America/Lima" }
 const SENT_AT = new Date("2026-11-27T15:00:00Z")
 
@@ -89,8 +82,11 @@ describe("lo que se dice de la entrega, sin base", () => {
     const [failed] = metaStatus("wamid.x", "failed", 131026)
     const delivery = budgetDeliveryOf(presented, [send({ messageStatus: "failed", error: failed!.error ?? null })], ZONE)
     expect(delivery).toMatchObject({ state: "no_llego", reached: false, label: "No le llegó", text: "No llegó por WhatsApp · enviado el 27 nov" })
-    expect(delivery?.problem).toMatch(/^Su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica\. Corrige su número/)
-    expect(delivery?.problem).toContain("vuelve a enviarlo desde su presupuesto, o imprímelo y entrégaselo")
+    expect(delivery?.problem).toBe(
+      "Su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica. Sugerencia: revisa su número en sus Datos y vuélvelo a enviar desde su presupuesto o, si ya se lo entregaste, marca «Ya se lo di en mano».",
+    )
+    // Nunca dice «imprímelo»: lo impreso se anota con «Ya se lo di en mano».
+    expect(delivery?.problem).not.toContain("imprím")
   })
 
   it("la clave falsa de una demo (190) sale como «No llegó» y no como «Entregado»", () => {
@@ -264,7 +260,7 @@ async function rejectedMessage(f: Awaited<ReturnType<typeof clinicalFixture>>, m
   await f.run((tx) => applyStatus(tx, ORG, metaStatus(wamid, "failed", 131026)))
 }
 
-it("Sofi no recibe «Entregado» de lo que no le llegó: recibe que no le llegó y por qué", async () => {
+it("«Ya se lo di en mano»: lo que no le llegó por WhatsApp cuenta como entregado, en código y en SQL", async () => {
   const f = await clinicalFixture()
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   await whatsappOf(personId, celular(), new Date())
@@ -274,71 +270,35 @@ it("Sofi no recibe «Entregado» de lo que no le llegó: recibe que no le llegó
     sendBudget(tx, ORG, { userId: f.actor }, { patientId: f.patient.id, budgetId: budget.id, requestId: randomUUID() }, { storage }),
   )
   await rejectedMessage(f, sent.messageId)
-  const found = await f.run((tx) => getAgentPatientBudgets(tx, ORG, personId, f.patient.id))
-  const view = found.budgets.find((row) => row.budgetId === budget.id)
-  expect(view?.stateText).toBe("No le llegó")
-  expect(view?.notReached).toMatch(/^No llegó por WhatsApp · enviado el .+\. Su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica\.$/)
-  // Lo que Sofi recibe es lo que la persona tiene: sin lo que hace la clínica.
-  expect(view?.notReached).not.toContain("Corrige su número")
-})
-
-it("la receta enviada dice lo que pasó con su mensaje: «No llegó» con el motivo, no «Ya se le envió»", async () => {
-  const f = await clinicalFixture()
-  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
-  await whatsappOf(personId, celular(), new Date())
-  const [thread] = await ownerDb.select({ id: conversation.id }).from(conversation).where(eq(conversation.contactId, personId))
-  const [sentMessage] = await ownerDb
-    .insert(message)
-    .values({ organizationId: ORG, conversationId: thread!.id, direction: "out", senderKind: "user", body: "Tu receta", status: "queued" })
-    .returning({ id: message.id })
-  const prescriptionId = randomUUID()
-  await ownerDb.insert(auditEvent).values({
-    organizationId: ORG,
-    actorUserId: f.actor,
-    action: "health_document.sent",
-    entity: "message",
-    entityId: sentMessage!.id,
-    metadata: { patientId: f.patient.id, documentType: "prescription", documentId: prescriptionId, recipientName: "Paciente de prueba", channel: "whatsapp" },
-  })
-  const last = () => f.run((tx) => lastHealthDocumentSend(tx, ORG, f.patient.id, { documentType: "prescription", documentId: prescriptionId }))
-  expect((await last())?.delivery).toMatchObject({ state: "enviado", text: expect.stringMatching(/^Enviado por WhatsApp el /) })
-  await rejectedMessage(f, sentMessage!.id)
-  const failed = (await last())?.delivery
-  expect(failed).toMatchObject({ state: "no_llego", reason: "Su número no tiene WhatsApp, está mal escrito o no recibe mensajes de la clínica." })
-  expect(failed?.text).toMatch(/^No llegó por WhatsApp · enviado el /)
-  expect(failed?.problem).toContain("vuelve a enviarla desde sus documentos, o imprímela y entrégasela")
-})
-
-it("el consentimiento enviado a firmar dice «No llegó» con qué hacer, no «Lo tiene en su enlace»", async () => {
-  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
-  try {
-    const f = await clinicalFixture()
-    const digits = randomUUID().replace(/\D/g, "").padEnd(16, "0")
-    const ana = await f.run((tx) =>
-      createPatient(tx, ORG, f.actor, { displayName: "Ana Soto", givenNames: "Ana", familyName: "Soto", birthDate: "1990-01-01", docType: "DNI", docNumber: digits.slice(0, 8) }),
-    )
-    const personId = (await f.run((tx) => patientPersonId(tx, ORG, ana.id)))!
-    await whatsappOf(personId, `519${digits.slice(8, 16)}`, new Date())
-    const draft = await f.run((tx) =>
-      createConsentTemplate(tx, ORG, f.actor, {
-        key: `t-${randomUUID().slice(0, 8)}`,
-        title: "Exodoncia",
-        sections: { procedure: "Extracción con anestesia local.", benefits: ["Quitar el dolor"], risks: ["Sangrado"], alternatives: ["Endodoncia"], consequences: "Puede avanzar." },
-      }),
-    )
-    const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
-    const consent = await f.run((tx) => createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: ana.id, procedureRef: "Exodoncia de la pieza 38" }))
-    const sent = await f.run(async (tx) => {
-      await markConsentSentByLink(tx, ORG, f.actor, consent.id)
-      return sendConsentToSign(tx, ORG, f.actor, { patientId: ana.id, consentId: consent.id }, { secretsKey: KEY })
-    })
-    const delivery = async () => (await f.run((tx) => listConsentDocuments(tx, ORG, { patientId: ana.id }))).find((row) => row.id === consent.id)?.linkDelivery
-    expect(await delivery()).toMatchObject({ state: "enviado" })
-    await rejectedMessage(f, sent.messageId)
-    const failed = await delivery()
-    expect(failed).toMatchObject({ state: "no_llego", text: expect.stringMatching(/^No llegó por WhatsApp · enviado el /) })
-    expect(failed?.problem).toContain("Corrige su número en sus Datos y vuelve a enviárselo con «Enviarlo por mensaje»")
-  } finally {
-    configurePublicLinks(null)
+  const unreached = async () => {
+    const [row] = await f.run((tx) => tx.execute<{ unreached: boolean }>(sql`select ${budgetNotReachedSql(ORG, sql`${budget.id}`)} as unreached`))
+    return row?.unreached
   }
+  expect((await f.run((tx) => getBudgetDetail(tx, ORG, f.patient.id, budget.id))).delivery).toMatchObject({ reached: false, label: "No le llegó" })
+  expect(await unreached()).toBe(true)
+
+  await f.run((tx) => markBudgetHanded(tx, ORG, { userId: f.actor }, { patientId: f.patient.id, budgetId: budget.id }))
+  const handed = (await f.run((tx) => getBudgetDetail(tx, ORG, f.patient.id, budget.id))).delivery
+  expect(handed).toMatchObject({ state: "en_mano", reached: true, label: "Entregado · espera respuesta" })
+  expect(handed?.text).toMatch(/^Entregado en mano el /)
+  expect(await unreached()).toBe(false)
+  const step = (await f.run((tx) => getPlanNextSteps(tx, ORG, f.patient.id, all))).steps.find((row) => row.kind === "respuesta")
+  expect(step?.text).toBe("Entregado · espera respuesta")
+  // Queda su traza, dicha con palabras.
+  const [trace] = await ownerDb
+    .select({ action: auditEvent.action })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entity, "treatment_budget"), eq(auditEvent.entityId, budget.id), eq(auditEvent.action, "budget.handed")))
+  expect(trace?.action).toBe("budget.handed")
+})
+
+it("la consulta de los envíos usa el índice parcial de los envíos", async () => {
+  // Con pocas filas Postgres prefiere recorrer la tabla: se le pide que no, para ver si el índice sirve.
+  const plan = await ownerDb.transaction(async (tx) => {
+    await tx.execute(sql`set local enable_seqscan = off`)
+    return tx.execute<{ "QUERY PLAN": string }>(sql`explain select 1 from audit_event e
+      where e.organization_id = ${ORG} and e.action = 'financial_document.sent' and e.metadata->>'documentType' = 'budget'
+        and (e.metadata->>'documentId') = ${randomUUID()}`)
+  })
+  expect(plan.map((row) => row["QUERY PLAN"]).join("\n")).toContain("audit_event_sent_document_idx")
 })
