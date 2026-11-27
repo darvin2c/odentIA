@@ -85,6 +85,31 @@ describe("las fichas que podrían ser la misma clienta", () => {
     expect(similarPairs(joined, [{ a: "a2", b: "b" }])).toEqual([])
   })
 
+  it("con un nombre muy común, la que acaba de llegar no queda fuera ni la tapan las ya contestadas", () => {
+    const old = Array.from({ length: 12 }, (_, i) => ficha(`old${i}`, "María López", null, i))
+    const members = [...old, ficha("nueva", "María López", null, 30)]
+    // Las viejas ya se contestaron entre ellas y con casi todas: la nueva igual aparece.
+    const decided = old.flatMap((a, i) => old.slice(i + 1).map((b) => ({ a: a.id, b: b.id })))
+    const pairs = similarPairs(members, decided)
+    expect(pairs.length).toBeGreaterThan(0)
+    expect(pairs.every((p) => p.b === "nueva")).toBe(true)
+  })
+
+  it("solo las de una ficha, aunque haya muchas otras parejas antes", () => {
+    const members = [
+      ficha("vieja", "Rosa Paz", null, 0),
+      ...Array.from({ length: 25 }, (_, i) => [
+        ficha(`a${i}`, `Clienta ${i}`, null, i + 1),
+        ficha(`b${i}`, `Clienta ${i}`, null, i + 40),
+      ]).flat(),
+      ficha("otra", "Rosa Paz", null, 1),
+    ]
+    expect(similarPairs(members, [])).toHaveLength(20)
+    expect(similarPairs(members, [], 20, "vieja")).toEqual([
+      { a: "vieja", b: "otra", reason: "nombre" },
+    ])
+  })
+
   it("las más nuevas primero y con tope", () => {
     const members = [
       ficha("a1", "Ana", null, 1),

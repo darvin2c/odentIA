@@ -609,8 +609,11 @@ export function createApp(deps: AppDeps) {
       await listCustomers(deps.appDb, c.get("person"), c.req.param("id"), c.req.query("buscar")),
     ),
   )
+  // «?de=…»: solo las de esa ficha (desde su aviso).
   app.get("/api/tiendas/:id/clientes/parecidas", async (c) =>
-    c.json(await similarCustomers(deps.appDb, c.get("person"), c.req.param("id"))),
+    c.json(
+      await similarCustomers(deps.appDb, c.get("person"), c.req.param("id"), c.req.query("de")),
+    ),
   )
   app.post("/api/tiendas/:id/clientes/unir", async (c) => {
     const input = await bodyOf(c, pairInput)

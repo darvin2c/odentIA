@@ -94,15 +94,20 @@ export interface SimilarPair {
 
 const pairKey = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`)
 
+/** Cuántas parejas arma, como mucho, un mismo nombre o teléfono (un nombre muy común). */
+const PAIRS_PER_KEY = 10
+
 /**
  * Las fichas que podrían ser la misma clienta: el mismo teléfono (primero) o el mismo nombre,
  * en fichas distintas, sin contar lo que una persona ya contestó (que son distintas, o que las
- * separó). Las más nuevas primero: la que acaba de llegar es la que conviene mirar.
+ * separó). Las más nuevas primero: la que acaba de llegar es la que conviene mirar. Con
+ * `involving`, solo las de esa ficha (antes del tope).
  */
 export function similarPairs(
   members: MemberRow[],
   decided: { a: string; b: string }[],
   limit = MAX_SIMILAR,
+  involving?: string,
 ): SimilarPair[] {
   const rootOf = new Map(members.map((m) => [m.id, m.root]))
   const born = new Map(members.filter((m) => m.id === m.root).map((m) => [m.id, m.createdAt]))
@@ -133,25 +138,26 @@ export function similarPairs(
         ? -1
         : 1,
   )
+  const age = (id: string) => born.get(id)?.getTime() ?? 0
   for (const key of keys) {
-    const roots = [...groups.get(key)!].sort(
-      (x, y) => (born.get(x)?.getTime() ?? 0) - (born.get(y)?.getTime() ?? 0) || (x < y ? -1 : 1),
-    )
-    // Un nombre muy común no arma decenas de parejas: las primeras alcanzan para empezar.
-    const some = roots.slice(0, 8)
-    for (let i = 0; i < some.length; i++)
-      for (let j = i + 1; j < some.length; j++) {
-        const id = pairKey(some[i]!, some[j]!)
+    // La más nueva primero, frente a cada una de las anteriores: la que acaba de llegar no queda
+    // fuera por un nombre muy común, y lo ya contestado no ocupa lugar.
+    const roots = [...(groups.get(key) ?? [])].sort((x, y) => age(y) - age(x) || (x < y ? 1 : -1))
+    let made = 0
+    pairing: for (const [i, newer] of roots.entries())
+      for (const older of roots.slice(i + 1)) {
+        if (involving && newer !== involving && older !== involving) continue
+        const id = pairKey(newer, older)
         if (answered.has(id) || pairs.has(id)) continue
         pairs.set(id, {
-          a: some[i]!,
-          b: some[j]!,
+          a: older,
+          b: newer,
           reason: key.startsWith("telefono:") ? "telefono" : "nombre",
         })
+        if (++made >= PAIRS_PER_KEY) break pairing
       }
   }
-  const newest = (p: SimilarPair) => born.get(p.b)?.getTime() ?? 0
-  return [...pairs.values()].sort((x, y) => newest(y) - newest(x)).slice(0, limit)
+  return [...pairs.values()].sort((x, y) => age(y.b) - age(x.b)).slice(0, limit)
 }
 
 async function membersOf(tx: Db, storeId: string): Promise<MemberRow[]> {
@@ -221,8 +227,9 @@ export interface CustomerSummary {
   since: Date
 }
 
-const ACCENTS_FROM = "áàäâãéèëêíìïîóòöôõúùüûñç"
-const ACCENTS_TO = "aaaaaeeeeiiiiooooouuuunc"
+// Las letras con tilde, también en mayúscula: `lower` de la base no siempre las baja.
+const ACCENTS_FROM = "áàäâãéèëêíìïîóòöôõúùüûñçÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ"
+const ACCENTS_TO = "aaaaaeeeeiiiiooooouuuuncaaaaaeeeeiiiiooooouuuunc"
 
 /**
  * Cada ficha con lo que la reconoce: la que se ve y las que están dentro de ella, juntas. Con
@@ -231,12 +238,14 @@ const ACCENTS_TO = "aaaaaeeeeiiiiooooouuuunc"
 async function summariesOf(
   tx: Db,
   storeId: string,
-  filter: { roots?: string[]; search?: string } = {},
+  filter: { roots?: string[]; search?: string; limit?: number } = {},
 ): Promise<CustomerSummary[]> {
   if (filter.roots && filter.roots.length === 0) return []
   // Lo escrito se busca tal cual: «%» o «_» no son comodines.
   const text = filter.search ? nameKey(filter.search).replace(/[\\%_]/g, (c) => `\\${c}`) : ""
-  const digits = filter.search ? filter.search.replace(/\D/g, "") : ""
+  // Un teléfono con su código de país encuentra el guardado sin él, y al revés (los últimos 8).
+  const typed = filter.search ? filter.search.replace(/\D/g, "") : ""
+  const digits = phoneKey(typed) ?? typed
   const rows = await tx.execute<{
     id: string
     name: string
@@ -269,7 +278,7 @@ async function summariesOf(
       ${
         text || digits.length >= 3
           ? sql`having bool_or(
-              ${text ? sql`translate(lower(g.name), ${ACCENTS_FROM}, ${ACCENTS_TO}) like ${`%${text}%`}` : sql`false`}
+              ${text ? sql`translate(lower(regexp_replace(btrim(g.name), '[[:space:]]+', ' ', 'g')), ${ACCENTS_FROM}, ${ACCENTS_TO}) like ${`%${text}%`}` : sql`false`}
               or ${digits.length >= 3 ? sql`coalesce(g.phone_digits, '') like ${`%${digits}%`}` : sql`false`})`
           : sql``
       }
@@ -278,7 +287,8 @@ async function summariesOf(
       (select array_agg(g.phone order by (g.id = r.id) desc, g.created_at)
         from groups g where g.root = r.id and g.phone is not null) as phones,
       (select array_agg(distinct o.channel) from sale_order o join groups g on g.id = o.customer_id
-        where g.root = r.id and o.test = false and o.channel <> 'otro') as channels,
+        where g.root = r.id and o.test = false and o.state <> 'anulado'
+          and o.channel <> 'otro') as channels,
       (select count(*) from sale_order o join groups g on g.id = o.customer_id
         where g.root = r.id and o.test = false and o.state <> 'anulado') as purchases,
       last.created_at as last_at, last.delivery_zone as last_zone, last.id as last_order,
@@ -293,7 +303,7 @@ async function summariesOf(
       order by o.created_at desc limit 1
     ) last on true
     order by last.created_at desc nulls last, r.created_at desc
-    limit ${MAX_LISTED}`)
+    limit ${filter.limit ?? MAX_LISTED}`)
   const list = [...rows]
   const lastIds = list.map((row) => row.last_order).filter((id): id is string => Boolean(id))
   const lastOrders = lastIds.length
@@ -343,19 +353,43 @@ function lineText(line: { productName: string; variantName: string; quantity: nu
 export async function listCustomers(appDb: Db, person: Person, storeId: string, search = "") {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
     const query = search.trim().slice(0, 80)
-    const customers = await summariesOf(tx, storeId, query ? { search: query } : {})
+    // Una de más, para saber si hay otras que no se ven.
+    const found = await summariesOf(tx, storeId, {
+      ...(query ? { search: query } : {}),
+      limit: MAX_LISTED + 1,
+    })
     // Sin buscar, también cuántas podrían ser la misma clienta (el aviso de la lista).
     const similar = query
       ? null
-      : similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId)).length
-    return { customers, similar, limited: customers.length >= MAX_LISTED }
+      : similarPairs(
+          await membersOf(tx, storeId),
+          await answeredPairs(tx, storeId),
+          Number.POSITIVE_INFINITY,
+        ).length
+    return {
+      customers: found.slice(0, MAX_LISTED),
+      similar,
+      limited: found.length > MAX_LISTED,
+    }
   })
 }
 
-/** «¿Es la misma clienta?»: las parejas por mirar, con lo que reconoce a cada una. */
-export async function similarCustomers(appDb: Db, person: Person, storeId: string) {
+/**
+ * «¿Es la misma clienta?»: las parejas por mirar, con lo que reconoce a cada una. Con
+ * `involving`, solo las de esa ficha (desde su aviso).
+ */
+export async function similarCustomers(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  involving?: string,
+) {
+  if (involving) uuidOr404(involving)
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const pairs = similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId))
+    const members = await membersOf(tx, storeId)
+    const root = involving ? members.find((m) => m.id === involving)?.root : undefined
+    if (involving && !root) throw new StoreError(404, "NOT_FOUND", "Esa clienta ya no está")
+    const pairs = similarPairs(members, await answeredPairs(tx, storeId), MAX_SIMILAR, root)
     const summaries = await summariesOf(tx, storeId, {
       roots: [...new Set(pairs.flatMap((p) => [p.a, p.b]))],
     })
@@ -458,15 +492,28 @@ export async function customerDetail(
           .orderBy(asc(saleOrderLine.position))
       : []
     const linesBy = Map.groupBy(lines, (line) => line.orderId)
-    const events = await tx
-      .select({
-        id: customerEvent.id,
-        action: customerEvent.action,
-        customerId: customerEvent.customerId,
-        otherId: customerEvent.otherId,
-        createdAt: customerEvent.createdAt,
-        actorName: accountCopy.name,
-      })
+    // Por dónde compró cada ficha: de todas sus compras, no solo de las que se listan.
+    const bought = await tx
+      .selectDistinct({ customerId: saleOrder.customerId, channel: saleOrder.channel })
+      .from(saleOrder)
+      .where(
+        and(
+          eq(saleOrder.storeId, storeId),
+          inArray(saleOrder.customerId, ids),
+          ne(saleOrder.state, "anulado"),
+          eq(saleOrder.test, false),
+        ),
+      )
+    const eventFields = {
+      id: customerEvent.id,
+      action: customerEvent.action,
+      customerId: customerEvent.customerId,
+      otherId: customerEvent.otherId,
+      createdAt: customerEvent.createdAt,
+      actorName: accountCopy.name,
+    }
+    const recent = await tx
+      .select(eventFields)
       .from(customerEvent)
       .leftJoin(accountCopy, eq(accountCopy.userId, customerEvent.actorUserId))
       .where(
@@ -477,6 +524,29 @@ export async function customerDetail(
       )
       .orderBy(desc(customerEvent.createdAt))
       .limit(EVENT_LIMIT)
+    // La última vez que se unió cada ficha que sigue dentro, aunque sea vieja: ahí va «Separar».
+    const inner = ids.filter((id) => id !== head.id)
+    const joins = inner.length
+      ? await tx
+          .select(eventFields)
+          .from(customerEvent)
+          .leftJoin(accountCopy, eq(accountCopy.userId, customerEvent.actorUserId))
+          .where(
+            and(
+              eq(customerEvent.storeId, storeId),
+              eq(customerEvent.action, "unida"),
+              inArray(customerEvent.otherId, inner),
+            ),
+          )
+          .orderBy(desc(customerEvent.createdAt))
+      : []
+    const separable = new Map<string, string>()
+    for (const e of joins) if (!separable.has(e.otherId)) separable.set(e.otherId, e.id)
+    const separates = new Set(separable.values())
+    const events = [
+      ...recent,
+      ...joins.filter((e) => separates.has(e.id) && !recent.some((r) => r.id === e.id)),
+    ].sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime())
     // Las fichas que nombra la historia (también las de otra clienta, si se dijo que son distintas).
     const named = [...new Set(events.flatMap((e) => [e.customerId, e.otherId]))]
     const fichas = new Map(
@@ -488,8 +558,8 @@ export async function customerDetail(
         : []
       ).map((row) => [row.id, row]),
     )
-    const channelsOf = (id: string) =>
-      [...new Set(orders.filter((o) => o.customerId === id).map((o) => o.channel))].filter(
+    const channelsOf = (id?: string) =>
+      [...new Set(bought.filter((o) => !id || o.customerId === id).map((o) => o.channel))].filter(
         (c) => c !== "otro",
       )
     const noteBy = head.noteBy
@@ -510,18 +580,14 @@ export async function customerDetail(
       addresses.push({ address: o.address, deliveryName: o.deliveryName, zone: o.deliveryZone })
       if (addresses.length === 5) break
     }
-    // La última vez que se unió cada ficha que sigue dentro: ahí se ofrece «Separar».
-    const separable = new Set<string>()
-    const lastJoin = new Set<string>()
-    for (const e of events) {
-      if (e.action !== "unida" || lastJoin.has(e.otherId)) continue
-      lastJoin.add(e.otherId)
-      if (fichas.get(e.otherId)?.mergedInto === head.id) separable.add(e.id)
-    }
     const last = orders[0]
-    const similar = similarPairs(await membersOf(tx, storeId), await answeredPairs(tx, storeId))
-      .filter((p) => p.a === head.id || p.b === head.id)
-      .map((p) => (p.a === head.id ? p.b : p.a))
+    // Las de esta ficha, sin el tope de la lista de toda la tienda.
+    const similar = similarPairs(
+      await membersOf(tx, storeId),
+      await answeredPairs(tx, storeId),
+      MAX_SIMILAR,
+      head.id,
+    ).map((p) => (p.a === head.id ? p.b : p.a))
     const similarNames = new Map(
       (similar.length
         ? await tx
@@ -536,7 +602,7 @@ export async function customerDetail(
       name: head.name,
       phone: head.phone,
       phones: members.map((m) => m.phone).filter((p): p is string => Boolean(p)),
-      channels: [...new Set(orders.map((o) => o.channel))].filter((c) => c !== "otro"),
+      channels: channelsOf(),
       since: members[0]?.createdAt ?? head.createdAt,
       note: head.note,
       noteByName: noteBy,
@@ -572,7 +638,7 @@ export async function customerDetail(
           self,
           with: { id: other, name: fichas.get(other)?.name ?? "otra ficha" },
           /** «Separar»: la ficha que se separa (la que se unió y sigue dentro de esta). */
-          separates: separable.has(e.id) ? e.otherId : null,
+          separates: separates.has(e.id) ? e.otherId : null,
         }
       }),
       /** «Repetir pedido»: lo de su última compra, con los precios de hoy al anotarlo. */
@@ -687,7 +753,11 @@ export async function mergeCustomersIn(
   return { id: keep.id }
 }
 
-/** «Separar»: la ficha que estaba dentro de otra vuelta a estar sola, con sus pedidos. */
+/**
+ * «Separar»: la ficha que estaba dentro de otra vuelve a estar sola, con sus pedidos y con las
+ * fichas que una persona le había unido antes (lo que dijo sigue valiendo: son ella). Así deshace
+ * lo que hizo «Sí, es la misma».
+ */
 export async function separateCustomer(
   appDb: Db,
   person: Person,
@@ -704,18 +774,58 @@ export async function separateCustomer(
     if (!row) throw new StoreError(404, "NOT_FOUND", "Esa clienta ya no está")
     if (!row.mergedInto)
       throw new StoreError(409, "NOT_MERGED", "Esa ficha ya está sola. Recarga para verla.")
+    const root = row.mergedInto
+    // Dentro de cada ficha, a cuál se unió la última vez: las que llegaron por esta, vuelven.
+    const inside = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(and(eq(customer.storeId, storeId), eq(customer.mergedInto, root)))
+    const joins = inside.length
+      ? await tx
+          .select({ into: customerEvent.customerId, id: customerEvent.otherId })
+          .from(customerEvent)
+          .where(
+            and(
+              eq(customerEvent.storeId, storeId),
+              eq(customerEvent.action, "unida"),
+              inArray(
+                customerEvent.otherId,
+                inside.map((c) => c.id),
+              ),
+            ),
+          )
+          .orderBy(desc(customerEvent.createdAt))
+      : []
+    const joinedInto = new Map<string, string>()
+    for (const j of joins) if (!joinedInto.has(j.id)) joinedInto.set(j.id, j.into)
+    const comes = new Set([row.id])
+    for (let grew = true; grew; ) {
+      grew = false
+      for (const [id, into] of joinedInto)
+        if (!comes.has(id) && comes.has(into)) {
+          comes.add(id)
+          grew = true
+        }
+    }
+    comes.delete(row.id)
+    const now = new Date()
     await tx
       .update(customer)
-      .set({ mergedInto: null, updatedAt: new Date() })
+      .set({ mergedInto: null, updatedAt: now })
       .where(eq(customer.id, row.id))
+    if (comes.size > 0)
+      await tx
+        .update(customer)
+        .set({ mergedInto: row.id, updatedAt: now })
+        .where(and(eq(customer.storeId, storeId), inArray(customer.id, [...comes])))
     await tx.insert(customerEvent).values({
       storeId,
-      customerId: row.mergedInto,
+      customerId: root,
       otherId: row.id,
       action: "separada",
       actorUserId: person.userId,
     })
-    return { id: row.id, from: row.mergedInto }
+    return { id: row.id, from: root, moved: [...comes] }
   })
 }
 

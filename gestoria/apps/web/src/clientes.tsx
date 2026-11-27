@@ -321,7 +321,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
     .join(" · ")
   const draft: OrderDraft | undefined = customer.repeat
     ? {
-        customer: { id: customer.id, name: customer.name, phone: customer.phone },
+        customer: { id: customer.id, name: customer.name, phone: customer.phones[0] ?? null },
         number: customer.repeat.number,
         channel: customer.repeat.channel,
         lines: customer.repeat.lines.map((l) => ({
@@ -501,7 +501,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
       <ConfirmDialog
         open={separating !== null}
         title={`¿Separar «${separating?.name ?? ""}»?`}
-        description="Vuelve a ser otra ficha, con los pedidos que llegaron por ella. No se vuelve a sugerir como la misma clienta."
+        description="Vuelve a ser otra ficha, con sus pedidos y con las fichas que se le unieron antes. No se vuelve a sugerir como la misma clienta."
         confirmLabel="Separar"
         cancelLabel="Dejarla unida"
         pending={separate.isPending}
@@ -528,7 +528,11 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
         />
       ) : null}
       {comparing ? (
-        <SimilarQueue involving={customer.id} onClose={() => setComparing(null)} />
+        <SimilarQueue
+          involving={customer.id}
+          first={comparing}
+          onClose={() => setComparing(null)}
+        />
       ) : null}
       {picking ? <PickOtherSheet customer={customer} onClose={() => setPicking(false)} /> : null}
     </article>
@@ -642,15 +646,28 @@ function CompareSheet({
  * Las parejas por mirar, de a una, hasta que no quede ninguna. Con `involving`, solo las de esa
  * ficha (desde su aviso).
  */
-function SimilarQueue({ involving, onClose }: { involving?: string; onClose: () => void }) {
+function SimilarQueue({
+  involving,
+  first,
+  onClose,
+}: {
+  involving?: string
+  /** La otra ficha del aviso que se tocó: esa pareja va primero. */
+  first?: string
+  onClose: () => void
+}) {
   const { store } = useStoreContext()
   const navigate = useNavigate()
   const similar = useQuery({
-    queryKey: SIMILAR_KEY(store.id),
-    queryFn: () => api<{ pairs: SimilarPair[] }>(`/api/tiendas/${store.id}/clientes/parecidas`),
+    queryKey: [...SIMILAR_KEY(store.id), involving ?? ""],
+    queryFn: () =>
+      api<{ pairs: SimilarPair[] }>(
+        `/api/tiendas/${store.id}/clientes/parecidas${involving ? `?de=${involving}` : ""}`,
+      ),
   })
-  const pairs = (similar.data?.pairs ?? []).filter(
-    (p) => !involving || p.a.id === involving || p.b.id === involving,
+  const has = (p: SimilarPair, id?: string) => Boolean(id) && (p.a.id === id || p.b.id === id)
+  const pairs = [...(similar.data?.pairs ?? [])].sort(
+    (x, y) => Number(has(y, first)) - Number(has(x, first)),
   )
   const pair = pairs[0]
   // Contestadas todas, se cierra.

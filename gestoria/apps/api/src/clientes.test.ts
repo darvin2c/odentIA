@@ -216,6 +216,20 @@ describe("cada pedido, con la ficha de su clienta", () => {
     expect(byPhone.json.customers.map((c: Json) => c.id).sort()).toEqual(
       [mariela, otraMariela].sort(),
     )
+    // Con el código del país encuentra el guardado sin él («987654321»).
+    const withCode = await call(
+      "lucia",
+      "GET",
+      `${base}/clientes?buscar=${encodeURIComponent("+51 987 654 321")}`,
+    )
+    expect(withCode.json.customers.map((c: Json) => c.id).sort()).toEqual(
+      [mariela, otraMariela].sort(),
+    )
+    // Lo escrito se busca tal cual: «%» no trae a todas.
+    expect((await call("lucia", "GET", `${base}/clientes?buscar=%25`)).json.customers).toEqual([])
+    // Las de una ficha, desde su aviso.
+    const of = await call("lucia", "GET", `${base}/clientes/parecidas?de=${otraMariela}`)
+    expect(of.json.pairs).toMatchObject([{ a: { id: mariela }, b: { id: otraMariela } }])
   })
 })
 
@@ -288,6 +302,32 @@ describe("¿Es la misma clienta?", () => {
       action: "distintas",
       with: { id: mariela },
     })
+  })
+
+  it("«Separar» deshace la unión: vuelve con las fichas que se le habían unido antes", async () => {
+    const a = (await anotar("lucia", { customerName: "Ana Paz", customerPhone: "" })).customerId
+    const b = (await anotar("lucia", { customerName: "Ana Paz", customerPhone: "" })).customerId
+    const c = (await anotar("lucia", { customerName: "Ana Paz", customerPhone: "" })).customerId
+    // C es B; después, B es A: las tres quedan en A.
+    expect((await call("lucia", "POST", `${base}/clientes/unir`, { a: c, b })).json.id).toBe(b)
+    expect((await call("lucia", "POST", `${base}/clientes/unir`, { a: b, b: a })).json.id).toBe(a)
+    const all = await ficha(a)
+    expect(all.members.map((m: Json) => m.id).sort()).toEqual([b, c].sort())
+    // Cada ficha de dentro se puede separar, aunque haya llegado por otra.
+    expect(
+      all.history
+        .filter((h: Json) => h.separates)
+        .map((h: Json) => h.separates)
+        .sort(),
+    ).toEqual([b, c].sort())
+    // B no es A: B vuelve a estar sola, con C, que una persona dijo que es B.
+    const separated = await call("lucia", "POST", `${base}/clientes/${b}/separar`)
+    expect(separated.json.moved).toEqual([c])
+    expect((await ficha(a)).members).toEqual([])
+    const back = await ficha(c)
+    expect(back.id).toBe(b)
+    expect(back.members.map((m: Json) => m.id)).toEqual([c])
+    expect(back.purchases).toBe(2)
   })
 })
 

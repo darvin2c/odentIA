@@ -1162,7 +1162,7 @@ export function NewOrderSheet({
     // Con su ficha elegida, el pedido copia su nombre y su teléfono; si no, abre la suya.
     customerId: chosen?.id ?? null,
     customerName: chosen ? "" : customerName,
-    customerPhone: chosen ? "" : customerPhone,
+    customerPhone: chosen ? (chosen.phone ?? "") : customerPhone,
     channel,
     address,
     notes,
@@ -1316,7 +1316,11 @@ export function NewOrderSheet({
                 name={customerName}
                 phone={customerPhone}
                 onChoose={(customer) => {
-                  setChosen(customer)
+                  // Si su ficha no tiene teléfono, el pedido lleva el que se escribió.
+                  setChosen({
+                    ...customer,
+                    phone: customer.phone ?? (customerPhone.trim() || null),
+                  })
                   setLocalErrors(({ customerName: _, ...rest }) => rest)
                 }}
               />
