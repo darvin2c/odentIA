@@ -29,8 +29,8 @@ import {
 } from "@gestoria/db"
 import { and, asc, count, desc, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import { z } from "zod"
-import { agentName, SOFI_ACTOR } from "./agente.js"
-import { imageType, SELLS_WITHOUT_STOCK } from "./catalogo.js"
+import { agentName, isAgent, SOFI_ACTOR } from "./agente.js"
+import { imageType, sellsWithoutStock, wholesaleOf } from "./catalogo.js"
 import { customerForOrderIn, shownCustomerId } from "./clientes.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
@@ -59,6 +59,7 @@ import {
 import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret, sealSecret } from "./secretos.js"
 import { cancelSale, heldBy, recordReturn, recordSale } from "./stock.js"
+import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -358,7 +359,14 @@ interface Priced {
  * Con `ids`, solo esas (también las quitadas, para decir que ya no se venden); sin ellos, las que
  * se venden.
  */
-export async function variantPrices(tx: Db, storeId: string, today: string, ids?: string[]) {
+export async function variantPrices(
+  tx: Db,
+  storeId: string,
+  today: string,
+  ids?: string[],
+  /** Solo las de un producto (la ficha): así no se lee toda la tienda. */
+  productId?: string,
+) {
   const rows = await tx
     .select({
       id: productVariant.id,
@@ -384,7 +392,14 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
     .where(
       and(
         eq(productVariant.storeId, storeId),
-        ids ? inArray(productVariant.id, ids) : isNull(productVariant.removedAt),
+        // Sin `ids`, lo que se vende: ni las variantes quitadas ni lo que «ya no se vende».
+        productId ? eq(productVariant.productId, productId) : undefined,
+        ids
+          ? inArray(productVariant.id, ids)
+          : and(
+              isNull(productVariant.removedAt),
+              sql`${product.status} is distinct from 'no_se_vende'`,
+            ),
       ),
     )
     .orderBy(asc(product.name), asc(productVariant.optionValues))
@@ -424,13 +439,13 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
         .filter(
           (p) =>
             p.optionIndex === null ||
-            (row.optionValues[p.optionIndex] ?? "").localeCompare(p.optionValue ?? "", "es", {
-              sensitivity: "base",
-            }) === 0,
+            sameText(row.optionValues[p.optionIndex] ?? "", p.optionValue ?? ""),
         )
         .sort((a, b) => b.percentOff - a.percentOff)[0] ?? null
     return {
       ...row,
+      /** Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre. */
+      sellsWithoutStock: sellsWithoutStock(row.status),
       variantName: row.optionValues.join(" · ") || "Única",
       promotion: promotion?.name ?? null,
       pricing: {
@@ -438,10 +453,7 @@ export async function variantPrices(tx: Db, storeId: string, today: string, ids?
         minPriceCents: row.minPriceCents,
         percentOff: promotion?.percentOff ?? null,
         quantityPrices: tiersBy.get(row.productId) ?? [],
-        wholesale:
-          row.wholesaleMinQuantity !== null && row.wholesalePriceCents !== null
-            ? { minQuantity: row.wholesaleMinQuantity, unitPriceCents: row.wholesalePriceCents }
-            : null,
+        wholesale: wholesaleOf(row),
         clearance: row.status === "liquidacion",
       } satisfies PricedVariant,
       offers: {
@@ -563,11 +575,7 @@ async function priceOrder(
     else if (!change && row.status === "no_se_vende")
       fields[`lines.${i}.variantId`] = "Ese producto ya no se vende"
     // Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre.
-    else if (
-      !change &&
-      row.stock < line.quantity &&
-      !(row.status && SELLS_WITHOUT_STOCK.includes(row.status))
-    )
+    else if (!change && row.stock < line.quantity && !row.sellsWithoutStock)
       fields[`lines.${i}.quantity`] =
         row.stock === 0 ? "Está agotado" : `Quedan ${row.stock}: registra una entrada si hay más`
     const pricing = { ...row.pricing, comboPercentOff: combo.get(row.productId) ?? null }
@@ -799,7 +807,7 @@ export async function createOrderIn(
   const { currency } = await storeRow(tx, storeId)
   const today = options.today ?? (await todayIn(tx, storeId, now))
   // Lo que anota Sofi solo cede lo que cada producto deja ofrecer, como al cotizarlo.
-  const byAgent = actorUserId.startsWith("agente:")
+  const byAgent = isAgent(actorUserId)
   const result = await priceOrder(tx, storeId, currency, input, today, null, byAgent)
   if (!result.ok)
     throw new StoreError(

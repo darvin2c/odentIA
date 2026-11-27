@@ -198,7 +198,18 @@ describe("el precio de la ficha (lienzo «La ficha del producto»)", () => {
     // Con la 2.ª unidad, rebaja si lleva dos o más.
     const second = { ...offers, discount: false, secondUnit: true }
     expect(
-      quote([zapatilla({ quantity: 2, unitCents: 11000, offers: second })], reparto, "PEN", {
+      quote([zapatilla({ quantity: 2, unitCents: 11450, offers: second })], reparto, "PEN", {
+        byAgent: true,
+      }).ok,
+    ).toBe(true)
+    // Con solo la 2.ª unidad, la rebaja es la de una unidad por cada dos, no la de todas.
+    expect(
+      quote([zapatilla({ quantity: 3, unitCents: 10000, offers: second })], reparto, "PEN", {
+        byAgent: true,
+      }).ok,
+    ).toBe(false)
+    expect(
+      quote([zapatilla({ quantity: 3, unitCents: 11934, offers: second })], reparto, "PEN", {
         byAgent: true,
       }).ok,
     ).toBe(true)
@@ -238,6 +249,13 @@ describe("el precio de la ficha (lienzo «La ficha del producto»)", () => {
     )
     expect(deliveryOnly.ok && deliveryOnly.quote.totalCents).toBe(12900)
     expect(deliveryOnly.ok && deliveryOnly.quote.deliveryCents).toBe(0)
+    // Si bajar al mínimo le quita el envío gratis desde un monto, conviene no bajarlo.
+    const freeFrom = lowestQuote(
+      { ...line, autoUnitCents: 10000, listUnitCents: 10000, floorUnitCents: 9000 },
+      { listCents: 2000, maxDiscountCents: null, freeFromCents: 10000 },
+      "PEN",
+    )
+    expect(freeFrom.ok && freeFrom.quote.totalCents).toBe(10000)
     // Sin mínimo, no cede nada.
     const fixed = lowestQuote({ ...line, floorUnitCents: 12900 }, delivery, "PEN")
     expect(fixed.ok && fixed.quote.totalCents).toBe(13900)

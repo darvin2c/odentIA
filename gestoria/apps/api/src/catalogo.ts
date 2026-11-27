@@ -26,13 +26,15 @@ import {
   stockMovement,
   storeEvent,
 } from "@gestoria/db"
-import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { z } from "zod"
+import { isAgent } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { costWarning } from "./dinero.js"
 import { can, type StoreSeat } from "./permisos.js"
 import { applyRubroData, RUBROS, readinessOf, templateIn } from "./rubros.js"
 import { lastEntryCost } from "./stock.js"
+import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -63,8 +65,7 @@ const optionInput = z.object({
     .max(40, "Hasta 40 valores por opción"),
 })
 
-export const sameText = (a: string, b: string) =>
-  a.localeCompare(b, "es", { sensitivity: "base" }) === 0
+export { sameText }
 
 const options = z
   .array(optionInput)
@@ -448,9 +449,22 @@ export function saleStateOf(status: ProductStatus | null, stock: number): SaleSt
 /** Por encargo, con cupo o en preventa se vende sin stock: el pedido espera a que entre. */
 export const SELLS_WITHOUT_STOCK: readonly ProductStatus[] = ["encargo", "cupo", "preventa"]
 
+export const sellsWithoutStock = (status: ProductStatus | null) =>
+  status !== null && SELLS_WITHOUT_STOCK.includes(status)
+
+/** El precio para revendedoras de un producto: desde cuántas y a cuánto, o nada. */
+export function wholesaleOf(row: {
+  wholesaleMinQuantity: number | null
+  wholesalePriceCents: number | null
+}) {
+  return row.wholesaleMinQuantity !== null && row.wholesalePriceCents !== null
+    ? { minQuantity: row.wholesaleMinQuantity, unitPriceCents: row.wholesalePriceCents }
+    : null
+}
+
 /** El nombre de quien anotó algo: el de su cuenta, o «Sofi» si fue ella. */
 export async function namesOf(tx: Db, ids: (string | null)[]): Promise<Map<string, string>> {
-  const people = [...new Set(ids.filter((id): id is string => !!id && !id.startsWith("agente:")))]
+  const people = [...new Set(ids.filter((id): id is string => !!id && !isAgent(id)))]
   const rows = people.length
     ? await tx
         .select({ id: accountCopy.userId, name: accountCopy.name })
@@ -458,7 +472,7 @@ export async function namesOf(tx: Db, ids: (string | null)[]): Promise<Map<strin
         .where(inArray(accountCopy.userId, people))
     : []
   const names = new Map(rows.map((row) => [row.id, row.name]))
-  for (const id of ids) if (id?.startsWith("agente:")) names.set(id, "Sofi")
+  for (const id of ids) if (id && isAgent(id)) names.set(id, "Sofi")
   return names
 }
 
@@ -576,10 +590,7 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
     photos,
     quantityPrices,
     promotions,
-    wholesale:
-      row.wholesaleMinQuantity !== null && row.wholesalePriceCents !== null
-        ? { minQuantity: row.wholesaleMinQuantity, unitPriceCents: row.wholesalePriceCents }
-        : null,
+    wholesale: wholesaleOf(row),
     comboPercentOff: row.comboPercentOff,
     offers,
     links: linkRows
@@ -616,7 +627,7 @@ export async function detailIn(tx: Db, storeId: string, productId: string) {
       listPriceCents: row.listPriceCents,
       minPriceCents: row.minPriceCents,
       stock,
-      sellsWithoutStock: row.status !== null && SELLS_WITHOUT_STOCK.includes(row.status),
+      sellsWithoutStock: sellsWithoutStock(row.status),
       colors: colors.map((c) => ({
         value: c.value,
         hasPhoto: !!c.photoId || (!!c.id && photos.some((p) => p.colorId === c.id)),
@@ -893,20 +904,16 @@ export async function updateProduct(
         )
       rubroData = applied.data
     }
-    const colorGone =
-      patch.options !== undefined &&
-      current.colorOption !== null &&
-      current.colorOption >= patch.options.length
+    // La opción del color sigue a su nombre: si se movió, cambia su índice; si se quitó, no hay color.
+    const colorName =
+      current.colorOption !== null ? current.options[current.colorOption]?.name : undefined
+    const colorIndex =
+      patch.options && colorName !== undefined
+        ? patch.options.findIndex((o) => sameText(o.name, colorName))
+        : -1
+    const colorMoved = patch.options !== undefined && current.colorOption !== null
     // El precio de revendedora queda bajo el de lista, como el precio por cantidad.
-    const wholesale =
-      patch.wholesale !== undefined
-        ? patch.wholesale
-        : current.wholesaleMinQuantity !== null && current.wholesalePriceCents !== null
-          ? {
-              minQuantity: current.wholesaleMinQuantity,
-              unitPriceCents: current.wholesalePriceCents,
-            }
-          : null
+    const wholesale = patch.wholesale !== undefined ? patch.wholesale : wholesaleOf(current)
     if (wholesale && wholesale.unitPriceCents >= listPriceCents)
       throw new StoreError(
         400,
@@ -935,7 +942,7 @@ export async function updateProduct(
       ...(patch.category !== undefined ? { category: patch.category } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.options !== undefined ? { options: patch.options } : {}),
-      ...(colorGone ? { colorOption: null } : {}),
+      ...(colorMoved ? { colorOption: colorIndex >= 0 ? colorIndex : null } : {}),
       ...(patch.rubro !== undefined ? { rubro: patch.rubro } : {}),
       ...(patch.rubroData !== undefined ? { rubroData } : {}),
       ...(patch.code !== undefined ? { code: patch.code } : {}),
@@ -969,7 +976,10 @@ export async function updateProduct(
       updatedAt: new Date(),
     }
     await tx.update(product).set(changes).where(eq(product.id, productId))
-    if (patch.options) await dropGoneColors(tx, productId)
+    if (patch.options) {
+      await dropGoneColors(tx, productId)
+      if (!patch.promotions) await followOptions(tx, productId, current.options, patch.options)
+    }
     if (patch.quantityPrices) {
       for (const tier of patch.quantityPrices)
         if (tier.unitPriceCents >= listPriceCents)
@@ -1059,6 +1069,35 @@ export async function updateProduct(
       await logProductEvent(tx, storeId, productId, person.userId, "cambiado", diff)
     return after
   })
+}
+
+/**
+ * Las promociones de un color o una talla siguen a su opción cuando cambian las opciones: por el
+ * nombre de la opción y su valor. La de un valor que ya no está se borra: no tiene a quién bajarle.
+ */
+async function followOptions(
+  tx: Db,
+  productId: string,
+  before: ProductOption[],
+  after: ProductOption[],
+) {
+  const scoped = await tx
+    .select()
+    .from(productPromotion)
+    .where(and(eq(productPromotion.productId, productId), isNotNull(productPromotion.optionIndex)))
+  for (const promo of scoped) {
+    const name = before[promo.optionIndex!]?.name
+    const index = name === undefined ? -1 : after.findIndex((o) => sameText(o.name, name))
+    const value =
+      index >= 0 ? after[index]!.values.find((v) => sameText(v, promo.optionValue!)) : undefined
+    if (value === undefined)
+      await tx.delete(productPromotion).where(eq(productPromotion.id, promo.id))
+    else if (index !== promo.optionIndex || value !== promo.optionValue)
+      await tx
+        .update(productPromotion)
+        .set({ optionIndex: index, optionValue: value })
+        .where(eq(productPromotion.id, promo.id))
+  }
 }
 
 /** Las columnas del estado que pone la tienda (nulo: disponible o agotado, por su stock). */

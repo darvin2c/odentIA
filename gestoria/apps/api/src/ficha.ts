@@ -30,7 +30,7 @@ import {
   takenSkus,
 } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
-import { deliveryListOf, storeRow, todayIn, variantPrices } from "./pedidos.js"
+import { deliveryListOf, pad, storeRow, todayIn, variantPrices } from "./pedidos.js"
 import { can } from "./permisos.js"
 import { autoUnit, floorOf, lowestQuote } from "./precio.js"
 import { templateIn } from "./rubros.js"
@@ -308,7 +308,7 @@ async function saveGridIn(
       throw new StoreError(
         409,
         "VARIANT_IN_ORDER",
-        `Una variante que se quita está en el pedido ${String(open.number).padStart(4, "0")}, todavía abierto. Entrégalo o anúlalo antes.`,
+        `Una variante que se quita está en el pedido ${pad(open.number)}, todavía abierto. Entrégalo o anúlalo antes.`,
       )
   }
 
@@ -341,11 +341,20 @@ async function saveGridIn(
       )
   // Primero un valor de paso: así cambiar «blanca» por «negra» y al revés no choca con el índice
   // de las combinaciones de cada producto.
-  for (const { variant } of kept)
+  // Lo mismo con el código de barras y el SKU: pasar uno de una celda a otra no choca.
+  for (const { variant, combo } of kept) {
+    const cell = cellOf.get(comboKey(combo))!
     await tx
       .update(productVariant)
-      .set({ optionValues: [`~${variant.id}`] })
+      .set({
+        optionValues: [`~${variant.id}`],
+        barcode: null,
+        ...(cell.sku && !sameText(cell.sku, variant.sku)
+          ? { sku: `T${variant.id.replace(/-/g, "")}` }
+          : {}),
+      })
       .where(eq(productVariant.id, variant.id))
+  }
   const skus = await takenSkus(tx, storeId)
   const priceChanges: ProductChange[] = []
   for (const { variant, combo } of kept) {
@@ -472,14 +481,33 @@ async function saveGridIn(
           .from(productPhoto)
           .where(and(eq(productPhoto.productId, productId), inArray(productPhoto.id, photoIds)))
       : []
+    // Cada fila de antes es de un solo color: primero las que cambiaron de nombre, después por su
+    // nombre. Y un nombre de paso, para que cambiar dos nombres entre sí no choque con el índice.
+    const used = new Set<string>()
+    const lookOf = grid.rows.values.map((item) => {
+      const look = item.was
+        ? looks.find((l) => !used.has(l.id) && sameText(l.value, item.was!))
+        : undefined
+      if (look) used.add(look.id)
+      return look
+    })
+    grid.rows.values.forEach((item, i) => {
+      if (lookOf[i]) return
+      const look = looks.find((l) => !used.has(l.id) && sameText(l.value, item.value))
+      if (look) used.add(look.id)
+      lookOf[i] = look
+    })
+    for (const look of looks)
+      await tx
+        .update(productColor)
+        .set({ value: `~${look.id.slice(0, 28)}` })
+        .where(eq(productColor.id, look.id))
     for (const [i, item] of grid.rows.values.entries()) {
       if (item.photoId && !photos.some((p) => p.id === item.photoId))
         throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está en el producto", {
           [`rows.values.${i}.photoId`]: "Esa foto ya no está",
         })
-      const look =
-        looks.find((l) => item.was && sameText(l.value, item.was)) ??
-        looks.find((l) => sameText(l.value, item.value))
+      const look = lookOf[i]
       const values = {
         value: item.value,
         hex: item.hex,
@@ -556,9 +584,7 @@ export async function simulatePrice(
     await productRow(tx, storeId, productId)
     const { currency } = await storeRow(tx, storeId)
     const today = await todayIn(tx, storeId)
-    const variants = (await variantPrices(tx, storeId, today)).filter(
-      (v) => v.productId === productId,
-    )
+    const variants = await variantPrices(tx, storeId, today, undefined, productId)
     const row = input.variantId
       ? variants.find((v) => v.id === input.variantId)
       : variants[Math.floor(variants.length / 2)]
@@ -626,7 +652,12 @@ export async function simulatePrice(
       // Lo que costó y lo que se gana en el peor caso, solo con `costos.ver`.
       costCents,
       gainCents:
-        costCents !== null && lowest ? lowest.subtotalCents - costCents * input.quantity : null,
+        costCents !== null && lowest
+          ? lowest.subtotalCents -
+            costCents * input.quantity -
+            // El envío que pone la tienda sale de lo que gana.
+            (lowest.marginUsedCents - lowest.discountCents - lowest.giftCents)
+          : null,
     }
   })
 }

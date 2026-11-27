@@ -11,6 +11,7 @@ import {
 import { and, asc, eq } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -314,8 +315,6 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
   },
 }
 
-const sameText = (a: string, b: string) => a.localeCompare(b, "es", { sensitivity: "base" }) === 0
-
 /** La plantilla de un rubro para la tienda: la fija con lo que ella ajustó, en su orden. */
 export function mergeTemplate(
   rubro: ProductRubro,
@@ -449,6 +448,9 @@ export async function saveTemplate(
       const base = field.key ? fixed.find((f) => f.key === field.key) : undefined
       const own = field.key ? current.find((row) => row.key === field.key && row.label) : undefined
       if (field.key && !base && !own) fields[`fields.${position}.key`] = "Ese dato ya no está"
+      // Los productos ya guardaron valores de su tipo: para otro tipo, se agrega otro dato.
+      if (own && field.type && field.type !== own.type)
+        fields[`fields.${position}.type`] = "El tipo de un dato no cambia: agrega otro dato"
       const label = field.label ?? own?.label ?? undefined
       const type = field.type ?? own?.type ?? undefined
       if (!base && (!label || !type))
@@ -493,6 +495,16 @@ export async function saveTemplate(
           options: null,
           columns: null,
           unit: null,
+          updatedBy: person.userId,
+          updatedAt: now,
+        })
+    // Un dato propio que no viene se guarda quitado: su clave no la toma otro dato con otro tipo.
+    for (const row of current)
+      if (row.label && !seen.has(row.key))
+        rows.push({
+          ...row,
+          position: rows.length,
+          hidden: true,
           updatedBy: person.userId,
           updatedAt: now,
         })
@@ -618,8 +630,8 @@ export interface ReadinessInput {
   rowLabel: string
   template: TemplateField[]
   rubroData: Record<string, RubroValue>
-  /** Si Sofi puede ofrecer algo (envío, unos soles, un regalo, la 2.ª unidad); sin el dato, no se mira. */
-  offersSomething?: boolean
+  /** Si Sofi puede ofrecer algo (envío, unos soles, un regalo, la 2.ª unidad). */
+  offersSomething: boolean
   keywordCount: number
   hasPackage: boolean
 }
@@ -656,16 +668,7 @@ export function readinessOf(input: ReadinessInput) {
       ok: isAnswered(input.rubroData[field.key]),
       needed: field.needed,
     })),
-    ...(input.offersSomething === undefined
-      ? []
-      : [
-          {
-            id: "ofertas",
-            label: "Lo que puede ofrecer",
-            ok: input.offersSomething,
-            needed: false,
-          },
-        ]),
+    { id: "ofertas", label: "Lo que puede ofrecer", ok: input.offersSomething, needed: false },
     { id: "palabras", label: "Cómo la buscan", ok: input.keywordCount > 0, needed: false },
     { id: "paquete", label: "Paquete para la agencia", ok: input.hasPackage, needed: false },
   ]

@@ -97,9 +97,18 @@ export interface QuoteLine {
   offers?: SofiOffers
 }
 
-/** Si Sofi puede rebajar esta línea: con «unos soles», o con la 2.ª unidad si lleva dos o más. */
-const agentMayDiscount = (line: QuoteLine) =>
-  !line.offers || line.offers.discount || (line.offers.secondUnit && line.quantity >= 2)
+/**
+ * Lo más bajo que Sofi puede dejar cada unidad de una línea: el mínimo con «unos soles»; con solo
+ * la 2.ª unidad, la rebaja de una unidad hasta su mínimo por cada dos, repartida en la línea; sin
+ * ninguna, el precio sin negociar.
+ */
+export function agentFloorUnit(line: Omit<QuoteLine, "unitCents" | "gift">): number {
+  if (!line.offers || line.offers.discount) return line.floorUnitCents
+  if (!line.offers.secondUnit || line.quantity < 2) return line.autoUnitCents
+  const pairs = Math.floor(line.quantity / 2)
+  const off = Math.floor(((line.autoUnitCents - line.floorUnitCents) * pairs) / line.quantity)
+  return line.autoUnitCents - off
+}
 
 export interface QuoteDelivery {
   listCents: number
@@ -167,9 +176,13 @@ export function quote(
         line.floorUnitCents === line.autoUnitCents
           ? `No se negocia: va a ${money(line.autoUnitCents)}`
           : `No puede bajar de ${money(line.floorUnitCents)}, el mínimo`
-    else if (options.byAgent && unit < line.autoUnitCents && !agentMayDiscount(line))
+    else if (options.byAgent && unit < agentFloorUnit(line)) {
+      const agentFloor = agentFloorUnit(line)
       fields[`lines.${i}.unitCents`] =
-        `De este producto no se ofrece rebaja: va a ${money(line.autoUnitCents)}`
+        agentFloor === line.autoUnitCents
+          ? `De este producto no se ofrece rebaja: va a ${money(line.autoUnitCents)}`
+          : `Con la 2.ª unidad baja hasta ${money(agentFloor)} cada una`
+    }
     return { ...line, unitCents: unit }
   })
   const sold = priced.filter((line) => !line.gift)
@@ -255,20 +268,26 @@ export function lowestQuote(
   delivery: Omit<QuoteDelivery, "chargedCents">,
   currency: string,
 ) {
-  const sell = { ...line, gift: false, unitCents: null }
-  const unitCents = agentMayDiscount(sell) ? line.floorUnitCents : line.autoUnitCents
-  const left = (unitCents - line.floorUnitCents) * line.quantity
-  const free =
-    delivery.listCents > 0 &&
-    delivery.freeFromCents !== null &&
-    unitCents * line.quantity >= delivery.freeFromCents
+  const sell = { ...line, gift: false }
   const mayDeliver = !line.offers || line.offers.delivery
-  const absorbed =
-    free || !mayDeliver ? 0 : Math.min(delivery.maxDiscountCents ?? 0, left, delivery.listCents)
-  return quote(
-    [{ ...sell, unitCents }],
-    { ...delivery, chargedCents: free ? null : delivery.listCents - absorbed },
-    currency,
-    { byAgent: true },
-  )
+  // Con el precio más bajo que puede dejar, o sin rebajarlo (así no pierde el envío gratis desde un
+  // monto): va la cotización que sale menos.
+  const tries = [...new Set([agentFloorUnit(line), line.autoUnitCents])].map((unitCents) => {
+    const left = (unitCents - line.floorUnitCents) * line.quantity
+    const free =
+      delivery.listCents > 0 &&
+      delivery.freeFromCents !== null &&
+      unitCents * line.quantity >= delivery.freeFromCents
+    const absorbed =
+      free || !mayDeliver ? 0 : Math.min(delivery.maxDiscountCents ?? 0, left, delivery.listCents)
+    return quote(
+      [{ ...sell, unitCents }],
+      { ...delivery, chargedCents: free ? null : delivery.listCents - absorbed },
+      currency,
+      { byAgent: true },
+    )
+  })
+  const ok = tries.filter((t) => t.ok)
+  if (ok.length === 0) return tries[0]!
+  return ok.reduce((best, t) => (t.quote.totalCents < best.quote.totalCents ? t : best))
 }

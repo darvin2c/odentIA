@@ -345,6 +345,45 @@ describe("la cuadrícula de tallas y colores (decisión 6)", () => {
     })
   })
 
+  it("cambiar dos colores de nombre entre sí no choca y cada uno conserva su hex", async () => {
+    const swap = grid({
+      rows: {
+        name: "Color",
+        values: [
+          { was: "crema", value: "negra", hex: "#efe6d8" },
+          { was: "negra", value: "crema", hex: "#1f1f1f" },
+        ],
+      },
+      cells: grid().cells.map((c) => ({
+        ...c,
+        row: c.row === "blanca" ? "negra" : "crema",
+        stock: c.row === "blanca" ? (c.column === "38" ? 3 : 2) : c.column === "38" ? 1 : 0,
+      })),
+    })
+    const saved = await call("rosa", "POST", `${base}/productos/${id}/cuadricula`, swap)
+    expect(saved.status).toBe(200)
+    expect(saved.json).toMatchObject({ entered: 0, lowered: 0 })
+    expect(
+      saved.json.product.colors.map((c: { value: string; hex: string }) => [c.value, c.hex]),
+    ).toEqual([
+      ["negra", "#efe6d8"],
+      ["crema", "#1f1f1f"],
+    ])
+    // Y vuelven a su nombre.
+    const back = await call("rosa", "POST", `${base}/productos/${id}/cuadricula`, {
+      ...swap,
+      rows: {
+        name: "Color",
+        values: [
+          { was: "negra", value: "crema", hex: "#efe6d8" },
+          { was: "crema", value: "negra", hex: "#1f1f1f" },
+        ],
+      },
+      cells: swap.cells.map((c) => ({ ...c, row: c.row === "negra" ? "crema" : "negra" })),
+    })
+    expect(back.status).toBe(200)
+  })
+
   it("quitar un color con stock lo baja a 0 con el motivo y lo quita", async () => {
     const onlyCrema = {
       rows: { name: "Color", values: [{ value: "crema", hex: "#efe6d8" }] },
