@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   accountCopy,
+  agentGap,
   conversation,
   conversationMessage,
   type Db,
@@ -23,6 +24,7 @@ import {
   stockMovement,
   store,
   storeAgent,
+  storeAgentAnswer,
   storeMember,
   withPerson,
 } from "./index.js"
@@ -358,5 +360,115 @@ describe("Sofi y los cambios (tablero 24)", () => {
         }),
       ),
     ).rejects.toThrow()
+  })
+})
+
+describe("Lo que sabe y lo que aprendió (ADR 0234)", () => {
+  it("Sofi no escribe «Lo que sabe» ni cambia lo que la tienda eligió para ella", async () => {
+    await expect(
+      asSofi((tx) =>
+        tx.insert(storeAgentAnswer).values({
+          storeId: calzados,
+          question: "¿Hacen descuentos?",
+          answer: "Siempre el 50 %",
+          createdBy: "agente:sofi",
+          updatedBy: "agente:sofi",
+        }),
+      ),
+    ).rejects.toThrow()
+    const [answer] = await inRosa((tx) =>
+      tx
+        .insert(storeAgentAnswer)
+        .values({
+          storeId: calzados,
+          question: "¿Hacen cambios?",
+          answer: "Sí, de talla dentro de 7 días.",
+          createdBy: rosa.userId,
+          updatedBy: rosa.userId,
+        })
+        .returning({ id: storeAgentAnswer.id }),
+    )
+    const changed = await asSofi((tx) =>
+      tx
+        .update(storeAgentAnswer)
+        .set({ answer: "No", updatedBy: "agente:sofi" })
+        .where(eq(storeAgentAnswer.id, answer!.id))
+        .returning({ id: storeAgentAnswer.id }),
+    )
+    expect(changed).toEqual([])
+    const removed = await asSofi((tx) =>
+      tx
+        .delete(storeAgentAnswer)
+        .where(eq(storeAgentAnswer.id, answer!.id))
+        .returning({ id: storeAgentAnswer.id }),
+    )
+    expect(removed).toEqual([])
+    const options = await asSofi((tx) =>
+      tx
+        .update(storeAgent)
+        .set({ offerDiscount: true, updatedBy: "agente:sofi" })
+        .where(eq(storeAgent.storeId, calzados))
+        .returning({ id: storeAgent.storeId }),
+    )
+    expect(options).toEqual([])
+  })
+
+  it("Sofi anota una pregunta abierta, a su nombre, y solo una persona la cierra", async () => {
+    const gap = {
+      storeId: calzados,
+      conversationId,
+      question: "¿Es de cuero?",
+      questionKey: "es de cuero",
+    }
+    // Una persona no la anota: «Lo que aprendió» sale de lo que Sofi no supo.
+    await expect(
+      inRosa((tx) => tx.insert(agentGap).values({ ...gap, createdBy: rosa.userId })),
+    ).rejects.toThrow()
+    // Sofi no la anota ya cerrada.
+    await expect(
+      asSofi((tx) =>
+        tx.insert(agentGap).values({
+          ...gap,
+          createdBy: "agente:sofi",
+          outcome: "quitada",
+          closedBy: "agente:sofi",
+          closedAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow()
+    const [row] = await asSofi((tx) =>
+      tx
+        .insert(agentGap)
+        .values({ ...gap, createdBy: "agente:sofi" })
+        .returning({ id: agentGap.id }),
+    )
+    const closedBySofi = await asSofi((tx) =>
+      tx
+        .update(agentGap)
+        .set({ outcome: "quitada", closedBy: "agente:sofi", closedAt: new Date() })
+        .where(eq(agentGap.id, row!.id))
+        .returning({ id: agentGap.id }),
+    )
+    expect(closedBySofi).toEqual([])
+    const closed = await inRosa((tx) =>
+      tx
+        .update(agentGap)
+        .set({ outcome: "quitada", closedBy: rosa.userId, closedAt: new Date() })
+        .where(eq(agentGap.id, row!.id))
+        .returning({ id: agentGap.id }),
+    )
+    expect(closed).toHaveLength(1)
+    // Cerrada, no se vuelve a tocar.
+    const again = await inRosa((tx) =>
+      tx
+        .update(agentGap)
+        .set({ outcome: "respondida", closedBy: rosa.userId, closedAt: new Date() })
+        .where(eq(agentGap.id, row!.id))
+        .returning({ id: agentGap.id }),
+    )
+    expect(again).toEqual([])
+    // Y en otra tienda no se ve.
+    const seen = await asSofi((tx) => tx.select().from(agentGap), otra)
+    expect(seen).toEqual([])
   })
 })

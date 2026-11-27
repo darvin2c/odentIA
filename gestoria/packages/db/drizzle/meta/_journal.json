@@ -239,6 +239,20 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795808997095,
+      "tag": "0039_lo_que_sabe",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795809010033,
+      "tag": "0040_reglas_lo_que_sabe",
+      "breakpoints": true
     }
   ]
 }

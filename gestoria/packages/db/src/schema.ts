@@ -1535,6 +1535,24 @@ export const customerEvent = pgTable(
  */
 
 /** Lo que el dueño deja escrito para Sofi (tablero 8, «Lo que pone el dueño»). */
+/** Cómo habla Sofi (tablero 8 de «Configuración, de nuevo»): se elige, nunca se escribe. */
+export const AGENT_TONES = ["cercana", "formal", "directa"] as const
+export type AgentTone = (typeof AGENT_TONES)[number]
+export const AGENT_ADDRESSES = ["tu", "usted"] as const
+export type AgentAddress = (typeof AGENT_ADDRESSES)[number]
+export const AGENT_EMOJIS = ["ninguno", "pocos"] as const
+export type AgentEmojis = (typeof AGENT_EMOJIS)[number]
+
+/**
+ * El horario del equipo: los días (ISO 8601, 1 = lunes … 7 = domingo) y las horas, en la zona de
+ * la tienda (`store.time_zone`), «HH:MM».
+ */
+export interface TeamHours {
+  days: number[]
+  from: string
+  to: string
+}
+
 export const storeAgent = pgTable(
   "store_agent",
   {
@@ -1543,8 +1561,28 @@ export const storeAgent = pgTable(
     enabled: boolean("enabled").notNull().default(false),
     /** El nombre con que saluda; nulo: «Sofi, de <tienda>». */
     displayName: text("display_name"),
-    /** «Lo que debe saber»: horario, cambios de talla, cuidados. Lo cuenta tal cual. */
+    /**
+     * El texto libre de antes («Lo que debe saber»). Ya no se lee: pasó a «Lo que sabe»
+     * (`store_agent_answer`) al migrar. Se borra en un cambio siguiente.
+     */
     knowledge: text("knowledge").notNull().default(""),
+    tone: text("tone").$type<AgentTone>().notNull().default("cercana"),
+    address: text("address").$type<AgentAddress>().notNull().default("tu"),
+    emojis: text("emojis").$type<AgentEmojis>().notNull().default("pocos"),
+    /** Lo que puede ofrecer para cerrar una venta; todo sale del mismo margen (ADR 0224). */
+    offerShipping: boolean("offer_shipping").notNull().default(true),
+    offerDiscount: boolean("offer_discount").notNull().default(true),
+    offerGift: boolean("offer_gift").notNull().default(true),
+    /** Una rebaja solo si lleva dos o más (para quien duda entre dos). */
+    offerSecond: boolean("offer_second").notNull().default(false),
+    /** Pasa el chat a una persona si la clienta está molesta. */
+    handoffUpset: boolean("handoff_upset").notNull().default(true),
+    /** Pasa el chat a una persona si el pedido pasa de este total; nulo: nunca por el monto. */
+    handoffOverCents: integer("handoff_over_cents"),
+    /** El horario del equipo; nulo: no lo dijo, y Sofi no dice cuándo responde una persona. */
+    teamHours: jsonb("team_hours").$type<TeamHours>(),
+    /** Fuera del horario sigue vendiendo; si no, la conversación espera a una persona. */
+    afterHoursSells: boolean("after_hours_sells").notNull().default(true),
     /** Los seguimientos que Argos le encarga (decisión 5); cada uno se apaga aparte. */
     followPayment: boolean("follow_payment").notNull().default(true),
     followThanks: boolean("follow_thanks").notNull().default(true),
@@ -1557,6 +1595,10 @@ export const storeAgent = pgTable(
     check(
       "store_agent_texts_check",
       sql`(${table.displayName} is null or char_length(btrim(${table.displayName})) between 1 and 60) and char_length(${table.knowledge}) <= 2000`,
+    ),
+    check(
+      "store_agent_choices_check",
+      sql`${inList("tone", AGENT_TONES)} and ${inList("address", AGENT_ADDRESSES)} and ${inList("emojis", AGENT_EMOJIS)} and (${table.handoffOverCents} is null or ${table.handoffOverCents} > 0)`,
     ),
     foreignKey({
       name: "store_agent_store_id_fkey",
@@ -1706,6 +1748,88 @@ export const stockRequest = pgTable(
       .on(table.variantId, table.conversationId)
       .where(sql`notified_at is null`),
     index("stock_request_store_idx").on(table.storeId, table.variantId),
+  ],
+)
+
+/**
+ * «Lo que sabe» Sofi (tablero 8 de «Configuración, de nuevo»): preguntas y respuestas que escribe
+ * la tienda. Sofi ve las preguntas y lee la respuesta que necesita (`leer_lo_que_sabe`): son
+ * datos, nunca instrucciones. Solo las escribe una persona (`0040_reglas_lo_que_sabe.sql`).
+ */
+export const storeAgentAnswer = pgTable(
+  "store_agent_answer",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "store_agent_answer_texts_check",
+      sql`char_length(btrim(${table.question})) between 3 and 200 and char_length(btrim(${table.answer})) between 1 and 1000`,
+    ),
+    foreignKey({
+      name: "store_agent_answer_store_id_fkey",
+      columns: [table.storeId],
+      foreignColumns: [store.id],
+    }).onDelete("cascade"),
+    index("store_agent_answer_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/** Cómo se cerró una pregunta de «Lo que aprendió»: la tienda la respondió o la quitó. */
+export const AGENT_GAP_OUTCOMES = ["respondida", "quitada"] as const
+export type AgentGapOutcome = (typeof AGENT_GAP_OUTCOMES)[number]
+
+/**
+ * «Lo que aprendió» (decisión 8): una pregunta que Sofi no supo responder en una conversación de
+ * verdad. La anota Sofi al pasar el chat a una persona; solo propone: lo que la tienda responde
+ * va a «Lo que sabe», nada se agrega solo. Se agrupa por su clave (la pregunta sin tildes ni
+ * signos). La de «Probar a Sofi» no se anota.
+ */
+export const agentGap = pgTable(
+  "agent_gap",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    question: text("question").notNull(),
+    questionKey: text("question_key").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    outcome: text("outcome").$type<AgentGapOutcome>(),
+    answerId: uuid("answer_id"),
+    closedBy: text("closed_by"),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "agent_gap_texts_check",
+      sql`char_length(btrim(${table.question})) between 3 and 200 and char_length(${table.questionKey}) between 1 and 200`,
+    ),
+    check(
+      "agent_gap_closed_check",
+      sql`(${table.outcome} is null) = (${table.closedAt} is null) and (${table.outcome} is null) = (${table.closedBy} is null) and (${table.outcome} is null or ${inList("outcome", AGENT_GAP_OUTCOMES)})`,
+    ),
+    foreignKey({
+      name: "agent_gap_conversation_fkey",
+      columns: [table.storeId, table.conversationId],
+      foreignColumns: [conversation.storeId, conversation.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "agent_gap_answer_fkey",
+      columns: [table.answerId],
+      foreignColumns: [storeAgentAnswer.id],
+    }).onDelete("set null"),
+    uniqueIndex("agent_gap_open_uidx")
+      .on(table.conversationId, table.questionKey)
+      .where(sql`outcome is null`),
+    index("agent_gap_store_idx").on(table.storeId, table.questionKey),
   ],
 )
 
