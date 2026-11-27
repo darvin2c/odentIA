@@ -241,8 +241,10 @@ export function writtenDateProblemText(
 }
 
 /**
- * Edad cumplida a una fecha: «31 años», «1 año», «8 meses» o «12 días» para
- * un bebé, y «Nació hoy». Vacío si la fecha no es válida o es posterior.
+ * Edad cumplida a una fecha: en años desde los dos («31 años»), en meses antes
+ * («18 meses», «8 meses»: en un niño pequeño los meses cuentan, como en la ficha
+ * de la clínica, `ageLabel` de `@odentia/clinical`), «12 días» en su primer mes
+ * y «Nació hoy». Vacío si la fecha no es válida o es posterior.
  */
 export function ageText(birth: string, today: string): string {
   if (!isIsoDate(birth) || !isIsoDate(today) || birth > today) return ""
@@ -250,8 +252,7 @@ export function ageText(birth: string, today: string): string {
   const [ty, tm, td] = today.split("-").map(Number) as [number, number, number]
   let months = (ty - by) * 12 + (tm - bm)
   if (td < bd) months -= 1
-  const years = Math.floor(months / 12)
-  if (years >= 1) return years === 1 ? "1 año" : `${years} años`
+  if (months >= 24) return `${Math.floor(months / 12)} años`
   if (months >= 1) return months === 1 ? "1 mes" : `${months} meses`
   const days = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(by, bm - 1, bd)) / 86_400_000)
   if (days === 0) return "Nació hoy"
