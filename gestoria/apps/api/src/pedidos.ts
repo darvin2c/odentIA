@@ -100,10 +100,12 @@ export function stockShortSql(o: string) {
  */
 export function missedSql(o: string) {
   const a = sql.raw(o)
-  return sql`(${a}.state = 'por_salir' and (
+  // Sin «Salió» ni «No se entregó» la subconsulta da null: `coalesce` deja siempre sí o no, para
+  // que `not missedSql(…)` cuente los que nunca salieron.
+  return sql`(${a}.state = 'por_salir' and coalesce((
     select e.action from order_event e
     where e.order_id = ${a}.id and e.action in ('salio', 'no_entregado')
-    order by e.seq desc limit 1) = 'no_entregado')`
+    order by e.seq desc limit 1), '') = 'no_entregado')`
 }
 
 /**
