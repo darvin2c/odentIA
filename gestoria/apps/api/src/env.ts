@@ -79,6 +79,12 @@ const schema = z.object({
   GESTORIA_S3_ACCESS_KEY: z.string().trim().default(""),
   GESTORIA_S3_SECRET_KEY: z.string().trim().default(""),
   GESTORIA_S3_BUCKET: z.string().trim().default("gestoria-medios"),
+  /**
+   * La IA de fotos: su modelo (por omisión el de Sofi, `gpt-6-luna`, con la misma clave; «fake»
+   * propone sin red, solo en desarrollo) y cuántas fotos mira por día y tienda.
+   */
+  GESTORIA_FOTOS_MODEL: z.string().trim().default(""),
+  GESTORIA_FOTOS_TOPE_DIA: z.coerce.number().int().min(0).max(100_000).default(200),
 })
 
 export type Env = z.infer<typeof schema>

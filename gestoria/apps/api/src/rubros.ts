@@ -37,6 +37,12 @@ export interface TemplateField {
   needed: boolean
   /** Lo que pregunta la IA cuando no lo ve en las fotos (la usa la propuesta de la IA). */
   ask?: string
+  /**
+   * Si la IA de fotos puede proponerlo (`ia-fotos.ts`): «foto», si se ve en la foto (el material
+   * de una lona, la tela de un jean); «etiqueta», solo si se lee escrito en la foto (el contenido,
+   * el registro sanitario). Sin él, nunca lo propone: lo pregunta (cómo calza, medidas, garantía).
+   */
+  visible?: "foto" | "etiqueta"
   /** Palabras con que lo pregunta una clienta (las usa Sofi para encontrarlo). */
   keys?: string[]
 }
@@ -84,6 +90,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["Cuero", "Sintético", "Lona", "Gamuza"],
         needed: true,
+        visible: "foto",
         ask: "¿De qué material es?",
         keys: ["material", "cuero", "lona", "sintético", "de qué es", "tela"],
       },
@@ -117,6 +124,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["Algodón", "Piqué de algodón", "Poliéster", "Lino", "Jean"],
         needed: true,
+        visible: "foto",
         ask: "¿De qué tela es?",
         keys: ["tela", "algodón", "material", "de qué es"],
       },
@@ -135,6 +143,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["Corto", "A la cadera", "Largo"],
         needed: false,
+        visible: "foto",
         keys: ["largo", "corto"],
       },
       {
@@ -151,6 +160,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Cuidado",
         type: "texto",
         needed: false,
+        visible: "etiqueta",
         keys: ["lava", "encoge", "lavadora", "plancha", "destiñe"],
       },
     ],
@@ -168,6 +178,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["3,5 g", "4 g", "15 ml", "30 ml"],
         needed: true,
+        visible: "etiqueta",
         ask: "¿Cuánto contiene? Si se lee en la etiqueta, lo propongo.",
         keys: ["contiene", "gramos", "ml", "cuánto trae", "tamaño"],
       },
@@ -177,6 +188,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["Todo tipo", "Seca", "Grasa", "Mixta", "Sensible"],
         needed: true,
+        visible: "etiqueta",
         ask: "¿Para qué tipo de piel es?",
         keys: ["piel", "sensible", "grasa", "seca", "alergia"],
       },
@@ -185,6 +197,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Ingredientes clave",
         type: "texto",
         needed: false,
+        visible: "etiqueta",
         keys: ["ingrediente", "tiene", "karité", "vitamina", "vegano", "cruelty"],
       },
       {
@@ -200,6 +213,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Registro sanitario (NSO de DIGEMID)",
         type: "texto",
         needed: true,
+        visible: "etiqueta",
         ask: "¿Cuál es su NSO? Está en el envase.",
         keys: ["registro", "nso", "digemid", "original", "sanitario"],
       },
@@ -217,6 +231,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Con qué equipos funciona",
         type: "texto",
         needed: true,
+        visible: "etiqueta",
         ask: "¿Con qué equipos funciona?",
         keys: ["funciona", "iphone", "android", "compatible", "laptop", "sirve con"],
       },
@@ -244,6 +259,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Qué trae la caja",
         type: "texto",
         needed: false,
+        visible: "foto",
         keys: ["trae", "incluye", "cable", "caja", "viene con"],
       },
       {
@@ -285,6 +301,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         type: "opcion",
         options: ["Algodón", "Lino", "Madera", "Cerámica", "Tela y metal"],
         needed: true,
+        visible: "foto",
         ask: "¿De qué material es?",
         keys: ["material", "algodón", "de qué es", "tela"],
       },
@@ -301,6 +318,7 @@ export const RUBROS: Record<ProductRubro, Rubro> = {
         label: "Cómo se limpia",
         type: "texto",
         needed: false,
+        visible: "etiqueta",
         keys: ["lava", "limpia", "funda", "mancha"],
       },
       {

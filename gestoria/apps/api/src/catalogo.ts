@@ -871,205 +871,213 @@ export async function updateProduct(
   productId: string,
   patch: z.infer<typeof productPatch>,
 ) {
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const current = await productRow(tx, storeId, productId)
-    const before = sheetOf(await detailIn(tx, storeId, productId))
-    const listPriceCents = patch.listPriceCents ?? current.listPriceCents
-    const minPriceCents =
-      patch.minPriceCents !== undefined ? patch.minPriceCents : current.minPriceCents
-    if (minPriceCents !== null && minPriceCents > listPriceCents)
+  return inStore(appDb, person, storeId, "configuracion", (tx) =>
+    updateProductIn(tx, person, storeId, productId, patch),
+  )
+}
+
+/**
+ * Cambia la ficha dentro de una transacción (la de una persona con `configuracion`). `reason`
+ * queda en el historial: «Propuesta de la IA» cuando el cambio sale de una (`propuestas.ts`).
+ */
+export async function updateProductIn(
+  tx: Db,
+  person: Person,
+  storeId: string,
+  productId: string,
+  patch: z.infer<typeof productPatch>,
+  reason: string | null = null,
+) {
+  const current = await productRow(tx, storeId, productId)
+  const before = sheetOf(await detailIn(tx, storeId, productId))
+  const listPriceCents = patch.listPriceCents ?? current.listPriceCents
+  const minPriceCents =
+    patch.minPriceCents !== undefined ? patch.minPriceCents : current.minPriceCents
+  if (minPriceCents !== null && minPriceCents > listPriceCents)
+    throw new StoreError(
+      400,
+      "VALIDATION_ERROR",
+      "El precio mínimo no puede ser mayor que el de lista",
+      {
+        minPriceCents: "El precio mínimo no puede ser mayor que el de lista",
+      },
+    )
+  if (patch.options) await applyOptions(tx, storeId, current, patch.options)
+  const rubro = patch.rubro !== undefined ? patch.rubro : current.rubro
+  let rubroData = current.rubroData
+  if (patch.rubroData) {
+    if (!rubro)
+      throw new StoreError(400, "VALIDATION_ERROR", "Elige primero el rubro del producto", {
+        rubro: "Elige el rubro",
+      })
+    const template = await templateIn(tx, storeId, rubro)
+    const applied = applyRubroData(template, rubroData, patch.rubroData)
+    if (!applied.ok)
       throw new StoreError(
         400,
         "VALIDATION_ERROR",
-        "El precio mínimo no puede ser mayor que el de lista",
-        {
-          minPriceCents: "El precio mínimo no puede ser mayor que el de lista",
-        },
+        Object.values(applied.fields)[0]!,
+        applied.fields,
       )
-    if (patch.options) await applyOptions(tx, storeId, current, patch.options)
-    const rubro = patch.rubro !== undefined ? patch.rubro : current.rubro
-    let rubroData = current.rubroData
-    if (patch.rubroData) {
-      if (!rubro)
-        throw new StoreError(400, "VALIDATION_ERROR", "Elige primero el rubro del producto", {
-          rubro: "Elige el rubro",
-        })
-      const template = await templateIn(tx, storeId, rubro)
-      const applied = applyRubroData(template, rubroData, patch.rubroData)
-      if (!applied.ok)
-        throw new StoreError(
-          400,
-          "VALIDATION_ERROR",
-          Object.values(applied.fields)[0]!,
-          applied.fields,
-        )
-      rubroData = applied.data
-    }
-    // La opción del color sigue a su nombre: si se movió, cambia su índice; si se quitó, no hay color.
-    const colorName =
-      current.colorOption !== null ? current.options[current.colorOption]?.name : undefined
-    const colorIndex =
-      patch.options && colorName !== undefined
-        ? patch.options.findIndex((o) => sameText(o.name, colorName))
-        : -1
-    const colorMoved = patch.options !== undefined && current.colorOption !== null
-    // El precio de revendedora queda bajo el de lista, como el precio por cantidad.
-    const wholesale = patch.wholesale !== undefined ? patch.wholesale : wholesaleOf(current)
-    if (wholesale && wholesale.unitPriceCents >= listPriceCents)
+    rubroData = applied.data
+  }
+  // La opción del color sigue a su nombre: si se movió, cambia su índice; si se quitó, no hay color.
+  const colorName =
+    current.colorOption !== null ? current.options[current.colorOption]?.name : undefined
+  const colorIndex =
+    patch.options && colorName !== undefined
+      ? patch.options.findIndex((o) => sameText(o.name, colorName))
+      : -1
+  const colorMoved = patch.options !== undefined && current.colorOption !== null
+  // El precio de revendedora queda bajo el de lista, como el precio por cantidad.
+  const wholesale = patch.wholesale !== undefined ? patch.wholesale : wholesaleOf(current)
+  if (wholesale && wholesale.unitPriceCents >= listPriceCents)
+    throw new StoreError(400, "VALIDATION_ERROR", "El precio por mayor es menor que el de lista", {
+      wholesale: "El precio por mayor es menor que el de lista",
+    })
+  const options = patch.options ?? current.options
+  for (const [i, promo] of (patch.promotions ?? []).entries())
+    if (
+      promo.scope &&
+      !options[promo.scope.optionIndex]?.values.some((v) => sameText(v, promo.scope!.optionValue))
+    )
       throw new StoreError(
         400,
         "VALIDATION_ERROR",
-        "El precio por mayor es menor que el de lista",
+        "Esa promoción es de un color o talla que no está",
         {
-          wholesale: "El precio por mayor es menor que el de lista",
+          [`promotions.${i}.scope`]: "Ese color o talla no está en el producto",
         },
       )
-    const options = patch.options ?? current.options
-    for (const [i, promo] of (patch.promotions ?? []).entries())
-      if (
-        promo.scope &&
-        !options[promo.scope.optionIndex]?.values.some((v) => sameText(v, promo.scope!.optionValue))
-      )
+  const changes = {
+    ...(patch.name !== undefined ? { name: patch.name } : {}),
+    ...(patch.category !== undefined ? { category: patch.category } : {}),
+    ...(patch.description !== undefined ? { description: patch.description } : {}),
+    ...(patch.options !== undefined ? { options: patch.options } : {}),
+    ...(colorMoved ? { colorOption: colorIndex >= 0 ? colorIndex : null } : {}),
+    ...(patch.rubro !== undefined ? { rubro: patch.rubro } : {}),
+    ...(patch.rubroData !== undefined ? { rubroData } : {}),
+    ...(patch.code !== undefined ? { code: patch.code } : {}),
+    ...(patch.status !== undefined ? statusColumns(patch.status) : {}),
+    ...(patch.package !== undefined
+      ? {
+          packageWeightG: patch.package.weightG,
+          packageLengthMm: patch.package.lengthMm,
+          packageWidthMm: patch.package.widthMm,
+          packageHeightMm: patch.package.heightMm,
+        }
+      : {}),
+    ...(patch.keywords !== undefined ? { keywords: patch.keywords } : {}),
+    ...(patch.web?.visible !== undefined ? { webVisible: patch.web.visible } : {}),
+    ...(patch.web?.slug !== undefined ? { webSlug: patch.web.slug } : {}),
+    ...(patch.wholesale !== undefined
+      ? {
+          wholesaleMinQuantity: patch.wholesale?.minQuantity ?? null,
+          wholesalePriceCents: patch.wholesale?.unitPriceCents ?? null,
+        }
+      : {}),
+    ...(patch.comboPercentOff !== undefined ? { comboPercentOff: patch.comboPercentOff } : {}),
+    ...(patch.offers?.delivery !== undefined ? { offerDelivery: patch.offers.delivery } : {}),
+    ...(patch.offers?.discount !== undefined ? { offerDiscount: patch.offers.discount } : {}),
+    ...(patch.offers?.secondUnit !== undefined ? { offerSecondUnit: patch.offers.secondUnit } : {}),
+    ...(patch.offers?.gift !== undefined ? { offerGift: patch.offers.gift } : {}),
+    listPriceCents,
+    minPriceCents,
+    updatedAt: new Date(),
+  }
+  await tx.update(product).set(changes).where(eq(product.id, productId))
+  if (patch.options) {
+    await dropGoneColors(tx, productId)
+    if (!patch.promotions) await followOptions(tx, productId, current.options, patch.options)
+  }
+  if (patch.quantityPrices) {
+    for (const tier of patch.quantityPrices)
+      if (tier.unitPriceCents >= listPriceCents)
         throw new StoreError(
           400,
           "VALIDATION_ERROR",
-          "Esa promoción es de un color o talla que no está",
+          "El precio por cantidad es menor que el de lista",
           {
-            [`promotions.${i}.scope`]: "Ese color o talla no está en el producto",
+            quantityPrices: "Cada precio por cantidad es menor que el de lista",
           },
         )
-    const changes = {
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.category !== undefined ? { category: patch.category } : {}),
-      ...(patch.description !== undefined ? { description: patch.description } : {}),
-      ...(patch.options !== undefined ? { options: patch.options } : {}),
-      ...(colorMoved ? { colorOption: colorIndex >= 0 ? colorIndex : null } : {}),
-      ...(patch.rubro !== undefined ? { rubro: patch.rubro } : {}),
-      ...(patch.rubroData !== undefined ? { rubroData } : {}),
-      ...(patch.code !== undefined ? { code: patch.code } : {}),
-      ...(patch.status !== undefined ? statusColumns(patch.status) : {}),
-      ...(patch.package !== undefined
-        ? {
-            packageWeightG: patch.package.weightG,
-            packageLengthMm: patch.package.lengthMm,
-            packageWidthMm: patch.package.widthMm,
-            packageHeightMm: patch.package.heightMm,
-          }
-        : {}),
-      ...(patch.keywords !== undefined ? { keywords: patch.keywords } : {}),
-      ...(patch.web?.visible !== undefined ? { webVisible: patch.web.visible } : {}),
-      ...(patch.web?.slug !== undefined ? { webSlug: patch.web.slug } : {}),
-      ...(patch.wholesale !== undefined
-        ? {
-            wholesaleMinQuantity: patch.wholesale?.minQuantity ?? null,
-            wholesalePriceCents: patch.wholesale?.unitPriceCents ?? null,
-          }
-        : {}),
-      ...(patch.comboPercentOff !== undefined ? { comboPercentOff: patch.comboPercentOff } : {}),
-      ...(patch.offers?.delivery !== undefined ? { offerDelivery: patch.offers.delivery } : {}),
-      ...(patch.offers?.discount !== undefined ? { offerDiscount: patch.offers.discount } : {}),
-      ...(patch.offers?.secondUnit !== undefined
-        ? { offerSecondUnit: patch.offers.secondUnit }
-        : {}),
-      ...(patch.offers?.gift !== undefined ? { offerGift: patch.offers.gift } : {}),
-      listPriceCents,
-      minPriceCents,
-      updatedAt: new Date(),
-    }
-    await tx.update(product).set(changes).where(eq(product.id, productId))
-    if (patch.options) {
-      await dropGoneColors(tx, productId)
-      if (!patch.promotions) await followOptions(tx, productId, current.options, patch.options)
-    }
-    if (patch.quantityPrices) {
-      for (const tier of patch.quantityPrices)
-        if (tier.unitPriceCents >= listPriceCents)
-          throw new StoreError(
-            400,
-            "VALIDATION_ERROR",
-            "El precio por cantidad es menor que el de lista",
-            {
-              quantityPrices: "Cada precio por cantidad es menor que el de lista",
-            },
-          )
-      await tx.delete(productQuantityPrice).where(eq(productQuantityPrice.productId, productId))
-      if (patch.quantityPrices.length > 0)
-        await tx
-          .insert(productQuantityPrice)
-          .values(patch.quantityPrices.map((tier) => ({ storeId, productId, ...tier })))
-    }
-    if (patch.promotions) {
-      await tx.delete(productPromotion).where(eq(productPromotion.productId, productId))
-      if (patch.promotions.length > 0)
-        await tx.insert(productPromotion).values(
-          patch.promotions.map(({ scope, ...promo }) => ({
-            storeId,
-            productId,
-            ...promo,
-            optionIndex: scope?.optionIndex ?? null,
-            optionValue: scope
-              ? (options[scope.optionIndex]?.values.find((v) => sameText(v, scope.optionValue)) ??
-                scope.optionValue)
-              : null,
-          })),
-        )
-    }
-    if (patch.links) {
-      const others = [...new Set(patch.links.map((l) => l.productId))].filter(
-        (id) => id !== productId,
-      )
-      const found = others.length
-        ? await tx
-            .select({ id: product.id })
-            .from(product)
-            .where(and(eq(product.storeId, storeId), inArray(product.id, others)))
-        : []
-      if (found.length !== others.length)
-        throw new StoreError(404, "NOT_FOUND", "Uno de los productos relacionados ya no está")
+    await tx.delete(productQuantityPrice).where(eq(productQuantityPrice.productId, productId))
+    if (patch.quantityPrices.length > 0)
       await tx
-        .delete(productLink)
-        .where(or(eq(productLink.productA, productId), eq(productLink.productB, productId)))
-      const rows = patch.links
-        .filter((l) => l.productId !== productId)
-        .map((l) => {
-          const [a, b] = [productId, l.productId].sort()
-          return { storeId, productA: a!, productB: b!, kind: l.kind }
-        })
-        .filter(
-          (r, i, all) =>
-            all.findIndex(
-              (o) => o.productA === r.productA && o.productB === r.productB && o.kind === r.kind,
-            ) === i,
-        )
-      if (rows.length > 0) await tx.insert(productLink).values(rows)
-    }
-    if (
-      listPriceCents !== current.listPriceCents ||
-      minPriceCents !== current.minPriceCents ||
-      (patch.name && patch.name !== current.name)
+        .insert(productQuantityPrice)
+        .values(patch.quantityPrices.map((tier) => ({ storeId, productId, ...tier })))
+  }
+  if (patch.promotions) {
+    await tx.delete(productPromotion).where(eq(productPromotion.productId, productId))
+    if (patch.promotions.length > 0)
+      await tx.insert(productPromotion).values(
+        patch.promotions.map(({ scope, ...promo }) => ({
+          storeId,
+          productId,
+          ...promo,
+          optionIndex: scope?.optionIndex ?? null,
+          optionValue: scope
+            ? (options[scope.optionIndex]?.values.find((v) => sameText(v, scope.optionValue)) ??
+              scope.optionValue)
+            : null,
+        })),
+      )
+  }
+  if (patch.links) {
+    const others = [...new Set(patch.links.map((l) => l.productId))].filter(
+      (id) => id !== productId,
     )
-      await tx.insert(storeEvent).values({
-        storeId,
-        actorUserId: person.userId,
-        action: "catalogo.producto",
-        subject: patch.name ?? current.name,
-        detail: {
-          cambiado: productId,
-          listPriceCents: { from: current.listPriceCents, to: listPriceCents },
-          minPriceCents: { from: current.minPriceCents, to: minPriceCents },
-        },
+    const found = others.length
+      ? await tx
+          .select({ id: product.id })
+          .from(product)
+          .where(and(eq(product.storeId, storeId), inArray(product.id, others)))
+      : []
+    if (found.length !== others.length)
+      throw new StoreError(404, "NOT_FOUND", "Uno de los productos relacionados ya no está")
+    await tx
+      .delete(productLink)
+      .where(or(eq(productLink.productA, productId), eq(productLink.productB, productId)))
+    const rows = patch.links
+      .filter((l) => l.productId !== productId)
+      .map((l) => {
+        const [a, b] = [productId, l.productId].sort()
+        return { storeId, productA: a!, productB: b!, kind: l.kind }
       })
-    const after = await detailIn(tx, storeId, productId)
-    const sheet = sheetOf(after)
-    const touched = Object.keys(patch).filter((key) => key in sheet) as (keyof typeof sheet)[]
-    const diff = changesOf(
-      Object.fromEntries(touched.map((key) => [key, before[key]])),
-      Object.fromEntries(touched.map((key) => [key, sheet[key]])),
-    )
-    if (diff.length > 0)
-      await logProductEvent(tx, storeId, productId, person.userId, "cambiado", diff)
-    return after
-  })
+      .filter(
+        (r, i, all) =>
+          all.findIndex(
+            (o) => o.productA === r.productA && o.productB === r.productB && o.kind === r.kind,
+          ) === i,
+      )
+    if (rows.length > 0) await tx.insert(productLink).values(rows)
+  }
+  if (
+    listPriceCents !== current.listPriceCents ||
+    minPriceCents !== current.minPriceCents ||
+    (patch.name && patch.name !== current.name)
+  )
+    await tx.insert(storeEvent).values({
+      storeId,
+      actorUserId: person.userId,
+      action: "catalogo.producto",
+      subject: patch.name ?? current.name,
+      detail: {
+        cambiado: productId,
+        listPriceCents: { from: current.listPriceCents, to: listPriceCents },
+        minPriceCents: { from: current.minPriceCents, to: minPriceCents },
+      },
+    })
+  const after = await detailIn(tx, storeId, productId)
+  const sheet = sheetOf(after)
+  const touched = Object.keys(patch).filter((key) => key in sheet) as (keyof typeof sheet)[]
+  const diff = changesOf(
+    Object.fromEntries(touched.map((key) => [key, before[key]])),
+    Object.fromEntries(touched.map((key) => [key, sheet[key]])),
+  )
+  if (diff.length > 0)
+    await logProductEvent(tx, storeId, productId, person.userId, "cambiado", diff, reason)
+  return after
 }
 
 /**
@@ -1370,75 +1378,93 @@ export async function updatePhoto(
   patch: z.infer<typeof photoPatch>,
 ) {
   uuidOr404(photoId, "Esa foto ya no está")
-  return inStore(appDb, person, storeId, "configuracion", async (tx) => {
-    const [photo] = await tx
-      .select({
-        id: productPhoto.id,
-        productId: productPhoto.productId,
-        colorId: productPhoto.colorId,
-        position: productPhoto.position,
+  return inStore(appDb, person, storeId, "configuracion", (tx) =>
+    updatePhotoIn(tx, person, storeId, photoId, patch),
+  )
+}
+
+/** Lo mismo, dentro de una transacción (la de una persona con `configuracion`). */
+export async function updatePhotoIn(
+  tx: Db,
+  person: Person,
+  storeId: string,
+  photoId: string,
+  patch: z.infer<typeof photoPatch>,
+  reason: string | null = null,
+) {
+  uuidOr404(photoId, "Esa foto ya no está")
+  const [photo] = await tx
+    .select({
+      id: productPhoto.id,
+      productId: productPhoto.productId,
+      colorId: productPhoto.colorId,
+      position: productPhoto.position,
+    })
+    .from(productPhoto)
+    .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
+  if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
+  const changes: ProductChange[] = []
+  const colorId = patch.colorId !== undefined ? patch.colorId : photo.colorId
+  if (colorId) {
+    const [color] = await tx
+      .select({ id: productColor.id })
+      .from(productColor)
+      .where(and(eq(productColor.id, colorId), eq(productColor.productId, photo.productId)))
+    if (!color) throw new StoreError(404, "NOT_FOUND", "Ese color ya no está en el producto")
+  }
+  if (patch.colorId !== undefined && patch.colorId !== photo.colorId) {
+    // Si era la foto de su color y cambia de color, ese color se queda sin la suya.
+    await tx
+      .update(productColor)
+      .set({ photoId: null, updatedAt: new Date() })
+      .where(and(eq(productColor.productId, photo.productId), eq(productColor.photoId, photoId)))
+    await tx
+      .update(productPhoto)
+      .set({ colorId: patch.colorId })
+      .where(eq(productPhoto.id, photoId))
+    changes.push({ field: "photoColor", from: photo.colorId, to: patch.colorId })
+  }
+  if (patch.colorMain !== undefined) {
+    if (patch.colorMain && !colorId)
+      throw new StoreError(400, "VALIDATION_ERROR", "Elige primero de qué color es la foto", {
+        colorId: "Elige el color",
       })
-      .from(productPhoto)
-      .where(and(eq(productPhoto.id, photoId), eq(productPhoto.storeId, storeId)))
-    if (!photo) throw new StoreError(404, "NOT_FOUND", "Esa foto ya no está")
-    const changes: ProductChange[] = []
-    const colorId = patch.colorId !== undefined ? patch.colorId : photo.colorId
     if (colorId) {
-      const [color] = await tx
-        .select({ id: productColor.id })
+      const [look] = await tx
+        .select({ photoId: productColor.photoId })
         .from(productColor)
-        .where(and(eq(productColor.id, colorId), eq(productColor.productId, photo.productId)))
-      if (!color) throw new StoreError(404, "NOT_FOUND", "Ese color ya no está en el producto")
-    }
-    if (patch.colorId !== undefined && patch.colorId !== photo.colorId) {
-      // Si era la foto de su color y cambia de color, ese color se queda sin la suya.
-      await tx
-        .update(productColor)
-        .set({ photoId: null, updatedAt: new Date() })
-        .where(and(eq(productColor.productId, photo.productId), eq(productColor.photoId, photoId)))
-      await tx
-        .update(productPhoto)
-        .set({ colorId: patch.colorId })
-        .where(eq(productPhoto.id, photoId))
-      changes.push({ field: "photoColor", from: photo.colorId, to: patch.colorId })
-    }
-    if (patch.colorMain !== undefined) {
-      if (patch.colorMain && !colorId)
-        throw new StoreError(400, "VALIDATION_ERROR", "Elige primero de qué color es la foto", {
-          colorId: "Elige el color",
-        })
-      if (colorId) {
-        const [look] = await tx
-          .select({ photoId: productColor.photoId })
-          .from(productColor)
+        .where(eq(productColor.id, colorId))
+      const next = patch.colorMain ? photoId : look?.photoId === photoId ? null : look?.photoId
+      if (next !== look?.photoId) {
+        await tx
+          .update(productColor)
+          .set({ photoId: next ?? null, updatedAt: new Date() })
           .where(eq(productColor.id, colorId))
-        const next = patch.colorMain ? photoId : look?.photoId === photoId ? null : look?.photoId
-        if (next !== look?.photoId) {
-          await tx
-            .update(productColor)
-            .set({ photoId: next ?? null, updatedAt: new Date() })
-            .where(eq(productColor.id, colorId))
-          changes.push({ field: "colorPhoto", from: look?.photoId ?? null, to: next ?? null })
-        }
+        changes.push({ field: "colorPhoto", from: look?.photoId ?? null, to: next ?? null })
       }
     }
-    if (patch.position !== undefined && patch.position !== photo.position) {
-      const all = await tx
-        .select({ id: productPhoto.id })
-        .from(productPhoto)
-        .where(eq(productPhoto.productId, photo.productId))
-        .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
-      const order = all.map((p) => p.id).filter((id) => id !== photoId)
-      order.splice(Math.min(patch.position, order.length), 0, photoId)
-      for (const [position, id] of order.entries())
-        await tx.update(productPhoto).set({ position }).where(eq(productPhoto.id, id))
-      changes.push({ field: "photoPosition", from: photo.position, to: patch.position })
-    }
-    if (changes.length > 0)
-      await logProductEvent(tx, storeId, photo.productId, person.userId, "foto", [
-        { field: "photo", from: photoId, to: photoId },
-        ...changes,
-      ])
-    return detailIn(tx, storeId, photo.productId)
-  })
+  }
+  if (patch.position !== undefined && patch.position !== photo.position) {
+    const all = await tx
+      .select({ id: productPhoto.id })
+      .from(productPhoto)
+      .where(eq(productPhoto.productId, photo.productId))
+      .orderBy(asc(productPhoto.position), asc(productPhoto.createdAt))
+    const order = all.map((p) => p.id).filter((id) => id !== photoId)
+    order.splice(Math.min(patch.position, order.length), 0, photoId)
+    for (const [position, id] of order.entries())
+      await tx.update(productPhoto).set({ position }).where(eq(productPhoto.id, id))
+    changes.push({ field: "photoPosition", from: photo.position, to: patch.position })
+  }
+  if (changes.length > 0)
+    await logProductEvent(
+      tx,
+      storeId,
+      photo.productId,
+      person.userId,
+      "foto",
+      [{ field: "photo", from: photoId, to: photoId }, ...changes],
+      reason,
+    )
+  return detailIn(tx, storeId, photo.productId)
 }

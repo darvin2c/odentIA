@@ -26,6 +26,7 @@ import {
   sheetNameKey,
 } from "./hoja.js"
 import { APP_LINK_SECONDS, MediaOff, storePhoto } from "./medios.js"
+import { carryProposalsIn } from "./propuestas.js"
 import { sameText } from "./texto.js"
 import { inStore, StoreError } from "./tiendas.js"
 
@@ -36,14 +37,14 @@ import { inStore, StoreError } from "./tiendas.js"
  * que «Subir una hoja» (`createPlanned` de `hoja.ts`). Todo es `configuracion`.
  *
  * Cada foto que llega es un producto nuevo, salvo que se diga a cuál va: juntar las fotos en
- * productos lo hace la persona («Juntar», «Mover a…»). Que la IA las junte sola es otro paso
- * (lienzo, tablero 7): no se comprobó con fotos reales cuánto acierta ni cuánto cuesta.
+ * productos lo hace la persona («Juntar», «Mover a…») o lo propone la IA de fotos
+ * (`propuestas.ts`, «juntar»), y la persona confirma cada grupo.
  */
 
 const loadFolder = (storeId: string, loadId: string, photoId: string) =>
   `tiendas/${storeId}/cargas/${loadId}/fotos/${photoId}`
 
-async function openLoadRow(tx: Db, storeId: string, loadId: string) {
+export async function openLoadRow(tx: Db, storeId: string, loadId: string) {
   uuidOr404(loadId, "Esa carga ya no está")
   const where = and(eq(bulkLoad.id, loadId), eq(bulkLoad.storeId, storeId))
   const [row] = await tx.select().from(bulkLoad).where(where)
@@ -67,7 +68,7 @@ async function openLoadRow(tx: Db, storeId: string, loadId: string) {
   return locked
 }
 
-async function itemRow(tx: Db, loadId: string, itemId: string) {
+export async function itemRow(tx: Db, loadId: string, itemId: string) {
   uuidOr404(itemId, "Ese producto ya no está en la carga")
   const [row] = await tx
     .select()
@@ -141,7 +142,7 @@ export async function storeLoads(appDb: Db, person: Person, storeId: string) {
   })
 }
 
-const colorsOf = (options: ProductOption[]) =>
+export const colorsOf = (options: ProductOption[]) =>
   options.find((o) => sameText(o.name, "Color"))?.values ?? []
 const sizesOf = (options: ProductOption[]) =>
   options.find((o) => sameText(o.name, "Talla"))?.values ?? []
@@ -384,7 +385,7 @@ export const loadBulkPatch = z.object({
 })
 
 /** Lo que cambia de un producto de la carga, con sus variantes armadas de nuevo si cambian colores o tallas. */
-function applyItem(
+export function applyItem(
   item: typeof bulkLoadItem.$inferSelect,
   patch: z.infer<typeof loadItemPatch>,
 ): Partial<typeof bulkLoadItem.$inferInsert> {
@@ -519,6 +520,41 @@ export async function joinLoadItems(
       .where(and(eq(bulkLoadItem.loadId, loadId), inArray(bulkLoadItem.id, others)))
     return { id: target.id }
   })
+}
+
+/**
+ * Junta fotos de la carga en un mismo producto, dentro de la transacción de quien llama (la
+ * propuesta «juntar» de la IA): van al producto de la primera foto que ya tiene uno, o a uno
+ * nuevo; los productos que quedan sin fotos y sin nada escrito se quitan.
+ */
+export async function joinPhotosIn(tx: Db, storeId: string, loadId: string, photoIds: string[]) {
+  await openLoadRow(tx, storeId, loadId)
+  const photos = photoIds.length
+    ? await tx
+        .select({ id: bulkLoadPhoto.id, itemId: bulkLoadPhoto.itemId })
+        .from(bulkLoadPhoto)
+        .where(and(eq(bulkLoadPhoto.loadId, loadId), inArray(bulkLoadPhoto.id, photoIds)))
+    : []
+  if (photos.length < 2)
+    throw new StoreError(409, "NOT_FOUND", "Esas fotos ya no están juntas en la carga")
+  const ordered = photoIds
+    .map((id) => photos.find((p) => p.id === id))
+    .filter((p): p is (typeof photos)[number] => !!p)
+  const target = ordered.find((p) => p.itemId)?.itemId ?? (await newItem(tx, storeId, loadId)).id
+  await tx
+    .update(bulkLoadPhoto)
+    .set({ itemId: target })
+    .where(
+      and(
+        eq(bulkLoadPhoto.loadId, loadId),
+        inArray(
+          bulkLoadPhoto.id,
+          ordered.map((p) => p.id),
+        ),
+      ),
+    )
+  await dropEmptyItems(tx, loadId)
+  return { itemId: target }
 }
 
 /**
@@ -710,7 +746,22 @@ export async function createFromLoad(appDb: Db, person: Person, storeId: string,
           createdBy: person.userId,
         })),
     )
-    if (moved.length > 0) await tx.insert(productPhoto).values(moved)
+    const inserted =
+      moved.length > 0
+        ? await tx
+            .insert(productPhoto)
+            .values(moved)
+            .returning({ id: productPhoto.id, objectKey: productPhoto.objectKey })
+        : []
+    // Lo que propuso la IA de cada producto de la carga pasa a su producto (`propuestas.ts`).
+    const photoOf = new Map(
+      photos.flatMap((ph) => {
+        const to = inserted.find((row) => row.objectKey === ph.objectKey)
+        return to ? [[ph.id, to.id] as const] : []
+      }),
+    )
+    for (const p of planned)
+      await carryProposalsIn(tx, storeId, p.itemId, idOf.get(sheetNameKey(p.name))!, photoOf)
     await tx.delete(bulkLoadPhoto).where(eq(bulkLoadPhoto.loadId, loadId))
     await tx
       .update(bulkLoad)

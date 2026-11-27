@@ -19,8 +19,14 @@ export interface ToolCall {
   function: { name: string; arguments: string }
 }
 
+/** Una parte de un mensaje del usuario: texto o una imagen (la IA de fotos, `ia-fotos.ts`). */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } }
+
 export type ChatMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string | ContentPart[] }
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
   | { role: "tool"; content: string; tool_call_id: string }
 
@@ -47,6 +53,11 @@ export interface ChatRequest {
   temperature?: number
   /** «auto» por omisión; «none» para que solo escriba. */
   toolChoice?: "auto" | "none"
+  /** Una respuesta con la forma de un JSON Schema (salida estructurada, `strict`). */
+  responseFormat?: {
+    type: "json_schema"
+    json_schema: { name: string; strict: true; schema: Record<string, unknown> }
+  }
   signal?: AbortSignal
 }
 
@@ -130,6 +141,7 @@ export function openAIModel(options: OpenAIOptions): ChatModel {
           ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto" }
           : {}),
         ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+        ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
         reasoning_effort: options.reasoningEffort ?? "none",
       }),
     })
@@ -228,7 +240,7 @@ export function fakeModel(): ChatModel {
     name: "fake",
     async complete(request) {
       const last = request.messages.at(-1)
-      if (last?.role === "user") {
+      if (last?.role === "user" && typeof last.content === "string") {
         return {
           content: null,
           toolCalls: [toolCall("buscar_productos", { texto: last.content.slice(0, 120) })],

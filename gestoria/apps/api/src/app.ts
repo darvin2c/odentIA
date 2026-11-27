@@ -200,6 +200,22 @@ import {
   unsaveQuestion,
 } from "./preguntas.js"
 import { skipInput, skipStep } from "./primeros-pasos.js"
+import {
+  aiCap,
+  applyAll,
+  DEFAULT_PHOTOS_CAP,
+  discardProposal,
+  improveText,
+  loadProposals,
+  type PhotoAi,
+  productProposals,
+  proposeForLoadItem,
+  proposeForProduct,
+  proposeGroups,
+  rewriteInput,
+  useInput,
+  useProposal,
+} from "./propuestas.js"
 import { setDeliverySlots, slotsInput } from "./repartidores.js"
 import { saveTemplate, storeTemplates, templateInput } from "./rubros.js"
 import { argosBoard } from "./sofi/argos.js"
@@ -260,6 +276,12 @@ export interface AppDeps {
    * solo se ven las fotos que todavía están en la base.
    */
   storage?: Storage | null
+  /**
+   * La IA de fotos (lienzo «La ficha del producto»): el modelo que mira y el tope de fotos por día
+   * y tienda. Sin modelo, la IA no está y se carga a mano.
+   */
+  photosModel?: ChatModel | null
+  photosCapPerDay?: number
 }
 
 type Env = { Variables: { person: Person } }
@@ -324,6 +346,11 @@ export function createApp(deps: AppDeps) {
   }
   const app = new Hono<Env>()
   const contract: ContractConfig = deps.contract ?? { url: deps.account.url, secret: "" }
+  const ai: PhotoAi = {
+    model: deps.photosModel ?? null,
+    storage: deps.storage,
+    capPerDay: deps.photosCapPerDay ?? DEFAULT_PHOTOS_CAP,
+  }
 
   app.use("*", requestId())
   app.use(
@@ -788,6 +815,51 @@ export function createApp(deps: AppDeps) {
     const { id, videoId } = c.req.param()
     await removeVideo(deps.appDb, c.get("person"), id, videoId)
     return c.body(null, 204)
+  })
+  // La IA de fotos: mira y propone; usar una propuesta pasa por la operación de siempre.
+  app.get("/api/tiendas/:id/ia", async (c) =>
+    c.json({ cap: await aiCap(deps.appDb, c.get("person"), c.req.param("id"), ai) }),
+  )
+  app.post("/api/tiendas/:id/ia/mejorar-texto", async (c) => {
+    const input = await bodyOf(c, rewriteInput)
+    return c.json(await improveText(deps.appDb, c.get("person"), c.req.param("id"), input, ai))
+  })
+  app.get("/api/tiendas/:id/productos/:productId/ia", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await productProposals(deps.appDb, c.get("person"), id, productId, ai))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/ia", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await proposeForProduct(deps.appDb, c.get("person"), id, productId, ai))
+  })
+  app.post("/api/tiendas/:id/productos/:productId/ia/aplicar-todos", async (c) => {
+    const { id, productId } = c.req.param()
+    return c.json(await applyAll(deps.appDb, c.get("person"), id, { productId }))
+  })
+  app.get("/api/tiendas/:id/cargas/:loadId/ia", async (c) => {
+    const { id, loadId } = c.req.param()
+    return c.json(await loadProposals(deps.appDb, c.get("person"), id, loadId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/ia/juntar", async (c) => {
+    const { id, loadId } = c.req.param()
+    return c.json(await proposeGroups(deps.appDb, c.get("person"), id, loadId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/productos/:itemId/ia", async (c) => {
+    const { id, loadId, itemId } = c.req.param()
+    return c.json(await proposeForLoadItem(deps.appDb, c.get("person"), id, loadId, itemId, ai))
+  })
+  app.post("/api/tiendas/:id/cargas/:loadId/productos/:itemId/ia/aplicar-todos", async (c) => {
+    const { id, loadId, itemId } = c.req.param()
+    return c.json(await applyAll(deps.appDb, c.get("person"), id, { loadId, itemId }))
+  })
+  app.post("/api/tiendas/:id/ia/propuestas/:proposalId/usar", async (c) => {
+    const input = await bodyOf(c, useInput)
+    const { id, proposalId } = c.req.param()
+    return c.json(await useProposal(deps.appDb, c.get("person"), id, proposalId, input))
+  })
+  app.post("/api/tiendas/:id/ia/propuestas/:proposalId/descartar", async (c) => {
+    const { id, proposalId } = c.req.param()
+    return c.json(await discardProposal(deps.appDb, c.get("person"), id, proposalId))
   })
   // «La IA propone quitar el fondo»: llega la foto ya sin fondo; la original no se toca.
   app.post("/api/tiendas/:id/fotos/:photoId/sin-fondo", async (c) => {

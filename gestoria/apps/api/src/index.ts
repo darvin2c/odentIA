@@ -6,6 +6,7 @@ import { createS3Storage } from "./archivos.js"
 import { runPushRound, webPushSender } from "./avisos.js"
 import { reviewAccountCopies } from "./cuenta.js"
 import { readEnv } from "./env.js"
+import { photosModelFromEnv } from "./ia-fotos.js"
 import { defaultLinkAdapters } from "./link-de-pago.js"
 import { emptyMediaTrash, moveStoredPhotos } from "./medios.js"
 import { readSecretsKey } from "./secretos.js"
@@ -32,6 +33,10 @@ const link = {
 const model = modelFromEnv({ ...env, NODE_ENV: process.env.NODE_ENV })
 if (!model)
   console.warn("gestoria-api: sin GESTORIA_OPENAI_API_KEY Sofi no responde (ni en la prueba).")
+// La IA de fotos: el mismo proveedor y la misma clave que Sofi. Sin clave, se carga a mano.
+const photosModel = photosModelFromEnv({ ...env, NODE_ENV: process.env.NODE_ENV })
+if (!photosModel)
+  console.warn("gestoria-api: sin GESTORIA_OPENAI_API_KEY la IA de fotos no propone nada.")
 // El acuerdo con la administración (B7): en la misma entrada de la cuenta, con su propio secreto.
 const contract = { url: env.GESTORIA_ACCOUNT_URL, secret: env.GESTORIA_CONTRACT_SECRET }
 // Las fotos y los videos del producto (ADR 0236): el bucket privado de gestorIA.
@@ -57,6 +62,8 @@ const app = createApp({
   contract,
   vapidPublicKey: env.GESTORIA_VAPID_PUBLIC_KEY,
   storage,
+  photosModel,
+  photosCapPerDay: env.GESTORIA_FOTOS_TOPE_DIA,
 })
 serve({ fetch: app.fetch, port: env.GESTORIA_PORT }, (info) => {
   console.log(`gestoria-api: escuchando en el puerto ${info.port}`)
