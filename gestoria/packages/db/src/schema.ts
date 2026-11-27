@@ -966,6 +966,12 @@ export const ORDER_EVENT_ACTIONS = [
   "entregado",
   "anulado",
   "aviso",
+  // Corregir sin anular (entrega 2 del lienzo «gestorIA como odentIA»): cambiar el pedido, que
+  // volvió sin entregar, pasarlo a otro día y deshacer la confirmación de un pago.
+  "cambiado",
+  "no_entregado",
+  "reprogramado",
+  "pago_deshecho",
 ] as const
 export type OrderEventAction = (typeof ORDER_EVENT_ACTIONS)[number]
 

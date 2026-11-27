@@ -62,6 +62,8 @@ import {
   addReceipt,
   cancelInput,
   cancelOrder,
+  changeInput,
+  changeOrder,
   connectPaymentLink,
   createOrder,
   createPaymentLink,
@@ -77,6 +79,7 @@ import {
   orderDetail,
   orderInput,
   paymentLinkStatus,
+  previewChange,
   quoteInput,
   quoteOrder,
   receiptInput,
@@ -576,6 +579,17 @@ export function createApp(deps: AppDeps) {
     return c.json({
       order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
     })
+  })
+  // Corregir sin anular (ADR 0224): cambiar el pedido.
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambiar/calcular", async (c) => {
+    const input = await bodyOf(c, changeInput)
+    const { id, orderId } = c.req.param()
+    return c.json(await previewChange(deps.appDb, c.get("person"), id, orderId, input))
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/cambiar", async (c) => {
+    const input = await bodyOf(c, changeInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await changeOrder(deps.appDb, c.get("person"), id, orderId, input) })
   })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)

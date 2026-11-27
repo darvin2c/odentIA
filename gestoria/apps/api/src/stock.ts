@@ -1,5 +1,5 @@
 import { accountCopy, type Db, productVariant, stockMovement } from "@gestoria/db"
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, like, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
 import { can } from "./permisos.js"
@@ -9,7 +9,8 @@ import { constraintError, inStore, StoreError } from "./tiendas.js"
  * El stock de cada variante y su kardex (decisión 3 del lienzo B). El saldo no se escribe: cada
  * movimiento lo cambia en la base (`stock_movement_apply`), que anota el saldo y rechaza que
  * quede bajo cero. Aquí están las entradas y los ajustes a mano (con motivo escrito), y las dos
- * operaciones que usarán los pedidos de B4: descontar una venta y devolverla al anular.
+ * operaciones de los pedidos: dejar fuera lo de sus líneas (al venderse y en cada cambio) y
+ * devolverlo al anular.
  */
 
 const quantity = z.number().int("Escribe un número entero").max(100_000, "Es demasiado")
@@ -123,27 +124,54 @@ export async function kardex(appDb: Db, person: Person, storeId: string, variant
 }
 
 /**
- * Las variantes que ya tienen ese movimiento de ese pedido. Se mira antes de agregar, y no con
- * `on conflict do nothing`: el stock se mueve en un disparador previo, que corre aunque la fila
- * después se descarte. Dos pedidos iguales a la vez chocan en el índice único y uno se deshace.
+ * Lo que mueve un pedido en el kardex va con su referencia («Pedido 0147») y, desde la segunda vez,
+ * con la de cada paso («Pedido 0147 · cambio 1», ADR 0224): así el índice único de cada referencia
+ * sigue diciendo que un paso no se repite, y cambiar dos veces no se salta el segundo cambio.
  */
-async function movedFor(
+const ofOrder = (reference: string) =>
+  or(eq(stockMovement.reference, reference), like(stockMovement.reference, `${reference} · %`))
+
+/**
+ * Lo que un pedido tiene fuera del stock ahora, por variante: lo vendido menos lo que volvió, en
+ * todas sus referencias.
+ */
+export async function heldBy(
   tx: Db,
   storeId: string,
   reference: string,
-  kind: "venta" | "anulacion",
-): Promise<Set<string>> {
+): Promise<Map<string, number>> {
   const rows = await tx
-    .select({ variantId: stockMovement.variantId })
+    .select({
+      variantId: stockMovement.variantId,
+      out: sql<number>`(-sum(${stockMovement.quantity}))::int`,
+    })
     .from(stockMovement)
     .where(
       and(
         eq(stockMovement.storeId, storeId),
-        eq(stockMovement.reference, reference),
-        eq(stockMovement.kind, kind),
+        inArray(stockMovement.kind, ["venta", "anulacion"]),
+        ofOrder(reference),
       ),
     )
-  return new Set(rows.map((row) => row.variantId))
+    .groupBy(stockMovement.variantId)
+  return new Map(
+    rows.filter((row) => Number(row.out) !== 0).map((row) => [row.variantId, Number(row.out)]),
+  )
+}
+
+/** Cuántas referencias usó ya el pedido: la suya y la de cada paso que movió stock. */
+async function referencesUsed(tx: Db, storeId: string, reference: string): Promise<number> {
+  const [row] = await tx
+    .select({ n: sql<number>`count(distinct ${stockMovement.reference})::int` })
+    .from(stockMovement)
+    .where(and(eq(stockMovement.storeId, storeId), ofOrder(reference)))
+  return Number(row?.n ?? 0)
+}
+
+/** La referencia del próximo paso: la del pedido la primera vez; después, «· cambio N». */
+async function nextReference(tx: Db, storeId: string, reference: string): Promise<string> {
+  const used = await referencesUsed(tx, storeId, reference)
+  return used === 0 ? reference : `${reference} · cambio ${used}`
 }
 
 export interface SaleLine {
@@ -152,9 +180,13 @@ export interface SaleLine {
 }
 
 /**
- * Descuenta lo de un pedido (decisión 3: al confirmar el pago, o al salir si se paga al
- * recibir). Para B4: corre dentro de la transacción del pedido, ya en su tienda. Si no alcanza
- * alguna variante, no descuenta ninguna. Repetirla con el mismo pedido no descuenta otra vez.
+ * Deja fuera del stock lo que dicen las líneas del pedido (decisión 3: al confirmar el pago, o al
+ * salir si se paga al recibir). Para B4: corre dentro de la transacción del pedido, ya en su
+ * tienda. Compara con lo que el pedido ya tiene fuera y mueve solo la diferencia, en un solo paso
+ * con su referencia: lo que sobra vuelve y lo que falta sale. Repetirla con las mismas líneas no
+ * mueve nada. Si no alcanza alguna variante, falla entera (quien la llama deshace el paso).
+ *
+ * Con `returnsOnly`, solo vuelve lo que ya no está en el pedido: lo que falta se descuenta después.
  */
 export async function recordSale(
   tx: Db,
@@ -162,52 +194,51 @@ export async function recordSale(
   actorUserId: string,
   reference: string,
   lines: SaleLine[],
+  options: { returnsOnly?: boolean; stepReference?: string } = {},
 ) {
   return stockGuard(async () => {
-    const done = await movedFor(tx, storeId, reference, "venta")
+    const want = new Map<string, number>()
     for (const line of lines) {
       if (!Number.isInteger(line.quantity) || line.quantity < 1)
         throw new StoreError(400, "VALIDATION_ERROR", "La cantidad de cada línea es al menos 1")
-      if (done.has(line.variantId)) continue
+      want.set(line.variantId, (want.get(line.variantId) ?? 0) + line.quantity)
+    }
+    const held = await heldBy(tx, storeId, reference)
+    const deltas = [...new Set([...held.keys(), ...want.keys()])]
+      .map((variantId) => ({
+        variantId,
+        delta: (want.get(variantId) ?? 0) - (held.get(variantId) ?? 0),
+      }))
+      .filter((d) => d.delta !== 0)
+    // Primero vuelve lo que sobra; después sale lo que falta.
+    const back = deltas.filter((d) => d.delta < 0)
+    const out = options.returnsOnly ? [] : deltas.filter((d) => d.delta > 0)
+    const moves = [...back, ...out]
+    if (moves.length === 0) return 0
+    const step = options.stepReference ?? (await nextReference(tx, storeId, reference))
+    for (const move of moves)
       await tx.insert(stockMovement).values({
         storeId,
-        variantId: line.variantId,
-        kind: "venta",
-        quantity: -line.quantity,
-        reference,
+        variantId: move.variantId,
+        kind: move.delta > 0 ? "venta" : "anulacion",
+        quantity: -move.delta,
+        reference: step,
         actorUserId,
       })
-    }
+    return moves.length
   })
 }
 
 /**
- * Devuelve al stock lo que descontó un pedido que se anula: lo mismo que salió, una sola vez.
- * Lo que el pedido no llegó a descontar no se toca.
+ * Devuelve al stock todo lo que un pedido tiene fuera, una sola vez: lo de un pedido que se anula,
+ * o lo de un pago que se deshizo. Lo que el pedido no llegó a descontar no se toca. Un pedido que
+ * solo se vendió devuelve con su propia referencia («Pedido 0142»); uno que cambió, con la del paso.
  */
 export async function cancelSale(tx: Db, storeId: string, actorUserId: string, reference: string) {
-  const sold = await tx
-    .select({ variantId: stockMovement.variantId, quantity: stockMovement.quantity })
-    .from(stockMovement)
-    .where(
-      and(
-        eq(stockMovement.storeId, storeId),
-        eq(stockMovement.reference, reference),
-        eq(stockMovement.kind, "venta"),
-      ),
-    )
-  const done = await movedFor(tx, storeId, reference, "anulacion")
-  const back = sold.filter((line) => !done.has(line.variantId))
-  for (const line of back)
-    await tx.insert(stockMovement).values({
-      storeId,
-      variantId: line.variantId,
-      kind: "anulacion",
-      quantity: -line.quantity,
-      reference,
-      actorUserId,
-    })
-  return back.length
+  const used = await referencesUsed(tx, storeId, reference)
+  return recordSale(tx, storeId, actorUserId, reference, [], {
+    ...(used === 1 ? { stepReference: reference } : {}),
+  })
 }
 
 /**

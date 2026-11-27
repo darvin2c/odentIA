@@ -13,6 +13,7 @@ import { addDays, storeClockIn } from "./hora.js"
 import {
   addReceipt,
   cancelOrder,
+  changeOrderIn,
   createOrderIn,
   markDelivered,
   markShipped,
@@ -256,5 +257,91 @@ export async function seedDemoPartPayment(tx: Db, storeId: string): Promise<void
   )
   await reviewPayment(tx, rosa, storeId, created.id, detail.payments.at(-1)!.id, {
     decision: "confirmar",
+  })
+}
+
+/**
+ * Corregir sin anular (lienzo «gestorIA como odentIA», tableros 6 y 7): Andrea pagó la sandalia
+ * beige 37 por Plin y pide la 38 a su oficina del Callao; se cambia el mismo pedido y le falta
+ * cobrar la diferencia del envío. Se agrega una vez, aunque la tienda ya tenga sus pedidos.
+ */
+export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void> {
+  const [already] = await tx
+    .select({ id: saleOrder.id })
+    .from(saleOrder)
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.customerName, "Andrea Castillo")))
+    .limit(1)
+  if (already) return
+  const variant = async (name: string, values: string) =>
+    (
+      await tx
+        .select({ id: productVariant.id, values: productVariant.optionValues })
+        .from(productVariant)
+        .innerJoin(product, eq(product.id, productVariant.productId))
+        .where(and(eq(productVariant.storeId, storeId), eq(product.name, name)))
+    ).find((row) => row.values.join(" ") === values)?.id
+  const method = async (name: string) =>
+    (
+      await tx
+        .select({ id: storePaymentMethod.id })
+        .from(storePaymentMethod)
+        .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.name, name)))
+    )[0]?.id
+  const [reparto] = await tx
+    .select({ id: storeDeliveryMethod.id })
+    .from(storeDeliveryMethod)
+    .where(
+      and(
+        eq(storeDeliveryMethod.storeId, storeId),
+        eq(storeDeliveryMethod.name, "Reparto en Lima"),
+      ),
+    )
+  const [b37, b38, plin] = [
+    await variant("Sandalia", "beige 37"),
+    await variant("Sandalia", "beige 38"),
+    await method("Plin"),
+  ]
+  if (!b37 || !b38 || !plin || !reparto) return
+  const { today } = await storeClockIn(tx, storeId)
+  const create = async (input: Partial<z.input<typeof orderInput>>) =>
+    createOrderIn(
+      tx,
+      storeId,
+      lucia.userId,
+      orderInput.parse({
+        channel: "whatsapp",
+        deliveryMethodId: reparto.id,
+        zone: "Surco y Miraflores",
+        deliverOn: today,
+        ...input,
+      }),
+    )
+
+  const andrea = await create({
+    customerName: "Andrea Castillo",
+    customerPhone: "+51 956 778 899",
+    address: "Av. Primavera 820, Surco",
+    lines: [{ variantId: b37, quantity: 1 }],
+    paymentMethodId: plin,
+  })
+  const detail = await addReceipt(
+    tx,
+    lucia,
+    storeId,
+    andrea.id,
+    { amountCents: andrea.totalCents, operation: "PLIN-30451" },
+    null,
+  )
+  await reviewPayment(tx, rosa, storeId, andrea.id, detail.payments.at(-1)!.id, {
+    decision: "confirmar",
+  })
+  await changeOrderIn(tx, storeId, lucia.userId, andrea.id, {
+    lines: [{ variantId: b38, quantity: 1, unitCents: null, gift: false }],
+    deliveryMethodId: reparto.id,
+    zone: "Callao",
+    deliveryListCents: null,
+    deliveryCents: null,
+    address: "Av. Sáenz Peña 501, of. 802, Callao",
+    deliverOn: today,
   })
 }

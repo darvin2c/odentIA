@@ -12,7 +12,7 @@ import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
-import { seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
+import { seedDemoCorrections, seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
 import { receiveSupportRequest } from "./soporte.js"
 
@@ -90,6 +90,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoCorrections(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta) y si ya
     // es del equipo: así sembrar otra vez no le deja otra invitación.

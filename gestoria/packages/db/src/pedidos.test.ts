@@ -1,7 +1,8 @@
 /**
  * Las reglas de los pedidos (paso B4), con el rol de la aplicación y una base real: cada tienda
- * ve solo sus pedidos; lo acordado (precios, totales, líneas) no se cambia; un pago solo se
- * revisa a nombre de quien pide; la historia y el link de pago son de su tienda.
+ * ve solo sus pedidos; al cambiar uno (ADR 0224) el total sigue siendo su suma y las líneas se
+ * reemplazan enteras; un pago solo se revisa a nombre de quien pide, y deshacer su confirmación
+ * lo deja esperando a nadie; la historia y el link de pago son de su tienda.
  */
 import { randomUUID } from "node:crypto"
 import { eq } from "drizzle-orm"
@@ -117,15 +118,45 @@ describe("los pedidos de cada tienda", () => {
     ).rejects.toThrow()
   })
 
-  it("lo acordado no se cambia: ni el total ni las líneas", async () => {
+  it("al cambiar un pedido, el total sigue siendo su suma y las líneas se reemplazan enteras", async () => {
     await expect(
       inRosa((tx) =>
         tx.update(saleOrder).set({ totalCents: 100 }).where(eq(saleOrder.id, orderId)),
       ),
     ).rejects.toThrow()
+    // Con todo lo que suma, sí (ADR 0224): el envío pasa de S/ 10 a S/ 12.
+    const changed = await inRosa((tx) =>
+      tx
+        .update(saleOrder)
+        .set({ deliveryListCents: 1200, deliveryCents: 1200, totalCents: 14100 })
+        .where(eq(saleOrder.id, orderId))
+        .returning({ total: saleOrder.totalCents }),
+    )
+    expect(changed).toEqual([{ total: 14100 }])
+    await inRosa((tx) =>
+      tx
+        .update(saleOrder)
+        .set({ deliveryListCents: 1000, deliveryCents: 1000, totalCents: 13900 })
+        .where(eq(saleOrder.id, orderId)),
+    )
     await expect(
       inRosa((tx) =>
         tx.update(saleOrderLine).set({ unitCents: 1 }).where(eq(saleOrderLine.orderId, orderId)),
+      ),
+    ).rejects.toThrow()
+    // Otra tienda no quita sus líneas.
+    expect(
+      await inMario((tx) =>
+        tx
+          .delete(saleOrderLine)
+          .where(eq(saleOrderLine.orderId, orderId))
+          .returning({ id: saleOrderLine.id }),
+      ),
+    ).toEqual([])
+    // Ni el medio de pago ni el cliente se cambian.
+    await expect(
+      inRosa((tx) =>
+        tx.update(saleOrder).set({ paymentName: "Plin" }).where(eq(saleOrder.id, orderId)),
       ),
     ).rejects.toThrow()
     await expect(
@@ -196,14 +227,50 @@ describe("los pedidos de cada tienda", () => {
         .returning({ id: orderPayment.id }),
     )
     expect(reviewed).toHaveLength(1)
-    const again = await inRosa((tx) =>
+    // Confirmado, no pasa a «no coincide» ni se vuelve a confirmar a nombre de otro.
+    await expect(
+      inRosa((tx) =>
+        tx
+          .update(orderPayment)
+          .set({ status: "no_coincide", note: "otra vez", reviewedBy: rosa.userId })
+          .where(eq(orderPayment.orderId, orderId)),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inRosa((tx) =>
+        tx
+          .update(orderPayment)
+          .set({ reviewedBy: rosa.userId, reviewedAt: new Date() })
+          .where(eq(orderPayment.orderId, orderId)),
+      ),
+    ).rejects.toThrow()
+    // Deshacer la confirmación de una captura: vuelve a esperar, a nombre de nadie.
+    await expect(
+      inRosa((tx) =>
+        tx
+          .update(orderPayment)
+          .set({ status: "por_confirmar", reviewedAt: null })
+          .where(eq(orderPayment.orderId, orderId)),
+      ),
+    ).rejects.toThrow()
+    const undone = await inRosa((tx) =>
       tx
         .update(orderPayment)
-        .set({ status: "no_coincide", note: "otra vez", reviewedBy: rosa.userId })
+        .set({ status: "por_confirmar", reviewedBy: null, reviewedAt: null })
         .where(eq(orderPayment.orderId, orderId))
         .returning({ id: orderPayment.id }),
     )
-    expect(again).toEqual([])
+    expect(undone).toHaveLength(1)
+    // Desde otra tienda, no.
+    expect(
+      await inMario((tx) =>
+        tx
+          .update(orderPayment)
+          .set({ status: "confirmado", reviewedBy: mario.userId, reviewedAt: new Date() })
+          .where(eq(orderPayment.orderId, orderId))
+          .returning({ id: orderPayment.id }),
+      ),
+    ).toEqual([])
   })
 
   it("el link de pago es de su tienda y nadie más lo lee", async () => {

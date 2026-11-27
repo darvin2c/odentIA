@@ -127,6 +127,20 @@
       "when": 1795749685873,
       "tag": "0017_reglas_saldo",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795779042584,
+      "tag": "0018_corregir_sin_anular",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795779043822,
+      "tag": "0019_reglas_corregir_sin_anular",
+      "breakpoints": true
     }
   ]
 }
