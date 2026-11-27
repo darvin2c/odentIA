@@ -76,6 +76,7 @@ import {
 } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
+import { budgetNotReachedSql } from "./budget-delivery.js"
 import { answerBudgetButton } from "./budget-send.js"
 import {
   applyTemplateStatuses,
@@ -817,23 +818,7 @@ export async function answerGeneralPermission(
 
 export type JobRow = typeof automationJob.$inferSelect
 
-/**
- * Qué pasó con el mensaje después de dejarlo en la cola. «enviado» en el
- * trabajo solo significa que salió hacia el canal: `enviando` mientras el
- * proveedor no lo acepta, `aceptado` cuando lo aceptó, `entregado` o `leido`
- * cuando el proveedor lo confirma, y `no_entregado` si lo rechazó.
- */
-export type JobDelivery = "enviando" | "aceptado" | "entregado" | "leido" | "no_entregado"
-
-export function deliveryOf(messageStatus: string | null | undefined): JobDelivery | null {
-  if (!messageStatus) return null
-  if (messageStatus === "queued" || messageStatus === "unknown") return "enviando"
-  if (messageStatus === "sent") return "aceptado"
-  if (messageStatus === "delivered") return "entregado"
-  if (messageStatus === "read") return "leido"
-  if (messageStatus === "failed") return "no_entregado"
-  return null
-}
+export { deliveryOf, type JobDelivery } from "./delivery-state.js"
 
 /**
  * A quienes administran la clínica (dueña y administradores): un aviso de WhatsApp
@@ -1394,6 +1379,8 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
         eq(treatmentBudget.status, "presentado"),
         lte(treatmentBudget.presentedAt, cutoff),
         gte(treatmentBudget.presentedAt, since),
+        // «Sigue pendiente» no se le dice de lo que no le llegó: eso lo reenvía la clínica, que lo ve en «Qué sigue».
+        sql`not ${budgetNotReachedSql(orgId, treatmentBudget.id)}`,
         notYetQueued(orgId, "seguimiento_presupuesto", treatmentBudget.id),
         patientNotLocked(treatmentBudget.patientId),
       ),

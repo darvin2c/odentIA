@@ -1318,12 +1318,17 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       : null
     return {
       kind: "respuesta",
-      text: callbackText ?? (budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo piensa"),
+      // Lo entregado se dice con lo que pasó con su mensaje (`budget-delivery.ts`): «Enviado» hasta
+      // que WhatsApp lo confirma y «No le llegó» si lo rechazó (pedido del 27 nov).
+      text:
+        callbackText ??
+        (budget.status === "presentado" ? (budget.delivery?.label ?? "Entregado · espera respuesta") : "Lo piensa"),
       detail: [
         open
           ? awaitingLinesText(open, locale, names)
           : budgetLine(budget, locale, budget.options.length > 1 ? undefined : names || undefined),
-        budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null,
+        budget.delivery?.text ?? (budget.presentedAt ? `Entregado el ${day(budget.presentedAt)}` : null),
+        budget.delivery?.problem ?? null,
       ]
         .filter(Boolean)
         .join(" · "),

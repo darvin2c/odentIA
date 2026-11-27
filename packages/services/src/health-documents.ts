@@ -22,6 +22,8 @@ import type { Db } from "@odentia/db"
 import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNull, sql } from "drizzle-orm"
+import { type MessageDelivery, messageDeliveryOf, messageStatuses } from "./budget-delivery.js"
+import { findOrgLocale } from "./locale.js"
 import { ATTENTION_SHEET_LABEL, getAttentionSheetPrint } from "./attention-sheet.js"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
 import {
@@ -511,10 +513,10 @@ export async function lastHealthDocumentSend(
   orgId: string,
   patientId: string,
   input: { documentType: string; documentId: string },
-): Promise<{ at: Date; channel: string; recipientName: string } | null> {
+): Promise<{ at: Date; channel: string; recipientName: string; delivery: MessageDelivery } | null> {
   const type = assertHealthType(input.documentType)
   const [row] = await tx
-    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
+    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata, messageId: auditEvent.entityId })
     .from(auditEvent)
     .where(
       and(
@@ -529,7 +531,14 @@ export async function lastHealthDocumentSend(
     .limit(1)
   if (!row) return null
   const sent = row.metadata as { channel?: string; recipientName?: string }
-  return { at: row.at, channel: sent.channel ?? "", recipientName: sent.recipientName ?? "" }
+  // Lo que pasó con el mensaje que la llevó (pedido del 27 nov): «se le envió» no es que le llegó.
+  const message = row.messageId ? (await messageStatuses(tx, orgId, [row.messageId])).get(row.messageId) : undefined
+  const delivery = messageDeliveryOf(
+    { at: row.at, channel: sent.channel ?? "whatsapp", messageStatus: message?.status ?? null, error: message?.error ?? null },
+    await findOrgLocale(tx, orgId),
+    "vuelve a enviarla desde sus documentos, o imprímela y entrégasela",
+  )
+  return { at: row.at, channel: sent.channel ?? "", recipientName: sent.recipientName ?? "", delivery }
 }
 
 // --- Envío ---------------------------------------------------------------------

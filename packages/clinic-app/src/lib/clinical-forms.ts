@@ -1,6 +1,7 @@
 import type { ConsentDocumentSections, ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, apiFetch, apiFetchBytes } from "./api"
+import type { MessageDelivery } from "./message-delivery"
 
 /**
  * Especialidad de la clínica: la única lista (ADR 0039). Nace con las de la
@@ -301,6 +302,8 @@ export interface ConsentDocument {
   paperDocumentId: string | null
   /** Se le envió para firmar en «Su enlace» (ADR 0037). */
   linkSentAt?: string | null
+  /** Lo que pasó con el mensaje que se lo llevó; nulo si se le mostró en la clínica o nunca salió. */
+  linkDelivery?: MessageDelivery | null
   /** Lo firmó desde su enlace: falta que el profesional lo confirme. */
   personSignedAt?: string | null
   createdAt: string

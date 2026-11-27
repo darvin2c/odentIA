@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError, WHATSAPP_TOKEN_REJECTED_CODE } from "@odentia/channels"
+import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError, WHATSAPP_TOKEN_REJECTED_CODE, whatsappCloudApiAdapter } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, sendOutboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  applyStatus,
   clearOwnAppTokenRejected,
   decryptConfig,
   isSaasSendBlocked,
@@ -24,6 +25,11 @@ export interface SendDeps {
   secretsKey: Buffer
   /** mock = sin HTTP (dev/e2e); live = envío real al proveedor. */
   senderMode: "mock" | "live"
+  /**
+   * Solo con `mock`: el acuse que da el WhatsApp simulado después de «enviar»
+   * (`CHANNEL_MOCK_STATUS`). Sin él, queda enviado sin acuse, como hasta ahora.
+   */
+  mockStatus?: MockStatus
   /** Rol owner, solo para abrir el caso de Soporte de una clave que Meta rechazó. */
   ownerDb: Db
 }
@@ -285,7 +291,11 @@ export async function processOutbound(
       }
       if (deps.senderMode === "mock") {
         // Sin proveedor no hay efecto externo que proteger: queda enviado aquí mismo.
-        await markSent(tx, orgId, messageId, row.conversation.id, `mock-${randomUUID()}`, false)
+        const mockId = `mock-${randomUUID()}`
+        await markSent(tx, orgId, messageId, row.conversation.id, mockId, false)
+        if (deps.mockStatus && deps.mockStatus !== "sent" && row.connection.provider === "whatsapp_cloud_api") {
+          await simulateWhatsAppStatus(tx, orgId, mockId, deps.mockStatus)
+        }
         return null
       }
       const config = decryptConfig(deps.secretsKey, row.connection.configEncrypted)
@@ -430,6 +440,38 @@ export async function processOutbound(
   }
 }
 
+
+export type MockStatus = "sent" | "delivered" | "read" | "failed"
+
+/**
+ * El acuse del WhatsApp simulado, para probar en desarrollo lo que pasa después
+ * de enviar: se arma como lo manda Meta y entra por el mismo adaptador y el
+ * mismo `applyStatus` que el aviso real. `failed` es el «Message undeliverable»
+ * (131026) de un número sin WhatsApp, que también marca su número.
+ */
+export async function simulateWhatsAppStatus(tx: Db, orgId: string, externalId: string, status: Exclude<MockStatus, "sent">) {
+  const rawBody = JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [{
+      id: "simulado",
+      changes: [{
+        field: "messages",
+        value: {
+          messaging_product: "whatsapp",
+          metadata: { phone_number_id: "simulado" },
+          statuses: [{
+            id: externalId,
+            status,
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            ...(status === "failed" ? { errors: [{ code: 131026, title: "Message undeliverable" }] } : {}),
+          }],
+        },
+      }],
+    }],
+  })
+  const { statuses } = whatsappCloudApiAdapter.parseWebhook({ headers: {}, rawBody, config: {} })
+  await applyStatus(tx, orgId, statuses, (inner, messageId) => reopenTopicOfFailedReplySafely(inner, orgId, messageId))
+}
 
 /** El proveedor aceptó el mensaje (o es una demostración): queda enviado y la Bandeja lo sabe. */
 async function markSent(tx: Db, orgId: string, messageId: string, conversationId: string, externalId: string, live: boolean) {

@@ -28,6 +28,7 @@
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { budgetNotReachedSql } from "./budget-delivery.js"
 import { uncountedSql } from "./conversation-state.js"
 import { budgetAcceptanceMany } from "./report-summary.js"
 import { productHooks } from "./products.js"
@@ -163,7 +164,7 @@ export function firstContactSql(orgId: string): SQL {
  * contacto y cuenta a quien llegó a él o a uno posterior:
  * - agendó: una cita sin cancelar («No vino» cuenta; cancelar sin otra no);
  * - vino: una cita atendida o una atención firmada;
- * - recibió presupuesto (presentado) y lo aceptó (del todo o en parte, según
+ * - recibió presupuesto (presentado, salvo que no le llegara: `budgetNotReachedSql`) y lo aceptó (del todo o en parte, según
  *   su estado a hoy), sin exigir la cita atendida: la cita queda atendida al
  *   firmar la atención, que puede seguir en borrador;
  * - pagó algo: lo aceptó y tiene un pago sin anular; sin presupuesto
@@ -187,7 +188,9 @@ export function funnelSql(orgId: string, hull: Span, now: Date, budgetRequired =
           or exists (select 1 from encounter e where e.organization_id = ${orgId} and e.patient_id = k.patient_id
             and e.status = 'finalizada' and e.finalized_at >= k.first_at) as came,
         exists (select 1 from treatment_budget b where b.organization_id = ${orgId} and b.patient_id = k.patient_id
-          and ${PRESENTED_BUDGET} and b.presented_at >= k.first_at) as budget,
+          and ${PRESENTED_BUDGET} and b.presented_at >= k.first_at
+          -- «Recibió presupuesto»: lo que no le llegó (todos sus envíos fallaron) no cuenta.
+          and not (b.status = 'presentado' and ${budgetNotReachedSql(orgId, sql`b.id`)})) as budget,
         exists (select 1 from treatment_budget b where b.organization_id = ${orgId} and b.patient_id = k.patient_id
           and b.status in ('aceptado','parcial') and b.presented_at >= k.first_at) as accepted,
         exists (select 1 from patient_payment y where y.organization_id = ${orgId} and y.patient_id = k.patient_id

@@ -50,6 +50,7 @@ import {
   budgetNumberLabel,
   budgetOptionApi,
   budgetPdfUrl,
+  budgetStateWithDelivery,
   cancelBudgetApi,
   createBudgetApi,
   deliverBudgetApi,
@@ -548,7 +549,11 @@ function BudgetCard({
   const stateLine = accepted
     ? (budgetAnswerLine(budget, (cents, currency) => money(cents, currency)) ??
       `${budget.stateText} · ${acceptedWords(budget, budget.currency, money)}`)
-    : budget.stateText
+    : budgetStateWithDelivery(budget)
+  // Lo enviado dice si le llegó, con lo que dice su mensaje; lo que no le llegó, por qué y qué hacer
+  // (pedido del 27 nov). Lo entregado en mano ya dice su fecha arriba.
+  const delivery = budget.status !== "borrador" && budget.delivery?.channel ? budget.delivery : null
+  const notReached = budget.status === "presentado" && budget.delivery?.reached === false
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
@@ -581,7 +586,7 @@ function BudgetCard({
         <div className="flex min-w-0 flex-1 basis-full flex-col gap-1 sm:basis-0">
           <span className="font-medium">{summary}</span>
           <span className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={budgetStatusTone(budget.status)}>{stateLine}</Badge>
+            <Badge variant={notReached ? "destructive" : budgetStatusTone(budget.status)}>{stateLine}</Badge>
             {expiredText ? <span className="text-xs font-medium">{expiredText}</span> : null}
             {budget.createdBy && own ? (
               <span className="text-xs text-muted-foreground">
@@ -594,6 +599,12 @@ function BudgetCard({
               </span>
             ) : null}
           </span>
+          {delivery ? (
+            <span className={`text-xs ${notReached ? "text-destructive" : "text-muted-foreground"}`}>
+              {delivery.text}
+              {delivery.problem ? `. ${delivery.problem}` : ""}
+            </span>
+          ) : null}
           {own ? null : (
             <span className="text-xs text-muted-foreground">
               Lo preparó {preparedBy}: solo quien lo preparó cambia precios o lo envía.

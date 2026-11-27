@@ -142,7 +142,15 @@ export interface WaitingUnreached {
 export interface WaitingBudgets {
   total: number
   oldestPresentedAt: string | null
-  items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
+  items: Array<{
+    id: string
+    patientId: string
+    patientName: string
+    title: string
+    presentedAt: string | null
+    /** «No llegó por WhatsApp · enviado el 27 nov»: no le llegó (`budget-delivery.ts`); nulo si sí o si aún puede llegar. */
+    notReached: string | null
+  }>
 }
 
 /**

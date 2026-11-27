@@ -11,10 +11,19 @@ import {
 } from "../../lib/clinical-forms"
 import { formatDate } from "../../lib/clinical-journey"
 
-/** Lo que dice el consentimiento sobre «Su enlace»: enviado, firmado por la persona o nada. */
-export function consentLinkWords(document: Pick<ConsentDocument, "status" | "linkSentAt" | "personSignedAt">): string | null {
+/**
+ * Lo que dice el consentimiento sobre «Su enlace»: enviado, firmado por la persona o nada.
+ * Lo enviado por mensaje dice lo que pasó con ese mensaje (pedido del 27 nov): «Lo tiene en
+ * su enlace» solo si se le mostró en la clínica; si no le llegó, por qué y qué hacer.
+ */
+export function consentLinkWords(
+  document: Pick<ConsentDocument, "status" | "linkSentAt" | "personSignedAt" | "linkDelivery">,
+): string | null {
   if (document.status !== "pendiente") return null
   if (document.personSignedAt) return `Lo firmó desde su enlace el ${formatDate(document.personSignedAt)}: confírmalo con la persona delante, antes de empezar.`
+  const delivery = document.linkDelivery
+  if (document.linkSentAt && delivery?.state === "no_llego") return `${delivery.text}. ${delivery.problem ?? ""}`.trim()
+  if (document.linkSentAt && delivery) return `${delivery.text}: espera su firma.${delivery.problem ? ` ${delivery.problem}` : ""}`
   if (document.linkSentAt) return `Lo tiene en su enlace desde el ${formatDate(document.linkSentAt)}: espera su firma.`
   return null
 }

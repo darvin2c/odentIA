@@ -7,6 +7,7 @@
  */
 import type { ApiErrorShape } from "@odentia/ui-patterns"
 import { ApiError, apiFetch } from "./api"
+import type { MessageDelivery } from "./message-delivery"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname } from "./host"
 
@@ -145,6 +146,8 @@ export interface HealthDocumentSent {
   at: string
   channel: string
   recipientName: string
+  /** Lo que pasó con su mensaje; opcional mientras dura un despliegue. */
+  delivery?: MessageDelivery
 }
 
 export function fetchHealthDocumentSent(

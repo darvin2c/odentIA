@@ -254,6 +254,38 @@ export interface BudgetWithTotals extends Budget {
    * colegas, pero solo cambia lo suyo. Lo dice el servidor.
    */
   canChange?: boolean
+  /**
+   * Si le llegó, con lo que dice su mensaje: «Enviado» hasta que WhatsApp lo confirma,
+   * «Entregado» o «Leído» con su acuse y «No llegó» si lo rechazó. Nulo en un borrador.
+   * Lo dice el servidor; opcional mientras dura un despliegue.
+   */
+  delivery?: BudgetDelivery | null
+}
+
+/** La entrega de un presupuesto, como la dice el servidor (`budget-delivery.ts`). */
+export interface BudgetDelivery {
+  state: "en_mano" | "enviado" | "entregado" | "leido" | "no_llego"
+  channel: "whatsapp" | "email" | null
+  at: string
+  /** «Entregado el 27 nov», «Enviado por WhatsApp el 27 nov», «No llegó por WhatsApp · enviado el 27 nov». */
+  text: string
+  /** Por qué no llegó y qué hacer. */
+  problem: string | null
+  /** Solo por qué no llegó. */
+  reason?: string | null
+  /** Falso si todos sus envíos fallaron: no le llegó. */
+  reached: boolean
+  /** El estado de lo entregado que espera respuesta, dicho con su entrega («Enviado · espera respuesta», «No le llegó»). */
+  label: string
+}
+
+/**
+ * El estado de un presupuesto en las pantallas de la clínica: el de siempre, salvo lo
+ * entregado que espera respuesta, que dice si le llegó («Enviado · espera respuesta»
+ * mientras WhatsApp no lo confirma, «No le llegó» si lo rechazó).
+ */
+export function budgetStateWithDelivery(budget: Pick<BudgetWithTotals, "status" | "stateText" | "delivery">): string {
+  return budget.status === "presentado" && budget.delivery ? budget.delivery.label : budget.stateText
 }
 
 /** La opción que vale: la elegida o, mientras decide, la recomendada. */

@@ -91,6 +91,7 @@ import {
 } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
+import { lastSendDeliveries, type MessageDelivery } from "./budget-delivery.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { updatePersonIdentity } from "./people.js"
@@ -4494,7 +4495,7 @@ export async function listConsentDocuments(
   tx: Db,
   orgId: string,
   query: { patientId: string; status?: string },
-): Promise<(ConsentDocumentRow & { diagnosisDescription: string | null })[]> {
+): Promise<(ConsentDocumentRow & { diagnosisDescription: string | null; linkDelivery: MessageDelivery | null })[]> {
   await requirePatient(tx, orgId, query.patientId)
   const conditions = [
     eq(consentDocument.organizationId, orgId),
@@ -4517,9 +4518,39 @@ export async function listConsentDocuments(
     .orderBy(desc(consentDocument.createdAt))
   // La hoja que se firma muestra el diagnóstico como el papel: código y descripción.
   const titles = await consentDiagnosisTitles(tx, rows)
+  // Lo enviado a firmar dice lo que pasó con su mensaje (pedido del 27 nov): «Lo tiene en su
+  // enlace» no es verdad si WhatsApp no se lo entregó. Lo que se le mostró en la clínica no tiene mensaje.
+  const waiting = rows.filter((row) => row.status === "pendiente" && row.linkSentAt && !row.personSignedAt).map((row) => row.id)
+  const sent = await lastSendDeliveries(tx, orgId, {
+    action: "personal_link.sent",
+    idKey: "consentId",
+    ids: waiting,
+    resend: "vuelve a enviárselo con «Enviarlo por mensaje», o muéstraselo para que lo firme en su teléfono",
+  })
+  // Mostrado en la clínica después del envío: lo tiene en su enlace, le haya llegado o no el mensaje.
+  const shown =
+    sent.size === 0
+      ? []
+      : await tx
+          .select({ id: auditEvent.entityId, at: sql<Date>`max(${auditEvent.createdAt})`.mapWith(auditEvent.createdAt) })
+          .from(auditEvent)
+          .where(
+            and(
+              eq(auditEvent.organizationId, orgId),
+              eq(auditEvent.action, "consent.shown_to_sign"),
+              inArray(auditEvent.entityId, [...sent.keys()]),
+            ),
+          )
+          .groupBy(auditEvent.entityId)
+  const shownAt = new Map(shown.map((row) => [row.id, row.at.getTime()]))
+  const linkDelivery = (id: string) => {
+    const delivery = sent.get(id)
+    return delivery && (shownAt.get(id) ?? 0) <= delivery.at.getTime() ? delivery : null
+  }
   return rows.map((row) => ({
     ...row,
     diagnosisDescription: titles.get(row.id) ?? null,
+    linkDelivery: linkDelivery(row.id),
     signatureData: null,
     professionalSignature: null,
     revokeSignature: null,

@@ -385,7 +385,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "arma-envia-presupuesto": (faq) => [
     {
       ...faq,
-      a: "No hace falta: lo que indicas en la atención queda aceptado al indicarlo y se agenda sin presupuesto; no se arma solo al firmar. Si la persona quiere saber cuánto costará, en su Plan › «Presupuesto», «Preparar presupuesto» lo arma con lo indicado que tiene precio. «Revisar y enviar» muestra lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento, con «Ver el PDF» antes de enviar; «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega. Recepción lo envía y anota la respuesta, pero no cambia precios.",
+      a: "No hace falta: lo que indicas en la atención queda aceptado al indicarlo y se agenda sin presupuesto; no se arma solo al firmar. Si la persona quiere saber cuánto costará, en su Plan › «Presupuesto», «Preparar presupuesto» lo arma con lo indicado que tiene precio. «Revisar y enviar» muestra lo que se propone, hasta cuándo vale y cómo se explica cada tratamiento, con «Ver el PDF» antes de enviar; «Enviar por WhatsApp» (o por correo, si no tiene WhatsApp) dice antes a quién le llega; si su número no puede ser un WhatsApp, no sale por ahí y el botón dice por qué. Después, el presupuesto dice si le llegó. Recepción lo envía y anota la respuesta, pero no cambia precios.",
       forms: ["hace falta un presupuesto para agendar", "no me sale el presupuesto al firmar", "el presupuesto es obligatorio"],
     },
   ],

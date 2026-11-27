@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, finalizedBudgetText, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, budgetStateWithDelivery, finalizedBudgetText, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -279,5 +279,26 @@ describe("finalizedBudgetText", () => {
     const budget = { id: "b", budgetNumber: 1, itemCount: 1, totalCents: 18000, currency: "PEN", added: 1 }
     expect(finalizedBudgetText(budget, money)).toBe("Presupuesto listo: 1 tratamiento por PEN 180.00")
     expect(finalizedBudgetText(budget, null)).toBe("Presupuesto listo: 1 tratamiento")
+  })
+})
+
+describe("el estado de lo entregado dice si le llegó (pedido del 27 nov)", () => {
+  const delivery = (state: "enviado" | "no_llego" | "entregado", label: string) => ({
+    state,
+    channel: "whatsapp" as const,
+    at: "2026-11-27T15:00:00.000Z",
+    text: "",
+    problem: null,
+    reached: state !== "no_llego",
+    label,
+  })
+  it("mientras WhatsApp no confirma, «Enviado»; si lo rechazó, «No le llegó»", () => {
+    const presented = { status: "presentado", stateText: "Entregado · espera respuesta" }
+    expect(budgetStateWithDelivery({ ...presented, delivery: delivery("enviado", "Enviado · espera respuesta") })).toBe("Enviado · espera respuesta")
+    expect(budgetStateWithDelivery({ ...presented, delivery: delivery("no_llego", "No le llegó") })).toBe("No le llegó")
+    expect(budgetStateWithDelivery({ ...presented, delivery: delivery("entregado", "Entregado · espera respuesta") })).toBe("Entregado · espera respuesta")
+  })
+  it("lo que ya respondió dice su respuesta, no la entrega", () => {
+    expect(budgetStateWithDelivery({ status: "aceptado", stateText: "Aceptó todo", delivery: delivery("no_llego", "No le llegó") })).toBe("Aceptó todo")
   })
 })

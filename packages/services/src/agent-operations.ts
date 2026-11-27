@@ -810,8 +810,16 @@ export interface AgentBudgetView {
   budgetId: string
   budgetNumber: number
   status: string
-  /** El estado con el nombre de toda la aplicación («Entregado · espera respuesta»). */
+  /**
+   * El estado con el nombre de toda la aplicación («Entregado · espera respuesta»); «No le
+   * llegó» si se entregó al enviarlo y todos sus envíos fallaron (`budgetReached`).
+   */
   stateText: string
+  /**
+   * Lo entregado que no le llegó: cuándo se envió y por qué no llegó («No llegó por WhatsApp
+   * · enviado el 27 nov. Su número no tiene WhatsApp…»). Nulo si le llegó o aún puede llegar.
+   */
+  notReached: string | null
   currency: string
   /** Se le puede anotar una respuesta. */
   answerable: boolean
@@ -853,11 +861,14 @@ function agentBudgetLine(line: BudgetLineWithStatus, twoCurrencies = false): Age
 
 function agentBudgetView(budget: BudgetWithTotals): AgentBudgetView {
   const twoCurrencies = new Set(budget.items.map((line) => line.currency)).size > 1
+  // Lo que no le llegó no se le presenta como entregado (pedido del 27 nov): la misma regla de la ficha.
+  const notReached = budget.status === "presentado" && budget.delivery && !budget.delivery.reached ? budget.delivery : null
   return {
     budgetId: budget.id,
     budgetNumber: budget.budgetNumber,
     status: budget.status,
-    stateText: budget.stateText,
+    stateText: notReached ? notReached.label : budget.stateText,
+    notReached: notReached ? [notReached.text, notReached.reason].filter(Boolean).join(". ") : null,
     currency: budget.currency,
     answerable: BUDGET_ANSWERABLE.includes(budget.status),
     totalCents: budget.totalCents,
