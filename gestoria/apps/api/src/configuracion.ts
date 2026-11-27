@@ -1,17 +1,30 @@
 import {
+  contractState,
   type Db,
   DELIVERY_COSTS,
   DELIVERY_TYPES,
   PAYMENT_COLLECTIONS,
   PAYMENT_TYPE_CODES,
+  product,
+  store,
+  storeAgent,
   storeDeliveryMethod,
   storeEvent,
+  storeImage,
+  storeInvitation,
+  storeLink,
+  storeMember,
+  storePaymentLink,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, eq } from "drizzle-orm"
+import { accountState } from "@odentia/contract"
+import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { can } from "./permisos.js"
+import { setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
+import { supportForTeam } from "./soporte.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -288,4 +301,147 @@ export async function deleteDelivery(appDb: Db, person: Person, storeId: string,
       detail: { borrado: id },
     })
   })
+}
+
+/**
+ * «Lo que falta para vender», donde abre Configuración (lienzo «gestorIA · Configuración, de
+ * nuevo», tablero 3): lo guardado en cada apartado, para que la pantalla diga en una línea cómo
+ * está cada parte y qué falta. Nada se marca a mano: son los mismos datos que los primeros pasos
+ * de Inicio (`setupFactsIn`), más lo de cada apartado. Lo que todavía no existe (los chats, la
+ * pasarela conectada entrando a la cuenta) no viene: no se dibuja.
+ *
+ * Lo ve quien configura la tienda (`configuracion`) y soporte, que solo mira: a soporte no le
+ * llegan Sofi ni el plan (no los mira) y a nadie le llegan costos, llaves ni los datos de cobro
+ * (números de cuenta, celulares): solo nombres y estados. El plan, solo a quien tiene `plan`, con
+ * lo último que se supo de la administración (sin preguntarle: abrir Configuración no la espera).
+ */
+export async function configOverview(appDb: Db, person: Person, storeId: string, now = new Date()) {
+  return inStore(appDb, person, storeId, "tienda.ver", async (tx, seat) => {
+    if (!can(seat, "configuracion") && seat !== "support")
+      throw new StoreError(403, "FORBIDDEN", "Tu rol en esta tienda no permite hacerlo")
+    const facts = await setupFactsIn(tx, storeId, now)
+    const steps = setupSteps(facts, await skippedStepsIn(tx, storeId))
+    const [shop] = await tx
+      .select({ publicName: store.publicName, brandColor: store.brandColor })
+      .from(store)
+      .where(eq(store.id, storeId))
+    const images = await tx
+      .select({ kind: storeImage.kind })
+      .from(storeImage)
+      .where(eq(storeImage.storeId, storeId))
+    const [link] = await tx
+      .select({ name: storeLink.name })
+      .from(storeLink)
+      .where(and(eq(storeLink.storeId, storeId), eq(storeLink.current, true)))
+    const [products] = await tx
+      .select({ n: count() })
+      .from(product)
+      .where(eq(product.storeId, storeId))
+    const payments = await tx
+      .select({
+        name: storePaymentMethod.name,
+        typeCode: storePaymentMethod.typeCode,
+        collection: storePaymentMethod.collection,
+      })
+      .from(storePaymentMethod)
+      .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.isActive, true)))
+      .orderBy(asc(storePaymentMethod.createdAt))
+    // Solo si está conectada y con qué: la cuenta y sus llaves nunca salen de aquí.
+    const [paymentLink] = await tx
+      .select({ provider: storePaymentLink.provider })
+      .from(storePaymentLink)
+      .where(eq(storePaymentLink.storeId, storeId))
+    const deliveries = await tx
+      .select({
+        name: storeDeliveryMethod.name,
+        type: storeDeliveryMethod.type,
+        cost: storeDeliveryMethod.cost,
+        zones: storeDeliveryMethod.zones,
+        acceptsPayOnDelivery: storeDeliveryMethod.acceptsPayOnDelivery,
+      })
+      .from(storeDeliveryMethod)
+      .where(and(eq(storeDeliveryMethod.storeId, storeId), eq(storeDeliveryMethod.isActive, true)))
+      .orderBy(asc(storeDeliveryMethod.createdAt))
+    const slots = await storeSlotsIn(tx, storeId)
+    const [members] = await tx
+      .select({ n: count() })
+      .from(storeMember)
+      .where(eq(storeMember.storeId, storeId))
+    const [invited] = await tx
+      .select({ n: count() })
+      .from(storeInvitation)
+      .where(
+        and(
+          eq(storeInvitation.storeId, storeId),
+          isNull(storeInvitation.acceptedAt),
+          isNull(storeInvitation.revokedAt),
+          gt(storeInvitation.expiresAt, now),
+        ),
+      )
+    const couriers = await couriersIn(tx, storeId)
+    // El pedido de soporte para mirar se responde en Equipo: ahí queda su punto.
+    const supportAsks = (await supportForTeam(tx, storeId, seat, now)).filter(
+      (row) => row.status === "por_aceptar",
+    ).length
+    const seesSofi = can(seat, "configuracion")
+    const [agent] = seesSofi
+      ? await tx
+          .select({ enabled: storeAgent.enabled })
+          .from(storeAgent)
+          .where(eq(storeAgent.storeId, storeId))
+      : []
+    return {
+      steps,
+      brand: {
+        publicName: shop?.publicName ?? null,
+        brandColor: shop?.brandColor ?? null,
+        logo: images.some((image) => image.kind === "logo"),
+        link: link?.name ?? null,
+      },
+      catalog: {
+        products: Number(products?.n ?? 0),
+        withStock: facts.productsWithStock,
+      },
+      payments,
+      paymentLink: paymentLink ? { provider: paymentLink.provider } : null,
+      deliveries: deliveries.map(({ zones, ...delivery }) => ({
+        ...delivery,
+        zones: zones.length,
+      })),
+      slots: slots.length,
+      team: {
+        members: Number(members?.n ?? 0),
+        invitations: Number(invited?.n ?? 0),
+        // Los repartidores externos (los del equipo ya están en «members»).
+        couriers: couriers.filter((courier) => !courier.team).map((courier) => courier.name),
+        names: couriers.filter((courier) => courier.team).map((courier) => courier.name),
+        supportAsks,
+      },
+      sofi: seesSofi ? { enabled: agent?.enabled ?? false, tried: facts.triedSofi } : null,
+      plan: can(seat, "plan") ? await planLineIn(tx, storeId) : null,
+    }
+  })
+}
+
+/**
+ * La línea del plan con lo último que dijo la administración (`contract_state`), sin preguntarle:
+ * su nombre, cómo está la cuenta y lo que queda del crédito del tramo. Sin nada guardado, null.
+ */
+async function planLineIn(tx: Db, storeId: string) {
+  const [row] = await tx
+    .select({ state: contractState.state })
+    .from(contractState)
+    .where(eq(contractState.storeId, storeId))
+  const parsed = accountState.safeParse(row?.state)
+  if (!parsed.success || !parsed.data.found) return null
+  const { plan, access, budget } = parsed.data
+  return {
+    name: plan?.name ?? null,
+    status: access?.status ?? null,
+    creditLeftCents:
+      budget?.currency && budget.creditCents > 0
+        ? Math.max(0, budget.creditCents - budget.creditUsedCents)
+        : null,
+    currency: budget?.currency ?? null,
+  }
 }

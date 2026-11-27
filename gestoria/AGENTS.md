@@ -62,10 +62,30 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El menú del día lleva solo pantallas que existen (Inicio, Despachos, Pedidos, Clientes y, en
   «Gestión», Catálogo, Caja y Reportes); al pie, Configuración y Ayuda. Una pantalla nueva entra en
   su lugar del tablero 4, no antes.
-- Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`: cada apartado
+- Configuración es `SectionNav` con los grupos de `apps/web/src/lib/configuracion.ts`, con nombres
+  de tarea (Tu tienda, Vender, Conexiones, Tu equipo, Para ti, Tu cuenta gestorIA): cada apartado
   lo ve quien puede cambiarlo (su `needs` de `permisos.ts`), soporte mira lo que su permiso lee y
-  quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo. Sus nombres y
-  rutas son los de `HELP_SCREENS` de la Ayuda.
+  quien no ve ninguno no ve la entrada. Abrir uno ajeno lo dice, sin mostrarlo; quien no ve «Lo
+  que falta» (Ventas) entra directo a lo suyo. Sus nombres y rutas son los de `HELP_SCREENS` de la
+  Ayuda. Integraciones espera su pantalla (`INTEGRATIONS_READY`).
+- Abre en «Lo que falta» (`/configuracion`; Datos de la tienda en `/configuracion/datos`): lo que
+  falta para vender, cada cosa con su botón, y cada parte en una línea con su estado y un punto
+  con texto si tiene algo pendiente. Todo sale de `GET /api/tiendas/:id/configuracion/resumen`
+  (`configOverview` de `apps/api/src/configuracion.ts`): lo guardado en cada apartado y los mismos
+  datos de los primeros pasos (`setupFactsIn`), nunca marcas a mano. Lo que todavía no existe no
+  viene ni se dibuja. Soporte lo mira sin Sofi ni el plan; a nadie le llegan llaves, costos ni
+  datos de cobro. Una parte nueva suma su línea ahí y en `configLines`.
+- El buscador de Configuración no es el de Ctrl+K: es el `Combobox` común sobre `SEARCH_INDEX`
+  (lo que hay dentro de cada parte, con las palabras de quien vende) y los nombres que guardó la
+  tienda (`namesIndex`). Una pantalla que suma algo que se busca suma su entrada, solo de lo que
+  existe.
+- En el teléfono Configuración no lleva la barra de `SectionNav`: la portada es el índice y cada
+  parte vuelve a ella con «Configuración». `SectionNav` aún no tiene ese modo: `ConfigFrame` esconde
+  su barra (anotado para moverlo a `shared/` en su propio cambio).
+- El pedido de soporte para mirar la tienda y quién mira ahora salen una sola vez, en la franja
+  de arriba (`StoreStrip` de `tiendas.tsx`, una `NoticeStrip`), para quien puede responder
+  (`equipo.gestionar`), y se responden en Equipo y repartidores: nunca una tarjeta en cada
+  apartado.
 - «Tu marca» (`apps/api/src/marca.ts`): el color pinta la app con `brandColorCss` de
   `@odentia/ui/lib/brand-color`, la cuenta común con las clínicas; no se copia aquí. El nombre del
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
