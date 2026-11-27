@@ -34,6 +34,7 @@ import { CREDITOS, RUBRO_IDS, RUBROS } from "./datos"
 import { ProductPage } from "./ficha/ficha"
 import { href, ir, useRuta } from "./ruta"
 import { reiniciar, useTienda } from "./tienda"
+import { DespachosPage } from "./despachos/despachos"
 import { ClientaPage } from "./pedidos/clienta"
 import { ComoAvanzaPage } from "./pedidos/como-avanza"
 import { InicioPage } from "./pedidos/inicio"
@@ -237,6 +238,7 @@ export function App() {
   let page: React.ReactNode
   if (p === "/inicio") page = <InicioPage />
   else if (p === "/pedidos") page = <PedidosPage />
+  else if (p === "/despachos") page = <DespachosPage />
   else if (p === "/pedidos/como-avanza") page = <ComoAvanzaPage />
   else if (p === "/clienta") page = <ClientaPage />
   else if (p === "/reparto") page = <RepartoPage />

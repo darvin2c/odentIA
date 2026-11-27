@@ -1148,8 +1148,11 @@ const emit = () => {
   for (const f of subs) f()
 }
 
+/** Otros pedidos de ejemplo que suma otra parte del prototipo (Despachos: el resto de la semana). */
+export const MAS_PEDIDOS: ((r: RubroId) => Pedido[])[] = []
+
 export function pedidosDe(r: RubroId): Pedido[] {
-  if (!S.porRubro[r]) S.porRubro[r] = seed(r)
+  if (!S.porRubro[r]) S.porRubro[r] = [...seed(r), ...MAS_PEDIDOS.flatMap((f) => f(r))]
   return S.porRubro[r]!
 }
 
