@@ -114,8 +114,11 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   en el pedido (de `store.delivery_slots`); el repartidor es de la tienda (`store_courier`, del
   equipo o un nombre externo, listo para enlazarse a gestorIA Reparto) y no se borra.
 - Sin pago confirmado no se entrega: «Entregado» con saldo anota en ese paso todo lo que falta, y un
-  pago por confirmar se confirma antes. Lo cobrado en la puerta queda a nombre del repartidor del
-  pedido (`order_payment.courier_id`).
+  pago por confirmar se confirma antes, en la misma ventana (la revisión del pedido). Lo cobrado en
+  la puerta queda a nombre del repartidor del pedido (`order_payment.courier_id`). Sofi no asigna
+  repartidor, franja ni agencia: la base lo frena al anotar y al cambiar (`0025`).
+- Lo que suma Caja de las entregas del día usa el mismo filtro que las filas de Despachos
+  (`onBoard`): una cifra nueva de entregas no arma su propia consulta.
 - Caja (`apps/api/src/caja.ts`, `caja`: Dueño y Administrador) recibe el efectivo con «Recibí», que
   solo se agrega y toma cada pago una vez. Lo cobrado es la misma consulta de Reportes
   (`collectedBetween`) y lo que falta cobrar, el saldo de las filas de Despachos: ninguna pantalla
