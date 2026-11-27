@@ -300,6 +300,36 @@ describe("la cuadrícula de tallas y colores (decisión 6)", () => {
     expect(kardex.json.movements).toMatchObject([{ kind: "entrada", quantity: 2, balance: 2 }])
   })
 
+  it("el catálogo dice de cada producto sus colores, su estado y qué tan lista está para Sofi", async () => {
+    const list = await call("lucia", "GET", `${base}/catalogo`)
+    expect(list.status).toBe(200)
+    const row = list.json.products.find((p: { id: string }) => p.id === id)
+    expect(row).toMatchObject({
+      colorOption: 0,
+      colors: [
+        { value: "blanca", hex: "#f2f0ea", hex2: null },
+        { value: "negra", hex: "#1f1f1f", hex2: null },
+      ],
+      state: "disponible",
+      stock: 7,
+      soldOut: 1,
+      variantCount: 4,
+    })
+    // La misma cuenta de la ficha: sin fotos de cada color, todavía no lo vende sola.
+    const sheet = (await call("lucia", "GET", `${base}/productos/${id}`)).json.product
+    expect(row.readiness).toEqual({
+      level: sheet.readiness.level,
+      sellsAlone: sheet.readiness.sellsAlone,
+      complete: sheet.readiness.complete,
+      done: sheet.readiness.done,
+      total: sheet.readiness.total,
+      neededMissing: sheet.readiness.items.filter(
+        (i: { needed: boolean; ok: boolean }) => i.needed && !i.ok,
+      ).length,
+    })
+    expect(row.readiness.sellsAlone).toBe(false)
+  })
+
   it("bajar el stock pide motivo y queda como ajuste; cambiar un nombre no rehace la variante", async () => {
     const lower = grid({
       cells: grid().cells.map((c) =>

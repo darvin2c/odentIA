@@ -75,6 +75,13 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - Lo que Sofi no supo (`preguntas.ts`): Sofi solo anota la pregunta; Ventas responde y propone
   guardarla; quien tiene `configuracion` la guarda en la ficha. Cada cambio de la ficha va al
   historial (`product_event`), campo por campo, con la forma de `productPatch`.
+- La pantalla de la ficha (`apps/web/src/ficha/`) es una página completa que se guarda sola: un
+  borrador (`FichaStore` de `ficha/borrador.ts`) con deshacer y rehacer, que envía solo lo que
+  cambió y dice siempre cómo está («Guardando…», «Guardado», lo rechazado en su campo). La
+  cuadrícula se envía sobre el stock de ahora (`rebase`): lo cambiado se suma, nunca pisa una
+  venta; si baja el stock, espera el motivo sin frenar lo demás. El margen se dibuja con el costo
+  que da el servidor solo con `costos.ver`; lo que cobraría Sofi es siempre `POST /simular`. Las
+  propuestas de la IA entran con `AiSuggestion`, nunca dibujadas a mano.
 
 ## El menú y Configuración (entrega 3 del lienzo «gestorIA como odentIA»; ADR 0225)
 

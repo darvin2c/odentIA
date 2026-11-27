@@ -185,7 +185,6 @@ function Field({ field }: { field: TemplateField }) {
         options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
         disabled={!edit}
         onChange={(o) => set(o)}
-        onClear={edit && !empty ? () => set(null) : undefined}
       />
     )
   else if (field.type === "texto")

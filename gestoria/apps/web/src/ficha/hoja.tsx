@@ -320,7 +320,10 @@ export function Hoja(props: HojaProps) {
                 <th
                   key={column.id}
                   scope="col"
-                  className="h-11 min-w-24 border-b border-l px-3 text-right font-medium"
+                  className={cn(
+                    "h-11 border-b border-l text-right font-medium",
+                    touch ? "min-w-14 px-2.5" : "min-w-24 px-3",
+                  )}
                 >
                   <button
                     type="button"
@@ -404,7 +407,8 @@ export function Hoja(props: HojaProps) {
                       }}
                       onDoubleClick={() => startEdit(value ?? "")}
                       className={cn(
-                        "relative h-11 border-b border-l px-3 text-right transition-colors group-last/row:border-b-0",
+                        "relative h-11 border-b border-l text-right transition-colors group-last/row:border-b-0",
+                        touch ? "px-2.5" : "px-3",
                         flash.has(`${row.id}|${column.id}`) && "celda-llena",
                         edit ? "cursor-cell" : "cursor-default",
                       )}
@@ -535,7 +539,7 @@ export function Hoja(props: HojaProps) {
             {!edit
               ? "Solo lectura."
               : touch
-                ? "Toca una celda para cambiarla, o un nombre para elegir toda la fila o la columna."
+                ? `Toca una celda para cambiarla, o un nombre para elegir toda la fila o la columna.${columns.length > 4 ? " Desliza para ver las demás." : ""}`
                 : "Arrastra o usa Mayúscula y las flechas para elegir varias, escribe un número y Enter. También pegas desde Excel."}
           </span>
         )}
