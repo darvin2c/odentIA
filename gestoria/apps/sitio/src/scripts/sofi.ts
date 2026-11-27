@@ -113,7 +113,7 @@ varying vec3 vVista;
 // El estudio de luz que el vidrio refleja y refracta: un cielo cálido, dos ventanas y el piso.
 vec3 estudio(vec3 d) {
   float y = d.y;
-  vec3 c = mix(vec3(0.16, 0.07, 0.04), vec3(1.0, 0.93, 0.86), smoothstep(-0.35, 0.95, y));
+  vec3 c = mix(vec3(0.38, 0.17, 0.08), vec3(1.0, 0.94, 0.88), smoothstep(-0.45, 0.9, y));
   // Ventana grande arriba a la izquierda.
   float v1 = smoothstep(0.08, 0.0, abs(d.x + 0.42) - 0.26) * smoothstep(0.06, 0.0, abs(d.y - 0.62) - 0.2);
   // Ventana alta y angosta a la derecha.
@@ -157,7 +157,7 @@ void main() {
   float grosor = mix(0.2, 1.0, pow(1.0 - nv, 1.4));
   vec3 cuerpo = mix(uClaro, uCuerpo, smoothstep(0.05, 0.75, grosor));
   cuerpo = mix(cuerpo, uHondo, smoothstep(0.78, 1.0, grosor) * 0.85);
-  vec3 color = cuerpo * (0.62 + 0.55 * refr);
+  vec3 color = cuerpo * (0.72 + 0.5 * refr);
   // El brillo interno que junta la luz abajo, del lado contrario a la ventana.
   float caustica = pow(max(dot(N, normalize(vec3(0.35, -0.65, 0.65))), 0.0), 5.0);
   color += vec3(1.0, 0.78, 0.45) * caustica * 0.75;
@@ -545,7 +545,7 @@ export function crearSofi(quieta: boolean): Sofi | null {
     malla.rotation.set(rot.x, rot.y, quieta ? 0 : Math.sin(ahora / 1700) * 0.05)
     aura.position.set(malla.position.x, malla.position.y - radio * 0.1, -400)
     aura.scale.setScalar(radio * 4.2)
-    auraU.uFuerza.value = 0.22 + animo.brillo * 0.5 + animo.feliz * 0.08
+    auraU.uFuerza.value = 0.28 + animo.brillo * 0.5 + animo.feliz * 0.08
 
     renderer.render(escena, camara)
   }

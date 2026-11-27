@@ -202,14 +202,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
 - El botón principal es el WhatsApp de ventas (`vars.SALES_WHATSAPP`) mientras los chats esperan a
   Meta; `TIENDAS_ABIERTAS` en `src/lib/sitio.ts` lo pasa a «Crea tu tienda» cuando el usuario lo
   decida. «Entrar» lleva al ingreso de la app.
-- Las páginas del plan (web v3) están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
+- Las páginas del plan están en `SITE_MAP` de `src/lib/sitio.ts`: mientras una no existe,
   la cabecera y el pie llevan a su parte del Inicio o no la muestran; al armarla pasa a `lista`.
-- El diseño es el de tasteskill 2.5.1: sus archivos van tal cual en `public/assets/` (no se editan;
-  su puerta los compara) y lo propio, en `src/styles/`. Las pantallas de la app son capturas
-  reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras y con `astro:assets`; nunca
-  dibujadas ni recortadas. El chat de WhatsApp del Inicio va en código: es lo que ve la clienta,
-  no la app. El movimiento del Inicio (GSAP con ScrollTrigger, Lenis y three.js, en `src/scripts/`)
-  cuenta la venta; con «reducir movimiento» nada se fija ni se mueve.
+- El diseño es propio (web v5): `src/styles/base.css` (Geist, tinta cálida y #CC4604), `inicio.css` y
+  `paginas.css`. La cabecera es transparente sobre el héroe y blanca con desenfoque al bajar. Las
+  pantallas de la app son capturas reales de la tienda de ejemplo (`src/assets/pantallas/`), enteras
+  y con `astro:assets`; nunca dibujadas ni recortadas. El chat del héroe va en código: es lo que ve
+  la clienta, no la app.
+- Sofi es el objeto vivo de la web: un globo de chat de vidrio naranja con un shader propio
+  (`src/scripts/sofi.ts`, three.js cargado aparte), en un solo lienzo fijo que viaja a cada
+  `[data-sofi]` (su valor es el humor). El movimiento del Inicio es GSAP con ScrollTrigger y Lenis
+  (`src/scripts/inicio.ts`): sin JavaScript o con «reducir movimiento», la página está completa y
+  quieta (lo que se esconde para entrar depende de la clase `mueve`).
 - El logo es el de la marca común guardado como archivo (`src/assets/`, lo vigila `marca.test.tsx`).
 
 ## Trabajo

@@ -21,7 +21,10 @@
   --naranja-hondo: #a83a03;
   --verde: #0e8a4f;
   --verde-claro: #dcf6e7;
-  --degradado: linear-gradient(100deg, #ffb27a 0%, #ff7a2f 38%, #e2560f 70%, #cc4604 100%);
+  /* El degradado de los títulos: sobre fondo claro empieza en un naranja con contraste (≥ 3:1 en
+     títulos grandes); sobre fondo oscuro, en el durazno claro. */
+  --degradado: linear-gradient(100deg, #e85a10 0%, #cc4604 55%, #a83a03 100%);
+  --degradado-oscuro: linear-gradient(100deg, #ffb27a 0%, #ff7a2f 38%, #e2560f 70%, #cc4604 100%);
   --sombra-1: 0 1px 2px rgba(29, 21, 18, 0.06), 0 2px 8px rgba(29, 21, 18, 0.05);
   --sombra-2: 0 2px 4px rgba(29, 21, 18, 0.04), 0 12px 32px -8px rgba(29, 21, 18, 0.14);
   --sombra-3: 0 4px 10px rgba(20, 13, 10, 0.08), 0 30px 70px -20px rgba(20, 13, 10, 0.35);
@@ -210,6 +213,11 @@ button {
   color: transparent;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+}
+.heroe .acento,
+.argos .acento,
+.pie .acento {
+  background-image: var(--degradado-oscuro);
 }
 .bajada {
   font-size: clamp(17px, 1.35vw, 19px);
@@ -619,21 +627,6 @@ button {
   color: #fff;
   overflow: hidden;
   --identity-ink: #fff;
-}
-.pie__cierre {
-  position: relative;
-  padding: clamp(80px, 10vw, 140px) 0 clamp(56px, 7vw, 96px);
-}
-.pie__cierre h2 {
-  font-size: clamp(40px, 6.4vw, 88px);
-  letter-spacing: -0.045em;
-  line-height: 0.98;
-}
-.pie__cierre p {
-  margin-top: 20px;
-  color: #c9b9ae;
-  font-size: clamp(17px, 1.4vw, 20px);
-  max-width: 30em;
 }
 .pie__botones {
   margin-top: 32px;

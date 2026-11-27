@@ -228,6 +228,21 @@ function heroe(sofi: Sofi | null) {
     },
   })
 
+  // Con el puntero (en computadora), la demo se inclina un poco hacia él: tiene profundidad.
+  if (matchMedia("(hover: hover) and (pointer: fine)").matches) {
+    const caja = $("[data-demo-caja]")
+    const rx = gsap.quickTo(demo, "rotationX", { duration: 1.2, ease: "power3" })
+    const ry = gsap.quickTo(demo, "rotationY", { duration: 1.2, ease: "power3" })
+    $(".heroe")?.addEventListener("pointermove", (e) => {
+      if (!caja) return
+      const r = caja.getBoundingClientRect()
+      const x = (e.clientX - (r.left + r.width / 2)) / window.innerWidth
+      const y = (e.clientY - (r.top + r.height / 2)) / window.innerHeight
+      ry(x * 10)
+      rx(-y * 8)
+    })
+  }
+
   // Al bajar: el texto sube y se apaga, la demo se inclina hacia atrás y la hoja blanca la tapa.
   gsap.to("[data-heroe-texto]", {
     yPercent: -18,
@@ -235,7 +250,7 @@ function heroe(sofi: Sofi | null) {
     ease: "none",
     scrollTrigger: { trigger: ".heroe", start: "top top", end: "bottom top", scrub: true },
   })
-  gsap.to(demo, {
+  gsap.to("[data-demo-caja]", {
     rotateX: 16,
     scale: 0.9,
     y: 60,
