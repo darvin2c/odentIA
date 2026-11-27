@@ -38,7 +38,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { CATALOG_KEY } from "./catalogo"
 import { ApiError, api } from "./lib/api"
 import { isImageFile, MEDIA_OFF, preparePhoto } from "./lib/medios"
@@ -92,6 +92,9 @@ interface LoadSummary {
   photos: number
 }
 
+/** Cambia cuando un dato no se pudo guardar: los campos vuelven a lo guardado. */
+const ResetContext = createContext(0)
+
 const LOADS_KEY = (storeId: string) => ["cargas", storeId]
 const LOAD_KEY = (storeId: string, loadId: string) => ["carga", storeId, loadId]
 
@@ -137,6 +140,10 @@ export function BulkLoadPage() {
   const open = loads.data?.loads.find((l) => l.state === "abierta")
   const [loadId, setLoadId] = useState<string | null>(null)
   const current = loadId ?? open?.id ?? null
+  // Viven aquí y no en cada vista: la primera subida sigue (con su avance y su aviso) cuando la
+  // página pasa de «Start» a la carga recién abierta.
+  const upload = useUploadPhotos(current)
+  const sheet = useSheet()
 
   const back = (
     <Link
@@ -176,9 +183,15 @@ export function BulkLoadPage() {
       </>
     )
   return current ? (
-    <LoadView back={back} loadId={current} onClosed={() => setLoadId(null)} />
+    <LoadView
+      back={back}
+      loadId={current}
+      upload={upload}
+      sheet={sheet}
+      onClosed={() => setLoadId(null)}
+    />
   ) : (
-    <Start back={back} onOpened={setLoadId} />
+    <Start back={back} upload={upload} sheet={sheet} onOpened={setLoadId} />
   )
 }
 
@@ -210,11 +223,15 @@ function useUploadPhotos(loadId: string | null) {
       }
       return { id, sent: photos.length - failed, failed }
     },
-    onSuccess: async ({ id, sent, failed }) => {
-      setProgress(null)
-      setOff(false)
+    onSettled: async (_, __, input) => {
+      const id = input.to ?? loadId
+      if (!id) return
       await queryClient.invalidateQueries({ queryKey: LOAD_KEY(store.id, id) })
       await queryClient.invalidateQueries({ queryKey: LOADS_KEY(store.id) })
+    },
+    onSuccess: ({ sent, failed }) => {
+      setProgress(null)
+      setOff(false)
       if (sent) toast.success(sent === 1 ? "Subiste 1 foto" : `Subiste ${sent} fotos`)
       if (failed)
         toast.error(
@@ -386,10 +403,21 @@ function Progress({ progress }: { progress: { done: number; total: number } | nu
 }
 
 /** Sin carga abierta: soltar las fotos (o la hoja) abre una. */
-function Start({ back, onOpened }: { back: React.ReactNode; onOpened: (id: string) => void }) {
+type Uploads = ReturnType<typeof useUploadPhotos>
+type Sheets = ReturnType<typeof useSheet>
+
+function Start({
+  back,
+  upload,
+  sheet,
+  onOpened,
+}: {
+  back: React.ReactNode
+  upload: Uploads
+  sheet: Sheets
+  onOpened: (id: string) => void
+}) {
   const { store } = useStoreContext()
-  const upload = useUploadPhotos(null)
-  const sheet = useSheet()
   const openLoad = async () => {
     const { load } = await api<{ load: { id: string } }>(`/api/tiendas/${store.id}/cargas`, {
       method: "POST",
@@ -468,10 +496,14 @@ function useSheet() {
 function LoadView({
   back,
   loadId,
+  upload,
+  sheet,
   onClosed,
 }: {
   back: React.ReactNode
   loadId: string
+  upload: Uploads
+  sheet: Sheets
   onClosed: () => void
 }) {
   const { store } = useStoreContext()
@@ -483,11 +515,11 @@ function LoadView({
     staleTime: 4 * 60_000,
     refetchInterval: 8 * 60_000,
   })
-  const upload = useUploadPhotos(loadId)
-  const sheet = useSheet()
   const [selection, setSelection] = useState<RowSelectionState>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [general, setGeneral] = useState<string[]>([])
+  // Cambia cuando un dato no se pudo guardar: cada campo vuelve a lo guardado.
+  const [reset, setReset] = useState(0)
   const refresh = () => queryClient.invalidateQueries({ queryKey: LOAD_KEY(store.id, loadId) })
   const base = `/api/tiendas/${store.id}/cargas/${loadId}`
 
@@ -547,7 +579,7 @@ function LoadView({
   const live = useRef({ items, errors })
   live.current = { items, errors }
   const allPhotos = items.reduce((n, i) => n + i.photos.length, 0) + loose.length
-  const chosen = Object.keys(selection).filter((id) => selection[id])
+  const chosen = items.filter((i) => selection[i.id]).map((i) => i.id)
 
   /** «Mover a…»: a otro producto de la carga, a uno nuevo o sin producto. */
   const moveTo = (photoId: string, target: string | null | "nuevo") =>
@@ -556,8 +588,13 @@ function LoadView({
       method: "PATCH",
       body: target === "nuevo" ? { newItem: true } : { itemId: target },
     })
-  const save = (itemId: string, body: Record<string, unknown>) =>
-    call.mutate({ path: `/productos/${itemId}`, method: "PATCH", body })
+  const save = (itemId: string, body: Record<string, unknown>) => {
+    setErrors(({ [itemId]: _, ...rest }) => rest)
+    call.mutate(
+      { path: `/productos/${itemId}`, method: "PATCH", body },
+      { onError: () => setReset((n) => n + 1) },
+    )
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: las acciones no cambian la forma de la tabla
   const columns = useMemo<ColumnDef<LoadItem>[]>(
@@ -837,7 +874,9 @@ function LoadView({
         />
       ) : (
         <>
-          <DataTable table={table} isFetching={detail.isFetching} wrap />
+          <ResetContext.Provider value={reset}>
+            <DataTable table={table} isFetching={detail.isFetching} wrap />
+          </ResetContext.Provider>
           <p className="text-sm text-muted-foreground">
             {ready === items.length
               ? "Todos tienen nombre y precio: «Crear» los pasa al catálogo de una vez."
@@ -872,7 +911,9 @@ function TextCell({
   inputMode?: "decimal" | "numeric"
 }) {
   const [text, setText] = useState(value)
-  useEffect(() => setText(value), [value])
+  const reset = useContext(ResetContext)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reset` vuelve a lo guardado
+  useEffect(() => setText(value), [value, reset])
   const commit = () => {
     if (text.trim() !== value.trim()) onSave(text)
   }

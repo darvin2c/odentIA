@@ -86,9 +86,12 @@ export async function preparePhoto(file: File): Promise<Blob> {
   canvas.height = Math.round(bitmap.height * scale)
   canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
   bitmap.close()
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", 0.88),
-  )
+  // Una PNG o WebP puede traer el fondo transparente (un recorte): va en WebP, que lo guarda.
+  const keepsAlpha = /image\/(png|webp)/.test(file.type)
+  const encode = (type: string) =>
+    new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.88))
+  const webp = keepsAlpha ? await encode("image/webp") : null
+  const blob = webp?.type === "image/webp" ? webp : await encode("image/jpeg")
   if (!blob) throw new Error("No se pudo preparar la foto. Prueba con otra.")
   return blob
 }

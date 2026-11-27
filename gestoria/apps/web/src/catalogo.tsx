@@ -585,20 +585,21 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null)
+  // La hoja tal como está: CSV o Excel (.xlsx); el servidor la lee (ADR 0236).
+  const [file, setFile] = useState<{ name: string; text: Blob } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
-  const send = (text: string, confirm: boolean) =>
+  const send = (text: Blob, confirm: boolean) =>
     api<SheetResult>(`/api/tiendas/${store.id}/catalogo/hoja${confirm ? "?confirmar=1" : ""}`, {
       method: "POST",
-      raw: { type: "text/csv", data: text },
+      raw: { type: text.type || "text/csv", data: text },
     })
-  const preview = useMutation({ mutationFn: (text: string) => send(text, false) })
+  const preview = useMutation({ mutationFn: (text: Blob) => send(text, false) })
   const save = useMutation({
-    mutationFn: (text: string) => send(text, true),
+    mutationFn: (text: Blob) => send(text, true),
     onSuccess: async (result) => {
       if (!result.saved) {
         preview.reset()
-        preview.mutate(file?.text ?? "")
+        if (file) preview.mutate(file.text)
         return
       }
       await queryClient.invalidateQueries({ queryKey: CATALOG_KEY(store.id) })
@@ -619,10 +620,10 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
     if (!chosen) return
     setProblem(null)
     save.reset()
-    if (!/\.(csv|txt)$/i.test(chosen.name)) {
+    if (!/\.(csv|txt|xlsx)$/i.test(chosen.name)) {
       setFile(null)
       setProblem(
-        "Guarda tu hoja como CSV y súbela otra vez. En Excel: Archivo › Guardar como › CSV UTF-8. En Google Sheets: Archivo › Descargar › CSV.",
+        "Sube tu hoja de Excel (.xlsx) o un CSV. En Google Sheets: Archivo › Descargar › Microsoft Excel o CSV.",
       )
       return
     }
@@ -631,9 +632,8 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
       setProblem("La hoja es muy grande: divídela en partes de hasta 2000 filas.")
       return
     }
-    const text = await chosen.text()
-    setFile({ name: chosen.name, text })
-    preview.mutate(text)
+    setFile({ name: chosen.name, text: chosen })
+    preview.mutate(chosen)
   }
 
   const result = preview.data
@@ -661,8 +661,8 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-2 rounded-lg border bg-surface-muted p-4 text-sm">
           <p>
-            Empieza con la hoja de ejemplo: ábrela en Excel o Google Sheets, reemplaza las filas por
-            las tuyas y guárdala como CSV.
+            Sube tu hoja de Excel o un CSV, con las tallas en filas o una columna por talla. Si no
+            tienes una, empieza con la de ejemplo y reemplaza sus filas por las tuyas.
           </p>
           <Button
             type="button"
@@ -679,7 +679,7 @@ function SheetUpload({ onClose }: { onClose: () => void }) {
         <input
           ref={input}
           type="file"
-          accept=".csv,text/csv,text/plain"
+          accept=".csv,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="sr-only"
           tabIndex={-1}
           aria-hidden

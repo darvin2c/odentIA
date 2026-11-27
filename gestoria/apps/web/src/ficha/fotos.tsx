@@ -106,15 +106,27 @@ function useMediaActions() {
       let done = 0
       const total = take.length + Math.min(1, videos.length)
       setProgress({ done, total })
+      let failed = 0
       for (const file of take) {
-        const blob = await preparePhoto(file)
-        await api(`/api/tiendas/${store.id}/productos/${sheet.id}/fotos`, {
-          method: "POST",
-          raw: { type: blob.type || "image/jpeg", data: blob },
-        })
+        try {
+          const blob = await preparePhoto(file)
+          await api(`/api/tiendas/${store.id}/productos/${sheet.id}/fotos`, {
+            method: "POST",
+            raw: { type: blob.type || "image/jpeg", data: blob },
+          })
+        } catch (error) {
+          // Sin almacenamiento no sigue; una foto que no se abre no frena a las demás.
+          if (error instanceof ApiError && error.code === MEDIA_OFF) throw error
+          failed++
+        }
         done++
         setProgress({ done, total })
       }
+      if (failed)
+        toast.error(
+          failed === 1 ? "1 foto no se pudo subir" : `${failed} fotos no se pudieron subir`,
+          { description: "Prueba con fotos en JPG, PNG o WebP." },
+        )
       if (videos.length > 1) toast.info("Un video por vez: se sube el primero.")
       const [video] = videos
       if (video) {
@@ -128,7 +140,7 @@ function useMediaActions() {
         })
         done++
       }
-      return { photos: take.length, video: Boolean(video) }
+      return { photos: take.length - failed, video: Boolean(video) }
     },
     onSuccess: async (result) => {
       setProgress(null)
