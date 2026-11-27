@@ -1,4 +1,4 @@
-import type { DeliveryType, PaymentCollection } from "./tienda"
+import type { DeliveryType, PaymentCollection, PaymentTypeCode } from "./tienda"
 
 /**
  * Lo que la pantalla sabe de los pedidos (paso B4): sus tipos, como los dice el servidor, y sus
@@ -22,6 +22,19 @@ export type OrderFilter =
   | "entregados"
   | "anulados"
 
+/**
+ * El saldo de un pedido, como lo calcula el servidor en un solo lugar: lo cobrado, lo que espera a
+ * una persona y lo que falta cobrar (total − confirmado − por confirmar). «Pagado» es no deber
+ * nada con todo confirmado. La pantalla no lo recalcula.
+ */
+export interface Balance {
+  confirmedCents: number
+  pendingCents: number
+  dueCents: number
+  overCents: number
+  paid: boolean
+}
+
 export interface OrderRow {
   id: string
   number: string
@@ -41,9 +54,13 @@ export interface OrderRow {
   /** De «Probar a Sofi»: no mueve stock ni cuenta en Reportes. */
   test: boolean
   bySofi: boolean
+  balance: Balance
+  paid: boolean
 }
 
 export interface OrderList {
+  /** Qué día es en la tienda, con su hora. */
+  today: string
   orders: OrderRow[]
   counts: Record<OrderFilter, number>
 }
@@ -67,6 +84,9 @@ export interface OrderPayment {
   kind: PaymentCollection
   status: "por_confirmar" | "confirmado" | "no_coincide"
   amountCents: number
+  /** Con qué pagó: el medio de la tienda («Yape», «Efectivo al recibir»). */
+  methodName: string
+  methodType: PaymentTypeCode
   operation: string | null
   hasPhoto: boolean
   note: string | null
@@ -75,6 +95,8 @@ export interface OrderPayment {
   createdByName: string | null
   reviewedByName: string | null
   byLink: boolean
+  /** Si se confirma, cuánto pasaría del total: más de 0 es un pago doble. */
+  overIfConfirmedCents: number
 }
 
 export interface OrderEvent {
@@ -129,7 +151,11 @@ export interface OrderDetail {
   linkConnected: boolean
   cancelReason: string | null
   createdAt: string
+  balance: Balance
+  /** «Pagado»: no falta cobrar y todo está confirmado. */
   paid: boolean
+  /** Ya entró dinero (un pago confirmado o uno por el link que espera): lo anula quien confirma pagos. */
+  moneyIn: boolean
   stockPending: boolean
   test: boolean
   bySofi: boolean
@@ -172,24 +198,32 @@ export interface SellableVariant {
   promotion: string | null
 }
 
-/** El nombre de cada estado. «Pago por confirmar» nunca se dice como pagado. */
+/**
+ * El nombre de cada estado. «Pago por confirmar» nunca se dice como pagado, y «Pagado» solo si no
+ * falta cobrar nada con todo confirmado (el saldo del servidor).
+ */
 export function stateName(order: {
   state: OrderState
   paymentCollection: PaymentCollection
+  balance: Balance
 }): string {
+  const { balance } = order
+  const nothingYet = balance.confirmedCents + balance.pendingCents === 0
   switch (order.state) {
     case "por_pagar":
       return "Por pagar"
     case "por_confirmar":
       return "Pago por confirmar"
     case "por_salir":
-      return order.paymentCollection === "al_recibir"
+      if (balance.paid) return "Pagado · por salir"
+      if (balance.dueCents === 0) return "Por salir · pago por confirmar"
+      return order.paymentCollection === "al_recibir" && nothingYet
         ? "Por salir · cobra al recibir"
-        : "Pagado · por salir"
+        : "Por salir · falta cobrar"
     case "en_camino":
-      return "En camino"
+      return balance.dueCents > 0 ? "En camino · falta cobrar" : "En camino"
     case "entregado":
-      return "Entregado"
+      return balance.dueCents > 0 ? "Entregado · falta cobrar" : "Entregado"
     default:
       return "Anulado"
   }
@@ -224,14 +258,28 @@ export const FILTERS: { value: OrderFilter; label: string }[] = [
   { value: "anulados", label: "Anulados" },
 ]
 
-/** La fecha de hoy en el equipo de la persona («2026-11-19»). */
-export function localToday(now = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+/**
+ * Qué día es en la tienda («2026-11-19»), con su hora: la misma que usa el servidor para «Para
+ * entregar hoy» y Reportes, aunque el equipo de la persona esté en otra.
+ */
+export function storeToday(timeZone: string, now = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now)
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ""
+    return `${part("year")}-${part("month")}-${part("day")}`
+  } catch {
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
 }
 
-/** «hoy», «mañana», «ayer» o «jue 20 nov». */
-export function dayName(date: string, today = localToday()): string {
+/** «hoy», «mañana», «ayer» o «jue 20 nov», contados desde `today` (el de la tienda). */
+export function dayName(date: string, today: string): string {
   const day = (text: string) =>
     Date.UTC(Number(text.slice(0, 4)), Number(text.slice(5, 7)) - 1, Number(text.slice(8, 10)))
   const diff = Math.round((day(date) - day(today)) / 86_400_000)

@@ -9,6 +9,7 @@ import {
 import { and, eq } from "drizzle-orm"
 import type { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { addDays, storeClockIn } from "./hora.js"
 import {
   addReceipt,
   cancelOrder,
@@ -17,7 +18,6 @@ import {
   markShipped,
   orderInput,
   reviewPayment,
-  todayUTC,
 } from "./pedidos.js"
 
 /**
@@ -74,8 +74,9 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
   const [yape, plin, transferencia, efectivo] = await Promise.all(
     ["Yape", "Plin", "Transferencia BCP", "Efectivo al recibir"].map(payment),
   )
-  const today = todayUTC()
-  const tomorrow = todayUTC(new Date(Date.now() + 86_400_000))
+  // El día de la tienda, con su hora (la de Lima).
+  const { today } = await storeClockIn(tx, storeId)
+  const tomorrow = addDays(today, 1)
 
   // Como lo arma «Anotar un pedido»: con los mismos valores por omisión.
   const create = async (input: Partial<z.input<typeof orderInput>>) =>
@@ -112,7 +113,7 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
   })
   await confirm(pedro, 22900, "00412233")
   await markShipped(tx, lucia, storeId, pedro, { tracking: null })
-  await markDelivered(tx, lucia, storeId, pedro, { collectedCents: null })
+  await markDelivered(tx, lucia, storeId, pedro, { collectedCents: null, methodId: null })
 
   // Anulado: el cliente se arrepintió antes de pagar.
   const sofia = await create({
@@ -193,4 +194,67 @@ export async function seedDemoOrders(tx: Db, storeId: string): Promise<void> {
     deliverOn: tomorrow,
   })
   await receipt(carla, 12000, "00123456")
+}
+
+/**
+ * El pago en partes (lienzo «gestorIA como odentIA», tablero 7): Diana pide una zapatilla de
+ * S/ 117 con envío, paga S/ 80 por Yape y Rosa lo confirma; el pedido queda listo para salir con
+ * S/ 37 por cobrar al entregar. Se agrega una vez, aunque la tienda ya tenga sus pedidos.
+ */
+export async function seedDemoPartPayment(tx: Db, storeId: string): Promise<void> {
+  const [already] = await tx
+    .select({ id: saleOrder.id })
+    .from(saleOrder)
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.customerName, "Diana Flores")))
+    .limit(1)
+  if (already) return
+  const [variant] = await tx
+    .select({ id: productVariant.id, values: productVariant.optionValues })
+    .from(productVariant)
+    .innerJoin(product, eq(product.id, productVariant.productId))
+    .where(and(eq(productVariant.storeId, storeId), eq(product.name, "Zapatilla urbana")))
+    .then((rows) => rows.filter((row) => row.values.join(" ") === "blanca 39"))
+  const [yape] = await tx
+    .select({ id: storePaymentMethod.id })
+    .from(storePaymentMethod)
+    .where(and(eq(storePaymentMethod.storeId, storeId), eq(storePaymentMethod.name, "Yape")))
+  const [reparto] = await tx
+    .select({ id: storeDeliveryMethod.id })
+    .from(storeDeliveryMethod)
+    .where(
+      and(
+        eq(storeDeliveryMethod.storeId, storeId),
+        eq(storeDeliveryMethod.name, "Reparto en Lima"),
+      ),
+    )
+  if (!variant || !yape || !reparto) return
+  const { today } = await storeClockIn(tx, storeId)
+  const created = await createOrderIn(
+    tx,
+    storeId,
+    lucia.userId,
+    orderInput.parse({
+      customerName: "Diana Flores",
+      customerPhone: "+51 945 112 233",
+      channel: "whatsapp",
+      address: "Av. Caminos del Inca 1450, Surco",
+      notes: "El resto lo paga en efectivo al recibir",
+      lines: [{ variantId: variant.id, quantity: 1, unitCents: 10700 }],
+      deliveryMethodId: reparto.id,
+      zone: "Surco y Miraflores",
+      paymentMethodId: yape.id,
+      deliverOn: today,
+    }),
+  )
+  const detail = await addReceipt(
+    tx,
+    lucia,
+    storeId,
+    created.id,
+    { amountCents: 8000, operation: "00556677" },
+    null,
+  )
+  await reviewPayment(tx, rosa, storeId, created.id, detail.payments.at(-1)!.id, {
+    decision: "confirmar",
+  })
 }

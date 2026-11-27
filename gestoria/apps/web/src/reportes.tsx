@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { api } from "./lib/api"
-import { CHANNELS, localToday, when } from "./lib/pedidos"
+import { CHANNELS, when } from "./lib/pedidos"
 import { type ArgosBoard, type StoreReport, usd } from "./lib/sofi"
 import { money } from "./lib/tienda"
 import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
@@ -26,11 +26,10 @@ const PERIODS: { value: Period; label: string }[] = [
 export function ReportsPage() {
   const { store } = useStoreContext()
   const [period, setPeriod] = useState<Period>("mes")
-  const today = localToday()
+  // Los periodos los cuenta el servidor con la hora de la tienda.
   const report = useQuery({
-    queryKey: ["reportes", store.id, period, today],
-    queryFn: () =>
-      api<StoreReport>(`/api/tiendas/${store.id}/reportes?periodo=${period}&hoy=${today}`),
+    queryKey: ["reportes", store.id, period],
+    queryFn: () => api<StoreReport>(`/api/tiendas/${store.id}/reportes?periodo=${period}`),
   })
   const m = (cents: number) => money(cents, store.currency)
   const r = report.data
@@ -62,10 +61,15 @@ export function ReportsPage() {
             />
             <KpiCard
               title="Falta cobrar"
-              value={m(
-                r.pending.toConfirm.cents + r.pending.toPay.cents + r.pending.onDelivery.cents,
-              )}
-              description={`${r.pending.toConfirm.orders} por confirmar · ${r.pending.toPay.orders} por pagar · ${r.pending.onDelivery.orders} al recibir`}
+              value={m(r.pending.due.cents)}
+              description={[
+                `${r.pending.due.orders} ${r.pending.due.orders === 1 ? "pedido" : "pedidos"}`,
+                r.pending.toConfirm.cents > 0
+                  ? `aparte, ${m(r.pending.toConfirm.cents)} por confirmar`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
             <KpiCard
               title="Compraron"

@@ -12,7 +12,7 @@ import type { AccountState } from "@odentia/contract"
 import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
-import { seedDemoOrders } from "./semilla-pedidos.js"
+import { seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
 import { receiveSupportRequest } from "./soporte.js"
 
@@ -89,6 +89,7 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     }
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
@@ -253,7 +254,11 @@ async function seedDemoSupport(tx: Db, storeId: string): Promise<void> {
   if (pending) return
   await receiveSupportRequest(tx, {
     account: storeId,
-    staff: { userId: "semilla-soporte", name: "Ana de Soporte (ficticia)", email: "soporte@example.test" },
+    staff: {
+      userId: "semilla-soporte",
+      name: "Ana de Soporte (ficticia)",
+      email: "soporte@example.test",
+    },
     minutes: 30,
     reason: "Revisar contigo por qué no se ven las fotos del catálogo",
   })

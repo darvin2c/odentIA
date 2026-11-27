@@ -3,10 +3,13 @@ import {
   type Db,
   MAX_PHOTO_BYTES,
   ORDER_CHANNELS,
+  ORDER_STATES,
   type OrderEventAction,
   type OrderState,
   orderEvent,
   orderPayment,
+  type PaymentCollection,
+  type PaymentTypeCode,
   product,
   productPhoto,
   productPromotion,
@@ -27,6 +30,7 @@ import { agentName, SOFI_ACTOR } from "./agente.js"
 import { imageType } from "./catalogo.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
+import { storeClockIn } from "./hora.js"
 import type { LinkAdapters } from "./link-de-pago.js"
 import { can } from "./permisos.js"
 import {
@@ -38,6 +42,7 @@ import {
   type QuoteLine,
   quote,
 } from "./precio.js"
+import { balanceIn, balancesIn, overIfConfirmed, unpaidBalance } from "./saldo.js"
 import { openSecret, sealSecret } from "./secretos.js"
 import { cancelSale, recordSale } from "./stock.js"
 import { inStore, StoreError } from "./tiendas.js"
@@ -53,6 +58,10 @@ import { inStore, StoreError } from "./tiendas.js"
  *   dinero ya llegó) y el stock se descuenta al salir: sin stock, no sale.
  * - El cobro va en orden: link de pago (se confirma solo), captura (la confirma una persona) y
  *   al recibir. Una captura es lo único que espera a alguien.
+ * - Un pedido acepta varios pagos, cada uno con su medio y su estado (ADR 0222). Lo que falta
+ *   cobrar sale de un solo lugar (`saldo.ts`); el primer pago confirmado lo deja listo para salir
+ *   y queda «Pagado» solo cuando no falta nada y todo está confirmado.
+ * - «Hoy» es el de la tienda, con su hora (`hora.ts`): nunca el del servidor ni el del navegador.
  * - Los avisos al cliente quedan escritos en la historia del pedido; hoy no salen, porque
  *   WhatsApp llega con B2.
  */
@@ -64,10 +73,13 @@ const stockReference = (number: number) => `Pedido ${pad(number)}`
 const OPEN: OrderState[] = ["por_pagar", "por_confirmar", "por_salir", "en_camino"]
 const TO_DELIVER: OrderState[] = ["por_salir", "en_camino"]
 
-/** Los filtros de la lista (tablero 5). */
+/**
+ * Los filtros de la lista (tablero 5). «Pago por confirmar» es todo pedido con un pago que espera
+ * a una persona, también el segundo pago de uno que ya sale (el pago en partes).
+ */
 export const ORDER_FILTERS = {
   abiertos: OPEN,
-  por_confirmar: ["por_confirmar"],
+  por_confirmar: [...ORDER_STATES],
   por_pagar: ["por_pagar"],
   para_entregar: TO_DELIVER,
   hoy: TO_DELIVER,
@@ -129,6 +141,12 @@ export const quoteInput = orderInput.extend({
   customerName: z.string().trim().max(120).default(""),
 })
 
+/** El medio de pago de la tienda con que pagó; vacío: el del pedido, si se cobra así. */
+const methodId = z
+  .union([z.uuid("Elige el medio de pago"), z.literal("")])
+  .nullish()
+  .transform((value) => value || null)
+
 export const receiptInput = z.object({
   amountCents: cents.min(1, "Escribe el monto que se ve en la captura"),
   operation: z
@@ -137,6 +155,7 @@ export const receiptInput = z.object({
     .max(60, "Máximo 60 caracteres")
     .default("")
     .transform((value) => value || null),
+  methodId,
 })
 
 const reason = z.string().trim().min(3, "Escribe el motivo").max(300, "Máximo 300 caracteres")
@@ -156,15 +175,17 @@ export const shipInput = z.object({
 })
 
 export const deliverInput = z.object({
-  /** Con pago al recibir: lo que cobró en la puerta. */
+  /** Si falta cobrar: lo que cobró en la puerta. */
   collectedCents: cents.nullable().default(null),
+  /** Con qué le pagaron en la puerta (un medio de la tienda que se cobra al recibir). */
+  methodId,
 })
 
 export const cancelInput = z.object({ reason })
 
-/** Hoy, en UTC (como las promociones de B3; la zona horaria de la tienda llega con B5). */
-export function todayUTC(now = new Date()): string {
-  return now.toISOString().slice(0, 10)
+/** Qué día es en la tienda (su hora, `hora.ts`). */
+async function todayIn(tx: Db, storeId: string, now = new Date()) {
+  return (await storeClockIn(tx, storeId, now)).today
 }
 
 function uuidOr404(id: string) {
@@ -396,9 +417,10 @@ export async function quoteOrder(
   person: Person,
   storeId: string,
   input: OrderInput,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const today = await todayIn(tx, storeId, now)
     const { quote: q, fields } = await quoteOrderIn(tx, storeId, input, today)
     return { quote: q, fields }
   })
@@ -432,18 +454,29 @@ type Notice =
  */
 async function notifyCustomer(
   tx: Db,
-  order: { id: string; storeId: string; number: number; totalCents: number },
+  order: { id: string; storeId: string; number: number; totalCents: number; state?: OrderState },
   actorUserId: string | null,
   currency: string,
   kind: Notice,
-  extra: { url?: string; tracking?: string | null } = {},
+  extra: {
+    url?: string
+    tracking?: string | null
+    /** Con un pago confirmado: cuánto pagó y cuánto falta (el pago en partes). */
+    paidCents?: number
+    dueCents?: number
+  } = {},
 ) {
   const n = pad(order.number)
   const total = formatMoney(order.totalCents, currency)
   const text: Record<Notice, string> = {
     resumen: `Tu pedido ${n} quedó anotado. Total: ${total}.`,
     link: `Puedes pagar tu pedido ${n} (${total}) aquí: ${extra.url ?? ""}`,
-    pago_confirmado: `Recibimos tu pago del pedido ${n}. ¡Gracias! Te avisamos cuando salga.`,
+    pago_confirmado:
+      extra.dueCents && extra.paidCents
+        ? `Recibimos tu pago de ${formatMoney(extra.paidCents, currency)} del pedido ${n}. Falta pagar ${formatMoney(extra.dueCents, currency)}.`
+        : order.state === "en_camino" || order.state === "entregado"
+          ? `Recibimos tu pago del pedido ${n}. ¡Gracias!`
+          : `Recibimos tu pago del pedido ${n}. ¡Gracias! Te avisamos cuando salga.`,
     pago_no_coincide: `No pudimos confirmar el pago de tu pedido ${n}. ¿Puedes revisarlo y enviarnos la captura otra vez?`,
     en_camino: `Tu pedido ${n} va en camino.${extra.tracking ? ` Número de envío: ${extra.tracking}.` : ""}`,
     entregado: `Tu pedido ${n} fue entregado. ¡Gracias por tu compra!`,
@@ -473,7 +506,8 @@ export async function createOrderIn(
 ) {
   const now = options.now ?? new Date()
   const { currency } = await storeRow(tx, storeId)
-  const result = await priceOrder(tx, storeId, currency, input, options.today ?? todayUTC(now))
+  const today = options.today ?? (await todayIn(tx, storeId, now))
+  const result = await priceOrder(tx, storeId, currency, input, today)
   if (!result.ok)
     throw new StoreError(
       400,
@@ -575,10 +609,10 @@ export async function createOrder(
   person: Person,
   storeId: string,
   input: OrderInput,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const created = await createOrderIn(tx, storeId, person.userId, input, { today })
+    const created = await createOrderIn(tx, storeId, person.userId, input, { now })
     return orderDetailIn(tx, storeId, created.id)
   })
 }
@@ -590,14 +624,18 @@ export async function listOrders(
   person: Person,
   storeId: string,
   filter: OrderFilter,
-  today = todayUTC(),
+  now = new Date(),
 ) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
+    const today = await todayIn(tx, storeId, now)
     const dueToday = and(inArray(saleOrder.state, TO_DELIVER), lte(saleOrder.deliverOn, today))
+    // Un pago que espera a una persona, en cualquier estado del pedido.
+    const toConfirm = sql`exists (select 1 from ${orderPayment} where ${orderPayment.orderId} = ${saleOrder.id} and ${orderPayment.status} = 'por_confirmar')`
     const where = and(
       eq(saleOrder.storeId, storeId),
       inArray(saleOrder.state, ORDER_FILTERS[filter]),
       filter === "hoy" ? dueToday : undefined,
+      filter === "por_confirmar" ? toConfirm : undefined,
     )
     const rows = await tx
       .select({
@@ -639,7 +677,7 @@ export async function listOrders(
           .where(inArray(saleOrderLine.orderId, ids))
           .orderBy(asc(saleOrderLine.position))
       : []
-    // Quién confirmó el pago: «Yape · confirmado por Rosa».
+    // Quién confirmó el pago: «Yape · confirmado por Rosa» (el último, si pagó en partes).
     const confirmed = ids.length
       ? await tx
           .select({
@@ -650,7 +688,9 @@ export async function listOrders(
           .from(orderPayment)
           .leftJoin(accountCopy, eq(accountCopy.userId, orderPayment.reviewedBy))
           .where(and(inArray(orderPayment.orderId, ids), eq(orderPayment.status, "confirmado")))
+          .orderBy(asc(orderPayment.reviewedAt))
       : []
+    const balances = await balancesIn(tx, ids)
     const counts = await tx
       .select({ state: saleOrder.state, n: count() })
       .from(saleOrder)
@@ -660,6 +700,10 @@ export async function listOrders(
       .select({ n: count() })
       .from(saleOrder)
       .where(and(eq(saleOrder.storeId, storeId), dueToday))
+    const [toConfirm_] = await tx
+      .select({ n: count() })
+      .from(saleOrder)
+      .where(and(eq(saleOrder.storeId, storeId), toConfirm))
     const byState = Object.fromEntries(counts.map((c) => [c.state, c.n])) as Partial<
       Record<OrderState, number>
     >
@@ -667,19 +711,24 @@ export async function listOrders(
     const linesBy = Map.groupBy(lines, (line) => line.orderId)
     const confirmedBy = new Map(confirmed.map((c) => [c.orderId, c]))
     return {
+      /** El día de hoy en la tienda: con él se dice «hoy», «mañana» o «ayer». */
+      today,
       orders: rows.map((row) => {
         const own = linesBy.get(row.id) ?? []
         const paid = confirmedBy.get(row.id)
+        const balance = balances.get(row.id) ?? unpaidBalance(row.totalCents)
         return {
           ...row,
           number: pad(row.number),
           lines: own.map(({ orderId: _, ...line }) => line),
           confirmedBy: paid ? (paid.kind === "link" ? "el link" : paid.name) : null,
+          balance,
+          paid: balance.paid,
         }
       }),
       counts: {
         abiertos: total(OPEN),
-        por_confirmar: total(["por_confirmar"]),
+        por_confirmar: toConfirm_?.n ?? 0,
         por_pagar: total(["por_pagar"]),
         para_entregar: total(TO_DELIVER),
         hoy: today_?.n ?? 0,
@@ -720,6 +769,8 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
       kind: orderPayment.kind,
       status: orderPayment.status,
       amountCents: orderPayment.amountCents,
+      methodName: orderPayment.methodName,
+      methodType: orderPayment.methodType,
       operation: orderPayment.operation,
       hasPhoto: sql<boolean>`${orderPayment.photo} is not null`,
       note: orderPayment.note,
@@ -809,6 +860,7 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
         .from(storePaymentLink)
         .where(eq(storePaymentLink.storeId, storeId))
     ).length > 0
+  const balance = await balanceIn(tx, order)
   const now = Date.now()
   return {
     ...rest,
@@ -819,8 +871,12 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     linkConnected,
     linkUrl: order.linkExpiresAt && order.linkExpiresAt.getTime() <= now ? null : order.linkUrl,
     priceExpired: Boolean(order.priceExpiresAt && order.priceExpiresAt.getTime() <= now),
+    /** Lo cobrado, lo por confirmar y lo que falta cobrar (`saldo.ts`). */
+    balance,
+    /** «Pagado»: no falta cobrar y todo está confirmado. */
+    paid: balance.paid,
     /** Ya entró dinero: un pago confirmado, o uno por el link que espera a una persona. */
-    paid: payments.some(
+    moneyIn: payments.some(
       (p) => p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar"),
     ),
     /** Pagado, pero el stock no alcanzaba: se descuenta al salir. */
@@ -834,6 +890,8 @@ async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
       createdByName: createdBy ? (names.get(createdBy) ?? agentName(createdBy)) : null,
       reviewedByName: reviewedBy ? (names.get(reviewedBy) ?? null) : null,
       byLink: p.kind === "link" && createdBy === null,
+      /** Si se confirma, cuánto pasaría del total: más de 0 es un pago doble. */
+      overIfConfirmedCents: overIfConfirmed(balance, order.totalCents, p),
     })),
     events: events.map(({ actorUserId, ...event }) => ({
       ...event,
@@ -851,9 +909,9 @@ export async function orderDetail(appDb: Db, person: Person, storeId: string, or
 }
 
 /** Lo que se puede vender hoy, con su precio sin negociar y su mínimo, para armar un pedido. */
-export async function sellable(appDb: Db, person: Person, storeId: string, today = todayUTC()) {
+export async function sellable(appDb: Db, person: Person, storeId: string, now = new Date()) {
   return inStore(appDb, person, storeId, "ventas.atender", async (tx) => {
-    const rows = await variantPrices(tx, storeId, today)
+    const rows = await variantPrices(tx, storeId, await todayIn(tx, storeId, now))
     return {
       // El precio de una unidad; el precio por cantidad lo aplica el resumen del pedido.
       variants: rows.map((row) => {
@@ -893,7 +951,7 @@ function stateError(order: OrderRow): StoreError {
   const now: Record<OrderState, string> = {
     por_pagar: "está por pagar",
     por_confirmar: "tiene un pago por confirmar",
-    por_salir: "ya está pagado y por salir",
+    por_salir: "ya está por salir",
     en_camino: "ya va en camino",
     entregado: "ya fue entregado",
     anulado: "está anulado",
@@ -969,25 +1027,72 @@ async function mustSale(tx: Db, order: OrderRow, actor: string) {
  * Si el pedido ya recibió dinero: un pago confirmado, o uno que llegó por el link y espera a una
  * persona (el dinero ya está en la cuenta aunque el monto no coincida).
  */
-async function moneyReceived(tx: Db, orderId: string, except?: string): Promise<boolean> {
+async function moneyReceived(tx: Db, orderId: string): Promise<boolean> {
   const rows = await tx
-    .select({ id: orderPayment.id, kind: orderPayment.kind, status: orderPayment.status })
+    .select({ kind: orderPayment.kind, status: orderPayment.status })
     .from(orderPayment)
     .where(eq(orderPayment.orderId, orderId))
   return rows.some(
-    (p) =>
-      p.id !== except &&
-      (p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar")),
+    (p) => p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar"),
   )
 }
 
-/** Anota la captura de un pago: el pedido queda «pago por confirmar» hasta que una persona lo mire. */
+type MethodCopy = { methodName: string; methodType: PaymentTypeCode }
+
+/**
+ * El medio de un pago, copiado del de la tienda como se copia en el pedido. Con `methodId`, ese
+ * (de la tienda y que se cobre de esa forma); si no, el del pedido si se cobra así, o el primero
+ * encendido que se cobre así. Si la tienda ya no tiene ninguno, el nombre del pedido con su tipo
+ * (o «1», otro, si ya no se sabe); por el link, «Link de pago».
+ */
+async function methodFor(
+  tx: Db,
+  storeId: string,
+  order: OrderRow,
+  collection: PaymentCollection,
+  methodId: string | null = null,
+): Promise<MethodCopy> {
+  const methods = await tx
+    .select({
+      id: storePaymentMethod.id,
+      name: storePaymentMethod.name,
+      typeCode: storePaymentMethod.typeCode,
+      collection: storePaymentMethod.collection,
+      isActive: storePaymentMethod.isActive,
+    })
+    .from(storePaymentMethod)
+    .where(eq(storePaymentMethod.storeId, storeId))
+    .orderBy(asc(storePaymentMethod.createdAt))
+  const usable = methods.filter((m) => m.collection === collection)
+  const copy = (m: { name: string; typeCode: PaymentTypeCode }) => ({
+    methodName: m.name,
+    methodType: m.typeCode,
+  })
+  if (methodId) {
+    const chosen = usable.find((m) => m.id === methodId)
+    if (!chosen)
+      throw new StoreError(400, "VALIDATION_ERROR", "Elige un medio de pago de la lista", {
+        methodId: "Elige un medio de pago de la lista",
+      })
+    return copy(chosen)
+  }
+  const found = usable.find((m) => m.id === order.paymentMethodId) ?? usable.find((m) => m.isActive)
+  if (found) return copy(found)
+  if (collection === "link") return { methodName: "Link de pago", methodType: "68" }
+  const own = methods.find((m) => m.id === order.paymentMethodId)
+  return { methodName: order.paymentName, methodType: own?.typeCode ?? "1" }
+}
+
+/**
+ * Anota la captura de un pago: queda «por confirmar» hasta que una persona lo mire. Se puede
+ * mientras falte cobrar (el pago en partes): el adelanto y después el resto.
+ */
 export async function addReceipt(
   appDb: Db,
   person: Person,
   storeId: string,
   orderId: string,
-  input: z.infer<typeof receiptInput>,
+  input: ReceiptData,
   photo: Uint8Array | null,
 ) {
   let photoType = null
@@ -1003,36 +1108,56 @@ export async function addReceipt(
   })
 }
 
+/** Lo que se anota de una captura: el monto, el número de operación y, si se elige, su medio. */
+export type ReceiptData = {
+  amountCents: number
+  operation: string | null
+  methodId?: string | null
+}
+
 /**
  * Anota una captura dentro de la transacción de la tienda: la usan el equipo y Sofi. Queda
- * «pago por confirmar»; confirmarla es de una persona (`reviewPayment`).
+ * «pago por confirmar»; confirmarla es de una persona (`reviewPayment`). Un pedido por pagar pasa
+ * a «pago por confirmar»; uno que ya sale sigue como está, con su pago esperando.
  */
 export async function addReceiptIn(
   tx: Db,
   storeId: string,
   actorUserId: string,
   orderId: string,
-  input: z.infer<typeof receiptInput>,
+  input: ReceiptData,
   photo: Uint8Array | null = null,
   photoType: (typeof orderPayment.$inferInsert)["photoType"] = null,
 ) {
   const order = await lockOrder(tx, storeId, orderId)
-  if (order.state !== "por_pagar") throw stateError(order)
+  if (order.state === "anulado") throw stateError(order)
+  const before = await balanceIn(tx, order)
+  if (before.dueCents === 0)
+    throw new StoreError(
+      409,
+      "NOTHING_DUE",
+      before.pendingCents > 0
+        ? `Lo que falta del pedido ${pad(order.number)} ya está en un pago por confirmar: confírmalo o di que no coincide.`
+        : `El pedido ${pad(order.number)} ya no debe nada. Recarga para verlo.`,
+    )
   const { currency } = await storeRow(tx, storeId)
+  const method = await methodFor(tx, storeId, order, "comprobante", input.methodId ?? null)
   await tx.insert(orderPayment).values({
     storeId,
     orderId,
     kind: "comprobante",
     status: "por_confirmar",
     amountCents: input.amountCents,
+    ...method,
     operation: input.operation,
     photoType,
     photo: photo ? Buffer.from(photo) : null,
     createdBy: actorUserId,
   })
-  await setState(tx, order, "por_confirmar")
+  if (order.state === "por_pagar") await setState(tx, order, "por_confirmar")
   await logEvent(tx, storeId, orderId, actorUserId, "comprobante", {
     monto: input.amountCents,
+    medio: method.methodName,
     operacion: input.operation,
     moneda: currency,
   })
@@ -1061,13 +1186,15 @@ export async function reviewPayment(
     const { currency } = await storeRow(tx, storeId)
     const now = new Date()
     if (input.decision === "confirmar") {
-      // Un pago más sobre un pedido que ya tenía dinero, o anulado: se confirma (el dinero llegó)
-      // y queda escrito que hay que ver si se devuelve.
+      // Un pago en partes no es un pago doble: solo lo es si lo confirmado pasa del total. Ese, o
+      // uno sobre un pedido anulado, se confirma igual (el dinero llegó) y queda escrito que hay
+      // que ver si se devuelve.
+      const over = overIfConfirmed(await balanceIn(tx, order), order.totalCents, payment)
       const extra =
         order.state === "anulado"
           ? "Pago sobre un pedido anulado: revisa si hay que devolverlo"
-          : (await moneyReceived(tx, orderId, paymentId))
-            ? "Pago doble: el pedido ya tenía otro pago. Revisa si hay que devolver uno"
+          : over > 0
+            ? `Pago doble: con este pago se cobró ${formatMoney(over, currency)} más que el total. Revisa si hay que devolverlo`
             : null
       await tx
         .update(orderPayment)
@@ -1078,19 +1205,27 @@ export async function reviewPayment(
           ...(extra ? { note: payment.note ? `${payment.note}. ${extra}` : extra } : {}),
         })
         .where(eq(orderPayment.id, paymentId))
+      // El primer pago confirmado lo deja listo para salir, aunque falte cobrar el resto.
       let stockPending = false
       if (order.state === "por_confirmar") {
         stockPending = !(await trySale(tx, order, person.userId))
         await setState(tx, order, "por_salir")
       }
+      const after = await balanceIn(tx, order)
       await logEvent(tx, storeId, orderId, person.userId, "pago_confirmado", {
         monto: payment.amountCents,
+        medio: payment.methodName,
+        ...(after.dueCents > 0 ? { falta: after.dueCents } : {}),
         ...(stockPending ? { faltaStock: true } : {}),
         ...(order.state !== "por_confirmar" ? { estado: order.state } : {}),
         ...(extra ? { porRevisar: extra } : {}),
       })
-      if (order.state === "por_confirmar")
-        await notifyCustomer(tx, order, person.userId, currency, "pago_confirmado")
+      // Lo que hay que revisar (un pago doble, un pedido anulado) no se le avisa al cliente.
+      if (!extra)
+        await notifyCustomer(tx, order, person.userId, currency, "pago_confirmado", {
+          paidCents: payment.amountCents,
+          dueCents: after.dueCents,
+        })
     } else {
       await tx
         .update(orderPayment)
@@ -1111,7 +1246,12 @@ export async function reviewPayment(
         monto: payment.amountCents,
         motivo: input.reason,
       })
-      if (order.state === "por_confirmar")
+      // También la captura del resto de un pedido que ya sale (el pago en partes); no la de un
+      // pedido anulado, ni la de un link que llegó cuando ya no se esperaba.
+      if (
+        order.state === "por_confirmar" ||
+        (payment.kind === "comprobante" && order.state !== "anulado")
+      )
         await notifyCustomer(tx, order, person.userId, currency, "pago_no_coincide")
     }
     return orderDetailIn(tx, storeId, orderId)
@@ -1141,8 +1281,9 @@ export async function markShipped(
 }
 
 /**
- * «Entregado» (o «Entregado y cobrado» si se paga al recibir: queda quién cobró y cuánto). Un
- * recojo en tienda pasa de «por salir» a entregado sin «Salió».
+ * «Entregado» (o «Entregado y cobrado» si falta cobrar: queda quién cobró, cuánto y con qué). Si
+ * pagó una parte antes, en la puerta se cobra lo que falta. Un recojo en tienda pasa de «por
+ * salir» a entregado sin «Salió».
  */
 export async function markDelivered(
   appDb: Db,
@@ -1154,18 +1295,21 @@ export async function markDelivered(
   return inStore(appDb, person, storeId, "entregas", async (tx) => {
     const order = await lockOrder(tx, storeId, orderId)
     if (order.state !== "por_salir" && order.state !== "en_camino") throw stateError(order)
-    const paid = await moneyReceived(tx, orderId)
+    const { dueCents } = await balanceIn(tx, order)
     const { currency } = await storeRow(tx, storeId)
-    // Lo cobrado en la puerta se anota tal cual; si no es el total, queda escrito para revisarlo.
-    const short =
-      !paid && input.collectedCents !== null && input.collectedCents !== order.totalCents
-        ? `Cobró ${formatMoney(input.collectedCents, currency)} de ${formatMoney(order.totalCents, currency)}`
-        : null
-    if (!paid) {
+    let collected: (MethodCopy & { cents: number; short: string | null }) | null = null
+    if (dueCents > 0) {
       if (input.collectedCents === null || input.collectedCents === 0)
         throw new StoreError(400, "VALIDATION_ERROR", "Escribe cuánto cobraste", {
           collectedCents: "Escribe cuánto cobraste al entregar",
         })
+      const method = await methodFor(tx, storeId, order, "al_recibir", input.methodId)
+      // Lo cobrado en la puerta se anota tal cual; si no es lo que faltaba, queda escrito para revisarlo.
+      const short =
+        input.collectedCents !== dueCents
+          ? `Cobró ${formatMoney(input.collectedCents, currency)} de ${formatMoney(dueCents, currency)}`
+          : null
+      collected = { ...method, cents: input.collectedCents, short }
       const now = new Date()
       await tx.insert(orderPayment).values({
         storeId,
@@ -1173,6 +1317,7 @@ export async function markDelivered(
         kind: "al_recibir",
         status: "confirmado",
         amountCents: input.collectedCents,
+        ...method,
         note: short,
         createdBy: person.userId,
         reviewedBy: person.userId,
@@ -1182,8 +1327,10 @@ export async function markDelivered(
     await mustSale(tx, order, person.userId)
     await setState(tx, order, "entregado")
     await logEvent(tx, storeId, orderId, person.userId, "entregado", {
-      ...(paid ? {} : { cobrado: input.collectedCents, moneda: currency }),
-      ...(short ? { porRevisar: short } : {}),
+      ...(collected
+        ? { cobrado: collected.cents, medio: collected.methodName, moneda: currency }
+        : {}),
+      ...(collected?.short ? { porRevisar: collected.short } : {}),
     })
     await notifyCustomer(tx, order, person.userId, currency, "entregado")
     return orderDetailIn(tx, storeId, orderId)
@@ -1226,7 +1373,11 @@ export async function cancelOrderIn(
   if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
   const paid = await moneyReceived(tx, orderId)
   if (paid && !options.mayCancelPaid)
-    throw new StoreError(403, "FORBIDDEN", "Un pedido pagado lo anula quien confirma pagos")
+    throw new StoreError(
+      403,
+      "FORBIDDEN",
+      "Un pedido que ya tiene un pago lo anula quien confirma pagos",
+    )
   const returned = await cancelSale(tx, storeId, actorUserId, stockReference(order.number))
   await setState(tx, order, "anulado", { cancelReason: reason })
   const { currency } = await storeRow(tx, storeId)
@@ -1449,12 +1600,14 @@ export async function receiveLinkNotice(
     const waiting = order.state === "por_pagar" || order.state === "por_confirmar"
     const matches = payment.currency === currency && payment.amountCents === order.totalCents
     const note = !waiting
-      ? `Llegó por el link cuando el pedido ${order.state === "anulado" ? "ya estaba anulado" : "ya estaba pagado"}: revisa si hay que devolverlo`
+      ? // Con el pago en partes, «ya sale» no quiere decir «ya pagó todo»: se dice solo lo cierto.
+        `Llegó por el link cuando el pedido ${order.state === "anulado" ? "ya estaba anulado" : "ya no estaba por pagar"}: revisa si hay que devolverlo`
       : !matches
         ? `El monto pagado por el link (${formatMoney(payment.amountCents, /^[A-Z]{3}$/.test(payment.currency) ? payment.currency : currency)}) no coincide con el total`
         : null
     const now = new Date()
     const db = tx as unknown as Db
+    const method = await methodFor(db, storeId, order, "link")
     if (waiting && matches) {
       await tx.insert(orderPayment).values({
         storeId,
@@ -1462,6 +1615,7 @@ export async function receiveLinkNotice(
         kind: "link",
         status: "confirmado",
         amountCents: payment.amountCents,
+        ...method,
         provider: connection.provider,
         providerRef: payment.ref,
         reviewedAt: now,
@@ -1473,7 +1627,10 @@ export async function receiveLinkNotice(
         proveedor: connection.provider,
         ...(stockOk ? {} : { faltaStock: true }),
       })
-      await notifyCustomer(db, order, null, currency, "pago_confirmado")
+      await notifyCustomer(db, order, null, currency, "pago_confirmado", {
+        paidCents: payment.amountCents,
+        dueCents: 0,
+      })
       return done
     }
     // No coincide: lo mira una persona. El dinero ya llegó, así que nunca se descarta.
@@ -1483,6 +1640,7 @@ export async function receiveLinkNotice(
       kind: "link",
       status: "por_confirmar",
       amountCents: payment.amountCents,
+      ...method,
       provider: connection.provider,
       providerRef: payment.ref,
       note,

@@ -12,6 +12,7 @@ import { agentStopIn } from "../acuerdo.js"
 import { agentName } from "../agente.js"
 import type { Person } from "../cuenta.js"
 import { pad } from "../pedidos.js"
+import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
 import { type AnswerResult, answer, type SofiDeps } from "./sofi.js"
 
@@ -166,12 +167,17 @@ async function viewIn(tx: Db, storeId: string, conversationId: string) {
       id: saleOrder.id,
       number: saleOrder.number,
       state: saleOrder.state,
+      paymentCollection: saleOrder.paymentCollection,
       totalCents: saleOrder.totalCents,
       test: saleOrder.test,
     })
     .from(saleOrder)
     .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.conversationId, conversationId)))
     .orderBy(asc(saleOrder.number))
+  const balances = await balancesIn(
+    tx,
+    orders.map((o) => o.id),
+  )
   const cost = messages.reduce(
     (sum, m) => sum + (typeof m.detail.costo === "number" ? m.detail.costo : 0),
     0,
@@ -194,7 +200,11 @@ async function viewIn(tx: Db, storeId: string, conversationId: string) {
       byArgos: agentName(m.actorUserId) === "Argos",
       ...(m.author === "sofi" ? { basis: basisOf(m.detail) } : {}),
     })),
-    orders: orders.map((o) => ({ ...o, number: pad(o.number) })),
+    orders: orders.map((o) => ({
+      ...o,
+      number: pad(o.number),
+      balance: balances.get(o.id) ?? unpaidBalance(o.totalCents),
+    })),
   }
 }
 
