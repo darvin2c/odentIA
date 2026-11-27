@@ -1,5 +1,6 @@
-import type { OrderChannel, OrderState } from "./pedidos"
+import type { Balance, OrderChannel, OrderState } from "./pedidos"
 import type { AgentStop } from "./plan"
+import type { PaymentCollection } from "./tienda"
 
 /** Lo que la pantalla sabe de Sofi, Argos y Reportes (paso B5), como lo dice el servidor. */
 
@@ -42,7 +43,15 @@ export interface ConversationView {
   waitingReason: string | null
   costMicros: number
   messages: ConversationMessage[]
-  orders: { id: string; number: string; state: OrderState; totalCents: number; test: boolean }[]
+  orders: {
+    id: string
+    number: string
+    state: OrderState
+    paymentCollection: PaymentCollection
+    totalCents: number
+    test: boolean
+    balance: Balance
+  }[]
 }
 
 export type AnswerStatus =
@@ -57,7 +66,8 @@ export type AnswerStatus =
 export interface StoreReport {
   period: "hoy" | "semana" | "mes"
   sold: { cents: number; orders: number; ticketCents: number }
-  pending: Record<"toConfirm" | "toPay" | "onDelivery", { orders: number; cents: number }>
+  /** Lo que espera a una persona y lo que falta cobrar (total − confirmado − por confirmar). */
+  pending: Record<"toConfirm" | "due", { orders: number; cents: number }>
   conversations: { total: number; bought: number }
   returning: number
   channels: { channel: OrderChannel; orders: number; cents: number }[]

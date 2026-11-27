@@ -14,6 +14,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { balancesIn, unpaidBalance } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -493,6 +494,11 @@ export async function customerDetail(
           .orderBy(asc(saleOrderLine.position))
       : []
     const linesBy = Map.groupBy(lines, (line) => line.orderId)
+    // El saldo de cada compra, el mismo que en Pedidos: con él se dice su estado.
+    const balances = await balancesIn(
+      tx,
+      orders.map((o) => o.id),
+    )
     // Por dónde compró cada ficha: de todas sus compras, no solo de las que se listan.
     const bought = await tx
       .selectDistinct({ customerId: saleOrder.customerId, channel: saleOrder.channel })
@@ -622,6 +628,7 @@ export async function customerDetail(
         paymentCollection: o.paymentCollection as PaymentCollection,
         channel: o.channel,
         totalCents: o.totalCents,
+        balance: balances.get(o.id) ?? unpaidBalance(o.totalCents),
         createdAt: o.createdAt,
         text: (linesBy.get(o.id) ?? []).map(lineText).join(", "),
       })),

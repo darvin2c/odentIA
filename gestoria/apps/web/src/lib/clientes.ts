@@ -1,5 +1,12 @@
 import { normalizeCountry, toE164 } from "@odentia/ui-patterns"
-import { CHANNELS, dayName, localToday, type OrderChannel, type OrderState } from "./pedidos"
+import {
+  type Balance,
+  CHANNELS,
+  dayName,
+  type OrderChannel,
+  type OrderState,
+  storeToday,
+} from "./pedidos"
 import type { PaymentCollection } from "./tienda"
 
 /**
@@ -80,6 +87,8 @@ export interface CustomerDetail {
     paymentCollection: PaymentCollection
     channel: OrderChannel
     totalCents: number
+    /** El saldo de la compra, el mismo que en Pedidos: con él se dice su estado. */
+    balance: Balance
     createdAt: string
     text: string
   }[]
@@ -105,20 +114,24 @@ export function channelsText(channels: OrderChannel[]): string {
     .join(" · ")
 }
 
-/** El día de una fecha y hora, en el equipo de la persona: «hoy», «ayer», «jue 20 nov». */
-export function dayOf(iso: string, today = localToday()): string {
-  return dayName(localToday(new Date(iso)), today)
+/**
+ * El día de una fecha y hora con la hora de la tienda, como en Pedidos: «hoy», «ayer», «jue 20
+ * nov», el mismo para todo el equipo aunque alguien esté en otro país.
+ */
+export function dayOf(iso: string, timeZone: string, today = storeToday(timeZone)): string {
+  return dayName(storeToday(timeZone, new Date(iso)), today)
 }
 
 /** «2 compras · la última hoy», o «Sin compras». */
 export function purchasesText(
   purchases: number,
   lastPurchaseAt: string | null,
-  today = localToday(),
+  timeZone: string,
+  today = storeToday(timeZone),
 ): string {
   if (purchases === 0) return "Sin compras"
   const count = purchases === 1 ? "1 compra" : `${purchases} compras`
-  return lastPurchaseAt ? `${count} · la última ${dayOf(lastPurchaseAt, today)}` : count
+  return lastPurchaseAt ? `${count} · la última ${dayOf(lastPurchaseAt, timeZone, today)}` : count
 }
 
 /** «clienta desde oct 2026» */

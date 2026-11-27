@@ -26,10 +26,19 @@ describe("cómo se dice una clienta", () => {
     expect(channelsText([])).toBe("")
   })
 
-  it("sus compras, con el día de la última", () => {
-    expect(purchasesText(0, null, "2026-11-26")).toBe("Sin compras")
-    expect(purchasesText(1, "2026-11-26T15:00:00", "2026-11-26")).toBe("1 compra · la última hoy")
-    expect(purchasesText(3, "2026-11-25T15:00:00", "2026-11-26")).toBe("3 compras · la última ayer")
+  it("sus compras, con el día de la última en la hora de la tienda", () => {
+    const lima = "America/Lima"
+    expect(purchasesText(0, null, lima, "2026-11-26")).toBe("Sin compras")
+    expect(purchasesText(1, "2026-11-26T15:00:00Z", lima, "2026-11-26")).toBe(
+      "1 compra · la última hoy",
+    )
+    expect(purchasesText(3, "2026-11-25T15:00:00Z", lima, "2026-11-26")).toBe(
+      "3 compras · la última ayer",
+    )
+    // Las 02:00 en Londres del 26 son todavía las 21:00 del 25 en Lima: fue ayer.
+    expect(purchasesText(1, "2026-11-26T02:00:00Z", lima, "2026-11-26")).toBe(
+      "1 compra · la última ayer",
+    )
   })
 
   it("desde cuándo es clienta, sin puntos ni «de»", () => {

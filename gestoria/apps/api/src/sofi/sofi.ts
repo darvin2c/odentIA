@@ -16,7 +16,9 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { type AgentStop, agentStopIn, countConversation } from "../acuerdo.js"
 import { SOFI_ACTOR, withAgent } from "../agente.js"
 import { COLLECTION_RANK } from "../configuracion.js"
-import { type LinkDeps, pad, todayUTC } from "../pedidos.js"
+import { storeClockIn } from "../hora.js"
+import { type LinkDeps, pad } from "../pedidos.js"
+import { balancesIn } from "../saldo.js"
 import {
   moneyText as formatMoney,
   newTrace,
@@ -150,9 +152,16 @@ interface Loaded {
   factAmounts: number[]
   history: (typeof conversationMessage.$inferSelect)[]
   paid: boolean
+  /** Qué día es en la tienda, con su hora. */
+  today: string
 }
 
-async function load(appDb: Db, storeId: string, conversationId: string): Promise<Loaded | null> {
+async function load(
+  appDb: Db,
+  storeId: string,
+  conversationId: string,
+  now = new Date(),
+): Promise<Loaded | null> {
   return withAgent(appDb, SOFI_ACTOR, storeId, async (tx) => {
     const [conv] = await tx
       .select()
@@ -211,6 +220,11 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
           )
       : []
     const currency = shop!.currency
+    const { today } = await storeClockIn(tx, storeId, now)
+    const balances = await balancesIn(
+      tx,
+      orders.map((o) => o.id),
+    )
     const money = (cents: number) => formatMoney(cents, currency)
     const factAmounts: number[] = []
     const say = (cents: number) => {
@@ -234,11 +248,17 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
       (p, i) =>
         `${i + 1}. ${p.id} · ${p.name} · ${COLLECTION_WORDS[p.collection]}${p.details ? ` · datos para el cliente: ${p.details}` : ""}`,
     )
-    const orderLines = orders.map(
-      (o) => `- ${pad(o.number)} · ${stateWords(o)} · ${say(o.totalCents)} · ${o.paymentName}`,
-    )
+    // El saldo de cada pedido, el mismo que ve el equipo: si pagó una parte, cuánto falta.
+    const orderLines = orders.map((o) => {
+      const balance = balances.get(o.id)
+      const part =
+        balance && balance.dueCents > 0 && balance.dueCents < o.totalCents
+          ? ` · falta pagar ${say(balance.dueCents)}`
+          : ""
+      return `- ${pad(o.number)} · ${stateWords(o, balance)} · ${say(o.totalCents)}${part} · ${o.paymentName}`
+    })
     const facts = [
-      `LA TIENDA: ${shop!.name}. Moneda: ${currency}. Hoy: ${todayUTC()}.`,
+      `LA TIENDA: ${shop!.name}. Moneda: ${currency}. Hoy: ${today}.`,
       `Te presentas como «${display}».`,
       "",
       "FORMAS DE ENTREGA (id · nombre · costo · cuándo llega · pago al recibir):",
@@ -266,6 +286,7 @@ async function load(appDb: Db, storeId: string, conversationId: string): Promise
       factAmounts,
       history,
       paid: confirmed.length > 0,
+      today,
     }
   })
 }
@@ -296,7 +317,7 @@ export async function answer(
     // quedó antes de esa respuesta: se responde otra vez (como mucho una), con lo nuevo al final.
     let answered = -1
     for (let round = 0; round < 2; round++) {
-      const loaded = await load(deps.appDb, storeId, conversationId)
+      const loaded = await load(deps.appDb, storeId, conversationId, deps.now?.() ?? new Date())
       if (!loaded) return { status: "nada" } as const
       const fresh = loaded.history.filter((m) => m.author === "cliente" && m.seq > answered)
       if (fresh.length === 0) return last
@@ -375,7 +396,7 @@ async function turn(deps: SofiDeps, storeId: string, loaded: Loaded): Promise<An
       test,
       channel: channelOf(conv.channel),
       currency: loaded.currency,
-      today: todayUTC(deps.now?.() ?? new Date()),
+      today: loaded.today,
       link: deps.link,
       shownQuotes: new Set(
         loaded.history.flatMap((m) =>

@@ -673,6 +673,30 @@ describe("el acuerdo", () => {
     ])
   })
 
+  it("la pregunta de cualquier rol deja su pantalla y su rol, y el estado dice quién la abrió (ADR 0221)", async () => {
+    await receiveAppEvent(
+      ownerDb,
+      GESTORIA,
+      "ayuda-ventas",
+      event("soporte.pedido", {
+        account: "tienda-ana",
+        userId: "otra-duena",
+        kind: "pregunta",
+        question: "No me deja confirmar el pago",
+        screen: "/pedidos?pedido=p-1",
+        role: "Ventas",
+      }),
+    )
+    const [row] = (await ownerDb.execute(
+      sql`select screen, role from support_case where question = 'No me deja confirmar el pago'`,
+    )) as unknown as { screen: string; role: string }[]
+    expect(row).toEqual({ screen: "/pedidos?pedido=p-1", role: "Ventas" })
+    const state = await answerAppState(ownerDb, GESTORIA, "tienda-ana", NOW)
+    expect(
+      state.support.find((kase) => kase.question === "No me deja confirmar el pago")?.userId,
+    ).toBe("otra-duena")
+  })
+
   it("una cuenta sin plan de lista se abre sin suscripción y no se cobra hasta que se le asigna uno", async () => {
     await ownerDb.execute(
       sql`update admin.saas_plan set is_default = false where code = 'gestoria-prueba'`,

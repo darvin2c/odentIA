@@ -87,6 +87,19 @@ describe("los mensajes del acuerdo", () => {
         timestamp: at,
         data: { account: "tienda-1", userId: "u-1", kind: "cobro", question: "¿Cómo pago?" },
       },
+      // Desde la Ayuda de cualquier rol: la pantalla y el rol van con la pregunta (ADR 0221).
+      {
+        type: "soporte.pedido",
+        timestamp: at,
+        data: {
+          account: "tienda-1",
+          userId: "u-2",
+          kind: "pregunta",
+          question: "No me deja confirmar el pago",
+          screen: "/pedidos?pedido=p-1",
+          role: "Ventas",
+        },
+      },
     ])
       expect(appEvent.safeParse(event).success, event.type).toBe(true)
   })
@@ -125,6 +138,17 @@ describe("los mensajes del acuerdo", () => {
         type: "soporte.pedido",
         timestamp: at,
         data: { account: " ", userId: "u", kind: "pregunta", question: "x" },
+      },
+      {
+        type: "soporte.pedido",
+        timestamp: at,
+        data: {
+          account: "t",
+          userId: "u",
+          kind: "pregunta",
+          question: "x",
+          screen: "/".repeat(201),
+        },
       },
     ]
     for (const event of bad)
@@ -167,6 +191,12 @@ describe("los mensajes del acuerdo", () => {
     expect(
       accountState.safeParse({ ...known, access: { ...known.access, status: "otra" } }).success,
     ).toBe(false)
+    // Cada caso dice quién lo abrió; el de una administración que aún no lo manda también entra.
+    const kase = { id: "k-1", status: "abierto", question: "Hola", createdAt: at, replies: [] }
+    expect(
+      accountState.safeParse({ ...known, support: [kase, { ...kase, id: "k-2", userId: "u-2" }] })
+        .success,
+    ).toBe(true)
   })
 })
 

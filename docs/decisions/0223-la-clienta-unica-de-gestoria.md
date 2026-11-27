@@ -49,5 +49,5 @@ persona única de las clínicas (ADR 0001), sin decidir la identidad porque coin
 
 ## Referencias
 
-`gestoria/apps/api/src/clientes.ts`, `gestoria/packages/db/drizzle/0014_las_clientas.sql` y
-`0015_reglas_clientas.sql`, `gestoria/apps/web/src/clientes.tsx`.
+`gestoria/apps/api/src/clientes.ts`, `gestoria/packages/db/drizzle/0018_las_clientas.sql` y
+`0019_reglas_clientas.sql`, `gestoria/apps/web/src/clientes.tsx`.

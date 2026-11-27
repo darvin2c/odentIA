@@ -41,7 +41,6 @@ import {
   CHANNELS,
   dayName,
   FILTERS,
-  localToday,
   type OrderChannel,
   type OrderDetail,
   type OrderFilter,
@@ -52,6 +51,7 @@ import {
   type SellableVariant,
   STATE_TONE,
   stateName,
+  storeToday,
   when,
 } from "./lib/pedidos"
 import { type DeliveryMethod, money, moneyInput, type PaymentMethod, readMoney } from "./lib/tienda"
@@ -74,6 +74,9 @@ import { ErrorBlock, StoreHeader, useStoreContext } from "./tiendas"
  * pago, captura que confirma una persona o al recibir), salir, entregar o anular con motivo.
  * «Anotar un pedido» es para la venta que llega por otro lado. Los avisos al cliente quedan
  * escritos en el pedido: salen cuando se conecte WhatsApp.
+ *
+ * Un pedido acepta varios pagos, cada uno con su medio; lo que falta cobrar lo dice el servidor
+ * (el mismo saldo en el pedido, la lista y Reportes). «Hoy» es el de la tienda, con su hora.
  */
 
 const ORDERS_KEY = (storeId: string) => ["pedidos", storeId]
@@ -86,7 +89,11 @@ function lineSummary(lines: OrderRow["lines"]): string {
   return lines.length > 1 ? `${text} y ${lines.length - 1} más` : text
 }
 
-function StateBadge({ order }: { order: Pick<OrderRow, "state" | "paymentCollection"> }) {
+function StateBadge({
+  order,
+}: {
+  order: Pick<OrderRow, "state" | "paymentCollection" | "balance">
+}) {
   return <Badge variant={STATE_TONE[order.state]}>{stateName(order)}</Badge>
 }
 
@@ -100,12 +107,13 @@ export function OrdersPage() {
     if (search.pedido) setOpen(search.pedido)
   }, [search.pedido])
   const [adding, setAdding] = useState(false)
-  const today = localToday()
   const list = useQuery({
-    queryKey: [...ORDERS_KEY(store.id), filter, today],
-    queryFn: () => api<OrderList>(`/api/tiendas/${store.id}/pedidos?filtro=${filter}&hoy=${today}`),
+    queryKey: [...ORDERS_KEY(store.id), filter],
+    queryFn: () => api<OrderList>(`/api/tiendas/${store.id}/pedidos?filtro=${filter}`),
     refetchInterval: 60_000,
   })
+  // El día de la tienda: «hoy», «mañana» o «ayer» se cuentan con su hora, no con la del equipo.
+  const today = list.data?.today ?? storeToday(store.timeZone)
   const orders = list.data?.orders ?? []
   const counts = list.data?.counts
 
@@ -187,8 +195,13 @@ export function OrdersPage() {
                   <span className="col-start-1 min-w-0 text-sm lg:line-clamp-2 lg:col-start-auto">
                     {lineSummary(order.lines)}
                   </span>
-                  <span className="col-start-2 row-start-1 text-right font-semibold tabular-nums lg:col-start-auto lg:row-start-auto">
-                    {money(order.totalCents, store.currency)}
+                  <span className="col-start-2 row-start-1 flex flex-col text-right tabular-nums lg:col-start-auto lg:row-start-auto">
+                    <span className="font-semibold">{money(order.totalCents, store.currency)}</span>
+                    {order.balance.dueCents > 0 && order.balance.dueCents < order.totalCents ? (
+                      <span className="text-xs text-warning">
+                        falta {money(order.balance.dueCents, store.currency)}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="col-start-1 min-w-0 text-sm lg:col-start-auto">
                     {order.paymentName}
@@ -322,7 +335,8 @@ function OrderBody({ order }: { order: OrderDetail }) {
   const cur = store.currency
   const absorbed = order.deliveryListCents - order.deliveryCents
   const open = !["entregado", "anulado"].includes(order.state)
-  const cancelAllowed = open && (!order.paid || can("pagos.confirmar"))
+  const cancelAllowed = open && (!order.moneyIn || can("pagos.confirmar"))
+  const { balance } = order
 
   return (
     <div className="flex flex-col">
@@ -381,7 +395,7 @@ function OrderBody({ order }: { order: OrderDetail }) {
             {order.marginUsedCents > 0
               ? ` Usó ${money(order.marginUsedCents, cur)} de ${money(order.marginCents, cur)} de margen.`
               : ""}
-            {order.priceExpiresAt && open && !order.paid
+            {order.priceExpiresAt && open && !order.moneyIn
               ? order.priceExpired
                 ? " El precio acordado ya venció."
                 : ` El precio vale hasta el ${when(order.priceExpiresAt)}`
@@ -405,7 +419,28 @@ function OrderBody({ order }: { order: OrderDetail }) {
             ))}
           </ul>
         )}
-        {order.state === "por_pagar" ? <CollectActions order={order} /> : null}
+        {order.payments.length > 0 && order.state !== "anulado" ? (
+          <div className="flex flex-col gap-1 border-t pt-2">
+            {balance.confirmedCents > 0 ? (
+              <Row label="Cobrado">{money(balance.confirmedCents, cur)}</Row>
+            ) : null}
+            {balance.pendingCents > 0 ? (
+              <Row label="Por confirmar">{money(balance.pendingCents, cur)}</Row>
+            ) : null}
+            {balance.dueCents > 0 ? (
+              <Row label="Falta cobrar" strong>
+                {money(balance.dueCents, cur)}
+              </Row>
+            ) : balance.paid ? (
+              <Row label="Falta cobrar">Nada: está pagado</Row>
+            ) : null}
+          </div>
+        ) : null}
+        {order.state === "por_pagar" ? (
+          <CollectActions order={order} />
+        ) : order.state !== "anulado" && balance.dueCents > 0 ? (
+          <OtherPayment order={order} />
+        ) : null}
       </Block>
 
       <Block title="Entrega">
@@ -421,7 +456,9 @@ function OrderBody({ order }: { order: OrderDetail }) {
           </Row>
         ) : null}
         <Row label="Forma">{order.deliveryName}</Row>
-        {order.deliverOn ? <Row label="Día">{dayName(order.deliverOn)}</Row> : null}
+        {order.deliverOn ? (
+          <Row label="Día">{dayName(order.deliverOn, storeToday(store.timeZone))}</Row>
+        ) : null}
         {order.address ? <Row label="Dirección">{order.address}</Row> : null}
         {order.customerPhone ? (
           <Row label="Teléfono">
@@ -442,9 +479,9 @@ function OrderBody({ order }: { order: OrderDetail }) {
       </Block>
 
       {cancelAllowed ? <CancelOrder order={order} /> : null}
-      {open && order.paid && !can("pagos.confirmar") ? (
+      {open && order.moneyIn && !can("pagos.confirmar") ? (
         <p className="pt-2 text-xs text-muted-foreground">
-          Un pedido pagado lo anula quien confirma pagos.
+          Un pedido que ya tiene un pago lo anula quien confirma pagos.
         </p>
       ) : null}
     </div>
@@ -453,6 +490,9 @@ function OrderBody({ order }: { order: OrderDetail }) {
 
 /** Lo que toca ahora, en una línea, arriba de todo. */
 function NextStep({ order }: { order: OrderDetail }) {
+  const { store } = useStoreContext()
+  const due = order.balance.dueCents
+  const dueText = money(due, store.currency)
   const text: Record<OrderDetail["state"], string | null> = {
     por_pagar: order.priceExpired
       ? "El precio acordado venció: si sigue en pie, anúlalo y anótalo de nuevo."
@@ -461,17 +501,26 @@ function NextStep({ order }: { order: OrderDetail }) {
         : "Falta que pague. Anota su captura cuando llegue.",
     por_confirmar: "Revisa la cuenta de la tienda y confirma el pago, o di que no coincide.",
     por_salir: order.stockPending
-      ? "Pagado, pero no alcanzaba el stock: registra la entrada en el catálogo antes de que salga."
-      : order.paymentCollection === "al_recibir"
-        ? "Listo para salir. Se cobra al entregar."
-        : "Pagado. Listo para salir.",
-    en_camino: "Va en camino. Márcalo como entregado cuando llegue.",
-    entregado: null,
+      ? "Ya pagó, pero no alcanzaba el stock: registra la entrada en el catálogo antes de que salga."
+      : due > 0
+        ? `Listo para salir. Falta cobrar ${dueText}: se cobra al entregar.`
+        : order.balance.paid
+          ? "Pagado. Listo para salir."
+          : "Listo para salir. Falta confirmar un pago.",
+    en_camino:
+      due > 0
+        ? `Va en camino. Al entregar, cobra ${dueText}.`
+        : "Va en camino. Márcalo como entregado cuando llegue.",
+    entregado: due > 0 ? `Entregado, pero falta cobrar ${dueText}.` : null,
     anulado: order.cancelReason ? `Anulado: ${order.cancelReason}` : null,
   }
   const message = text[order.state]
   if (!message) return null
-  const warn = order.priceExpired || order.stockPending || order.state === "por_confirmar"
+  const warn =
+    order.priceExpired ||
+    order.stockPending ||
+    order.state === "por_confirmar" ||
+    (order.state === "entregado" && due > 0)
   return (
     <p
       className={`mb-2 rounded-lg px-3 py-2 text-sm ${warn ? "bg-warning-soft text-warning" : "bg-surface-muted"}`}
@@ -533,12 +582,6 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState("")
   const action = useOrderAction(store.id, order.id, () => setRejecting(false))
-  const differs = payment.amountCents !== order.totalCents
-  const otherMoney = order.payments.some(
-    (p) =>
-      p.id !== payment.id &&
-      (p.status === "confirmado" || (p.kind === "link" && p.status === "por_confirmar")),
-  )
   const review = (body: { decision: "confirmar" } | { decision: "no_coincide"; reason: string }) =>
     action.mutate({
       path: `pagos/${payment.id}/revision`,
@@ -554,7 +597,7 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
     <li className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="font-medium">
-          {PAYMENT_KINDS[payment.kind]} · {money(payment.amountCents, cur)}
+          {payment.methodName} · {money(payment.amountCents, cur)}
           {payment.operation ? (
             <span className="font-normal text-muted-foreground"> · op. {payment.operation}</span>
           ) : null}
@@ -562,9 +605,10 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
         {status}
       </div>
       <p className="text-xs text-muted-foreground">
+        {PAYMENT_KINDS[payment.kind]} ·{" "}
         {payment.byLink
-          ? `Llegó por el link el ${when(payment.createdAt)}`
-          : `Anotado por ${payment.createdByName ?? "alguien del equipo"} el ${when(payment.createdAt)}`}
+          ? `llegó por el link el ${when(payment.createdAt)}`
+          : `anotado por ${payment.createdByName ?? "alguien del equipo"} el ${when(payment.createdAt)}`}
         {payment.reviewedAt && payment.reviewedByName
           ? `; ${payment.status === "confirmado" ? "confirmado" : "revisado"} por ${payment.reviewedByName} el ${when(payment.reviewedAt)}`
           : ""}
@@ -576,21 +620,25 @@ function PaymentItem({ order, payment }: { order: OrderDetail; payment: OrderPay
       {payment.status === "por_confirmar" ? (
         canConfirm ? (
           <>
-            {differs ? (
+            {order.state === "anulado" ? (
               <p className="text-sm text-warning">
-                El monto ({money(payment.amountCents, cur)}) no es el total del pedido (
-                {money(order.totalCents, cur)}).
+                El pedido está anulado: si lo confirmas, queda anotado para ver si hay que
+                devolverlo.
+              </p>
+            ) : payment.overIfConfirmedCents > 0 ? (
+              <p className="text-sm text-warning">
+                Con este pago se cobra {money(payment.overIfConfirmedCents, cur)} más que el total (
+                {money(order.totalCents, cur)}): si lo confirmas, queda como pago doble para
+                revisar.
+              </p>
+            ) : order.balance.dueCents > 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Es una parte del total: después de confirmarlo, faltan{" "}
+                {money(order.balance.dueCents, cur)}.
               </p>
             ) : null}
             {order.priceExpiresAt && payment.createdAt > order.priceExpiresAt ? (
               <p className="text-sm text-warning">El precio acordado venció antes de este pago.</p>
-            ) : null}
-            {otherMoney || order.state === "anulado" ? (
-              <p className="text-sm text-warning">
-                {order.state === "anulado"
-                  ? "El pedido está anulado: si lo confirmas, queda anotado para ver si hay que devolverlo."
-                  : "El pedido ya tiene otro pago: si lo confirmas, queda como pago doble para revisar."}
-              </p>
             ) : null}
             <div className="flex flex-wrap gap-2">
               <SubmitButton
@@ -743,10 +791,51 @@ function CollectActions({ order }: { order: OrderDetail }) {
   )
 }
 
+/**
+ * Los medios de la tienda con que se puede anotar un pago de una forma (una captura, o en la
+ * puerta), con el del pedido primero si se cobra así. El servidor los vuelve a comprobar.
+ */
+function useMethodsFor(order: OrderDetail, collection: PaymentMethod["collection"]) {
+  const { store } = useStoreContext()
+  const lists = useQuery({
+    queryKey: ["pagos-y-entregas", store.id],
+    queryFn: () =>
+      api<{ payments: PaymentMethod[]; deliveries: DeliveryMethod[] }>(
+        `/api/tiendas/${store.id}/pagos-y-entregas`,
+      ),
+  })
+  const methods = (lists.data?.payments ?? []).filter(
+    (m) => m.collection === collection && (m.isActive || m.name === order.paymentName),
+  )
+  const own = methods.find((m) => m.name === order.paymentName)
+  return own ? [own, ...methods.filter((m) => m !== own)] : methods
+}
+
+/**
+ * Ya sale (o salió) y falta cobrar: un pago más antes de la puerta, como el resto por Yape o un
+ * adelanto de un pedido que se paga al recibir.
+ */
+function OtherPayment({ order }: { order: OrderDetail }) {
+  const [capturing, setCapturing] = useState(false)
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      <Button variant="outline" onClick={() => setCapturing(true)}>
+        <ReceiptText aria-hidden />
+        {order.payments.length > 0 ? "Anotar otro pago" : "Anotar un pago"}
+      </Button>
+      {capturing ? <ReceiptSheet order={order} onClose={() => setCapturing(false)} /> : null}
+    </div>
+  )
+}
+
 function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => void }) {
   const { store } = useStoreContext()
   const queryClient = useQueryClient()
-  const [amount, setAmount] = useState(moneyInput(order.totalCents, store.currency))
+  const due = order.balance.dueCents
+  const [amount, setAmount] = useState(moneyInput(due || order.totalCents, store.currency))
+  const methods = useMethodsFor(order, "comprobante")
+  const [methodId, setMethodId] = useState("")
+  const chosen = methodId || methods[0]?.id || ""
   const [operation, setOperation] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -764,6 +853,7 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
       const form = new FormData()
       form.set("amountCents", String(amountCents))
       form.set("operation", operation.trim())
+      if (chosen) form.set("methodId", chosen)
       if (file) form.set("captura", await shrinkPhoto(file), "captura")
       return api<{ order: OrderDetail }>(
         `/api/tiendas/${store.id}/pedidos/${order.id}/comprobante`,
@@ -807,13 +897,26 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
       }
     >
       <FieldGroup>
+        {methods.length > 1 ? (
+          <SelectField
+            label="Medio"
+            value={chosen}
+            onChange={setMethodId}
+            options={methods.map((m) => ({ value: m.id, label: m.name }))}
+            error={errors.methodId}
+          />
+        ) : null}
         <MoneyField
           label="Monto"
           currency={store.currency}
           value={amount}
           onChange={setAmount}
           error={amountError ?? errors.amountCents}
-          help={`El total del pedido es ${money(order.totalCents, store.currency)}.`}
+          help={
+            due < order.totalCents
+              ? `Falta cobrar ${money(due, store.currency)} de ${money(order.totalCents, store.currency)}.`
+              : `El total del pedido es ${money(order.totalCents, store.currency)}. Si paga una parte, anota lo que pagó.`
+          }
           autoFocus
         />
         <TextField
@@ -861,11 +964,16 @@ function ReceiptSheet({ order, onClose }: { order: OrderDetail; onClose: () => v
 /** Por salir o en camino: «Salió» y «Entregado» (o «Entregado y cobrado»). */
 function DeliveryActions({ order }: { order: OrderDetail }) {
   const { store } = useStoreContext()
+  const due = order.balance.dueCents
   const [tracking, setTracking] = useState("")
-  const [collected, setCollected] = useState(moneyInput(order.totalCents, store.currency))
+  const [collected, setCollected] = useState(moneyInput(due, store.currency))
+  const methods = useMethodsFor(order, "al_recibir")
+  const [methodId, setMethodId] = useState("")
+  const chosen = methodId || methods[0]?.id || ""
   const [asking, setAsking] = useState<"salio" | "entregado" | null>(null)
   const action = useOrderAction(store.id, order.id, () => setAsking(null))
-  const cashOnDelivery = !order.paid
+  // Falta cobrar (todo, o lo que quedó de un adelanto): se cobra en la puerta.
+  const cashOnDelivery = due > 0
   const errors = fieldErrors(action.error)
   const collectedCents = readMoney(collected, store.currency)
   const pickup = order.deliveryType === "OnSitePickup"
@@ -880,7 +988,11 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
         ) : null}
         <Button
           variant={order.state === "en_camino" || pickup ? "default" : "outline"}
-          onClick={() => setAsking("entregado")}
+          onClick={() => {
+            // Lo que falta cobrar ahora, aunque haya entrado otro pago desde que se abrió.
+            setCollected(moneyInput(due, store.currency))
+            setAsking("entregado")
+          }}
         >
           <PackageCheck aria-hidden />
           {cashOnDelivery ? "Entregado y cobrado" : "Entregado"}
@@ -910,7 +1022,7 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
         title={cashOnDelivery ? "Entregado y cobrado" : `El pedido ${order.number} llegó`}
         description={
           cashOnDelivery
-            ? "Anota cuánto cobraste en la puerta: queda con tu nombre."
+            ? "Anota cuánto cobraste en la puerta y con qué: queda con tu nombre."
             : "Pasa a «Entregado»."
         }
         confirmLabel={cashOnDelivery ? "Entregado y cobrado" : "Entregado"}
@@ -921,25 +1033,41 @@ function DeliveryActions({ order }: { order: OrderDetail }) {
         onConfirm={() =>
           action.mutate({
             path: "entregado",
-            body: cashOnDelivery ? { collectedCents } : {},
+            body: cashOnDelivery ? { collectedCents, methodId: chosen || null } : {},
             done: "Entregado",
           })
         }
         onClose={() => setAsking(null)}
       >
         {cashOnDelivery ? (
-          <MoneyField
-            label="Lo que cobraste"
-            currency={store.currency}
-            value={collected}
-            onChange={setCollected}
-            error={errors.collectedCents}
-            help={
-              collectedCents !== null && collectedCents !== order.totalCents
-                ? `No es el total (${money(order.totalCents, store.currency)}): queda anotado lo que cobraste para revisarlo.`
-                : `El total es ${money(order.totalCents, store.currency)}.`
-            }
-          />
+          <FieldGroup>
+            <MoneyField
+              label="¿Cuánto cobraste?"
+              currency={store.currency}
+              value={collected}
+              onChange={setCollected}
+              error={errors.collectedCents}
+              help={
+                collectedCents !== null && collectedCents !== due
+                  ? `No es lo que faltaba (${money(due, store.currency)}): queda anotado lo que cobraste para revisarlo.`
+                  : due < order.totalCents
+                    ? `Falta cobrar ${money(due, store.currency)} de ${money(order.totalCents, store.currency)}.`
+                    : `El total es ${money(order.totalCents, store.currency)}.`
+              }
+            />
+            {methods.length > 1 ? (
+              <SelectField
+                label="Medio"
+                value={chosen}
+                onChange={setMethodId}
+                options={methods.map((m) => ({ value: m.id, label: m.name }))}
+                error={errors.methodId}
+              />
+            ) : methods[0] ? (
+              // Con un solo medio para cobrar en la puerta, se dice con cuál queda anotado.
+              <p className="text-sm text-muted-foreground">Queda anotado con {methods[0].name}.</p>
+            ) : null}
+          </FieldGroup>
         ) : null}
       </ConfirmDialog>
     </div>
@@ -962,8 +1090,8 @@ function CancelOrder({ order }: { order: OrderDetail }) {
         variant="destructive"
         title={`Anular el pedido ${order.number}`}
         description={
-          order.paid
-            ? "Está pagado: el stock vuelve, pero la devolución del dinero la haces tú, fuera de gestorIA."
+          order.moneyIn
+            ? "Ya pagó: el stock vuelve, pero la devolución del dinero la haces tú, fuera de gestorIA."
             : "Lo que salió del stock vuelve con su movimiento."
         }
         confirmLabel="Anular pedido"
@@ -1019,7 +1147,9 @@ function History({ order }: { order: OrderDetail }) {
         const extra = [
           typeof d.motivo === "string" ? `«${d.motivo}»` : null,
           typeof d.monto === "number" ? money(d.monto, store.currency) : null,
+          typeof d.medio === "string" ? d.medio : null,
           typeof d.cobrado === "number" ? `cobró ${money(d.cobrado, store.currency)}` : null,
+          typeof d.falta === "number" ? `faltan ${money(d.falta, store.currency)}` : null,
           typeof d.envio === "string" ? `envío ${d.envio}` : null,
           typeof d.porRevisar === "string" ? d.porRevisar : null,
           d.faltaStock ? "no alcanzaba el stock" : null,
@@ -1090,9 +1220,7 @@ export function NewOrderSheet({
   const sellable = useQuery({
     queryKey: ["para-vender", store.id],
     queryFn: () =>
-      api<{ variants: SellableVariant[] }>(
-        `/api/tiendas/${store.id}/pedidos/para-vender?hoy=${localToday()}`,
-      ),
+      api<{ variants: SellableVariant[] }>(`/api/tiendas/${store.id}/pedidos/para-vender`),
   })
   const lists = useQuery({
     queryKey: ["pagos-y-entregas", store.id],
@@ -1127,7 +1255,7 @@ export function NewOrderSheet({
   const [deliveryCost, setDeliveryCost] = useState("")
   const [deliveryCharged, setDeliveryCharged] = useState("")
   const [address, setAddress] = useState(draft?.address ?? "")
-  const [deliverOn, setDeliverOn] = useState(localToday())
+  const [deliverOn, setDeliverOn] = useState(storeToday(store.timeZone))
   const [paymentId, setPaymentId] = useState(draft?.paymentMethodId ?? "")
   const [notes, setNotes] = useState("")
   const dirty = useDirty({
@@ -1203,7 +1331,7 @@ export function NewOrderSheet({
     queryKey: ["calcular", store.id, debounced],
     queryFn: () =>
       api<{ quote: Quote | null; fields: Record<string, string> }>(
-        `/api/tiendas/${store.id}/pedidos/calcular?hoy=${localToday()}`,
+        `/api/tiendas/${store.id}/pedidos/calcular`,
         { method: "POST", body: JSON.parse(debounced) },
       ),
     enabled: ready && debounced === quoteKey,
@@ -1212,7 +1340,7 @@ export function NewOrderSheet({
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos?hoy=${localToday()}`, {
+      api<{ order: OrderDetail }>(`/api/tiendas/${store.id}/pedidos`, {
         method: "POST",
         body,
       }),
@@ -1665,7 +1793,7 @@ function CustomerMatches({
                       channelsText(c.channels),
                       c.phones[0],
                       c.lastZone,
-                      purchasesText(c.purchases, c.lastPurchaseAt),
+                      purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone),
                     ]
                       .filter(Boolean)
                       .join(" · ")}

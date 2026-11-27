@@ -13,7 +13,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { saveState } from "./acuerdo.js"
 import { seedDemoConfiguration } from "./semilla-catalogo.js"
 import { seedDemoCustomers } from "./semilla-clientes.js"
-import { seedDemoOrders } from "./semilla-pedidos.js"
+import { seedDemoOrders, seedDemoPartPayment } from "./semilla-pedidos.js"
 import { seedDemoSofi } from "./semilla-sofi.js"
 import { receiveSupportRequest } from "./soporte.js"
 
@@ -90,12 +90,26 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
     }
     await seedDemoConfiguration(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoOrders(tx as unknown as Db, DEMO_STORE_ID)
+    await seedDemoPartPayment(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoSofi(tx as unknown as Db, DEMO_STORE_ID)
     await seedDemoCustomers(tx as unknown as Db, DEMO_STORE_ID)
-    await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID)
-    await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
+    // Quien va a usar la demo, si ya entró alguna vez a gestorIA (su copia de la cuenta) y si ya
+    // es del equipo: así sembrar otra vez no le deja otra invitación.
     const email = invite?.trim().toLowerCase()
-    if (email) {
+    const [guest] = email
+      ? await tx
+          .select({ userId: accountCopy.userId, member: storeMember.role })
+          .from(accountCopy)
+          .leftJoin(
+            storeMember,
+            and(eq(storeMember.userId, accountCopy.userId), eq(storeMember.storeId, DEMO_STORE_ID)),
+          )
+          .where(eq(accountCopy.email, email))
+          .limit(1)
+      : []
+    await seedDemoPlan(tx as unknown as Db, DEMO_STORE_ID, guest?.userId)
+    await seedDemoSupport(tx as unknown as Db, DEMO_STORE_ID)
+    if (email && !guest?.member) {
       const [pending] = await tx
         .select({ id: storeInvitation.id })
         .from(storeInvitation)
@@ -122,9 +136,12 @@ export async function seedDemoStore(ownerDb: Db, invite?: string): Promise<void>
 /**
  * «Plan y pagos» de ejemplo (B7): lo que respondería la administración, como si ya hubiera
  * preguntado (en desarrollo, sin `GESTORIA_CONTRACT_SECRET`, no se pregunta y queda esto). Un mes
- * pagado, el actual por pagar, un aviso del tope y una pregunta respondida.
+ * pagado, el actual por pagar, un aviso del tope y preguntas respondidas. Quien usa la demo
+ * (`guestId`, de `GESTORIA_SEMILLA_CORREO`) ve una suya en la Ayuda: la Ayuda muestra a cada
+ * persona solo las suyas. Sin su copia de la cuenta (nunca entró) no se sabe quién es: sembrar
+ * otra vez después de entrar la suma.
  */
-async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
+async function seedDemoPlan(tx: Db, storeId: string, guestId?: string): Promise<void> {
   const day = 86_400_000
   const now = Date.now()
   const at = (days: number) => new Date(now + days * day).toISOString()
@@ -225,12 +242,44 @@ async function seedDemoPlan(tx: Db, storeId: string): Promise<void> {
         instructions: "Cuenta en dólares 193-0000000-1-00 a nombre de Sallca Group E.I.R.L.",
       },
     ],
+    // Cada caso dice quién lo abrió: la Ayuda le muestra a cada persona solo los suyos (ADR 0221).
     support: [
+      ...(guestId
+        ? [
+            {
+              id: "semilla-soporte-3",
+              status: "esperando_clinica",
+              question: "¿Dónde le digo a Sofi el horario de la tienda?",
+              createdAt: at(-2),
+              userId: guestId,
+              replies: [
+                {
+                  body: "En Sofi, en «Cómo vende»: escríbelo en «Lo que debe saber» y guarda. Sofi lo cuenta tal cual.",
+                  at: at(-2),
+                },
+              ],
+            },
+          ]
+        : []),
+      {
+        id: "semilla-soporte-2",
+        status: "esperando_clinica",
+        question: "Un cliente dice que ya pagó por Yape, pero su pedido sigue «Pago por confirmar»",
+        createdAt: at(-1),
+        userId: "semilla-lucia",
+        replies: [
+          {
+            body: "Su captura está anotada y falta confirmarla: revisa la cuenta de la tienda y, si el pago está, usa «Confirmar pago» en el pedido.",
+            at: at(-1),
+          },
+        ],
+      },
       {
         id: "semilla-soporte-1",
         status: "esperando_clinica",
         question: "¿Puedo pagar con Yape?",
         createdAt: at(-3),
+        userId: "semilla-rosa",
         replies: [
           {
             body: "Sí: al pagar el cobro de este mes, elige Yape y sube la captura.",
@@ -255,7 +304,11 @@ async function seedDemoSupport(tx: Db, storeId: string): Promise<void> {
   if (pending) return
   await receiveSupportRequest(tx, {
     account: storeId,
-    staff: { userId: "semilla-soporte", name: "Ana de Soporte (ficticia)", email: "soporte@example.test" },
+    staff: {
+      userId: "semilla-soporte",
+      name: "Ana de Soporte (ficticia)",
+      email: "soporte@example.test",
+    },
     minutes: 30,
     reason: "Revisar contigo por qué no se ven las fotos del catálogo",
   })

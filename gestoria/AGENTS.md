@@ -65,9 +65,16 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   a las 24 horas (ADR 0207). Lo acordado no se cambia: un pedido se anula con motivo y se anota otro.
 - El stock baja al confirmar el pago, o al salir si se paga al recibir, y vuelve al anular. Si al
   pagar no alcanza, el pago se confirma igual y el pedido no sale hasta que entre stock.
+- «Hoy» es el de la tienda, con su zona horaria (`store.time_zone`, `apps/api/src/hora.ts`; ADR
+  0222): nunca el del servidor ni el del navegador. Todo lo que cuenta días la usa.
+- Un solo saldo por pedido: la vista `order_balance` (`saldo.ts`). Falta cobrar = total −
+  confirmado − por confirmar; «Pagado» es no deber nada con todo confirmado; «Pago doble», solo si
+  lo confirmado pasa del total. Ninguna pantalla ni respuesta lo recalcula. Un pedido acepta varios
+  pagos mientras falte cobrar, cada uno con su medio (el de la tienda, copiado).
 - El cobro va en orden: link de pago (se confirma solo), captura (la confirma quien tiene
-  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró).
-  Un pedido pagado lo anula solo quien confirma pagos; uno entregado no se anula.
+  `pagos.confirmar`; «No coincide» pide motivo) y al recibir (quien entrega anota lo que cobró y
+  con qué medio; si pagó una parte antes, cobra lo que falta).
+  Un pedido con un pago lo anula solo quien confirma pagos; uno entregado no se anula.
 - El link de pago es un adaptador (`link-de-pago.ts`). El aviso del proveedor solo dice qué pago
   mirar: se lee del proveedor con el token de la tienda. Lo que no coincide queda por confirmar,
   nunca se descarta. Las credenciales van cifradas (`secretos.ts`) y nunca vuelven al navegador.
@@ -85,7 +92,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   la ficha más nueva dentro de la más antigua (`merged_into`), sin mover ni borrar nada; «Separar»
   la deja sola, con las que se le unieron antes. Lo decidido va a `customer_event` y no se vuelve a
   preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
-  decisiones (`0015_reglas_clientas.sql`).
+  decisiones (`0019_reglas_clientas.sql`).
 - Lo que debe una clienta no se calcula en Clientes: sale del saldo de cada pedido.
 - «Escribirle» lee cada teléfono en E.164 con lo común (`toE164` de `@odentia/ui-patterns`): el
   que trae su código vale siempre; el anotado sin él, como del país de la tienda. Sin país, no se
@@ -141,6 +148,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   `seatIn` a la vez. A quien tuvo una entrada, el servidor le dice cómo está la suya
   (`supportStateOf`); a cualquier otra persona, 404. «Salir» termina solo la entrada, nunca la
   sesión. Ventas ve solo quién mira y hasta cuándo; soporte no ve la lista de soporte.
+
+## La Ayuda (entrega 7 del lienzo «gestorIA como odentIA»)
+
+- La guía es `apps/api/src/ayuda.ts`: una pregunta por tarea, solo de lo que gestorIA hace hoy. Un
+  cambio de pantalla, botón o permiso cambia su respuesta en el mismo cambio, y una pantalla nueva
+  suma su pregunta. Quién puede sale de `needs` con `permisos.ts`, nunca del texto; lo que va entre
+  «» existe en la pantalla (lo prueban `apps/api/src/ayuda.test.ts`, si cambia la guía, y
+  `apps/web/src/lib/ayuda-guia.test.ts`, si cambia la pantalla).
+- «Pedir ayuda» es de todo el equipo (`ayuda.pedir`; soporte no), en la cabecera y en la Ayuda,
+  con la pantalla y el rol de quien pregunta: sale por `soporte.pedido` a la Bandeja de la
+  administración. Cada persona ve solo sus preguntas y respuestas (`helpView`, ADR 0221); «Plan y
+  pagos» del Dueño, las de toda la tienda, y lo del cobro sigue siendo solo de `plan`.
 
 ## La web pública (B8)
 

@@ -13,7 +13,9 @@ import type { StoreRole } from "@gestoria/db"
  * formas de entrega, el catálogo, sus precios y el stock (entradas y ajustes); «catalogo.ver» es
  * verlos, sin cambiarlos (B3); «costos.ver» es ver lo que costó cada producto (el costo de las
  * entradas del kardex y el aviso del mínimo), que Ventas no ve. «reportes.ver» es Reportes y lo
- * que hizo y le toca a Argos (B5, tablero 13): solo Dueño y Administrador.
+ * que hizo y le toca a Argos (B5, tablero 13): solo Dueño y Administrador. «ayuda.pedir» es
+ * escribirle al equipo de gestorIA desde la Ayuda: todo el equipo (decisión 6 del lienzo
+ * «gestorIA como odentIA»); lo del cobro, solo con «plan».
  */
 export const STORE_PERMISSIONS = [
   "tienda.ver",
@@ -27,6 +29,7 @@ export const STORE_PERMISSIONS = [
   "ventas.atender",
   "pagos.confirmar",
   "entregas",
+  "ayuda.pedir",
 ] as const
 export type StorePermission = (typeof STORE_PERMISSIONS)[number]
 
@@ -37,12 +40,14 @@ const SALES: readonly StorePermission[] = [
   "ventas.atender",
   "pagos.confirmar",
   "entregas",
+  "ayuda.pedir",
 ]
 
 /**
  * Soporte de gestorIA, mientras su entrada esté aceptada (ADR 0214): no es del equipo ni un rol que
  * se da, y solo mira lo que no se toca al mirarlo (la tienda, su equipo y su catálogo, sin costos).
- * Lo que se lee con permisos que también escriben (atender, pagos, entregas) queda fuera.
+ * Lo que se lee con permisos que también escriben (atender, pagos, entregas) queda fuera, y no le
+ * pide ayuda a su propio equipo (`ayuda.pedir`).
  */
 export type StoreSeat = StoreRole | "support"
 

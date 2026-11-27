@@ -191,7 +191,7 @@ export function CustomersLayout() {
                       </span>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {purchasesText(c.purchases, c.lastPurchaseAt)}
+                      {purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone)}
                     </span>
                   </Link>
                 </li>
@@ -402,7 +402,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
             <p className="text-xs text-muted-foreground">
               Nota del equipo, la clienta no la ve
               {customer.noteByName && customer.noteAt
-                ? ` · escribió ${customer.noteByName.split(" ")[0]} ${dayOf(customer.noteAt)}`
+                ? ` · escribió ${customer.noteByName.split(" ")[0]} ${dayOf(customer.noteAt, store.timeZone)}`
                 : ""}
             </p>
           </>
@@ -439,7 +439,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
                 >
                   <span className="font-mono tabular-nums">{o.number}</span>
                   <span className="min-w-0">
-                    {dayOf(o.createdAt)} · {o.text}
+                    {dayOf(o.createdAt, store.timeZone)} · {o.text}
                     {o.channel !== "otro" ? (
                       <span className="text-muted-foreground">
                         {" "}
@@ -491,7 +491,9 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
           <ul className="flex flex-col gap-2 text-sm">
             {customer.history.map((item) => (
               <li key={item.id} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="text-muted-foreground">{dayOf(item.createdAt)} ·</span>
+                <span className="text-muted-foreground">
+                  {dayOf(item.createdAt, store.timeZone)} ·
+                </span>
                 <span className="min-w-0 flex-1">{historyText(item)}</span>
                 {item.separates ? (
                   <Button
@@ -555,6 +557,7 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
 /* ------------------------------------------------------------- ¿es la misma clienta? */
 
 function Card({ card }: { card: CompareCard }) {
+  const { store } = useStoreContext()
   const where = [channelsText(card.channels) || "Anotada a mano", ...card.phones].join(" · ")
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1 rounded-lg border p-3 text-sm">
@@ -562,7 +565,7 @@ function Card({ card }: { card: CompareCard }) {
       <span className="text-muted-foreground">{where}</span>
       <span>
         {card.lastOrder
-          ? `${card.lastOrder.number} · ${dayOf(card.lastOrder.createdAt)} · ${card.lastOrder.text}`
+          ? `${card.lastOrder.number} · ${dayOf(card.lastOrder.createdAt, store.timeZone)} · ${card.lastOrder.text}`
           : "Sin compras"}
       </span>
       {card.purchases > 1 ? (
@@ -799,7 +802,7 @@ function PickOtherSheet({ customer, onClose }: { customer: CustomerDetail; onClo
                         {[
                           channelsText(c.channels),
                           c.phones[0],
-                          purchasesText(c.purchases, c.lastPurchaseAt),
+                          purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone),
                         ]
                           .filter(Boolean)
                           .join(" · ")}
@@ -888,9 +891,7 @@ function EditCustomerSheet({
           placeholder="+51 987 654 321"
           error={errors.phone}
           help={
-            customer.country
-              ? undefined
-              : "Con el código del país, «Escribirle» abre su WhatsApp."
+            customer.country ? undefined : "Con el código del país, «Escribirle» abre su WhatsApp."
           }
         />
         <Field data-invalid={errors.note ? true : undefined}>
