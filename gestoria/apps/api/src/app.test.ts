@@ -3,7 +3,7 @@
  * el de la cuenta: entrar, crear la tienda, invitar y los permisos de cada rol; la copia de las
  * cuentas con los avisos firmados y la revisión diaria.
  */
-import { accountCopy, storeEvent, storeMember } from "@gestoria/db"
+import { accountCopy, orderEvent, saleOrder, storeEvent, storeMember } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
 import { eq, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
@@ -599,6 +599,20 @@ describe("la tienda de ejemplo", () => {
     expect(body.invitations).toEqual([
       expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
     ])
+
+    // Corregir sin anular: Andrea cambió su pedido pagado y Jorge volvió sin entregar.
+    const corrected = await db.ownerDb
+      .select({ name: saleOrder.customerName, state: saleOrder.state, action: orderEvent.action })
+      .from(saleOrder)
+      .innerJoin(orderEvent, eq(orderEvent.orderId, saleOrder.id))
+      .where(sql`${saleOrder.customerName} in ('Andrea Castillo', 'Jorge Paredes')
+        and ${orderEvent.action} in ('cambiado', 'no_entregado')`)
+    expect(corrected).toEqual(
+      expect.arrayContaining([
+        { name: "Andrea Castillo", state: "por_salir", action: "cambiado" },
+        { name: "Jorge Paredes", state: "por_salir", action: "no_entregado" },
+      ]),
+    )
 
     // Ya en el equipo, sembrar otra vez no le deja otra invitación y le suma su pregunta en la
     // Ayuda, que muestra a cada persona solo las suyas.

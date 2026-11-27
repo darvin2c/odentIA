@@ -1276,11 +1276,17 @@ function Missed({ order }: { order: OrderDetail }) {
         <FieldGroup>
           <FieldSet>
             <FieldLegend variant="label">¿Qué pasó?</FieldLegend>
-            <RadioGroup value={choice} onValueChange={(value) => setChoice(String(value))}>
-              {[...MISSED_REASONS, "otro"].map((option) => (
+            <RadioGroup
+              aria-label="¿Qué pasó?"
+              value={choice}
+              onValueChange={(value) => setChoice(String(value))}
+            >
+              {/* El id va con el número: un motivo con espacios no sirve de id y el botón se
+                  quedaría sin nombre. */}
+              {[...MISSED_REASONS, "otro"].map((option, i) => (
                 <Field key={option} orientation="horizontal">
-                  <RadioGroupItem id={`${id}-${option}`} value={option} />
-                  <FieldLabel htmlFor={`${id}-${option}`} className="font-normal">
+                  <RadioGroupItem id={`${id}-motivo-${i}`} value={option} />
+                  <FieldLabel htmlFor={`${id}-motivo-${i}`} className="font-normal">
                     {option === "otro" ? "Otro motivo" : option}
                   </FieldLabel>
                 </Field>
