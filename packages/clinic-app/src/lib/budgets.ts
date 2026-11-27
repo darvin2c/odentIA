@@ -254,6 +254,53 @@ export interface BudgetWithTotals extends Budget {
    * colegas, pero solo cambia lo suyo. Lo dice el servidor.
    */
   canChange?: boolean
+  /**
+   * Si le llegó, con lo que dice su mensaje: «Enviado» hasta que WhatsApp lo confirma,
+   * «Entregado» o «Leído» con su acuse y «No llegó» si lo rechazó. Nulo en un borrador.
+   * Lo dice el servidor; opcional mientras dura un despliegue.
+   */
+  delivery?: BudgetDelivery | null
+}
+
+/** La entrega de un presupuesto, como la dice el servidor (`budget-delivery.ts`). */
+export interface BudgetDelivery {
+  state: "en_mano" | "enviado" | "entregado" | "leido" | "no_llego"
+  channel: "whatsapp" | "email" | null
+  at: string
+  /** «Entregado el 27 nov», «Enviado por WhatsApp el 27 nov», «No llegó por WhatsApp · enviado el 27 nov». */
+  text: string
+  /** Por qué no llegó, con una sugerencia. */
+  problem: string | null
+  /** Falso si todos sus envíos fallaron: no le llegó. */
+  reached: boolean
+  /** El estado de lo entregado que espera respuesta, dicho con su entrega («Enviado · espera respuesta», «No le llegó»). */
+  label: string
+}
+
+/**
+ * El estado de un presupuesto en las pantallas de la clínica: el de siempre, salvo lo
+ * entregado que espera respuesta, que dice si le llegó («Enviado · espera respuesta»
+ * mientras WhatsApp no lo confirma, «No le llegó» si lo rechazó).
+ */
+export function budgetStateWithDelivery(budget: Pick<BudgetWithTotals, "status" | "stateText" | "delivery">): string {
+  return budget.status === "presentado" && budget.delivery ? budget.delivery.label : budget.stateText
+}
+
+/**
+ * La línea de la entrega en la tarjeta del Plan: solo lo que salió por un mensaje (lo
+ * entregado en mano ya dice su fecha). El motivo y la sugerencia, solo mientras espera
+ * respuesta: lo ya respondido no pide reenviarse.
+ */
+export function budgetDeliveryLine(
+  budget: Pick<BudgetWithTotals, "status" | "delivery">,
+): { text: string; notReached: boolean } | null {
+  const delivery = budget.delivery
+  if (budget.status === "borrador" || !delivery?.channel) return null
+  const waiting = budget.status === "presentado"
+  return {
+    text: waiting && delivery.problem ? `${delivery.text}. ${delivery.problem}` : delivery.text,
+    notReached: waiting && !delivery.reached,
+  }
 }
 
 /** La opción que vale: la elegida o, mientras decide, la recomendada. */
@@ -596,6 +643,14 @@ export function updateBudgetApi(
 /** Entregar el presupuesto al imprimirlo: lo entrega en mano. */
 export function deliverBudgetApi(patientId: string, budgetId: string): Promise<{ data: Budget }> {
   return apiFetch<{ data: Budget }>(`${budgetsBase(patientId)}/${budgetId}/deliver`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
+/** «Ya se lo di en mano»: lo que no le llegó por mensaje se le entregó impreso (queda su traza). */
+export function markBudgetHandedApi(patientId: string, budgetId: string): Promise<{ data: { handed: true } }> {
+  return apiFetch<{ data: { handed: true } }>(`${budgetsBase(patientId)}/${budgetId}/handed`, {
     method: "POST",
     body: JSON.stringify({}),
   })
