@@ -585,11 +585,17 @@ it("el resumen dice si la atención abierta es de hoy: desde la ficha, «Hacer h
 
 it("la nota normativa valida signos vitales y el cargo multiplica la cantidad", async () => {
   const f = await clinicalFixture()
+  // Lo que no es una medida se rechaza junto a su campo; la sistólica sola y lo extremo se guardan
+  // con aviso en la pantalla (26 nov: nada lo decide el sistema).
   await expect(
     f.run((tx) =>
-      updateEncounterDraft(tx, ...f.args, f.encounter.id, { vitals: { presionSistolica: 120 } }),
+      updateEncounterDraft(tx, ...f.args, f.encounter.id, { vitals: { temperatura: "treinta" } }),
     ),
   ).rejects.toMatchObject({ status: 400 })
+  const half = await f.run((tx) =>
+    updateEncounterDraft(tx, ...f.args, f.encounter.id, { vitals: { presionSistolica: 120, temperatura: 29 } }),
+  )
+  expect(half.vitals).toEqual({ presionSistolica: 120, temperatura: 29 })
   const updated = await f.run((tx) =>
     updateEncounterDraft(tx, ...f.args, f.encounter.id, {
       presentIllness: "Dolor pulsátil desde hace dos días",

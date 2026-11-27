@@ -310,7 +310,9 @@ export const OPERATIONS = {
     fields: {
       diagnosisCode: { kind: "text", min: 1, max: 10, label: "Código", description: "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
       diagnosisSystem: { kind: "text", min: 1, max: 20, label: "Lista", description: "La lista de diagnósticos de la clínica.", body: "optional", nullable: true, agent: "context" },
-      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques.", body: "required", agent: "requires" },
+      // Si el profesional no dijo si es presuntivo o definitivo, Clío no lo inventa: queda presuntivo, lo
+      // que no afirma nada, y la tarjeta lo muestra para cambiarlo (revisión del 26 nov, ADR 0221).
+      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo dice que es presuntivo o probable; confirmed solo si dice que es seguro o definitivo. Si no dijo ninguna de las dos, no lo indiques.", body: "required", agent: "fills" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (dieciséis = 16).", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
       // El área de un tratamiento por cuadrante o arcada: «Usar» la propuesta la manda tal cual. Clío no la llena.
@@ -331,6 +333,8 @@ export const OPERATIONS = {
       detail: { kind: "text", max: 2000, label: "Detalle", description: "Una precisión sobre la indicación.", body: "optional", nullable: true, agent: "fills" },
       // Solo del dictado: «resina, o si no una corona» es una elección del paciente (issue 109, fase 2).
       alternatives: { kind: "textList", maxItems: 2, maxLength: 200, label: "Otros caminos", description: "Otras prestaciones que dijo como alternativa para lo mismo («o si no una corona»), con sus palabras y en el orden en que las dijo. Vacío si no dijo alternativas.", body: "none", agent: "fills" },
+      // Solo del dictado: la recomendada la dice el odontólogo; sin eso, los caminos van sin recomendación (revisión del 26 nov).
+      recommended: { kind: "flag", label: "Recomendada", description: "Solo con otros caminos: true si dijo cuál recomienda («le recomiendo la corona», «lo mejor es la resina»), y esa va en `service`. Si no lo dijo, no va.", body: "none", agent: "fills" },
     },
   },
   // Un medicamento de una receta dictada (issue 109, fase 2): los datos de la Guía de la buena
@@ -388,7 +392,7 @@ export const OPERATIONS = {
     fields: {
       system: { kind: "text", min: 1, max: 40, label: "Sistema", description: "La clave del sistema examinado, de la lista de sistemas que se te da (por ejemplo, toraxPulmones).", body: "required", agent: "requires" },
       state: { kind: "enum", values: ["sin_alteraciones", "con_hallazgos"], label: "Estado", description: "sin_alteraciones si lo dijo normal («pulmones limpios»); con_hallazgos si describió algo anormal.", body: "required", agent: "requires" },
-      finding: { kind: "text", max: 1000, label: "Hallazgo", description: "Lo que encontró, con la parte del cuerpo y con sus palabras («amígdalas aumentadas, con placas blanquecinas»). Vacío si está sin alteraciones.", body: "optional", nullable: true, agent: "fills" },
+      finding: { kind: "text", max: 1000, label: "Hallazgo", description: "Lo que dijo de ese sistema, con la parte del cuerpo y con sus palabras: lo anormal («amígdalas aumentadas, con placas blanquecinas») y también lo normal («Lasègue negativo»).", body: "optional", nullable: true, agent: "fills" },
     },
   },
   // El descanso médico que se dicta (latidIA, issue 229): se emite como siempre, firmado y con el

@@ -108,7 +108,9 @@ it("dos opciones: cada una con su total, nunca sumadas; al elegir una, la otra q
   )
   const totals = Object.fromEntries(withCrown.options.map((option) => [option.label, option.totalCents]))
   expect(totals).toEqual({ "Opción A": 240000, "Opción B": 210000 })
-  // Vale la recomendada (la A), no la suma de las dos.
+  // Ninguna nace recomendada (revisión del 26 nov): mientras nadie marque una, vale la primera
+  // (la A), nunca la suma de las dos.
+  expect(withCrown.options.some((option) => option.isRecommended)).toBe(false)
   expect(withCrown.totalCents).toBe(240000)
   const recommended = await f.run((tx) => recommendBudgetOption(tx, ...f.args, draft.id, optionB.id))
   expect(recommended.totalCents).toBe(210000)
@@ -158,6 +160,63 @@ it("dos opciones: cada una con su total, nunca sumadas; al elegir una, la otra q
   ).rejects.toMatchObject({ code: "BUDGET_DECISION_FINAL" })
 })
 
+// QA del 26 nov (clínica, hallazgo 2): con la profilaxis hecha hoy en lo común, «Lo dejo para después»
+// del enlace fallaba con «No puede retirar la aceptación de un tratamiento ejecutado».
+it("dejarlo para después, sin elegir camino, deja fuera lo que ya se hizo", async () => {
+  const { f, items } = await withItems(3)
+  const [profilaxis, resina, corona] = items as [(typeof items)[number], (typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [profilaxis.id, resina.id] }))
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const optionB = two.options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [resina.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "realizado" }).where(eq(treatmentPlanItem.id, profilaxis.id))
+  // Como lo manda el enlace: sin lo ya hecho.
+  const postponed = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: null,
+      decisions: [
+        { planItemId: resina.id, decision: "pospuesto" },
+        { planItemId: corona.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  expect(postponed.status).toBe("pospuesto")
+  const [done] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, profilaxis.id))
+  expect(done?.status).toBe("realizado")
+  expect(done?.decisionStatus).toBe("pendiente")
+})
+
+it("posponer lo ya hecho no lo cambia ni frena lo demás; rechazarlo sí avisa", async () => {
+  const { f, items } = await withItems(2)
+  const [profilaxis, resina] = items as [(typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [profilaxis.id, resina.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "realizado" }).where(eq(treatmentPlanItem.id, profilaxis.id))
+  await expect(
+    f.run((tx) =>
+      decideBudget(tx, ...f.args, draft.id, {
+        decisions: [
+          { planItemId: profilaxis.id, decision: "rechazado" },
+          { planItemId: resina.id, decision: "pospuesto" },
+        ],
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "ITEM_IN_EXECUTION" })
+  const postponed = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      decisions: [
+        { planItemId: profilaxis.id, decision: "pospuesto" },
+        { planItemId: resina.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  expect(postponed.status).toBe("pospuesto")
+  const [done] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, profilaxis.id))
+  expect(done?.decisionStatus).toBe("pendiente")
+})
+
 it("las opciones solo cambian en borrador; siempre queda una y se renumeran", async () => {
   const { f, items } = await withItems(1)
   const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [items[0]!.id] }))
@@ -170,10 +229,12 @@ it("las opciones solo cambian en borrador; siempre queda una y se renumeran", as
   await expect(
     f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id)),
   ).rejects.toMatchObject({ code: "BUDGET_OPTIONS_MAX" })
-  // Quitar la A (recomendada): la que queda primera pasa a ser la A y la recomendada.
+  // Quitar la A recomendada: la que queda primera pasa a ser la A, y ninguna queda
+  // recomendada hasta que alguien la marque (revisión del 26 nov).
+  await f.run((tx) => recommendBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
   const left = await f.run((tx) => removeBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
   expect(left.options.map((option) => [option.label, option.isRecommended])).toEqual([
-    ["Opción A", true],
+    ["Opción A", false],
     ["Opción B", false],
   ])
   expect(left.options[0]!.id).toBe(two.options[1]!.id)
@@ -526,9 +587,9 @@ it("lo que explica dice cuál opción es la recomendada, y cambia al marcar otra
     (await f.run((tx) => getBudgetPresentation(tx, "org_a", f.patient.id, draft.id, { clinicalAccess: true }))).options.map(
       (option) => [option.label, option.isRecommended],
     )
-  // Nace recomendada la primera; la copia, sin marca.
+  // Ninguna nace recomendada, ni la primera ni la copia: la marca quien lo arma (revisión del 26 nov).
   expect(await recommendedOf()).toEqual([
-    ["Opción A", true],
+    ["Opción A", false],
     ["Opción B", false],
   ])
   await f.run((tx) => recommendBudgetOption(tx, ...f.args, draft.id, optionB.id))

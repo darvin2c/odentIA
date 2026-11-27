@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, finalizedBudgetText, budgetRowAmount, commonPlanItemIds, pendingTreatmentCounts, planKeysAfterDictation, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -250,5 +250,34 @@ describe("planKeysAfterDictation", () => {
       expect(planKeysAfterDictation(kind)).toEqual(expect.arrayContaining(["treatment-plans", "plan-items", "budgets", "plan-next"]))
     }
     expect(planKeysAfterDictation("nota")).toEqual(["plan-items"])
+  })
+})
+
+// QA del 27 nov (verificador, hallazgo 4): el cierre leía las opciones de otra consulta, guardada de antes de
+// firmar, y decía S/ 180 o S/ 900 mientras se enviaba S/ 360 o S/ 1,080. Dice las cifras que trajo el cierre.
+describe("finalizedBudgetText", () => {
+  const money = (cents: number, currency: string) => `${currency} ${(cents / 100).toFixed(2)}`
+  it("con dos caminos, cada uno con el total que trajo el cierre, unidos con «o»", () => {
+    const text = finalizedBudgetText(
+      {
+        id: "b",
+        budgetNumber: 1,
+        itemCount: 2,
+        totalCents: 36000,
+        currency: "PEN",
+        added: 1,
+        options: [
+          { id: "ob", position: 2, label: "Opción B", name: null, totalCents: 108000 },
+          { id: "oa", position: 1, label: "Opción A", name: null, totals: [{ currency: "PEN", totalCents: 36000 }], totalCents: 36000 },
+        ],
+      },
+      money,
+    )
+    expect(text).toBe("Presupuesto listo con dos opciones: Opción A PEN 360.00 o Opción B PEN 1080.00. Nunca se suman.")
+  })
+  it("con una sola opción, los tratamientos y su total; sin el idioma, sin cifras", () => {
+    const budget = { id: "b", budgetNumber: 1, itemCount: 1, totalCents: 18000, currency: "PEN", added: 1 }
+    expect(finalizedBudgetText(budget, money)).toBe("Presupuesto listo: 1 tratamiento por PEN 180.00")
+    expect(finalizedBudgetText(budget, null)).toBe("Presupuesto listo: 1 tratamiento")
   })
 })

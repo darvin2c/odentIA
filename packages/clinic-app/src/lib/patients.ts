@@ -2,6 +2,7 @@
 import {
   type AnesthesiaAtSigning,
   ageInYears,
+  ageLabel,
   DIAGNOSIS_VERIFICATION_LABELS,
   type HealthAtSigning,
   type HealthDeclarant,
@@ -713,6 +714,12 @@ export interface PlanItem {
    * dijo ella el 14 nov): pide su INR del día». Lo dice el servidor; es un aviso, no frena nada.
    */
   extractionRisks?: string[]
+  /**
+   * La fase que sugiere la regla cuando difiere de la que tiene y nadie la eligió con «Planificar…»:
+   * «Sugerencia: con pulpitis de la 46 iría en «Urgencia». Cámbiala con «Planificar…».» Lo dice el
+   * servidor; la fase no cambia sola.
+   */
+  phaseSuggestion?: string
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">
@@ -1284,6 +1291,15 @@ export function hcLabel(n: number): string {
 export function ageYears(birthDate: string | null | undefined, today: string = clinicToday()): number | null {
   const age = ageInYears(birthDate, today)
   return age === null || age < 0 ? null : age
+}
+
+/**
+ * La edad para leerla junto al nombre: en meses antes de los dos años («18 meses») y en años después
+ * («36 años»), con el día de la clínica (`ageLabel`; QA clínica del 26 nov: 18 meses salía «1 año»).
+ * "" si no se sabe.
+ */
+export function ageWords(birthDate: string | null | undefined, today: string = clinicToday()): string {
+  return ageLabel(birthDate?.slice(0, 10) ?? null, today)
 }
 
 /** La edad de `ageYears` para mostrarla: "" si no se sabe. */

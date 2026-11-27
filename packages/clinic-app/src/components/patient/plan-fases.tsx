@@ -344,6 +344,10 @@ function PlanPhasesGroup({
                             .join(" · ")}
                         </span>
                         {closed ? null : <ExtractionRisks lines={item.extractionRisks} className="mt-1" />}
+                        {/* La fase no cambia sola (revisión del 26 nov): si la regla la pondría en otra, se sugiere. */}
+                        {!closed && item.phaseSuggestion ? (
+                          <span className="mt-1 text-xs text-muted-foreground">{item.phaseSuggestion}</span>
+                        ) : null}
                         {done.length > 0 ? (
                           <PlanItemSessions
                             sessions={done}
@@ -389,6 +393,7 @@ function PlanPhasesGroup({
                               type="button"
                               size="sm"
                               variant="ghost"
+                              aria-label={`Planificar «${item.title}${site(item)}»…`}
                               onClick={() => setPlanning(item)}
                             >
                               Planificar…

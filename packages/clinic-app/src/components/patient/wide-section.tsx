@@ -1,7 +1,7 @@
 import { DetailDrawer, ListSearchScope, LoadingState, useScopedListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useLocation } from "@tanstack/react-router"
-import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, useState } from "react"
+import { createContext, lazy, type ReactNode, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { type DocumentFilter, isPatientSectionId, sectionOf } from "../../lib/patient-areas"
 import type { PatientFull } from "../../lib/patients"
@@ -50,6 +50,20 @@ export interface WideTarget {
 }
 
 const OpenWide = createContext<((target: WideTarget) => void) | null>(null)
+/** Quienes ceden su lugar al lado cuando se abre una sección encima (`useBeforeOpenWide`). */
+const BeforeOpenWide = createContext<((listener: () => void) => () => void) | null>(null)
+
+/**
+ * Lo que la pantalla tiene al lado y es de solo lectura («Antecedentes y última atención» en la
+ * atención) se cierra cuando se abre una sección encima: así lo que se abre toma la columna (QA del
+ * 26 nov: con esa columna abierta, «Corregir algo» no se veía).
+ */
+export function useBeforeOpenWide(listener: () => void): void {
+  const register = useContext(BeforeOpenWide)
+  const current = useRef(listener)
+  current.current = listener
+  useEffect(() => register?.(() => current.current()), [register])
+}
 
 /**
  * Abre una sección de la persona encima de donde se está, en la página y en el
@@ -109,6 +123,17 @@ export function WideSectionProvider({
   children: ReactNode
 }) {
   const [target, setTarget] = useState<WideTarget | null>(null)
+  const listeners = useRef(new Set<() => void>())
+  const register = useCallback((listener: () => void) => {
+    listeners.current.add(listener)
+    return () => {
+      listeners.current.delete(listener)
+    }
+  }, [])
+  const open = useCallback((next: WideTarget) => {
+    for (const listener of listeners.current) listener()
+    setTarget(next)
+  }, [])
   // Un enlace de dentro lleva a otra sección de la página: se ve esa, no lo que estaba
   // encima. Elegir sede también queda en la dirección (`?branch=`) y no cierra nada.
   const place = useLocation({
@@ -147,11 +172,28 @@ export function WideSectionProvider({
       openSection: (next, options) => setTarget({ id: next, place: options?.place, itemId: options?.itemId }),
     })
   }
+  // «Corregir algo» (y «Revisar» de Pendientes) abre solo el formulario de Antecedentes: en ventana ancha
+  // va en la columna del layout, no en un cajón encima de la sección (QA del 26 nov, a 1440 px).
+  const editing = target?.id === "antecedentes" && target.review === true && Boolean(patientId)
   return (
-    <OpenWide.Provider value={patientId ? setTarget : null}>
-      {children}
+    <OpenWide.Provider value={patientId ? open : null}>
+      <BeforeOpenWide.Provider value={register}>{children}</BeforeOpenWide.Provider>
+      {editing && target && patientId ? (
+        <Suspense fallback={null}>
+          <AntecedentesTab
+            key={JSON.stringify(target.said ?? null)}
+            patientId={patientId}
+            startEditing
+            editorOnly
+            said={target.said}
+            heard={target.heard}
+            onSaved={target.onSaved}
+            onClosed={() => setTarget(null)}
+          />
+        </Suspense>
+      ) : null}
       <DetailDrawer
-        open={target !== null && Boolean(patientId)}
+        open={target !== null && Boolean(patientId) && !editing}
         onClose={() => setTarget(null)}
         size="xl"
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(60rem,calc(100vw-2rem))]"

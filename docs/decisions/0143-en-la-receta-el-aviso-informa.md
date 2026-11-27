@@ -16,7 +16,7 @@ El usuario lo decidió el 2026-11-05: «todo lo que mostramos es informativo; no
 - **La alergia y lo contraindicado en el embarazo se avisan y no piden nada.**
   - El aviso va junto al medicamento y en el bloque de avisos, y quien receta emite.
   - El motivo es opcional y, si se escribe, queda en la receta.
-  - Los controlados siguen en su receta oficial y el peso de un niño sigue siendo obligatorio, porque lo pide la ley o la dosis, no una preferencia.
+  - Los controlados siguen en su receta oficial (convenciones de la ONU de 1961 y 1971). El peso de un niño era obligatorio; desde el 26 nov avisa y deja emitir (ver la actualización).
 - **La receta guarda lo que se vio** (`prescription.alerts_seen`), con el nombre de quien la firmó.
   - La pantalla envía los avisos que mostró, tal cual (`alertsShown`). El servidor guarda como vistos los de alergia y embarazo, que exige haber mostrado, y los duplicados que la pantalla mostró.
   - Un aviso de alergia o embarazo que el servidor encuentra y la pantalla no mostró responde 409 para mostrarlo. Lo que no se mostró nunca se firma como visto.
@@ -44,3 +44,7 @@ El usuario lo decidió el 2026-11-05: «todo lo que mostramos es informativo; no
 
 - `packages/services/src/prescriptions.ts` (`createPrescription`, `currentMedicationsOf`), `packages/clinical/src/allergens.ts` (`duplicateWarnings`), `packages/services/src/encounter-dictation.ts`, `packages/clinic-app/src/components/patient/clinical-panels.tsx` y `prescription-alerts.tsx`.
 - `packages/db/drizzle/0049_avisos_de_la_receta.sql`.
+
+## Actualización del 2026-11-26
+
+El usuario decidió que «nada decide el sistema; lo máximo que puede hacer es sugerir». Sin una norma citada que exija el peso en la receta de un menor de 12 años, faltar el peso avisa («Aviso: tiene 5 años y la receta va sin su peso…») y la receta se emite igual, con el aviso entre lo visto (`PrescribingReview.warnings`). Los controlados siguen fuera de la receta común.

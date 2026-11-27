@@ -38,7 +38,10 @@ export const EXAM_FINDING_MAX = 1000
 
 export interface ExamSystemEntry {
   estado: ExamState
-  /** Solo con hallazgos; puede faltar mientras se escribe. */
+  /**
+   * Lo que encontró, con sus palabras; puede faltar mientras se escribe. Lo normal también guarda lo
+   * que se dijo («Lasègue negativo»): el estado no reemplaza las palabras del médico (revisión del 26 nov).
+   */
   hallazgo?: string
 }
 
@@ -94,11 +97,8 @@ export function parseSystemsExam(
         ok: false,
         error: `${labelOf(key)}: el hallazgo tiene hasta ${EXAM_FINDING_MAX} caracteres`,
       }
-    // Sin alteraciones no lleva texto: si lo tenía, se descarta al cambiar de estado.
-    out[key] =
-      estado === "con_hallazgos" && text
-        ? { estado, hallazgo: text }
-        : { estado: estado as ExamState }
+    // Lo normal también guarda lo que se dijo («Lasègue negativo»), si se dijo.
+    out[key] = text ? { estado: estado as ExamState, hallazgo: text } : { estado: estado as ExamState }
   }
   return { ok: true, value: Object.keys(out).length > 0 ? { sistemas: out } : null }
 }
@@ -109,9 +109,10 @@ function labelOf(key: ExamSystemKey): string {
 
 /**
  * Lo dictado de un sistema se suma a lo que ya tenía, sin pisarlo (ADR 0012,
- * actualización del 2026-10-24): un hallazgo nuevo se agrega al escrito, y un
- * «sin alteraciones» dictado no borra un hallazgo que ya estaba. La usan el
- * servidor al confirmar y la pantalla al reflejarlo, para que digan lo mismo.
+ * actualización del 2026-10-24): lo nuevo que se dijo se agrega al texto que ya
+ * estaba, y un «sin alteraciones» dictado no borra un hallazgo que ya estaba. Lo
+ * normal dicho con palabras («Lasègue negativo») las guarda. La usan el servidor
+ * al confirmar y la pantalla al reflejarlo, para que digan lo mismo.
  */
 export function mergeDictatedSystem(
   exam: SystemsExam | null,
@@ -119,16 +120,26 @@ export function mergeDictatedSystem(
   dictated: ExamSystemEntry,
 ): SystemsExam {
   const current = exam?.sistemas[system]
-  const had = current?.estado === "con_hallazgos" ? (current.hallazgo ?? "").trim() : ""
-  const said = dictated.estado === "con_hallazgos" ? (dictated.hallazgo ?? "").trim() : ""
+  const had = (current?.hallazgo ?? "").trim()
+  const said = (dictated.hallazgo ?? "").trim()
   // Lo mismo dicho otra vez es lo que ya está, frase por frase: «edema» no es «Sin edema».
   const same = (a: string, b: string) => a.toLocaleLowerCase("es").replace(/\s+/g, " ") === b.toLocaleLowerCase("es").replace(/\s+/g, " ")
-  let entry: ExamSystemEntry
-  if (current?.estado === "con_hallazgos" && dictated.estado !== "con_hallazgos") entry = current
-  else if (!had) entry = said ? { estado: "con_hallazgos", hallazgo: said } : dictated
-  else if (!said || had.split(";").some((part) => same(part.trim(), said))) entry = current!
-  else entry = { estado: "con_hallazgos", hallazgo: `${had}; ${said}`.slice(0, EXAM_FINDING_MAX) }
+  const text = !said ? had : !had ? said : had.split(";").some((part) => same(part.trim(), said)) ? had : `${had}; ${said}`.slice(0, EXAM_FINDING_MAX)
+  // Con un hallazgo, de antes o dictado, el sistema queda con hallazgos: lo normal dicho no lo borra.
+  const estado: ExamState = current?.estado === "con_hallazgos" || dictated.estado === "con_hallazgos" ? "con_hallazgos" : "sin_alteraciones"
+  const entry: ExamSystemEntry = text ? { estado, hallazgo: text } : { estado }
   return { sistemas: { ...(exam?.sistemas ?? {}), [system]: entry } }
+}
+
+/**
+ * El sistema con el estado que se eligió a mano. De «con hallazgos» a «sin alteraciones» se borra lo
+ * que encontró: no queda «Cardiovascular, sin alteraciones: edema en MMII» (revisión de código del 26
+ * nov). Lo normal dicho con sus palabras («Lasègue negativo») se conserva, y lo escrito también al pasar
+ * a «con hallazgos».
+ */
+export function withExamState(entry: ExamSystemEntry | undefined, estado: ExamState): ExamSystemEntry {
+  const kept = entry?.estado === "con_hallazgos" && estado === "sin_alteraciones" ? "" : (entry?.hallazgo ?? "")
+  return kept ? { estado, hallazgo: kept } : { estado }
 }
 
 /** Lo guardado, leído sin fallar: lo que no se entiende queda «No examinado». */
@@ -182,8 +193,10 @@ export function examSummary(exam: SystemsExam | null): string {
 }
 
 /**
- * El examen en la historia, en líneas: cada hallazgo en la suya, y juntos los
- * sistemas sin alteraciones y los no examinados. Sin nada marcado, ninguna.
+ * El examen en la historia, en líneas: cada hallazgo en la suya, lo normal dicho
+ * con palabras también en la suya («Neurológico, sin alteraciones: Lasègue
+ * negativo»), y juntos los demás sin alteraciones y los no examinados. Sin nada
+ * marcado, ninguna.
  */
 export function examLines(exam: SystemsExam | null): string[] {
   const readings = examReadings(exam)
@@ -193,7 +206,10 @@ export function examLines(exam: SystemsExam | null): string[] {
   const lines = readings
     .filter((r) => r.state === "con_hallazgos")
     .map((r) => `${r.label}: ${r.finding ?? "con hallazgos, sin describir"}`)
-  const normal = names("sin_alteraciones")
+  for (const r of readings)
+    if (r.state === "sin_alteraciones" && r.finding)
+      lines.push(`${r.label}, ${EXAM_STATE_LABELS.sin_alteraciones.toLowerCase()}: ${r.finding}`)
+  const normal = readings.filter((r) => r.state === "sin_alteraciones" && !r.finding).map((r) => r.label)
   if (normal.length) lines.push(`Sin alteraciones: ${normal.join(", ")}`)
   const missing = names("no_examinado")
   if (missing.length) lines.push(`No examinado: ${missing.join(", ")}`)

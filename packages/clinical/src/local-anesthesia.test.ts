@@ -107,7 +107,9 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
   }
   const hta = { name: "Hipertensión esencial", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
   const fa = { name: "Fibrilación auricular", diagnosisSystem: "ICD-10", diagnosisCode: "I48" }
-  const cap = (why: string) => `Epinefrina hasta 0,04 mg por ${why}: unos 2,2 cartuchos`
+  // Los cartuchos van junto a los mg: «por la presión de hoy (165/100) (unos 2,2 cartuchos)» llevaba
+  // dos paréntesis seguidos (QA del 26 nov, H7).
+  const cap = (why: string) => `Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por ${why}`
 
   // QA de diseño del 18 nov (H7): el primer número que se leía era el máximo por peso (7,8), no el tope (2,2).
   it("con tope, lo que manda va primero y el máximo por peso después, corto", () => {
@@ -118,7 +120,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       epinephrine: check({ asaClass: "III" }),
     })
     expect(words).toEqual({
-      cap: "Epinefrina hasta 0,04 mg por su ASA III: unos 2,2 cartuchos",
+      cap: "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por su ASA III",
       dose: "Máximo por peso (64 kg): 7,8 cartuchos",
       warnings: [],
     })
@@ -178,9 +180,9 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
   it("la hipertensión sin la presión de hoy pide tomarla antes de anestesiar, sin tope", () => {
     const today = check({ conditions: [hta], asaClass: "II" })
     expect(today).toEqual({ cap: null, takePressure: "hipertensión esencial (I10)" })
-    expect(warn(today)).toEqual(["Con su hipertensión esencial (I10), toma la presión antes de anestesiar."])
+    expect(warn(today)).toEqual(["Aviso: con su hipertensión esencial (I10), la presión de hoy no está anotada."])
     // Con cualquier anestésico: no es por la epinefrina sola.
-    expect(warn(today, "mepivacaina-3")).toEqual(["Con su hipertensión esencial (I10), toma la presión antes de anestesiar."])
+    expect(warn(today, "mepivacaina-3")).toEqual(["Aviso: con su hipertensión esencial (I10), la presión de hoy no está anotada."])
   })
 
   // QA clínica del 18 nov: «Con su hipertensión esencial (primaria) (I10)…», con dos paréntesis seguidos.
@@ -188,7 +190,7 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
     const primary = { name: "Hipertensión esencial (primaria)", diagnosisSystem: "ICD-10", diagnosisCode: "I10" }
     const today = check({ conditions: [primary], asaClass: "II" })
     expect(today.takePressure).toBe("hipertensión esencial (primaria, I10)")
-    expect(warn(today)).toEqual(["Con su hipertensión esencial (primaria, I10), toma la presión antes de anestesiar."])
+    expect(warn(today)).toEqual(["Aviso: con su hipertensión esencial (primaria, I10), la presión de hoy no está anotada."])
   })
 
   // latidIA no pide la ASA: llega nula, y vale lo demás.

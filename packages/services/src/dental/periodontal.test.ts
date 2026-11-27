@@ -5,12 +5,13 @@ import { encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { addOdontogramEntries } from "./odontogram.js"
+import { addOdontogramEntries, voidOdontogramEntry } from "./odontogram.js"
 import { makeSigner, readyToClose, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import { finalizeEncounter, getEncounterClosing } from "../encounters.js"
 import { getPatientSummary, getTimeline } from "../patient-history.js"
 import { nextPatientNumber } from "../patients.js"
 import {
+  chartTeethInOrder,
   classifyPeriodontalChart,
   comparePeriodontalCharts,
   getPeriodontalChart,
@@ -76,6 +77,52 @@ it("toma del odontograma las piezas y el implante, y es uno por atención", asyn
   expect(chart.summary.pendingTeeth).toHaveLength(28)
   const again = await f.run((tx) => startPeriodontalChart(tx, f.orgId, f.actor, f.patientId, { encounterId: f.first }))
   expect(again.id).toBe(chart.id)
+})
+
+// Revisión del 26 nov: el odontólogo corrige el odontograma durante el sondaje (la 18 no estaba
+// ausente) y esa pieza ya se puede sondear; la que sigue ausente, no.
+it("la pieza que el odontograma ya no tiene ausente se sondea y se suma a las del sondaje", async () => {
+  const f = await attending()
+  const chart = await f.run((tx) => startPeriodontalChart(tx, f.orgId, f.actor, f.patientId, { encounterId: f.first }))
+  expect(chart.expectedTeeth).not.toContain(18)
+  const [absent18] = await ownerDb
+    .select({ id: odontogramEntry.id })
+    .from(odontogramEntry)
+    .where(and(eq(odontogramEntry.patientId, f.patientId), eq(odontogramEntry.toothNumber, 18), isNull(odontogramEntry.voidedAt)))
+  await f.run((tx) => voidOdontogramEntry(tx, f.orgId, f.actor, absent18!.id, f.patientId, "No estaba ausente: error al registrar"))
+  // La pantalla ya la ofrece: el sondaje en borrador lee el odontograma vigente.
+  const offered = await f.run((tx) => getPeriodontalChart(tx, f.orgId, f.patientId, chart.id))
+  expect(offered.expectedTeeth.slice(0, 2)).toEqual([18, 17])
+  expect(offered.summary.pendingTeeth).toContain(18)
+  // El cierre dice lo mismo que la pantalla: la 18 también falta (revisión de código del 26 nov).
+  await f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { toothNumber: 17, probingDepth: [3, 2, 3, 3, 2, 3] }))
+  const shown = await f.run((tx) => getPeriodontalChart(tx, f.orgId, f.patientId, chart.id))
+  const closing = await f.run((tx) => getEncounterClosing(tx, f.orgId, f.actor, f.patientId, f.first))
+  const probing = closing.periodontal as { teeth: number; pending: string | null } | undefined
+  expect(probing?.teeth).toBe(shown.expectedTeeth.length - shown.implantTeeth.length)
+  expect(shown.pending).toMatch(/^arriba por fuera, la 18 y /)
+  expect(probing?.pending).toBe(shown.pending)
+  const saved = await f.run((tx) =>
+    savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { toothNumber: 18, probingDepth: [3, 2, 3, 3, 2, 3] }),
+  )
+  expect(saved).toMatchObject({ toothNumber: 18, probingDepth: [3, 2, 3, 3, 2, 3] })
+  const view = await f.run((tx) => getPeriodontalChart(tx, f.orgId, f.patientId, chart.id))
+  expect(view.expectedTeeth).toHaveLength(29)
+  expect(view.expectedTeeth.slice(0, 2)).toEqual([18, 17])
+  expect(view.teeth.find((tooth) => tooth.toothNumber === 18)?.probingDepth).toEqual([3, 2, 3, 3, 2, 3])
+  // La 28 sigue ausente: el aviso de siempre.
+  await expect(
+    f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { toothNumber: 28, probingDepth: [3, 2, 3, 3, 2, 3] })),
+  ).rejects.toMatchObject({ code: "VALIDATION", message: expect.stringMatching(/ausente/) })
+  // La base solo deja sumar: quitar una pieza del sondaje sigue sin poderse.
+  await expect(
+    f.run((tx) => tx.execute(sql`update periodontal_chart set expected_teeth = '{17}' where id = ${chart.id}`)),
+  ).rejects.toThrow()
+})
+
+it("las piezas del sondaje van en su orden, también una temporal: nunca delante de la 18", () => {
+  expect(chartTeethInOrder([17, 55, 18, 48, 11, 21])).toEqual([18, 17, 11, 21, 48, 55])
+  expect(chartTeethInOrder([18, 18, 17])).toEqual([18, 17])
 })
 
 it("solo quien lleva la atención escribe, solo en borrador y solo las piezas que se sondean", async () => {

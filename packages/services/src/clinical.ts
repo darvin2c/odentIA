@@ -731,9 +731,14 @@ function validateMedicationRow(
     doseValue !== null && doseUnit
       ? doseText(doseValue, doseUnit as DoseUnit)
       : assertText(input.dose, 200, `${at}.dose`, false)
+  // Con frecuencia de la lista, lo escrito es su nombre, salvo lo dicho que dice lo mismo («dos veces al
+  // día» es «Cada 12 horas»): eso se queda como se dijo (QA del 26 nov). Otra cosa no acompaña al código.
+  const written = assertText(input.frequency, 200, `${at}.frequency`, false)
   const frequency = frequencyCode
-    ? MEDICATION_FREQUENCY_LABELS[frequencyCode as MedicationFrequency]
-    : assertText(input.frequency, 200, `${at}.frequency`, false)
+    ? written && frequencyCodeOf(written) === frequencyCode
+      ? written
+      : MEDICATION_FREQUENCY_LABELS[frequencyCode as MedicationFrequency]
+    : written
   const startDate = assertDateStr(input.startDate, `${at}.startDate`)
   const endDate = assertDateStr(input.endDate, `${at}.endDate`)
   assertDateRange(startDate, endDate, `${at}.endDate`)
@@ -1455,7 +1460,8 @@ export function declaredMedications(
     return {
       ...row,
       ...(structured ? { dose: doseText(structured.doseValue, structured.doseUnit), doseValue: structured.doseValue, doseUnit: structured.doseUnit } : {}),
-      ...(code ? { frequency: MEDICATION_FREQUENCY_LABELS[code], frequencyCode: code } : {}),
+      // Cada cuánto, como se dijo («2 veces al día»), con su código de la lista al lado (QA del 26 nov).
+      ...(code ? { frequency: row.frequency?.trim(), frequencyCode: code } : {}),
     }
   })
 }
@@ -1488,7 +1494,8 @@ function declaredDoseFields(dose: string | null | undefined, frequency: string |
     dose: structured ? doseText(structured.doseValue, structured.doseUnit) : dose?.trim() || null,
     doseValue: structured ? String(structured.doseValue) : null,
     doseUnit: structured?.doseUnit ?? null,
-    frequency: code ? MEDICATION_FREQUENCY_LABELS[code] : frequency?.trim() || null,
+    // Lo dicho en `frequency` y el código en `frequencyCode`: «dos veces al día» no pasa a «Cada 12 horas».
+    frequency: frequency?.trim() || null,
     frequencyCode: code,
   }
 }

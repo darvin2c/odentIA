@@ -18,7 +18,7 @@ import {
   DOSE_UNITS,
   type DoseUnit,
   MEDICATION_FREQUENCIES,
-  MEDICATION_FREQUENCY_LABELS, FAMILY_KINSHIP_LABELS, kinshipFromWords } from "@odentia/clinical"
+  MEDICATION_FREQUENCY_LABELS, type MedicationFrequency, FAMILY_KINSHIP_LABELS, kinshipFromWords, everydayConditionOf, frequencyCodeOf } from "@odentia/clinical"
 import { Button, Input } from "@odentia/ui"
 import { PastDateInput, withForm } from "@odentia/ui-patterns"
 import { formOptions } from "@tanstack/react-form"
@@ -147,7 +147,8 @@ export function withSaidHealth(values: HealthFormValues, { health: said, intervi
       doseValue: "",
       doseUnit: "",
       frequency: item.frequency,
-      frequencyCode: item.frequency ? "otra" : "",
+      // Lo dicho que es una de la lista («dos veces al día») queda elegida en ella, con lo dicho al lado.
+      frequencyCode: item.frequency ? (frequencyCodeOf(item.frequency) ?? "otra") : "",
       startDate: "",
       endDate: "",
       notes: item.notes,
@@ -333,16 +334,34 @@ export const ConditionRows = withForm({
           <div className="flex flex-col gap-3">
             {rowsField.state.value.map((row, index) => (
               <div key={row.key} className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-                <form.AppField name={`conditions[${index}].name`}>
-                  {(field) => (
-                    <field.TextField
-                      id={fid(`con-nom-${row.key}`)}
-                      label="Nombre"
-                      maxLength={HEALTH_NAME_MAX}
-                      disabled={readOnly}
-                    />
-                  )}
-                </form.AppField>
+                <div className="flex flex-col gap-1">
+                  <form.AppField name={`conditions[${index}].name`}>
+                    {(field) => (
+                      <field.TextField
+                        id={fid(`con-nom-${row.key}`)}
+                        label="Nombre"
+                        maxLength={HEALTH_NAME_MAX}
+                        disabled={readOnly}
+                      />
+                    )}
+                  </form.AppField>
+                  {/* «Presión» dicha: se sugiere la del catálogo y la elige quien atiende (QA del 26 nov). */}
+                  {everydayConditionOf(row.name) ? (
+                    <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                      Sugerencia: {everydayConditionOf(row.name)?.toLocaleLowerCase("es")}.
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="h-auto min-h-11 px-1 sm:min-h-0"
+                        disabled={readOnly}
+                        onClick={() => form.setFieldValue(`conditions[${index}].name`, everydayConditionOf(row.name) ?? row.name)}
+                      >
+                        Usar «{everydayConditionOf(row.name)}»
+                      </Button>
+                    </p>
+                  ) : null}
+                </div>
                 {/* «Quitar código» lo trae el buscador, junto al código elegido: no se repite
                     debajo (repaso final de la ficha, B6). */}
                 <form.AppField name={`conditions[${index}].diagnosisCode`}>
@@ -504,6 +523,19 @@ const FREQUENCY_OPTIONS = [
 ]
 type FrequencyChoice = (typeof FREQUENCY_OPTIONS)[number]["value"]
 
+/** La frecuencia de la lista, por su código; vacío si no es de la lista. */
+const frequencyLabel = (code: string): string =>
+  (MEDICATION_FREQUENCIES as readonly string[]).includes(code) ? MEDICATION_FREQUENCY_LABELS[code as MedicationFrequency] : ""
+
+/**
+ * Cada cuánto la toma, como se dijo («2 veces al día») o, sin eso, el nombre de la de la lista, en
+ * minúscula para ir dentro de una línea (QA del 26 nov: lo dicho se guardaba como «Cada 12 horas»).
+ */
+export function frequencyWords(frequency: string | null | undefined, code: string | null | undefined): string {
+  const said = frequency?.trim() || frequencyLabel(code ?? "")
+  return said ? said.charAt(0).toLocaleLowerCase("es") + said.slice(1) : ""
+}
+
 const UNIT_OPTIONS = [
   { value: "", label: "Unidad" },
   ...DOSE_UNITS.map((unit) => ({ value: unit, label: DOSE_UNIT_LABELS[unit as DoseUnit][1] })),
@@ -620,6 +652,10 @@ export const MedicationRows = withForm({
                         </field.Group>
                       )}
                     </form.AppField>
+                    {/* Lo dicho que dice lo mismo que la de la lista: se ve como se dijo (QA del 26 nov). */}
+                    {row.frequencyCode !== "otra" && row.frequency.trim() && row.frequency.trim().toLocaleLowerCase("es") !== frequencyLabel(row.frequencyCode).toLocaleLowerCase("es") ? (
+                      <p className="text-xs text-muted-foreground">Se dijo: «{row.frequency.trim()}».</p>
+                    ) : null}
                     {row.frequencyCode === "otra" ? (
                       <form.AppField name={`medications[${index}].frequency`}>
                         {(field) => (

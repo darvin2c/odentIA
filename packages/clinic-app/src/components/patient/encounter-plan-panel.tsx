@@ -97,6 +97,7 @@ import { ExtractionRisks } from "./extraction-risks"
 import { PlanItemSessions, phaseHeading } from "./plan-fases"
 import { ReviseDrawer } from "./recorrido-tab"
 import { ServicePicker } from "./service-picker"
+import { useOpenWide } from "./wide-section"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -326,6 +327,8 @@ export function EncounterPlanPanel({
   // Riesgos propios escritos sin guardar: «Guardar y firmar» (QA de diseño del 18 nov, H1).
   const risksDrafts = useRisksDrafts()
   const orgLocale = useOrgProfile().data?.locale
+  // «Abrir el Plan»: la sugerencia de fase se cambia con «Planificar…», que vive en el Plan.
+  const openWide = useOpenWide()
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
     queryFn: () => fetchTreatmentPlans(patientId),
@@ -996,6 +999,26 @@ export function EncounterPlanPanel({
                               </Fragment>
                             ))}
                           </span>
+                          {/* La sugerencia de fase, también donde se anota el diagnóstico, como en el Plan de
+                              la ficha; la fase no cambia sola (QA del 26 nov, clínica 5). */}
+                          {!CLOSED.has(item.status) && item.phaseSuggestion ? (
+                            <span className="text-xs text-muted-foreground">
+                              {item.phaseSuggestion}
+                              {openWide ? (
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  size="sm"
+                                  className="h-auto min-h-11 px-1 py-0 text-xs sm:min-h-0"
+                                  // Sin el tratamiento: con él se abría encima su Recorrido, que no tiene
+                                  // «Planificar…» (QA del 27 nov, verificador 5).
+                                  onClick={() => openWide({ id: "plan" })}
+                                >
+                                  Abrir el Plan
+                                </Button>
+                              ) : null}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="flex flex-wrap items-center gap-1">
                           {/* Con «Hoy», su estado ya está bajo el nombre: «Aceptado» y «En curso» sobran. */}

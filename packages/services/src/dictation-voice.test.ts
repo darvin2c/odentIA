@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { type DictationFormQuestion, formNetMisses, formQuestionsOf, prepareFormAnswer, withoutFormNotes } from "./dictation-forms.js"
 import { pauseBridge, withPauseBridge } from "./dictation-heard.js"
-import { dictatedService } from "./encounter-dictation.js"
+import { dictatedService, discardedByPerson, withSaidAmounts } from "./encounter-dictation.js"
 import type { ProductSite } from "./product-hooks.js"
 import { productHooksFor } from "./products.js"
 
@@ -259,5 +259,31 @@ describe("cuando Clío duda entre dos opciones, las deja para elegir", () => {
     })
     // Sin duda, no lleva opciones.
     expect(ask(endo, "frio", "Aumentada, persiste", "prueba de frío aumentada que persiste")?.payload).not.toHaveProperty("choices")
+  })
+})
+
+// QA del 27 nov (verificador, hallazgo 6): «Me corrijo: no es paracetamol, le indiqué ibuprofeno de 400» dejó
+// «Ibuprofeno si tiene dolor.»: la corrección perdió la dosis dicha. Lo dicho junto a lo que trae no se pierde.
+describe("una corrección conserva la cantidad que se dijo con ella", () => {
+  const said = "Me corrijo: no es paracetamol, le indiqué ibuprofeno de 400"
+  it("la dosis va detrás de la palabra que la corrección trae", () => {
+    expect(withSaidAmounts("Paracetamol si tiene dolor.", "Ibuprofeno si tiene dolor.", said)).toBe("Ibuprofeno de 400 si tiene dolor.")
+  })
+  it("si Clío ya la trae, o la palabra ya estaba antes, no cambia nada", () => {
+    expect(withSaidAmounts("Paracetamol si tiene dolor.", "Ibuprofeno de 400 si tiene dolor.", said)).toBe("Ibuprofeno de 400 si tiene dolor.")
+    expect(withSaidAmounts("Ibuprofeno si tiene dolor.", "Ibuprofeno cada 8 horas.", "no, ibuprofeno de 400 cada 8 horas")).toBe("Ibuprofeno cada 8 horas.")
+    expect(withSaidAmounts("Dolor en la 36.", "Dolor en la 46.", "me corrijo: es la 46")).toBe("Dolor en la 46.")
+  })
+})
+
+// QA del 27 nov (verificador, hallazgo 1): lo descartado por una persona se le dice a Clío en la pausa, también
+// lo que estaba por revisar con su nota; lo que descartó el sistema (reemplazado o incluido en caminos), no.
+describe("lo que descartó una persona", () => {
+  it("cuenta lo descartado a mano aunque tuviera su nota de por revisar, no lo que descartó el sistema", () => {
+    expect(discardedByPerson({ kind: "plan", status: "descartada", note: "Elige la prestación en cada opción." })).toBe(true)
+    expect(discardedByPerson({ kind: "control", status: "descartada", note: null })).toBe(true)
+    expect(discardedByPerson({ kind: "nota", status: "descartada", note: "Lo que dijo después lo reemplaza." })).toBe(false)
+    expect(discardedByPerson({ kind: "plan", status: "descartada", note: "La incluye la elección de caminos." })).toBe(false)
+    expect(discardedByPerson({ kind: "ficha", status: "descartada", note: null })).toBe(false)
   })
 })

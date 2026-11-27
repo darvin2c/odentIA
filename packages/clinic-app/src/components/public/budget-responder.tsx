@@ -69,6 +69,21 @@ function lineGuideRows(guide: PatientGuide | null | undefined): Array<[string, s
   return rows.filter((row): row is [string, string] => Boolean(row[1]))
 }
 
+/** Lo que ya se hizo o se está haciendo: no se deja para después. */
+const executed = (status: string) => status === "realizado" || status === "en_curso"
+
+/**
+ * El nombre de una línea con su pieza (odentIA; sin pieza, solo el nombre), como en su PDF: con dos
+ * caminos, «Resina… · Corona…» no decía qué era cada línea (QA del 27 nov, verificador 8).
+ */
+const lineName = (item: { title: string; toothNumber: number | null }) =>
+  item.toothNumber != null && !new RegExp(`(?<!\\d)${item.toothNumber}(?!\\d)`).test(item.title)
+    ? `${item.title} · pieza ${item.toothNumber}`
+    : item.title
+
+/** «Opción A» en medio de una frase: «la opción A», con su letra como se llama. */
+const midLabel = (label: string) => label.charAt(0).toLocaleLowerCase("es") + label.slice(1)
+
 /**
  * «Ver y responder» (tablero 3): el presupuesto como lo ve la persona, en «Su
  * enlace» y en el portal. Cada línea se marca para aceptarla; lo que no marca
@@ -91,16 +106,23 @@ export function BudgetResponder({
 }) {
   const several = budget.options.length > 1
   const chosen = budget.options.find((option) => option.decision === "elegida") ?? null
-  const recommended =
-    budget.options.find((option) => option.isRecommended) ?? budget.options[0] ?? null
+  // Va elegida de antemano solo la que su odontólogo marcó como recomendada: si nadie marcó
+  // ninguna, elige la persona (revisión del 26 nov). Con una sola opción no hay nada que elegir.
+  const recommended = budget.options.find((option) => option.isRecommended) ?? null
   const [pickedOptionId, setPickedOptionId] = useState<string | null>(
     chosen?.id ?? (several ? (recommended?.id ?? null) : null),
   )
   const viewedOption =
-    chosen ?? budget.options.find((option) => option.id === pickedOptionId) ?? recommended
+    chosen ??
+    budget.options.find((option) => option.id === pickedOptionId) ??
+    (several ? null : (budget.options[0] ?? null))
+  // Con varias y ninguna elegida todavía, no se muestran líneas: serían las de todas mezcladas.
+  const choosing = several && !viewedOption
   const lines = viewedOption
     ? budget.items.filter((item) => item.optionId === viewedOption.id)
-    : budget.items
+    : choosing
+      ? []
+      : budget.items
   const open = (decision: string) => decision !== "aceptado" && decision !== "rechazado"
   // Por omisión todo marcado: lo habitual es aceptar lo que propone su odontólogo.
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set())
@@ -123,24 +145,35 @@ export function BudgetResponder({
     budget,
   )
   const totalText = portalTotalsText(several && viewedOption ? viewedOption : budget, budget)
-  const anyOpen = lines.some((item) => open(item.decision))
+  const anyOpen = (choosing ? budget.items : lines).some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")
+  // Sin elegir opción, todo queda para después: cada tratamiento una vez, sin camino elegido. Solo
+  // aceptar pide elegir una (revisión de código del 26 nov), como lo responde el servidor.
+  // Lo que ya se hizo («realizado», «en curso») no se deja para después: queda fuera (QA del 26 nov).
+  const postponedItems = [
+    ...new Map(budget.items.filter((item) => open(item.decision) && !executed(item.itemStatus)).map((item) => [item.planItemId, item])).values(),
+  ]
   const answer = () =>
-    onAnswer({
-      optionId: several ? (viewedOption?.id ?? null) : null,
-      decisions: lines
-        .filter((item) => open(item.decision))
-        .map((item) => ({
-          planItemId: item.planItemId,
-          decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
-        })),
-    })
+    onAnswer(
+      choosing
+        ? { optionId: null, decisions: postponedItems.map((item) => ({ planItemId: item.planItemId, decision: "pospuesto" as const })) }
+        : {
+            optionId: several ? (viewedOption?.id ?? null) : null,
+            decisions: lines
+              .filter((item) => open(item.decision) && !(executed(item.itemStatus) && unchecked.has(item.planItemId)))
+              .map((item) => ({
+                planItemId: item.planItemId,
+                decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
+              })),
+          },
+    )
   const noneMarked = lines
     .filter((item) => open(item.decision))
     .every((item) => unchecked.has(item.planItemId))
-  const label =
-    several && !chosen && viewedOption
-      ? `Elijo la ${viewedOption.label.toLowerCase()}`
+  const label = choosing
+    ? "Lo dejo para después"
+    : several && !chosen && viewedOption
+      ? `Elijo la ${midLabel(viewedOption.label)}`
       : noneMarked
         ? "Lo dejo para después"
         : "Acepto lo marcado"
@@ -192,16 +225,23 @@ export function BudgetResponder({
                   <span className="font-semibold">
                     {option.name?.trim() || option.label} · {portalTotalsText(option, budget)}
                   </span>
-                  <span className="text-muted-foreground">
-                    {[
-                      option.isRecommended ? `La recomienda tu ${appWords().clinician.one}` : null,
-                      budget.items
-                        .filter((item) => item.optionId === option.id)
-                        .map((item) => item.title)
-                        .join(" · "),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
+                  {option.isRecommended ? (
+                    <span className="text-muted-foreground">La recomienda tu {appWords().clinician.one}</span>
+                  ) : null}
+                  {/* Cada línea en su renglón: seguidas con «·», a 390 px no se veía dónde acababa una
+                      (verificador 2 del 27 nov). Dentro de la etiqueta va con roles, no con <ul>. */}
+                  <span
+                    role="list"
+                    aria-label={`${option.name?.trim() || option.label}: lo que incluye`}
+                    className="flex flex-col text-muted-foreground"
+                  >
+                    {budget.items
+                      .filter((item) => item.optionId === option.id)
+                      .map((item) => (
+                        <span key={item.planItemId} role="listitem">
+                          {lineName(item)}
+                        </span>
+                      ))}
                   </span>
                   {option.pros ? <span className="mt-1">A favor: {option.pros}</span> : null}
                   {option.cons ? <span className="mt-1">A considerar: {option.cons}</span> : null}
@@ -217,93 +257,97 @@ export function BudgetResponder({
         <p className="text-sm font-semibold">Elegiste la {viewedOption.label.toLowerCase()}</p>
       ) : null}
 
-      <ul className="flex flex-col divide-y rounded-2xl border bg-card">
-        {lines.map((item) => {
-          const id = `linea-${item.planItemId}`
-          const isOpen = open(item.decision)
-          const checked = accepted(item.planItemId, item.decision)
-          const detail = [
-            item.billingMode === "session"
-              ? item.sessionsPlanned === 1
-                ? "1 sesión"
-                : item.sessionsPlanned
-                  ? `${item.sessionsPlanned} sesiones`
-                  : "Se paga en cada visita"
-              : null,
-            item.promotionName ? `Promoción: ${item.promotionName}` : null,
-            !checked
-              ? item.decision === "rechazado"
-                ? "No lo aceptaste"
-                : "Lo dejo para después"
-              : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-          const guideRows = lineGuideRows(item.patientGuide)
-          return (
-            <li key={item.planItemId} className="flex flex-col p-3 text-sm">
-              <div className="flex items-center gap-3">
-                {isOpen ? (
-                  <Checkbox
-                    id={id}
-                    checked={checked}
-                    disabled={pending}
-                    onCheckedChange={(next) => {
-                      const copy = new Set(unchecked)
-                      if (next === true) copy.delete(item.planItemId)
-                      else copy.add(item.planItemId)
-                      setUnchecked(copy)
-                    }}
-                  />
-                ) : checked ? (
-                  <Check className="size-4 text-success" aria-label="Aceptado" />
-                ) : (
-                  <Minus className="size-4 text-muted-foreground" aria-label="No aceptado" />
-                )}
-                <label
-                  htmlFor={isOpen ? id : undefined}
-                  className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
-                >
-                  <span className="font-medium">{item.title}</span>
-                  {detail ? <span className="text-muted-foreground">{detail}</span> : null}
-                </label>
-                <span className="whitespace-nowrap font-medium tabular-nums">
-                  {formatPortalMoney(
-                    item.lineTotalCents,
-                    item.currency,
-                    budget.locale,
-                    !twoCurrencies,
-                  )}
-                </span>
-              </div>
-              {guideRows.length > 0 ? (
-                // Fuera de la etiqueta de la casilla: tocarlo no marca ni desmarca.
-                <details className="group mt-1 pl-7">
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-primary [&::-webkit-details-marker]:hidden">
-                    Cómo es este tratamiento
-                    <ChevronDown
-                      aria-hidden
-                      className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+      {choosing ? null : (
+        <ul className="flex flex-col divide-y rounded-2xl border bg-card">
+          {lines.map((item) => {
+            const id = `linea-${item.planItemId}`
+            const isOpen = open(item.decision)
+            const checked = accepted(item.planItemId, item.decision)
+            const detail = [
+              item.billingMode === "session"
+                ? item.sessionsPlanned === 1
+                  ? "1 sesión"
+                  : item.sessionsPlanned
+                    ? `${item.sessionsPlanned} sesiones`
+                    : "Se paga en cada visita"
+                : null,
+              item.promotionName ? `Promoción: ${item.promotionName}` : null,
+              !checked
+                ? item.decision === "rechazado"
+                  ? "No lo aceptaste"
+                  : "Lo dejo para después"
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+            const guideRows = lineGuideRows(item.patientGuide)
+            return (
+              <li key={item.planItemId} className="flex flex-col p-3 text-sm">
+                <div className="flex items-center gap-3">
+                  {isOpen ? (
+                    <Checkbox
+                      id={id}
+                      checked={checked}
+                      disabled={pending}
+                      onCheckedChange={(next) => {
+                        const copy = new Set(unchecked)
+                        if (next === true) copy.delete(item.planItemId)
+                        else copy.add(item.planItemId)
+                        setUnchecked(copy)
+                      }}
                     />
-                  </summary>
-                  <dl className="flex flex-col gap-1.5 pb-1 text-muted-foreground">
-                    {guideRows.map(([term, text]) => (
-                      <div key={term}>
-                        <dt className="font-medium text-foreground">{term}</dt>
-                        <dd className="whitespace-pre-wrap">{text}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </details>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
+                  ) : checked ? (
+                    <Check className="size-4 text-success" aria-label="Aceptado" />
+                  ) : (
+                    <Minus className="size-4 text-muted-foreground" aria-label="No aceptado" />
+                  )}
+                  <label
+                    htmlFor={isOpen ? id : undefined}
+                    className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
+                  >
+                    <span className="font-medium">{lineName(item)}</span>
+                    {detail ? <span className="text-muted-foreground">{detail}</span> : null}
+                  </label>
+                  <span className="whitespace-nowrap font-medium tabular-nums">
+                    {formatPortalMoney(
+                      item.lineTotalCents,
+                      item.currency,
+                      budget.locale,
+                      !twoCurrencies,
+                    )}
+                  </span>
+                </div>
+                {guideRows.length > 0 ? (
+                  // Fuera de la etiqueta de la casilla: tocarlo no marca ni desmarca.
+                  <details className="group mt-1 pl-7">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-primary [&::-webkit-details-marker]:hidden">
+                      Cómo es este tratamiento
+                      <ChevronDown
+                        aria-hidden
+                        className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                      />
+                    </summary>
+                    <dl className="flex flex-col gap-1.5 pb-1 text-muted-foreground">
+                      {guideRows.map(([term, text]) => (
+                        <div key={term}>
+                          <dt className="font-medium text-foreground">{term}</dt>
+                          <dd className="whitespace-pre-wrap">{text}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </details>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
-      <p className="text-sm font-semibold" aria-live="polite">
-        Aceptas {acceptedText} de {totalText}
-      </p>
+      {choosing ? null : (
+        <p className="text-sm font-semibold" aria-live="polite">
+          Aceptas {acceptedText} de {totalText}
+        </p>
+      )}
       {hasSessions ? (
         <p className="text-sm text-muted-foreground">
           No lo pagas todo desde el primer día: lo que se cobra por visita se paga en cada visita.
@@ -379,7 +423,6 @@ export function BudgetResponder({
           type="button"
           className="min-h-11 w-full"
           pending={pending}
-          disabled={several && !viewedOption}
           onClick={answer}
         >
           {label}

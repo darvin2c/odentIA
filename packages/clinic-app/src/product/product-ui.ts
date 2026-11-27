@@ -119,8 +119,11 @@ export interface ProductPrescribingUi {
 }
 
 export interface PrescribingRulesUi {
-  /** Lo que impide emitir. */
-  check(items: ReadonlyArray<{ genericName: string }>, weightKg: number | null): { errors: string[] }
+  /** Lo que impide emitir (por norma) y lo que solo avisa (`warnings`: falta el peso de un niño). */
+  check(
+    items: ReadonlyArray<{ genericName: string }>,
+    weightKg: number | null,
+  ): { errors: string[]; warnings?: string[] }
   /** Si la receta lleva el peso y el último que se registró, para proponerlo. */
   /** `ageYears`: sus años, para avisar un peso imposible para su edad (mesa del 25 nov). */
   weight: { required: boolean; suggested: number | null; ageYears?: number | null }

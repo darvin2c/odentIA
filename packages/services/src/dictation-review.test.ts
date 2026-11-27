@@ -407,6 +407,23 @@ describe("lo que el repaso no usó", () => {
     await enable(false)
   })
 
+  // QA del 26 nov (clínica, O2): con el turno de la madre, lo que dice de sí es lo de la familia del niño.
+  it("lo que la madre dice de sí, con su turno, se propone como «Madre: diabetes» y deja de ir a «No lo usé»", async () => {
+    await enable(true)
+    const { pause, review, said, pending } = await conversation()
+    const segmentId = await pause("Yo también soy diabética, eso es mío.")
+    const result = await review({
+      turns: [{ segmentId, turns: [{ quien: "acompanante", vinculo: "madre", texto: "Yo también soy diabética, eso es mío." }] }],
+      outOfPlace: [{ said: "Yo también soy diabética, eso es mío", why: "familiar" }],
+    })
+    expect(result.unused).toEqual([])
+    const [health] = (await pending()).filter((item) => item.kind === "salud")
+    expect(health?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Madre: diabetes"])
+    const [segment] = await said()
+    expect(segment?.unused).toEqual([])
+    await enable(false)
+  })
+
   it("lo que se dijo mientras el repaso leía sigue pidiendo otro repaso", async () => {
     await enable(true)
     const { fx, pause, start } = await conversation()
@@ -488,6 +505,28 @@ describe("un turno que empieza a media frase (QA del 21 nov, C10)", () => {
     ])
     expect(turnsSayTranscript(turns ?? [], segments[0]!.transcript)).toBe(true)
     expect(turnsFromStarts(segments, [{ desde: 1, quien: "paciente", empieza: "no dijo esto" }])[0]).toEqual([{ quien: "paciente", texto: segments[0]!.transcript }])
+  })
+
+  it("las primeras palabras se ubican sin mirar tildes ni signos; si no se ubican, la frase de dos no se le da a quien habló último (26 nov)", () => {
+    const heard = [{ transcript: "toma alguna medicina si tomo losartán para la presión", needsTurns: true }]
+    // Clío escribió sin tilde y con coma: igual se ubica.
+    expect(turnsFromStarts(heard, [{ desde: 1, quien: "dra" }, { desde: 1, quien: "paciente", empieza: "Sí, tomo losartan" }])[0]).toEqual([
+      { quien: "dra", texto: "toma alguna medicina" },
+      { quien: "paciente", texto: "si tomo losartán para la presión" },
+    ])
+    // La respuesta del paciente y la pregunta de la doctora en una frase, sin poder ubicar dónde empieza
+    // la pregunta: antes la frase entera quedaba como de la doctora. No se sabe; lo que sigue, sí.
+    const mixed = [{ transcript: "si tomo losartán y es alérgica a algo. No, a nada.", needsTurns: true }]
+    const [turns] = turnsFromStarts(mixed, [
+      { desde: 1, quien: "paciente" },
+      { desde: 1, quien: "dra", empieza: "y es alérgica a algún medicamento" },
+      { desde: 2, quien: "paciente" },
+    ])
+    expect(turns).toEqual([
+      { quien: "no_se_sabe", texto: "si tomo losartán y es alérgica a algo." },
+      { quien: "paciente", texto: "No, a nada." },
+    ])
+    expect(turnsSayTranscript(turns ?? [], mixed[0]!.transcript)).toBe(true)
   })
 })
 

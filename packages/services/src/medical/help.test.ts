@@ -153,3 +153,16 @@ describe("Clío en una consulta conversada, en latidIA", () => {
     expect(faq?.a).not.toContain("la anestesia)")
   })
 })
+
+// QA del 26 nov (desarrollo, H9): en el consultorio, estas preguntas daban «No estoy segura…».
+describe("lo nuevo de «el sistema solo sugiere» en latidIA", () => {
+  it.each([
+    ["¿Por qué el examen dictado quedó por revisar?", "examen-dictado-por-revisar"],
+    ["clio no marco sin alteraciones en el examen", "examen-dictado-por-revisar"],
+    ["la glucosa salió 650, ¿se guarda?", "pacientes-signo-fuera-de-lo-habitual"],
+    ["¿Qué pasa si anoto un signo vital fuera de lo habitual?", "pacientes-signo-fuera-de-lo-habitual"],
+    ["¿Cómo quito por voz un dato de salud?", "pacientes-dictado-quitar-salud"],
+  ])("«%s» tiene su respuesta", (question, id) => {
+    expect(matchHelpTopics(question, MEDICAL_HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+})

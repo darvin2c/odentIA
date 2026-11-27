@@ -366,6 +366,22 @@ describe("la categoría manda y los retomar piden el sí", () => {
       detail: "Su número es de prueba (a ese número no le llega ningún mensaje) y no tiene correo registrado",
     })
   })
+
+  // Verificador 2 del 27 nov (hallazgo 2): el presupuesto salió con su plantilla a un número de prueba y la
+  // ficha decía «Entregado el 27 nov» junto a «su número es de prueba (a ese número no le llega ningún
+  // mensaje)». Una plantilla no abre conversación con un número que no recibe: no sale y no se entrega.
+  it("con un número de prueba como su WhatsApp, la plantilla aprobada no es una vía", async () => {
+    const spec = AUTOMATION_MESSAGES.aviso_cita_reservada
+    const c = await clinic({ approved: [spec.template!] })
+    const real = await person(c, "Con número de verdad")
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, real.contactId, spec))).toEqual({ via: "plantilla", channel: "whatsapp" })
+    const fiction = await person(c, "Con número de prueba")
+    await ownerDb.update(contactIdentity).set({ externalUserId: "447700900882" }).where(eq(contactIdentity.contactId, fiction.contactId))
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, fiction.contactId, spec))).toEqual({
+      cause: "sin_destino",
+      detail: "Su número es de prueba (a ese número no le llega ningún mensaje) y no tiene correo registrado",
+    })
+  })
 })
 
 describe("el agente no elige plantillas: retoma el sistema", () => {

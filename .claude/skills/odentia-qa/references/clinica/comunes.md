@@ -387,3 +387,21 @@ No tiene camino en el código.
 
 **Caso:** una paciente pide su copia porque se cambia de clínica, con la endodoncia de la 46 aceptada y la sesión 1 pendiente; otra odontóloga la recibe y debe poder empezar la endodoncia con seguridad.
 **Fuentes:** NTS 139-MINSA/2018/DGAIN; NTS 188-MINSA/DGIESP-2022; HL7 FHIR R4; HL7 IPS (ISO 27269:2021; verificar qué secciones son obligatorias).
+
+## P-COM-27 Lo clínico solo se sugiere
+
+**Dónde:** el dictado (`S/encounter-dictation.ts`, `S/dictation-health.ts`, `S/dictation-control.ts`), el cierre y la firma (`S/encounters.ts`, `S/dental/hooks.ts`), el plan (`S/plan.ts`), los signos vitales (`clinical/vitals.ts`), la receta (`medical/prescribing.ts`) y la prioridad de Sofi (`agent/decision/route.ts`). Decisión: ADR 0221.
+
+- [ ] Lo dicho se guarda tal cual («para la presión», «2 veces al día»), y lo deducido llega como sugerencia que el profesional confirma («Sugerencia: … hipertensión arterial»).
+- [ ] Lo dicho en negativo («no tiene hipertiroidismo», «no tengo asma, eso lo tiene mi esposa») no se propone como del paciente. «No, la diabetes no» propone quitarla con «Deshacer», y una palabra parecida no quita otra.
+- [ ] Lo que quien acompaña dice de sí misma se propone como antecedente familiar con su parentesco. Lo de su pareja no va a «De su familia».
+- [ ] Nada clínico cambia solo:
+  - la fase se sugiere en la fila y no se mueve;
+  - la firma dice qué dibuja en el odontograma y qué controles crea;
+  - ninguna opción sale «recomendada» ni preseleccionada sin que alguien la marque.
+- [ ] Ninguna regla clínica frena: un signo vital extremo se guarda con aviso, y la receta de un niño sin peso se emite con aviso, escrita o dictada. Solo frena lo que exige una norma citada.
+- [ ] Ningún texto ordena: dicen «Sugerencia: …» o «Aviso: …», y no «Debe…» ni «Contraindicado».
+- [ ] Sofi nunca baja la prioridad de un caso clínico por su cuenta.
+
+**Caso:** la madre de un niño de 18 meses dice «yo también soy diabética, eso es mío; su papá es asmático; no tiene hipertiroidismo», y la odontóloga dicta «una resina o si no una corona en la 36» y «su próximo control a los dos años».
+**Fuentes:** ADR 0200 y 0221; NTS 139-MINSA/2018/DGAIN (la historia la firma el profesional responsable).

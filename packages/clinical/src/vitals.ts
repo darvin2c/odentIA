@@ -1,8 +1,11 @@
 /**
  * Signos vitales de la atención. Cada uno se identifica con su código LOINC
  * (perfil de signos vitales de HL7 FHIR) y su unidad UCUM, para poder
- * intercambiarlos sin traducir. Los rangos son de plausibilidad para atrapar
- * errores de digitación, no de normalidad clínica.
+ * intercambiarlos sin traducir. Los rangos son de lo habitual, para avisar de
+ * un posible error de digitación, no de normalidad clínica: un valor real
+ * extremo (una glucosa de 650, una saturación de 48 %) se guarda con un aviso
+ * (`vitalsWarnings`). Solo se rechaza lo que no es una medida (26 nov: nada lo
+ * decide el sistema).
  */
 export const VITAL_SIGNS = [
   {
@@ -135,7 +138,7 @@ export function bodyMassIndex(vitals: Vitals | null | undefined): number | null 
   return Math.round((weight / (meters * meters)) * 10) / 10
 }
 
-/** Un signo solo: que se conozca, que sea un número plausible y con sus decimales; vacío es null. */
+/** Un signo solo: que se conozca, que sea una medida (un número mayor que 0) y con sus decimales; vacío es null. */
 function parseSign(
   key: string,
   raw: unknown,
@@ -146,20 +149,19 @@ function parseSign(
   if (raw === null || raw === undefined || raw === "") return { ok: true, key: def.key, value: null }
   const value = typeof raw === "number" ? raw : Number(raw)
   if (!Number.isFinite(value)) return { ok: false, error: `${def.label} debe ser un número` }
-  if (value < def.min || value > def.max)
-    return { ok: false, error: `${def.label} fuera de rango (${def.min}–${def.max} ${def.suffix})` }
+  if (value <= 0) return { ok: false, error: `${def.label} debe ser un número mayor que 0` }
   const factor = 10 ** def.decimals
   return { ok: true, key: def.key, value: Math.round(value * factor) / factor }
 }
 
 /**
- * Valida y normaliza los signos vitales: solo claves conocidas, números
- * dentro del rango de plausibilidad y con los decimales de su medida. La
- * presión se registra completa (sistólica y diastólica) o no se registra.
- * Devuelve el mensaje del primer error o los valores limpios. `allowed` son
- * los que registra el producto de la clínica; por omisión, todos.
+ * Lee los signos vitales para guardarlos: solo claves conocidas, que sean una
+ * medida y con los decimales de su medida. Lo fuera de lo habitual y la
+ * presión a medias se guardan: los avisa `vitalsWarnings`. Devuelve el mensaje
+ * del primer error o los valores limpios. `allowed` son los que registra el
+ * producto de la clínica; por omisión, todos.
  */
-export function parseVitals(
+export function readVitals(
   input: unknown,
   allowed: readonly VitalSignKey[] = VITAL_SIGNS.map((v) => v.key),
 ): { ok: true; value: Vitals | null } | { ok: false; error: string } {
@@ -172,20 +174,38 @@ export function parseVitals(
     if (!one.ok) return one
     if (one.value !== null) out[one.key] = one.value
   }
-  const hasSys = out.presionSistolica !== undefined
-  const hasDia = out.presionDiastolica !== undefined
-  if (hasSys !== hasDia)
-    return { ok: false, error: "Registra la presión arterial completa: sistólica y diastólica" }
-  if (hasSys && hasDia && (out.presionSistolica as number) <= (out.presionDiastolica as number))
-    return { ok: false, error: "La presión sistólica debe ser mayor que la diastólica" }
   return { ok: true, value: Object.keys(out).length > 0 ? out : null }
 }
 
 /**
- * Lo mismo que `parseVitals`, pero dicho por signo: la clave del signo que hay
- * que corregir → su mensaje, para marcarlo junto a su campo. La presión
- * incompleta va en la que falta; la sistólica no mayor, en la sistólica.
- * Vacío: todo bien.
+ * Lo mismo que `readVitals` y, además, que cada signo esté dentro de lo
+ * habitual y la presión completa y bien ordenada: si no, devuelve su mensaje.
+ * No decide qué se guarda (eso es `readVitals`): lo usa lo dictado para dejar
+ * por revisar una medida que conviene mirar antes de confirmarla.
+ */
+export function parseVitals(
+  input: unknown,
+  allowed: readonly VitalSignKey[] = VITAL_SIGNS.map((v) => v.key),
+): { ok: true; value: Vitals | null } | { ok: false; error: string } {
+  const read = readVitals(input, allowed)
+  if (!read.ok || !read.value) return read
+  for (const [key, value] of Object.entries(read.value)) {
+    const def = VITAL_SIGNS.find((v) => v.key === key)!
+    if (value < def.min || value > def.max)
+      return { ok: false, error: `${def.label} fuera de rango (${def.min}–${def.max} ${def.suffix})` }
+  }
+  const hasSys = read.value.presionSistolica !== undefined
+  const hasDia = read.value.presionDiastolica !== undefined
+  if (hasSys !== hasDia)
+    return { ok: false, error: "Registra la presión arterial completa: sistólica y diastólica" }
+  if (hasSys && hasDia && (read.value.presionSistolica as number) <= (read.value.presionDiastolica as number))
+    return { ok: false, error: "La presión sistólica debe ser mayor que la diastólica" }
+  return read
+}
+
+/**
+ * Lo mismo que `readVitals`, pero dicho por signo: la clave del signo que hay
+ * que corregir → su mensaje, para marcarlo junto a su campo. Vacío: todo bien.
  */
 export function vitalsErrors(
   input: Record<string, unknown> | null | undefined,
@@ -193,20 +213,44 @@ export function vitalsErrors(
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!input) return errors
-  // Cada signo por su cuenta; la presión completa se mira después, con las dos
-  // juntas: una sola parecería siempre incompleta.
   for (const [key, raw] of Object.entries(input)) {
     const one = parseSign(key, raw, allowed)
     if (!one.ok) errors[key] = one.error
   }
-  if (Object.keys(errors).length > 0) return errors
-  const whole = parseVitals(input, allowed)
-  if (whole.ok) return errors
-  const diastolic = input.presionDiastolica
-  const key: VitalSignKey =
-    diastolic === null || diastolic === undefined || diastolic === "" ? "presionDiastolica" : "presionSistolica"
-  errors[key] = whole.error
   return errors
+}
+
+/**
+ * Lo que se guarda pero conviene revisar, por signo (26 nov): lo fuera de lo habitual («Aviso: 650
+ * mg/dL está fuera de lo habitual (20–600 mg/dL): revísalo.»), la presión con una sola de sus dos
+ * cifras y la sistólica que no es mayor que la diastólica. Avisa y no frena: decide el profesional.
+ * Lo que no es una medida no está aquí: es un error (`vitalsErrors`).
+ */
+export function vitalsWarnings(
+  input: Record<string, unknown> | null | undefined,
+  allowed: readonly VitalSignKey[] = VITAL_SIGNS.map((v) => v.key),
+): Record<string, string> {
+  const warnings: Record<string, string> = {}
+  if (!input) return warnings
+  const out: Vitals = {}
+  for (const [key, raw] of Object.entries(input)) {
+    const one = parseSign(key, raw, allowed)
+    if (!one.ok || one.value === null) continue
+    out[one.key] = one.value
+    const def = VITAL_SIGNS.find((v) => v.key === one.key)!
+    if (one.value < def.min || one.value > def.max)
+      warnings[one.key] =
+        `Aviso: ${one.value} ${def.suffix} está fuera de lo habitual (${def.min}–${def.max} ${def.suffix}): revísalo.`
+  }
+  const systolic = out.presionSistolica
+  const diastolic = out.presionDiastolica
+  if (systolic !== undefined && diastolic === undefined)
+    warnings.presionDiastolica = "Aviso: falta la diastólica. Se guarda la sistólica sola."
+  else if (systolic === undefined && diastolic !== undefined)
+    warnings.presionSistolica = "Aviso: falta la sistólica. Se guarda la diastólica sola."
+  else if (systolic !== undefined && diastolic !== undefined && systolic <= diastolic && !warnings.presionSistolica)
+    warnings.presionSistolica = "Aviso: la sistólica no es mayor que la diastólica: revísalo."
+  return warnings
 }
 
 /**

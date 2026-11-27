@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PortalBudget } from "../../lib/portal"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { BudgetResponder } from "./budget-responder"
@@ -163,5 +165,88 @@ describe("BudgetResponder", () => {
     expect(page).toContain(`>${dollars}</span>`)
     expect(page).toContain(`Aceptas ${soles} + ${dollars} de ${soles} + ${dollars}`)
     expect(page).not.toContain("Por cotizar")
+  })
+
+  // Revisión del 26 nov: sin recomendada marcada, no se elige ninguna por la persona.
+  const twoOptions = (recommendedB: boolean): PortalBudget => ({
+    ...plain,
+    options: [
+      { ...plain.options[0]!, isRecommended: false },
+      { id: "o2", label: "Opción B", isRecommended: recommendedB, decision: "pendiente", totalCents: 30000 },
+    ],
+    items: [
+      plain.items[0]!,
+      { ...plain.items[0]!, planItemId: "i2", optionId: "o2", title: "Exodoncia del molar 46", lineTotalCents: 30000 },
+    ],
+  })
+
+  it("con varias opciones y ninguna recomendada, ninguna va elegida ni se muestran sus líneas", () => {
+    const page = html(twoOptions(false))
+    expect(page).not.toMatch(/role="radio"[^>]*aria-checked="true"/)
+    expect(page).not.toContain("La recomienda tu")
+    expect(page).not.toContain('font-medium">Endodoncia del molar 46')
+    expect(page).not.toContain("Aceptas")
+  })
+
+  // Revisión de código del 26 nov: como antes, dejarlo para después no pide elegir; solo aceptar.
+  afterEach(cleanup)
+  it("sin elegir ninguna, se puede dejar todo para después: sin opción y cada tratamiento una vez", () => {
+    const onAnswer = vi.fn()
+    render(<BudgetResponder budget={twoOptions(false)} pending={false} error={null} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole("button", { name: "Lo dejo para después" }))
+    expect(onAnswer).toHaveBeenCalledWith({
+      optionId: null,
+      decisions: [
+        { planItemId: "i1", decision: "pospuesto" },
+        { planItemId: "i2", decision: "pospuesto" },
+      ],
+    })
+  })
+
+  // QA del 26 nov (clínica, hallazgo 2): con la profilaxis hecha hoy en lo común, «Lo dejo para después»
+  // fallaba con «No puede retirar la aceptación de un tratamiento ejecutado».
+  it("dejarlo para después deja fuera lo que ya se hizo", () => {
+    const onAnswer = vi.fn()
+    const base = twoOptions(false)
+    const done = { ...plain.items[0]!, planItemId: "i0", optionId: "o1", title: "Profilaxis", itemStatus: "realizado" }
+    const budget = { ...base, items: [done, { ...done, optionId: "o2" }, ...base.items] }
+    render(<BudgetResponder budget={budget} pending={false} error={null} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole("button", { name: "Lo dejo para después" }))
+    expect(onAnswer).toHaveBeenCalledWith({
+      optionId: null,
+      decisions: [
+        { planItemId: "i1", decision: "pospuesto" },
+        { planItemId: "i2", decision: "pospuesto" },
+      ],
+    })
+  })
+
+  it("con la recomendada marcada, esa va elegida de antemano", () => {
+    const page = html(twoOptions(true))
+    expect(page).toContain("La recomienda tu")
+    expect(page.match(/role="radio"[^>]*aria-checked="true"/g)).toHaveLength(1)
+    // La letra de la opción como se llama: «opción B», no «opción b» (QA del 26 nov, H7).
+    expect(page).toContain("Elijo la opción B")
+    expect(page).toContain("Aceptas")
+  })
+
+  // QA del 27 nov (verificador, hallazgo 8): «Resina fotocurable… · Corona cerámica» no decía de qué pieza era
+  // cada línea. Cada una dice su pieza, en la opción y en su línea; si el nombre ya la dice, no se repite.
+  it("cada línea dice su pieza, en el resumen de la opción y en la lista", () => {
+    const base = twoOptions(true)
+    const resina = { ...plain.items[0]!, planItemId: "i3", optionId: "o2", title: "Resina fotocurable", toothNumber: 36, lineTotalCents: 18000 }
+    const corona = { ...plain.items[0]!, planItemId: "i4", optionId: "o2", title: "Corona cerámica", toothNumber: 16, lineTotalCents: 90000 }
+    const page = html({ ...base, items: [base.items[0]!, resina, corona] })
+    expect(page).toContain('font-medium">Corona cerámica · pieza 16')
+    expect(page).toContain("Endodoncia del molar 46")
+    expect(page).not.toContain("Endodoncia del molar 46 · pieza 46")
+    // Verificador 2 del 27 nov: seguidas con «·», a 390 px no se veía dónde acababa una línea. Cada una
+    // va en su renglón, y un lector de pantalla las oye como una lista.
+    render(<BudgetResponder budget={{ ...base, items: [base.items[0]!, resina, corona] }} pending={false} error={null} onAnswer={() => {}} />)
+    const optionB = screen.getByRole("list", { name: "Opción B: lo que incluye" })
+    expect([...optionB.querySelectorAll('[role="listitem"]')].map((row) => row.textContent)).toEqual([
+      "Resina fotocurable · pieza 36",
+      "Corona cerámica · pieza 16",
+    ])
   })
 })

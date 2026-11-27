@@ -118,6 +118,11 @@ export interface ClosingValues extends SignatureRegistration {
    */
   finishChanges?: Record<string, { dueDay?: string; remove?: boolean }>
   /**
+   * Los controles abiertos que el cierre sugería quitar (`open[].forSession`: eran para la próxima
+   * sesión de lo que termina con esta firma) y quien firma quitó con «Quitar».
+   */
+  dropControls?: string[]
+  /**
    * La consulta del cierre: vacío es la que viene marcada (`closing.consultation.proposed`),
    * «none» es desmarcada, o el servicio elegido con «Cambiar».
    */
@@ -188,7 +193,7 @@ type KnownReturn =
  * quien firma deja sin marcar uno suyo. Uno de un colega sin marcar no frena.
  */
 function knownReturn(
-  value: Pick<ClosingValues, "fulfill">,
+  value: Pick<ClosingValues, "fulfill" | "dropControls">,
   controls: ClosingControls,
   dictated: DictatedControl | null,
 ): KnownReturn | null {
@@ -197,7 +202,8 @@ function knownReturn(
     controls.due.find((control) => fulfills(value, control) && control.repeatEveryMonths) ??
     controls.byAppointment.find((control) => control.repeatEveryMonths)
   if (repeating?.repeatEveryMonths) return { kind: "repeats", months: repeating.repeatEveryMonths }
-  if (controls.next) return { kind: "control", control: controls.next }
+  // El que se quitó en «Controles que quedan» ya no dice cuándo vuelve: se pregunta.
+  if (controls.next && !value.dropControls?.includes(controls.next.id)) return { kind: "control", control: controls.next }
   const stays = controls.due.find((control) => control.mine && !fulfills(value, control))
   return stays ? { kind: "stays", control: stays } : null
 }
@@ -361,11 +367,19 @@ export function closingControlsBody(
   followUpIds?: string[]
   nextControl?: { dueAt: string } | { none: true }
   finishControlChanges?: FinishingControlChange[]
+  dropFollowUpIds?: string[]
 } {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
   const changes = finishingChanges(value, controls)
-  const extra = changes.length > 0 ? { finishControlChanges: changes } : {}
+  // Solo los que el cierre sugería quitar; el servidor además mira que su tratamiento termine.
+  const drop = (controls.open ?? [])
+    .filter((control) => control.forSession && value.dropControls?.includes(control.id))
+    .map((control) => control.id)
+  const extra = {
+    ...(changes.length > 0 ? { finishControlChanges: changes } : {}),
+    ...(drop.length > 0 ? { dropFollowUpIds: drop } : {}),
+  }
   if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds, ...extra }
   if (value.nextControl === "none") return { followUpIds, nextControl: { none: true }, ...extra }
   const day = chosenDay(value, controls)
@@ -391,13 +405,19 @@ function ClosingControlsLeft({
   form,
   controls,
   busy,
+  ends,
 }: {
   form: ClosingForm
   controls: ClosingControls
   busy: boolean
+  /** El tratamiento trabajado hoy termina con esta firma, con lo respondido en «¿Terminaste?». */
+  ends: (planItemId: string) => boolean
 }): React.JSX.Element | null {
   const ids = useId()
   const changes = useStore(form.store, (state) => state.values.finishChanges ?? {})
+  const dropped = useStore(form.store, (state) => state.values.dropControls ?? [])
+  const toggleDrop = (id: string, drop: boolean) =>
+    form.setFieldValue("dropControls", drop ? [...dropped.filter((other) => other !== id), id] : dropped.filter((other) => other !== id))
   const finishing = controls.finishing ?? []
   const open = (controls.open ?? []).filter((control) => !controls.due.some((due) => due.id === control.id))
   if (finishing.length === 0 && open.length === 0) return null
@@ -472,16 +492,37 @@ function ClosingControlsLeft({
             </li>
           )
         })}
-        {open.map((control) => (
-          <li key={control.id} className="rounded-md border px-3 py-2 text-sm">
-            {control.title}
-            <span className="text-muted-foreground">
-              {control.scheduledAt
-                ? ` · con su cita el ${controlDaySaid(dayOf(control.scheduledAt))}: se cambia moviendo la cita`
-                : ` · ${controlDaySaid(dayOf(control.dueAt))} · se cambia en Plan y controles`}
-            </span>
-          </li>
-        ))}
+        {open.map((control) => {
+          // El que era para la próxima sesión de lo que termina con esta firma: se sugiere quitarlo
+          // en su fila, como los de arriba; quien firma decide (QA del 26 nov, H6).
+          const stale = control.forSession && !control.scheduledAt && ends(control.forSession.planItemId) ? control.forSession : null
+          if (!stale)
+            return (
+              <li key={control.id} className="rounded-md border px-3 py-2 text-sm">
+                {control.title}
+                <span className="text-muted-foreground">
+                  {control.scheduledAt
+                    ? ` · con su cita el ${controlDaySaid(dayOf(control.scheduledAt))}: se cambia moviendo la cita`
+                    : ` · ${controlDaySaid(dayOf(control.dueAt))} · se cambia en Plan y controles`}
+                </span>
+              </li>
+            )
+          const removed = dropped.includes(control.id)
+          return (
+            <li key={control.id} className="flex flex-col gap-1 rounded-md border px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <span className={removed ? "text-sm text-muted-foreground line-through" : "text-sm"}>
+                  {control.title}
+                  <span className="text-muted-foreground"> · {controlDaySaid(dayOf(control.dueAt))}</span>
+                </span>
+                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => toggleDrop(control.id, !removed)}>
+                  {removed ? "Deshacer" : "Quitar"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{staleControlSaid(stale)}</p>
+            </li>
+          )
+        })}
       </ul>
       {finishing.length > 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -490,6 +531,20 @@ function ClosingControlsLeft({
       ) : null}
     </div>
   )
+}
+
+const ORDINAL_WORDS = ["primera", "segunda", "tercera", "cuarta", "quinta", "sexta", "séptima", "octava", "novena", "décima"]
+
+/**
+ * «Sugerencia: la endodoncia termina con esta firma; este control era para su segunda sesión.» El
+ * artículo va por la primera palabra del tratamiento: las en -a, -dad, -ión o -sis, «la».
+ */
+export function staleControlSaid(forSession: { title: string; session: number }): string {
+  const name = inSentence(forSession.title.split(" · ")[0] ?? forSession.title)
+  const first = (name.split(" ")[0] ?? "").toLocaleLowerCase("es")
+  const article = /(a|dad|i[oó]n|sis)$/.test(first) ? "la" : "el"
+  const which = ORDINAL_WORDS[forSession.session - 1]
+  return `Sugerencia: ${article} ${name} termina con esta firma; este control era para su ${which ? `${which} sesión` : `sesión ${forSession.session}`}.`
 }
 
 /** El día de un instante en la zona de la clínica. */
@@ -581,7 +636,12 @@ export function ClosingNextVisit({
   const beside = values.askControl ? controlBesideAccepted(continuing, day) : null
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
-      <ClosingControlsLeft form={form} controls={controls} busy={busy} />
+      <ClosingControlsLeft
+        form={form}
+        controls={controls}
+        busy={busy}
+        ends={(planItemId) => !continuing.some((visit) => visit.planItemId === planItemId && !visit.accepted)}
+      />
       {/* El control que trae su cita de hoy se cumple al firmar: se dice cuál y de quién (QA del 9 nov, repaso 3). */}
       {controls.byAppointment.map((control) => (
         <p key={control.id} className="text-sm">
@@ -1037,6 +1097,7 @@ export function ClosingSessions({
                 ? "Al firmar queda realizado."
                 : `Sigue en curso con una sesión más, la ${session.n + 1}: al firmar puedes reservarla.`}
             </p>
+            {answer === "terminar" ? <DrawnOnSign session={session} /> : null}
           </li>
         )
       })}
@@ -1073,6 +1134,7 @@ export function ClosingSessions({
                 ? `Al firmar queda realizado, en la sesión ${session.n} de ${session.m}.`
                 : `Sigue en curso: le queda la sesión ${session.n + 1}.`}
             </p>
+            {answer === "terminar" ? <DrawnOnSign session={session} /> : null}
           </li>
         )
       })}
@@ -1112,6 +1174,20 @@ export function ClosingSessions({
       })}
     </ul>
   )
+}
+
+/** «En la 46 se dibuja: …»: lo que firmar deja en el odontograma al terminarlo. */
+export function drawnOnSignText(drawn: { toothNumber: number; words: string }): string {
+  return `En la ${drawn.toothNumber} se dibuja: ${drawn.words}. Si no es así, corrígelo en el odontograma.`
+}
+
+/**
+ * Lo que firmar dibuja al dejarlo realizado (revisión del 26 nov): antes se dibujaba dentro de la
+ * firma sin verse. Solo si el producto lo dice (odentIA).
+ */
+function DrawnOnSign({ session }: { session: ClosingSession }): React.JSX.Element | null {
+  if (!session.draws) return null
+  return <p className="text-xs text-muted-foreground">{drawnOnSignText(session.draws)}</p>
 }
 
 /**

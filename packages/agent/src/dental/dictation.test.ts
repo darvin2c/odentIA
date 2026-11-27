@@ -343,6 +343,19 @@ describe("lo que recibe el modelo en cada pausa", () => {
     expect(ask("fake", NOW, "Viene por dolor.")[0]?.content).toBe(((ask("openai", NOW, "x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
   })
 
+  // QA del 27 nov (verificador, hallazgo 1): tras descartar los dos caminos de la 16, volver a dictarlos salía
+  // como un cambio a algo confirmado. La pausa dice lo descartado, sin número, y que volver a indicarlo es nuevo.
+  it("lo descartado va en la pausa sin número, como algo que se puede volver a indicar; sin descartadas, nada", () => {
+    const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript: "Para la 16 mejor una resina o una corona.", context: "", pending: [{ label: "Pieza 16 · caries · ya confirmada" }] }
+    const [, human] = dictationMessages({ ...base, discarded: ["Pieza 16 · dos caminos"] }, DENTAL_DICTATION_PROFILE, false)
+    const text = String(human?.content)
+    expect(text).toContain("Descartadas en este dictado")
+    expect(text).toContain("- Pieza 16 · dos caminos")
+    expect(text).toContain("es un registro nuevo, no una corrección")
+    expect(text).toContain("1. Pieza 16 · caries · ya confirmada")
+    expect(String(dictationMessages(base, DENTAL_DICTATION_PROFILE, false)[1]?.content)).not.toContain("Descartadas")
+  })
+
   it("las preguntas de las fichas van en el mensaje de la pausa y cómo se responden, al final de las instrucciones; sin ficha, todo es lo de siempre", () => {
     const forms = [
       { number: 1, responseId: "r1", formTitle: "Ficha de ortodoncia", fieldId: "clase", label: "Clase molar derecha (Angle)", type: "opcion_unica" as const, options: ["Clase I", "Clase II división 1"], unit: null, min: null, max: null, order: 0, dependsOn: null },

@@ -165,7 +165,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman). Ninguna nace recomendada: la marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; sin marca, la persona elige sin ninguna elegida de antemano. La recomendada es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer" && form !== "dos caminos") } : {}),
           },
         ]
@@ -290,7 +290,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         ? {
             id: faq.id,
             q: faq.q,
-            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes». Si está sana, «Sin enfermedad» ofrece con un toque «Examen médico general» (en un menor, «Control de salud del niño») o «Sin hallazgos».",
+            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, sale marcado «Ya diagnosticado antes»; el tipo lo eliges igual. Si está sana, «Sin enfermedad» ofrece con un toque «Examen médico general» (en un menor, «Control de salud del niño») o «Sin hallazgos».",
           }
         : faq,
     ),
@@ -471,7 +471,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» al indicarlo, si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Un diagnóstico que anotas después, o cambiarle el servicio, no mueve lo ya indicado: si iría en otra fase, su fila lo sugiere y lo pasas tú con «Planificar…».",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },
@@ -659,7 +659,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-anestesia-dosis-maxima",
       q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, avisa el tope de epinefrina (0,04 mg por sesión) y dice por cuál: con el tope son unos 2,2 cartuchos de lidocaína con epinefrina 1:100 000; la hipertensión controlada no lo pide, y si tiene hipertensión y no anotaste la presión de hoy, te dice «toma la presión antes de anestesiar». Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      a: "En la atención, arriba del Plan, en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Con una enfermedad del corazón registrada con su código (por ejemplo, la fibrilación auricular, I48) o con la presión de hoy de 160/95 o más, avisa el tope de epinefrina (0,04 mg por sesión) y dice por cuál: con el tope son unos 2,2 cartuchos de lidocaína con epinefrina 1:100 000; la hipertensión controlada no lo pide, y si tiene hipertensión y no anotaste la presión de hoy, te avisa «la presión de hoy no está anotada». Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
       forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo", "por que me limita la epinefrina", "cuantos cartuchos puedo usar con un hipertenso"],
       area: "clinica",
       needs: "clinical.write",
@@ -667,7 +667,26 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "registro-signos-vitales-examen-fisico",
       q: "¿Dónde registro los signos vitales y el examen físico?",
-      a: "Dentro de la atención, en su bloque «Examen físico»: los signos vitales (el IMC sale solo del peso y la talla) y cada sistema «Sin alteraciones» o «Con hallazgos», con lo que encontraste y la parte del cuerpo. Lo que no marcas queda «No examinado», nunca normal. En su página, Clínica › Signos vitales los muestra en el tiempo.",
+      a: "Dentro de la atención, en su bloque «Examen físico»: los signos vitales (el IMC sale solo del peso y la talla) y cada sistema «Sin alteraciones» o «Con hallazgos», con lo que encontraste y la parte del cuerpo. Lo normal dictado con tus palabras («Lasègue negativo») queda escrito con ellas, y un sistema dictado sin decir si está normal queda por revisar para que lo elijas. Lo que no marcas queda «No examinado», nunca normal. En su página, Clínica › Signos vitales los muestra en el tiempo.",
+      area: "clinica",
+      needs: "clinical.write",
+    },
+    // QA del 26 nov (desarrollo, H9): la explicación estaba dentro de otra respuesta y la Ayuda no la encontraba.
+    {
+      id: "examen-dictado-por-revisar",
+      q: "¿Por qué un sistema del examen dictado quedó por revisar?",
+      a: "Porque se dictó lo que encontraste sin decir si el sistema está sin alteraciones o con hallazgos: Clío lo escribe con tus palabras y no elige por ti. Su tarjeta dice «No quedó dicho si está sin alteraciones o con hallazgos. Elígelo.»: elige «Sin alteraciones» o «Con hallazgos» y confírmala, o dilo otra vez con su estado. Dicho con su estado, como «Lasègue negativo» de un sistema sin alteraciones, va listo para confirmar. Lo que no se marca queda «No examinado», nunca normal.",
+      forms: [
+        "por que el examen quedo por revisar",
+        "por que un sistema del examen quedo por revisar",
+        "el examen dictado quedo por revisar",
+        "clio no marco sin alteraciones",
+        "clio no marco sin alteraciones en el examen",
+        "clio no puso si esta normal",
+        "dicte lasegue negativo y quedo por revisar",
+        "por que me pide elegir sin alteraciones o con hallazgos",
+        "examen sin estado",
+      ],
       area: "clinica",
       needs: "clinical.write",
     },
@@ -730,7 +749,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-receta-avisos",
       q: "¿Por qué la receta me pide el peso o no me deja un medicamento controlado?",
-      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
+      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)», para revisar la dosis, y propone el último registrado; sin él, avisa y se emite igual. La receta dictada avisa lo mismo en su tarjeta, en «Para que lo tengas en cuenta», y se emite sin peso: si quieres ponerlo, «Editar» abre la receta. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que se desaconseja en el embarazo; un antiinflamatorio (AINE) también se avisa con un anticoagulante o desde la semana 20: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
       forms: ["no me deja recetar tramadol", "la receta me pide el peso", "aviso de embarazo en la receta"],
       area: "clinica",
       needs: "clinical.write",

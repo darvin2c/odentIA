@@ -688,6 +688,87 @@
         "consulta": { "motivo": ["tos"], "tiempo": "dos dias|2 dias" },
         "noPropone": [{ "tipo": "control", "con": ["fiebre"] }]
       }
+    },
+    {
+      "id": "lat-lasegue-normal",
+      "producto": "latidia",
+      "descripcion": "Revisión del 26 nov: lo normal del examen guarda las palabras del médico («Lasègue negativo»); el estado no las reemplaza. Voz de Chrome.",
+      "pausas": [
+        "buenos días don Raúl qué lo trae por acá",
+        "me duele la espalda baja desde hace cinco días y se me corre a la pierna derecha",
+        "a ver acuéstese Lasègue negativo a la derecha fuerza y sensibilidad conservadas en las dos piernas"
+      ],
+      "espera": {
+        "consulta": { "motivo": ["espalda|lumbar"], "tiempo": "cinco|5" },
+        "propone": [{ "tipo": "examen", "campos": { "state": "sin_alteraciones" }, "con": ["lasegue"] }],
+        "noPropone": [{ "tipo": "examen", "campos": { "state": "con_hallazgos" }, "con": ["lasegue"] }]
+      }
+    },
+    {
+      "id": "od-caminos-sin-recomendar",
+      "producto": "odentia",
+      "descripcion": "Revisión del 26 nov: dos caminos dichos sin decir cuál recomienda van sin recomendada; la primera dicha no es la recomendada.",
+      "pausas": [
+        "a ver la cuarenta y seis tiene una caries grande por oclusal y distal",
+        "para esa pieza le podemos hacer una resina o si no una corona de zirconio usted lo piensa"
+      ],
+      "espera": {
+        "propone": [{ "tipo": "plan", "campos": { "toothNumber": 46 }, "con": ["resina", "corona"] }],
+        "noPropone": [{ "tipo": "plan", "campos": { "recommended": true } }]
+      }
+    },
+    {
+      "id": "od-caminos-recomienda",
+      "producto": "odentia",
+      "descripcion": "Revisión del 26 nov: si dice cuál recomienda, esa va primero y recomendada, aunque la nombre segunda.",
+      "pausas": [
+        "la treinta y seis tiene la corona fracturada",
+        "hay dos caminos una resina grande o una corona de zirconio yo le recomiendo la corona porque la pieza está muy debilitada"
+      ],
+      "espera": {
+        "propone": [{ "tipo": "plan", "campos": { "toothNumber": 36, "recommended": true }, "con": ["corona", "resina"] }]
+      }
+    },
+    {
+      "id": "od-profilaxis-con-destartraje",
+      "producto": "odentia",
+      "descripcion": "Revisión del 26 nov: «profilaxis con destartraje» es una sola prestación, no dos cobros; «la profilaxis y el destartraje» sí son dos (od-charla-pago-profilaxis). Voz de Chrome.",
+      "pausas": [
+        "buenas tardes señor Luis hoy le toca su limpieza alguna molestia",
+        "ninguna doctora todo bien",
+        "ya entonces hoy le hacemos la profilaxis con destartraje"
+      ],
+      "espera": {
+        "consulta": { "tiempo": null },
+        "propone": [{ "tipo": "procedimiento", "con": ["profilaxis", "destartraje"] }],
+        "noPropone": [
+          { "tipo": "procedimiento", "campos": { "service": "destartraje" } },
+          { "tipo": "procedimiento", "campos": { "service": "profilaxis" } },
+          { "tipo": "plan" }
+        ]
+      }
+    },
+    {
+      "id": "od-paciente-pregunta",
+      "producto": "odentia",
+      "descripcion": "Revisión del 26 nov: el paciente también pregunta («¿me va a doler?», «¿cuánto me va a costar?») y le habla a la doctora; el repaso no se lo da a quien atiende. Voz de Chrome.",
+      "pausas": [
+        "buenos días señora Carmen qué la trae",
+        "me duele una muela de arriba cuando mastico doctora me va a doler lo que me haga",
+        "no se preocupe le pongo anestesia y no siente nada desde cuándo le duele",
+        "desde el lunes y cuánto me va a costar",
+        "eso se lo dicen en recepción a ver abra grande la dieciséis tiene caries profunda por oclusal"
+      ],
+      "espera": {
+        "consulta": { "motivo": ["muela|duele|dolor"], "tiempo": "lunes", "relatoSin": ["costar", "recepcion", "anestesia"] },
+        "propone": [{ "tipo": "odontograma", "campos": { "toothNumber": 16 }, "con": ["caries"] }],
+        "quien": [
+          { "frase": "me va a doler lo que me haga", "quien": "paciente" },
+          { "frase": "desde cuándo le duele", "quien": "dra" },
+          { "frase": "cuánto me va a costar", "quien": "paciente" },
+          { "frase": "tiene caries profunda", "quien": "dra" }
+        ]
+      }
     }
   ]
 }

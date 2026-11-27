@@ -2,7 +2,7 @@ import { kinSaid, MEDICATION_CLASSES, type MedicationClass, medicationClassOf, s
 import { Button, toast } from "@odentia/ui"
 import { DetailField, DetailList, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Plus } from "lucide-react"
+import { Mic, Plus } from "lucide-react"
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
@@ -58,6 +58,8 @@ export interface HeardHealthRow {
   stopped: boolean
   /** La frase en que se oyó, tal cual; nula si el servidor no la tiene (lo dicho antes de guardarla). */
   said: string | null
+  /** Lo dicho con palabras de todos los días y la enfermedad que sugiere: la elige quien atiende. */
+  suggested?: Array<{ said: string; name: string }>
 }
 
 const ROW_GROUPS = new Set(["conditions", "medications", "allergies", "anticoagulants", "boneMedicines"])
@@ -98,6 +100,7 @@ export function heardHealth(
       denied: row.denied === true,
       stopped: row.stopped === true,
       said: row.said?.trim() || null,
+      ...(row.suggested?.length ? { suggested: row.suggested } : {}),
     }),
   )
   const people = [...new Set(rows.map((row) => row.by))]
@@ -418,7 +421,9 @@ export function HealthReviewNotice({
   const dictatedAllergies =
     !!dictation?.enabled &&
     (dictation.suggestions.some(isAllergy) || dictation.removedByVoice.some(isAllergy) || dictation.undoRequests.some(isAllergy))
-  const heardAny = heard.rows.length > 0 || dictatedAllergies
+  // Lo de su salud quitado entero por voz («quita eso»): tachado, con «Deshacer», hasta firmar (QA del 26 nov).
+  const removedHealth = dictation?.enabled ? dictation.removedByVoice.filter((item) => item.kind === "salud") : []
+  const heardAny = heard.rows.length > 0 || dictatedAllergies || removedHealth.length > 0
   if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy && !heardAny && earlierCount === 0)) return null
   // Mientras corre «Deshacer» de «Lo revisé con ella», sin nada más que pedir, la caja no queda vacía
   // con su título (pantalla, 15 nov): sigue montada para guardar o deshacer.
@@ -467,7 +472,8 @@ export function HealthReviewNotice({
     !!dictation?.confirmHealth.isPending ||
     !!dictation?.settleHealthGroups.isPending ||
     !!dictation?.confirmStopped.isPending ||
-    !!dictation?.discardHealth.isPending
+    !!dictation?.discardHealth.isPending ||
+    !!dictation?.act.isPending
   /** Quién lo dijo, en la fila: «lo dijo Rosa», «lo dijo su madre». */
   const saidByOf = (by: string | null) => (by === "el paciente" ? `lo dijo ${patientFirst}` : by ? `lo dijo ${by}` : "no se sabe quién lo dijo")
   /** Un dato oído: lo que dijo, la frase en que se oyó, quién y, si lo dijo distinto, lo de antes. */
@@ -480,6 +486,12 @@ export function HealthReviewNotice({
         {when}
         {row.before ? ` · antes dijo «${row.before}»` : ""}
       </p>
+      {/* «Presión» dicha queda como se dijo; la del catálogo es una sugerencia que se elige (QA del 26 nov). */}
+      {(row.suggested ?? []).map((one) => (
+        <p key={one.said} className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {`Sugerencia: «${one.said}» puede ser ${one.name.toLocaleLowerCase("es")}.${openWide ? " Elígela en «Corregir algo»." : ""}`}
+        </p>
+      ))}
     </div>
   )
   const unconfirmed = <span className="text-xs text-muted-foreground">dijo, sin confirmar</span>
@@ -784,6 +796,51 @@ export function HealthReviewNotice({
               {heardLine(row)}
             </div>
             {row.denied ? deniedHere : unconfirmed}
+          </li>
+        ))}
+        {heardItem?.voice && dictation ? (
+          // Lo quitado o corregido por voz, con su «Deshacer», como en las tarjetas de las demás sugerencias.
+          <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <p className="flex min-w-0 flex-1 basis-48 items-start gap-1.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+              <Mic className="mt-0.5 size-4 shrink-0" aria-hidden />
+              {heardItem.voice.removed
+                ? `Quitado por voz: ${heardItem.voice.before}. Dijiste «${heardItem.voice.removed}».`
+                : `Corregido por voz, antes ${heardItem.voice.before}.`}
+            </p>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="min-h-11 px-1 sm:min-h-8"
+              disabled={busy}
+              onClick={() => dictation.act.mutate({ item: heardItem, action: "undo-voice" })}
+            >
+              Deshacer
+            </Button>
+          </li>
+        ) : null}
+        {removedHealth.map((item) => (
+          // Quitada entera por voz: a la vista, tachada, hasta firmar; no cuenta como pendiente.
+          <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-1 basis-48 items-start gap-1.5 text-sm text-muted-foreground">
+              <Mic className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <div className="flex min-w-0 flex-col gap-0.5 [overflow-wrap:anywhere]">
+                <p className="line-through">{heardHealth(item, askTo).rows.map((row) => `${row.label}: ${row.value}`).join(" · ") || "Lo que dijo de su salud"}</p>
+                <p>{`Quitado por voz: dijiste «${item.removal?.said ?? ""}».`}</p>
+              </div>
+            </div>
+            {dictation ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="min-h-11 px-1 sm:min-h-8"
+                disabled={busy}
+                onClick={() => dictation.act.mutate({ item, action: "undo-voice" }, { onSuccess: () => toast.success("Volvió a lo que dijo de su salud") })}
+              >
+                Deshacer
+              </Button>
+            ) : null}
           </li>
         ))}
         {earlierSaid.map((item) => (

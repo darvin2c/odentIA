@@ -276,7 +276,8 @@ export function EncounterContextBody({
           <p className="text-muted-foreground">
             {saidNo("medications") ??
               (data.reviewStatus.medications === "none"
-                ? "No toma medicación."
+                ? // Lo que anotó quien se lo preguntó, como «Niega enfermedades»: no un hecho (QA del 26 nov).
+                  "Niega tomar medicación."
                 : data.reviewStatus.medications === "recorded"
                   ? "Sin medicación vigente."
                   : "Aún no se le preguntó por su medicación.")}

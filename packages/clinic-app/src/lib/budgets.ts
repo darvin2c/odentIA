@@ -20,7 +20,7 @@
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents,
  * `stateText`).
  */
-import { budgetAnswerText, isLeftOut, type PatientGuide } from "@odentia/clinical"
+import { budgetAnswerText, isLeftOut, moneyTotalsText, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { PlanItem, TreatmentPlan, TreatmentPlanWithStatus } from "./patients"
 
@@ -180,6 +180,54 @@ export function totalsOf(
       discountCents: of.discountCents,
     },
   ]
+}
+
+/** El presupuesto que quedó armado al firmar, como lo devuelve el cierre (`AssembledBudget`). */
+export interface FinalizedBudget {
+  id: string
+  budgetNumber: number
+  itemCount: number
+  /** Un total por moneda; con dos, `totalCents` es nulo. */
+  totals?: BudgetCurrencyTotal[] | Array<{ currency: string; totalCents: number | null }>
+  totalCents: number | null
+  currency: string
+  added: number
+  /** Cada opción con su total, de la misma lectura que arma el presupuesto. */
+  options?: Array<{
+    id: string
+    position: number
+    label: string
+    name: string | null
+    totals?: Array<{ currency: string; totalCents: number | null }>
+    totalCents: number | null
+  }>
+}
+
+/**
+ * «Presupuesto listo: …» del cierre. Con caminos, cada uno con su total y unidos con «o»: nunca se
+ * suman. Las cifras son las que trajo el cierre (QA del 27 nov): leerlas de otra consulta podía dar
+ * las de antes de firmar, distintas de las que se envían. Sin `format` (aún sin el idioma), sin cifras.
+ */
+export function finalizedBudgetText(
+  budget: FinalizedBudget,
+  format: ((cents: number, currency: string) => string) | null,
+): string {
+  const options = [...(budget.options ?? [])].sort((a, b) => a.position - b.position)
+  if (options.length > 1) {
+    const count = options.length === 2 ? "dos" : options.length === 3 ? "tres" : String(options.length)
+    const words = options.map((option) => {
+      const label = option.name?.trim() || option.label
+      if (!format) return label
+      const totals = option.totals?.length ? option.totals : [{ currency: budget.currency, totalCents: option.totalCents }]
+      return `${label} ${moneyTotalsText(totals, format, "con un precio por definir")}`
+    })
+    return `Presupuesto listo con ${count} opciones: ${words.join(" o ")}. Nunca se suman.`
+  }
+  const treatments = budget.itemCount === 1 ? "1 tratamiento" : `${budget.itemCount} tratamientos`
+  const totals = budget.totals?.length ? budget.totals : [{ currency: budget.currency, totalCents: budget.totalCents }]
+  return format
+    ? `Presupuesto listo: ${treatments} por ${moneyTotalsText(totals, format, "un precio por definir")}`
+    : `Presupuesto listo: ${treatments}`
 }
 
 export interface BudgetWithTotals extends Budget {

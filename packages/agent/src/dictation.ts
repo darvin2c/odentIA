@@ -200,7 +200,9 @@ export function consultaPrompt(examples: string): string[] {
     // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
     "El relato es lo que cuentan el paciente o quien lo acompaña sobre lo que le pasa. No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente o al asistente mientras se lo atiende («tranquila, ya casi terminamos», «abre grande», «¿te duele cuando comes?», «pásame…») ni lo que el paciente dice o llora mientras lo examinan o lo tratan («¡me duele!», «no quiero», «mamá»): una queja suelta entre eso no es de la historia. Lo que responde sobre lo que le pasa sí es del relato, y lo que el profesional encuentra al examinarlo va donde siempre.",
     // QA del 21 nov: la explicación del sistema a la paciente («al decir dolor en la 16 lo anota…») quedó firmada como evolución.
-    "La evolución (`evolution`) es solo lo que se examinó, lo que se hizo en esta atención y cómo respondió el paciente. Lo que se le explica al paciente o a quien lo acompaña (cómo funciona el sistema o la consulta, cómo se paga, qué se haría y por qué) no es evolución ni otra parte de la historia: no va.",
+    // Medición del 26 nov: lo que contó el paciente («cuando toma algo frío») pasaba a la evolución al sumar lo examinado, y el
+    // ejemplo con que se explica el sistema («si yo digo… y le encuentro una caries») quedaba como hallazgo.
+    "La evolución (`evolution`) es solo lo que se examinó, lo que se hizo en esta atención y cómo respondió el paciente: lo que contó el paciente sigue en el motivo y el relato, no pasa a la evolución. Lo que se le explica al paciente o a quien lo acompaña (cómo funciona el sistema o la consulta, cómo se paga, qué se haría y por qué) no es evolución ni otra parte de la historia: no va, tampoco como hallazgo, diagnóstico o indicación, aunque lo diga con un ejemplo («por ejemplo, si yo digo… y le encuentro…»).",
     // Mesa del 20 nov 2026: con la consulta pendiente sin su texto, cada pausa la «corregía» y reemplazaba el relato.
     "La consulta pendiente llega con lo que ya dice. Lo nuevo que se cuenta de la consulta (lo que le pasa, desde cuándo, lo que se hizo) va en `nota`, solo lo nuevo y sin repetir lo que ya dice: el sistema lo suma a esa misma consulta. El motivo y el tiempo ya dichos solo cambian si alguien se corrige: entonces va en `nota` el último. `correcciones` a la consulta es solo para cuando alguien corrige en voz alta lo ya dicho («no, fue hace un mes», «perdón, es del lado izquierdo»), con esa frase en `dicho` y solo los campos que cambian: una pregunta, o lo que no habla de la consulta, no la corrige.",
   ]
@@ -297,6 +299,12 @@ export interface DictationAsk {
   /** Lo último ya ordenado de este dictado: ayuda a entender lo nuevo y no se registra otra vez. */
   context: string
   pending: DictationPending[]
+  /**
+   * Lo que una persona descartó en este dictado, sin número: no se corrige ni se quita. Si se vuelve
+   * a indicar es un registro nuevo (QA del 27 nov: «para la 16 mejor le propongo una resina o una
+   * corona», dicho tras descartar sus dos caminos, salía como un cambio a algo ya confirmado).
+   */
+  discarded?: readonly string[] | undefined
   /**
    * Las preguntas vacías de las fichas empezadas en la atención (entrega 11):
    * van en el mensaje de la pausa, con sus reglas, solo si hay alguna. Sin
@@ -427,6 +435,9 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
+      : "",
+    input.discarded?.length
+      ? `Descartadas en este dictado (las quitó una persona; no se corrigen ni se quitan). Si lo nuevo vuelve a indicar una, con los mismos datos o con otros, es un registro nuevo, no una corrección:\n${input.discarded.map((label) => `- ${label}`).join("\n")}`
       : "",
     dictationFormsText(forms),
     newText(context, input.transcript),

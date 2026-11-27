@@ -12,10 +12,11 @@ import {
   isChildAge,
   localAnestheticOf,
   moneyTotalsText,
-  parseVitals,
+  readVitals,
   VITAL_SIGNS,
   type Vitals,
   vitalsErrors,
+  vitalsWarnings,
 } from "@odentia/clinical"
 import { clinicToday } from "../../lib/inventory"
 import {
@@ -57,7 +58,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { fetchBudgetDetail, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation, totalsOf } from "../../lib/budgets"
+import { type FinalizedBudget, finalizedBudgetText, PLAN_QUERY_KEYS, pendingTreatmentCounts, planKeysAfterDictation } from "../../lib/budgets"
 import {
   type ConsentDocument,
   canFillFormInAttention,
@@ -99,6 +100,7 @@ import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { untilWritten } from "../../lib/write-barrier"
 import {
   ageFrom,
+  ageWords,
   type Encounter,
   type EncounterDetail,
   fetchPatientHealth,
@@ -168,7 +170,7 @@ import { EncounterAnesthesiaLine } from "./encounter-anesthesia"
 import { LinkSignedNotice } from "./link-signed-notice"
 import { VitalsPressureAlert } from "./vitals-alert"
 import { REGISTRATION_FIELDS } from "./signature-registration-fields"
-import { useOpenWide } from "./wide-section"
+import { useBeforeOpenWide, useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, useEncounterDocuments } from "./encounter-documents"
@@ -381,68 +383,16 @@ function formatClock(iso: string): string {
       })
 }
 
-/** Resumen económico del cierre: qué quedó por cobrar y qué no. */
-/** El presupuesto que quedó armado al firmar, con lo indicado en esta atención. */
-interface FinalizedBudget {
-  id: string
-  budgetNumber: number
-  itemCount: number
-  /** Un total por moneda; con dos, `totalCents` es nulo. */
-  totals?: Array<{ currency: string; totalCents: number | null }>
-  totalCents: number | null
-  currency: string
-  added: number
-}
-
-/**
- * «Presupuesto listo: …» del cierre. Con caminos (varias opciones), cada uno
- * con su total y unidos con «o»: las opciones nunca se suman. El cierre no
- * trae las opciones; se leen del presupuesto. Mientras tanto no se dice un
- * total, para no mostrar una suma de caminos.
- */
+/** «Presupuesto listo: …» del cierre, con las cifras que trajo el cierre (`finalizedBudgetText`). */
 function FinalizedBudgetSummary({
-  patientId,
   budget,
   locale,
 }: {
-  patientId: string
   budget: FinalizedBudget
   locale: string | undefined
 }): React.JSX.Element {
-  const detailQuery = useQuery({
-    queryKey: ["budget", patientId, budget.id],
-    queryFn: () => fetchBudgetDetail(patientId, budget.id),
-  })
-  const detail = detailQuery.data?.data
-  const money = (cents: number, currency: string) => (locale ? formatMoney(cents, currency, locale) : "…")
-  const options = detail?.options ?? []
-  if (detail && options.length > 1) {
-    const count = options.length === 2 ? "dos" : options.length === 3 ? "tres" : String(options.length)
-    const words = [...options]
-      .sort((a, b) => a.position - b.position)
-      .map(
-        (option) =>
-          `${option.name?.trim() || option.label} ${moneyTotalsText(totalsOf(option, detail.currency), money, "con un precio por definir")}`,
-      )
-    return (
-      <p className="text-sm">
-        Presupuesto listo con {count} opciones: {words.join(" o ")}. Nunca se suman.
-      </p>
-    )
-  }
-  const treatments = budget.itemCount === 1 ? "1 tratamiento" : `${budget.itemCount} tratamientos`
-  return (
-    <p className="text-sm">
-      Presupuesto listo: {treatments}
-      {detail && locale && (budget.totalCents != null || budget.totals?.length)
-        ? ` por ${moneyTotalsText(
-            budget.totals?.length ? budget.totals : [{ currency: budget.currency, totalCents: budget.totalCents }],
-            money,
-            "un precio por definir",
-          )}`
-        : ""}
-    </p>
-  )
+  const format = locale ? (cents: number, currency: string) => formatMoney(cents, currency, locale) : null
+  return <p className="text-sm">{finalizedBudgetText(budget, format)}</p>
 }
 
 /** Lo aceptado que va después de lo que sigue en curso y ya tiene su cita. */
@@ -569,8 +519,10 @@ export function EncounterEditor({
   })
   const draftValues = useStore(draftForm.store, (state) => state.values)
   const { reason, evolution, indications, vitals } = draftValues
-  const parsed = parseVitals(vitals, exam.vitals)
+  const parsed = readVitals(vitals, exam.vitals)
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
+  // Lo que se guarda pero conviene revisar (fuera de lo habitual, la presión a medias): avisa junto a su campo.
+  const vitalWarnings = vitalsWarnings(vitals, exam.vitals)
   // Lo que el servidor rechazó del examen, por la ruta de cada dato («extraoral.atm»).
   const [examErrors, setExamErrors] = useState<Record<string, string>>({})
   // Las piezas de la atención se siguen de lo registrado (ya no se eligen a mano en Consulta).
@@ -723,6 +675,10 @@ export function EncounterEditor({
   const keepOpen = Object.entries(sessionAnswers)
     .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
     .sort()
+  // «Sí, terminar» antes de sus sesiones también: el cierre muestra los controles que dejará al firmar.
+  const completeNow = Object.entries(sessionAnswers)
+    .flatMap(([id, answer]) => (answer === "terminar" ? [id] : []))
+    .sort()
   // La salud para la franja de arriba (lo que dijo y nadie revisó, el embarazo): la misma lectura
   // y la misma caché que el aviso «Pregúntale a…».
   const stripHealth = useQuery({
@@ -730,8 +686,8 @@ export function EncounterEditor({
     queryFn: () => fetchPatientHealth(patientId),
   })
   const closingQuery = useQuery({
-    queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
-    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
+    queryKey: ["encounter-closing", patientId, encounterId, keepOpen, completeNow],
+    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen, completeNow),
     enabled: canWrite,
     placeholderData: keepPreviousData,
   })
@@ -769,6 +725,9 @@ export function EncounterEditor({
   }
   const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
+  // «Antecedentes y última atención» es de solo lectura: cede la columna a lo que se abre encima
+  // («Corregir algo» no se veía con ella abierta, QA del 26 nov).
+  useBeforeOpenWide(() => setContextOpen(false))
   // Sin colegiatura en el perfil se firma igual (17 nov): el cierre la pide o pide escribir por qué.
   const needsRegistration = closingQuery.isSuccess && Boolean(closingQuery.data.data.registrationMissing)
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
@@ -988,9 +947,9 @@ export function EncounterEditor({
           const filled = Object.fromEntries(
             Object.entries(values.vitals).filter(([, raw]) => raw.trim() !== ""),
           )
-          // Incompletos o fuera de rango no se envían: el error se muestra en línea
-          // y se guardan al corregirlos.
-          if (!parseVitals(filled, exam.vitals).ok) break
+          // Lo que no es una medida no se envía: el error se muestra en línea y se guarda al
+          // corregirlo. Lo fuera de lo habitual y la presión a medias se guardan con su aviso.
+          if (!readVitals(filled, exam.vitals).ok) break
           body.vitals = Object.keys(filled).length > 0 ? filled : null
           break
         }
@@ -1418,8 +1377,8 @@ export function EncounterEditor({
         // dictado puede llegar hoy a sus sesiones previstas.
         const shown = new Set((closingQuery.data?.data.sessions?.finishing ?? []).map((session) => session.planItemId))
         const fresh = await queryClient.fetchQuery({
-          queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
-          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
+          queryKey: ["encounter-closing", patientId, encounterId, keepOpen, completeNow],
+          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen, completeNow),
           staleTime: 0,
         })
         askedSessions = fresh.data.sessions
@@ -1506,6 +1465,8 @@ export function EncounterEditor({
       setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedFreed(result.data.freedAppointments ?? [])
       setFinalizedBilling(result.data.billing)
+      // Lo que entró al firmar cambia el presupuesto que otras pantallas ya tenían leído.
+      if (result.data.budget) void queryClient.invalidateQueries({ queryKey: ["budget", patientId] })
       // «Debe en total» cuenta lo que este cierre acaba de cargar.
       if (canReadFinance) void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
@@ -2300,6 +2261,7 @@ export function EncounterEditor({
                     </span>
                   }
                   id={`${uid}-vital-${sign.key}`}
+                  description={vitalWarnings[sign.key]}
                 >
                   {(control) => (
                     <Input
@@ -2342,7 +2304,8 @@ export function EncounterEditor({
           </Button>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          La presión se registra completa (sistólica y diastólica).
+          La presión va con sus dos cifras, sistólica y diastólica: si falta una, se guarda la que anotaste
+          y lo avisa.
         </p>
         <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>
@@ -2734,7 +2697,7 @@ export function EncounterEditor({
             <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
             <span>
               {[
-                age !== "" ? `${age} ${Number(age) === 1 ? "año" : "años"}` : null,
+                ageWords(patient.patient.birthDate) || null,
                 hcLabel(patient.patient.patientNumber),
                 // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
                 encounter.appointmentId ? "desde su cita" : null,
@@ -2773,7 +2736,7 @@ export function EncounterEditor({
           health={stripHealth.data?.data ?? null}
           displayName={patient.patient.displayName}
           shortName={shortPatientName(patient.patient)}
-          age={age !== "" ? `${age} a` : ""}
+          age={age !== "" && Number(age) >= 2 ? `${age} a` : ageWords(patient.patient.birthDate)}
           save={saveChip}
           canDictate={attending && dictation.enabled && dictation.canListen && dictationIdle(dictation)}
           onDictate={() => {
@@ -3676,7 +3639,7 @@ export function EncounterEditor({
               aria-label="Presupuesto listo"
               className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
             >
-              <FinalizedBudgetSummary patientId={patientId} budget={finalizedBudget} locale={orgLocale} />
+              <FinalizedBudgetSummary budget={finalizedBudget} locale={orgLocale} />
               {budgetSent ? (
                 <p role="status" className="text-sm font-medium">
                   Enviado. Queda «Entregado · espera respuesta» en su Plan.

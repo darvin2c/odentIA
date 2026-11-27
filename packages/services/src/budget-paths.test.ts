@@ -104,6 +104,33 @@ it("la atención dice el camino de cada tratamiento, como el plan", async () => 
   expect(pathOf(exodoncia.id)).toMatchObject({ positions: [2], pathCount: 2, chosen: false })
 })
 
+// Verificador 2 del 27 nov (hallazgo 1): con la endodoncia de la 26 hecha hoy, el Plan de la atención
+// decía «A S/ 1,010 · B S/ 1,730» (lo hecho hoy sumado a lo común) y al firmar se ofrecía y enviaba
+// S/ 360 o S/ 1,080. Lo hecho hoy que su cargo cubre no entra al borrador: el Plan y el envío leen
+// el mismo presupuesto.
+it("lo hecho hoy no entra a lo común de las opciones: el Plan de la atención dice los totales que se envían", async () => {
+  const { f, exodoncia } = await ana()
+  await f.run((tx) => placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }))
+  const draft = (await f.run((tx) => findDraftBudget(tx, "org_a", f.patient.id)))!
+  const totals = async () =>
+    (await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, draft.id))).options.map((option) => option.totalCents)
+  expect(await totals()).toEqual([185000, 45000])
+  // Hoy se hizo la primera sesión de una endodoncia de la 26, sin indicarla antes (se cobra por tratamiento).
+  const [endodonciaHoy] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Endodoncia hecha hoy", scope: "tooth", source: "custom", priceCents: 65000, currency: "PEN", ownUsualSessions: 2 })
+    .returning()
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: endodonciaHoy!.id, toothNumber: 26 }))
+  expect(await totals()).toEqual([185000, 45000])
+  // Lo que el cierre ofrece y lo que se envía: las mismas cifras.
+  await f.ready(f.encounter.id)
+  const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
+  expect(signed.budget?.options.map((option) => option.totalCents)).toEqual([185000, 45000])
+  expect(await totals()).toEqual([185000, 45000])
+  const preview = await f.run((tx) => previewBudgetSend(tx, "org_a", f.patient.id, draft.id))
+  expect(preview.text).toContain("2 opciones: S/ 1,850.00 o S/ 450.00")
+})
+
 it("sin elegir camino se acepta lo común y lo de la 46 queda pensándolo; la oportunidad sigue abierta hasta que elige", async () => {
   const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
   const draft = await f.run((tx) =>

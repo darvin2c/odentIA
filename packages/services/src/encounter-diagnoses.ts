@@ -18,7 +18,6 @@ import { resolveDiagnosisCode, wasDiagnosedBefore } from "./diagnosis-codes.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
-import { reproposePhasesAtSite } from "./plan.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 
@@ -145,7 +144,7 @@ export async function recordEncounterDiagnosis(
     .orderBy(asc(encounterDiagnosis.createdAt))
     .limit(1)
   if (already) return { row: withSite(site, already), existing: true }
-  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
+  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId, columns)
   const [row] = await tx
     .insert(encounterDiagnosis)
     .values({
@@ -169,12 +168,8 @@ export async function recordEncounterDiagnosis(
     diagnosisSystem: found.system,
     diagnosisCode: found.code,
   })
-  // Lo indicado hoy en ese sitio vuelve a proponer su fase: la pulpitis anotada después de su
-  // endodoncia la lleva a «Urgencia» (reglas clínicas del 18 nov).
-  await reproposePhasesAtSite(tx, orgId, actorUserId, patientId, encounterId, {
-    siteSystem: columns.siteSystem ?? null,
-    siteCode: columns.siteCode ?? null,
-  })
+  // Lo ya indicado en ese sitio no cambia de fase: nada lo decide el sistema (26 nov). La fase se
+  // propone al indicar (`proposedPhaseOf`) y después la cambia el odontólogo con «Planificar…».
   return { row: withSite(site, row), existing: false }
 }
 

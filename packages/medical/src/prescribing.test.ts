@@ -25,6 +25,7 @@ describe("la receta de latidIA (issue 229, decisión 12)", () => {
     ])
     expect(checkPrescription(context({}), [{ genericName: "paracetamol" }], null)).toEqual({
       errors: [],
+      warnings: [],
       weightRequired: false,
     })
   })
@@ -36,19 +37,21 @@ describe("la receta de latidIA (issue 229, decisión 12)", () => {
     const pregnant = context({
       embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-10-10", semanas: 10 } },
     })
-    expect(checkPrescription(pregnant, [{ genericName: "enalapril" }], null)).toEqual({ errors: [], weightRequired: false })
+    expect(checkPrescription(pregnant, [{ genericName: "enalapril" }], null)).toEqual({ errors: [], warnings: [], weightRequired: false })
     expect(
       prescribingAlerts({ interview: pregnant.history, today: TODAY, taking: [] }, [{ genericName: "enalapril" }], GENERAL_MEDICATIONS).warnings,
-    ).toEqual(["Enalapril: está embarazada (12 semanas) y los IECA están contraindicados en el embarazo (ATC C09AA02)."])
+    ).toEqual(["Enalapril: está embarazada (12 semanas) y las fichas técnicas desaconsejan los IECA en el embarazo (ATC C09AA02)."])
   })
 
-  it("a un menor de 12 años se le receta con su peso", () => {
+  // Sin su peso avisa y deja emitir: lo decide quien receta (26 nov).
+  it("a un menor de 12 años se le pide su peso: sin él avisa y no frena", () => {
     const child = context({}, "2021-02-10")
-    expect(checkPrescription(child, [{ genericName: "amoxicilina" }], null)).toMatchObject({
+    expect(checkPrescription(child, [{ genericName: "amoxicilina" }], null)).toEqual({
       weightRequired: true,
-      errors: ["Tiene 5 años: escribe su peso para recetarle."],
+      errors: [],
+      warnings: ["Aviso: tiene 5 años y la receta va sin su peso. Con su peso se revisa la dosis."],
     })
-    expect(checkPrescription(child, [{ genericName: "amoxicilina" }], 18.5).errors).toEqual([])
+    expect(checkPrescription(child, [{ genericName: "amoxicilina" }], 18.5)).toMatchObject({ errors: [], warnings: [] })
     expect(checkPrescription(context({}, "2014-10-24"), [], null).weightRequired).toBe(false)
   })
 

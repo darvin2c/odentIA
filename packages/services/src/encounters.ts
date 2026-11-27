@@ -4,7 +4,7 @@ import {
   doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
-  parseVitals,
+  readVitals,
   sumByCurrency,
   type Vitals,
   vitalsErrors,
@@ -127,7 +127,7 @@ import {
   finishingControlsOf,
   undoFinishControls,
 } from "./finish-controls.js"
-import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
+import { cancelFollowUp, createFollowUp, repeatFollowUp } from "./follow-ups.js"
 import { type FormRecord, loadFormRecords } from "./form-record.js"
 import { healthAtSigningOf } from "./health-at-signing.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
@@ -166,6 +166,7 @@ import {
   type DiscountedMaterials,
   discountEncounterMaterials,
 } from "./service-materials.js"
+import { type ControlForSession, controlsForSessionOf } from "./session-control.js"
 import { nextSessionGapOf } from "./session-gap.js"
 import {
   canBookAnother,
@@ -1644,7 +1645,7 @@ export async function updateEncounterDraft(
     if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
   }
   if (patch.vitals !== undefined) {
-    const parsed = parseVitals(patch.vitals, hooks.vitals)
+    const parsed = readVitals(patch.vitals, hooks.vitals)
     if (!parsed.ok) {
       const bySign = vitalsErrors(patch.vitals as Record<string, unknown> | null, hooks.vitals)
       throw validation(
@@ -2126,6 +2127,9 @@ export async function addEncounterProcedure(
         plannedSessions: directPlannedSessions,
       },
     )
+    // Al indicarse entró al borrador de la persona (`addPlanItem`); hecho hoy, sale con la regla de
+    // la firma: lo que su cargo cubre ya no es presupuesto, y el Plan dice lo que se enviará.
+    await removeDoneFromDraft(tx, orgId, actorUserId, patientId, [row])
     // El servicio directo de una sesión nace realizado: lo que su producto hace con
     // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
     // dibuja al terminarlo.
@@ -2458,6 +2462,11 @@ export interface ClosingSession {
   booked?: BookedSession
   /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
   before?: { planItemId: string; title: string }
+  /**
+   * Lo que firmar dibuja si queda realizado (odentIA: «tratamiento de conducto, buen estado» en la
+   * 46), para decirlo en el cierre y corregirlo en el odontograma si no es así. Sin él, nada.
+   */
+  draws?: { toothNumber: number; words: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
@@ -2649,6 +2658,7 @@ async function closingSessionsOf(
   orgId: string,
   encounterId: string,
   appointmentId: string | null,
+  patientId: string,
 ): Promise<ClosingCheckBase["sessions"]> {
   const rows = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
     select worked.id, worked.title, worked.planned_sessions as m,
@@ -2666,9 +2676,20 @@ async function closingSessionsOf(
   const next = new Map(
     (await nextSessionsOf(tx, orgId, rows.map((row) => row.id), appointmentId)).map((session) => [session.planItemId, session.booked]),
   )
+  // Lo que la firma dibuja al terminarlo (odentIA: en el odontograma), dicho antes de firmar: dibujarlo
+  // sin que se vea era fijar un dato clínico sin mostrarlo (revisión del 26 nov, ADR 0221).
+  const draws = (await (await productHooks(tx, orgId)).treatmentDraws?.(tx, { orgId, patientId, planItemIds: rows.map((row) => row.id) })) ?? new Map()
   for (const row of rows) {
     const booked = next.get(row.id)
-    const session: ClosingSession = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m), ...(booked ? { booked } : {}) }
+    const drawn = draws.get(row.id)
+    const session: ClosingSession = {
+      planItemId: row.id,
+      title: row.title,
+      n: Number(row.done),
+      m: Number(row.m),
+      ...(booked ? { booked } : {}),
+      ...(drawn ? { draws: drawn } : {}),
+    }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
   // Lo que la cita traía, o se trajo al empezar («Hacer hoy»), y hoy no se
@@ -2888,6 +2909,12 @@ export interface ClosingOpenControl {
   status: string
   /** La hora de su cita, si la tiene en pie: se cambia moviendo la cita. */
   scheduledAt: Date | null
+  /**
+   * Se indicó para la próxima sesión de un tratamiento trabajado hoy («vuelva para la segunda
+   * sesión»): si ese tratamiento termina con esta firma, el cierre lo sugiere quitar y quien firma
+   * decide (`FinalizeEncounterInput.dropFollowUpIds`). Solo los pendientes y sin cita.
+   */
+  forSession?: ControlForSession
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -2911,6 +2938,11 @@ export async function checkEncounterClosing(
   row: EncounterRow,
   /** «Falta otra sesión» ya elegido en pantalla: no se cuenta como terminado al anunciar lo que se firma. */
   keepOpenPlanItemIds: readonly string[] = [],
+  /**
+   * «Sí, terminar» ya elegido en pantalla en lo que aún no llega a sus sesiones: se anuncian los
+   * controles que dejará al firmar, como los de lo que sí llega (`controls.finishing`).
+   */
+  completePlanItemIds: readonly string[] = [],
 ): Promise<ClosingCheck> {
   const missing: ClosingRequirement[] = []
   if (!row.reason?.trim()) missing.push("reason")
@@ -2948,7 +2980,7 @@ export async function checkEncounterClosing(
     uses: await anesthesiaUsesOf(tx, orgId, row.id),
     asksAsa: (await productHooks(tx, orgId)).asksAsa,
   }
-  const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
+  const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null, row.patientId)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
   const openForms = await listOpenEncounterForms(tx, orgId, row.id)
   // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
@@ -2963,15 +2995,30 @@ export async function checkEncounterClosing(
       and f.finish_after_days is not null and f.status = 'pendiente'`)
   const fromToday = new Set(doneToday.map((link) => link.id))
   const base = await closingControlsOf(tx, orgId, actorUserId, row)
+  const stillOpen = base.open.filter((control) => !fromToday.has(control.id))
+  // El control que se indicó para la próxima sesión de lo trabajado hoy («vuelva para la segunda
+  // sesión»): si eso termina al firmar, el cierre lo sugiere quitar (QA del 26 nov, H6).
+  const forSession = await controlsForSessionOf(
+    tx,
+    orgId,
+    row.patientId,
+    stillOpen.map((control) => control.id),
+    [...sessions.finishing, ...sessions.continuing],
+  )
   const controls = {
     ...base,
-    open: base.open.filter((control) => !fromToday.has(control.id)),
+    open: stillOpen.map((control) => {
+      const found = forSession.get(control.id)
+      return found ? { ...control, forSession: found } : control
+    }),
     finishing: await finishingControlsOf(tx, orgId, [
       ...new Set([
         ...sessions.finishing.map((session) => session.planItemId).filter((id) => !keepOpenPlanItemIds.includes(id)),
+        // Lo que termina antes con «Sí, terminar» deja los mismos controles al firmar (`setPlanItemStatus`).
+        ...sessions.continuing.map((session) => session.planItemId).filter((id) => completePlanItemIds.includes(id)),
         ...doneToday.map((link) => link.plan_item_id),
       ]),
-    ]),
+    ], row.id),
   }
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
     orgId,
@@ -3339,9 +3386,11 @@ export async function getEncounterClosing(
   encounterId: string,
   /** Lo que en pantalla ya dice «Falta otra sesión» (ADR 0161). */
   keepOpenPlanItemIds: readonly string[] = [],
+  /** Lo que en pantalla ya dice «Sí, terminar» antes de llegar a sus sesiones. */
+  completePlanItemIds: readonly string[] = [],
 ): Promise<ClosingCheck> {
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
-  return checkEncounterClosing(tx, orgId, actorUserId, row, keepOpenPlanItemIds)
+  return checkEncounterClosing(tx, orgId, actorUserId, row, keepOpenPlanItemIds, completePlanItemIds)
 }
 
 export interface FinalizeEncounterInput {
@@ -3388,6 +3437,11 @@ export interface FinalizeEncounterInput {
    * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
    */
   finishControlChanges?: FinishingControlChange[]
+  /**
+   * Los controles abiertos que el cierre sugirió quitar (`closing.controls.open[].forSession`: eran
+   * para la próxima sesión de lo que termina con esta firma) y quien firma quitó. Los demás, nada.
+   */
+  dropFollowUpIds?: string[]
   /**
    * El anestésico elegido en la línea de anestesia (`LOCAL_ANESTHETICS`), solo para el máximo que
    * guarda la atención firmada; sin él, el máximo no se guarda.
@@ -3485,7 +3539,24 @@ async function removeChargedFromDraft(
   charges: ReadonlyArray<{ encounterProcedureId: string | null }>,
   procedures: ReadonlyArray<typeof encounterProcedure.$inferSelect>,
 ): Promise<void> {
-  const charged = procedures.filter((proc) => proc.planItemId && charges.some((charge) => charge.encounterProcedureId === proc.id))
+  const charged = procedures.filter((proc) => charges.some((charge) => charge.encounterProcedureId === proc.id))
+  await removeDoneFromDraft(tx, orgId, actorUserId, patientId, charged)
+}
+
+/**
+ * La única regla de qué de lo hecho hoy sale del borrador (o no entra): lo que su cargo cubre entero,
+ * terminado o cobrado por tratamiento. La usan la firma (`removeChargedFromDraft`) y el servicio
+ * hecho sin indicarlo antes, que al indicarse entraba a lo común de las opciones: el Plan de la
+ * atención decía «A S/ 1,010 · B S/ 1,730» y se enviaba S/ 360 o S/ 1,080 (verificador 2 del 27 nov).
+ */
+async function removeDoneFromDraft(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  procedures: ReadonlyArray<Pick<typeof encounterProcedure.$inferSelect, "planItemId" | "serviceId">>,
+): Promise<void> {
+  const charged = procedures.filter((proc) => proc.planItemId)
   if (!charged.length) return
   const draft = await findDraftBudget(tx, orgId, patientId)
   if (!draft) return
@@ -3853,6 +3924,24 @@ export async function finalizeEncounter(
   const { addSessions, keptOpen } = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions, visitAt)
   // Los controles que dejó lo terminado, como quedaron en el cierre (otro día, o quitados).
   await applyFinishingControlChanges(tx, { orgId, actorUserId, patientId, encounterId }, input.finishControlChanges ?? [])
+  // «Quitar» en el control que era para la próxima sesión de lo que hoy termina (QA del 26 nov, H6):
+  // solo los que el cierre sugirió, si quien firma lo quitó y su tratamiento termina con esta firma
+  // (lo que llega a sus previstas sin «Falta otra sesión», o «Sí, terminar»); el sistema no lo quita solo.
+  const ends = (planItemId: string) =>
+    (input.completePlanItemIds ?? []).includes(planItemId) ||
+    (closing.sessions.finishing.some((session) => session.planItemId === planItemId) &&
+      !(input.addSessionPlanItemIds ?? []).includes(planItemId))
+  const dropped = closing.controls.open.filter(
+    (control) =>
+      control.forSession && ends(control.forSession.planItemId) && (input.dropFollowUpIds ?? []).includes(control.id),
+  )
+  for (const control of dropped)
+    await cancelFollowUp(tx, orgId, actorUserId, patientId, control.id, { reason: "Quitado al firmar la atención" })
+  // Si el quitado era «el próximo», el que queda se vuelve a leer: sin otro, «¿Cuándo vuelve?» crea el suyo.
+  const controlsNext =
+    closing.controls.next && dropped.some((control) => control.id === closing.controls.next?.id)
+      ? (await closingControlsOf(tx, orgId, actorUserId, locked)).next
+      : closing.controls.next
   // Lo que hoy quedó realizado resuelve su diagnóstico de esa pieza, si quien firma lo dejó marcado.
   await resolveDiagnosesOnSign(tx, orgId, actorUserId, patientId, encounterId, input.resolveDiagnosisIds ?? [], visitAt)
   const procedures = await tx
@@ -3881,7 +3970,7 @@ export async function finalizeEncounter(
   const returnsToPlan =
     nextDay !== null && nextDay <= closing.controls.shortcuts.month && closing.controls.returnsTo.length > 0
   const nextControl =
-    nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
+    nextDay !== null && !controlsNext && !repeats && !stays && !returnsToPlan
       ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone, consultationProcedureId)
       : null
   const hooks = await productHooks(tx, orgId)
@@ -4049,7 +4138,7 @@ export async function finalizeEncounter(
         ? "vuelve_a_lo_por_hacer"
         : input.nextControl && "none" in input.nextControl
         ? "no_hace_falta"
-        : closing.controls.next || repeats || stays
+        : controlsNext || repeats || stays
           ? "ya_tenia"
           : // Mientras un tratamiento sigue en curso la pantalla no pregunta por un control (`continuingAfterSign`):
             // lo que no llega a sus previstas, sin lo que se eligió terminar, y lo de «Falta otra sesión».

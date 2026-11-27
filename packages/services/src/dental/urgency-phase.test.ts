@@ -1,7 +1,8 @@
 /**
  * La fase «Urgencia» que propone el diagnóstico (reglas clínicas del 18 nov, punto 4, caso C2): lo
  * indicado por dolor, infección aguda o trauma, si su tipo lo dejaría en la básica o la quirúrgica.
- * Nunca lo rehabilitador; el odontólogo la mueve con «Planificar…» y su elección no se pisa.
+ * Nunca lo rehabilitador; el odontólogo la mueve con «Planificar…» y su elección no se pisa. Se
+ * propone al indicar; un diagnóstico anotado después no mueve lo ya indicado.
  */
 import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { expect, it } from "vitest"
@@ -78,46 +79,86 @@ it("la resina de una caries sin pulpitis queda en su fase de siempre", async () 
   })
 })
 
-it("cambiar el servicio vuelve a proponer la fase, salvo la que se eligió a mano con «Planificar…»", async () => {
+// Nada lo decide el sistema (26 nov): cambiar el servicio, la pieza o el diagnóstico no mueve la
+// fase ni el orden. La fase la cambia el odontólogo con «Planificar…»; el Plan lo sugiere en la fila.
+it("cambiar el servicio, la pieza o el diagnóstico no le cambia la fase ni el orden", async () => {
   const f = await withDentalServices()
-  const change = (itemId: string, serviceId: string) =>
-    f.run((tx) => updatePlanItem(tx, ...f.args, itemId, { serviceId, encounterId: f.encounter.id }))
-  // La endodoncia de una pulpitis cambiada por una exodoncia sigue en urgencia: el diagnóstico es el mismo.
-  const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 }, "K04.0")
-  expect(await change(endo.id, f.extraction.id)).toMatchObject({ phase: "urgencia" })
+  const change = (itemId: string, patch: Omit<Parameters<typeof updatePlanItem>[5], "encounterId">) =>
+    f.run((tx) => updatePlanItem(tx, ...f.args, itemId, { ...patch, encounterId: f.encounter.id }))
+  // La exodoncia cambiada por una endodoncia sigue en la quirúrgica, en su lugar.
+  const extraction = await f.indicate(f.extraction.id, { toothNumber: 18 })
+  const resin = await f.indicate(f.resin.id, { toothNumber: 26, surfaces: ["occlusal"] })
+  const changed = await change(extraction.id, { serviceId: f.endodontics.id })
+  expect(changed).toMatchObject({ phase: "quirurgica", sortOrder: extraction.sortOrder })
+  expect(changed.sortOrder).toBeLessThan(resin.sortOrder)
+  const listed = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))
+  expect(listed.find((item) => item.id === extraction.id)?.phaseSuggestion).toBe(
+    "Sugerencia: por su tipo de tratamiento iría en «Básica o higiénica». Cámbiala con «Planificar…».",
+  )
+  // La endodoncia de la básica a la que se le anota una pulpitis tampoco va sola a «Urgencia».
+  const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
+  expect(endo).toMatchObject({ phase: "basica" })
+  expect(await change(endo.id, { diagnosisCode: "K04.0" })).toMatchObject({ phase: "basica", sortOrder: endo.sortOrder })
+  // Ni al cambiarla de pieza a una con pulpitis en la atención.
+  await f.diagnose("K04.0", 46)
+  expect(await change(endo.id, { toothNumber: 46 })).toMatchObject({ phase: "basica", sortOrder: endo.sortOrder })
   // La que el odontólogo pasó a la básica se queda ahí al cambiarle el servicio.
   const moved = await f.indicate(f.endodontics.id, { toothNumber: 37 }, "K04.0")
   await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, moved.id, { phase: "basica" }))
-  expect(await change(moved.id, f.extraction.id)).toMatchObject({ phase: "basica" })
+  expect(await change(moved.id, { serviceId: f.extraction.id })).toMatchObject({ phase: "basica" })
 })
 
-// Revisión de las reglas clínicas del 18 nov: la pulpitis anotada después de indicar la endodoncia
-// también la lleva a «Urgencia», y lo que cambia de fase por la regla entra al final de la nueva.
-it("anotar la pulpitis después de indicar la endodoncia la pasa a «Urgencia», al final de esa fase", async () => {
+// Nada lo decide el sistema (26 nov): la pulpitis anotada después de indicar la endodoncia ya no la
+// mueve sola a «Urgencia». La fase la cambia el odontólogo con «Planificar…».
+it("anotar la pulpitis después de indicar la endodoncia no le cambia la fase ni el orden", async () => {
   const f = await withDentalServices()
-  const first = await f.indicate(f.endodontics.id, { toothNumber: 11 }, "K04.0")
   const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
   expect(endo).toMatchObject({ phase: "basica" })
-  // La que el odontólogo movió a mano con «Planificar…» no se mueve.
   const kept = await f.indicate(f.endodontics.id, { toothNumber: 46 })
   await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, kept.id, { phase: "quirurgica" }))
+  const before = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
   await f.diagnose("K04.0", 36)
   await f.diagnose("K04.0", 46)
   const items = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
-  const of = (id: string) => items.find((item) => item.id === id)!
-  expect(of(endo.id).phase).toBe("urgencia")
-  expect(of(endo.id).sortOrder).toBeGreaterThan(of(first.id).sortOrder)
-  expect(of(kept.id).phase).toBe("quirurgica")
+  const of = (list: typeof items, id: string) => list.find((item) => item.id === id)!
+  expect(of(items, endo.id).phase).toBe("basica")
+  expect(of(items, endo.id).sortOrder).toBe(of(before, endo.id).sortOrder)
+  expect(of(items, kept.id).phase).toBe("quirurgica")
+  // El Plan lo sugiere en la fila, sin cambiarla; lo que se planificó a mano no.
+  const shown = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))
+  expect(of(shown, endo.id).phaseSuggestion).toBe("Sugerencia: con pulpitis de la 36 iría en «Urgencia». Cámbiala con «Planificar…».")
+  expect(of(shown, kept.id).phaseSuggestion).toBeUndefined()
+  expect(of(items, endo.id).phaseSuggestion).toBeUndefined()
 })
 
-it("cambiar la fase por la regla al cambiar el servicio lo deja al final de la nueva, como «Planificar…»", async () => {
+// Revisión de código del 26 nov: la fase que una persona eligió al indicar también es suya; el Plan no
+// le sugiere cambiarla para siempre.
+it("la fase elegida al indicar cuenta como elegida: el Plan no sugiere cambiarla", async () => {
   const f = await withDentalServices()
-  const extraction = await f.indicate(f.extraction.id, { toothNumber: 18 })
-  const resin = await f.indicate(f.resin.id, { toothNumber: 26, surfaces: ["occlusal"] })
-  expect(extraction.sortOrder).toBeLessThan(resin.sortOrder)
-  const changed = await f.run((tx) =>
-    updatePlanItem(tx, ...f.args, extraction.id, { serviceId: f.endodontics.id, encounterId: f.encounter.id }),
+  const chosen = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.extraction.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, toothNumber: 18, phase: "basica" }),
   )
-  expect(changed.phase).toBe("basica")
-  expect(changed.sortOrder).toBeGreaterThan(resin.sortOrder)
+  expect(chosen).toMatchObject({ phase: "basica" })
+  // Sin elegirla, lo que la regla pondría en otra fase sí lleva la sugerencia.
+  const other = await f.indicate(f.endodontics.id, { toothNumber: 38 })
+  await f.diagnose("K04.0", 38)
+  const shown = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))
+  expect(shown.find((item) => item.id === chosen.id)?.phaseSuggestion).toBeUndefined()
+  expect(shown.find((item) => item.id === other.id)?.phaseSuggestion).toContain("iría en «Urgencia»")
+})
+
+// QA del 26 nov (desarrollo, H2): «Planificar…» guardado con la misma fase no hacía desaparecer la
+// sugerencia: elegir con «Planificar…» es elegir, aunque sea la fase que ya tenía.
+it("guardar «Planificar…» con la misma fase cuenta como elegida y la sugerencia se va", async () => {
+  const f = await withDentalServices()
+  const endo = await f.indicate(f.endodontics.id, { toothNumber: 36 })
+  await f.diagnose("K04.0", 36)
+  const suggestedOf = async () =>
+    (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))).find((item) => item.id === endo.id)?.phaseSuggestion
+  expect(await suggestedOf()).toContain("iría en «Urgencia»")
+  // Mover arriba o abajo no elige la fase.
+  await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, endo.id, { move: "up" }))
+  expect(await suggestedOf()).toContain("iría en «Urgencia»")
+  await f.run((tx) => updatePlanItemPlanning(tx, ...f.args, endo.id, { phase: "basica" }))
+  expect(await suggestedOf()).toBeUndefined()
 })

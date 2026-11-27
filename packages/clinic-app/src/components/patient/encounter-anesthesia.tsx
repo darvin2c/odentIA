@@ -1,6 +1,7 @@
 import {
   type AnesthesiaAtSigning,
   anesthesiaUsesParts,
+  conditionWordsOf,
   type EpinephrineCheck,
   epinephrineCheckOf,
   isCurrentMedication,
@@ -65,9 +66,10 @@ export function anesthesiaHealthWords(
     const allergies = health.allergies.filter((row) => row.isActive).map((row) => midSentence(row.substance))
     // En medio de la frase, en minúscula: «Tiene hipertensión arterial», no «Tiene Hipertensión…»
     // (verificación del 18 nov). Una sigla («HTA», «VIH») queda como está.
+    // Dicha de quien la tiene, por su nombre: «Tiene hipertensión arterial», no «Tiene hipertensa» (QA del 26 nov, H4).
     const conditions = health.conditions
       .filter((row) => row.status === "activa")
-      .map((row) => midSentence(row.name))
+      .map((row) => midSentence(conditionWordsOf(row.name)))
     const medications = health.medications
       .filter((row) => isCurrentMedication(row, today))
       .map((row) => midSentence([row.genericName ?? row.name, row.dose].filter(Boolean).join(" ")))
@@ -86,7 +88,7 @@ export function anesthesiaHealthWords(
   // (revisión final del 25 nov: «Falta preguntarle por su medicación» con el apixabán ya dicho).
   const saidRows = (health?.said ?? []).flatMap((item) => item.rows).filter((row) => !row.denied && !row.stopped && !row.newer)
   const saidGroups = new Set(saidRows.map((row) => (row.key === "anticoagulants" || row.key === "boneMedicines" ? "medications" : row.key)))
-  const saidNow = saidRows.filter((row) => ["medications", "anticoagulants", "boneMedicines", "conditions"].includes(row.key)).map((row) => midSentence(row.value))
+  const saidNow = saidRows.filter((row) => ["medications", "anticoagulants", "boneMedicines", "conditions"].includes(row.key)).map((row) => midSentence(row.key === "conditions" ? row.value.split(" · ").map(conditionWordsOf).join(" · ") : row.value))
   if (saidNow.length > 0) parts.push(`Dijo ${listWords([...new Set(saidNow)])}, sin revisar.`)
   const unasked = gaps.flatMap((gap) => (gap === "asa" || saidGroups.has(gap) ? [] : [GAP_WORDS[gap]]))
   if (unasked.length > 0) parts.push(`Falta preguntarle por ${listWords(unasked)}.`)

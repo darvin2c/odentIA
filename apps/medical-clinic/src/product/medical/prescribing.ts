@@ -54,7 +54,10 @@ function useMedicalPrescribingRules(patientId: string, enabled: boolean): Prescr
     null
   return {
     // El embarazo, la lactancia y lo demás que avisa toda receta lo suma la receta misma (`prescribingAlerts`).
-    check: (items, weightKg) => ({ errors: checkPrescription(context, items, weightKg).errors }),
+    check: (items, weightKg) => {
+      const { errors, warnings } = checkPrescription(context, items, weightKg)
+      return { errors, warnings }
+    },
     // El último peso no se propone si es imposible para su edad («230 kg» a los 7 años): se revisa antes.
     weight: {
       required: age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS,

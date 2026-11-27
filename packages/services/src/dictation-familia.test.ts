@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { encounter, patientAnamnesis, patientFamilyHistory, patientHealthDeclaration, patientMedication, patientRegistration } from "@odentia/db/schema/clinical"
+import { encounter, patientAnamnesis, patientCondition, patientFamilyHistory, patientHealthDeclaration, patientMedication, patientRegistration } from "@odentia/db/schema/clinical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -182,6 +182,31 @@ describe("revisión del 25 nov", () => {
     await enable(false)
   })
 
+  // Revisión del 26 nov: sus medicinas se borraban sin aviso; ahora van a «No lo usé» con su motivo.
+  it("la medicina que la madre dice que toma ella no se propone al paciente y «No lo usé» dice por qué", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const saved = await segment({
+      drafts: [
+        {
+          kind: "salud",
+          payload: { declarante: "acompanante", vinculo: "madre", conditions: { state: "recorded", items: [{ name: "diabetes" }] }, medications: { state: "recorded", items: [{ name: "metformina" }] } },
+          sourceText: "yo soy diabética y tomo metformina, eso es mío",
+        },
+      ],
+      transcript: "Yo soy diabética y tomo metformina, eso es mío.",
+    })
+    expect(saved.droppedForms).toContainEqual({
+      said: "yo soy diabética y tomo metformina, eso es mío",
+      why: "«metformina» lo dijo su madre de sí: no es del paciente y no lo propuse. Si es suyo, anótalo a mano.",
+      targets: [],
+    })
+    const [said] = await health()
+    expect(said?.payload["medications"]).toBeUndefined()
+    expect(said?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Madre: diabetes"])
+    await enable(false)
+  })
+
   it("«no, la diabetes no» quita solo la diabetes, como corrección que se deshace; «quita eso» quita la propuesta entera", async () => {
     await enable(true)
     const { fx, segment, health } = await session()
@@ -193,7 +218,8 @@ describe("revisión del 25 nov", () => {
     await segment({ drafts: [], removals: [{ suggestionId: said!.id, said: "no, la diabetes no" }], transcript: "No, la diabetes no." })
     const [kept] = await health()
     expect(kept?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
-    expect(kept?.voice).toEqual({ before: "diabetes" })
+    // La tarjeta dice qué se quitó y con qué frase (QA del 26 nov: no tenía marca ni «Deshacer»).
+    expect(kept?.voice).toEqual({ before: "diabetes", removed: "no, la diabetes no" })
     await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, said!.id))
     const [back] = await health()
     expect(back?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] })
@@ -380,6 +406,88 @@ describe("la primera consulta de un paciente registrado en el panel", () => {
     const [said] = await health()
     await confirm(said!.id)
     expect((await medicines()).map((row) => [row.name, Number(row.doseValue), row.doseUnit, row.frequencyCode])).toEqual([["apixabán", 5, "mg", "cada_12_h"]])
+    await enable(false)
+  })
+})
+
+/*
+ * QA clínica del 26 nov («lo que quedó fuera»): «no, la diabetes no» sin esperar a Clío, lo que la madre
+ * dice de sí como lo de la familia del niño y cada cuánto la toma como se dijo. Todo como propuesta.
+ */
+describe("QA del 26 nov · lo de su salud que se dice en voz alta", () => {
+  it("«no, la diabetes no» propone quitar solo la diabetes, con su marca, y «Deshacer» la devuelve; Clío no tuvo que mandar `quitar`", async () => {
+    await enable(true)
+    const { fx, segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] } }, sourceText: "tengo diabetes y asma" }],
+      transcript: "Tengo diabetes y asma.",
+    })
+    // Un «No» que responde a una pregunta no quita nada.
+    await segment({ drafts: [], transcript: "¿Es diabético? No." })
+    expect((await health())[0]?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] })
+    const result = await segment({ drafts: [], transcript: "No, la diabetes no, me equivoqué." })
+    const [said] = await health()
+    expect(result.corrected).toEqual([said!.id])
+    expect(said?.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "asma" }] })
+    expect(said?.voice).toEqual({ before: "diabetes", removed: "No, la diabetes no, me equivoqué." })
+    const undone = await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, said!.id))
+    expect(undone.payload["conditions"]).toEqual({ state: "recorded", items: [{ name: "diabetes" }, { name: "asma" }] })
+    await enable(false)
+  })
+
+  it("lo ya confirmado no se quita con «no, la diabetes no»", async () => {
+    await enable(true)
+    const { fx, segment, health, confirm } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", conditions: { state: "recorded", items: [{ name: "diabetes" }] } }, sourceText: "tengo diabetes" }],
+      transcript: "Tengo diabetes.",
+    })
+    await confirm((await health())[0]!.id)
+    const result = await segment({ drafts: [], transcript: "No, la diabetes no." })
+    expect(result.corrected).toEqual([])
+    expect(result.removed).toEqual([])
+    const conditions = await ownerDb.select().from(patientCondition).where(eq(patientCondition.patientId, fx.patient.id))
+    expect(conditions.map((row) => row.name)).toEqual(["diabetes"])
+    await enable(false)
+  })
+
+  it("«yo también soy diabética», dicho por la madre, se propone como «Madre: diabetes» y deja de ir a «No lo usé»", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "acompanante", vinculo: "madre", family: [{ relation: "papá", of: "paciente", name: "asma" }] }, sourceText: "su papá es asmático" }],
+      transcript: "Su papá es asmático.",
+    })
+    const result = await segment({
+      drafts: [],
+      transcript: "Yo también soy diabética, eso es mío, no de él.",
+      outOfPlace: [{ said: "Yo también soy diabética, eso es mío", why: "familiar" }],
+    })
+    expect(result.outOfPlaceUsed).toEqual(["Yo también soy diabética, eso es mío"])
+    const [said] = await health()
+    expect(said?.healthRows?.filter((row) => row.group === "family").map((row) => `${row.label}: ${row.value}`)).toEqual(["Papá: asma", "Madre: diabetes"])
+    expect(said?.payload["conditions"]).toBeUndefined()
+    await enable(false)
+  })
+
+  it("sin saber quién habla, lo que dice de sí sigue sin proponerse", async () => {
+    await enable(true)
+    const { segment, health } = await session()
+    const result = await segment({ drafts: [], transcript: "Yo soy diabética, eso es mío.", outOfPlace: [{ said: "Yo soy diabética, eso es mío", why: "familiar" }] })
+    expect(result.outOfPlaceUsed).toBeUndefined()
+    expect(await health()).toEqual([])
+    await enable(false)
+  })
+
+  it("«dos veces al día» queda como se dijo, con su código de la lista al lado", async () => {
+    await enable(true)
+    const { segment, health, confirm, medicines } = await session()
+    await segment({
+      drafts: [{ kind: "salud", payload: { declarante: "paciente", medications: { state: "recorded", items: [{ name: "metformina 850 mg dos veces al día" }] } }, sourceText: "tomo metformina 850 mg dos veces al día" }],
+      transcript: "Tomo metformina 850 mg dos veces al día.",
+    })
+    await confirm((await health())[0]!.id)
+    expect((await medicines()).map((row) => [row.name, row.dose, row.frequency, row.frequencyCode])).toEqual([["metformina", "850 mg", "2 veces al día", "cada_12_h"]])
     await enable(false)
   })
 })

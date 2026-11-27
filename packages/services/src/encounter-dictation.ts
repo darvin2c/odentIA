@@ -15,12 +15,14 @@ import {
   type DiagnosisSystemKey,
   findHabitualMedication,
   findMedication,
+  kinSaid,
   medicationClassOf,
   type HealthDeclarant,
   isDiagnosisVerification,
   type MedicationCatalog,
   moneyTotalsText,
   sumByCurrency,
+  normalizeDiagnosisCode,
   normalizeDrugText,
   quantityWords,
   prescribingAlerts,
@@ -43,6 +45,7 @@ import {
   prescription,
   serviceCatalog,
   treatmentBudget,
+  treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -50,7 +53,7 @@ import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { product } from "@odentia/db/schema/inventory"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import {
@@ -64,8 +67,14 @@ import {
   reviewDeclaredHealth,
 } from "./clinical.js"
 import {
+  companionFamily,
+  companionKinOf,
+  companionOwnMedicinesWhy,
   companionSelfTalk,
+  healthNegated,
+  selfConditionsOf,
   speaksOfSelf,
+  withConditionsToFamily,
   groundHealthNames,
   hasDeclaredHealth,
   hasHealth,
@@ -90,6 +99,7 @@ import {
   mergeHealth,
   unnamedMedicineWhy,
   vagueConditionWhy,
+  deniedHealthWhy,
   prepareHealth,
   saidInDoubt,
   selfCorrectedHealth,
@@ -100,6 +110,7 @@ import {
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { closestDiagnosisCode, type DiagnosisCodeOption, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
+import { controlByAge } from "./dictation-control.js"
 import { reviewDiagnosis } from "./dictation-diagnosis.js"
 import { recordEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
@@ -129,7 +140,7 @@ import {
   withoutFormNotes,
   withoutRepeatedNotes,
 } from "./dictation-forms.js"
-import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
+import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, PrescribingReview, ProductDictation, ProductHooks } from "./product-hooks.js"
 import type { ProductCatalog } from "./product-catalog.js"
 import { clinicToday } from "./inventory-stock.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
@@ -224,8 +235,11 @@ export interface DictationSuggestion {
   note: string | null
   /** Texto corto de lo que entraría a la historia. */
   summary: string
-  /** Corregida por voz al seguir dictando: qué decía antes, para poder deshacerlo. */
-  voice: { before: string } | null
+  /**
+   * Corregida por voz al seguir dictando: qué decía antes, para poder deshacerlo. `removed`: lo de su
+   * salud que se quitó por voz dato por dato, con lo que se dijo para quitarlo (la tarjeta lo dice).
+   */
+  voice: { before: string; removed?: string } | null
   /** Quitada por voz («quita la endodoncia»): lo que dijo, para poder deshacerlo. */
   removal: { said: string } | null
   /** Ya confirmada, y pidió quitarla en voz alta: espera que una persona lo decida. */
@@ -286,6 +300,8 @@ interface VoiceStep {
   status: "lista" | "por_revisar"
   note: string | null
   before: string
+  /** Lo de su salud quitado por voz (no corregido): con lo que se dijo para quitarlo. */
+  removed?: string | undefined
   previous?: VoiceStep | undefined
 }
 
@@ -452,7 +468,12 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
     site: hooks.site,
     formQuestions: [],
     serviceWords: serviceWordsOf(hooks),
-    patient: { adult: age?.birthDate ? !age.isMinor : null, ageYears: age?.birthDate ? ageInYears(age.birthDate, age.today) : null },
+    patient: {
+      adult: age?.birthDate ? !age.isMinor : null,
+      ageYears: age?.birthDate ? ageInYears(age.birthDate, age.today) : null,
+      birthDate: age?.birthDate ?? null,
+      today: age?.today ?? null,
+    },
   }
 }
 
@@ -469,7 +490,20 @@ const words = (text: string) => normalizeForSearch(text).split(" ").filter((word
 const NOT_SERVICE_WORDS = new Set([
   "una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro",
   "tratamiento", "procedimiento", "cambio", "cambios", "par", "pares", "caja", "cajas", "sobre", "sobres", "unidad", "unidades",
+  // La sesión de un tratamiento no dice cuál es: «la primera sesión de la endodoncia» (QA del 26 nov, H5).
+  "sesion", "sesiones", "primera", "segunda", "tercera", "cuarta", "ultima",
 ])
+
+/**
+ * ¿Lo dicho empieza por lo mismo que el nombre del tratamiento («la primera sesión de la endodoncia» y
+ * «Endodoncia posterior vital»)? La primera palabra dice qué es (`matchService`): «resina» no es
+ * «Carilla de resina». Solo para lo que el plan ya indicaba (`settleDone`).
+ */
+function sameTreatmentHead(spoken: string, title: string, lookup: ServiceWords): boolean {
+  const first = words(spoken).find((word) => !NOT_SERVICE_WORDS.has(word) && !lookup.place.has(word) && !DONE_VERB.test(word) && !NUMBER_WORD.test(word))
+  const head = words(title)[0]
+  return !!first && !!head && sameWord(first, head)
+}
 /** Lo que se hizo, no la prestación: «cambiamos», «hicimos», «le hice», «coloqué». */
 const DONE_VERB = /^(?:[a-z]{3,}(?:amos|emos|imos)|hice|hizo|puse|puso|coloque|termine|realice|cambie|cemente|aplique|saque)$/
 /** Un número dicho («la cinco cinco», «de dos caras»): dice dónde o cuánto, no cuál prestación. */
@@ -529,6 +563,14 @@ function matchService<T extends { name: string }>(spoken: string, services: T[],
   if (!keys.length) return { match: null, candidates: [] }
   const otherKeys = everydayServiceVariants(spoken, lookup.everyday).map(keysOf)
   const tokens = words(spoken)
+  // Lo que es cada servicio lo dice la primera palabra de su nombre: «Carilla de resina» es una carilla,
+  // hecha de resina. Calza con lo dicho la que empieza como lo dicho o con un nombre que el catálogo da
+  // por lo mismo (resina, obturación y restauración, juntas en sus palabras de todos los días); si alguna
+  // calza así, las demás son otro tratamiento y no se ofrecen («resina» en la 46 ofrecía carillas,
+  // revisión del 26 nov). Si ninguna empieza así («el bracket»), se ofrecen como siempre.
+  const same = Object.values(lookup.everyday).map((others) => others.map((item) => normalizeForSearch(item).split(" ")[0] ?? ""))
+  const sameHead = (a: string, b: string) => !!a && !!b && (sameWord(a, b) || same.some((group) => group.some((word) => sameWord(word, a)) && group.some((word) => sameWord(word, b))))
+  const heads = [keys[0] ?? ""]
   const scored = services
     .flatMap((service) => {
       const name = normalizeForSearch(service.name)
@@ -543,15 +585,17 @@ function matchService<T extends { name: string }>(spoken: string, services: T[],
       // Contiene lo dicho, o está en lo dicho, por palabras enteras (con otra terminación): «guante» está en
       // «Guantes de nitrilo», pero «cera» no está en «Corona cerámica».
       const contains = byName && (tokens.every((token) => has(own, token)) || own.every((word) => has(tokens, word)))
-      return [{ service, shared, byName, contains, extra: own.length - shared }]
+      const head = heads.some((word) => sameHead(nameKeys[0] ?? "", word))
+      return [{ service, shared, byName, contains, head, extra: own.length - shared }]
     })
     .sort((a, b) => Number(b.contains) - Number(a.contains) || Number(b.byName) - Number(a.byName) || b.shared - a.shared || a.extra - b.extra)
-  const [best, second] = scored
+  const pool = scored.some((item) => item.head) ? scored.filter((item) => item.head) : scored
+  const [best, second] = pool
   // Una sola coincidencia clara se da por buena; si hay varias parecidas, elige el profesional.
   if (best && best.contains && (!second || !second.contains) && best.shared >= Math.min(tokens.length, best.shared + best.extra)) {
     return { match: best.service, candidates: [] }
   }
-  return { match: null, candidates: scored.slice(0, SERVICE_CANDIDATES).map((item) => item.service) }
+  return { match: null, candidates: pool.slice(0, SERVICE_CANDIDATES).map((item) => item.service) }
 }
 
 /**
@@ -575,7 +619,23 @@ function matchFitting<T extends { name: string }>(spoken: string, services: T[],
   }
   if (own.match || own.candidates.length) return own
   const other = matchService(spoken, among("fallback"), lookup)
-  return { match: null, candidates: other.match ? [other.match] : other.candidates }
+  if (other.match || other.candidates.length) return { match: null, candidates: other.match ? [other.match] : other.candidates }
+  return joinedService(spoken, services, fit, lookup)
+}
+
+/**
+ * Lo que se nombra como una sola prestación con lo que la acompaña («profilaxis con destartraje») y
+ * la clínica no tiene junto: es una sola propuesta, nunca dos cobros. Se elige entre los servicios de
+ * cada parte (revisión del 26 nov); si la clínica tiene uno que los junta, ya calzó con lo dicho entero.
+ */
+function joinedService<T extends { name: string }>(spoken: string, services: T[], fit: (service: T) => DictationServiceFit, lookup: ServiceWords): { match: T | null; candidates: T[] } {
+  const parts = spoken.split(/\s+con\s+/iu).map((part) => part.trim()).filter(Boolean)
+  if (parts.length < 2) return { match: null, candidates: [] }
+  const found = parts.flatMap((part) => {
+    const { match } = matchFitting(part, services, fit, lookup)
+    return match ? [match] : []
+  })
+  return { match: null, candidates: [...new Set(found)].slice(0, SERVICE_CANDIDATES) }
 }
 
 /**
@@ -634,7 +694,8 @@ function summarize(
     return [`${String(payload["label"] ?? "Pregunta")}${value}`, String(payload["formTitle"] ?? "Ficha")].join("\n")
   }
   if (kind === "alergia") {
-    if (payload["none"] === true) return payload["review"] === "sin_cambios" ? "Sin alergias nuevas" : "No tiene alergias"
+    // Lo que se dijo, no un hecho (QA del 26 nov): «Niega alergias», como lo anota quien lo pregunta.
+    if (payload["none"] === true) return payload["review"] === "sin_cambios" ? "Niega alergias nuevas" : "Niega alergias"
     const reaction = [payload["reaction"], payload["severity"] ? `reacción ${payload["severity"]}` : ""].filter(Boolean).join(" · ")
     return [`Alergia a ${allergyName(payload)}`, reaction].filter(Boolean).join("\n")
   }
@@ -691,10 +752,18 @@ function summarize(
     }
     const options = Array.isArray(payload["options"]) ? (payload["options"] as PlanChoice[]) : []
     if (options.length) {
-      // Dos o tres caminos para lo mismo: la principal es la opción A, la recomendada.
+      // Dos o tres caminos para lo mismo: la principal es la opción A, la primera que se dijo. Es la
+      // recomendada solo si el odontólogo lo dijo o la tocó (revisión del 26 nov).
       const how = options.length === 1 ? "dos caminos" : "tres caminos"
       const tooth = typeof payload["toothNumber"] === "number" ? `Pieza ${payload["toothNumber"]} · ` : ""
-      return [`${tooth}${tooth ? how : `${how.charAt(0).toUpperCase()}${how.slice(1)}`}, el paciente elige`, `Opción A · recomendada: ${choice(payload as PlanChoice)}`, ...options.map((option, index) => `Opción ${OPTION_LETTER[index + 1]}: ${choice(option)}`)].join("\n")
+      const first = payload["recommended"] === true ? "Opción A · recomendada" : "Opción A"
+      return [`${tooth}${tooth ? how : `${how.charAt(0).toUpperCase()}${how.slice(1)}`}, el paciente elige`, `${first}: ${choice(payload as PlanChoice)}`, ...options.map((option, index) => `Opción ${OPTION_LETTER[index + 1]}: ${choice(option)}`)].join("\n")
+    }
+    // Sin prestación elegida la tarjeta muestra su nota («Dijiste «resina»… Elige cuál es») y no el
+    // resto: la pieza va en el título, como en «Pieza 36 · dos caminos» (verificador 2 del 27 nov).
+    if (typeof payload["serviceId"] !== "string") {
+      const site = dictation.siteWords(payload)
+      return [`${payload["serviceName"] ?? payload["service"] ?? ""}${site ? ` · ${site}` : ""}`, payload["detail"]].filter(Boolean).join("\n")
     }
     return [`${payload["serviceName"] ?? payload["service"] ?? ""}${price ? ` · ${price}` : ""}`, dictation.siteWords(payload), payload["detail"]].filter(Boolean).join("\n")
   }
@@ -720,7 +789,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zon
     status: row.status as DictationSuggestion["status"],
     note: row.note,
     summary: summarize(row.kind, data, zone, dictation, meta.earlier),
-    voice: meta.voice ? { before: meta.voice.before } : null,
+    voice: meta.voice ? { before: meta.voice.before, ...(meta.voice.removed ? { removed: meta.voice.removed } : {}) } : null,
     removal: row.status === "descartada" && meta.removal ? { said: meta.removal.said } : null,
     undoRequest: row.status === "confirmada" && meta.undoRequest ? { said: meta.undoRequest.said } : null,
     createdAt: row.createdAt.toISOString(),
@@ -861,6 +930,9 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value] as const)
       .filter(([, value]) => value !== undefined && value !== null && value !== ""),
   )
+  // Sin decir si es presuntivo o definitivo, queda presuntivo: es lo que no afirma nada, y la
+  // tarjeta lo muestra para cambiarlo (revisión del 26 nov, ADR 0221).
+  if (draft.kind === "diagnostico" && payload["diagnosisType"] === undefined) payload["diagnosisType"] = "provisional"
   if (draft.kind === "nota") {
     const note = Object.fromEntries(
       Object.entries(payload)
@@ -878,12 +950,19 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   }
   if (draft.kind === "diagnostico") {
     // Se valida contra la lista de la clínica: un código de otra lista no se acepta. Uno que no está
-    // en ella pasa a su padre que sí está (K04.02 → K04.0, prueba con voz del 15 nov, c3).
+    // en ella se propone con su padre que sí está (K04.02 → K04.0, prueba con voz del 15 nov, c3), por
+    // revisar y diciendo el cambio: el diagnóstico lo decide el profesional (revisión del 26 nov).
     const code = String(payload["diagnosisCode"] ?? "").trim().toUpperCase()
     const known = code ? await closestCode(tx, scope, code) : null
     const list = DIAGNOSIS_SYSTEM_INFO[diagnosisSystem].title
     if (!known) return { payload: { ...payload, diagnosisCode: code, diagnosisSystem }, status: "por_revisar", note: `El código ${code} no está en la lista ${list} de la clínica. Elige el diagnóstico.` }
     if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
+    // Dicho con su código, «Dijiste»; con palabras, el código lo puso Clío y lo dice así: «Entendí J03.90»
+    // hacía creer que se había dicho un código (QA clínica del 26 nov).
+    const changed =
+      normalizeDiagnosisCode(diagnosisSystem, code) === known.code
+        ? null
+        : `${normalizeForSearch(draft.sourceText ?? "").includes(normalizeForSearch(code)) ? "Dijiste" : "Clío propuso"} ${code}; la lista de la clínica tiene ${known.code} («${known.description}»). Revísalo.`
     // Un nombre que contradice lo dictado («sin fístula» con la fístula dicha) queda por revisar, con
     // el hermano de la lista que calza si lo hay (prueba con voz del 15 nov, c4b, v07).
     const review = await reviewDiagnosis({ code: known.code, title: known.description }, draft.sourceText ?? "", scope.said ?? (scope.transcript ? [scope.transcript] : []), async (words) =>
@@ -900,15 +979,17 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
           : `Dijiste «${clash.said}» y ${known.code} dice «${clash.named}». Revísalo.`,
       }
     }
+    if (changed) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: changed }
     return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "lista", note: null }
   }
   // Lo dicho de la misma prestación también dice su variante: «la endodoncia no vital de la 36».
   const lookup = draft.kind === "plan" || draft.kind === "cita" || draft.kind === "procedimiento" ? { ...scope, patient: withSaid(scope.patient, draft.sourceText, payload) } : scope
   if (draft.kind === "plan") {
-    // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal.
-    const { alternatives, ...main } = payload
+    // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal. La recomendada
+    // es la que dijo el odontólogo: sin eso, ninguna (revisión del 26 nov).
+    const { alternatives, recommended, ...main } = payload
     const options = scope.choices && Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
-    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, lookup)
+    return settlePlan({ ...main, ...(options.length ? { options, ...(recommended === true ? { recommended: true } : {}) } : {}) }, lookup)
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
@@ -929,6 +1010,19 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     return { payload, status: "lista", note: null }
   }
   if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
+  if (draft.kind === "control") {
+    // «Su control a los dos años» de un niño es cuando los cumpla, no dentro de dos años: se propone
+    // esa fecha y se dice; la fecha la decide el profesional (revisión del 26 nov).
+    const byAge = controlByAge(draft.sourceText, scope.patient)
+    if (byAge && String(payload["dueAt"] ?? "").slice(0, 10) !== byAge.day) {
+      const day = new Date(byAge.dueAt).toLocaleDateString("es", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+      return {
+        payload: { ...payload, dueAt: byAge.dueAt },
+        status: "lista",
+        note: `Se dijo «${byAge.said}»: te propongo la fecha por su edad, cuando cumpla ${byAge.age} (${day}). Si era desde hoy, cámbiala.`,
+      }
+    }
+  }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
   if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, lookup, payload) }, status: "lista", note: null }
@@ -984,7 +1078,8 @@ const OPTION_LETTER = ["A", "B", "C"]
 
 /**
  * Una indicación del plan, con sus otros caminos si se dijeron (issue 109,
- * fase 2). La principal es la recomendada (la opción A del presupuesto); cada
+ * fase 2). La principal es la opción A del presupuesto, recomendada solo si el
+ * odontólogo lo dijo o la tocó (`recommended`, revisión del 26 nov); cada
  * camino busca su servicio en el tarifario como la principal. Queda lista solo
  * si todos tienen su servicio. Cada uno se busca entre los que pueden ir en la
  * pieza dicha y para el paciente.
@@ -1234,6 +1329,11 @@ interface PatientChecks {
    * ATC solo informa), y el embarazo y el anticoagulante que avisa `prescribingAlerts`, como al emitir.
    */
   prescribing: PrescribingSituation
+  /**
+   * Lo que revisa la receta del producto al emitir (`ProductPrescribing.review`; latidIA: un controlado
+   * frena por norma, el peso que falta a un niño avisa), con lo que tendrá la receta dictada: sin peso.
+   */
+  review: (genericName: string) => Promise<PrescribingReview>
 }
 
 /** Lo que se puede hacer hoy de un tratamiento: no está cerrado ni suspendido, y está aceptado o espera respuesta. */
@@ -1288,13 +1388,16 @@ async function patientChecks(tx: Db, orgId: string, patientId: string, encounter
       inSentBudget: Boolean(item.budgetId && sent.has(item.budgetId)),
     }
   })
-  const catalog = (await productHooks(tx, orgId)).prescribing.catalog
+  const productPrescribing = (await productHooks(tx, orgId)).prescribing
+  const catalog = productPrescribing.catalog
   return {
     allergies,
     dictatedAllergies,
     choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null,
     planItems,
     prescribing: await prescribingSituationOf(tx, orgId, patientId, catalog),
+    // La receta dictada se emite sin peso (`issueDictationPrescription`): se revisa así.
+    review: (genericName) => productPrescribing.review(tx, { orgId, patientId, items: [{ genericName }], weightKg: null }),
   }
 }
 
@@ -1321,7 +1424,7 @@ async function withPatient(
   checks: PatientChecks,
   scope: DictationScope,
 ): Promise<Prepared> {
-  const ready = checkAgainstPatient(kind, prepared, checks, scope)
+  const ready = await checkAgainstPatient(kind, prepared, checks, scope)
   if (kind === "cita") return settleAppointment(tx, orgId, patientId, encounterId, ready, checks)
   if (kind === "presupuesto") return previewBudget(tx, orgId, patientId, encounterId, ready, scope)
   if (kind === "material") return settleMaterial(tx, orgId, encounterId, ready)
@@ -1553,10 +1656,13 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
   const { planItemId: _item, acceptOnDo: _accept, source: _source, pending: _pending, ...base } = prepared.payload
   const said = placeOf(base)
   const spoken = String(base["service"] ?? "")
+  // Lo que el plan indicaba se reconoce por su nombre o por lo que dice qué es: una sesión dicha («la
+  // primera sesión de la endodoncia») es la del tratamiento abierto, no un acto libre fuera del plan.
   const byService = checks.planItems.filter((item) =>
     typeof base["serviceId"] === "string"
       ? item.serviceId === base["serviceId"]
-      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], lookup).match !== null,
+      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], lookup).match !== null ||
+        sameTreatmentHead(spoken, item.title, lookup),
   )
   const fits = byService.filter((item) => said.tooth === null || item.toothNumber === null || item.toothNumber === said.tooth)
   // Con la pieza dicha, la de esa pieza; sin pieza, solo si hay uno: entre dos resinas no se adivina.
@@ -1595,21 +1701,30 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  * queda por revisar con el aviso de siempre (la misma regla que «Emitir
  * receta»), y una elección de caminos que no cabe en su presupuesto espera.
  */
-function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, scope: Pick<DictationScope, "medications" | "dictation" | "serviceWords">): Prepared {
+async function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, scope: Pick<DictationScope, "medications" | "dictation" | "serviceWords">): Promise<Prepared> {
   const { medications, dictation } = scope
   if (kind === "receta") {
-    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, ...rest } = prepared.payload
+    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, productWarnings: _oldProduct, ...rest } = prepared.payload
     const genericName = String(rest["genericName"] ?? "")
     // Lo que ya toma del mismo principio o grupo: solo informa, en la tarjeta (ADR 0143).
     const duplicates = duplicateWarnings([{ genericName }], checks.prescribing.taking, medications)
-    const payload = duplicates.length ? { ...rest, duplicateWarnings: duplicates } : rest
+    // Lo que revisa la receta del producto, como la escrita a mano (QA del 26 nov, hallazgo 3: a un niño
+    // de 8 años sin peso, la dictada se emitía sin el aviso). Lo que avisa informa en la tarjeta y al
+    // emitir queda como visto; lo que frena por norma (un controlado) se revisa en la receta.
+    const product = genericName.trim() ? await checks.review(genericName) : { errors: [], warnings: [] }
+    const productWarnings = product.warnings ?? []
+    const payload = {
+      ...rest,
+      ...(duplicates.length ? { duplicateWarnings: duplicates } : {}),
+      ...(productWarnings.length ? { productWarnings } : {}),
+    }
     const onFile = allergyWarnings(genericName, checks.allergies as never, medications)
     // La alergia que se acaba de dictar avisa igual, aunque aún no se confirme.
     const dictated = allergyWarnings(genericName, checks.dictatedAllergies as never, medications).filter((line) => !onFile.includes(line))
     const warnings = [...onFile, ...dictated]
     // Lo que avisa toda receta, como al emitirla (QA final de formularios, Y1): el embarazo, un AINE con
     // un anticoagulante. Sin esto la tarjeta decía «lista» y al emitir se rechazaba con el aviso.
-    const alerts = prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings
+    const alerts = [...prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings, ...product.errors]
     if (!warnings.length && !alerts.length) return { ...prepared, payload }
     const note = [
       onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "",
@@ -1670,12 +1785,14 @@ function revisePlanChoice(current: Record<string, unknown>, patch: Record<string
   const spoken = typeof patch["service"] === "string" ? normalizeForSearch(patch["service"]) : ""
   const named = spoken ? options.findIndex((option) => [option.service, option.serviceName].some((name) => name && normalizeForSearch(name).includes(spoken))) : -1
   if (named >= 0) patch = { ...patch, recommend: named + 1 }
-  const recommend = Number(patch["recommend"])
+  const recommend = patch["recommend"] === undefined || patch["recommend"] === null ? Number.NaN : Number(patch["recommend"])
   if (Number.isInteger(recommend) && recommend >= 1 && recommend <= options.length) {
     const swapped = options[recommend - 1]!
     options[recommend - 1] = chosenMain
     chosenMain = swapped
   }
+  // Tocar una (también la A) o nombrarla la deja recomendada: lo decidió el odontólogo.
+  if (Number.isInteger(recommend) && recommend >= 0 && recommend <= options.length) rest["recommended"] = true
   const site = scope.dictation.normalizeSite(rest)
   if (site.invalid) return { payload: { ...rest, ...chosenMain, options }, status: "por_revisar", note: site.invalid }
   return settlePlan({ ...site.payload, ...chosenMain, options }, scope)
@@ -1688,6 +1805,33 @@ const FIELD_LABEL = Object.fromEntries(
   ]),
 ) as Record<DictationKind, Record<string, string>>
 
+/**
+ * Lo que las correcciones por voz reemplazaron en la consulta de esta atención: las oraciones de cada
+ * paso de «Deshacer» que ya no dice lo que quedó. El repaso no las vuelve a proponer.
+ */
+async function replacedByVoice(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ payload: encounterDictationSuggestion.payload })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.kind, "nota"),
+      ),
+    )
+  const texts = (payload: Record<string, unknown>) => Object.values(payload).filter((value): value is string => typeof value === "string")
+  const out: string[] = []
+  for (const row of rows) {
+    const { data, meta } = splitMeta(row.payload)
+    const now = texts(data).join(" ")
+    for (let step = meta.voice; step; step = step.previous)
+      for (const sentence of texts(step.payload).flatMap(noteSentences)) if (!saysAlready(now, sentence) && !out.includes(sentence)) out.push(sentence)
+  }
+  return out
+}
+
 /** Los campos de la consulta que son una sola línea: dicho distinto, queda lo último (mesa del 20 nov 2026). */
 const NOTE_ONE_LINE = new Set(["reason", "illnessDuration"])
 
@@ -1699,6 +1843,84 @@ export const withoutLooseEnd = (text: string) => text.replace(/[\s;,]+$/u, "").t
 
 /** ¿`text` ya dice `part`, palabra por palabra? «dos meses» no dice «s meses». */
 const saysAlready = (text: string, part: string) => ` ${normalizeForSearch(text)} `.includes(` ${normalizeForSearch(part)} `)
+
+/** Las oraciones de un texto de la consulta. */
+const noteSentences = (text: string) =>
+  text
+    .split(/(?<=[.;!?\n])\s+/u)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence))
+
+/** Palabras de cuatro letras o más que no dicen de qué habla una oración. */
+const NOTE_FILLER = new Set(["para", "como", "pero", "porque", "desde", "hace", "tiene", "esta", "este", "esto", "refiere", "presenta", "paciente", "cuando", "donde", "sobre", "entre", "tambien", "hasta", "todo", "nada", "algo", "solo", "mucho", "poco", "ahora", "luego", "despues", "antes", "corrijo", "perdon"])
+
+/** De qué habla una oración: sus palabras que distinguen, por su comienzo, y sus números («36»). */
+const noteTopic = (sentence: string) =>
+  new Set(
+    normalizeForSearch(sentence)
+      .split(" ")
+      .filter((word) => /^\d+$/.test(word) || (word.length >= 4 && !NOTE_FILLER.has(word)))
+      .map((word) => (/^\d+$/.test(word) ? word : word.slice(0, 5))),
+  )
+
+/**
+ * Lo que queda de un texto de varias oraciones al corregirlo por voz: cambia solo lo que la corrección
+ * corrige y lo demás se queda (QA del 26 nov, hallazgo 8: «me corrijo: el dolor de la 36 dura varios
+ * minutos» se llevó también «hoy le hice una profilaxis»). Se reemplazan las oraciones que hablan de lo
+ * mismo que la corrección (comparten una palabra que lo distingue o un número); si ninguna, la última,
+ * que es lo último que se dictó. Si Clío ya trae el texto entero corregido, queda ese.
+ */
+export function correctedNoteText(old: string, now: string): string {
+  const before = noteSentences(old)
+  if (before.length <= 1 || before.some((sentence) => saysAlready(now, sentence))) return now
+  const topic = noteTopic(now)
+  const touched = before.map((sentence) => [...noteTopic(sentence)].some((word) => topic.has(word)))
+  const replaced = touched.some(Boolean) ? touched : before.map((_, index) => index === before.length - 1)
+  const first = replaced.indexOf(true)
+  return before
+    .flatMap((sentence, index) => (index === first ? [now.trim()] : replaced[index] ? [] : [sentence]))
+    .join(" ")
+}
+
+/** Lo que el sistema descarta solo, con su motivo: no lo descartó una persona. */
+const REPLACED_NOTE = "Lo que dijo después lo reemplaza."
+const IN_CHOICE_NOTE = "La incluye la elección de caminos."
+
+/**
+ * ¿Lo descartó una persona? Lo que lo dicho después reemplazó o una elección de caminos incluyó lo
+ * descartó el sistema, y una respuesta de ficha no se vuelve a indicar. Lo descartado por una persona
+ * se le dice a Clío en la pausa: volver a dictarlo es un registro nuevo (QA del 27 nov, verificador 1).
+ */
+export function discardedByPerson(item: Pick<DictationSuggestion, "kind" | "status" | "note">): boolean {
+  return item.status === "descartada" && item.kind !== "ficha" && item.note !== REPLACED_NOTE && item.note !== IN_CHOICE_NOTE
+}
+
+/** Una palabra dicha seguida de su cantidad: «ibuprofeno de 400», «amoxicilina 500 mg». */
+const SAID_AMOUNT = /(\p{L}{4,})\s+((?:de\s+)?\d+(?:[.,]\d+)?(?:\s*(?:mg|mcg|g|ml|ui|%)(?![\p{L}\p{N}]))?)/giu
+
+/**
+ * La cantidad dicha junto a lo que trae una corrección no se pierde (QA del 27 nov, verificador 6: «no es
+ * paracetamol, le indiqué ibuprofeno de 400» quedó «Ibuprofeno si tiene dolor.»). Si la frase que corrige
+ * dice una palabra que antes no estaba, seguida de su cantidad, y el texto corregido trae esa palabra sin la
+ * cantidad, la cantidad va detrás de ella, como se dijo. Lo que ya decía el texto no se toca.
+ */
+export function withSaidAmounts(old: string, now: string, said: string | undefined): string {
+  if (!said) return now
+  const had = new Set(normalizeForSearch(old).split(" "))
+  let out = now
+  for (const match of said.matchAll(SAID_AMOUNT)) {
+    const word = normalizeForSearch(match[1] ?? "")
+    const amount = (match[2] ?? "").trim()
+    const digits = /\d+(?:[.,]\d+)?/u.exec(amount)?.[0]
+    if (!word || !digits || had.has(word) || NOTE_FILLER.has(word)) continue
+    if (new RegExp(`(?<![\\d.,])${digits.replace(/[.,]/gu, "[.,]")}(?![\\d])`, "u").test(out)) continue
+    const token = [...out.matchAll(/\p{L}+/gu)].find((found) => normalizeForSearch(found[0]) === word)
+    if (token?.index === undefined) continue
+    const end = token.index + token[0].length
+    out = `${out.slice(0, end)} ${amount}${out.slice(end)}`
+  }
+  return out
+}
 
 /**
  * Lo nuevo de la consulta, sumado a la que ya estaba pendiente (mesa del 20 nov 2026): una pausa
@@ -1916,6 +2138,12 @@ export interface DictationSegment {
    * no vuelve aunque Clío lo proponga otra vez (`unsettled`): no basta con pedírselo en el prompt.
    */
   review?: boolean | undefined
+  /**
+   * Lo clínico que Clío dejó fuera con su motivo (`sin_lugar`). Lo que quien acompaña dice de su
+   * propia salud («yo soy diabética», `familiar`) se propone como lo de la familia del paciente si se
+   * sabe su vínculo (el de su turno, `vinculo`, o el de quien acompaña en lo propuesto de su salud).
+   */
+  outOfPlace?: ReadonlyArray<{ said: string; why: string; vinculo?: string | undefined }> | undefined
 }
 
 export interface DictationSegmentResult {
@@ -1946,6 +2174,11 @@ export interface DictationSegmentResult {
   formSources: string[]
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
+  /**
+   * Lo que Clío dejó fuera por ser de la salud de quien acompaña (`outOfPlace`, `familiar`) y quedó
+   * propuesto como lo de su familia («Madre: diabetes»): ya no va a «No lo usé».
+   */
+  outOfPlaceUsed?: string[]
 }
 
 /** Una pregunta de una ficha empezada, para abrirla desde «No pude usar esto» («Usar en Percusión»). */
@@ -2174,7 +2407,16 @@ export async function saveDictationSegment(
         const now = textOf(value)
         return !!old && !!now && !saysAlready(old, now) && (corrects || (!NOTE_ONE_LINE.has(key) && !saysAlready(now, old)))
       }
-      const real = Object.fromEntries(Object.entries(changes).filter(([key, value]) => isReal(key, value)))
+      // Lo de varias oraciones cambia solo en lo que se corrige; lo demás sigue (`correctedNoteText`).
+      const real = Object.fromEntries(
+        Object.entries(changes)
+          .filter(([key, value]) => isReal(key, value))
+          .map(([key, value]) => {
+            const text = NOTE_ONE_LINE.has(key) ? textOf(value) : correctedNoteText(textOf(stored[key]), textOf(value))
+            // Y lo dicho al corregir que Clío dejó fuera («ibuprofeno de 400» sin «de 400»), con su palabra.
+            return [key, withSaidAmounts(textOf(stored[key]), text, said)]
+          }),
+      )
       const extra = Object.fromEntries(Object.entries(changes).filter(([key, value]) => !isReal(key, value)))
       const merged = Object.keys(extra).length ? mergeNote(stored, extra, corrects) : null
       voiceTouched.set(row.id, new Set([...(voiceTouched.get(row.id) ?? []), ...Object.keys(changes)]))
@@ -2200,6 +2442,7 @@ export async function saveDictationSegment(
       const heard = groundHealthNames(changes, said ?? "")
       if (heard.unnamed.length && said?.trim()) droppedForms.push({ said: said.trim(), why: unnamedMedicineWhy(heard.unnamed), targets: [] })
       if (heard.vague.length && said?.trim()) droppedForms.push({ said: said.trim(), why: vagueConditionWhy(heard.vague), targets: [] })
+      if (heard.denied.length && said?.trim()) droppedForms.push({ said: said.trim(), why: deniedHealthWhy(heard.denied), targets: [] })
       if (!heard.payload) return false
       // Sin palabras de corrección no es una corrección: lo nuevo se suma, como lo de una pausa. Una
       // medicina más no reemplaza a la que ya dijo (QA del 23 nov, verificador 2: «toma algo para la
@@ -2209,7 +2452,7 @@ export async function saveDictationSegment(
       const merged = mergeHealth(data, heard.payload, fixes ? (said ?? true) : false)
       const ready = prepareHealth(merged.payload, undefined, dictation.health)
       if (!ready || JSON.stringify(ready.payload) === JSON.stringify(data)) return false
-      const saidNow = healthSaidOf(heard.payload, said, meta.said, { was: data, now: ready.payload })
+      const saidNow = healthSaidOf(heard.payload, said, meta.said, { was: data, now: ready.payload }, segment.transcript)
       if (!fixes) {
         const withAdded = (step: VoiceStep | undefined): VoiceStep | undefined =>
           step && { ...step, payload: mergeHealth(step.payload, heard.payload ?? {}).payload, previous: withAdded(step.previous) }
@@ -2306,10 +2549,18 @@ export async function saveDictationSegment(
     // entera, como antes, y «Deshacer» la devuelve.
     if (row.kind === "salud") {
       const named = healthNamed(data, removal.said)
-      if (!named.keys.size && (companionSelfTalk(removal.said) || speaksOfSelf(removal.said))) continue
-      const rest = named.keys.size ? withoutHealthKeys(data, named.keys) : null
+      const ownSaid = companionSelfTalk(removal.said) || speaksOfSelf(removal.said)
+      if (!named.keys.size && ownSaid) continue
+      // «La diabetes no, eso es mío», dicho por la madre: pasa a lo de su familia, «Madre: diabetes», como
+      // propuesta que se deshace (QA clínica del 26 nov). Sin su vínculo, se quita como antes.
+      const moved = ownSaid && named.keys.size ? withConditionsToFamily(data, named.keys, companionKinOf(data)) : null
+      const rest = moved ?? (named.keys.size ? withoutHealthKeys(data, named.keys) : null)
       if (rest) {
-        const voice = voiceStep({ payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: named.names.join(", ") }, meta.voice)
+        const said = removal.said.slice(0, DICTATION_SOURCE_CHARS)
+        const voice = voiceStep(
+          { payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before: named.names.join(", "), ...(moved ? {} : { removed: said }) },
+          meta.voice,
+        )
         await tx
           .update(encounterDictationSuggestion)
           .set({ payload: withMeta(rest, stamp({ ...meta, voice })), updatedAt: new Date() })
@@ -2325,6 +2576,64 @@ export async function saveDictationSegment(
       .set({ payload: withMeta(data, stamp({ ...meta, removal: undo })), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(encounterDictationSuggestion.id, row.id))
     removed.push(row.id)
+  }
+
+  // «No, la diabetes no» sobre lo ya propuesto de su salud: la pausa lo propone quitar sola, como la
+  // corrección por voz que se deshace (QA del 26 nov: dependía de que Clío mandara `quitar`, y casi nunca
+  // lo hacía). Solo lo pendiente, nunca lo confirmado; ni en el repaso, que no corrige. Lo que ya dijo
+  // antes (la frase de lo propuesto) no se vuelve a leer, y un «No» que responde no nombra nada.
+  if (!segment.review && segment.transcript?.trim()) {
+    const [healthRow] = await tx
+      .select()
+      .from(encounterDictationSuggestion)
+      .where(
+        and(
+          eq(encounterDictationSuggestion.organizationId, orgId),
+          eq(encounterDictationSuggestion.patientId, patientId),
+          eq(encounterDictationSuggestion.encounterId, encounterId),
+          eq(encounterDictationSuggestion.kind, "salud"),
+          inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+        ),
+      )
+      .orderBy(desc(encounterDictationSuggestion.createdAt))
+      .for("update")
+      .limit(1)
+    if (healthRow && !corrected.includes(healthRow.id) && !removed.includes(healthRow.id)) {
+      const { data, meta } = splitMeta(healthRow.payload)
+      const heardBefore = ` ${normalizeForSearch(healthRow.sourceText ?? "")} `
+      const fresh = segment.transcript
+        .split(/(?<=[.!?;])\s+/u)
+        .filter((sentence) => normalizeForSearch(sentence).trim() && !heardBefore.includes(` ${normalizeForSearch(sentence).trim()} `))
+        .join(" ")
+      // «No es warfarina, es apixabán»: lo de una sola respuesta que la pausa trae de nuevo se reemplaza al
+      // sumarse, con «antes dijo warfarina»; no se quita antes.
+      const replaced = new Set(
+        segment.drafts.flatMap((draft) => (draft.kind === "salud" ? ["anticoagulants", "boneMedicines"].filter((group) => typeof draft.payload[group] === "object" && draft.payload[group] !== null) : [])),
+      )
+      const negated = fresh ? healthNegated(Object.fromEntries(Object.entries(data).filter(([group]) => !replaced.has(group))), fresh) : null
+      if (negated?.keys.size) {
+        const said = fresh.slice(0, DICTATION_SOURCE_CHARS)
+        // «La diabetes no, eso es mío», dicho por la madre: a lo de su familia, como en el «quitar» de Clío.
+        const moved = companionSelfTalk(fresh) || speaksOfSelf(fresh) ? withConditionsToFamily(data, negated.keys, companionKinOf(data)) : null
+        const rest = moved ?? withoutHealthKeys(data, negated.keys)
+        const status = healthRow.status as "lista" | "por_revisar"
+        if (rest) {
+          const voice = voiceStep({ payload: data, status, note: healthRow.note, before: negated.names.join(", "), ...(moved ? {} : { removed: said }) }, meta.voice)
+          await tx
+            .update(encounterDictationSuggestion)
+            .set({ payload: withMeta(rest, stamp({ ...meta, voice })), updatedAt: new Date() })
+            .where(eq(encounterDictationSuggestion.id, healthRow.id))
+          corrected.push(healthRow.id)
+        } else {
+          // No le queda nada: se quita entera, como «quita eso», y «Deshacer» la devuelve.
+          await tx
+            .update(encounterDictationSuggestion)
+            .set({ payload: withMeta(data, stamp({ ...meta, removal: { status, said } })), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+            .where(eq(encounterDictationSuggestion.id, healthRow.id))
+          removed.push(healthRow.id)
+        }
+      }
+    }
   }
 
   // Lo que ya está pendiente no se repite: el asistente a veces corrige una sugerencia y además la
@@ -2354,7 +2663,29 @@ export async function saveDictationSegment(
   // que fue para una ficha no se repite en el texto de la consulta.
   // Un diagnóstico dicho que también pregunta una ficha va a los dos lugares, y la respuesta de ficha
   // que es un diagnóstico, también a Diagnóstico si Clío no lo propuso (prueba con voz del 15 nov, c5).
-  const dictated = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS).map(doubtfulAllergy)
+  // Lo que quien acompaña dice de su propia salud («yo soy diabética», dicho por la madre) y Clío dejó
+  // fuera (`familiar`): con su vínculo es lo de la familia del paciente, «Madre: diabetes», y se propone
+  // como lo demás de su salud (QA clínica del 26 nov). Sin saber su vínculo sigue en «No lo usé».
+  const outOfPlaceUsed: string[] = []
+  const companionDrafts: DictationDraft[] = []
+  const draftKin = [
+    ...new Set(
+      segment.drafts.flatMap((item) => {
+        const kin = item.kind === "salud" && item.payload["declarante"] === "acompanante" ? kinSaid(item.payload["vinculo"]).toLocaleLowerCase("es") : ""
+        return kin ? [kin] : []
+      }),
+    ),
+  ]
+  const pendingHealth = pendingNow.filter((item) => item.kind === "salud").at(-1)
+  for (const item of segment.outOfPlace ?? []) {
+    if (item.why !== "familiar" || !item.said.trim()) continue
+    const vinculo = kinSaid(item.vinculo) || (draftKin.length === 1 ? draftKin[0] : null) || (pendingHealth ? companionKinOf(pendingHealth.payload) : null)
+    const family = companionFamily(selfConditionsOf(item.said), vinculo)
+    if (!vinculo || !family.length) continue
+    companionDrafts.push({ kind: "salud", payload: { declarante: "acompanante", vinculo, family: family.map((one) => ({ ...one, of: "paciente" })) }, sourceText: item.said })
+    outOfPlaceUsed.push(item.said)
+  }
+  const dictated = [...segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS), ...companionDrafts].map(doubtfulAllergy)
   const fromDiagnoses = withDiagnosisFormAnswers(dictated, scope.formQuestions).slice(dictated.length)
   const pendingValues = pendingFormValues(pendingNow, scope.formQuestions)
   // Sin nada nuevo en la pausa no hay qué elegir ni qué llevar a Diagnóstico: lo confirmado no hace falta.
@@ -2375,9 +2706,14 @@ export async function saveDictationSegment(
     : []
   // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa); en
   // el repaso, tampoco lo de una consulta ya confirmada o descartada.
-  const pendingNotes = [...pendingNow, ...settled]
-    .filter((item) => item.kind === "nota")
-    .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
+  // En el repaso, tampoco lo que una corrección por voz reemplazó: se corrigió, no vuelve (QA del 26 nov,
+  // hallazgo 8: «dolor con el frío que se pasa rápido» volvía marcado al firmar).
+  const pendingNotes = [
+    ...[...pendingNow, ...settled]
+      .filter((item) => item.kind === "nota")
+      .flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string")),
+    ...(segment.review ? await replacedByVoice(tx, orgId, patientId, encounterId) : []),
+  ]
   const { drafts, twins } = withFormTwins(
     withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes, { review: !!segment.review }),
     scope.formQuestions,
@@ -2393,6 +2729,9 @@ export async function saveDictationSegment(
     if (said.kind === "salud") {
       const phrase = said.sourceText?.trim() ?? ""
       if (!phrase) continue
+      // Las medicinas que quien acompaña dice que toma ella no se proponen; su motivo, a «No lo usé».
+      const ownMedicines = companionOwnMedicinesWhy(said.payload, phrase)
+      if (ownMedicines) droppedForms.push({ said: phrase, why: ownMedicines, targets: [] })
       // El nombre se busca en su frase y, si no está, en lo dicho en la pausa: Clío a veces cita solo
       // un pedazo («tomo warfarina…») y el losartán dicho al lado salía como no propuesto (QA del 22 nov, H4).
       const inPhrase = groundHealthNames(said.payload, phrase)
@@ -2401,6 +2740,7 @@ export async function saveDictationSegment(
         droppedForms.push({ said: phrase, why: `No encontré «${heard.notHeard.join("», «")}» en lo que se dijo: no lo propuse.`, targets: [] })
       if (inPhrase.unnamed.length) droppedForms.push({ said: phrase, why: unnamedMedicineWhy(inPhrase.unnamed), targets: [] })
       if (inPhrase.vague.length) droppedForms.push({ said: phrase, why: vagueConditionWhy(inPhrase.vague), targets: [] })
+      if (heard.denied.length) droppedForms.push({ said: phrase, why: deniedHealthWhy(heard.denied), targets: [] })
       if (!heard.payload) continue
       draft = { ...said, payload: heard.payload }
       // «Tomo warfarina, no, perdón, apixabán»: queda lo último, con «antes dijo warfarina» (QA del 21 nov, C2).
@@ -2607,7 +2947,7 @@ export async function saveDictationSegment(
                   ...meta,
                   voice: withAdded(meta.voice),
                   earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-                  said: healthSaidOf(fresh, draft.sourceText, meta.said, { was: data, now: health.payload }),
+                  said: healthSaidOf(fresh, draft.sourceText, meta.said, { was: data, now: health.payload }, segment.transcript),
                 }),
               ),
               sourceText: joinSource(row.sourceText, draft.sourceText),
@@ -2627,7 +2967,7 @@ export async function saveDictationSegment(
         newHealth.payload = withMeta(health.payload, {
           ...meta,
           earlier: { ...meta.earlier, ...merged.earlier, ...healthEarlier.get(draft) },
-          said: healthSaidOf(ready.payload, draft.sourceText, meta.said, { was: data, now: health.payload }),
+          said: healthSaidOf(ready.payload, draft.sourceText, meta.said, { was: data, now: health.payload }, segment.transcript),
         })
         newHealth.sourceText = joinSource(newHealth.sourceText ?? "", draft.sourceText)
       }
@@ -2707,11 +3047,16 @@ export async function saveDictationSegment(
       // Al revés: la elección ya confirmada hoy incluye esta prestación en esa pieza («endodoncia o
       // exodoncia de la 36», confirmada, y luego «endodoncia de la 36»). Ya es uno de sus caminos en el
       // plan y el presupuesto: confirmarla otra vez la dejaría dos veces. No se propone; se avisa.
-      if (!entry.choice && entry.place.tooth !== null) {
+      // La misma elección, ya confirmada hoy, tampoco: con la misma regla que entre las pendientes (QA del
+      // 27 nov, verificador 7: «la 46 la vemos en la próxima cita» volvía a proponer sus dos caminos).
+      if (entry.place.tooth !== null) {
         confirmedChoices ??= (await listDecidedDictation(tx, orgId, patientId, encounterId, "confirmada"))
           .filter((item) => isPlanChoice(item.kind, item.payload))
           .map((item) => planEntry(item.id, item.payload))
-        if (confirmedChoices.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place))) {
+        const inPlan = entry.choice
+          ? confirmedChoices.some((item) => covers(item.place, entry.place) && entry.names.every((name) => item.names.includes(name)))
+          : confirmedChoices.some((item) => item.names.some((name) => entry.names.includes(name)) && covers(item.place, entry.place))
+        if (inPlan) {
           const name = String(ready.payload["serviceName"] ?? ready.payload["service"] ?? "").trim()
           if (name && !alreadyDone.includes(name)) alreadyDone.push(name)
           continue
@@ -2727,7 +3072,7 @@ export async function saveDictationSegment(
           if (!row) continue
           await tx
             .update(encounterDictationSuggestion)
-            .set({ status: "descartada", note: "La incluye la elección de caminos.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+            .set({ status: "descartada", note: IN_CHOICE_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
             .where(eq(encounterDictationSuggestion.id, row.id))
           pendingPlans.splice(pendingPlans.indexOf(loose), 1)
         }
@@ -2775,7 +3120,7 @@ export async function saveDictationSegment(
         ready.payload,
         stamp({
           ...(healthEarlier.has(draft) ? { earlier: healthEarlier.get(draft) } : {}),
-          ...(draft.kind === "salud" ? { said: healthSaidOf(ready.payload, draft.sourceText) } : {}),
+          ...(draft.kind === "salud" ? { said: healthSaidOf(ready.payload, draft.sourceText, {}, undefined, segment.transcript) } : {}),
         }),
       ),
       sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),
@@ -2811,7 +3156,19 @@ export async function saveDictationSegment(
     })
   }
   const zone = await findOrgLocale(tx, orgId)
-  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, added, removed, undoRequested, alreadyOnFile, alreadyDone, droppedForms, formSources, repeated: false }
+  return {
+    suggestions: inserted.map((row) => toItem(row, zone, dictation)),
+    corrected,
+    added,
+    removed,
+    undoRequested,
+    alreadyOnFile,
+    alreadyDone,
+    droppedForms,
+    formSources,
+    repeated: false,
+    ...(outOfPlaceUsed.length ? { outOfPlaceUsed } : {}),
+  }
 }
 
 /**
@@ -3216,7 +3573,7 @@ async function refreshRecipes(tx: Db, orgId: string, patientId: string, encounte
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   for (const row of rows) {
     const { data, meta } = splitMeta(row.payload)
-    const ready = checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope)
+    const ready = await checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope)
     if (ready.status === row.status && ready.note === row.note) continue
     await tx
       .update(encounterDictationSuggestion)
@@ -3312,7 +3669,8 @@ export async function confirmDictationSuggestion(
     const input = {
       diagnosisCode: String(payload["diagnosisCode"]),
       diagnosisSystem: typeof payload["diagnosisSystem"] === "string" ? payload["diagnosisSystem"] : null,
-      diagnosisType: String(payload["diagnosisType"]),
+      // Sin tipo dicho, presuntivo (como al preparar): lo que no afirma nada.
+      diagnosisType: String(payload["diagnosisType"] ?? "provisional"),
       toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
       note: (payload["note"] as string | undefined) ?? null,
@@ -3491,7 +3849,7 @@ async function confirmHealthRow(
   if (!data) {
     const [settled] = await tx
       .update(encounterDictationSuggestion)
-      .set({ status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(encounterDictationSuggestion.id, row.id))
       .returning()
     if (!settled) throw new Error("No se pudo confirmar lo que dijo de su salud")
@@ -3568,7 +3926,7 @@ async function confirmHealthRow(
       .set(
         left
           ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
-          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+          : { status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
       )
       .where(eq(encounterDictationSuggestion.id, older.id))
   }
@@ -3718,7 +4076,7 @@ export async function confirmSaidStopped(
       .set(
         left
           ? { payload: withMeta(left, parts.meta), updatedAt: new Date() }
-          : { status: "descartada", note: "Lo que dijo después lo reemplaza.", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
+          : { status: "descartada", note: REPLACED_NOTE, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() },
       )
       .where(eq(encounterDictationSuggestion.id, older.id))
   }
@@ -4111,21 +4469,57 @@ async function confirmPlanChoice(
   for (const option of payload["options"] as PlanChoice[]) others.push(await indicate(String(option.serviceId)))
   const tooth = typeof site["toothNumber"] === "number" ? ` para la ${site["toothNumber"]}` : ""
   const draft = await findDraftBudget(tx, orgId, patientId)
-  const budget = draft
-    ? await addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: [main.id] })
-    : await createBudget(tx, orgId, actorUserId, patientId, {
-        planId: main.planId,
-        itemIds: [main.id],
-        notes: `${others.length === 1 ? "Dos caminos" : "Tres caminos"}${tooth}: elige uno.`,
-      })
-  const optionA = budget.options[0]
+  let budgetId: string
+  if (draft) {
+    budgetId = draft.id
+    // Con un borrador, lo que se acaba de indicar ya entró a su opción (`quoteIndicatedNow`): la principal
+    // se queda en la A y cada otro camino sale de ella para ir a su propia opción (revisión de código del
+    // 26 nov: confirmar contra un borrador fallaba con «El tratamiento ya está en ese presupuesto»).
+    const quoted = new Set(
+      (
+        await tx
+          .select({ planItemId: treatmentBudgetItem.planItemId })
+          .from(treatmentBudgetItem)
+          .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, draft.id)))
+      ).map((row) => row.planItemId),
+    )
+    const strays = [...new Set(others.map((other) => other.id))].filter((id) => id !== main.id && quoted.has(id))
+    if (strays.length) await removeBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: strays })
+    if (!quoted.has(main.id)) await addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: [main.id] })
+  } else {
+    const created = await createBudget(tx, orgId, actorUserId, patientId, {
+      planId: main.planId,
+      itemIds: [main.id],
+      notes: `${others.length === 1 ? "Dos caminos" : "Tres caminos"}${tooth}: elige uno.`,
+    })
+    budgetId = created.id
+  }
+  const [optionA] = await tx
+    .select({ id: treatmentBudgetOption.id })
+    .from(treatmentBudgetOption)
+    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budgetId)))
+    .orderBy(asc(treatmentBudgetOption.position))
+    .limit(1)
   if (!optionA) throw new Error("El presupuesto quedó sin opción")
   for (const other of others) {
-    const copied = await duplicateBudgetOption(tx, orgId, actorUserId, patientId, budget.id, optionA.id)
+    const copied = await duplicateBudgetOption(tx, orgId, actorUserId, patientId, budgetId, optionA.id)
     const created = copied.options.at(-1)
     if (!created) throw new Error("No se pudo crear la opción")
-    await removeBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [main.id], optionId: created.id })
-    await addBudgetItems(tx, orgId, actorUserId, patientId, budget.id, { itemIds: [other.id], optionId: created.id })
+    await removeBudgetItems(tx, orgId, actorUserId, patientId, budgetId, { itemIds: [main.id], optionId: created.id })
+    await addBudgetItems(tx, orgId, actorUserId, patientId, budgetId, { itemIds: [other.id], optionId: created.id })
+  }
+  // Las opciones nacen sin recomendada: la A lo es solo si el odontólogo dijo que la recomienda; si no,
+  // se marca después con «Marcar como recomendada» (revisión del 26 nov). Solo se toca lo que el
+  // dictado decide: la marca que una persona puso en el borrador se queda (revisión de código del 26 nov).
+  if (payload["recommended"] === true) {
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: false, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budgetId)))
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: true, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionA.id)))
   }
   return main.id
 }
@@ -4149,10 +4543,14 @@ export async function issueDictationPrescription(
   if (rows.length === 0) throw conflict("NO_DICTATED_PRESCRIPTION", "No hay una receta dictada por emitir")
   const waiting = rows.find((row) => row.status !== "lista")
   if (waiting) throw conflict("SUGGESTION_NEEDS_REVIEW", waiting.note ?? "Completa la receta antes de emitirla")
-  // Los duplicados que mostró la tarjeta quedan como vistos; la alergia se resuelve en el formulario.
+  // Los duplicados y los avisos de la receta del producto (el peso de un niño) que mostró la tarjeta
+  // quedan como vistos; la alergia se resuelve en el formulario.
   const shownDuplicates = rows.flatMap((row) => {
-    const lines = splitMeta(row.payload).data["duplicateWarnings"]
-    return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : []
+    const data = splitMeta(row.payload).data
+    return ["duplicateWarnings", "productWarnings"].flatMap((key) => {
+      const lines = data[key]
+      return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : []
+    })
   })
   const created = await createPrescription(tx, orgId, actorUserId, patientId, {
     encounterId,

@@ -20,6 +20,7 @@ import {
   mergeDictatedSystem,
   readSystemsExam,
   type SystemsExam,
+  withExamState,
 } from "@odentia/medical"
 import { Button, Field, FieldError, FieldLabel, Textarea } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
@@ -118,24 +119,21 @@ function SystemsExamFields({ idPrefix, draft, onChange, disabled, errors }: Exam
                 invalid={stateError.invalid}
                 aria-describedby={stateError.describedBy}
                 onChange={(estado) =>
-                  set(
-                    system.key,
-                    estado === "con_hallazgos"
-                      ? { estado, hallazgo: entry?.hallazgo ?? "" }
-                      : { estado },
-                  )
+                  // De «con hallazgos» a «sin alteraciones» se borra lo que encontró; lo normal dicho con sus palabras se queda.
+                  set(system.key, withExamState(entry, estado))
                 }
                 onClear={() => set(system.key, null)}
               />
             </div>
             {stateError.message ? <FieldError id={stateError.errorId}>{stateError.message}</FieldError> : null}
-            {entry?.estado === "con_hallazgos" ? (
+            {/* Lo normal dictado con palabras («Lasègue negativo») también se ve y se edita. */}
+            {entry && (entry.estado === "con_hallazgos" || entry.hallazgo) ? (
               <Field data-invalid={findingError.invalid}>
                 <FieldLabel
                   htmlFor={findingId}
                   className="text-xs text-muted-foreground"
                 >
-                  Qué encontraste
+                  {entry.estado === "con_hallazgos" ? "Qué encontraste" : "Lo que dijiste"}
                 </FieldLabel>
                 <Textarea
                   id={findingId}
@@ -147,7 +145,7 @@ function SystemsExamFields({ idPrefix, draft, onChange, disabled, errors }: Exam
                   aria-describedby={findingError.describedBy}
                   placeholder="Qué y dónde: «Adenopatías submandibulares en ambos lados, de 1 cm»"
                   onChange={(event) =>
-                    set(system.key, { estado: "con_hallazgos", hallazgo: event.target.value })
+                    set(system.key, { estado: entry.estado, hallazgo: event.target.value })
                   }
                 />
                 {findingError.message ? (
@@ -181,8 +179,8 @@ function shortDate(iso: string): string {
 /** «PA 124/80 · peso 64 kg»: lo que se compara de una vez a otra. */
 function previousLine(vitals: Vitals): string {
   const parts: string[] = []
-  if (vitals.presionSistolica !== undefined && vitals.presionDiastolica !== undefined)
-    parts.push(`PA ${vitals.presionSistolica}/${vitals.presionDiastolica}`)
+  if (vitals.presionSistolica !== undefined || vitals.presionDiastolica !== undefined)
+    parts.push(`PA ${vitals.presionSistolica ?? "?"}/${vitals.presionDiastolica ?? "?"}`)
   if (vitals.peso !== undefined) parts.push(`peso ${decimal(vitals.peso)} kg`)
   if (vitals.glucosaCapilar !== undefined) parts.push(`glucosa ${vitals.glucosaCapilar} mg/dL`)
   return parts.join(" · ")
@@ -236,7 +234,9 @@ export const medicalExamination: ProductExaminationUi = {
     const system = EXAM_SYSTEMS.find((item) => item.key === payload["system"])
     if (!system) return draft
     const finding = typeof payload["finding"] === "string" ? payload["finding"] : ""
-    const entry = payload["state"] === "con_hallazgos" ? { estado: "con_hallazgos" as const, ...(finding ? { hallazgo: finding } : {}) } : { estado: "sin_alteraciones" as const }
-    return mergeDictatedSystem(exam, system.key, entry)
+    // Sin estado dicho no se confirma (queda por revisar): nunca se da por normal.
+    if (payload["state"] !== "con_hallazgos" && payload["state"] !== "sin_alteraciones") return draft
+    // Lo normal también lleva lo que se dijo («Lasègue negativo»), como en el servidor.
+    return mergeDictatedSystem(exam, system.key, { estado: payload["state"], ...(finding ? { hallazgo: finding } : {}) })
   },
 }

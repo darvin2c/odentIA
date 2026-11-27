@@ -92,8 +92,8 @@ export { budgetLineUnitsSql, budgetValueOptionSql } from "./budget-awaiting.js"
  * - Dos o tres opciones en un mismo presupuesto (decisión 13): cada opción
  *   tiene sus líneas y su propio total, nunca sumados. La persona elige una y
  *   dentro de ella puede dejar algo para después; las otras quedan «No
- *   elegida». Mientras decide, el valor es el de la recomendada; después, el
- *   de lo elegido.
+ *   elegida». Mientras decide, el valor es el de la recomendada (sin ella, el de
+ *   la primera); después, el de lo elegido.
  * - El odontólogo actúa sobre lo que él indicó (`treatment_plan_item.created_by`),
  *   no sobre «su plan»: el plan es uno por persona.
  */
@@ -205,7 +205,7 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
   options: BudgetOptionWithTotals[]
   /**
    * Total que vale el presupuesto: el de la opción elegida o, mientras decide,
-   * el de la recomendada. Nunca la suma de las opciones. Esta y las tres
+   * el de la recomendada (sin ella, la primera). Nunca la suma de las opciones. Esta y las tres
    * siguientes son las de su única moneda; nulas si lleva dos (las dice `totals`).
    */
   totalCents: number | null
@@ -1248,7 +1248,11 @@ export async function findDraftBudget(
   return row ?? null
 }
 
-/** Nace el borrador con su primera opción, la recomendada. */
+/**
+ * Nace el borrador con su primera opción, sin recomendada: la recomendada la marca
+ * quien lo arma («Marcar como recomendada»), nunca el sistema (revisión del 26 nov,
+ * ADR 0221). Sin marca, lo que vale mientras decide es la primera (`valueOptionOf`).
+ */
 async function insertDraftBudget(
   tx: Db,
   orgId: string,
@@ -1284,7 +1288,7 @@ async function insertDraftBudget(
       patientId,
       budgetId: budget.id,
       position: 1,
-      isRecommended: true,
+      isRecommended: false,
       createdBy: actorUserId,
     })
     .returning()
@@ -1403,6 +1407,34 @@ export interface AssembledBudget {
   currency: string
   /** Lo que entró en esta atención. */
   added: number
+  /**
+   * Cada opción con su total, leídas en la misma lectura que lo de arriba: el cierre dice estas
+   * cifras y no las de otra consulta, que podía venir de antes de firmar (QA del 27 nov: decía
+   * S/ 180 o S/ 900 y al paciente le llegaba S/ 360 o S/ 1,080, con lo común que entró al firmar).
+   */
+  options: Array<Pick<BudgetOptionWithTotals, "id" | "position" | "label" | "name" | "totals" | "totalCents">>
+}
+
+/** Lo que el cierre dice del presupuesto, de una sola lectura (`loadBudget`). */
+function assembledOf(full: BudgetWithTotals, added: number): AssembledBudget {
+  const value = valueOptionOf(full.options)
+  return {
+    id: full.id,
+    budgetNumber: full.budgetNumber,
+    itemCount: value?.lineCount ?? full.items.length,
+    totals: full.totals,
+    totalCents: full.totalCents,
+    currency: full.currency,
+    added,
+    options: full.options.map(({ id, position, label, name, totals, totalCents }) => ({
+      id,
+      position,
+      label,
+      name,
+      totals,
+      totalCents,
+    })),
+  }
 }
 
 /**
@@ -1491,17 +1523,7 @@ export async function assembleEncounterBudget(
         encounterId,
       })
       await notifyBudget(tx, orgId)
-      const full = await loadBudget(tx, orgId, patientId, locked)
-      const value = valueOptionOf(full.options)
-      return {
-        id: full.id,
-        budgetNumber: full.budgetNumber,
-        itemCount: value?.lineCount ?? full.items.length,
-        totals: full.totals,
-        totalCents: full.totalCents,
-        currency: full.currency,
-        added: ready.length,
-      }
+      return assembledOf(await loadBudget(tx, orgId, patientId, locked), ready.length)
     }
   }
   // Lo indicado aquí ya entró al borrador al indicarlo (`quoteIndicatedNow`): no queda nada nuevo
@@ -1514,17 +1536,7 @@ export async function assembleEncounterBudget(
       where organization_id = ${orgId} and patient_id = ${patientId}::uuid and budget_id = ${draft.id}::uuid
         and source_encounter_id = ${encounterId}::uuid and status <> 'cancelado'`)
     if (mine && mine.n > 0) {
-      const full = await loadBudget(tx, orgId, patientId, draft)
-      const value = valueOptionOf(full.options)
-      return {
-        id: full.id,
-        budgetNumber: full.budgetNumber,
-        itemCount: value?.lineCount ?? full.items.length,
-        totals: full.totals,
-        totalCents: full.totalCents,
-        currency: full.currency,
-        added: mine.n,
-      }
+      return assembledOf(await loadBudget(tx, orgId, patientId, draft), mine.n)
     }
   }
   return null
@@ -1969,8 +1981,8 @@ export async function recommendBudgetOption(
 
 /**
  * Quita una opción del borrador (siempre queda al menos una). Las demás se
- * renumeran para que las letras sigan seguidas; si era la recomendada, pasa a
- * serlo la primera.
+ * renumeran para que las letras sigan seguidas; si era la recomendada, ninguna
+ * queda recomendada hasta que alguien la marque (revisión del 26 nov).
  */
 export async function removeBudgetOption(
   tx: Db,
@@ -2019,7 +2031,7 @@ export async function removeBudgetOption(
       .update(treatmentBudgetOption)
       .set({
         position: index + 1,
-        isRecommended: gone.isRecommended ? index === 0 : option.isRecommended,
+        isRecommended: option.isRecommended,
         updatedAt: new Date(),
       })
       .where(
@@ -2169,7 +2181,7 @@ export async function restoreDraftBudget(
       createdBy: actorUserId,
     })
   }
-  // La recomendada de antes (quitar la había pasado a la primera que quedó).
+  // La recomendada de antes, si había una (quitarla la había dejado sin recomendada).
   const recommended = snapshot.options.find((option) => option.isRecommended)
   if (recommended) {
     await tx
@@ -2757,10 +2769,14 @@ export async function decideBudget(
   // La respuesta de un tratamiento en el cuerpo (`decisions[1].decision`), para decir el rechazo junto a ella.
   const decisionField = (planItemId: string) =>
     `decisions[${input.decisions.findIndex((d) => d.planItemId === planItemId)}].decision`
+  // Lo que ya se hizo o se está haciendo puede quedar sin responder, y dejarlo para después no lo
+  // cambia: posponer deja fuera lo ejecutado (QA del 26 nov: lo hecho hoy va en lo común con la
+  // decisión abierta y «Lo dejo para después» del enlace fallaba). Rechazarlo sí avisa, abajo.
+  const executed = (line: BudgetLineWithStatus) => line.itemStatus === "en_curso" || line.itemStatus === "realizado"
   for (const line of lines) {
     const next = decisions.get(line.planItemId)
     if (isOpen(line.decision)) {
-      if (!next) throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
+      if (!next && !executed(line)) throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
       continue
     }
     // Lo ya respondido no se reescribe: puede repetirse igual u omitirse.
@@ -2818,10 +2834,11 @@ export async function decideBudget(
     const message = "Ese camino ya no tiene nada por responder"
     throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { optionId: message })
   }
-  // Lo que se escribe ahora: solo lo que esperaba respuesta.
+  // Lo que se escribe ahora: solo lo que esperaba respuesta, sin lo ejecutado que se deja para después.
   const answering = new Map(
     lines
-      .filter((line) => isOpen(line.decision))
+      .filter((line) => isOpen(line.decision) && decisions.has(line.planItemId))
+      .filter((line) => !(executed(line) && decisions.get(line.planItemId) === "pospuesto"))
       .map((line) => [line.planItemId, decisions.get(line.planItemId)!] as const),
   )
   const signature = input.signature != null
@@ -2970,16 +2987,21 @@ export async function decideBudget(
   )
   const finalOf = (line: { planItemId: string; decision: string }) =>
     finals.get(line.planItemId) ?? line.decision
-  const answers = [...finals.values()]
+  // Lo ya hecho que sigue sin responder no cuenta para el estado: no es un «sí» ni un «después».
+  const answers = lines
+    .filter((line) => !(executed(line) && isOpen(finalOf(line))))
+    .map((line) => finalOf(line))
   const acceptedCount = answers.filter((d) => d === "aceptado").length
   const status: BudgetStatus =
-    acceptedCount === answers.length
-      ? "aceptado"
-      : acceptedCount > 0
-        ? "parcial"
-        : answers.some((d) => d === "pospuesto")
-          ? "pospuesto"
-          : "rechazado"
+    answers.length === 0
+      ? "pospuesto"
+      : acceptedCount === answers.length
+        ? "aceptado"
+        : acceptedCount > 0
+          ? "parcial"
+          : answers.some((d) => d === "pospuesto")
+            ? "pospuesto"
+            : "rechazado"
   const [updated] = await tx
     .update(treatmentBudget)
     .set({
@@ -3815,7 +3837,9 @@ export async function reviseBudget(
   // Lo hecho o cobrado conserva lo acordado tal cual (también una promoción que ya terminó).
   const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
   const plan = kept.length > 0 ? kept : sources.slice(0, 1)
-  const recommended = plan.find((source) => source.isRecommended) ?? plan[0] ?? null
+  // Varios caminos sin recomendada (el odontólogo no dijo cuál, revisión del 26 nov) siguen sin ella.
+  // Tampoco una sola: la recomendada es la que alguien marcó.
+  const recommended = plan.find((source) => source.isRecommended) ?? null
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
   const billingModes = await readBillingModes(
     tx,
@@ -3831,7 +3855,7 @@ export async function reviseBudget(
         patientId,
         budgetId: revision.id,
         position: index + 1,
-        isRecommended: plan.length > 0 ? source?.id === recommended?.id : true,
+        isRecommended: !!recommended && source?.id === recommended.id,
         name: keepsPaths ? (source?.name ?? null) : null,
         pros: keepsPaths ? (source?.pros ?? null) : null,
         cons: keepsPaths ? (source?.cons ?? null) : null,

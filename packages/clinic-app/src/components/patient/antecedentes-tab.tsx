@@ -93,6 +93,7 @@ import {
   withSaidHealth,
   endedMedicineWords,
   familyLine,
+  frequencyWords,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi, type SubFieldErrors } from "../../product/product-ui"
@@ -229,8 +230,9 @@ export function buildDrafts(health: PatientHealth): HealthFormValues {
       dose: m.doseValue ? "" : (m.dose ?? ""),
       doseValue: m.doseValue ? String(Number(m.doseValue)) : "",
       doseUnit: m.doseUnit ?? "",
-      // Lo escrito sin frecuencia de la lista es «Otra».
-      frequency: m.frequencyCode ? "" : (m.frequency ?? ""),
+      // Lo escrito sin frecuencia de la lista es «Otra»; con ella, lo dicho que dice lo mismo («2 veces al
+      // día») viaja al lado y se vuelve a guardar igual (QA del 26 nov).
+      frequency: m.frequency ?? "",
       frequencyCode: m.frequencyCode ?? (m.frequency?.trim() ? "otra" : ""),
       startDate: m.startDate ?? "",
       endDate: m.endDate ?? "",
@@ -470,7 +472,8 @@ function healthBody(
           // Con número y unidad, el servidor escribe la dosis («500 mg»); igual la frecuencia de la lista.
           doseValue: m.doseValue ? Number(m.doseValue.replace(",", ".")) : null,
           doseUnit: m.doseValue ? m.doseUnit || null : null,
-          frequency: other && m.frequency.trim() !== "" ? m.frequency.trim() : null,
+          // Con la de la lista, lo dicho viaja al lado: el servidor lo conserva solo si dice lo mismo.
+          frequency: m.frequency.trim() !== "" && (other || m.frequencyCode) ? m.frequency.trim() : null,
           frequencyCode: m.frequencyCode && !other ? m.frequencyCode : null,
           startDate: m.startDate === "" ? null : m.startDate,
           endDate: m.endDate === "" ? null : m.endDate,
@@ -498,8 +501,17 @@ export function AntecedentesTab({
   said,
   heard,
   onSaved,
+  editorOnly = false,
+  onClosed,
 }: {
   patientId: string
+  /**
+   * Solo el formulario, sin la sección detrás: «Corregir algo» de la atención lo abre así, y en ventana
+   * ancha va en la columna del layout, no en un cajón encima de otro (QA del 26 nov, a 1440 px).
+   */
+  editorOnly?: boolean
+  /** El formulario se cerró (guardado o no): quien lo abrió solo con él lo quita. */
+  onClosed?: () => void
   /** «Revisar» de Pendientes: se abre con el formulario listo, sin otro clic. */
   startEditing?: boolean
   /** «Corregir algo» de lo que Clío oyó en la consulta: el formulario abre con eso puesto. */
@@ -678,6 +690,20 @@ export function AntecedentesTab({
     }
   }, [startEditing, canWrite, health])
 
+  // Abierto solo con el formulario: al cerrarlo no queda nada que mostrar. Solo después de haberse visto
+  // abierto: con la salud ya en caché, el efecto que abre y este corrían en el mismo render, con `drawerOpen`
+  // todavía en falso, y el formulario se desmontaba antes de verse (QA del 26 nov, H1).
+  const closed = useRef(onClosed)
+  closed.current = onClosed
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (drawerOpen) {
+      wasOpen.current = true
+      return
+    }
+    if (editorOnly && wasOpen.current) closed.current?.()
+  }, [editorOnly, drawerOpen])
+
   async function reload(): Promise<void> {
     const fresh = await healthQuery.refetch()
     if (fresh.data) resetTo(fresh.data.data)
@@ -707,6 +733,7 @@ export function AntecedentesTab({
     if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
   }
 
+  if (editorOnly && healthQuery.isPending) return <></>
   if (healthQuery.isPending)
     return (
       <SkeletonRegion message="Cargando antecedentes…">
@@ -749,6 +776,401 @@ export function AntecedentesTab({
     : saved.conditions.length + saved.medications.length > 0
       ? "Editar antecedentes"
       : "Registrar antecedentes"
+  const drawer = (
+    <FormDrawer
+      {...surface}
+      isDirty={changedHere}
+      open={drawerOpen}
+      onClose={() => setDrawerOpen(false)}
+      title={editingVerb}
+      headerContent={
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
+            Revisión {base.current.revision} ·{" "}
+            {base.current.version > 0
+              ? `entrevista v${base.current.version}`
+              : "sin entrevista registrada"}
+          </p>
+          {heard ? (
+            // La frase queda arriba mientras se baja a su grupo: se anota donde va, sin volver a buscarla.
+            <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm [overflow-wrap:anywhere]">
+              <span className="font-medium">Se dijo en la consulta:</span> «{heard}»
+            </p>
+          ) : null}
+          {stale ? (
+            <div
+              role="alert"
+              className="flex flex-col gap-2 rounded-xl border border-destructive/50 p-3"
+            >
+              <p className="text-sm">
+                Otra sesión guardó antecedentes mientras editabas (revisión {health.revision}). Tus
+                valores se conservan: recarga para ver lo nuevo y vuelve a guardar.
+              </p>
+              <div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void reload()}>
+                  Recargar
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      }
+      isLoading={healthQuery.isPending}
+      submitLabel={submitLabel}
+      submitDisabled={!canWrite}
+      // Solo el formulario (desde la atención) va en la columna, que admite hasta 42rem y se ensancha a mano;
+    // encima de la sección, el cajón ancho de siempre.
+    className={
+      editorOnly
+        ? "data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))]"
+        : "data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
+    }
+    >
+      <div className="flex flex-col gap-4">
+        <section
+          aria-label="Grupo sanguíneo"
+          className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+        >
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
+              {saved.bloodGroup !== "" && pendingReview ? (
+                <Badge variant="outline">Declarado · pendiente de revisión</Badge>
+              ) : null}
+            </div>
+          </div>
+          <div>
+            <BloodGroupField
+              form={form}
+              id={fid("blood")}
+              readOnly={readOnly}
+              declared={saved.bloodGroup !== "" && pendingReview}
+            />
+          </div>
+        </section>
+
+        {/* Las alergias se agregan y quitan una por una en su tarjeta, fuera de este formulario (tablero 7). */}
+        <ClinicalGroupCard
+          title="Condiciones"
+          review={reviewStatus.conditions}
+          saidNo={saidNoOf("conditions")}
+          reviewField={<ReviewStateField form={form} id={fid("rev-con")} group="conditions" readOnly={readOnly} />}
+        >
+          <ConditionRows form={form} idPrefix={uid} readOnly={readOnly} />
+          <form.Subscribe selector={(state) => state.values.conditions.length === 0}>
+            {(empty) =>
+              empty ? (
+                <p className="text-sm text-muted-foreground">
+                  {saidNoOf("conditions")
+                    ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                    : reviewStatus.conditions === "none"
+                      ? "Ausencia confirmada en este grupo."
+                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                </p>
+              ) : null
+            }
+          </form.Subscribe>
+        </ClinicalGroupCard>
+
+        <ClinicalGroupCard
+          title="Medicación vigente"
+          review={reviewStatus.medications}
+          saidNo={saidNoOf("medications")}
+          reviewField={<ReviewStateField form={form} id={fid("rev-med")} group="medications" readOnly={readOnly} />}
+        >
+          <MedicationRows form={form} idPrefix={uid} readOnly={readOnly} />
+          <form.Subscribe selector={(state) => state.values.medications.length === 0}>
+            {(empty) =>
+              empty ? (
+                <p className="text-sm text-muted-foreground">
+                  {saidNoOf("medications")
+                    ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                    : reviewStatus.medications === "none"
+                      ? "Ausencia confirmada en este grupo."
+                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                </p>
+              ) : null
+            }
+          </form.Subscribe>
+        </ClinicalGroupCard>
+
+        <section
+          aria-label="Riesgo anestésico (ASA)"
+          className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+        >
+          <div className="font-heading text-base font-medium">Riesgo anestésico (ASA)</div>
+          <form.AppField name="asaClass">
+            {(field) => (
+              <field.Control id={fid("asa")} label="Clasificación ASA" description="Su riesgo ante la anestesia, según sus enfermedades y su medicación.">
+                {(control) => (
+                  <ChoiceSelect
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    className="max-w-md"
+                    value={field.state.value}
+                    disabled={readOnly}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  >
+                    <option value="">Sin clasificar</option>
+                    {ASA_OPTIONS.map(([value, optionLabel]) => (
+                      <option key={value} value={value}>
+                        {optionLabel}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        </section>
+
+        <section
+          aria-label="Entrevista de salud"
+          className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+        >
+          <div className="flex flex-col gap-1.5">
+            <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
+          </div>
+          <div className="flex flex-col gap-4">
+            <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
+              <CollapsibleTrigger className="text-sm font-medium">
+                <span className="flex items-center gap-1">
+                  Personales <ChevronDown aria-hidden className="size-4" />
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="grid gap-4 pt-2 sm:grid-cols-2">
+                  {(
+                    [
+                      ["hospitalizaciones", "ap-hosp", "Hospitalizaciones"],
+                      ["cirugias", "ap-cir", "Cirugías"],
+                      ["transfusiones", "ap-tra", "Transfusiones"],
+                    ] as const
+                  ).map(([key, id, label]) => (
+                    <Field key={key}>
+                      <FieldLabel htmlFor={fid(id)}>{label}</FieldLabel>
+                      <Input
+                        id={fid(id)}
+                        value={strOf(personales[key])}
+                        disabled={readOnly}
+                        onChange={(e) =>
+                          updateInterview(
+                            "antecedentesPersonales",
+                            key,
+                            e.target.value === "" ? undefined : e.target.value,
+                          )
+                        }
+                      />
+                    </Field>
+                  ))}
+                  {/* A un niño no se le pregunta el embarazo; lo ya anotado sí se ve (revisión final del 15 nov, K8). */}
+                  {productHealth.asksPregnancy && (!childPatient || pregnancyRecord) ? (
+                    <Field>
+                      <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
+                      <Select
+                        // Con sus nombres: sin ellos, el campo muestra la clave («sin-responder», QA del 6 nov).
+                        items={PREGNANCY_ITEMS}
+                        value={pregnancyRecord?.estado ?? "sin-responder"}
+                        onValueChange={(v) => {
+                          // Responderlo es decirlo hoy: queda con la fecha de hoy, que ya no se mueve.
+                          form.setFieldValue("interview", (prev) =>
+                            withPregnancy(prev, v === "si" || v === "no" ? v : null, clinicToday()),
+                          )
+                          if (v !== "si") form.setFieldValue("pregnancyWeeks", "")
+                          if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
+                        }}
+                        disabled={readOnly}
+                      >
+                        <SelectTrigger id={fid("emb-estado")}>
+                          <SelectValue placeholder="Sin responder" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sin-responder">Sin responder</SelectItem>
+                          <SelectItem value="si">Sí</SelectItem>
+                          <SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {pregnancyRecord ? (
+                        <p className="text-xs text-muted-foreground">
+                          {(pregnancyRecord.fecha ?? health.pregnancy?.saidOn)
+                            ? `Anotado el ${shortDay(pregnancyRecord.fecha ?? health.pregnancy?.saidOn ?? "")}. Si cambias la respuesta o las semanas, queda con la fecha de hoy.`
+                            : "Está anotado sin fecha: al responderlo de nuevo queda con la de hoy."}
+                        </p>
+                      ) : null}
+                    </Field>
+                  ) : null}
+                  {productHealth.asksPregnancy && pregnancyRecord?.estado === "si" ? (
+                    <form.AppField
+                      name="pregnancyWeeks"
+                      listeners={{
+                        // Las semanas son las de hoy: decirlas pone la fecha de hoy. Solo si sigue en «Sí»:
+                        // al pasar a «No» el campo se vacía y eso no es decir las semanas.
+                        onChange: () =>
+                          form.setFieldValue("interview", (prev) =>
+                            pregnancyRecordOf(prev)?.estado === "si" ? withPregnancy(prev, "si", clinicToday()) : prev,
+                          ),
+                      }}
+                    >
+                      {(field) => (
+                        <field.TextField
+                          id={fid("emb-sem")}
+                          label="Semanas de embarazo (0–42)"
+                          inputMode="numeric"
+                          maxLength={2}
+                          disabled={readOnly}
+                        />
+                      )}
+                    </form.AppField>
+                  ) : null}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
+            <Collapsible open={openFamiliares} onOpenChange={setOpenFamiliares}>
+              <CollapsibleTrigger className="text-sm font-medium">
+                <span className="flex items-center gap-1">
+                  Familiares <ChevronDown aria-hidden className="size-4" />
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <form.AppField name="familyHistory" mode="array">
+                  {(rowsField) => (
+                    <div className="flex flex-col gap-3 pt-2">
+                      {rowsField.state.value.map((row, index) => (
+                        <div
+                          key={row.key}
+                          className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[10rem_1fr_auto]"
+                        >
+                          <form.AppField name={`familyHistory[${index}].relationship`}>
+                            {(field) => (
+                              <field.Control id={fid(`fam-rel-${row.key}`)} label="Parentesco">
+                                {(control) => (
+                                  <ChoiceSelect
+                                    id={control.id}
+                                    aria-invalid={control.invalid || undefined}
+                                    aria-describedby={control.describedBy}
+                                    onBlur={control.onBlur}
+                                    value={field.state.value}
+                                    disabled={readOnly}
+                                    onChange={(e) => field.handleChange(e.target.value)}
+                                  >
+                                    {FAMILY_RELATIONSHIP_OPTIONS.map(([value, optionLabel]) => (
+                                      <option key={value} value={value}>
+                                        {optionLabel}
+                                      </option>
+                                    ))}
+                                  </ChoiceSelect>
+                                )}
+                              </field.Control>
+                            )}
+                          </form.AppField>
+                          <form.AppField name={`familyHistory[${index}].condition`}>
+                            {(field) => (
+                              <field.TextField
+                                id={fid(`fam-con-${row.key}`)}
+                                label="Condición"
+                                maxLength={HEALTH_NAME_MAX}
+                                disabled={readOnly}
+                                placeholder="Ej.: diabetes, hipertensión, cardiopatía"
+                              />
+                            )}
+                          </form.AppField>
+                          {canWrite ? (
+                            <div className="flex items-end">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={readOnly}
+                                onClick={() => rowsField.removeValue(index)}
+                              >
+                                Quitar
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                      {canWrite ? (
+                        <div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={readOnly}
+                            onClick={() =>
+                              rowsField.pushValue({
+                                key: `fam-${Date.now()}`,
+                                relationship: "MTH",
+                                condition: "",
+                                diagnosisCode: "",
+                                diagnosisSystem: null,
+                              })
+                            }
+                          >
+                            Agregar antecedente familiar
+                          </Button>
+                        </div>
+                      ) : null}
+                      {strOf(interview["antecedentesFamiliares"]) ? (
+                        <p className="text-xs text-muted-foreground">
+                          Registro anterior en texto: {strOf(interview["antecedentesFamiliares"])}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </form.AppField>
+              </CollapsibleContent>
+            </Collapsible>
+
+            {/* Lo del producto (odentIA: «Odontológicos y hábitos»; latidIA: embarazo, hábitos y vacunas). */}
+            <form.Field name="interview">
+              {() => (
+                <productHealth.InterviewSections
+                  answers={interview}
+                  update={updateInterview}
+                  setGroup={setTopInterview}
+                  disabled={readOnly}
+                  idPrefix={uid}
+                  sex={patientQuery.data?.data.patient.sex ?? null}
+                  age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
+                  errors={interviewErrors}
+                />
+              )}
+            </form.Field>
+
+            {legacy.length > 0 ? (
+              <div
+                className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
+                role="note"
+                aria-label="Información previa por conciliar"
+              >
+                <p className="text-sm font-medium">Información previa por conciliar</p>
+                <p className="text-xs text-muted-foreground">
+                  Textos de entrevistas anteriores (motivo, examen, diagnóstico o listas libres).
+                  Se muestran tal cual; no se convierten automáticamente en registros.
+                </p>
+                <dl className="grid gap-2 text-sm">
+                  {legacy.map((entry) => (
+                    <div
+                      key={entry.label}
+                      className="grid gap-0.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-2"
+                    >
+                      <dt className="text-muted-foreground">{entry.label}</dt>
+                      <dd className="whitespace-pre-wrap">{entry.text}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    </FormDrawer>
+  )
+  // «Corregir algo» de la atención: solo el formulario (va en la columna si cabe).
+  if (editorOnly) return drawer
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -836,391 +1258,7 @@ export function AntecedentesTab({
         )}
       />
 
-      <FormDrawer
-        {...surface}
-        isDirty={changedHere}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title={editingVerb}
-        headerContent={
-          <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              Revisión {base.current.revision} ·{" "}
-              {base.current.version > 0
-                ? `entrevista v${base.current.version}`
-                : "sin entrevista registrada"}
-            </p>
-            {heard ? (
-              // La frase queda arriba mientras se baja a su grupo: se anota donde va, sin volver a buscarla.
-              <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm [overflow-wrap:anywhere]">
-                <span className="font-medium">Se dijo en la consulta:</span> «{heard}»
-              </p>
-            ) : null}
-            {stale ? (
-              <div
-                role="alert"
-                className="flex flex-col gap-2 rounded-xl border border-destructive/50 p-3"
-              >
-                <p className="text-sm">
-                  Otra sesión guardó antecedentes mientras editabas (revisión {health.revision}). Tus
-                  valores se conservan: recarga para ver lo nuevo y vuelve a guardar.
-                </p>
-                <div>
-                  <Button type="button" size="sm" variant="outline" onClick={() => void reload()}>
-                    Recargar
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        }
-        isLoading={healthQuery.isPending}
-        submitLabel={submitLabel}
-        submitDisabled={!canWrite}
-        className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
-      >
-        <div className="flex flex-col gap-4">
-          <section
-            aria-label="Grupo sanguíneo"
-            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
-          >
-            <div className="flex flex-col gap-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
-                {saved.bloodGroup !== "" && pendingReview ? (
-                  <Badge variant="outline">Declarado · pendiente de revisión</Badge>
-                ) : null}
-              </div>
-            </div>
-            <div>
-              <BloodGroupField
-                form={form}
-                id={fid("blood")}
-                readOnly={readOnly}
-                declared={saved.bloodGroup !== "" && pendingReview}
-              />
-            </div>
-          </section>
-
-          {/* Las alergias se agregan y quitan una por una en su tarjeta, fuera de este formulario (tablero 7). */}
-          <ClinicalGroupCard
-            title="Condiciones"
-            review={reviewStatus.conditions}
-            saidNo={saidNoOf("conditions")}
-            reviewField={<ReviewStateField form={form} id={fid("rev-con")} group="conditions" readOnly={readOnly} />}
-          >
-            <ConditionRows form={form} idPrefix={uid} readOnly={readOnly} />
-            <form.Subscribe selector={(state) => state.values.conditions.length === 0}>
-              {(empty) =>
-                empty ? (
-                  <p className="text-sm text-muted-foreground">
-                    {saidNoOf("conditions")
-                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
-                      : reviewStatus.conditions === "none"
-                        ? "Ausencia confirmada en este grupo."
-                        : "Sin registros. Agrega filas o confirma la ausencia."}
-                  </p>
-                ) : null
-              }
-            </form.Subscribe>
-          </ClinicalGroupCard>
-
-          <ClinicalGroupCard
-            title="Medicación vigente"
-            review={reviewStatus.medications}
-            saidNo={saidNoOf("medications")}
-            reviewField={<ReviewStateField form={form} id={fid("rev-med")} group="medications" readOnly={readOnly} />}
-          >
-            <MedicationRows form={form} idPrefix={uid} readOnly={readOnly} />
-            <form.Subscribe selector={(state) => state.values.medications.length === 0}>
-              {(empty) =>
-                empty ? (
-                  <p className="text-sm text-muted-foreground">
-                    {saidNoOf("medications")
-                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
-                      : reviewStatus.medications === "none"
-                        ? "Ausencia confirmada en este grupo."
-                        : "Sin registros. Agrega filas o confirma la ausencia."}
-                  </p>
-                ) : null
-              }
-            </form.Subscribe>
-          </ClinicalGroupCard>
-
-          <section
-            aria-label="Riesgo anestésico (ASA)"
-            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
-          >
-            <div className="font-heading text-base font-medium">Riesgo anestésico (ASA)</div>
-            <form.AppField name="asaClass">
-              {(field) => (
-                <field.Control id={fid("asa")} label="Clasificación ASA" description="Su riesgo ante la anestesia, según sus enfermedades y su medicación.">
-                  {(control) => (
-                    <ChoiceSelect
-                      id={control.id}
-                      aria-invalid={control.invalid || undefined}
-                      aria-describedby={control.describedBy}
-                      onBlur={control.onBlur}
-                      className="max-w-md"
-                      value={field.state.value}
-                      disabled={readOnly}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    >
-                      <option value="">Sin clasificar</option>
-                      {ASA_OPTIONS.map(([value, optionLabel]) => (
-                        <option key={value} value={value}>
-                          {optionLabel}
-                        </option>
-                      ))}
-                    </ChoiceSelect>
-                  )}
-                </field.Control>
-              )}
-            </form.AppField>
-          </section>
-
-          <section
-            aria-label="Entrevista de salud"
-            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
-          >
-            <div className="flex flex-col gap-1.5">
-              <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
-            </div>
-            <div className="flex flex-col gap-4">
-              <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
-                <CollapsibleTrigger className="text-sm font-medium">
-                  <span className="flex items-center gap-1">
-                    Personales <ChevronDown aria-hidden className="size-4" />
-                  </span>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="grid gap-4 pt-2 sm:grid-cols-2">
-                    {(
-                      [
-                        ["hospitalizaciones", "ap-hosp", "Hospitalizaciones"],
-                        ["cirugias", "ap-cir", "Cirugías"],
-                        ["transfusiones", "ap-tra", "Transfusiones"],
-                      ] as const
-                    ).map(([key, id, label]) => (
-                      <Field key={key}>
-                        <FieldLabel htmlFor={fid(id)}>{label}</FieldLabel>
-                        <Input
-                          id={fid(id)}
-                          value={strOf(personales[key])}
-                          disabled={readOnly}
-                          onChange={(e) =>
-                            updateInterview(
-                              "antecedentesPersonales",
-                              key,
-                              e.target.value === "" ? undefined : e.target.value,
-                            )
-                          }
-                        />
-                      </Field>
-                    ))}
-                    {/* A un niño no se le pregunta el embarazo; lo ya anotado sí se ve (revisión final del 15 nov, K8). */}
-                    {productHealth.asksPregnancy && (!childPatient || pregnancyRecord) ? (
-                      <Field>
-                        <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
-                        <Select
-                          // Con sus nombres: sin ellos, el campo muestra la clave («sin-responder», QA del 6 nov).
-                          items={PREGNANCY_ITEMS}
-                          value={pregnancyRecord?.estado ?? "sin-responder"}
-                          onValueChange={(v) => {
-                            // Responderlo es decirlo hoy: queda con la fecha de hoy, que ya no se mueve.
-                            form.setFieldValue("interview", (prev) =>
-                              withPregnancy(prev, v === "si" || v === "no" ? v : null, clinicToday()),
-                            )
-                            if (v !== "si") form.setFieldValue("pregnancyWeeks", "")
-                            if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
-                          }}
-                          disabled={readOnly}
-                        >
-                          <SelectTrigger id={fid("emb-estado")}>
-                            <SelectValue placeholder="Sin responder" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="sin-responder">Sin responder</SelectItem>
-                            <SelectItem value="si">Sí</SelectItem>
-                            <SelectItem value="no">No</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {pregnancyRecord ? (
-                          <p className="text-xs text-muted-foreground">
-                            {(pregnancyRecord.fecha ?? health.pregnancy?.saidOn)
-                              ? `Anotado el ${shortDay(pregnancyRecord.fecha ?? health.pregnancy?.saidOn ?? "")}. Si cambias la respuesta o las semanas, queda con la fecha de hoy.`
-                              : "Está anotado sin fecha: al responderlo de nuevo queda con la de hoy."}
-                          </p>
-                        ) : null}
-                      </Field>
-                    ) : null}
-                    {productHealth.asksPregnancy && pregnancyRecord?.estado === "si" ? (
-                      <form.AppField
-                        name="pregnancyWeeks"
-                        listeners={{
-                          // Las semanas son las de hoy: decirlas pone la fecha de hoy. Solo si sigue en «Sí»:
-                          // al pasar a «No» el campo se vacía y eso no es decir las semanas.
-                          onChange: () =>
-                            form.setFieldValue("interview", (prev) =>
-                              pregnancyRecordOf(prev)?.estado === "si" ? withPregnancy(prev, "si", clinicToday()) : prev,
-                            ),
-                        }}
-                      >
-                        {(field) => (
-                          <field.TextField
-                            id={fid("emb-sem")}
-                            label="Semanas de embarazo (0–42)"
-                            inputMode="numeric"
-                            maxLength={2}
-                            disabled={readOnly}
-                          />
-                        )}
-                      </form.AppField>
-                    ) : null}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-
-              <Collapsible open={openFamiliares} onOpenChange={setOpenFamiliares}>
-                <CollapsibleTrigger className="text-sm font-medium">
-                  <span className="flex items-center gap-1">
-                    Familiares <ChevronDown aria-hidden className="size-4" />
-                  </span>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <form.AppField name="familyHistory" mode="array">
-                    {(rowsField) => (
-                      <div className="flex flex-col gap-3 pt-2">
-                        {rowsField.state.value.map((row, index) => (
-                          <div
-                            key={row.key}
-                            className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[10rem_1fr_auto]"
-                          >
-                            <form.AppField name={`familyHistory[${index}].relationship`}>
-                              {(field) => (
-                                <field.Control id={fid(`fam-rel-${row.key}`)} label="Parentesco">
-                                  {(control) => (
-                                    <ChoiceSelect
-                                      id={control.id}
-                                      aria-invalid={control.invalid || undefined}
-                                      aria-describedby={control.describedBy}
-                                      onBlur={control.onBlur}
-                                      value={field.state.value}
-                                      disabled={readOnly}
-                                      onChange={(e) => field.handleChange(e.target.value)}
-                                    >
-                                      {FAMILY_RELATIONSHIP_OPTIONS.map(([value, optionLabel]) => (
-                                        <option key={value} value={value}>
-                                          {optionLabel}
-                                        </option>
-                                      ))}
-                                    </ChoiceSelect>
-                                  )}
-                                </field.Control>
-                              )}
-                            </form.AppField>
-                            <form.AppField name={`familyHistory[${index}].condition`}>
-                              {(field) => (
-                                <field.TextField
-                                  id={fid(`fam-con-${row.key}`)}
-                                  label="Condición"
-                                  maxLength={HEALTH_NAME_MAX}
-                                  disabled={readOnly}
-                                  placeholder="Ej.: diabetes, hipertensión, cardiopatía"
-                                />
-                              )}
-                            </form.AppField>
-                            {canWrite ? (
-                              <div className="flex items-end">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={readOnly}
-                                  onClick={() => rowsField.removeValue(index)}
-                                >
-                                  Quitar
-                                </Button>
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                        {canWrite ? (
-                          <div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={readOnly}
-                              onClick={() =>
-                                rowsField.pushValue({
-                                  key: `fam-${Date.now()}`,
-                                  relationship: "MTH",
-                                  condition: "",
-                                  diagnosisCode: "",
-                                  diagnosisSystem: null,
-                                })
-                              }
-                            >
-                              Agregar antecedente familiar
-                            </Button>
-                          </div>
-                        ) : null}
-                        {strOf(interview["antecedentesFamiliares"]) ? (
-                          <p className="text-xs text-muted-foreground">
-                            Registro anterior en texto: {strOf(interview["antecedentesFamiliares"])}
-                          </p>
-                        ) : null}
-                      </div>
-                    )}
-                  </form.AppField>
-                </CollapsibleContent>
-              </Collapsible>
-
-              {/* Lo del producto (odentIA: «Odontológicos y hábitos»; latidIA: embarazo, hábitos y vacunas). */}
-              <form.Field name="interview">
-                {() => (
-                  <productHealth.InterviewSections
-                    answers={interview}
-                    update={updateInterview}
-                    setGroup={setTopInterview}
-                    disabled={readOnly}
-                    idPrefix={uid}
-                    sex={patientQuery.data?.data.patient.sex ?? null}
-                    age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
-                    errors={interviewErrors}
-                  />
-                )}
-              </form.Field>
-
-              {legacy.length > 0 ? (
-                <div
-                  className="flex flex-col gap-2 rounded-lg border border-dashed p-3"
-                  role="note"
-                  aria-label="Información previa por conciliar"
-                >
-                  <p className="text-sm font-medium">Información previa por conciliar</p>
-                  <p className="text-xs text-muted-foreground">
-                    Textos de entrevistas anteriores (motivo, examen, diagnóstico o listas libres).
-                    Se muestran tal cual; no se convierten automáticamente en registros.
-                  </p>
-                  <dl className="grid gap-2 text-sm">
-                    {legacy.map((entry) => (
-                      <div
-                        key={entry.label}
-                        className="grid gap-0.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-2"
-                      >
-                        <dt className="text-muted-foreground">{entry.label}</dt>
-                        <dd className="whitespace-pre-wrap">{entry.text}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </div>
-      </FormDrawer>
+      {drawer}
 
       <AnamnesisVersionDialog
         patientId={patientId}
@@ -1259,7 +1297,7 @@ export function AntecedentesSummary({
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
   /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
-  health?: Pick<PatientHealth, "changed" | "medications" | "asaClassSetAt" | "asaClassSetBy"> & Partial<Pick<PatientHealth, "familyHistory">>
+  health?: Pick<PatientHealth, "changed" | "medications" | "asaClassSetAt" | "asaClassSetBy"> & Partial<Pick<PatientHealth, "familyHistory" | "said">>
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
@@ -1295,6 +1333,10 @@ export function AntecedentesSummary({
     const no = saidNoGroupOf(groups, topic)
     // Con su día, como en el cajón: «Dijo que no · 14 nov · sin revisar» (pantalla, 15 nov).
     if (no) return `${saidNoWords(no.by, sex)}${no.at ? ` · ${shortDay(no.at)}` : ""} · sin revisar`
+    // Su «No» dicho en la consulta, que espera en su fila del aviso: no es «No se le preguntó» (QA del 26 nov,
+    // «no toma ninguna medicina», dicho por la madre).
+    const heardNo = ids.length === 0 ? (health?.said ?? []).find((item) => item.rows.some((row) => row.key === topic && row.denied && !row.newer)) : undefined
+    if (heardNo) return `${saidNoWords(heardNo.by, sex)} en la consulta · sin confirmar`
     // Quien dijo cada fila lo trae su declaración; con dos personas, se nombran las dos.
     const who = [
       ...new Set(ids.flatMap((id) => {
@@ -1345,7 +1387,10 @@ export function AntecedentesSummary({
                 const text = rowWords(
                   "medications",
                   row.id,
-                  [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "),
+                  // Cada cuánto, como se dijo («2 veces al día»), también con la de la lista (QA del 26 nov).
+                  [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose, frequencyWords(row.frequency, row.frequencyCode)]
+                    .filter(Boolean)
+                    .join(" "),
                   activeMed.flatMap((item) => (item.id ? [item.id] : [])),
                 )
                 return before ? `${text} · ${before}` : text

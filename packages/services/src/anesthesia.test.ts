@@ -182,9 +182,12 @@ it("B5d: una endodoncia en un adulto sin peso: la firma guarda la ASA y ningún 
 // QA del 18 nov (novato 10): en la segunda atención del mismo día volvía a pedir el peso.
 it("sin peso en esta atención, la firma usa el anotado hoy en otra atención no anulada", async () => {
   const f = await clinicalFixture()
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
-  // La de la mañana, firmada, con su peso; otra anulada después, con otro peso que ya no cuenta.
-  const morningAt = new Date(Date.now() - 30 * 60_000)
+  // Un día fijo: con «ahora menos 30 minutos», entre las 00:00 y las 00:30 de Lima la de la mañana
+  // caía en el día anterior y la prueba fallaba según la hora.
+  const today = "2026-11-18"
+  // La de la mañana (10:00 de Lima), firmada, con su peso; otra anulada después, con otro peso que ya no cuenta.
+  const morningAt = new Date("2026-11-18T15:00:00Z")
+  const laterAt = new Date("2026-11-18T15:20:00Z")
   await ownerDb.insert(encounter).values([
     {
       organizationId: "org_a",
@@ -205,8 +208,8 @@ it("sin peso en esta atención, la firma usa el anotado hoy en otra atención no
       reason: "Abierta por error",
       vitals: { peso: 95 },
       status: "anulada",
-      startedAt: new Date(Date.now() - 10 * 60_000),
-      voidedAt: new Date(),
+      startedAt: laterAt,
+      voidedAt: laterAt,
       voidedBy: f.actor,
       voidReason: "Abierta por error",
     },
@@ -348,11 +351,11 @@ it("la firma no limita la epinefrina a la hipertensión controlada y sí a la pr
   expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.warnings).toEqual([])
   // El tope va aparte y primero, como en la atención (QA de diseño del 18 nov, H7).
   expect(await signing({ presionSistolica: 165, presionDiastolica: 100 })).toMatchObject({
-    cap: "Epinefrina hasta 0,04 mg por la presión de hoy (165/100): unos 2,2 cartuchos",
+    cap: "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por la presión de hoy (165/100)",
     warnings: [],
   })
   expect((await signing(null))?.warnings).toEqual([
-    "Con su hipertensión arterial (I10), toma la presión antes de anestesiar.",
+    "Aviso: con su hipertensión arterial (I10), la presión de hoy no está anotada.",
   ])
   // Una fibrilación auricular con su código, aun con ASA II, sí lo pide.
   await ownerDb.insert(patientCondition).values({
@@ -364,6 +367,6 @@ it("la firma no limita la epinefrina a la hipertensión controlada y sí a la pr
     status: "activa",
   })
   expect((await signing({ presionSistolica: 130, presionDiastolica: 85 }))?.cap).toBe(
-    "Epinefrina hasta 0,04 mg por su fibrilación auricular (I48): unos 2,2 cartuchos",
+    "Sugerencia: epinefrina hasta 0,04 mg (unos 2,2 cartuchos) por su fibrilación auricular (I48)",
   )
 })

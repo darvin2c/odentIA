@@ -3255,7 +3255,7 @@ await addBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
   optionId: opcionB,
 })
 // La propuesta recomienda la corona: la marca tiene que decir lo mismo, porque es
-// la que Rosa ve marcada en su enlace y en el PDF (la A nace recomendada).
+// la que Rosa ve marcada en su enlace y en el PDF (ninguna nace recomendada).
 await recommendBudgetOption(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, opcionB)
 await updateBudgetPresentation(
   db,

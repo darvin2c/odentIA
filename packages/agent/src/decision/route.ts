@@ -214,10 +214,11 @@ export const URGENT_SCORE = 1.8
 /**
  * Cómo llega al equipo un caso que el modelo de decisión pasó a una persona:
  * qué clase de caso es y con qué prioridad. La urgencia y la intención salen
- * de lo que la persona escribió; quien toma el caso puede cambiarlas. Un
- * reclamo nunca entra por debajo de «media».
+ * de lo que la persona escribió; quien toma el caso puede cambiarlas. La
+ * urgencia puede subir la prioridad a «alta», nunca bajarla (26 nov: nada lo
+ * decide el sistema): lo que no es urgente entra en «media».
  */
-export function routeHandoff(route: AgentRoute): { reason: string; priority: "alta" | "media" | "baja" } {
+export function routeHandoff(route: AgentRoute): { reason: string; priority: "alta" | "media" } {
   const urgent = route.urgency !== null && route.urgency >= URGENT_SCORE
   const reason =
     route.intent === "complaint"
@@ -229,8 +230,7 @@ export function routeHandoff(route: AgentRoute): { reason: string; priority: "al
         : urgent
           ? "Urgencia"
           : "Pide hablar con una persona"
-  const priority = urgent ? "alta" : route.urgency !== null && route.urgency < 0.5 && route.intent !== "complaint" ? "baja" : "media"
-  return { reason, priority }
+  return { reason, priority: urgent ? "alta" : "media" }
 }
 
 /** Aviso que recibe la persona si el modelo que escribe no pudo redactar el suyo: nunca queda sin respuesta. */

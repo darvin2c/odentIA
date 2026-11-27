@@ -51,6 +51,7 @@ const indicated = operationAgentSchema("plan.indicacion", WORDS).omit({
   toothNumber: true,
   surfaces: true,
   alternatives: true,
+  recommended: true,
 })
 
 const HEALTH = dictationHealthPart(MEDICAL_DICTATION_HEALTH)
@@ -137,10 +138,10 @@ export function systemPrompt(input: {
     "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo. Pero ya no está pendiente (se confirmó o se descartó): si lo nuevo lo cambia o lo vuelve a indicar con otros datos, es un registro nuevo, no una corrección.",
     "Si el médico nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Los signos vitales van en `signos`, en una sola entrada y en números: la presión «ciento dieciocho con setenta y seis» es 118 de sistólica y 76 de diastólica; la temperatura lleva su decimal («treinta y ocho y medio» = 38.5). Una medida que no dijo no se pone.",
-    "El examen físico va en `examen`: un elemento por cada sistema que nombró, con su clave de la lista de sistemas. Si lo dijo normal («pulmones limpios», «abdomen blando, no doloroso») es sin_alteraciones, sin texto; si describió algo anormal es con_hallazgos, con lo que encontró en sus palabras y la parte del cuerpo («amígdalas aumentadas, con placas blanquecinas»). Un sistema que no nombró no se pone: queda como no examinado. Cada hallazgo va en su sistema: si una frase describe dos («amígdalas con placas, adenopatías submandibulares»), son dos elementos (bocaGarganta y cabezaCuello). Una descripción normal también es sin_alteraciones aunque sea larga («ruidos cardiacos rítmicos, sin soplos», «Lasègue negativo»). En una gestante, la altura uterina y los latidos fetales son del abdomen, no del corazón de la paciente. Un hallazgo del examen que no es de ningún sistema de la lista (el dolor a la palpación de la región lumbar) no se pone en el sistema más parecido.",
+    "El examen físico va en `examen`: un elemento por cada sistema que nombró, con su clave de la lista de sistemas. Si lo dijo normal («pulmones limpios», «abdomen blando, no doloroso») es sin_alteraciones, con lo que dijo en `finding`, en sus palabras: el estado no reemplaza lo que dijo; si describió algo anormal es con_hallazgos, con lo que encontró en sus palabras y la parte del cuerpo («amígdalas aumentadas, con placas blanquecinas»). Un sistema que no nombró no se pone: queda como no examinado. Cada hallazgo va en su sistema: si una frase describe dos («amígdalas con placas, adenopatías submandibulares»), son dos elementos (bocaGarganta y cabezaCuello). Una descripción normal también es sin_alteraciones aunque sea larga («ruidos cardiacos rítmicos, sin soplos», «Lasègue negativo»). En una gestante, la altura uterina y los latidos fetales son del abdomen, no del corazón de la paciente. Un hallazgo del examen que no es de ningún sistema de la lista (el dolor a la palpación de la región lumbar) no se pone en el sistema más parecido.",
     `Lista de sistemas (clave, nombre):\n${input.catalog}`,
     "La parte del cuerpo («rodilla derecha», «región lumbar») se escribe con sus palabras en el hallazgo o en la nota del diagnóstico.",
-    `En \`diagnosticos\` van los diagnósticos que nombró, con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Si dice «parece», «probable» o «a descartar», es presuntivo (provisional); si lo da por seguro, es definitivo (confirmed). Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el médico lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.`,
+    `En \`diagnosticos\` van los diagnósticos que nombró, con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Si dice «parece», «probable» o «a descartar», es presuntivo (provisional); solo si dice que es seguro o definitivo, confirmed; si no dice ninguna de las dos, no lo indiques. Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el médico lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.`,
     "En las indicaciones va lo que hace el consultorio (una consulta, un control, una ecografía, una nebulización, un inyectable): pon en `service` la prestación con las palabras del médico; el sistema la busca en los servicios de la clínica. No inventes precios. Un examen que se hace en otro lugar (un hemograma en un laboratorio) no es una prestación del consultorio: va en las indicaciones de la consulta.",
     homeCarePrompt("«reposo», «líquidos abundantes», «que se tome la presión en casa»"),
     "En `recetas` va cada medicamento que receta, con lo que dijo: la DCI, la concentración con su unidad, la forma, la dosis, la frecuencia y la duración. No completes lo que no dijo: el sistema lo pregunta y calcula la cantidad. Lo recetado no se repite en el texto de la consulta. Cambiar un medicamento pendiente («mejor paracetamol en vez del ibuprofeno») o completarlo («la amoxicilina por diez días») es una corrección de ese medicamento, con la DCI y lo que cambie, no uno nuevo.",
@@ -156,7 +157,7 @@ export function systemPrompt(input: {
       measured: "`signos` ni en ",
     }),
     // Mesa del 25 nov (C8): la FUR sola no avisaba el embarazo en la receta, y «G2P1» se partía en números.
-    "La fecha de su última regla (FUR) va en `salud`, en `gyneco.fur`. Si está embarazada (un control prenatal, «es mi segundo embarazo»), va también `personal.embarazo`. Lo que cuenta de sus embarazos («es mi segundo embarazo», «G2P1, una cesárea») va en el relato tal como lo dijo: no lo partas en números.",
+    "La fecha de su última regla (FUR) va en `salud`, en `gyneco.fur`. Si está embarazada (un control prenatal, «es mi segundo embarazo»), va también `personal.embarazo`. Lo que cuenta de sus embarazos («es mi segundo embarazo», «G2P1, una cesárea») va en el relato tal como lo dijo, además de `salud`: no lo partas en números. Lo que va a `salud` no le quita el motivo a la consulta (las náuseas de un control prenatal).",
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",
@@ -264,9 +265,8 @@ export function demoExtraction(
       const normal = NORMAL.test(words)
       drafts.push({
         kind: "examen",
-        payload: normal
-          ? { system: system.key, state: "sin_alteraciones" }
-          : { system: system.key, state: "con_hallazgos", finding: part.trim() },
+        // Lo normal también lleva lo que dijo, como lo pide el prompt.
+        payload: { system: system.key, state: normal ? "sin_alteraciones" : "con_hallazgos", finding: part.trim() },
         sourceText: part.trim(),
       })
     }

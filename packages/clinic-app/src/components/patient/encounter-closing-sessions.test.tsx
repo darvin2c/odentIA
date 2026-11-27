@@ -46,3 +46,29 @@ it("respondido «Sí, terminar», dice que queda realizado en la sesión 1 de 2"
   )
   expect(screen.getByText("Al firmar queda realizado, en la sesión 1 de 2.")).toBeTruthy()
 })
+
+// Revisión del 26 nov: lo que la firma dibuja al terminarlo se decía en ningún lado.
+it("con «Sí, terminar», dice qué se dibuja en el odontograma; con «Falta otra sesión», no", () => {
+  const drawn = { ...endo, n: 2, draws: { toothNumber: 46, words: "tratamiento de conducto, buen estado" } }
+  const text = "En la 46 se dibuja: tratamiento de conducto, buen estado. Si no es así, corrígelo en el odontograma."
+  const { rerender } = render(
+    <ClosingSessions
+      sessions={{ finishing: [drawn], continuing: [] }}
+      labelOf={(session) => session.title}
+      answers={{}}
+      onAnswer={() => undefined}
+      disabled={false}
+    />,
+  )
+  expect(screen.getByText(text)).toBeTruthy()
+  rerender(
+    <ClosingSessions
+      sessions={{ finishing: [drawn], continuing: [] }}
+      labelOf={(session) => session.title}
+      answers={{ endo: "otra" }}
+      onAnswer={() => undefined}
+      disabled={false}
+    />,
+  )
+  expect(screen.queryByText(text)).toBeNull()
+})

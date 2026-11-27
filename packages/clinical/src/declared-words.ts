@@ -106,3 +106,57 @@ export function saidNoWords(by: HealthDeclarant, sex: Sex, answer: "no" | "no sa
   }
   return `Dijo que ${answer}`
 }
+
+/**
+ * La enfermedad que suele decirse con palabras de todos los días (QA clínica del 26 nov: «para la
+ * presión» quedaba como la enfermedad «presión»): «presión», «presión alta» o «la presión» es la
+ * hipertensión arterial; «el azúcar», la diabetes mellitus. Es solo una sugerencia que el profesional
+ * elige: lo que se guarda sigue siendo lo dicho, y así lo comparan quitarlo por voz y lo ya guardado.
+ * `null` si lo dicho no es una de ellas.
+ */
+export function everydayConditionOf(name: string): string | null {
+  const said = plainCondition(name)
+    .replace(/^(?:para|de|por|problemas? de|algo de) /, "")
+    .replace(/^(?:la|el|lo de la|lo del) /, "")
+  if (/^(?:presion|presion alta|alta presion|presion arterial alta)$/.test(said)) return "Hipertensión arterial"
+  if (/^(?:azucar|azucar alta|azucar en la sangre)$/.test(said)) return "Diabetes mellitus"
+  return adjectiveConditionOf(name)
+}
+
+/** En minúsculas, sin tildes ni signos: como se comparan las palabras de una enfermedad dicha. */
+const plainCondition = (name: string) =>
+  name
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+/** La enfermedad dicha de quien la tiene: «es hipertensa», «diabético», «asmática». */
+const ADJECTIVE_CONDITIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^hipertens[oa]s?$/, "Hipertensión arterial"],
+  [/^diabetic[oa]s?$/, "Diabetes mellitus"],
+  [/^asmatic[oa]s?$/, "Asma"],
+  [/^epileptic[oa]s?$/, "Epilepsia"],
+]
+
+/**
+ * La enfermedad cuando se dijo de quien la tiene (QA del 26 nov, H4: «es hipertensa» quedaba sin
+ * sugerencia y la anestesia decía «Tiene hipertensa.»): «hipertensa» es la hipertensión arterial,
+ * «diabético» la diabetes mellitus. Como `everydayConditionOf`, solo una sugerencia y la palabra de los
+ * textos: lo guardado sigue siendo lo dicho. `null` si no es una de ellas.
+ */
+export function adjectiveConditionOf(name: string): string | null {
+  const said = plainCondition(name).replace(/^(?:es|era|soy|son|esta|muy) /, "")
+  return ADJECTIVE_CONDITIONS.find(([word]) => word.test(said))?.[1] ?? null
+}
+
+/**
+ * Cómo se nombra una enfermedad en medio de una frase: la dicha de quien la tiene, por su nombre
+ * («Tiene hipertensión arterial», no «Tiene hipertensa»); las demás, como se guardaron.
+ */
+export function conditionWordsOf(name: string): string {
+  const noun = adjectiveConditionOf(name)
+  return noun ? noun.toLocaleLowerCase("es") : name
+}

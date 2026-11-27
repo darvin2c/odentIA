@@ -166,12 +166,12 @@
             "description": "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno."
           },
           "diagnosisType": {
+            "description": "provisional si el odontólogo dice que es presuntivo o probable; confirmed solo si dice que es seguro o definitivo. Si no dijo ninguna de las dos, no lo indiques.",
             "type": "string",
             "enum": [
               "provisional",
               "confirmed"
-            ],
-            "description": "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques."
+            ]
           },
           "toothNumber": {
             "description": "La pieza en numeración FDI (dieciséis = 16).",
@@ -202,8 +202,7 @@
           }
         },
         "required": [
-          "diagnosisCode",
-          "diagnosisType"
+          "diagnosisCode"
         ],
         "additionalProperties": false
       }
@@ -253,6 +252,10 @@
               "minLength": 1,
               "maxLength": 200
             }
+          },
+          "recommended": {
+            "description": "Solo con otros caminos: true si dijo cuál recomienda («le recomiendo la corona», «lo mejor es la resina»), y esa va en `service`. Si no lo dijo, no va.",
+            "type": "boolean"
           },
           "dicho": {
             "description": "El fragmento del dictado, tal cual, del que sale este registro.",

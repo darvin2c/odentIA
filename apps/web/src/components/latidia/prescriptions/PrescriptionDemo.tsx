@@ -117,8 +117,8 @@ function CaseForm({
     if (kase === "embarazo") {
       block = {
         kind: "warn",
-        title: "Contraindicado en el embarazo",
-        text: "Doxiciclina: está embarazada (12 semanas) y las tetraciclinas están contraindicadas en el embarazo (ATC J01AA02).",
+        title: "Aviso en el embarazo",
+        text: "Doxiciclina: está embarazada (12 semanas) y las fichas técnicas desaconsejan las tetraciclinas en el embarazo (ATC J01AA02).",
       }
       status = "Decides tú: si la emites, la receta guarda que viste el aviso."
       emitOk = true
@@ -128,8 +128,13 @@ function CaseForm({
         status = "Lista para emitir con tu firma."
         emitOk = true
       } else {
-        block = { kind: "stop", title: "Falta el peso", text: "Tiene 8 años: escribe su peso para recetarle." }
-        status = "Sin el peso no se emite."
+        block = {
+          kind: "warn",
+          title: "Falta el peso",
+          text: "Aviso: tiene 8 años y la receta va sin su peso. Con su peso se revisa la dosis.",
+        }
+        status = "Decides tú: si la emites sin su peso, la receta guarda que viste el aviso."
+        emitOk = true
       }
     } else {
       block = {

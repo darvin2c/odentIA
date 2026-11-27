@@ -241,7 +241,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
       {
         ...faq,
         q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-        a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+        a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman). Ninguna nace recomendada: la marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; sin marca, la persona elige sin ninguna elegida de antemano. La recomendada es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
       },
       "otro camino para la pieza",
       "conservar o extraer",
@@ -593,7 +593,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return {
           id: faq.id,
           q: faq.q,
-          a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los del ojo. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. El ojo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+          a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los del ojo. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. El ojo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, sale marcado «Ya diagnosticado antes»; el tipo lo eliges igual.",
         }
       return faq
     }),
@@ -695,6 +695,9 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-dictado-lo-que-se-dijo": () => [],
   "pacientes-dictado-terminar-escribiendo": () => [],
   "pacientes-dictado-salud": () => [],
+  "pacientes-dictado-quitar-salud": () => [],
+  // Una óptica no toma signos vitales.
+  "pacientes-signo-fuera-de-lo-habitual": () => [],
   "pacientes-dictado-no-lo-registro": () => [],
   "pacientes-dictado-llevar-a-su-salud": () => [],
   "pacientes-dictado-quien-hablo": () => [],
@@ -727,7 +730,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ...faq,
         a: swap(
           faq.a,
-          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Si lo cambias de fase con «Planificar…», cambiarle después el servicio no te lo vuelve a mover.",
+          "La fase y las sesiones previstas se cambian en la lista con «Planificar…», y el orden dentro de la fase, con las flechas de subir y bajar. Lo que indicas por dolor, infección o trauma (una pulpitis, un absceso agudo, una alveolitis, una pieza fracturada o luxada) se propone en «Urgencia» al indicarlo, si es de la fase básica o quirúrgica; lo rehabilitador, como la corona, nunca. Un diagnóstico que anotas después, o cambiarle el servicio, no mueve lo ya indicado: si iría en otra fase, su fila lo sugiere y lo pasas tú con «Planificar…».",
           "Las sesiones previstas se cambian en la lista con «Planificar…», y el orden, con las flechas de subir y bajar.",
         ),
       },

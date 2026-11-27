@@ -43,6 +43,7 @@ import {
   TREATMENT_PHASES,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
+import { resolvableDiagnosesOf } from "../closing-diagnoses.js"
 import { notFound } from "../errors.js"
 import { serviceKindOf } from "../specialties.js"
 import type { TimelineItem } from "../patient-history.js"
@@ -74,7 +75,7 @@ import {
   signedOdontogramPaper,
   todayOdontogramPaper,
 } from "./odontogram-pdf.js"
-import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
+import { latestPeriodontalBrief, periodontalBriefsByEncounter, withCorrectedTeeth } from "./periodontal.js"
 import {
   correctionFindings,
   planItemLostItsFinding,
@@ -84,7 +85,7 @@ import {
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
 import { lesionRowsOf, treatedByItem } from "./lesion.js"
 import { dentalProductSite, dentalSiteOfRow, siteColumns, surfaceWords } from "./site.js"
-import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
+import { drawTreatedFinding, treatedFindingOf, treatedFindingWords, voidLeftFindings } from "./treated-findings.js"
 
 /**
  * Lo que hace odentIA en los momentos de lo común (ADR 0079): el odontograma,
@@ -105,9 +106,10 @@ async function closingPeriodontalOf(
   orgId: string,
   encounterId: string,
 ): Promise<ClosingPeriodontal | null> {
-  const [chart] = await tx
+  const [saved] = await tx
     .select({
       id: periodontalChart.id,
+      patientId: periodontalChart.patientId,
       expectedTeeth: periodontalChart.expectedTeeth,
       implantTeeth: periodontalChart.implantTeeth,
     })
@@ -119,7 +121,9 @@ async function closingPeriodontalOf(
       ),
     )
     .limit(1)
-  if (!chart) return null
+  if (!saved) return null
+  // Las mismas piezas que la pantalla del sondaje en borrador: con las que el odontograma corrigió.
+  const chart = await withCorrectedTeeth(tx, orgId, saved)
   const rows = await tx
     .select({
       toothNumber: periodontalTooth.toothNumber,
@@ -145,7 +149,11 @@ async function closingPeriodontalOf(
  * nació de un hallazgo deja esa lesión como tratada (sigue en la historia,
  * pero ya no es un problema por tratar). Una caries de dos caras es una
  * lesión: se tratan sus caras juntas, o solo las que cubre una resina
- * (`treatedByItem`).
+ * (`treatedByItem`). Lo decide quien firma: si el cierre le mostró el
+ * diagnóstico de esa pieza «pasa a resuelto» y lo desmarcó, el diagnóstico
+ * sigue activo y su hallazgo también (QA del 26 nov: la lesión quedaba tratada
+ * aunque el odontólogo dijera que sigue). Lo que sana en su control se muestra
+ * sin marcar: no marcarlo no lo aparta.
  */
 async function resolveTreatedFindings(
   tx: Db,
@@ -174,7 +182,18 @@ async function resolveTreatedFindings(
         eq(treatmentPlanItem.status, "realizado"),
       ),
     )
+  if (items.length === 0) return
+  // Lo que sigue activo después de `resolveDiagnosesOnSign` y el cierre propuso marcado: lo que quien
+  // firma desmarcó. Lo que sana en su control (`followUp`, la periodontitis apical) se muestra sin
+  // marcar de entrada: seguir activo no dice que lo desmarcó, y su hallazgo queda tratado como siempre
+  // (revisión de código del 26 nov).
+  const kept = new Set(
+    (await resolvableDiagnosesOf(tx, orgId, patientId, encounterId, { done: true })).flatMap((found) =>
+      found.followUp ? [] : found.planItemIds,
+    ),
+  )
   for (const item of items) {
+    if (kept.has(item.id)) continue
     const lesion = await lesionRowsOf(tx, orgId, item.entryId)
     const rows = treatedByItem(lesion, item.entryId, dentalSiteOfRow(item).surfaces)
     const open = rows.filter((row) => row.resolvedAt === null).map((row) => row.id)
@@ -349,6 +368,21 @@ export const dentalHooks: ProductHooks = {
       encounterId,
       await withPlanItemDental(tx, orgId, row),
     )
+  },
+
+  // Lo que la firma dibuja al terminar, en palabras, para decirlo en el cierre (revisión del 26 nov).
+  async treatmentDraws(tx, { orgId, patientId, planItemIds }) {
+    const out = new Map<string, { toothNumber: number; words: string }>()
+    if (planItemIds.length === 0) return out
+    const rows = await tx
+      .select()
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, [...planItemIds])))
+    for (const row of rows) {
+      const left = await treatedFindingOf(tx, orgId, patientId, await withPlanItemDental(tx, orgId, row))
+      if (left) out.set(row.id, { toothNumber: left.finding.toothNumber, words: treatedFindingWords(left.finding) })
+    }
+    return out
   },
 
   async treatmentUndone(

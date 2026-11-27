@@ -57,7 +57,7 @@ it("la receta de latidIA: controlados, embarazo, peso de un niño y alergias de 
       }),
     )
     await expect(prescribe({ items: [medication("enalapril")] })).rejects.toThrow(
-      /IECA están contraindicados/,
+      /desaconsejan los IECA/,
     )
     const withReason = await prescribe({
       items: [medication("enalapril")],
@@ -69,7 +69,7 @@ it("la receta de latidIA: controlados, embarazo, peso de un niño y alergias de 
     // Sin motivo también (Q17): es solo un aviso, y la receta guarda que se vio.
     const noReason = await prescribe({ items: [medication("enalapril")], acknowledgeAllergies: true })
     expect(noReason.allergyOverrideReason).toBeNull()
-    expect(noReason.alertsSeen).toEqual([expect.stringMatching(/IECA están contraindicados/)])
+    expect(noReason.alertsSeen).toEqual([expect.stringMatching(/desaconsejan los IECA/)])
 
     // La medicación habitual elegida de la lista de latidIA lleva su ATC (X2): antes quedaba sin él.
     const current = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
@@ -96,15 +96,16 @@ it("la receta de latidIA: controlados, embarazo, peso de un niño y alergias de 
       /fluoroquinolonas/,
     )
 
-    // Un niño de 5 años: la receta va con su peso.
+    // Un niño de 5 años: sin su peso avisa y se emite igual; la receta guarda que se vio (26 nov).
     const fiveYearsAgo = `${Number(today.slice(0, 4)) - 5}${today.slice(4)}`
     await ownerDb
       .update(contact)
       .set({ birthDate: fiveYearsAgo })
       .where(eq(contact.id, f.patient.personId))
-    await expect(prescribe({ items: [medication("paracetamol")] })).rejects.toThrow(
-      /escribe su peso/,
-    )
+    const weightWarning = "Aviso: tiene 5 años y la receta va sin su peso. Con su peso se revisa la dosis."
+    const withoutWeight = await prescribe({ items: [medication("paracetamol")], alertsShown: [weightWarning] })
+    expect(withoutWeight.patientWeightKg).toBeNull()
+    expect(withoutWeight.alertsSeen).toEqual([weightWarning])
     const child = await prescribe({ items: [medication("paracetamol")], patientWeightKg: 18.46 })
     expect(child.patientWeightKg).toBe("18.5")
   } finally {

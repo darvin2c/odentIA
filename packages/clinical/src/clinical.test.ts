@@ -20,7 +20,9 @@ import {
   medicalLeaveEnd,
   medicalLeaveWords,
   parseVitals,
+  readVitals,
   vitalsErrors,
+  vitalsWarnings,
   MAX_TAGS,
   normalizeTags,
 } from "./index.js"
@@ -62,18 +64,28 @@ describe("normalizeTags", () => {
 })
 
 describe("signos vitales", () => {
-  it("normaliza decimales y exige presión completa y plausible", () => {
-    expect(parseVitals({ temperatura: "36.54", frecuenciaCardiaca: 72 })).toEqual({
+  // Nada lo decide el sistema (26 nov): un valor real extremo se guarda con aviso; solo se rechaza
+  // lo que no es una medida (no es un número, o es cero o negativo).
+  it("normaliza decimales y guarda lo extremo con aviso; solo rechaza lo que no es una medida", () => {
+    expect(readVitals({ temperatura: "36.54", frecuenciaCardiaca: 72 })).toEqual({
       ok: true,
       value: { temperatura: 36.5, frecuenciaCardiaca: 72 },
     })
-    expect(parseVitals({ presionSistolica: 120 })).toMatchObject({ ok: false })
-    expect(parseVitals({ presionSistolica: 80, presionDiastolica: 120 })).toMatchObject({
-      ok: false,
+    // La sistólica sola, la presión invertida y lo extremo se guardan.
+    expect(readVitals({ presionSistolica: 120 })).toEqual({ ok: true, value: { presionSistolica: 120 } })
+    expect(readVitals({ presionSistolica: 80, presionDiastolica: 120 })).toMatchObject({ ok: true })
+    expect(readVitals({ temperatura: 29, saturacionOxigeno: 48 })).toEqual({
+      ok: true,
+      value: { temperatura: 29, saturacionOxigeno: 48 },
     })
-    expect(parseVitals({ temperatura: 50 })).toMatchObject({ ok: false })
-    expect(parseVitals({ glucosa: 90 })).toMatchObject({ ok: false })
-    expect(parseVitals({ temperatura: "" })).toEqual({ ok: true, value: null })
+    expect(readVitals({ temperatura: "treinta" })).toMatchObject({ ok: false })
+    expect(readVitals({ peso: -3 })).toMatchObject({ ok: false })
+    expect(readVitals({ glucosa: 90 })).toMatchObject({ ok: false })
+    expect(readVitals({ temperatura: "" })).toEqual({ ok: true, value: null })
+    // Lo estricto, para lo dictado que queda por revisar: lo fuera de lo habitual y la presión a medias.
+    expect(parseVitals({ presionSistolica: 120 })).toMatchObject({ ok: false })
+    expect(parseVitals({ temperatura: 29 })).toMatchObject({ ok: false })
+    expect(parseVitals({ presionSistolica: 120, presionDiastolica: 80 })).toMatchObject({ ok: true })
     expect(formatVitals({ presionSistolica: 120, presionDiastolica: 80, temperatura: 36.5 })).toBe(
       "PA 120/80 mmHg · T 36.5 °C",
     )
@@ -81,36 +93,49 @@ describe("signos vitales", () => {
 
   it("cada producto registra los suyos; el IMC sale del peso y la talla (issue 229)", () => {
     // La glucosa capilar es de latidIA: con los ocho de siempre no se acepta.
-    expect(parseVitals({ glucosaCapilar: 110 }, CORE_VITAL_KEYS)).toMatchObject({ ok: false })
-    expect(parseVitals({ glucosaCapilar: 110, perimetroCefalico: "48.25" })).toEqual({
+    expect(readVitals({ glucosaCapilar: 110 }, CORE_VITAL_KEYS)).toMatchObject({ ok: false })
+    expect(readVitals({ glucosaCapilar: 110, perimetroCefalico: "48.25" })).toEqual({
       ok: true,
       value: { glucosaCapilar: 110, perimetroCefalico: 48.3 },
     })
-    expect(parseVitals({ glucosaCapilar: 900 })).toMatchObject({ ok: false })
+    expect(readVitals({ glucosaCapilar: 650 })).toEqual({ ok: true, value: { glucosaCapilar: 650 } })
     expect(bodyMassIndex({ peso: 62, talla: 160 })).toBe(24.2)
     expect(bodyMassIndex({ peso: 62 })).toBeNull()
     expect(formatVitals({ glucosaCapilar: 110 })).toBe("Glucosa 110 mg/dL")
   })
 
-  it("dice el error junto al signo que hay que corregir; la presión completa no es un error", () => {
+  it("dice el error junto al signo: solo lo que no es una medida", () => {
     // Así llegan desde el formulario: como texto.
     expect(vitalsErrors({ presionSistolica: "120", presionDiastolica: "80", frecuenciaCardiaca: "78" })).toEqual({})
-    expect(vitalsErrors({ presionSistolica: "120", presionDiastolica: "" })).toEqual({
-      presionDiastolica: "Registra la presión arterial completa: sistólica y diastólica",
-    })
-    expect(vitalsErrors({ presionSistolica: "", presionDiastolica: "80" })).toEqual({
-      presionSistolica: "Registra la presión arterial completa: sistólica y diastólica",
-    })
-    expect(vitalsErrors({ presionSistolica: "80", presionDiastolica: "120" })).toEqual({
-      presionSistolica: "La presión sistólica debe ser mayor que la diastólica",
-    })
-    expect(vitalsErrors({ temperatura: "50", presionSistolica: "120", presionDiastolica: "80" })).toEqual({
-      temperatura: "Temperatura fuera de rango (30–45 °C)",
-    })
+    expect(vitalsErrors({ presionSistolica: "120", presionDiastolica: "" })).toEqual({})
+    expect(vitalsErrors({ presionSistolica: "80", presionDiastolica: "120" })).toEqual({})
+    expect(vitalsErrors({ temperatura: "50", presionSistolica: "120", presionDiastolica: "80" })).toEqual({})
+    expect(vitalsErrors({ temperatura: "3x" })).toEqual({ temperatura: "Temperatura debe ser un número" })
+    expect(vitalsErrors({ peso: "0" })).toEqual({ peso: "Peso debe ser un número mayor que 0" })
     expect(vitalsErrors({ glucosaCapilar: "110" }, CORE_VITAL_KEYS)).toEqual({
       glucosaCapilar: "Signo vital desconocido: glucosaCapilar",
     })
     expect(vitalsErrors(null)).toEqual({})
+  })
+
+  it("avisa junto al signo lo fuera de lo habitual y la presión a medias, sin frenar", () => {
+    expect(vitalsWarnings({ presionSistolica: "120", presionDiastolica: "80", glucosaCapilar: "110" })).toEqual({})
+    expect(vitalsWarnings({ glucosaCapilar: "650", saturacionOxigeno: 48, temperatura: "29" })).toEqual({
+      glucosaCapilar: "Aviso: 650 mg/dL está fuera de lo habitual (20–600 mg/dL): revísalo.",
+      saturacionOxigeno: "Aviso: 48 % está fuera de lo habitual (50–100 %): revísalo.",
+      temperatura: "Aviso: 29 °C está fuera de lo habitual (30–45 °C): revísalo.",
+    })
+    expect(vitalsWarnings({ presionSistolica: "120", presionDiastolica: "" })).toEqual({
+      presionDiastolica: "Aviso: falta la diastólica. Se guarda la sistólica sola.",
+    })
+    expect(vitalsWarnings({ presionSistolica: "", presionDiastolica: "80" })).toEqual({
+      presionSistolica: "Aviso: falta la sistólica. Se guarda la diastólica sola.",
+    })
+    expect(vitalsWarnings({ presionSistolica: "80", presionDiastolica: "120" })).toEqual({
+      presionSistolica: "Aviso: la sistólica no es mayor que la diastólica: revísalo.",
+    })
+    // Lo que no es una medida es un error, no un aviso.
+    expect(vitalsWarnings({ temperatura: "3x" })).toEqual({})
   })
 })
 

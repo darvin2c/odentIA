@@ -9,7 +9,7 @@
  * hallazgo observado: no hace que el cierre firme «Nuevos hallazgos»
  * (`closingOdontogramOf`; NTS 188, 5.8).
  */
-import { findingLeftByTreatment, type LeavesFinding } from "@odentia/dental"
+import { type FindingInput, findingByVariant, findingLeftByTreatment, type LeavesFinding, surfaceLabel } from "@odentia/dental"
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
@@ -52,20 +52,16 @@ async function toothConditionsOf(
 }
 
 /**
- * Registra en la atención lo que deja el tratamiento completado, si su
- * servicio lo dice y aún no está dibujado. Devuelve el hallazgo o null (el
- * servicio no deja nada, ya estaba, o no hay dónde dibujarlo: sin pieza, o lo
- * que va en caras sin superficies). No bloquea completar: un tratamiento que
- * no se puede dibujar se completa igual.
+ * Lo que dejaría dibujado el tratamiento al completarse, sin registrarlo: lo
+ * mismo que registra `drawTreatedFinding`. Null si su servicio no deja nada, ya
+ * está dibujado o no hay dónde dibujarlo.
  */
-export async function drawTreatedFinding(
+export async function treatedFindingOf(
   tx: Db,
   orgId: string,
-  actorUserId: string,
   patientId: string,
-  encounterId: string,
   item: TreatedItem,
-) {
+): Promise<{ finding: FindingInput; strictVariants: boolean } | null> {
   if (!item.serviceId || item.toothNumber == null) return null
   const [service] = await tx
     .select({ leaves: serviceLeavesFinding })
@@ -110,9 +106,39 @@ export async function drawTreatedFinding(
       toothConditions: await toothConditionsOf(tx, orgId, patientId, item.toothNumber),
     },
   )
-  if (!finding) return null
-  const [row] = await insertOdontogramFinding(tx, orgId, actorUserId, patientId, encounterId, finding, {
-    strictVariants,
+  return finding ? { finding, strictVariants } : null
+}
+
+/**
+ * «tratamiento de conducto, buen estado»: lo que se dibuja, en palabras, para que el cierre lo
+ * diga antes de firmar (revisión del 26 nov). Sin estado si el hallazgo no lo lleva.
+ */
+export function treatedFindingWords(finding: FindingInput): string {
+  const name = findingByVariant(finding.condition, finding.details?.variant ?? null)
+  const faces = finding.surfaces?.length ? ` (cara ${finding.surfaces.map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")})` : ""
+  const quality = finding.details?.quality === "good" ? ", buen estado" : finding.details?.quality === "poor" ? ", mal estado" : ""
+  return `${name.charAt(0).toLowerCase()}${name.slice(1)}${faces}${quality}`
+}
+
+/**
+ * Registra en la atención lo que deja el tratamiento completado, si su
+ * servicio lo dice y aún no está dibujado. Devuelve el hallazgo o null (el
+ * servicio no deja nada, ya estaba, o no hay dónde dibujarlo: sin pieza, o lo
+ * que va en caras sin superficies). No bloquea completar: un tratamiento que
+ * no se puede dibujar se completa igual.
+ */
+export async function drawTreatedFinding(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  item: TreatedItem,
+) {
+  const left = await treatedFindingOf(tx, orgId, patientId, item)
+  if (!left) return null
+  const [row] = await insertOdontogramFinding(tx, orgId, actorUserId, patientId, encounterId, left.finding, {
+    strictVariants: left.strictVariants,
     leftByPlanItemId: item.id,
   })
   return row ?? null

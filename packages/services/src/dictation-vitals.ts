@@ -1,4 +1,4 @@
-import { formatVitals, parseVitals, VITAL_SIGNS, type VitalSignKey, type Vitals, weightForAgeAlert } from "@odentia/clinical"
+import { formatVitals, readVitals, VITAL_SIGNS, type VitalSignKey, type Vitals, vitalsWarnings, weightForAgeAlert } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounter } from "@odentia/db/schema/clinical"
 import { and, eq } from "drizzle-orm"
@@ -22,11 +22,16 @@ export const isVital = (key: string): key is VitalSignKey => VITAL_SIGNS.some((s
  */
 export function prepareDictatedVitals(payload: Record<string, unknown>, keys: readonly VitalSignKey[], ageYears: number | null | undefined): DictationPrepared {
   const values = Object.fromEntries(Object.entries(payload).filter(([key]) => isVital(key) && keys.includes(key)))
-  const parsed = parseVitals(values, keys)
+  // Lo que no es una medida se dice de nuevo; lo fuera de lo habitual y la presión a medias se guardan
+  // como se dijeron, con el mismo aviso que al teclearlos (`vitalsWarnings`; QA del 26 nov, H10: lo
+  // dictado pedía «Corrígelo» a un valor real y lo tecleado decía «fuera de lo habitual»).
+  const parsed = readVitals(values, keys)
   if (!parsed.ok) return { payload: values, status: "por_revisar", note: `${parsed.error}. Corrígelo o dilo de nuevo.` }
   if (!parsed.value) return { payload: values, status: "por_revisar", note: "No entendí ninguna medida. Dila de nuevo o escríbela." }
   const impossible = weightForAgeAlert(parsed.value.peso, ageYears)
   if (impossible) return { payload: parsed.value, status: "por_revisar", note: `${impossible} Corrígelo o dilo de nuevo.` }
+  const warnings = Object.values(vitalsWarnings(values, keys))
+  if (warnings.length) return { payload: parsed.value, status: "por_revisar", note: warnings.join(" ") }
   return { payload: parsed.value, status: "lista", note: null }
 }
 

@@ -709,6 +709,39 @@ describe("el foco queda donde sigue", () => {
     await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Confirmar: Endodoncia · 46"))
   })
 
+  // QA del 27 nov (verificador, hallazgo 2): «una resina o si no una incrustación», sin incrustación en los
+  // servicios, dejaba el camino B sin opciones ni buscador. Se busca como en las demás tarjetas por revisar.
+  it("un camino que no se parece a ningún servicio se busca en sus servicios y se elige", async () => {
+    const { DictationBlockSuggestions } = await import("./dictation-suggestions")
+    const save = mutation()
+    const item = suggestion({
+      id: "p-16",
+      kind: "plan",
+      status: "por_revisar",
+      summary: "Pieza 16 · dos caminos, el paciente elige",
+      payload: { service: "resina", serviceId: "srv-1", serviceName: "Resina fotocurable", priceCents: 18000, currency: "PEN", toothNumber: 16, options: [{ service: "incrustación" }] },
+    })
+    route.mockImplementation(async (url: string) =>
+      url.includes("/api/services")
+        ? { data: [{ id: "srv-9", name: "Incrustación cerámica", priceCents: 90000, currency: "PEN", scope: "tooth", isActive: true }], total: 1 }
+        : url.includes("specialt")
+          ? { data: [] }
+          : { data: {} },
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <DictationBlockSuggestions session={sessionWith({ suggestions: [item], save })} kind="plan" />
+      </QueryClientProvider>,
+    )
+    const camino = screen.getByRole("group", { name: "Elige la prestación del camino B" })
+    expect(within(camino).getByText("Dijiste «incrustación»: elige cuál es.")).toBeTruthy()
+    const search = within(camino).getByLabelText("Buscar la prestación del camino B")
+    fireEvent.change(search, { target: { value: "incrust" } })
+    fireEvent.click(await screen.findByRole("option", { name: /Incrustación cerámica/ }))
+    expect(save.mutate).toHaveBeenCalledWith({ item, patch: { option1ServiceId: "srv-9" }, confirm: false })
+  })
+
   it("cambiado quién habló, vuelve a ese turno", async () => {
     renderSaid([
       segment({
@@ -900,4 +933,40 @@ it("tras «Lo revisé con…», con lo que ya no toma esperando, el foco va a su
   renderNotice(sessionWith({ suggestions: [elena], confirmHealth }))
   fireEvent.click(screen.getByRole("button", { name: /^Lo revisé con/ }))
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, lo dejó" })))
+})
+
+// QA del 26 nov (desarrollo, C3): lo de su salud quitado por voz no tenía marca ni «Deshacer» en el aviso.
+describe("lo de su salud quitado por voz, en el aviso", () => {
+  const conditions = { key: "conditions", group: "conditions", label: "Enfermedades", value: "asma", by: { declarante: "paciente" as const }, before: null, denied: false }
+
+  it("quitado dato por dato: dice qué y con qué frase, y «Deshacer» lo devuelve", () => {
+    const item = suggestion({ id: "salud-voz", healthRows: [conditions], voice: { before: "diabetes", removed: "no, la diabetes no" } })
+    const session = sessionWith({ suggestions: [item] })
+    renderNotice(session)
+    expect(document.body.textContent).toContain("Quitado por voz: diabetes. Dijiste «no, la diabetes no».")
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer" }))
+    expect(session.act.mutate).toHaveBeenCalledWith({ item, action: "undo-voice" })
+  })
+
+  it("quitado entero («quita eso»): tachado, con «Deshacer»", () => {
+    const item = suggestion({ id: "salud-fuera", status: "descartada", healthRows: [conditions], removal: { said: "quita eso" } })
+    const session = sessionWith({ removedByVoice: [item] })
+    renderNotice(session)
+    expect(document.body.textContent).toContain("Quitado por voz: dijiste «quita eso».")
+    expect(screen.getByText("Enfermedades: asma").className).toContain("line-through")
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer" }))
+    expect(session.act.mutate).toHaveBeenCalledWith({ item, action: "undo-voice" }, expect.anything())
+  })
+
+  // QA del 26 nov (clínica, O1): «para la presión» quedaba como la enfermedad «presión».
+  it("«presión» queda como se dijo, con la sugerencia de la del catálogo", () => {
+    const item = suggestion({
+      id: "salud-presion",
+      healthRows: [{ ...conditions, value: "presión", suggested: [{ said: "presión", name: "Hipertensión arterial" }] }],
+    })
+    renderNotice(sessionWith({ suggestions: [item] }))
+    const row = screen.getByRole("heading", { name: "Enfermedades" }).closest("li") as HTMLElement
+    expect(row.textContent).toContain("Presión")
+    expect(row.textContent).toContain("Sugerencia: «presión» puede ser hipertensión arterial. Elígela en «Corregir algo».")
+  })
 })

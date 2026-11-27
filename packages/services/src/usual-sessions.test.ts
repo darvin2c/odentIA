@@ -207,7 +207,7 @@ it("no se reabre si lo firmado no llega a las sesiones con que se repartió su c
   await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_FINISHED_EARLY" })
 })
 
-it("«Cambiar» una exodoncia por una endodoncia recalcula la fase y acepta las sesiones previstas (QA del 9 nov, repaso 3)", async () => {
+it("«Cambiar» una exodoncia por una endodoncia sugiere la fase sin moverla y acepta las sesiones previstas (QA del 9 nov, repaso 3; ADR 0221)", async () => {
   const f = await clinicalFixture()
   const { service: extraction } = await libraryService(f, 1, "general", "cirugia")
   const { service: endodontics } = await libraryService(f, 1)
@@ -215,11 +215,13 @@ it("«Cambiar» una exodoncia por una endodoncia recalcula la fase y acepta las 
     addPlanItem(tx, ...f.args, { serviceId: extraction.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
   )
   expect(item.phase).toBe("quirurgica")
-  // Sin sesiones en el cambio: las habituales del nuevo y su fase.
+  // Sin sesiones en el cambio: las habituales del nuevo. La fase no se mueve sola: el Plan sugiere la suya.
   const changed = await f.run((tx) =>
     updatePlanItem(tx, ...f.args, item.id, { serviceId: endodontics.id, encounterId: f.encounter.id }),
   )
-  expect(changed).toMatchObject({ phase: "basica", plannedSessions: 1 })
+  expect(changed).toMatchObject({ phase: "quirurgica", plannedSessions: 1 })
+  const listed = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { phaseSuggestions: true }))
+  expect(listed.find((row) => row.id === item.id)?.phaseSuggestion).toMatch(/^Sugerencia: .*iría en «.+»\. Cámbiala con «Planificar…»\.$/)
   // Con las sesiones que se escribieron en «Cambiar».
   const two = await f.run((tx) =>
     updatePlanItem(tx, ...f.args, item.id, { plannedSessions: 2, encounterId: f.encounter.id }),

@@ -30,6 +30,8 @@ export async function extractDictation(
     context?: string | undefined
     /** Sugerencias de este dictado que el profesional aún no decide, para corregirlas o quitarlas por voz. */
     pending?: DictationPending[] | undefined
+    /** Lo que una persona descartó en este dictado: si se vuelve a indicar, es nuevo (`DictationAsk.discarded`). */
+    discarded?: readonly string[] | undefined
     /** Las preguntas vacías de las fichas empezadas en la atención (`dictationFormQuestions`). */
     forms?: readonly DictationFormQuestion[] | undefined
     /** Lo que ya proponen las sugerencias de ficha pendientes, por pregunta (`pendingFormValues`). */
@@ -94,6 +96,7 @@ export async function extractDictation(
       transcript,
       context: input.context ?? "",
       pending,
+      discarded: (input.discarded ?? []).slice(0, 20),
       forms: input.forms ?? [],
     },
     profile,

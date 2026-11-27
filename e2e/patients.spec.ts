@@ -208,7 +208,8 @@ test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) 
   const card = page.getByRole("region", { name: /^Presupuesto N\.º 2 · Por enviar$/ })
   await card.getByRole("button", { name: "Duplicar como otra opción", exact: true }).click()
   const options = card.getByRole("group", { name: "Opciones del presupuesto" })
-  await expect(options.getByRole("button", { name: /^Opción A · recomendada · / })).toBeVisible()
+  // Ninguna nace recomendada: la marca quien lo arma.
+  await expect(options.getByRole("button", { name: /^Opción A · (?!recomendada)/ })).toBeVisible()
   await expect(options.getByRole("button", { name: /^Opción B · / })).toHaveAttribute("aria-pressed", "true")
 })
 

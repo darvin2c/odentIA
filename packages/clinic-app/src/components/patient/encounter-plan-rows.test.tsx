@@ -49,6 +49,12 @@ vi.mock("../../lib/api", async (original) => ({
   },
 }))
 
+const openWide = vi.hoisted(() => vi.fn())
+vi.mock("./wide-section", async (original) => ({
+  ...(await original<typeof import("./wide-section")>()),
+  useOpenWide: () => openWide,
+}))
+
 const { EncounterPlanPanel } = await import("./encounter-plan-panel")
 
 const item = (over: Partial<PlanItem> & Pick<PlanItem, "id" | "title">): PlanItem =>
@@ -427,5 +433,29 @@ describe("la fila «Hoy» es una sola fila", () => {
     )
     const register = await screen.findByRole("button", { name: "Registrar" })
     await waitFor(() => expect(document.activeElement).toBe(register))
+  })
+})
+
+// QA del 26 nov (clínica, hallazgo 5): la sugerencia de fase solo salía en el Plan de la ficha; en la
+// atención, donde se anota la pulpitis, no se veía.
+describe("la sugerencia de fase en la atención", () => {
+  it("se ve en su fila, como en el Plan, y la fase no cambia", async () => {
+    const suggestion = "Sugerencia: con pulpitis de la 46 iría en «Urgencia». Cámbiala con «Planificar…»."
+    state.items = [item({ id: "i-endo", title: "Endodoncia", status: "pendiente", phase: "basica", phaseSuggestion: suggestion } as Partial<PlanItem> & Pick<PlanItem, "id" | "title">)]
+    show()
+    const row = await rowOf("Endodoncia")
+    expect(within(row).getByText(suggestion)).toBeTruthy()
+  })
+
+  // QA del 27 nov (verificador, hallazgo 5): «Abrir el Plan» abría encima el Recorrido del tratamiento, que no
+  // tiene «Planificar…». Abre el Plan, donde está lo que la sugerencia nombra.
+  it("«Abrir el Plan» abre el Plan, no el recorrido del tratamiento", async () => {
+    openWide.mockReset()
+    const suggestion = "Sugerencia: con pulpitis de la 36 iría en «Urgencia». Cámbiala con «Planificar…»."
+    state.items = [item({ id: "i-resina", title: "Resina", status: "pendiente", phase: "basica", phaseSuggestion: suggestion } as Partial<PlanItem> & Pick<PlanItem, "id" | "title">)]
+    show()
+    const row = await rowOf("Resina")
+    fireEvent.click(within(row).getByRole("button", { name: "Abrir el Plan" }))
+    expect(openWide).toHaveBeenCalledWith({ id: "plan" })
   })
 })

@@ -363,8 +363,10 @@ export const COMMON_INTERVIEW: ProductInterview = {
  * el embarazo y un AINE con un anticoagulante, `prescribingAlerts`), que revisa la receta misma.
  */
 export interface PrescribingReview {
-  /** Lo que impide emitir (latidIA: un controlado, el peso de un niño). */
+  /** Lo que impide emitir por norma (latidIA: un controlado, que va en la receta oficial). */
   errors: string[]
+  /** Lo que avisa y deja emitir (latidIA: falta el peso de un niño); la receta guarda que se vio. */
+  warnings?: string[]
 }
 
 /**
@@ -431,6 +433,12 @@ export interface DictationPatient {
   adult: boolean | null
   /** Sus años cumplidos (null: no se sabe): un peso imposible para su edad avisa (mesa del 25 nov). */
   ageYears?: number | null
+  /**
+   * Su fecha de nacimiento y el día de hoy en la clínica (AAAA-MM-DD): «su control a los dos años»
+   * de un niño se propone para cuando los cumpla (revisión del 26 nov). Sin ellas, desde hoy.
+   */
+  birthDate?: string | null
+  today?: string | null
   /**
    * Lo diagnosticado en la atención (en la pausa, propuesto o confirmado, y lo que responden sus
    * fichas): decide la variante que depende de eso (odentIA: la endodoncia vital o no vital, prueba
@@ -655,6 +663,14 @@ export interface ProductHooks {
   }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>
+  /**
+   * Lo que `treatmentDone` dejaría registrado de cada tratamiento, en palabras y sin registrarlo
+   * (odentIA: «tratamiento de conducto, buen estado» en la 46): el cierre lo dice antes de firmar.
+   */
+  treatmentDraws?(
+    tx: Db,
+    scope: { orgId: string; patientId: string; planItemIds: readonly string[] },
+  ): Promise<Map<string, { toothNumber: number; words: string }>>
   /** Un tratamiento dejó de estar realizado porque se anuló su procedimiento. */
   treatmentUndone(
     tx: Db,

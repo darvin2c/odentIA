@@ -98,6 +98,12 @@ export interface HelpTopicArea {
   about: string
   /** Se hace dentro de una sola cosa de la lista (su atención, su plan): desde ahí, «Llévame» no saca a la lista. */
   inItem?: boolean
+  /**
+   * Dónde está dentro de esa cosa («su atención»): desde fuera, «Llévame» deja en la lista y la
+   * respuesta dice el resto del camino (verificador 2 del 27 nov: «Llévame a Personas › Pacientes» no
+   * llevaba a la tarjeta que explicaba).
+   */
+  reach?: string
 }
 
 const SETTINGS = "Configuración"
@@ -639,6 +645,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "clinica",
         label: "la historia clínica y la atención",
         inItem: true,
+        reach: "su atención",
         about:
           "Atender a un paciente: la atención y su firma, antecedentes y alergias, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
       },
@@ -646,6 +653,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "plan",
         label: "el plan, el presupuesto y los controles",
         inItem: true,
+        reach: "su Plan",
         about:
           "Lo que se le va a hacer y lo que cuesta: los tratamientos del plan y sus sesiones, armar, enviar y responder un presupuesto, sus opciones y descuentos, agendar lo aceptado y los controles.",
       },
@@ -916,7 +924,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "pieza-quedo-dibujada-despues-tratamiento",
         q: "¿Por qué la pieza quedó dibujada después del tratamiento?",
-        a: "Lo tratado queda dibujado: al completar un tratamiento cuyo servicio dice qué deja en la pieza (la resina deja una restauración; la exodoncia, una pieza ausente), eso se registra solo en la atención, en buen estado (azul), y lo que se trató deja de estar pendiente al cerrar. Los servicios de la biblioteca de odentIA ya lo traen; en uno propio se elige en Servicios › «Deja en la pieza».",
+        a: "Lo tratado queda dibujado: al completar un tratamiento cuyo servicio dice qué deja en la pieza (la resina deja una restauración; la exodoncia, una pieza ausente), eso se registra en la atención como sugerencia, en buen estado (azul): lo ves en la pieza, en «Registrado hoy», y si no es lo que observas lo anulas y lo registras como lo ves antes de firmar. Lo de varias sesiones que terminas con «Sí, terminar» se dibuja al firmar: el cierre dice antes qué se dibuja y en qué pieza. Lo que se trató deja de estar pendiente al firmar, salvo que en el cierre desmarques que su diagnóstico «pasa a resuelto»: entonces el diagnóstico y su hallazgo siguen por tratar. Los servicios de la biblioteca de odentIA ya lo traen; en uno propio se elige en Servicios › «Deja en la pieza».",
         area: "clinica",
       },
       {
@@ -1014,7 +1022,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "dejo-dicho-vuelve",
         q: "¿Cómo dejo dicho cuándo vuelve?",
-        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso: primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento; lo aceptado hace más tiempo no cambia el cierre. «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte, y si la sesión de hoy tenía una cita por venir, «Usarla para…» la deja para todo eso; «Indicar también un control» lo pide igual. Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita.",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si hoy no registraste nada y tiene algo por hacer sin cita (lo aceptado, o lo que indicaste hoy), vuelve para eso: no se crea un control aparte y recepción lo ve en «Qué sigue» para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Próximo control», dentro del Plan de la atención. Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine. Si ya terminó y tiene algo aceptado sin empezar (la corona tras la endodoncia), dice que vuelve para eso: primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento; lo aceptado hace más tiempo no cambia el cierre. «Atención finalizada» lo reserva ahí mismo, sin crear un control aparte, y si la sesión de hoy tenía una cita por venir, «Usarla para…» la deja para todo eso; «Indicar también un control» lo pide igual. Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar. Lo aceptado se reserva sin esperar al control: el control va en esa cita solo si su día cae cuando ya se puede hacer; si no, queda por reservar y te lo dice. Arriba de «¿Cuándo vuelve?», «Controles que quedan» muestra los que deja lo que terminas hoy según su servicio (por ejemplo, el control al año que pide su servicio, uno solo aunque terminen dos el mismo día) y los que ya tenía: los de hoy se cambian de fecha o se quitan ahí, solo para esta persona; los que ya tenía, con «Cambiar fecha» en Plan y controles, y el que tiene cita, moviendo la cita. Si un control era para la próxima sesión de lo que termina con esta firma (dictaste que vuelve para la segunda sesión y respondiste «Sí, terminar»), su fila lo dice como sugerencia y trae «Quitar»: lo quitas ahí o lo dejas; no se quita solo.",
         area: "plan",
       },
       {
@@ -1114,7 +1122,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno va recomendado: nace el primero y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman); lo que hiciste hoy no entra en ninguno, porque se carga a su cuenta al firmar. Ninguno nace recomendado: lo marcas con «Marcar como recomendada», en el Plan o en «Revisar y enviar»; si los dictas a Clío, va el que dijiste que recomiendas, o lo marcas con un toque en la tarjeta, donde también buscas el camino que Clío no encontró. Sin marca, la persona elige sin ninguno elegido de antemano. El recomendado es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
         forms: [
           "dos caminos",
           "conservar o extraer",
@@ -1234,7 +1242,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "dicto-atencion",
         q: "¿Cómo dicto una atención?",
-        a: "Dentro de la atención, pulsa «Dictar», arriba junto a «Antecedentes y última atención», y habla: Clío ordena lo que dices en sugerencias dentro de cada parte, y tú las confirmas o firmas. Al lado, «¿Qué puedo decir?» muestra ejemplos (la primera vez se abre solo) y «Escribir en vez de dictar». Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar. Dicta con un micrófono de vincha o de solapa cerca de la boca: las voces de fondo (radio, otra conversación) se cuelan.",
+        a: "Dentro de la atención, pulsa «Dictar», arriba junto a «Antecedentes y última atención», y habla: Clío ordena lo que dices en sugerencias dentro de cada parte, y tú las confirmas o firmas. Al lado, «¿Qué puedo decir?» muestra ejemplos (la primera vez se abre solo) y «Escribir en vez de dictar». Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar. Lo que Clío deduce lo propone y lo dice en la tarjeta: un código que no está en tu lista queda por revisar con el de tu lista, un control dicho por edad, como a los dos años, se propone para cuando los cumpla y, si no dijiste cuál recomiendas, ninguna opción va recomendada. Dicta con un micrófono de vincha o de solapa cerca de la boca: las voces de fondo (radio, otra conversación) se cuelan.",
         forms: [
           "como uso el dictado",
           "microfono de vincha para dictar",
@@ -2260,7 +2268,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "elijo-diagnostico-atencion",
         q: "¿Cómo elijo el diagnóstico de una atención?",
-        a: "En tres pasos: lo que propone la atención, los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. Propone el odontograma (una caries en la 16 propone su código) y, en una sesión o un control, el diagnóstico del tratamiento que continúa. Nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+        a: "En tres pasos: lo que propone la atención, los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. Propone el odontograma (una caries en la 16 propone su código) y, en una sesión o un control, el diagnóstico del tratamiento que continúa. Nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico en el mismo sitio, sale marcado «Ya diagnosticado antes»; el tipo lo eliges igual.",
       },
       {
         id: "activo-otra-moneda",

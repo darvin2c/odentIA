@@ -15,8 +15,11 @@ export interface DictationSuggestion {
   status: "lista" | "por_revisar" | "confirmada" | "descartada"
   note: string | null
   summary: string
-  /** Corregida por voz al seguir dictando: qué decía antes. */
-  voice: { before: string } | null
+  /**
+   * Corregida por voz al seguir dictando: qué decía antes. `removed`: lo de su salud que se quitó por voz,
+   * dato por dato, con lo que se dijo para quitarlo (se deshace igual que una corrección).
+   */
+  voice: { before: string; removed?: string } | null
   /** Quitada por voz: lo que dijo para pedirlo. Se puede deshacer hasta firmar. */
   removal: { said: string } | null
   /** Al confirmar una nota: cómo quedó cada texto en la atención, ya unido a lo que había. */
@@ -51,6 +54,8 @@ export interface SaidHealthRow {
   stopped?: boolean
   /** La frase en que se oyó, tal cual: la fila la muestra entre comillas. */
   said?: string | null
+  /** Lo dicho con palabras de todos los días y la enfermedad que sugiere («presión» → «Hipertensión arterial»). */
+  suggested?: Array<{ said: string; name: string }>
 }
 
 /** Una frase de lo que se dijo que está en una sugerencia (pendiente o confirmada), con su clase. */
@@ -880,7 +885,8 @@ export function useDictationSession({
     },
     onSuccess: (input) => {
       // Confirmar o descartar una alergia cambia lo que dice la franja («dijo…, sin confirmar»; QA del 25 nov).
-      if (input.item.kind === "alergia") void refreshHealth()
+      // Deshacer lo quitado por voz de su salud también: la franja vuelve a decir lo que dijo.
+      if (input.item.kind === "alergia" || (input.item.kind === "salud" && input.action === "undo-voice")) void refreshHealth()
       // Quitar lo ya confirmado cambia la atención: se refresca como al confirmar.
       if (input.action === "undo-confirmed") onApplied(input.item)
       if (input.action !== "confirm") return

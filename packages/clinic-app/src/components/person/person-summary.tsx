@@ -8,7 +8,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type TaskItem, useCan, usePermission } from "../../lib/crm"
 import {
-  ageFrom,
+  ageWords,
   fetchPatientHealth,
   hcLabel,
   type PatientFull,
@@ -164,7 +164,6 @@ export function PersonSummary({
             <Fact label="Responsable de">
               <span className="flex flex-col gap-0.5">
                 {person.responsibleFor.map((row) => {
-                  const age = ageFrom(row.birthDate)
                   return (
                     <span key={row.patientId}>
                       <PersonLink patientId={row.patientId} contactId={row.personId}>
@@ -173,7 +172,7 @@ export function PersonSummary({
                       <span className="font-normal text-muted-foreground">
                         {" · "}
                         {[
-                          age ? `${age} años` : null,
+                          ageWords(row.birthDate) || null,
                           hcLabel(row.patientNumber),
                           row.relationshipDetail || RELATIONSHIP_WORDS[row.relationship],
                         ]
