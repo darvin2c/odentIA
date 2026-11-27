@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest"
 import { hasPending, PRIVACIDAD, segments, TERMINOS } from "./legal"
 import {
   CONTACT_EMAIL,
+  footerGroups,
   footerLinks,
+  hrefOf,
   LOGIN_URL,
   mainNav,
   primaryCta,
   REGISTER_URL,
+  SITE_MAP,
   salesWhatsAppHref,
   TIENDAS_ABIERTAS,
 } from "./sitio"
@@ -57,27 +60,48 @@ describe("el botón principal", () => {
 })
 
 describe("los enlaces", () => {
+  const pie = [...footerGroups.flatMap((g) => g.links), ...footerLinks]
+
   it("el pie lleva a lo que enlazan los correos de la cuenta y a entrar", () => {
-    expect(footerLinks.map((l) => l.href)).toEqual([
+    const hrefs = pie.map((l) => l.href)
+    for (const href of [
       "/terminos",
       "/privacidad",
       "/contacto",
       "https://app.gestoria24.com/login",
     ])
+      expect(hrefs).toContain(href)
     expect(LOGIN_URL).toBe("https://app.gestoria24.com/login")
     expect(CONTACT_EMAIL).toBe("hola@gestoria24.com")
   })
 
-  it("la cabecera no ofrece precios mientras no haya planes", () => {
-    expect(mainNav.map((l) => l.label)).not.toContain("Precios")
+  it("una página que no existe no se enlaza: lleva a su parte del Inicio o no aparece", () => {
+    const pages = Object.values(SITE_MAP).flat()
+    for (const p of pages) {
+      const href = hrefOf(p)
+      if (p.lista) expect(href).toBe(p.path)
+      else expect(href === null || href.startsWith("/#")).toBe(true)
+    }
+    expect(pages.length).toBeGreaterThanOrEqual(18)
+  })
+
+  it("cada enlace lleva a un solo lugar y cada lugar tiene un solo nombre", () => {
+    const all = [...mainNav, ...pie].filter((l) => l.label !== "Producto")
+    const byHref = new Map<string, Set<string>>()
+    for (const l of all) byHref.set(l.href, (byHref.get(l.href) ?? new Set()).add(l.label))
+    for (const [href, labels] of byHref) expect([href, labels.size]).toEqual([href, 1])
+  })
+
+  it("cada grupo del pie tiene enlaces", () => {
+    for (const g of footerGroups) expect(g.links.length).toBeGreaterThan(0)
   })
 })
 
 describe("términos y privacidad", () => {
-  it("mientras tengan marcas, se sabe", () => {
-    expect(hasPending(TERMINOS)).toBe(true)
-    expect(hasPending(PRIVACIDAD)).toBe(true)
-    expect(hasPending({ ...TERMINOS, since: "1 de enero de 2027", sections: [] })).toBe(false)
+  it("están completos: sin marcas, se indexan", () => {
+    expect(hasPending(TERMINOS)).toBe(false)
+    expect(hasPending(PRIVACIDAD)).toBe(false)
+    expect(hasPending({ ...TERMINOS, since: "[Por completar: fecha]" })).toBe(true)
   })
 
   it("llevan los datos de la empresa", () => {

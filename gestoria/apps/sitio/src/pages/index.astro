@@ -1,140 +1,328 @@
 ---
-// La portada de gestorIA (lienzo B8, tableros 2 y 3): vende lo que gestorIA ya hace, en la voz de
-// quien vende por chat. Sin precios hasta que haya planes (decisión 4).
+// El Inicio de gestorIA (web v5, versión clara aprobada en el lienzo). Sofi, un globo de chat de
+// vidrio naranja hecho con un shader propio (src/scripts/sofi.ts), recorre la página: va a cada
+// lugar marcado con `data-sofi` y cambia de humor con lo que pasa. El movimiento es de GSAP con
+// ScrollTrigger y Lenis (src/scripts/inicio.ts).
+// - Héroe: el chat se puede tocar; Sofi contesta con respuestas de muestra (dice que son un ejemplo).
+// - Sofi trabajando, paso a paso, junto a los números y la pantalla real de Pedidos.
+// - Lo que Sofi lee de la tienda, con líneas que se dibujan hacia ella.
+// - La venta por capítulos, en una escena fija que avanza con el scroll.
+// - Sin pago confirmado no se entrega, con capturas reales; «Sofi hace, tú decides»; los rubros sobre
+//   un mar de puntos (WebGL); Argos y la ficha de la clienta; el precio y las preguntas.
+// Lo que todavía no existe («Pagar ahora», gestorIA Reparto) va como «pronto» y nunca como pantalla.
+// Sin JavaScript o con «reducir movimiento», todo está a la vista, completo y quieto.
+import { getImage } from "astro:assets"
+import instagram from "../assets/iconos/instagram.svg"
+import messenger from "../assets/iconos/messenger.svg"
+import whatsapp from "../assets/iconos/whatsapp.svg"
+import isotipo from "../assets/isotipo.svg?raw"
+import clienta from "../assets/pantallas/clienta.png"
+import menuPedido from "../assets/pantallas/menu-pedido.png"
+import pedidoPorConfirmar from "../assets/pantallas/pedido-por-confirmar.png"
+import pedidos from "../assets/pantallas/pedidos.png"
+import Acordeon from "../components/Acordeon.astro"
+import Chat from "../components/escenas/Chat.astro"
+import Mapa from "../components/escenas/Mapa.astro"
+import Venta from "../components/escenas/Venta.astro"
 import Base from "../layouts/Base.astro"
-import { cta } from "../lib/sitio"
+import { faqLd, PREGUNTAS, RUBROS } from "../lib/contenido"
+import { cta, LOGIN_URL, SITE_URL } from "../lib/sitio"
+import "../styles/inicio.css"
 
-const features = [
-  [
-    "Contesta al instante",
-    "Foto, precio y tallas que quedan, de tu catálogo. Nunca inventa un precio ni un stock.",
-  ],
-  [
-    "Negocia sin regalar",
-    "Tú pones el precio mínimo. Sofi usa ese margen para cerrar: descuento, envío gratis o los dos. Nunca baja del mínimo.",
-  ],
-  [
-    "Cobra con link",
-    "El link de pago se confirma solo. ¿Mandaron captura de Yape o transferencia? La confirmas tú con un toque.",
-  ],
-  [
-    "Stock que cuadra",
-    "Baja al confirmar el pago, o al salir si es contra entrega, y vuelve si se anula. Cada movimiento queda en el kardex: quién, cuándo y cuánto queda.",
-  ],
-  [
-    "Entregas del día",
-    "«Para entregar hoy» en una lista. Tocas «Salió» y «Entregado»; si es contra entrega, anotas lo cobrado.",
-  ],
-  [
-    "Tus números, claros",
-    "Argos te muestra lo vendido, lo que falta cobrar y lo que hoy necesita a una persona.",
-  ],
+const webp = (src: ImageMetadata, widths: number[]) => getImage({ src, widths, format: "webp" })
+const [pedidosW, clientaW, porConfirmarW, pagadoW] = await Promise.all([
+  webp(pedidos, [480, 760, 1200]),
+  webp(clienta, [480, 760, 1200]),
+  webp(pedidoPorConfirmar, [300, 600, 900]),
+  webp(menuPedido, [360, 720, 1080]),
+])
+
+const marca = isotipo
+  .replace(/ role="[^"]*"/, "")
+  .replace(/ aria-label="[^"]*"/, "")
+  .replace("<svg ", '<svg aria-hidden="true" focusable="false" ')
+const flecha =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const check =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+const trabajo = [
+  { t: "Entiende lo que pide", d: "Zapatilla blanca, talla 38, quiere rebaja." },
+  { t: "Busca en tu catálogo", codigo: "catálogo · zapatilla urbana blanca · talla 38 · quedan 2" },
+  {
+    t: "Calcula sin bajar de tu mínimo",
+    d: "Lista S/ 129 · pide S/ 110 · mínimo S/ 100 → ofrece S/ 120 con envío gratis.",
+  },
+  { t: "Anota el pedido", d: "Pedido 0018 · Valeria Soto · S/ 120 · pago por confirmar." },
+]
+const cifras = [
+  { n: 13, t: "Pedidos abiertos" },
+  { n: 5, t: "Salen hoy" },
+  { n: 2, t: "Pago por confirmar", acento: true },
+  { n: 5, t: "Por pagar" },
 ]
 
-const steps = [
-  ["Carla escribe", "Desde el anuncio, por WhatsApp, Instagram o Messenger."],
-  ["Sofi responde", "Con la foto, el precio y lo que queda en su talla."],
-  ["Arma el pedido", "Con el envío a su distrito y el total a la vista."],
-  ["Cobra", "Link de pago, captura o contra entrega, en ese orden."],
-  ["Tú despachas", "Carla recibe «va en camino» y, al día siguiente, «¿te llegó bien?»."],
+const ejemplosRubro = [
+  {
+    r: "Moda",
+    q: "¿El vestido viene en M?",
+    a: "Sí, en M quedan 3. Es de lino y entalla un poco.",
+  },
+  { r: "Belleza", q: "¿Tienen el tono 220?", a: "Sí, el 220 está disponible. ¿Te lo envío?" },
+  { r: "Tecnología", q: "¿Los audífonos en negro?", a: "En negro me queda 1. ¿Te lo separo?" },
+  { r: "Hogar", q: "¿La lámpara llega a Ate?", a: "Sí, el reparto a Ate cuesta S/ 12." },
 ]
+const filaA = RUBROS.slice(0, 12)
+const filaB = RUBROS.slice(12)
 
-const facts = [
-  [
-    "Pruébala antes de abrirla.",
-    "«Probar a Sofi» la pone a vender con tu catálogo sin tocar tu stock.",
-  ],
-  ["Tu equipo, con su rol.", "Dueño, Administrador y Ventas: cada uno ve lo suyo."],
-  ["Pausa cuando quieras.", "La conversación pasa a una persona y no se pierde nada."],
-  [
-    "Todo queda escrito.",
-    "Lo que se cedió en cada pedido, quién confirmó cada pago y cada movimiento de stock.",
-  ],
-]
+const app = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "gestorIA",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  url: `${SITE_URL}/`,
+  description:
+    "Vendedora con IA para tiendas que venden por WhatsApp, Instagram y Messenger: Sofi atiende, negocia sin bajar del precio mínimo y cobra antes de entregar.",
+  offers: { "@type": "Offer", price: "19", priceCurrency: "USD" },
+}
 ---
 <Base
-  title="gestorIA: tu tienda vende en los chats a toda hora"
-  description="gestorIA contesta por WhatsApp, Instagram y Messenger con tu catálogo y tu stock reales, negocia sin bajar de tu precio mínimo, arma el pedido y manda el link de pago."
-  header="dark"
+  sofiPropia
+  title="gestorIA: vendedora con IA para tiendas por chat"
+  description="Sofi atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar. USD 19 al mes, que vuelven como saldo."
+  ld={[app, faqLd(PREGUNTAS)]}
 >
-  <div class="night">
-    <section class="wrap hero" aria-labelledby="titulo">
-      <div class="hero-copy">
-        <p class="pill"><b>24 h</b>Ventas por WhatsApp, Instagram y Messenger</p>
-        <h1 id="titulo">Tu tienda vende en los chats a toda hora. <span class="hl">Tú confirmas y despachas.</span></h1>
-        <p class="lead">gestorIA contesta con tu catálogo y tu stock reales, negocia sin bajar de tu precio mínimo, arma el pedido y manda el link de pago. Mientras tú duermes, también.</p>
-        <dl class="roles">
-          <div><dt class="mono">Ventas</dt><dd><b class="sofi">Sofi</b> responde, negocia y cierra el pedido.</dd></div>
-          <div><dt class="mono">Administración</dt><dd><b class="argos">Argos</b> te dice qué toca hoy y cuánto vendiste.</dd></div>
-        </dl>
-        <div class="ctas">
-          <a class="btn btn-big" href={cta.href}>{cta.label}</a>
-          <a class="btn btn-ghost" href="#como">Mira cómo vende</a>
+  <!-- ============================================================ héroe -->
+  <section class="heroe" aria-labelledby="heroe-h" data-heroe>
+    <div class="heroe__fondo" aria-hidden="true"><span class="heroe__luz"></span></div>
+    <div class="marco heroe__marco">
+      <div class="heroe__texto" data-heroe-texto>
+        <p class="heroe__chip" data-entra><span class="heroe__punto" aria-hidden="true"></span>Para tiendas que venden por chat</p>
+        <h1 id="heroe-h" class="heroe__h">
+          <span class="linea"><span>Tu tienda vende</span></span>
+          <span class="linea"><span>por chat. Sofi</span></span>
+          <span class="linea"><span><span class="cur">cierra</span> la venta.</span></span>
+        </h1>
+        <p class="heroe__bajada" data-entra>Sofi es la vendedora con IA de tu tienda. Atiende tu WhatsApp, Instagram y Messenger, negocia sin bajar de tu precio mínimo y cobra antes de entregar.</p>
+        <div class="heroe__botones" data-entra>
+          <a class="boton" href={cta.href}>{cta.label}<Fragment set:html={flecha} /></a>
+          <a class="boton boton--fantasma" href="#venta">Mira cómo vende</a>
         </div>
+        <ul class="heroe__canales" aria-label="Los chats donde vende Sofi" data-entra>
+          <li><img src={whatsapp.src} width="20" height="20" alt="" />WhatsApp</li>
+          <li><img src={instagram.src} width="20" height="20" alt="" />Instagram</li>
+          <li><img src={messenger.src} width="20" height="20" alt="" />Messenger</li>
+        </ul>
       </div>
 
-      <figure class="hero-chat" aria-label="Ejemplo de una venta por WhatsApp">
-        <div class="chat">
-          <div class="chat-head"><b>Calzados Rosa</b><span>WhatsApp · 11:48 p. m.</span></div>
-          <ol>
-            <li class="in">Hola, ¿tienen la zapatilla blanca en 38?</li>
-            <li class="out">¡Sí, Carla! Quedan 2 en talla 38, a S/ 129. ¿Te la enviamos? A Surco el envío es S/ 10.</li>
-            <li class="in">Sí, porfa. ¿Me haces precio?</li>
-            <li class="out">Te dejo el envío gratis: total S/ 129. Aquí tienes tu link de pago.</li>
-          </ol>
-        </div>
-        <div class="order">
-          <div><b>Pedido 0142 · S/ 129</b><span>Pagado con el link · sale mañana</span></div>
-          <span class="badge">Pagado</span>
-        </div>
-        <figcaption class="caption">Una venta de ejemplo, con la tienda de muestra.</figcaption>
-      </figure>
-    </section>
-  </div>
-
-  <section id="como" class="wrap section" aria-labelledby="como-t">
-    <div class="section-head">
-      <p class="mono">Lo que hace por tu tienda</p>
-      <h2 id="como-t" class="h2">Vende como tu mejor vendedora. Sin regalar tu margen.</h2>
+      <Chat />
     </div>
-    <ul class="cards">
-      {features.map(([title, text]) => (
-        <li class="card"><h3>{title}</h3><p>{text}</p></li>
-      ))}
-    </ul>
   </section>
 
-  <section class="cream" aria-labelledby="venta-t">
-    <div class="wrap section">
-      <h2 id="venta-t" class="h2">Una venta, del primer mensaje al «¿te llegó?»</h2>
-      <ol class="steps">
-        {steps.map(([title, text], i) => (
-          <li><span class="n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span><b>{title}</b><p>{text}</p></li>
+  <!-- ============================================================ Sofi trabajando -->
+  <section class="trabajo" id="trabajo" aria-labelledby="trabajo-h">
+    <div class="marco">
+      <div class="cabeza" data-aparece>
+        <p class="etiqueta">Sofi trabajando</p>
+        <h2 id="trabajo-h" class="titulo-2">Mírala trabajar, <span class="cur">paso a paso</span></h2>
+        <p class="bajada">Mientras Valeria escribe, Sofi entiende qué busca, mira tu catálogo, hace la cuenta sin bajar de tu mínimo y anota el pedido. Tú ves cada paso.</p>
+      </div>
+      <div class="trabajo__grilla" data-trabajo>
+        <div class="trabajo__sofi">
+          <ul class="trabajo__canales" aria-label="Canales">
+            <li class="es-activo">WhatsApp</li><li>Instagram</li><li>Messenger</li>
+          </ul>
+          <span class="trabajo__ancla" data-sofi="decidida" data-sofi-escala="0.5" aria-hidden="true"></span>
+          <p>Atendiendo a <b>Valeria Soto</b>: zapatilla blanca, talla 38, reparto a Surco.</p>
+        </div>
+        <ol class="trabajo__pasos">
+          {trabajo.map((p, i) => (
+            <li class="tpaso" data-tpaso={i}>
+              <div class="tpaso__fila"><span class="tpaso__n">{String(i + 1).padStart(2, "0")} / 04</span><span class="tpaso__estado" data-testado>Listo</span></div>
+              <b>{p.t}</b>
+              {p.codigo ? <code>{p.codigo}</code> : <span class="tpaso__d">{p.d}</span>}
+            </li>
+          ))}
+        </ol>
+        <div class="trabajo__tienda">
+          <div class="trabajo__tienda-cabeza"><b>Tu tienda hoy</b><span>Calzados Rosa</span></div>
+          <ul class="trabajo__cifras">
+            {cifras.map((c) => (
+              <li class:list={[{ "es-acento": c.acento }]}><span>{c.t}</span><b data-cifra={c.n}>{c.n}</b></li>
+            ))}
+          </ul>
+          <figure class="ventana ventana--chica">
+            <img src={pedidosW.src} srcset={pedidosW.srcSet.attribute} sizes="(min-width: 1100px) 380px, 90vw" width={pedidos.width} height={pedidos.height} alt="La pantalla real de Pedidos de Calzados Rosa en gestorIA: cada pedido con su total, su pago, su entrega y su estado" loading="lazy" />
+          </figure>
+          <p class="trabajo__nota">Números de la tienda de ejemplo, en la pantalla real de Pedidos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <Mapa />
+
+  <Venta />
+
+  <!-- ============================================================ el pago confirmado -->
+  <section class="cobro" id="cobro" aria-labelledby="cobro-h">
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">La regla de oro</p>
+        <h2 id="cobro-h" class="titulo-2">Sin pago confirmado, <span class="cur">no se entrega</span></h2>
+        <p class="bajada">Sofi cobra antes de que el pedido salga. Una captura de Yape la confirma una persona de tu equipo; el link de pago, solo.</p>
+      </div>
+      <div class="cobro__escena" data-cobro>
+        <figure class="cobro__pantalla cobro__pantalla--a">
+          <div class="cel cel--imagen">
+            <img src={porConfirmarW.src} srcset={porConfirmarW.srcSet.attribute} sizes="(max-width: 767px) 220px, 280px" width={pedidoPorConfirmar.width} height={pedidoPorConfirmar.height} alt="El pedido 0008 de Carla Mendoza en gestorIA con el pago por Yape por confirmar: la tienda toca «Confirmar pago» o «No coincide»" loading="lazy" />
+          </div>
+          <figcaption><span class="paso-chip">1</span> El pago llega <b>por confirmar</b></figcaption>
+        </figure>
+        <div class="cobro__flujo" aria-hidden="true">
+          <span class="cobro__linea" data-cobro-linea></span>
+          <span class="cobro__toque">Confirmar pago</span>
+          <span class="cobro__sofi" data-sofi="feliz" data-sofi-escala="0.5"></span>
+        </div>
+        <figure class="cobro__pantalla cobro__pantalla--b">
+          <div class="hojita">
+            <img src={pagadoW.src} srcset={pagadoW.srcSet.attribute} sizes="(max-width: 767px) 260px, 340px" width={menuPedido.width} height={menuPedido.height} alt="El pedido 0004 de Luis Paredes en gestorIA: «Pagado · por salir», con su pago por Yape confirmado y listo para salir" loading="lazy" />
+            <span class="hojita__onda" aria-hidden="true"></span>
+          </div>
+          <figcaption><span class="paso-chip">2</span> Tu equipo lo confirma y sale <b>pagado</b></figcaption>
+        </figure>
+      </div>
+      <ul class="cobro__datos" id="entrega" data-aparece>
+        <li><b>Si paga al recibir</b>, quien entrega anota cuánto cobró y con qué, y recién lo da por entregado.</li>
+        <li><b>Cada pedido dice</b> cuánto falta cobrar y si el pago está confirmado o por confirmar.</li>
+        <li><span class="pronto">Pronto</span> <b>gestorIA Reparto</b>: la app del repartidor, con la ruta y el cobro del día.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ Sofi hace, tú decides -->
+  <section class="decides" id="decides" aria-labelledby="decides-h">
+    <div class="marco">
+      <div class="cabeza cabeza--centro" data-aparece>
+        <p class="etiqueta">Con control humano</p>
+        <h2 id="decides-h" class="titulo-2">Sofi hace, <span class="cur">tú decides</span></h2>
+        <p class="bajada">Sofi trabaja dentro de las reglas que pones. Lo que pide una persona, siempre pasa por una persona.</p>
+      </div>
+      <div class="decides__grilla" data-decides>
+        <div class="decides__caja">
+          <p class="etiqueta">Lo hace sola</p>
+          <ul class="lista-ok">
+            <li>Atiende tus chats a toda hora</li>
+            <li>Muestra el valor del producto</li>
+            <li>Ofrece una sola vez, sin bajar de tu mínimo</li>
+            <li>Anota el pedido y pide el pago</li>
+            <li>Le avisa a la clienta cuando el pago está confirmado</li>
+          </ul>
+        </div>
+        <span class="decides__puente" aria-hidden="true" data-puente></span>
+        <div class="decides__caja decides__caja--persona oscuro">
+          <p class="etiqueta">Siempre pasa por una persona</p>
+          <ul class="lista-ok">
+            <li>Confirmar una captura de Yape o transferencia</li>
+            <li>Entregar el pedido, solo con el pago confirmado</li>
+            <li>Decidir si dos fichas son la misma clienta</li>
+            <li>Cambiar precios, mínimos y medios de pago</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ rubros -->
+  <section class="rubros" id="rubros" aria-labelledby="rubros-h">
+    <canvas class="rubros__puntos" aria-hidden="true" data-puntos></canvas>
+    <div class="marco cabeza cabeza--centro" data-aparece>
+      <p class="etiqueta">Cualquier rubro</p>
+      <h2 id="rubros-h" class="titulo-2">Si lo vendes por chat, <span class="cur">Sofi lo vende</span></h2>
+      <p class="bajada">Cada producto con sus opciones (talla, color o tamaño), su stock y su precio mínimo. Estos rubros son ejemplos, no un límite.</p>
+    </div>
+    <div class="marco">
+      <ul class="rubros__tarjetas" data-rubros-tarjetas>
+        {ejemplosRubro.map((e) => (
+          <li class="rubro">
+            <b>{e.r}</b>
+            <span class="rubro__ella">{e.q}</span>
+            <span class="rubro__sofi">{e.a}</span>
+          </li>
         ))}
-      </ol>
+      </ul>
+      <p class="rubros__nota">Conversaciones de ejemplo.</p>
+    </div>
+    <p class="sr">Ejemplos de rubros: {RUBROS.join(", ")}.</p>
+    <div class="cintas" aria-hidden="true" data-cintas>
+      <div class="cinta" data-cinta="1"><div class="cinta__pista">{[...filaA, ...filaA].map((r) => <span>{r}</span>)}</div></div>
+      <div class="cinta cinta--b" data-cinta="-1"><div class="cinta__pista">{[...filaB, ...filaB].map((r) => <span>{r}</span>)}</div></div>
     </div>
   </section>
 
-  <section id="agentes" class="wrap section split" aria-labelledby="agentes-t">
-    <div class="section-head">
-      <p class="mono">Tú mandas</p>
-      <h2 id="agentes-t" class="h2">Dos agentes que trabajan para ti, con tus reglas.</h2>
-      <p>Sofi es la única que le habla a tu cliente. Argos cuida los números y le pasa a Sofi lo que hay que recordar. Lo delicado, como una captura de pago, siempre lo decide una persona.</p>
+  <!-- ============================================================ Argos y clientes -->
+  <section class="dupla" aria-label="Argos y la ficha de la clienta">
+    <div class="marco dupla__grilla">
+      <article class="dupla__caja dupla__caja--argos oscuro" id="argos" aria-labelledby="argos-h" data-aparece>
+        <p class="etiqueta">Argos, el administrador</p>
+        <h2 id="argos-h">Argos administra tu tienda <span class="cur">mientras vendes</span></h2>
+        <p>Vigila pedidos, pagos, stock y chats. Lo de rutina se lo encarga a Sofi y sale solo; lo delicado te lo trae a «Te toca».</p>
+        <ul class="argos__poderes" aria-label="Lo que hace Argos">
+          <li><b>Vende</b><span>Recuerda el pago, invita a volver y avisa cuando vuelve una talla</span></li>
+          <li><b>Cuida el stock</b><span>Te dice qué reponer y qué pedido espera mercadería</span></li>
+          <li><b>Conoce a tus clientas</b><span>Quién vuelve a comprar y qué se vende más</span></li>
+          <li><b>Promociones</b><span class="argos__pronto"><span class="pronto">Pronto</span> A la medida de cada clienta</span></li>
+        </ul>
+        <ul class="argos__lista" aria-label="Ejemplos de lo que Argos hizo hoy">
+          <li class="alerta" data-alerta><span class="alerta__punto" aria-hidden="true"></span><span><b>Le pedí a Sofi 3 mensajes para recordar el pago</b><small>Salen solos, uno por clienta</small></span></li>
+          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--c" aria-hidden="true"></span><span><b>Reponer Zapatilla urbana blanca 38</b><small>Se acabó y 2 personas la pidieron. Cuando entre, Sofi les avisa sola.</small></span></li>
+          <li class="alerta" data-alerta><span class="alerta__punto alerta__punto--a" aria-hidden="true"></span><span><b>Te toca: confirmar un pago</b><small>Pedido 0008 de Carla Mendoza, S/ 120 por Yape (captura)</small></span></li>
+        </ul>
+        <a class="argos__mas" href="/argos">Todo lo que hace Argos</a>
+        <span class="dupla__ojo" aria-hidden="true"><Fragment set:html={marca} /></span>
+      </article>
+      <article class="dupla__caja" id="clientas" aria-labelledby="clientas-h" data-aparece>
+        <p class="etiqueta">La clienta, en una ficha</p>
+        <h2 id="clientas-h">Una ficha por clienta, <span class="cur">escriba por donde escriba</span></h2>
+        <p>Sus compras, lo que debe y cómo prefiere recibir. Si dos fichas parecen la misma clienta, gestorIA te avisa y decides tú: nunca las une por el teléfono.</p>
+        <figure class="ventana" data-vitrina>
+          <div class="ventana__barra" aria-hidden="true"><i></i><i></i><i></i><span>app.gestoria24.com/clientes</span></div>
+          <img src={clientaW.src} srcset={clientaW.srcSet.attribute} sizes="(min-width: 1100px) 560px, 90vw" width={clienta.width} height={clienta.height} alt="La ficha de Andrea Castillo en Clientes: escribe por Instagram y WhatsApp, lleva 2 compras, una entregada y otra por pagar, y su dirección de reparto" loading="lazy" />
+        </figure>
+      </article>
     </div>
-    <ul class="facts">
-      {facts.map(([title, text]) => (
-        <li><b>{title}</b> <span>{text}</span></li>
-      ))}
-    </ul>
   </section>
 
-  <section class="night" aria-labelledby="cierre-t">
-    <div class="wrap closing">
-      <div>
-        <h2 id="cierre-t" class="h2">Abre tu tienda las <span class="hl">24 horas.</span></h2>
-        <p>¿Ya usas odentIA, latidIA o vistIA? Entras con la misma cuenta.</p>
+  <!-- ============================================================ precio y preguntas -->
+  <section class="precio" id="precio" aria-labelledby="precio-h">
+    <div class="marco precio__marco">
+      <article class="plan" data-plan>
+        <p class="plan__rotulo">Tu tienda en gestorIA</p>
+        <h2 id="precio-h" class="plan__precio"><span class="plan__moneda">USD</span><span class="plan__cifra" data-cuenta="19">19</span><span class="plan__mes">al mes</span></h2>
+        <p class="plan__saldo"><b>Vuelven como saldo.</b> De ahí sale el 1 % de cada pedido que gestorIA genera sola. Lo que anota tu equipo no paga el 1 %.</p>
+        <ul class="plan__lista">
+          <li><Fragment set:html={check} />Sofi en WhatsApp, Instagram y Messenger</li>
+          <li><Fragment set:html={check} />Tu catálogo con precio mínimo por producto</li>
+          <li><Fragment set:html={check} />Pedidos, pagos y entregas del día</li>
+          <li><Fragment set:html={check} />Tu equipo con su rol: Dueño, Administrador y Ventas</li>
+        </ul>
+        <a class="plan__boton" href="/precios">Ver precios</a>
+      </article>
+      <div class="preguntas" id="preguntas">
+        <div class="cabeza" data-aparece>
+          <p class="etiqueta">Preguntas</p>
+          <h2 class="titulo-2">Buenas <span class="cur">preguntas</span></h2>
+          <p class="bajada">¿Te queda otra? <a class="enlace" href="/contacto">Escríbenos</a> y te responde una persona.</p>
+        </div>
+        <Acordeon preguntas={PREGUNTAS} />
+        <p class="preguntas__mas"><a class="enlace" href="/preguntas">Ver todas las preguntas</a> · <a class="enlace" href={LOGIN_URL}>Entrar a mi tienda</a></p>
       </div>
-      <a class="btn btn-big" href={cta.href}>{cta.label}</a>
     </div>
   </section>
 </Base>
+
+<script>
+  import { iniciarInicio } from "../scripts/inicio"
+  iniciarInicio()
+</script>
