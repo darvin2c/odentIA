@@ -37,8 +37,9 @@ import {
   type Place,
   PlaceSwitcher,
   regionCountry,
+  SideDockProvider,
+  SideDockSlot,
   SubmitButton,
-  useHeaderCompact,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
@@ -46,12 +47,10 @@ import {
   ArrowLeft,
   Banknote,
   ChartColumn,
-  CircleHelp,
   Copy,
   CreditCard,
   House,
   KeyRound,
-  LifeBuoy,
   MailOpen,
   MessageCircle,
   Package,
@@ -73,6 +72,7 @@ import {
   useMemo,
   useState,
 } from "react"
+import { HelpMenuItem, StoreHelpButton } from "./ayuda"
 import {
   ApiError,
   api,
@@ -90,7 +90,6 @@ import { device } from "./lib/avisos"
 import { configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
 import { atTime, endedMessage, sentence, stripMessage, supportLine } from "./lib/soporte"
-import { AskForHelpSheet } from "./pedir-ayuda"
 
 /** Lo que la persona ve al entrar: sus tiendas y sus invitaciones. */
 export function useMe() {
@@ -149,31 +148,6 @@ function OpeningFailed({ error, onRetry }: { error: unknown; onRetry: () => void
         <ErrorBlock error={error} onRetry={onRetry} />
       </div>
     </div>
-  )
-}
-
-/**
- * Abre «Pedir ayuda» de la tienda, o `null` si el rol de quien está no pide ayuda (soporte). Es un
- * solo panel para la cabecera y la Ayuda, montado en el armazón: lo escrito sin enviar sigue ahí
- * al volver a abrirlo, desde cualquier pantalla de la tienda.
- */
-const AskForHelpContext = createContext<(() => void) | null>(null)
-
-export function useAskForHelp(): (() => void) | null {
-  return useContext(AskForHelpContext)
-}
-
-/**
- * «Pedir ayuda» en la cabecera, para todo el equipo (`ayuda.pedir`; lienzo «gestorIA como
- * odentIA», tablero 19): abre «Pedir ayuda» ahí mismo, con la pantalla en la que está.
- */
-function AskForHelp({ onOpen }: { onOpen: () => void }) {
-  const compact = useHeaderCompact()
-  return (
-    <Button variant="outline" className="elevated h-9 gap-2 rounded-full px-3" onClick={onOpen}>
-      <LifeBuoy className="size-4" aria-hidden />
-      <span className={compact ? "sr-only" : "max-md:sr-only"}>Pedir ayuda</span>
-    </Button>
   )
 }
 
@@ -305,9 +279,6 @@ export function Shell({
   children: ReactNode
 }) {
   const { pathname } = useLocation()
-  const [asking, setAsking] = useState(false)
-  const canAsk = store?.permissions.includes("ayuda.pedir") ?? false
-  const openAsk = useMemo(() => (canAsk ? () => setAsking(true) : null), [canAsk])
   // La foto y el nombre, los de la cuenta: cambian en Mi perfil sin esperar otro token.
   const live = authClient.useSession().data?.user
   const canDispatch = store?.permissions.includes("entregas") ?? false
@@ -369,26 +340,26 @@ export function Shell({
       }
       onSignOut={() => void signOut()}
     >
-      <AskForHelpContext.Provider value={openAsk}>
+      {/* La Ayuda (ADR 0227), la misma de las clínicas: en la cabecera de cada pantalla de la
+          tienda; con la fila compacta (el teléfono), en su menú ⋯. Abierta en una ventana ancha va
+          en la columna lateral, a la derecha de la página, que le cede el ancho. */}
+      <SideDockProvider>
         <HeaderUtilitiesProvider
-          value={{
-            // En la Ayuda, «Pedir ayuda» ya es el botón de la página.
-            utilities:
-              openAsk && !pathname.endsWith("/ayuda") ? <AskForHelp onOpen={openAsk} /> : undefined,
-          }}
+          value={
+            store
+              ? { utilities: <StoreHelpButton store={store} />, menuItems: <HelpMenuItem /> }
+              : {}
+          }
         >
-          {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+          {/* La estructura no cambia al abrir o cerrar la columna: la página nunca se remonta. */}
+          <div className="flex min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+            </div>
+            <SideDockSlot />
+          </div>
         </HeaderUtilitiesProvider>
-        {/* Uno por tienda: lo escrito en una no aparece en otra. */}
-        {store && openAsk ? (
-          <AskForHelpSheet
-            key={store.id}
-            store={store}
-            open={asking}
-            onClose={() => setAsking(false)}
-          />
-        ) : null}
-      </AskForHelpContext.Provider>
+      </SideDockProvider>
     </AppShell>
   )
 }
@@ -737,17 +708,14 @@ function storeSections(store: MyStore, missed: number): AppShellNavEntry[] {
 
 /**
  * Al pie, como en las clínicas: Configuración, si quien está ve algún apartado (Ventas ve solo sus
- * avisos al celular: no ve lo que no puede tocar), y la Ayuda, para todos (tablero 19).
+ * avisos al celular: no ve lo que no puede tocar). La Ayuda está en la cabecera.
  */
 function storeFooter(store: MyStore): AppShellNavItem[] {
   // Abre el primer apartado que ve: a Ventas, sus avisos al celular, no «Datos de la tienda».
   const first = configGroupsFor(store)[0]?.items[0]
-  return [
-    ...(first
-      ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
-      : []),
-    { label: "Ayuda", to: `/tiendas/${store.id}/ayuda`, icon: CircleHelp },
-  ]
+  return first
+    ? [{ label: "Configuración", to: `/tiendas/${store.id}${first.path}`, icon: Settings }]
+    : []
 }
 
 /**

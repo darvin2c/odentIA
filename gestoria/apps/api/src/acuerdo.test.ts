@@ -22,6 +22,11 @@ import {
   type AppEvent,
   appEvent,
   CONTRACT_PATHS,
+  type HelpAskAnswer,
+  type HelpAskQuestion,
+  type HelpFeedback,
+  helpAskQuestion,
+  helpFeedback,
   stateQuestion,
 } from "@odentia/contract"
 import { verifySignedMessage } from "@odentia/contract/signing"
@@ -29,13 +34,13 @@ import { and, eq } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
+  askAriadna,
   askForHelp,
   askSupport,
   CONVERSATION_WINDOW_MS,
   type ContractConfig,
   countConversation,
   deliverOutbox,
-  helpView,
   purgeOutbox,
   refreshStates,
   reviewStoreTeams,
@@ -70,6 +75,12 @@ const admin = {
   states: new Map<string, Partial<AccountState>>(),
   /** Las cuentas cuyos avisos rechaza (422), sin estar caída. */
   reject: new Set<string>(),
+  /** Ariadna: lo que responde (o con qué estado falla) y lo que le preguntaron. */
+  help: { status: 200, answer: null as HelpAskAnswer | null },
+  helpAsked: [] as HelpAskQuestion[],
+  /** Lo que la persona dijo de una respuesta; la administración responde con `feedbackStatus`. */
+  feedback: [] as HelpFeedback[],
+  feedbackStatus: 200,
 }
 
 const adminFetch: typeof fetch = async (input, init) => {
@@ -78,6 +89,19 @@ const adminFetch: typeof fetch = async (input, init) => {
   const body = String(init?.body ?? "")
   const id = verifySignedMessage({ secret: SECRET, headers: new Headers(init?.headers), body })
   if (!id || url.origin !== ACCOUNT) return Response.json({}, { status: 401 })
+  // Como la de verdad (`runService`), Ariadna responde `{ data: … }`.
+  if (url.pathname === CONTRACT_PATHS.help) {
+    admin.helpAsked.push(helpAskQuestion.parse(JSON.parse(body)))
+    return admin.help.status === 200
+      ? Response.json({ data: admin.help.answer })
+      : Response.json({}, { status: admin.help.status })
+  }
+  if (url.pathname === CONTRACT_PATHS.helpFeedback) {
+    const said = helpFeedback.parse(JSON.parse(body))
+    if (admin.feedbackStatus !== 200) return Response.json({}, { status: admin.feedbackStatus })
+    admin.feedback.push(said)
+    return Response.json({ data: { ok: true } })
+  }
   if (url.pathname === CONTRACT_PATHS.events) {
     admin.deliveries++
     const event = appEvent.parse(JSON.parse(body))
@@ -106,7 +130,8 @@ const adminFetch: typeof fetch = async (input, init) => {
     paymentMethods: [],
     support: [],
   }
-  return Response.json({ ...empty, ...(known ? { found: true, ...known } : {}) })
+  // Como la de verdad (`runService`): `{ data: … }`.
+  return Response.json({ data: { ...empty, ...(known ? { found: true, ...known } : {}) } })
 }
 
 const contract: ContractConfig = { url: ACCOUNT, secret: SECRET, fetch: adminFetch }
@@ -486,29 +511,168 @@ describe("gestorIA pregunta y nunca se detiene por la administración", () => {
   })
 })
 
-describe("la Ayuda: todo el equipo pide ayuda y cada uno ve solo lo suyo (ADR 0221)", () => {
+describe("la Ayuda: la misma Ariadna, y cada uno ve solo sus casos (ADR 0221 y 0227)", () => {
   const lucia = { userId: "u-lucia", email: people.lucia.email, name: people.lucia.name }
   const question = "El 0149 dice que falta cobrar, pero ya me pagó todo por Yape"
+  const ASK = "5b0c3a6e-1f7d-4b8e-9a2c-3d4e5f6a7b8c"
 
-  it("Ventas pregunta desde su pantalla y sale con su rol; una pantalla rara no entra", async () => {
-    const asked = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda`, {
+  it("la pantalla dice su nombre, lo que su rol puede preguntar y lo que se adjunta", async () => {
+    const path = encodeURIComponent(`/tiendas/${storeId}/pedidos`)
+    const screen = await call("lucia", "GET", `/api/tiendas/${storeId}/ayuda/screen?path=${path}`)
+    expect(screen.status).toBe(200)
+    expect(screen.json.data).toMatchObject({
+      title: "Pedidos",
+      attached: { screen: "Pedidos", role: "Ventas", clinic: "Calzados Rosa", version: null },
+    })
+    expect(screen.json.data.suggestions).toHaveLength(3)
+    // De Configuración, Ventas no tiene nada que hacer: no se le sugiere.
+    const settings = encodeURIComponent(`/tiendas/${storeId}/configuracion/marca`)
+    const marca = await call(
+      "lucia",
+      "GET",
+      `/api/tiendas/${storeId}/ayuda/screen?path=${settings}`,
+    )
+    expect(marca.json.data).toMatchObject({ title: "Tu marca", suggestions: [] })
+    expect(
+      (await call("lucia", "GET", `/api/tiendas/${randomUUID()}/ayuda/screen?path=%2F`)).status,
+    ).toBe(404)
+  })
+
+  it("pregunta a Ariadna con la guía entera, firmada, y la respuesta es para el rol de quien pregunta", async () => {
+    admin.help = {
+      status: 200,
+      answer: {
+        askId: ASK,
+        via: "jev",
+        verdict: "seguro",
+        shown: ["faq:cambiar-stock"],
+        offered: [],
+        written: null,
+      },
+    }
+    const asked = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/ask`, {
+      question: "¿Cómo cambio el stock de una talla?",
+      screen: `/tiendas/${storeId}/catalogo/prod-1`,
+      previous: { question: "¿Dónde están los productos?", where: "Catálogo" },
+    })
+    expect(asked.status).toBe(200)
+    expect(asked.json.data).toMatchObject({
+      askId: ASK,
+      kind: "guia",
+      basedOn: "La guía de gestorIA: Catálogo.",
+      answers: [
+        {
+          where: "Catálogo",
+          path: `/tiendas/${storeId}/catalogo`,
+          restriction:
+            "Con tu rol (Ventas) no se puede: pídeselo a quien sí puede. Lo pueden hacer: Dueño y Administrador.",
+        },
+      ],
+    })
+    // A Ariadna viaja la ruta dentro de la tienda y la guía; nada de la tienda ni de la persona.
+    const sent = admin.helpAsked.at(-1)
+    expect(sent).toMatchObject({
+      question: "¿Cómo cambio el stock de una talla?",
+      screen: "/catalogo/prod-1",
+      previous: { question: "¿Dónde están los productos?", where: "Catálogo" },
+    })
+    expect(sent?.guide.map((topic) => topic.id)).toContain("pedidos")
+    expect(JSON.stringify(sent)).not.toContain(storeId)
+    expect(JSON.stringify(sent)).not.toContain("Calzados Rosa")
+
+    // Las cifras: Ventas no ve Reportes, se le dice a quién pedírselas.
+    admin.help = {
+      status: 200,
+      answer: { askId: ASK, via: "jev", verdict: "datos", shown: [], offered: [], written: null },
+    }
+    const data = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/ask`, {
+      question: "¿Cuánto vendimos este mes?",
+      screen: `/tiendas/${storeId}`,
+    })
+    expect(data.json.data).toMatchObject({ kind: "datos", argos: false, answers: [] })
+    expect(data.json.data.say).toContain("Pídeselo a quien ve Reportes")
+    const short = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/ask`, {
+      question: "ok",
+    })
+    expect(short.status).toBe(400)
+  })
+
+  it("si Ariadna no responde, solo responde una pregunta exacta de la guía y no inventa", async () => {
+    admin.help = { status: 503, answer: null }
+    const exact = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/ask`, {
+      question: "¿Cómo le mando un link de pago?",
+      screen: `/tiendas/${storeId}/pedidos`,
+    })
+    expect(exact.json.data).toMatchObject({
+      kind: "guia",
+      answers: [{ where: "Pedidos", path: `/tiendas/${storeId}/pedidos`, restriction: null }],
+    })
+    expect(exact.json.data.askId).toMatch(/^local-/)
+    // Lo que salió sin Ariadna no se puede anotar, y se dice.
+    const rated = await call(
+      "lucia",
+      "POST",
+      `/api/tiendas/${storeId}/ayuda/ask/${exact.json.data.askId}/feedback`,
+      { helpful: true },
+    )
+    expect(rated.status).toBe(503)
+    expect(rated.json.error.message).toContain("no se pudo anotar")
+    const other = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/ask`, {
+      question: "¿Cómo mando un link?",
+    })
+    expect(other.json.data).toMatchObject({
+      kind: "nada",
+      say: "Ahora no puedo buscar bien en la guía.",
+      answers: [],
+    })
+    // Sin el secreto, igual, y sin preguntarle a nadie.
+    const before = admin.helpAsked.length
+    const off: ContractConfig = { url: ACCOUNT, secret: "", fetch: adminFetch }
+    const offline = await askAriadna(db.appDb, off, lucia, storeId, {
+      question: "¿Cómo le mando un link de pago?",
+      screen: "/",
+    })
+    expect(offline.kind).toBe("guia")
+    expect(admin.helpAsked).toHaveLength(before)
+    admin.help = { status: 200, answer: null }
+  })
+
+  it("lo que dice de la respuesta llega a la administración; si no llega, lo dice", async () => {
+    const base = `/api/tiendas/${storeId}/ayuda/ask/${ASK}`
+    expect((await call("lucia", "POST", `${base}/feedback`, { helpful: false })).status).toBe(204)
+    expect((await call("lucia", "POST", `${base}/none`)).status).toBe(204)
+    expect(admin.feedback.slice(-2)).toEqual([
+      { askId: ASK, helpful: false },
+      { askId: ASK, noneFits: true },
+    ])
+    admin.feedbackStatus = 404
+    expect((await call("lucia", "POST", `${base}/feedback`, { helpful: true })).status).toBe(404)
+    admin.feedbackStatus = 500
+    const failed = await call("lucia", "POST", `${base}/feedback`, { helpful: true })
+    expect(failed.status).toBe(502)
+    expect(failed.json.error.message).toBe(
+      "La guía no respondió y no se anotó. Vuelve a intentarlo.",
+    )
+    admin.feedbackStatus = 200
+    admin.up = false
+    expect((await call("lucia", "POST", `${base}/feedback`, { helpful: true })).status).toBe(502)
+    admin.up = true
+  })
+
+  it("Ventas escribe a soporte desde su pantalla y sale con su rol; una pantalla rara no entra", async () => {
+    const asked = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/requests`, {
       question,
-      screen: "/pedidos?pedido=p-1",
+      screen: `/tiendas/${storeId}/pedidos`,
+      kind: "problema",
     })
     expect(asked.status).toBe(204)
     const mine = (await outbox("soporte.pedido")).find(
       (row) => (row.payload.data as Json).userId === "u-lucia",
     )
     expect(mine?.payload).toMatchObject({
-      data: {
-        account: storeId,
-        kind: "pregunta",
-        question,
-        screen: "/pedidos?pedido=p-1",
-        role: "Ventas",
-      },
+      data: { account: storeId, kind: "problema", question, screen: "/pedidos", role: "Ventas" },
     })
-    const odd = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda`, {
+    const odd = await call("lucia", "POST", `/api/tiendas/${storeId}/ayuda/requests`, {
       question: "Hola",
       screen: "https://otra.test/pedidos",
     })
@@ -520,7 +684,7 @@ describe("la Ayuda: todo el equipo pide ayuda y cada uno ve solo lo suyo (ADR 02
     expect(plan?.payload).toMatchObject({ data: { screen: "/plan", role: "Dueño" } })
   })
 
-  it("cada persona ve sus preguntas y sus respuestas; las del Dueño no le llegan a Ventas", async () => {
+  it("cada persona ve sus casos y sus respuestas; los del Dueño no le llegan a Ventas", async () => {
     const at = new Date().toISOString()
     admin.states.set(storeId, {
       ...admin.states.get(storeId),
@@ -547,22 +711,16 @@ describe("la Ayuda: todo el equipo pide ayuda y cada uno ve solo lo suyo (ADR 02
     })
     expect(await refreshStates(db.ownerDb, contract, new Date(Date.now() + 44 * 60_000))).toBe(1)
 
-    const forLucia = await call("lucia", "GET", `/api/tiendas/${storeId}/ayuda`)
+    const forLucia = await call("lucia", "GET", `/api/tiendas/${storeId}/ayuda/casos`)
     expect(forLucia.status).toBe(200)
-    expect(forLucia.json).toMatchObject({ role: "Ventas", canAsk: true, connected: true })
     const luciaAsked = (forLucia.json.questions as Json[]).map((one) => one.id ?? one.question)
     expect(luciaAsked).toEqual([question, "k-lucia"])
     expect(forLucia.json.questions[0]).toMatchObject({ status: "por_enviar", replies: [] })
     expect(forLucia.json.questions[1].replies).toEqual([
       { body: "En el pedido, «Confirmar pago».", at },
     ])
-    // La guía le dice qué no puede hacer y no la lleva a lo que no abre.
-    const plan = (forLucia.json.guide as Json[])
-      .flatMap((group) => group.faqs as Json[])
-      .find((faq) => faq.id === "plan")
-    expect(plan).toMatchObject({ who: "Dueño", you: false, screen: null })
 
-    const forRosa = await call("rosa", "GET", `/api/tiendas/${storeId}/ayuda`)
+    const forRosa = await call("rosa", "GET", `/api/tiendas/${storeId}/ayuda/casos`)
     const rosaAsked = (forRosa.json.questions as Json[]).map((one) => one.id ?? one.question)
     expect(rosaAsked).toContain("k-rosa")
     expect(rosaAsked).not.toContain("k-lucia")
@@ -577,14 +735,11 @@ describe("la Ayuda: todo el equipo pide ayuda y cada uno ve solo lo suyo (ADR 02
     ])
   })
 
-  it("sin secreto, la Ayuda se abre igual pero no acepta preguntas", async () => {
+  it("sin secreto, no acepta lo que se escribe a soporte", async () => {
     const off: ContractConfig = { url: ACCOUNT, secret: "", fetch: adminFetch }
     await expect(
-      askForHelp(db.appDb, off, lucia, storeId, { question: "Hola" }),
+      askForHelp(db.appDb, off, lucia, storeId, { question: "Hola", kind: "pregunta" }),
     ).rejects.toMatchObject({ status: 409 })
-    const view = await helpView(db.appDb, off, lucia, storeId)
-    expect(view).toMatchObject({ connected: false, canAsk: true, role: "Ventas" })
-    expect(view.guide.length).toBeGreaterThan(0)
   })
 })
 
