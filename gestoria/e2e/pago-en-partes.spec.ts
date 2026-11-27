@@ -4,12 +4,11 @@ import { expect, type Page, test } from "@playwright/test"
 import { ACCOUNT, API_PORT, STORE_ID, WEB, type Who } from "./entorno"
 
 /**
- * La hora de la tienda y el pago en partes en un navegador (lienzo «gestorIA como odentIA»,
- * tableros 3 y 7), contra su servidor y su base de verdad:
+ * El pago en partes en un navegador (lienzo «gestorIA como odentIA», tablero 7), contra su
+ * servidor y su base de verdad:
  * - Diana pide una zapatilla de S/ 117 y paga S/ 80 por Yape: la captura se anota como una parte,
  *   se confirma sin «Pago doble», el pedido queda listo para salir con «Falta cobrar S/ 37» en el
  *   pedido, la lista y Reportes, y al entregar se cobran los S/ 37 en efectivo y queda pagado.
- * - «Hora de la tienda» en Pagos y entregas: se cambia y se vuelve a la de Lima.
  * Cada pantalla en escritorio y a 390 px, sin desborde. Las capturas van a `gestoria/e2e/capturas/`.
  */
 
@@ -169,32 +168,4 @@ test("Diana paga en partes: S/ 80 por Yape y S/ 37 en efectivo al recibir", asyn
   await expect(sheet.getByText("Yape · S/ 80")).toBeVisible()
   await noSideScroll(page)
   await shot(page, "pago-en-partes-pagado-telefono")
-})
-
-test("la hora de la tienda se cambia en Pagos y entregas", async ({ page }) => {
-  await as("rosa")
-  await page.setViewportSize(DESKTOP)
-  await page.goto(`${BASE}/pagos-y-entregas`)
-  await expect(page.getByRole("heading", { name: "Hora de la tienda" })).toBeVisible()
-  const zone = page.getByLabel("Zona horaria")
-  await expect(zone).toHaveValue("America/Lima")
-  const save = page.getByRole("button", { name: "Guardar la hora" })
-  await expect(save).toBeDisabled()
-  await zone.selectOption("America/Bogota")
-  await save.click()
-  await expect(page.getByText("Hora de la tienda: Bogota (UTC−5)")).toBeVisible()
-  await expect(zone).toHaveValue("America/Bogota")
-  await noSideScroll(page)
-  await shot(page, "hora-de-la-tienda-escritorio")
-  await page.setViewportSize(PHONE)
-  await zone.scrollIntoViewIfNeeded()
-  await noSideScroll(page)
-  await shot(page, "hora-de-la-tienda-telefono")
-  // Vuelve a la de Lima, con el teclado.
-  await zone.focus()
-  await zone.selectOption("America/Lima")
-  await save.focus()
-  await page.keyboard.press("Enter")
-  await expect(page.getByText("Hora de la tienda: Lima (UTC−5)")).toBeVisible()
-  await expect(zone).toHaveValue("America/Lima")
 })

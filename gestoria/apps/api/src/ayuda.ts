@@ -16,12 +16,20 @@ import { can, ROLE_NAMES, type StorePermission, type StoreSeat } from "./permiso
 /** Las pantallas de la tienda a las que lleva una respuesta: su ruta y lo que hace falta para abrirla. */
 export const HELP_SCREENS = {
   pedidos: { label: "Pedidos", path: "/pedidos", opens: "ventas.atender" },
-  sofi: { label: "Sofi", path: "/sofi", opens: "ventas.atender" },
   catalogo: { label: "Catálogo", path: "/catalogo", opens: "catalogo.ver" },
-  pagos: { label: "Pagos y entregas", path: "/pagos-y-entregas", opens: "tienda.ver" },
   reportes: { label: "Reportes", path: "/reportes", opens: "reportes.ver" },
-  equipo: { label: "Equipo", path: "/equipo", opens: "equipo.ver" },
-  plan: { label: "Plan y pagos", path: "/plan", opens: "plan" },
+  // Configuración, al pie del menú: cada apartado lo abre quien puede cambiarlo.
+  datos: { label: "Datos de la tienda", path: "/configuracion", opens: "configuracion" },
+  marca: { label: "Tu marca", path: "/configuracion/marca", opens: "configuracion" },
+  equipo: { label: "Equipo", path: "/configuracion/equipo", opens: "equipo.gestionar" },
+  sofi: { label: "Sofi", path: "/configuracion/sofi", opens: "configuracion" },
+  pagos: { label: "Medios de pago", path: "/configuracion/medios-de-pago", opens: "configuracion" },
+  entregas: {
+    label: "Formas de entrega y zonas",
+    path: "/configuracion/entregas",
+    opens: "configuracion",
+  },
+  plan: { label: "Plan y pagos", path: "/configuracion/plan", opens: "plan" },
 } as const satisfies Record<string, { label: string; path: `/${string}`; opens: StorePermission }>
 export type HelpScreen = keyof typeof HELP_SCREENS
 
@@ -52,9 +60,10 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Quién es Sofi y qué hace sola?",
         a: [
           "Sofi es la vendedora de tu tienda. Responde con tu catálogo y tus precios, recomienda, negocia sin bajar del precio mínimo que pusiste y arma el pedido con lo que el cliente ya vio. Le dice cómo pagar y, si paga por link, el pedido queda pagado solo.",
-          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Sofi, en «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Lo que no está en tu catálogo ni en lo que debe saber, no lo inventa: pasa la conversación a una persona. Por ahora la pruebas en Configuración, en Sofi, con «Probar a Sofi», escribiendo como si fueras un cliente. Esos pedidos son de prueba: no mueven el stock ni cuentan en Reportes.",
+          "Probarla sirve al ajustarla: por eso la prueba quien cambia la configuración de la tienda.",
         ],
-        needs: "ventas.atender",
+        needs: "configuracion",
         screen: "sofi",
       },
       {
@@ -71,8 +80,8 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "sofi-lo-que-sabe",
         q: "¿Cómo le enseño a Sofi lo que debe saber?",
         a: [
-          "En Sofi, en «Cómo vende»: cómo se presenta, lo que debe saber (tu horario, los cambios de talla, cómo se cuida el producto) y si está encendida. Ahí también eliges los seguimientos que Argos le encarga, como recordar el pago a quien no pagó.",
-          "Lo cuenta tal cual. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Pagos y entregas: no hace falta repetirlos.",
+          "En Configuración, en Sofi, «Cómo vende»: cómo se presenta, lo que debe saber (tu horario, los cambios de talla, cómo se cuida el producto) y si está encendida. Ahí también eliges los seguimientos que Argos le encarga, como recordar el pago a quien no pagó.",
+          "Lo cuenta tal cual. Tus productos, precios, medios de pago y formas de entrega los toma del catálogo y de Configuración: no hace falta repetirlos.",
         ],
         needs: "configuracion",
         screen: "sofi",
@@ -116,7 +125,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Cómo le mando un link de pago?",
         a: [
           "En el pedido por pagar, «Crear link de pago» y después «Copiar el link», para pegarlo en la conversación. Cuando paga, el pedido pasa a pagado solo.",
-          "Si no aparece el botón, falta conectar Mercado Pago en Pagos y entregas, o venció el precio acordado.",
+          "Si no aparece el botón, falta conectar Mercado Pago en Configuración, en Medios de pago, o venció el precio acordado.",
         ],
         needs: "ventas.atender",
         screen: "pedidos",
@@ -231,10 +240,39 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
     title: "La tienda",
     faqs: [
       {
+        id: "configuracion",
+        q: "¿Dónde se ajusta la tienda y por qué hay quien no ve Configuración?",
+        a: [
+          "En Configuración, al pie del menú: los datos de la tienda y su hora, Tu marca, el equipo, Sofi con «Probar a Sofi», los medios de pago, las formas de entrega y el plan. Se ajusta una vez y lo usan las demás pantallas.",
+          "Cada apartado lo ve quien puede cambiarlo. Quien atiende sin cambiar la configuración no ve Configuración, ni el equipo ni «Probar a Sofi», y sigue vendiendo con lo que ahí se puso.",
+        ],
+        needs: "configuracion",
+        screen: "datos",
+      },
+      {
+        id: "hora-de-la-tienda",
+        q: "¿Cómo cambio el nombre o la hora de la tienda?",
+        a: [
+          "En Configuración, en Datos de la tienda: el nombre, el país y la «Hora de la tienda», con la que se cuentan «hoy», «mañana», los reportes y las promociones para todo el equipo. La moneda queda fija desde que se creó la tienda.",
+        ],
+        needs: "configuracion",
+        screen: "datos",
+      },
+      {
+        id: "tu-marca",
+        q: "¿Cómo pongo mi logo y el color de mi marca?",
+        a: [
+          "En Configuración, en Tu marca: el logo, el nombre que ve el cliente, la foto de portada, el nombre del link de tu tienda y el color. Te sugerimos colores de tu logo y de una foto de tu letrero; cualquier color vale, y los tonos para que se lea bien se calculan solos.",
+          "El color se ve en gestorIA para todo tu equipo. El nombre del link va sin tildes ni espacios, y algunos nombres están reservados.",
+        ],
+        needs: "configuracion",
+        screen: "marca",
+      },
+      {
         id: "medios-de-pago",
         q: "¿Cómo agrego Yape, Plin o una cuenta para transferencias?",
         a: [
-          "En Pagos y entregas, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
+          "En Configuración, en Medios de pago, «Agregar medio»: el nombre como lo dirá Sofi y los datos que envía tal cual (el número, la cuenta, a nombre de quién). Si lo apagas, Sofi deja de ofrecerlo.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -243,16 +281,16 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "formas-de-entrega",
         q: "¿Cómo pongo el costo del envío por zona?",
         a: [
-          "En Pagos y entregas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
+          "En Configuración, en Formas de entrega y zonas, «Agregar forma»: tu reparto, el recojo en tienda o la agencia, con su precio por zona y cuándo llega. También dices hasta cuánto puede rebajarlo Sofi y desde qué compra es gratis.",
         ],
         needs: "configuracion",
-        screen: "pagos",
+        screen: "entregas",
       },
       {
         id: "mercado-pago",
         q: "¿Cómo conecto Mercado Pago?",
         a: [
-          "En Pagos y entregas, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
+          "En Configuración, en Medios de pago, «Conectar Mercado Pago», con la cuenta de la tienda: el dinero de cada link llega directo a ella. Desde entonces, cada pedido por pagar puede llevar su link de pago.",
         ],
         needs: "configuracion",
         screen: "pagos",
@@ -261,7 +299,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "invitar",
         q: "¿Cómo invito a alguien a mi equipo?",
         a: [
-          "En Equipo, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
+          "En Configuración, en Equipo, «Invitar»: su correo y su rol; al elegirlo, cada rol dice lo que puede hacer. Comparte el enlace: entra con la cuenta de ese correo, y la invitación vence en 7 días.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -271,7 +309,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         q: "¿Qué ve soporte cuando lo dejo entrar y cómo sé si entró?",
         a: [
           "Soporte de gestorIA entra solo si lo dejan entrar, y por los minutos que pidió, que empiezan cuando lo dejan entrar. Ve tu tienda, tu catálogo sin costos y tu equipo (nombres, correos y roles). No ve tus pedidos ni tus conversaciones, y no cambia nada. Solo el equipo de gestorIA puede pedirlo.",
-          "En Equipo ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
+          "En Configuración, en Equipo, ves quién miró, desde qué hora, quién lo dejó entrar y cómo terminó. Mientras mira, «Sacar ahora» lo saca al momento.",
         ],
         needs: "equipo.gestionar",
         screen: "equipo",
@@ -289,7 +327,7 @@ export const HELP_GUIDE: readonly HelpGroup[] = [
         id: "plan",
         q: "¿Dónde veo mi plan y lo que se me cobró?",
         a: [
-          "En «Plan y pagos», que se abre desde el nombre de la tienda, arriba en el menú: tu plan, lo que se te cobró, tus pagos y sus avisos. Ahí también subes el comprobante de un pago.",
+          "En Configuración, en «Plan y pagos» (también se abre desde el nombre de la tienda, arriba en el menú): tu plan, lo que se te cobró, tus pagos y sus avisos. Ahí también subes el comprobante de un pago.",
         ],
         needs: "plan",
         screen: "plan",

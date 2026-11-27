@@ -143,7 +143,7 @@ function OnlyOwnerBlocker({ stores }: { stores: MyStore[] }) {
                 key={s.id}
                 variant="outline"
                 size="sm"
-                render={<Link to="/tiendas/$id/equipo" params={{ id: s.id }} />}
+                render={<Link to="/tiendas/$id/configuracion/equipo" params={{ id: s.id }} />}
               >
                 {stores.length === 1 ? "Ir al equipo" : `Equipo de ${s.name}`}
               </Button>

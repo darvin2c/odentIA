@@ -14,6 +14,9 @@ describe("la pantalla desde la que se pide ayuda", () => {
       name: "Catálogo",
     })
     expect(screenOf(`/tiendas/${STORE}/ayuda?pregunta=plan`, STORE).name).toBe("Ayuda")
+    // Configuración: cada apartado con su nombre, y su entrada es «Datos de la tienda».
+    expect(screenOf(`/tiendas/${STORE}/configuracion/marca`, STORE).name).toBe("Tu marca")
+    expect(screenOf(`/tiendas/${STORE}/configuracion`, STORE).name).toBe("Datos de la tienda")
   })
 
   it("una sección que no conoce es el inicio de la tienda, y nunca pasa de 200 letras", () => {

@@ -56,12 +56,16 @@ export function questionStatus(status: string): string {
 /** Las pantallas de la tienda por su ruta, con el nombre que les da el menú. */
 const SCREENS: [path: string, name: string][] = [
   ["/pedidos", "Pedidos"],
-  ["/sofi", "Sofi"],
   ["/catalogo", "Catálogo"],
-  ["/pagos-y-entregas", "Pagos y entregas"],
   ["/reportes", "Reportes"],
-  ["/equipo", "Equipo"],
-  ["/plan", "Plan y pagos"],
+  ["/configuracion/marca", "Tu marca"],
+  ["/configuracion/equipo", "Equipo"],
+  ["/configuracion/sofi", "Sofi"],
+  ["/configuracion/medios-de-pago", "Medios de pago"],
+  ["/configuracion/entregas", "Formas de entrega y zonas"],
+  ["/configuracion/plan", "Plan y pagos"],
+  // Datos de la tienda es la entrada de Configuración: después de sus apartados.
+  ["/configuracion", "Datos de la tienda"],
   ["/ayuda", "Ayuda"],
 ]
 
