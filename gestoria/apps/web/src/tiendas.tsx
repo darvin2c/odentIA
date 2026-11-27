@@ -39,6 +39,8 @@ import {
   regionCountry,
   SubmitButton,
   useHeaderCompact,
+  SideDockProvider,
+  SideDockSlot,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router"
@@ -86,6 +88,7 @@ import {
   type SupportAccess,
   type TeamMember,
 } from "./lib/api"
+import { DraftGuard } from "./lib/draft-guard"
 import { device } from "./lib/avisos"
 import { configGroupsFor } from "./lib/configuracion"
 import { accountToken, authClient, forgetToken, forgetUser } from "./lib/cuenta"
@@ -377,7 +380,16 @@ export function Shell({
               openAsk && !pathname.endsWith("/ayuda") ? <AskForHelp onOpen={openAsk} /> : undefined,
           }}
         >
-          {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+          {/* La columna lateral de los formularios y detalles, la de las clínicas: al lado de la
+              página, sin taparla, con el aviso de borrador al salir por el menú. */}
+          <SideDockProvider draftGuard={DraftGuard}>
+            <div className="flex min-w-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                {bare ? children : <PageShell className="flex flex-col gap-6">{children}</PageShell>}
+              </div>
+              <SideDockSlot />
+            </div>
+          </SideDockProvider>
         </HeaderUtilitiesProvider>
         {/* Uno por tienda: lo escrito en una no aparece en otra. */}
         {store && openAsk ? (
