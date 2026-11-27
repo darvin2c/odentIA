@@ -1,4 +1,4 @@
--- Las reglas de corregir un pedido sin anularlo (ADR 0224). Como en las migraciones de reglas
+-- Las reglas de corregir un pedido sin anularlo (ADR 0226). Como en las migraciones de reglas
 -- anteriores, se concede solo lo que la aplicación usa; qué rol puede hacer qué lo decide el
 -- servidor (`permisos.ts`).
 --

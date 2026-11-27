@@ -1,6 +1,6 @@
 /**
  * Las reglas de los pedidos (paso B4), con el rol de la aplicación y una base real: cada tienda
- * ve solo sus pedidos; al cambiar uno (ADR 0224) el total sigue siendo su suma y las líneas se
+ * ve solo sus pedidos; al cambiar uno (ADR 0226) el total sigue siendo su suma y las líneas se
  * reemplazan enteras; un pago solo se revisa a nombre de quien pide, y deshacer su confirmación
  * lo deja esperando a nadie; la historia y el link de pago son de su tienda.
  */
@@ -124,7 +124,7 @@ describe("los pedidos de cada tienda", () => {
         tx.update(saleOrder).set({ totalCents: 100 }).where(eq(saleOrder.id, orderId)),
       ),
     ).rejects.toThrow()
-    // Con todo lo que suma, sí (ADR 0224): el envío pasa de S/ 10 a S/ 12.
+    // Con todo lo que suma, sí (ADR 0226): el envío pasa de S/ 10 a S/ 12.
     const changed = await inRosa((tx) =>
       tx
         .update(saleOrder)

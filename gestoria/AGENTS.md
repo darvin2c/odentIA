@@ -63,7 +63,7 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   con el precio de `precio.ts`. Ningún precio baja del mínimo; lo cedido (descuento, envío que pone
   la tienda, regalo a su mínimo) sale de un solo margen y queda escrito; el precio negociado vence
   a las 24 horas (ADR 0207).
-- Un pedido se corrige sin anularlo (ADR 0224): «Cambiar» (`changeOrderIn`) es el mismo pedido,
+- Un pedido se corrige sin anularlo (ADR 0226): «Cambiar» (`changeOrderIn`) es el mismo pedido,
   con su número y sus pagos, mientras no sale; vuelve a calcular el precio y el saldo con el total
   nuevo. Las líneas se reemplazan enteras, nunca se editan. «No se entregó» y «Pasar a…» solo
   mueven el día. «Entregado» sin «Salió» deja las dos. Deshacer la confirmación de una captura
@@ -121,6 +121,9 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   Nada sale sin `checkReply` (`revisar.ts`): importes, porcentajes y pagos. Si no pasa dos veces,
   sale el aviso fijo y la conversación pasa a una persona.
 - Arma un pedido solo con una cotización que el cliente ya vio. Nunca confirma un pago.
+- Ofrece una sola vez por conversación, del mismo margen y a cambio de pagar a una hora exacta
+  (ADR 0224). Lo que sabe de la clienta para elegirla sale de su ficha, por cualquier chat
+  (`conversationCustomerOrdersIn` de `clientes.ts`), nunca del teléfono.
 - Los pedidos de «Probar a Sofi» llevan `test`: no mueven stock, no crean un link real y no
   cuentan en Reportes ni en Argos. Ninguna pantalla dice que un mensaje se envió (no hay canal).
 - Argos no usa modelo: Reportes y «Te toca» son cálculos fijos y los seguimientos son textos

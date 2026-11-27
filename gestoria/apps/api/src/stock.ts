@@ -125,7 +125,7 @@ export async function kardex(appDb: Db, person: Person, storeId: string, variant
 
 /**
  * Lo que mueve un pedido en el kardex va con su referencia («Pedido 0147») y, desde la segunda vez,
- * con la de cada paso («Pedido 0147 · cambio 1», ADR 0224): así el índice único de cada referencia
+ * con la de cada paso («Pedido 0147 · cambio 1», ADR 0226): así el índice único de cada referencia
  * sigue diciendo que un paso no se repite, y cambiar dos veces no se salta el segundo cambio.
  */
 const ofOrder = (reference: string) =>

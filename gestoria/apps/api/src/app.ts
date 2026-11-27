@@ -604,7 +604,7 @@ export function createApp(deps: AppDeps) {
       order: await markDelivered(deps.appDb, c.get("person"), id, orderId, input),
     })
   })
-  // Corregir sin anular (ADR 0224): cambiar, no se entregó y pasar a otro día.
+  // Corregir sin anular (ADR 0226): cambiar, no se entregó y pasar a otro día.
   app.post("/api/tiendas/:id/pedidos/:orderId/cambiar/calcular", async (c) => {
     const input = await bodyOf(c, changeInput)
     const { id, orderId } = c.req.param()

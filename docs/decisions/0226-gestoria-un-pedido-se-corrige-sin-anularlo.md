@@ -1,4 +1,4 @@
-# 0224 · En gestorIA, un pedido se corrige sin anularlo
+# 0226 · En gestorIA, un pedido se corrige sin anularlo
 
 Fecha: 2026-11-27 · Estado: aceptada · Entrega 2 del lienzo «gestorIA como odentIA» (tableros 6, 7
 y 12; cambia la regla «lo acordado no se cambia» del ADR 0207, sobre el saldo del ADR 0222)

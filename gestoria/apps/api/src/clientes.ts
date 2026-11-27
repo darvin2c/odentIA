@@ -935,20 +935,8 @@ export async function customerForOrderIn(
   }
   if (options.conversationId) {
     // Sofi vuelve a anotar el pedido en la misma conversación: es la misma clienta.
-    const [previous] = await tx
-      .select({ customerId: saleOrder.customerId })
-      .from(saleOrder)
-      .where(
-        and(
-          eq(saleOrder.storeId, storeId),
-          eq(saleOrder.conversationId, options.conversationId),
-          isNotNull(saleOrder.customerId),
-        ),
-      )
-      .orderBy(desc(saleOrder.createdAt))
-      .limit(1)
-    if (previous?.customerId) {
-      const head = await rootRow(tx, storeId, previous.customerId)
+    const head = await conversationCustomerIn(tx, storeId, options.conversationId)
+    if (head) {
       return {
         id: head.id,
         name: input.customerName || head.name,
@@ -970,6 +958,75 @@ export async function customerForOrderIn(
     })
     .returning({ id: customer.id, name: customer.name, phone: customer.phone })
   return created!
+}
+
+/**
+ * La ficha de la clienta de una conversación (la que se ve, si quedó dentro de otra): la del último
+ * pedido de ese chat que tiene ficha. Nunca se busca por el teléfono ni por el nombre.
+ */
+async function conversationCustomerIn(
+  tx: Db,
+  storeId: string,
+  conversationId: string,
+): Promise<CustomerRow | null> {
+  const [previous] = await tx
+    .select({ customerId: saleOrder.customerId })
+    .from(saleOrder)
+    .where(
+      and(
+        eq(saleOrder.storeId, storeId),
+        eq(saleOrder.conversationId, conversationId),
+        isNotNull(saleOrder.customerId),
+      ),
+    )
+    .orderBy(desc(saleOrder.createdAt))
+    .limit(1)
+  return previous?.customerId ? rootRow(tx, storeId, previous.customerId) : null
+}
+
+/**
+ * Lo que compró la clienta de una conversación, para que Sofi elija qué ofrecer (ADR 0224 sobre
+ * ADR 0223): los pedidos de su ficha y de las que una persona le unió, por cualquier chat o canal,
+ * más los de esta conversación que no tienen ficha (los de prueba y los de antes de Clientes).
+ * Sin ficha, es solo lo de esta conversación: nunca se une por el teléfono.
+ */
+export async function conversationCustomerOrdersIn(
+  tx: Db,
+  storeId: string,
+  conversationId: string,
+) {
+  const head = await conversationCustomerIn(tx, storeId, conversationId)
+  const members = head
+    ? (
+        await tx
+          .select({ id: customer.id })
+          .from(customer)
+          .where(
+            and(
+              eq(customer.storeId, storeId),
+              or(eq(customer.id, head.id), eq(customer.mergedInto, head.id)),
+            ),
+          )
+      ).map((m) => m.id)
+    : []
+  return tx
+    .select({
+      id: saleOrder.id,
+      state: saleOrder.state,
+      createdAt: saleOrder.createdAt,
+      marginUsedCents: saleOrder.marginUsedCents,
+      test: saleOrder.test,
+    })
+    .from(saleOrder)
+    .where(
+      and(
+        eq(saleOrder.storeId, storeId),
+        members.length
+          ? or(eq(saleOrder.conversationId, conversationId), inArray(saleOrder.customerId, members))
+          : eq(saleOrder.conversationId, conversationId),
+      ),
+    )
+    .orderBy(asc(saleOrder.createdAt))
 }
 
 /** La ficha que se ve de la de un pedido (si quedó dentro de otra, esa otra). */
