@@ -1107,3 +1107,74 @@ describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
     expect(steps[0].createdAt).toBe(steps[1].createdAt)
   })
 })
+
+describe("deshacer la confirmación de un pago (tablero 7)", () => {
+  it("con motivo, vuelve a «por confirmar»; si era lo único, el pedido espera y el stock vuelve", async () => {
+    const id = (await call("lucia", "POST", `${base}/pedidos`, order())).json.order.id
+    const form = new FormData()
+    form.set("amountCents", "13900")
+    const sent = await call("lucia", "POST", `${base}/pedidos/${id}/comprobante`, undefined, form)
+    const paymentId = sent.json.order.payments[0].id
+    await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/revision`, {
+      decision: "confirmar",
+    })
+    const sold = (await stockOf(ids.t38)).stock
+    const noReason = await call(
+      "rosa",
+      "POST",
+      `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`,
+      {
+        reason: "",
+      },
+    )
+    expect(noReason.status).toBe(400)
+    const undone = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Lo confirmé en el pedido equivocado",
+    })
+    expect(undone.json.order).toMatchObject({
+      state: "por_confirmar",
+      balance: { confirmedCents: 0, pendingCents: 13900, dueCents: 0, paid: false },
+    })
+    expect(undone.json.order.payments[0]).toMatchObject({
+      status: "por_confirmar",
+      reviewedAt: null,
+      note: "Se deshizo la confirmación: Lo confirmé en el pedido equivocado",
+    })
+    expect((undone.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "pago_deshecho",
+      detail: { motivo: "Lo confirmé en el pedido equivocado", stockDevuelto: 1 },
+    })
+    expect((await stockOf(ids.t38)).stock).toBe(sold + 1)
+    // Se vuelve a confirmar y el stock baja otra vez, con la referencia del paso.
+    const again = await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/revision`, {
+      decision: "confirmar",
+    })
+    expect(again.json.order).toMatchObject({ state: "por_salir", paid: true })
+    expect((await stockOf(ids.t38)).stock).toBe(sold)
+    const twice = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Otra vez",
+    })
+    expect(twice.status).toBe(200)
+    expect(
+      (
+        await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+          reason: "Una tercera",
+        })
+      ).status,
+    ).toBe(409)
+  })
+
+  it("lo cobrado en la puerta no se deshace, ni el pago de un pedido entregado", async () => {
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 13900,
+    })
+    const paymentId = done.json.order.payments[0].id
+    const undo = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Me equivoqué",
+    })
+    expect(undo.status).toBe(409)
+  })
+})

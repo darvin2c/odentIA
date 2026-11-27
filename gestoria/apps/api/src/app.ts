@@ -93,6 +93,8 @@ import {
   reviewPayment,
   sellable,
   shipInput,
+  undoInput,
+  undoPayment,
 } from "./pedidos.js"
 import { argosBoard } from "./sofi/argos.js"
 import {
@@ -560,6 +562,13 @@ export function createApp(deps: AppDeps) {
     const { id, orderId, paymentId } = c.req.param()
     return c.json({
       order: await reviewPayment(deps.appDb, c.get("person"), id, orderId, paymentId, input),
+    })
+  })
+  app.post("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/deshacer", async (c) => {
+    const input = await bodyOf(c, undoInput)
+    const { id, orderId, paymentId } = c.req.param()
+    return c.json({
+      order: await undoPayment(deps.appDb, c.get("person"), id, orderId, paymentId, input),
     })
   })
   app.get("/api/tiendas/:id/pedidos/:orderId/pagos/:paymentId/captura", async (c) => {

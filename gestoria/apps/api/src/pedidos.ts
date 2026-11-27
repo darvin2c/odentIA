@@ -228,6 +228,9 @@ export const missedInput = z.object({ reason, deliverOn: dateOnly })
 /** «Pasar a…»: otro día. */
 export const rescheduleInput = z.object({ deliverOn: dateOnly })
 
+/** «Deshacer» la confirmación de un pago, con motivo escrito. */
+export const undoInput = z.object({ reason })
+
 /** Qué día es en la tienda (su hora, `hora.ts`). */
 async function todayIn(tx: Db, storeId: string, now = new Date()) {
   return (await storeClockIn(tx, storeId, now)).today
@@ -1312,6 +1315,79 @@ export async function reviewPayment(
       )
         await notifyCustomer(tx, order, person.userId, currency, "pago_no_coincide")
     }
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * «Deshacer» la confirmación de una captura (tablero 7), con motivo escrito: se confirmó por error.
+ * El pago vuelve a esperar a una persona y queda en la historia. Si era lo único confirmado de un
+ * pedido que todavía no sale, vuelve a «Pago por confirmar» y lo que salió del stock vuelve: el
+ * stock baja al confirmar el pago. Lo que llegó por el link o se cobró en la puerta no se deshace,
+ * ni el pago de un pedido entregado o anulado.
+ */
+export async function undoPayment(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  paymentId: string,
+  input: z.infer<typeof undoInput>,
+) {
+  if (!z.uuid().safeParse(paymentId).success)
+    throw new StoreError(404, "NOT_FOUND", "Ese pago ya no está")
+  return inStore(appDb, person, storeId, "pagos.confirmar", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    const [payment] = await tx
+      .select()
+      .from(orderPayment)
+      .where(and(eq(orderPayment.id, paymentId), eq(orderPayment.orderId, orderId)))
+    if (!payment) throw new StoreError(404, "NOT_FOUND", "Ese pago ya no está")
+    if (payment.status !== "confirmado")
+      throw new StoreError(
+        409,
+        "PAYMENT_REVIEWED",
+        "Ese pago no está confirmado. Recarga para verlo.",
+      )
+    if (payment.kind !== "comprobante")
+      throw new StoreError(
+        409,
+        "PAYMENT_UNDO",
+        payment.kind === "link"
+          ? "Un pago por el link lo confirmó el link: no se deshace."
+          : "Lo cobrado en la puerta no se deshace.",
+      )
+    if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
+    const undone = `Se deshizo la confirmación: ${input.reason}`
+    await tx
+      .update(orderPayment)
+      .set({
+        status: "por_confirmar",
+        reviewedBy: null,
+        reviewedAt: null,
+        note: (payment.note ? `${payment.note}. ${undone}` : undone).slice(0, 300),
+      })
+      .where(eq(orderPayment.id, paymentId))
+    // Sin otro pago confirmado, lo que todavía no sale vuelve a esperar su pago.
+    let back = 0
+    let state: OrderState = order.state
+    if (
+      order.state === "por_salir" &&
+      order.paymentCollection !== "al_recibir" &&
+      (await balanceIn(tx, order)).confirmedCents === 0
+    ) {
+      if (!order.test)
+        back = await cancelSale(tx, storeId, person.userId, stockReference(order.number))
+      state = "por_confirmar"
+      await setState(tx, order, state)
+    }
+    await logEvent(tx, storeId, orderId, person.userId, "pago_deshecho", {
+      monto: payment.amountCents,
+      medio: payment.methodName,
+      motivo: input.reason,
+      ...(state !== order.state ? { estado: state } : {}),
+      ...(back > 0 ? { stockDevuelto: back } : {}),
+    })
     return orderDetailIn(tx, storeId, orderId)
   })
 }
