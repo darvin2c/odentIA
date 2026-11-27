@@ -292,6 +292,23 @@ describe("Despachos", () => {
     const tomorrow = await board(addDays(today, 1))
     expect((tomorrow.deliveries as Json[]).some((d) => d.id === carla)).toBe(true)
   })
+
+  it("lo que no se entregó y después se anuló ya no sale ni se cuenta", async () => {
+    const before = (await board()).days.find((d: Json) => d.day === today).missed as number
+    const rita = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ customerName: "Rita Salas" }))
+    ).json.order.id as string
+    await call("lucia", "POST", `${base}/pedidos/${rita}/salio`, {})
+    await call("lucia", "POST", `${base}/pedidos/${rita}/no-se-entrego`, {
+      reason: "No lo quiso",
+      deliverOn: addDays(today, 1),
+    })
+    expect((await board()).days.find((d: Json) => d.day === today).missed).toBe(before + 1)
+    await call("lucia", "POST", `${base}/pedidos/${rita}/anular`, { reason: "Ya no lo quiere" })
+    const after = await board()
+    expect((after.deliveries as Json[]).some((d) => d.id === rita)).toBe(false)
+    expect(after.days.find((d: Json) => d.day === today).missed).toBe(before)
+  })
 })
 
 describe("Caja", () => {

@@ -43,10 +43,11 @@ const happenedOn = (action: string, day: string, timeZone: string) => sql`exists
 
 /**
  * Las entregas que salen en el tablero de un día: lo que todavía sale ese día, lo entregado ese día
- * y lo que ese día no se entregó. Caja suma «Cobrar» con este mismo filtro: las dos dicen lo mismo.
+ * y lo que ese día no se entregó (menos lo que después se anuló). Caja suma «Cobrar» con este mismo
+ * filtro: las dos dicen lo mismo.
  */
 export const onBoard = (storeId: string, day: string, today: string, timeZone: string) => sql`(
-  o.store_id = ${storeId} and o.test = false and (
+  o.store_id = ${storeId} and o.test = false and o.state <> 'anulado' and (
     ${dueOn(sql`${day}::date`, today)}
     or (o.state = 'entregado' and ${happenedOn("entregado", day, timeZone)})
     or ${happenedOn("no_entregado", day, timeZone)}))`
@@ -127,7 +128,7 @@ export async function dispatchBoard(
           where o.store_id = ${storeId} and o.test = false and o.state = 'entregado'
             and e.action = 'entregado' and (e.created_at at time zone ${timeZone})::date = d::date) as delivered,
         (select count(distinct e.order_id) from order_event e join sale_order o on o.id = e.order_id
-          where o.store_id = ${storeId} and o.test = false
+          where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
             and e.action = 'no_entregado' and (e.created_at at time zone ${timeZone})::date = d::date) as missed
       from generate_series(${from}::date, ${addDays(chosen, AFTER)}::date, interval '1 day') d
       order by d`)) as { day: string; pending: string; delivered: string; missed: string }[]
