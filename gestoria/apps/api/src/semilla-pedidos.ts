@@ -262,16 +262,17 @@ export async function seedDemoPartPayment(tx: Db, storeId: string): Promise<void
 }
 
 /**
- * Corregir sin anular (lienzo «gestorIA como odentIA», tableros 6 y 7): Andrea pagó la sandalia
+ * Corregir sin anular (lienzo «gestorIA como odentIA», tableros 6 y 7): Gabriela pagó la sandalia
  * beige 37 por Plin y pide la 38 a su oficina del Callao; se cambia el mismo pedido y le falta
  * cobrar la diferencia del envío. Jorge no contestó cuando llegó Kevin: vuelve a salir mañana. Se
- * agrega una vez, aunque la tienda ya tenga sus pedidos.
+ * agrega una vez, aunque la tienda ya tenga sus pedidos. Son otras personas que las de la ficha de
+ * Clientes (`semilla-clientes.ts`): cada pedido sin ficha elegida abre la suya.
  */
 export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void> {
   const [already] = await tx
     .select({ id: saleOrder.id })
     .from(saleOrder)
-    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.customerName, "Andrea Castillo")))
+    .where(and(eq(saleOrder.storeId, storeId), eq(saleOrder.customerName, "Gabriela Rojas")))
     .limit(1)
   if (already) return
   const variant = async (name: string, values: string) =>
@@ -321,8 +322,8 @@ export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void
       }),
     )
 
-  const andrea = await create({
-    customerName: "Andrea Castillo",
+  const gabriela = await create({
+    customerName: "Gabriela Rojas",
     customerPhone: "+51 956 778 899",
     address: "Av. Primavera 820, Surco",
     lines: [{ variantId: b37, quantity: 1 }],
@@ -332,14 +333,14 @@ export async function seedDemoCorrections(tx: Db, storeId: string): Promise<void
     tx,
     lucia,
     storeId,
-    andrea.id,
-    { amountCents: andrea.totalCents, operation: "PLIN-30451" },
+    gabriela.id,
+    { amountCents: gabriela.totalCents, operation: "PLIN-30451" },
     null,
   )
-  await reviewPayment(tx, rosa, storeId, andrea.id, detail.payments.at(-1)!.id, {
+  await reviewPayment(tx, rosa, storeId, gabriela.id, detail.payments.at(-1)!.id, {
     decision: "confirmar",
   })
-  await changeOrderIn(tx, storeId, lucia.userId, andrea.id, {
+  await changeOrderIn(tx, storeId, lucia.userId, gabriela.id, {
     lines: [{ variantId: b38, quantity: 1, unitCents: null, gift: false }],
     deliveryMethodId: reparto.id,
     zone: "Callao",

@@ -3,9 +3,9 @@
  * el de la cuenta: entrar, crear la tienda, invitar y los permisos de cada rol; la copia de las
  * cuentas con los avisos firmados y la revisión diaria.
  */
-import { accountCopy, orderEvent, saleOrder, storeEvent, storeMember } from "@gestoria/db"
+import { accountCopy, customer, orderEvent, saleOrder, storeEvent, storeMember } from "@gestoria/db"
 import { startTestDb, type TestDb } from "@gestoria/db/testing"
-import { eq, sql } from "drizzle-orm"
+import { eq, inArray, sql } from "drizzle-orm"
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
@@ -599,17 +599,32 @@ describe("la tienda de ejemplo", () => {
     expect(body.invitations).toEqual([
       expect.objectContaining({ storeName: "Calzados Rosa", role: "owner" }),
     ])
+    // Clientes (entrega 4): dos Mariela Ríos por mirar, y Andrea Castillo ya unida por una persona.
+    const fichas = await db.ownerDb
+      .select({ name: customer.name, mergedInto: customer.mergedInto })
+      .from(customer)
+      .where(inArray(customer.name, ["Mariela Ríos", "Andrea Castillo"]))
+    expect(fichas.filter((f) => f.name === "Mariela Ríos").map((f) => f.mergedInto)).toEqual([
+      null,
+      null,
+    ])
+    expect(
+      fichas
+        .filter((f) => f.name === "Andrea Castillo")
+        .map((f) => Boolean(f.mergedInto))
+        .sort(),
+    ).toEqual([false, true])
 
-    // Corregir sin anular: Andrea cambió su pedido pagado y Jorge volvió sin entregar.
+    // Corregir sin anular: Gabriela cambió su pedido pagado y Jorge volvió sin entregar.
     const corrected = await db.ownerDb
       .select({ name: saleOrder.customerName, state: saleOrder.state, action: orderEvent.action })
       .from(saleOrder)
       .innerJoin(orderEvent, eq(orderEvent.orderId, saleOrder.id))
-      .where(sql`${saleOrder.customerName} in ('Andrea Castillo', 'Jorge Paredes')
+      .where(sql`${saleOrder.customerName} in ('Gabriela Rojas', 'Jorge Paredes')
         and ${orderEvent.action} in ('cambiado', 'no_entregado')`)
     expect(corrected).toEqual(
       expect.arrayContaining([
-        { name: "Andrea Castillo", state: "por_salir", action: "cambiado" },
+        { name: "Gabriela Rojas", state: "por_salir", action: "cambiado" },
         { name: "Jorge Paredes", state: "por_salir", action: "no_entregado" },
       ]),
     )

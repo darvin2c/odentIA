@@ -131,15 +131,29 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1795779042584,
-      "tag": "0018_corregir_sin_anular",
+      "when": 1795755635689,
+      "tag": "0018_las_clientas",
       "breakpoints": true
     },
     {
       "idx": 19,
       "version": "7",
-      "when": 1795779043822,
-      "tag": "0019_reglas_corregir_sin_anular",
+      "when": 1795755660765,
+      "tag": "0019_reglas_clientas",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795781577601,
+      "tag": "0020_corregir_sin_anular",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795781578972,
+      "tag": "0021_reglas_corregir_sin_anular",
       "breakpoints": true
     }
   ]

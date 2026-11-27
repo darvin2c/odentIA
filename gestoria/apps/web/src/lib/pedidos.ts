@@ -128,6 +128,8 @@ export interface OrderDetail {
   number: string
   state: OrderState
   channel: OrderChannel
+  /** La ficha de la clienta (entrega 4); null en los pedidos de antes y en los de prueba. */
+  customerId: string | null
   customerName: string
   customerPhone: string | null
   address: string
