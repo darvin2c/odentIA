@@ -871,6 +871,9 @@ describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
       ...body,
     })
   const stock = async (variantId: string) => (await stockOf(variantId)).stock as number
+  /** Las pruebas de antes se llevan la 37: cada una que la necesita entra la suya. */
+  const restock = (quantity: number) =>
+    call("rosa", "POST", `${base}/variantes/${v.t37}/movimientos`, { kind: "entrada", quantity })
 
   beforeAll(async () => {
     today = (await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)).json.today
@@ -1071,6 +1074,7 @@ describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
   })
 
   it("«Pasar a…» cambia el día sin anular nada; uno en camino, no", async () => {
+    await restock(2)
     const created = (await call("lucia", "POST", `${base}/pedidos`, andrea({ deliverOn: today })))
       .json.order.id
     const moved = await call("lucia", "POST", `${base}/pedidos/${created}/pasar-a`, {
@@ -1093,7 +1097,18 @@ describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
     expect(late.json.error.message).toContain("No se entregó")
   })
 
+  it("«Cambiar» no pasa un pedido a un día que ya pasó", async () => {
+    await restock(1)
+    const created = (await call("lucia", "POST", `${base}/pedidos`, andrea())).json.order.id
+    const d = new Date(`${today}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 1)
+    const late = await change(created, { deliverOn: d.toISOString().slice(0, 10) })
+    expect(late.status).toBe(400)
+    expect(late.json.error.fields).toMatchObject({ deliverOn: "Elige hoy o un día que viene" })
+  })
+
   it("«Entregado» sin «Salió» deja las dos, con la misma hora", async () => {
+    await restock(1)
     const created = (
       await call("lucia", "POST", `${base}/pedidos`, andrea({ paymentMethodId: ids.efectivo }))
     ).json.order.id

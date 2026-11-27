@@ -1592,6 +1592,11 @@ export async function changeOrderIn(
   if (!NOT_SHIPPED.includes(order.state)) throw notShippedError(order)
   const { currency } = await storeRow(tx, storeId)
   const today = await todayIn(tx, storeId, now)
+  // Un día nuevo no puede ser uno que ya pasó; el que ya tenía se queda aunque haya pasado.
+  if (input.deliverOn && input.deliverOn !== order.deliverOn && input.deliverOn < today)
+    throw new StoreError(400, "VALIDATION_ERROR", "Elige hoy o un día que viene", {
+      deliverOn: "Elige hoy o un día que viene",
+    })
   const result = await priceOrder(
     tx,
     storeId,
