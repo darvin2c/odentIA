@@ -39,6 +39,7 @@ import {
   channelsText,
   dayOf,
   historyText,
+  owedText,
   purchasesText,
   reasonText,
   type SimilarPair,
@@ -191,7 +192,8 @@ export function CustomersLayout() {
                       </span>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
-                      {purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone)}
+                      {owedText(c, store.currency) ??
+                        purchasesText(c.purchases, c.lastPurchaseAt, store.timeZone)}
                     </span>
                   </Link>
                 </li>
@@ -474,6 +476,14 @@ function CustomerCard({ customer }: { customer: CustomerDetail }) {
           </ul>
         </Section>
       ) : null}
+
+      <Section title="Debe">
+        <p className="text-sm">
+          {customer.dueCents > 0
+            ? `${money(customer.dueCents, store.currency)}${customer.dueOnDelivery ? " · contra entrega" : ""}`
+            : "Nada"}
+        </p>
+      </Section>
 
       <Section
         title="Historia"

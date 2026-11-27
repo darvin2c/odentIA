@@ -3,6 +3,7 @@ import {
   type CustomerHistoryItem,
   channelsText,
   historyText,
+  owedText,
   purchasesText,
   reasonText,
   sinceText,
@@ -21,6 +22,14 @@ const item = (over: Partial<CustomerHistoryItem>): CustomerHistoryItem => ({
 })
 
 describe("cómo se dice una clienta", () => {
+  it("lo que debe, con la cifra del servidor, y nada si no debe", () => {
+    expect(owedText({ dueCents: 0, dueOnDelivery: false }, "PEN")).toBeNull()
+    expect(owedText({ dueCents: 3700, dueOnDelivery: false }, "PEN")).toMatch(/^Debe S\/\s37$/)
+    expect(owedText({ dueCents: 20400, dueOnDelivery: true }, "PEN")).toMatch(
+      /^Debe S\/\s204 · contra entrega$/,
+    )
+  })
+
   it("sus canales, sin «otro»", () => {
     expect(channelsText(["whatsapp", "instagram", "otro"])).toBe("WhatsApp · Instagram")
     expect(channelsText([])).toBe("")

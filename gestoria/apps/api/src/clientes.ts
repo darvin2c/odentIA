@@ -30,7 +30,8 @@ import { inStore, StoreError } from "./tiendas.js"
  * - Al estrenar Clientes, los pedidos de antes no tienen ficha: no se unen solos por el teléfono.
  *
  * Lo ve y lo decide todo el equipo que atiende (`ventas.atender`): Dueño, Administrador y Ventas.
- * Lo que debe cada clienta llega con el saldo único de cada pedido (entrega 1), no se calcula aquí.
+ * Lo que debe cada clienta es la suma del saldo único de sus pedidos (`order_balance`, entrega 1):
+ * aquí no se recalcula.
  */
 
 /** Hasta cuántas fichas lista la pantalla de una vez; con más, se busca. */
@@ -227,6 +228,13 @@ export interface CustomerSummary {
   lastOrder: { number: string; createdAt: Date; text: string } | null
   lastAddress: string | null
   since: Date
+  /**
+   * Lo que debe: la suma de lo que falta cobrar de cada compra, tal como lo dice el saldo único
+   * (`order_balance`). Aquí solo se suma, nunca se recalcula.
+   */
+  dueCents: number
+  /** Todo lo que debe se cobra al entregar (contra entrega). */
+  dueOnDelivery: boolean
 }
 
 // Las letras con tilde, también en mayúscula: `lower` de la base no siempre las baja.
@@ -259,6 +267,8 @@ async function summariesOf(
     last_order: string | null
     last_address: string | null
     since: Date | string
+    due_cents: number | string | null
+    due_on_delivery: boolean | null
   }>(sql`
     with groups as (
       select coalesce(c.merged_into, c.id) as root, c.id, c.name, c.phone, c.phone_digits,
@@ -295,7 +305,16 @@ async function summariesOf(
         where g.root = r.id and o.test = false and o.state <> 'anulado') as purchases,
       last.created_at as last_at, last.delivery_zone as last_zone, last.id as last_order,
       nullif(last.address, '') as last_address,
-      (select min(g.created_at) from groups g where g.root = r.id) as since
+      (select min(g.created_at) from groups g where g.root = r.id) as since,
+      -- Lo que debe sale del saldo único de cada pedido (anulado, 0); aquí solo se suma.
+      (select coalesce(sum(b.due_cents), 0) from sale_order o
+        join groups g on g.id = o.customer_id
+        join order_balance b on b.order_id = o.id
+        where g.root = r.id and o.test = false) as due_cents,
+      (select bool_and(o.payment_collection = 'al_recibir') from sale_order o
+        join groups g on g.id = o.customer_id
+        join order_balance b on b.order_id = o.id
+        where g.root = r.id and o.test = false and b.due_cents > 0) as due_on_delivery
     from found f
     join customer r on r.id = f.root
     left join lateral (
@@ -342,6 +361,8 @@ async function summariesOf(
         : null,
       lastAddress: row.last_address,
       since: new Date(row.since),
+      dueCents: Number(row.due_cents ?? 0),
+      dueOnDelivery: Boolean(row.due_on_delivery),
     }
   })
 }
@@ -604,6 +625,8 @@ export async function customerDetail(
         : []
       ).map((row) => [row.id, row]),
     )
+    // Lo que debe, con la misma suma del saldo único que la lista (de todas sus compras).
+    const [owed] = await summariesOf(tx, storeId, { roots: [head.id] })
     // El país de la tienda: con él, un teléfono anotado sin su código se lee como de ese país.
     const [shop] = await tx
       .select({ country: store.country })
@@ -621,6 +644,8 @@ export async function customerDetail(
       noteByName: noteBy,
       noteAt: head.noteAt,
       purchases: counted?.n ?? orders.length,
+      dueCents: owed?.dueCents ?? 0,
+      dueOnDelivery: owed?.dueOnDelivery ?? false,
       orders: orders.map((o) => ({
         id: o.id,
         number: orderNumber(o.number),

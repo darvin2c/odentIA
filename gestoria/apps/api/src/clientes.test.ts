@@ -377,6 +377,24 @@ describe("la ficha", () => {
     await call("rosa", "POST", `${base}/pedidos/${extra.id}/anular`, { reason: "Se arrepintió" })
     expect((await ficha(mariela)).purchases).toBe(2)
   })
+
+  it("lo que debe es la suma del saldo de sus compras, el mismo en la ficha y en la lista", async () => {
+    const before = (await ficha(mariela)).dueCents as number
+    expect(before).toBeGreaterThan(0)
+    const extra = await anotar("lucia", { customerId: mariela })
+    const detail = await ficha(mariela)
+    expect(detail.dueCents).toBe(before + extra.totalCents)
+    // Se paga por comprobante: no es contra entrega.
+    expect(detail.dueOnDelivery).toBe(false)
+    const listed = (await call("lucia", "GET", `${base}/clientes`)).json.customers as Json[]
+    expect(listed.find((c) => c.id === mariela)).toMatchObject({
+      dueCents: detail.dueCents,
+      dueOnDelivery: false,
+    })
+    // Un pedido anulado no se debe.
+    await call("rosa", "POST", `${base}/pedidos/${extra.id}/anular`, { reason: "Se arrepintió" })
+    expect((await ficha(mariela)).dueCents).toBe(before)
+  })
 })
 
 describe("quién ve las fichas", () => {

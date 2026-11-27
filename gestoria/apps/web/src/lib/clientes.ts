@@ -7,7 +7,7 @@ import {
   type OrderState,
   storeToday,
 } from "./pedidos"
-import type { PaymentCollection } from "./tienda"
+import { money, type PaymentCollection } from "./tienda"
 
 /**
  * Lo que la pantalla sabe de las clientas (entrega 4, tablero 8): sus tipos, como los dice el
@@ -29,6 +29,10 @@ export interface CustomerSummary {
   lastOrder: { number: string; createdAt: string; text: string } | null
   lastAddress: string | null
   since: string
+  /** Lo que debe: la suma de lo que falta cobrar de sus compras, del saldo de cada una. */
+  dueCents: number
+  /** Todo lo que debe se cobra al entregar. */
+  dueOnDelivery: boolean
 }
 
 export interface CustomerList {
@@ -80,6 +84,10 @@ export interface CustomerDetail {
   noteByName: string | null
   noteAt: string | null
   purchases: number
+  /** Lo que debe: la suma de lo que falta cobrar de sus compras, del saldo de cada una. */
+  dueCents: number
+  /** Todo lo que debe se cobra al entregar. */
+  dueOnDelivery: boolean
   orders: {
     id: string
     number: string
@@ -132,6 +140,19 @@ export function purchasesText(
   if (purchases === 0) return "Sin compras"
   const count = purchases === 1 ? "1 compra" : `${purchases} compras`
   return lastPurchaseAt ? `${count} · la última ${dayOf(lastPurchaseAt, timeZone, today)}` : count
+}
+
+/**
+ * «Debe S/ 204 · contra entrega», o null si no debe nada. La cifra la dice el servidor con el
+ * saldo de cada compra; aquí solo se dice.
+ */
+export function owedText(
+  owed: { dueCents: number; dueOnDelivery: boolean },
+  currency: string,
+): string | null {
+  if (owed.dueCents <= 0) return null
+  const amount = `Debe ${money(owed.dueCents, currency)}`
+  return owed.dueOnDelivery ? `${amount} · contra entrega` : amount
 }
 
 /** «clienta desde oct 2026» */

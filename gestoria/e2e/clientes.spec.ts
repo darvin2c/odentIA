@@ -149,7 +149,8 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
   await expect(compare).toBeHidden()
   await expect(page.getByText("Dos fichas podrían ser la misma clienta.")).toHaveCount(0)
   await expect(list.getByRole("link", { name: /Mariela Ríos/ })).toHaveCount(1)
-  await expect(list.getByText("2 compras · la última hoy")).toBeVisible()
+  // Lo que debe, en lugar de sus compras: la suma del saldo de sus dos pedidos por pagar.
+  await expect(list.getByText(/^Debe S\/\s278$/)).toBeVisible()
 
   // La ficha: sus dos canales, su teléfono, «Escribirle» por su WhatsApp y su historia.
   await list.getByRole("link", { name: /Mariela Ríos/ }).click()
@@ -164,6 +165,8 @@ test("Clientes: una persona dice que es la misma clienta, la ficha junta todo y 
     "https://wa.me/51987654321",
   )
   await expect(card.getByText("2 compras", { exact: true })).toBeVisible()
+  const owes = card.getByRole("region", { name: "Debe" })
+  await expect(owes.getByText(/^S\/\s278$/)).toBeVisible()
   await expect(
     card.getByText(
       "Rosa Quispe dijo que «Mariela Ríos» es la misma clienta: su ficha quedó dentro de esta.",

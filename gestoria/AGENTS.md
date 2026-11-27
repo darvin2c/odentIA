@@ -93,7 +93,8 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   la deja sola, con las que se le unieron antes. Lo decidido va a `customer_event` y no se vuelve a
   preguntar. Un pedido no cambia de ficha. Sofi abre fichas, pero no las cambia ni anota
   decisiones (`0019_reglas_clientas.sql`).
-- Lo que debe una clienta no se calcula en Clientes: sale del saldo de cada pedido.
+- Lo que debe una clienta («Debe» en la lista y en la ficha) no se calcula en Clientes: es la suma
+  del saldo de cada pedido (`order_balance`), en `summariesOf` de `clientes.ts`.
 - «Escribirle» lee cada teléfono en E.164 con lo común (`toE164` de `@odentia/ui-patterns`): el
   que trae su código vale siempre; el anotado sin él, como del país de la tienda. Sin país, no se
   adivina.
