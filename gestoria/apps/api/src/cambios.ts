@@ -1,5 +1,6 @@
 import {
   type Db,
+  orderRefund,
   type PaymentCollection,
   saleOrder,
   saleOrderLine,
@@ -7,8 +8,9 @@ import {
   storeDeliveryMethod,
   storePaymentMethod,
 } from "@gestoria/db"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { SOFI_ACTOR } from "./agente.js"
 import type { Person } from "./cuenta.js"
 import { formatMoney } from "./dinero.js"
 import {
@@ -21,6 +23,7 @@ import {
   orderDetailIn,
   pad,
   returnableIn,
+  stateError,
   storeRow,
   todayIn,
   trySale,
@@ -28,6 +31,7 @@ import {
   variantPrices,
 } from "./pedidos.js"
 import { autoUnitCents, floorUnitCents, MAX_ORDER_CENTS } from "./precio.js"
+import { balanceIn } from "./saldo.js"
 import { inStore, StoreError } from "./tiendas.js"
 
 /**
@@ -627,4 +631,98 @@ export async function createExchange(
     const created = await createExchangeIn(tx, storeId, person.userId, orderId, input)
     return { order: await orderDetailIn(tx, storeId, created.id), notice: created.notice }
   })
+}
+
+/* ------------------------------------------------------------------- el dinero devuelto */
+
+/** «Anotar la devolución»: cuánto devolvió y con qué medio de la tienda (vacío: el del pedido). */
+export const refundInput = z.object({
+  amountCents: cents.min(1, "Escribe cuánto devolviste"),
+  methodId: z
+    .union([z.uuid("Elige con qué lo devolviste"), z.literal("")])
+    .nullish()
+    .transform((value) => value || null),
+})
+
+/**
+ * Anota el dinero que la tienda devolvió de lo que sobra de un pedido (tablero 17): un cambio que
+ * cuesta menos, una devolución o un pago doble. gestorIA no mueve el dinero: queda lo que la persona
+ * devolvió desde su app, con su medio y su nombre. No se devuelve más de lo que sobra (el saldo
+ * único) y lo hace quien confirma pagos.
+ */
+export async function recordRefund(
+  appDb: Db,
+  person: Person,
+  storeId: string,
+  orderId: string,
+  input: z.infer<typeof refundInput>,
+) {
+  uuidOr404(orderId)
+  return inStore(appDb, person, storeId, "pagos.confirmar", async (tx) => {
+    const order = await lockOrder(tx, storeId, orderId)
+    if (order.state === "anulado") throw stateError(order)
+    const { currency } = await storeRow(tx, storeId)
+    const money = (cents: number) => formatMoney(cents, currency)
+    const { overCents } = await balanceIn(tx, order)
+    if (overCents === 0)
+      throw new StoreError(
+        409,
+        "NOTHING_OVER",
+        `El pedido ${pad(order.number)} no tiene nada que devolver. Recarga para verlo.`,
+      )
+    if (input.amountCents > overCents)
+      throw new StoreError(
+        400,
+        "VALIDATION_ERROR",
+        `Sobran ${money(overCents)}: no devuelvas más`,
+        {
+          amountCents: `Sobran ${money(overCents)}: no devuelvas más`,
+        },
+      )
+    const methods = await tx
+      .select()
+      .from(storePaymentMethod)
+      .where(eq(storePaymentMethod.storeId, storeId))
+      .orderBy(asc(storePaymentMethod.createdAt))
+    const method = input.methodId
+      ? methods.find((m) => m.id === input.methodId && m.isActive)
+      : (methods.find((m) => m.id === order.paymentMethodId && m.isActive) ??
+        methods.find((m) => m.isActive && m.collection !== "link"))
+    if (!method)
+      throw new StoreError(400, "VALIDATION_ERROR", "Elige con qué lo devolviste", {
+        methodId: "Elige con qué lo devolviste",
+      })
+    await tx.insert(orderRefund).values({
+      storeId,
+      orderId,
+      amountCents: input.amountCents,
+      methodName: method.name,
+      methodType: method.typeCode,
+      createdBy: person.userId,
+    })
+    const left = overCents - input.amountCents
+    await logEvent(tx, storeId, orderId, person.userId, "dinero_devuelto", {
+      monto: input.amountCents,
+      medio: method.name,
+      moneda: currency,
+      ...(left > 0 ? { porDevolver: left } : {}),
+    })
+    return orderDetailIn(tx, storeId, orderId)
+  })
+}
+
+/**
+ * Lo que volvió (a lo que se pagó) de los pedidos que armó gestorIA sola, desde `since` (ISO): lo
+ * que el cobro del 1 % descuenta (tablero 18; el cobro llega en la Fase C). Cuenta cuando vuelve a
+ * la tienda, no cuando se anota el cambio. Lo de prueba no cuenta.
+ */
+export async function agentReturnsIn(tx: Db, storeId: string, since: string): Promise<number> {
+  const [row] = await tx.execute<{ cents: string | number }>(sql`
+    select coalesce(sum(r.quantity * r.unit_cents), 0) as cents
+    from sale_order_return r
+    join sale_order c on c.id = r.order_id
+    join sale_order o on o.id = c.exchange_of_id
+    where r.store_id = ${storeId} and r.returned_at >= ${since}
+      and o.created_by = ${SOFI_ACTOR} and o.test = false`)
+  return Number(row?.cents ?? 0)
 }

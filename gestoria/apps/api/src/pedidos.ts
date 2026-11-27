@@ -8,6 +8,7 @@ import {
   type OrderState,
   orderEvent,
   orderPayment,
+  orderRefund,
   type PaymentCollection,
   type PaymentTypeCode,
   product,
@@ -1029,6 +1030,19 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     order.state === "entregado" && !order.test
       ? await returnableIn(tx, storeId, order.id, lines)
       : []
+  // El dinero que la tienda devolvió de lo que sobra, con su medio y quién lo hizo.
+  const refunds = await tx
+    .select({
+      id: orderRefund.id,
+      amountCents: orderRefund.amountCents,
+      methodName: orderRefund.methodName,
+      createdAt: orderRefund.createdAt,
+      createdByName: accountCopy.name,
+    })
+    .from(orderRefund)
+    .leftJoin(accountCopy, eq(accountCopy.userId, orderRefund.createdBy))
+    .where(eq(orderRefund.orderId, order.id))
+    .orderBy(asc(orderRefund.createdAt))
   return {
     ...rest,
     number: pad(order.number),
@@ -1040,6 +1054,8 @@ export async function orderDetailIn(tx: Db, storeId: string, orderId: string) {
     returns,
     /** Lo que todavía puede volver de este pedido entregado, por variante. */
     returnable,
+    /** Lo que la tienda devolvió de lo que sobra («Devuelto · Plin − S/ 129»). */
+    refunds,
     /** Lo armó Sofi en la conversación. */
     bySofi: order.createdBy === SOFI_ACTOR,
     /** La tienda conectó su link de pago: se puede ofrecer «Link de pago». */
@@ -2071,6 +2087,18 @@ export async function cancelOrderIn(
   const order = await lockOrder(tx, storeId, orderId)
   if (order.state === "entregado" || order.state === "anulado") throw stateError(order)
   const paid = await moneyReceived(tx, orderId)
+  // Lo devuelto ya salió de la caja: el pedido queda con su historia, sin anularse.
+  const [refunded] = await tx
+    .select({ id: orderRefund.id })
+    .from(orderRefund)
+    .where(eq(orderRefund.orderId, orderId))
+    .limit(1)
+  if (refunded)
+    throw new StoreError(
+      409,
+      "REFUNDED",
+      `Ya anotaste dinero devuelto en el pedido ${pad(order.number)}: no se anula.`,
+    )
   if (paid && !options.mayCancelPaid)
     throw new StoreError(
       403,

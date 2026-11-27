@@ -1348,6 +1348,40 @@ describe("cambiar o devolver después de entregar (Andrea, tablero 17)", () => {
       totalCents: -12900,
       balance: { dueCents: 0, overCents: 12900 },
     })
+    // «Anotar la devolución»: no más de lo que sobra, con su medio y quién lo devolvió.
+    const id = created.json.order.id as string
+    const before = (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    const tooMuch = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 20000,
+    })
+    expect(tooMuch.status).toBe(400)
+    expect(tooMuch.json.error.fields).toHaveProperty("amountCents")
+    const refunded = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 12900,
+      methodId: ids.yape,
+    })
+    expect(refunded.status).toBe(200)
+    expect(refunded.json.order).toMatchObject({
+      balance: { dueCents: 0, overCents: 0, refundedCents: 12900, paid: true },
+      refunds: [expect.objectContaining({ amountCents: 12900, methodName: "Yape" })],
+    })
+    expect(refunded.json.order.refunds[0].createdByName).toBe("Lucía Torres")
+    expect((refunded.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "dinero_devuelto",
+      detail: { monto: 12900, medio: "Yape" },
+    })
+    const again = await call("lucia", "POST", `${base}/pedidos/${id}/devolucion`, {
+      amountCents: 100,
+    })
+    expect(again.status).toBe(409)
+    // Lo devuelto ya salió de la caja: el cambio no se anula, y Reportes deja de contarlo.
+    const cancel = await call("rosa", "POST", `${base}/pedidos/${id}/anular`, {
+      reason: "Me equivoqué",
+    })
+    expect(cancel.status).toBe(409)
+    const after = (await call("rosa", "GET", `${base}/reportes?periodo=mes`)).json
+    expect(after.sold.refundedCents - before.sold.refundedCents).toBe(12900)
+    expect(before.sold.cents - after.sold.cents).toBe(12900)
   })
 
   it("un cambio no se «Cambia», y un pedido sin entregar no tiene cambio", async () => {

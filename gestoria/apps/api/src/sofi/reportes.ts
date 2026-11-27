@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm"
 import { z } from "zod"
 import { SOFI_ACTOR } from "../agente.js"
 import type { Person } from "../cuenta.js"
+import { agentReturnsIn } from "../cambios.js"
 import { addDays, startOfDay, storeClockIn, weekdayOf } from "../hora.js"
 import { inStore } from "../tiendas.js"
 
@@ -44,12 +45,17 @@ export async function storeReport(
     // postgres.js no recibe fechas dentro de `sql`: van como texto ISO.
     const since = from.toISOString()
     const at = now.toISOString()
-    // Vendido y cobrado: los pagos confirmados del periodo, por pedido.
+    // Vendido y cobrado: los pagos confirmados del periodo, por pedido, menos lo que la tienda
+    // devolvió en el periodo (un cambio que costó menos o una devolución, tablero 17).
     const [sold] = await tx.execute<{ cents: string; orders: string }>(sql`
       select coalesce(sum(p.amount_cents), 0) as cents, count(distinct p.order_id) as orders
       from order_payment p join sale_order o on o.id = p.order_id
       where p.store_id = ${storeId} and p.status = 'confirmado' and o.test = false
         and p.reviewed_at >= ${since}`)
+    const [refunded] = await tx.execute<{ cents: string }>(sql`
+      select coalesce(sum(r.amount_cents), 0) as cents
+      from order_refund r join sale_order o on o.id = r.order_id
+      where r.store_id = ${storeId} and o.test = false and r.created_at >= ${since}`)
     // Lo que falta cobrar y lo que espera a una persona, hoy, del saldo de cada pedido. Un
     // pedido por pagar con el precio vencido ya no se cuenta: no se va a cobrar así.
     const [pending] = await tx.execute<{
@@ -134,15 +140,21 @@ export async function storeReport(
       from sale_order o
       where o.store_id = ${storeId} and o.test = false and o.state <> 'anulado'
         and o.created_by = ${SOFI_ACTOR} and o.created_at >= ${since}`)
+    // Lo que volvió de lo que vendió Sofi: el cobro del 1 % lo descuenta (tablero 18).
+    const agentReturned = await agentReturnsIn(tx, storeId, since)
     const soldOrders = n(sold?.orders)
+    const soldCents = n(sold?.cents) - n(refunded?.cents)
     const conversations = n(agent?.conversations)
     return {
       period,
       from,
       sold: {
-        cents: n(sold?.cents),
+        /** Lo cobrado menos lo devuelto. */
+        cents: soldCents,
         orders: soldOrders,
-        ticketCents: soldOrders ? Math.round(n(sold?.cents) / soldOrders) : 0,
+        ticketCents: soldOrders ? Math.round(soldCents / soldOrders) : 0,
+        /** Lo que la tienda devolvió en el periodo: ya está restado. */
+        refundedCents: n(refunded?.cents),
       },
       pending: {
         /** Los pagos que esperan a una persona: no son «falta cobrar». */
@@ -175,6 +187,8 @@ export async function storeReport(
         passedToPerson: n(agent?.passed),
         orders: n(bySofi?.orders),
         cents: n(bySofi?.cents),
+        /** Lo que volvió a la tienda de sus pedidos, a lo que se pagó. */
+        returnedCents: agentReturned,
         marginCents: n(bySofi?.margin),
         marginUsedCents: n(bySofi?.used),
         costMicros: n(agent?.cost),

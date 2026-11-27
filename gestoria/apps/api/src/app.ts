@@ -18,7 +18,13 @@ import {
   supportInput,
 } from "./acuerdo.js"
 import { receiveAdminRequest } from "./acuerdo-pedidos.js"
-import { createExchange, exchangeInput, previewExchange } from "./cambios.js"
+import {
+  createExchange,
+  exchangeInput,
+  previewExchange,
+  recordRefund,
+  refundInput,
+} from "./cambios.js"
 import {
   addPhoto,
   catalog,
@@ -689,6 +695,12 @@ export function createApp(deps: AppDeps) {
     const input = await bodyOf(c, exchangeInput)
     const { id, orderId } = c.req.param()
     return c.json(await createExchange(deps.appDb, c.get("person"), id, orderId, input), 201)
+  })
+  // «Anotar la devolución»: el dinero que la tienda devolvió de lo que sobra, con su medio.
+  app.post("/api/tiendas/:id/pedidos/:orderId/devolucion", async (c) => {
+    const input = await bodyOf(c, refundInput)
+    const { id, orderId } = c.req.param()
+    return c.json({ order: await recordRefund(deps.appDb, c.get("person"), id, orderId, input) })
   })
   app.post("/api/tiendas/:id/pedidos/:orderId/anular", async (c) => {
     const input = await bodyOf(c, cancelInput)

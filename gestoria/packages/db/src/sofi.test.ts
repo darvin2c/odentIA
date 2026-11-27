@@ -14,6 +14,7 @@ import {
   type Db,
   enterStore,
   orderPayment,
+  orderRefund,
   product,
   productVariant,
   saleOrder,
@@ -341,6 +342,19 @@ describe("Sofi y los cambios (tablero 24)", () => {
           quantity: 1,
           unitCents: 12900,
           reason: "Le quedó chica",
+        }),
+      ),
+    ).rejects.toThrow()
+    // Ni devuelve dinero.
+    await expect(
+      asSofi((tx) =>
+        tx.insert(orderRefund).values({
+          storeId: calzados,
+          orderId,
+          amountCents: 100,
+          methodName: "Yape",
+          methodType: "68",
+          createdBy: "agente:sofi",
         }),
       ),
     ).rejects.toThrow()

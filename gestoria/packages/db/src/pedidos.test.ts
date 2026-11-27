@@ -14,6 +14,7 @@ import {
   orderBalance,
   orderEvent,
   orderPayment,
+  orderRefund,
   product,
   productVariant,
   saleOrder,
@@ -511,5 +512,73 @@ describe("los cambios y devoluciones (tablero 17)", () => {
       ),
     ).toEqual([])
     expect(await inMario((tx) => tx.select().from(saleOrderReturn))).toEqual([])
+  })
+})
+
+describe("el dinero devuelto (tablero 17)", () => {
+  it("lo devuelto se resta de lo pagado en el saldo, a nombre de quien lo devolvió, y no se edita", async () => {
+    // Una devolución: vuelve S/ 129, sin nada que se lleve ni envío. El total queda en − S/ 129.
+    const refundOrder = await inRosa(async (tx) => {
+      const [row] = await tx
+        .insert(saleOrder)
+        .values({
+          ...anOrder(calzados, 70, rosa.userId),
+          state: "por_salir",
+          exchangeOfId: orderId,
+          returnCreditCents: 12900,
+          itemsAutoCents: 0,
+          subtotalCents: 0,
+          deliveryListCents: 0,
+          deliveryCents: 0,
+          totalCents: -12900,
+        })
+        .returning({ id: saleOrder.id })
+      return row!.id
+    })
+    const balanceOf = () =>
+      inRosa(async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(orderBalance)
+          .where(eq(orderBalance.orderId, refundOrder))
+        return row
+      })
+    expect(await balanceOf()).toMatchObject({
+      dueCents: 0,
+      overCents: 12900,
+      refundedCents: 0,
+      paid: true,
+    })
+    const refund = {
+      storeId: calzados,
+      orderId: refundOrder,
+      amountCents: 12900,
+      methodName: "Plin",
+      methodType: "68" as const,
+      createdBy: rosa.userId,
+    }
+    // Nadie anota lo devuelto a nombre de otro, ni en otra tienda.
+    await expect(
+      inRosa((tx) => tx.insert(orderRefund).values({ ...refund, createdBy: mario.userId })),
+    ).rejects.toThrow()
+    await expect(
+      inMario((tx) => tx.insert(orderRefund).values({ ...refund, createdBy: mario.userId })),
+    ).rejects.toThrow()
+    await inRosa((tx) => tx.insert(orderRefund).values(refund))
+    expect(await balanceOf()).toMatchObject({
+      dueCents: 0,
+      overCents: 0,
+      refundedCents: 12900,
+      paid: true,
+    })
+    await expect(
+      inRosa((tx) =>
+        tx.update(orderRefund).set({ amountCents: 1 }).where(eq(orderRefund.orderId, refundOrder)),
+      ),
+    ).rejects.toThrow()
+    await expect(
+      inRosa((tx) => tx.delete(orderRefund).where(eq(orderRefund.orderId, refundOrder))),
+    ).rejects.toThrow()
+    expect(await inMario((tx) => tx.select().from(orderRefund))).toEqual([])
   })
 })

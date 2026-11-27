@@ -1104,12 +1104,48 @@ export const orderPayment = pgTable(
 )
 
 /**
+ * El dinero que la tienda devolvió (tablero 17): lo que sobra de un pedido (un cambio que cuesta
+ * menos, una devolución o un pago doble), con su medio, quién lo devolvió y cuándo. gestorIA no
+ * mueve el dinero: anota lo que la persona devolvió desde su app. Solo se agrega.
+ */
+export const orderRefund = pgTable(
+  "order_refund",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    storeId: uuid("store_id").notNull(),
+    orderId: uuid("order_id").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** Con qué lo devolvió: el medio de pago de la tienda, copiado («Plin»), y su tipo de UN/CEFACT 4461. */
+    methodName: text("method_name").notNull(),
+    methodType: text("method_type").$type<PaymentTypeCode>().notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("order_refund_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "order_refund_method_check",
+      sql`char_length(btrim(${table.methodName})) between 1 and 80 and ${inList("method_type", PAYMENT_TYPE_CODES)}`,
+    ),
+    foreignKey({
+      name: "order_refund_order_fkey",
+      columns: [table.storeId, table.orderId],
+      foreignColumns: [saleOrder.storeId, saleOrder.id],
+    }).onDelete("cascade"),
+    index("order_refund_order_idx").on(table.orderId, table.createdAt),
+    index("order_refund_store_idx").on(table.storeId, table.createdAt),
+  ],
+)
+
+/**
  * El saldo de cada pedido (ADR 0222), calculado en un solo lugar: esta vista, que leen el pedido,
- * las listas, Reportes, Argos y Sofi. Falta cobrar = total − confirmado − por confirmar (nunca
- * menos de 0, y 0 si se anuló). «Pagado» es no deber nada con todo confirmado; lo confirmado que
- * pasa del total es un pago doble para revisar. La vista corre con los permisos de quien la lee
- * (`security_invoker`): cada tienda ve solo lo suyo, con las reglas de sus tablas. Se crea a mano
- * en `0016_el_saldo_y_el_pago_en_partes.sql`.
+ * las listas, Reportes, Argos y Sofi. Lo pagado es lo confirmado menos lo devuelto
+ * (`order_refund`). Falta cobrar = total − pagado − por confirmar (nunca menos de 0, y 0 si se
+ * anuló). «Pagado» es no deber nada con todo confirmado; lo pagado que pasa del total sobra: un
+ * pago doble, o lo que la tienda devuelve de un cambio o una devolución (tablero 17). La vista
+ * corre con los permisos de quien la lee (`security_invoker`): cada tienda ve solo lo suyo, con
+ * las reglas de sus tablas. Se crea a mano en `0016_el_saldo_y_el_pago_en_partes.sql` y suma lo
+ * devuelto en `0026_el_dinero_devuelto.sql`.
  */
 export const orderBalance = pgView("order_balance", {
   orderId: uuid("order_id").notNull(),
@@ -1120,6 +1156,8 @@ export const orderBalance = pgView("order_balance", {
   dueCents: integer("due_cents").notNull(),
   overCents: integer("over_cents").notNull(),
   paid: boolean("paid").notNull(),
+  /** Lo que la tienda devolvió. */
+  refundedCents: integer("refunded_cents").notNull(),
 }).existing()
 
 /**
@@ -1144,8 +1182,10 @@ export const ORDER_EVENT_ACTIONS = [
   "no_entregado",
   "reprogramado",
   "pago_deshecho",
-  // Cambios y devoluciones (entrega 8, tablero 17): en el pedido entregado, el cambio que salió de él.
+  // Cambios y devoluciones (entrega 8, tablero 17): en el pedido entregado, el cambio que salió de él;
+  // y el dinero que la tienda devolvió de lo que sobra.
   "cambio",
+  "dinero_devuelto",
 ] as const
 export type OrderEventAction = (typeof ORDER_EVENT_ACTIONS)[number]
 

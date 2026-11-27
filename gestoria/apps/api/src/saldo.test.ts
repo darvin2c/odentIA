@@ -1,5 +1,5 @@
 /**
- * El pago doble (ADR 0222), sin base: un pago en partes no lo es; solo lo que pasa del total. El
+ * El pago doble (ADR 0222) y lo que se devuelve (tablero 17), sin base: un pago en partes no lo es; solo lo que pasa del total. El
  * saldo mismo lo calcula la base (`order_balance`) y se prueba con ella en `@gestoria/db`.
  */
 import { describe, expect, it } from "vitest"
@@ -30,6 +30,17 @@ describe("cuándo un pago es «Pago doble»", () => {
       dueCents: 11700,
       overCents: 0,
       paid: false,
+      refundedCents: 0,
     })
+  })
+
+  it("una devolución sin pagos (total bajo cero) no debe nada: sobra lo que se devuelve", () => {
+    expect(unpaidBalance(-12900)).toMatchObject({ dueCents: 0, overCents: 12900, paid: true })
+  })
+
+  it("lo devuelto ya no cuenta como pagado", () => {
+    // Pagó S/ 139 dos veces y la tienda le devolvió S/ 139: otra captura sí pasaría del total.
+    const balance = { ...unpaidBalance(13900), confirmedCents: 27800, refundedCents: 13900 }
+    expect(overIfConfirmed(balance, 13900, { amountCents: 100, status: "por_confirmar" })).toBe(100)
   })
 })

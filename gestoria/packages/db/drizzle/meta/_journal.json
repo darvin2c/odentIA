@@ -183,6 +183,20 @@
       "when": 1795789299780,
       "tag": "0025_reglas_cambios_y_devoluciones",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795789931547,
+      "tag": "0026_el_dinero_devuelto",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795789949397,
+      "tag": "0027_reglas_dinero_devuelto",
+      "breakpoints": true
     }
   ]
 }
