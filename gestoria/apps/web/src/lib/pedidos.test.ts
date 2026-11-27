@@ -4,7 +4,15 @@
  * nombra.
  */
 import { describe, expect, it } from "vitest"
-import { type Balance, dayName, stateName, storeToday } from "./pedidos"
+import {
+  type Balance,
+  dayName,
+  missedReason,
+  nextDay,
+  type OrderEvent,
+  stateName,
+  storeToday,
+} from "./pedidos"
 
 const balance = (over: Partial<Balance>): Balance => ({
   confirmedCents: 0,
@@ -59,5 +67,32 @@ describe("el día de la tienda", () => {
     expect(storeToday("America/Lima", at)).toBe("2026-11-25")
     expect(dayName("2026-11-26", storeToday("America/Lima", at))).toBe("mañana")
     expect(dayName("2026-11-25", storeToday("America/Lima", at))).toBe("hoy")
+  })
+})
+
+describe("volvió sin entregar (tablero 6)", () => {
+  const event = (
+    action: OrderEvent["action"],
+    detail: Record<string, unknown> = {},
+  ): OrderEvent => ({
+    id: action,
+    action,
+    detail,
+    createdAt: "2026-11-25T19:05:00Z",
+    actorName: "Kevin",
+    byLink: false,
+  })
+
+  it("el 0142 no contestó y vuelve a salir: se dice el motivo hasta que sale otra vez", () => {
+    const back = [event("salio"), event("no_entregado", { motivo: "No contestó" })]
+    expect(missedReason({ state: "por_salir", events: back })).toBe("No contestó")
+    expect(missedReason({ state: "en_camino", events: [...back, event("salio")] })).toBeNull()
+    expect(missedReason({ state: "por_salir", events: [event("salio")] })).toBeNull()
+  })
+
+  it("«Mañana» es el día siguiente en el calendario, también a fin de mes", () => {
+    expect(nextDay("2026-11-26")).toBe("2026-11-27")
+    expect(nextDay("2026-11-30")).toBe("2026-12-01")
+    expect(nextDay("2026-12-31")).toBe("2027-01-01")
   })
 })

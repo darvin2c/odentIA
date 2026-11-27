@@ -826,3 +826,370 @@ describe("la lista y quién puede", () => {
     expect(await response.json()).toEqual({ message: "Recibido" })
   })
 })
+
+describe("corregir sin anular (Andrea y Jorge, tableros 6 y 7)", () => {
+  const v = { t37: "", t38: "", zonas: "" }
+  let today = ""
+  /** El día siguiente al de la tienda («2026-11-26»). */
+  const tomorrow = () => {
+    const d = new Date(`${today}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 1)
+    return d.toISOString().slice(0, 10)
+  }
+  const andrea = (over: Json = {}) =>
+    order({
+      customerName: "Andrea Castillo",
+      lines: [{ variantId: v.t37, quantity: 1 }],
+      deliveryMethodId: v.zonas,
+      zone: "Surco y Miraflores",
+      ...over,
+    })
+  /** Anota y paga con una captura confirmada: el stock ya salió. */
+  const paidOrder = async (over: Json = {}) => {
+    const created = await call("lucia", "POST", `${base}/pedidos`, andrea(over))
+    const id = created.json.order.id as string
+    const form = new FormData()
+    form.set("amountCents", String(created.json.order.totalCents))
+    const sent = await call("lucia", "POST", `${base}/pedidos/${id}/comprobante`, undefined, form)
+    await call(
+      "lucia",
+      "POST",
+      `${base}/pedidos/${id}/pagos/${sent.json.order.payments[0].id}/revision`,
+      {
+        decision: "confirmar",
+      },
+    )
+    return id
+  }
+  const change = (id: string, body: Json, path = "cambiar") =>
+    call("lucia", "POST", `${base}/pedidos/${id}/${path}`, {
+      lines: [{ variantId: v.t37, quantity: 1 }],
+      deliveryMethodId: v.zonas,
+      zone: "Surco y Miraflores",
+      address: "Av. Primavera 123, Surco",
+      deliverOn: null,
+      ...body,
+    })
+  const stock = async (variantId: string) => (await stockOf(variantId)).stock as number
+  /** Las pruebas de antes se llevan la 37: cada una que la necesita entra la suya. */
+  const restock = (quantity: number) =>
+    call("rosa", "POST", `${base}/variantes/${v.t37}/movimientos`, { kind: "entrada", quantity })
+
+  beforeAll(async () => {
+    today = (await call("lucia", "GET", `${base}/pedidos?filtro=hoy`)).json.today
+    const sandalia = await call("rosa", "POST", `${base}/productos`, {
+      name: "Sandalia beige",
+      listPriceCents: 12900,
+      options: [{ name: "Talla", values: ["37", "38"] }],
+    })
+    const variants = (await call("rosa", "GET", `${base}/productos/${sandalia.json.product.id}`))
+      .json.product.variants as Json[]
+    v.t37 = variants.find((x) => x.optionValues[0] === "37")!.id
+    v.t38 = variants.find((x) => x.optionValues[0] === "38")!.id
+    for (const [variantId, quantity] of [
+      [v.t37, 3],
+      [v.t38, 2],
+    ] as const)
+      await call("rosa", "POST", `${base}/variantes/${variantId}/movimientos`, {
+        kind: "entrada",
+        quantity,
+      })
+    v.zonas = (
+      await call("rosa", "POST", `${base}/formas-de-entrega`, {
+        name: "Reparto por zona",
+        type: "DeliveryModeOwnFleet",
+        cost: "por_zona",
+        zones: [
+          { name: "Surco y Miraflores", priceCents: 1000 },
+          { name: "San Isidro y Lince", priceCents: 1200 },
+          { name: "Centro", priceCents: 500 },
+        ],
+        acceptsPayOnDelivery: true,
+      })
+    ).json.method.id
+  })
+
+  let id = ""
+  let number = ""
+  it("«Cambiar» la talla y la zona de un pedido pagado: mismo número, el pago se queda y falta S/ 2", async () => {
+    id = await paidOrder()
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual([2, 2])
+    const to38 = {
+      lines: [{ variantId: v.t38, quantity: 1 }],
+      zone: "San Isidro y Lince",
+      address: "Av. Rivera Navarrete 501, of. 802",
+    }
+    // La vista previa usa la misma operación y no guarda nada.
+    const preview = await change(id, to38, "cambiar/calcular")
+    expect(preview.json).toMatchObject({
+      totalCents: 14100,
+      balance: { confirmedCents: 13900, dueCents: 200, paid: false },
+      stockPending: false,
+    })
+    expect(preview.json.changes).toContain("Sandalia beige 37 → 38")
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual([2, 2])
+    const saved = await change(id, to38)
+    expect(saved.status).toBe(200)
+    number = saved.json.order.number
+    expect(saved.json.order).toMatchObject({
+      id,
+      state: "por_salir",
+      totalCents: 14100,
+      deliveryZone: "San Isidro y Lince",
+      address: "Av. Rivera Navarrete 501, of. 802",
+      balance: { confirmedCents: 13900, dueCents: 200, overCents: 0 },
+      stockPending: false,
+    })
+    expect(saved.json.order.payments).toHaveLength(1)
+    expect(saved.json.order.payments[0].status).toBe("confirmado")
+    expect(saved.json.order.lines).toHaveLength(1)
+    expect(saved.json.order.lines[0].variantName).toBe("38")
+    const changed = (saved.json.order.events as Json[]).find((e) => e.action === "cambiado")!
+    expect(changed.detail.cambios).toEqual(
+      expect.arrayContaining([
+        "Sandalia beige 37 → 38",
+        "entrega: Reparto por zona (Surco y Miraflores) → Reparto por zona (San Isidro y Lince)",
+      ]),
+    )
+    expect(changed.detail.falta).toBe(200)
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual([3, 1])
+  })
+
+  it("cambiar dos veces: cada cambio con su referencia y el stock igual a lo que salió", async () => {
+    const back = await change(id, { lines: [{ variantId: v.t37, quantity: 1 }] })
+    expect(back.status).toBe(200)
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual([2, 2])
+    const mine = (movements: Json[]) =>
+      movements
+        .filter((m) => String(m.reference).startsWith(`Pedido ${number}`))
+        .map((m) => `${m.kind} ${m.quantity} ${m.reference}`)
+        .reverse()
+    expect(mine((await stockOf(v.t37)).movements)).toEqual([
+      `venta -1 Pedido ${number}`,
+      `anulacion 1 Pedido ${number} · cambio 1`,
+      `venta -1 Pedido ${number} · cambio 2`,
+    ])
+    expect(mine((await stockOf(v.t38)).movements)).toEqual([
+      `venta -1 Pedido ${number} · cambio 1`,
+      `anulacion 1 Pedido ${number} · cambio 2`,
+    ])
+    // Anular después de cambiar devuelve lo que tiene fuera, una vez.
+    const other = await paidOrder()
+    await change(other, { lines: [{ variantId: v.t38, quantity: 1 }] })
+    const before = [await stock(v.t37), await stock(v.t38)]
+    await call("rosa", "POST", `${base}/pedidos/${other}/anular`, { reason: "Ya no lo quiere" })
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual([before[0], before[1]! + 1])
+  })
+
+  it("sin cambios no guarda, un precio bajo el mínimo no pasa y uno anulado no se cambia", async () => {
+    // Lo mismo que ya tiene (la 37, a Surco) no es un cambio.
+    const same = await change(id, {})
+    expect(same.status).toBe(409)
+    expect(same.json.error.code).toBe("NO_CHANGE")
+    const cheap = await change(id, { lines: [{ variantId: v.t37, quantity: 1, unitCents: 100 }] })
+    expect(cheap.status).toBe(400)
+    const unpaid = (await call("lucia", "POST", `${base}/pedidos`, andrea())).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${unpaid}/anular`, { reason: "Prueba de estados" })
+    expect((await change(unpaid, { zone: "Centro" })).status).toBe(409)
+  })
+
+  it("si la talla nueva no tiene stock, se guarda igual y queda «falta stock»: solo frena al salir", async () => {
+    const paid = await paidOrder()
+    await call("rosa", "POST", `${base}/variantes/${v.t38}/movimientos`, {
+      kind: "ajuste",
+      counted: 0,
+      reason: "Se dañaron en la vitrina",
+    })
+    const before37 = await stock(v.t37)
+    const saved = await change(paid, { lines: [{ variantId: v.t38, quantity: 1 }] })
+    expect(saved.status).toBe(200)
+    expect(saved.json.order).toMatchObject({ state: "por_salir", stockPending: true })
+    expect(await stock(v.t37)).toBe(before37 + 1)
+    const out = await call("lucia", "POST", `${base}/pedidos/${paid}/salio`, {})
+    expect(out.status).toBe(409)
+    expect(out.json.error.code).toBe("NOT_ENOUGH_STOCK")
+    await call("rosa", "POST", `${base}/variantes/${v.t38}/movimientos`, {
+      kind: "entrada",
+      quantity: 1,
+    })
+    expect(
+      (await call("lucia", "POST", `${base}/pedidos/${paid}/salio`, {})).json.order.state,
+    ).toBe("en_camino")
+    expect(await stock(v.t38)).toBe(0)
+  })
+
+  it("si el total baja, lo que sobra de lo pagado queda en el saldo para revisarlo", async () => {
+    const paid = await paidOrder()
+    const saved = await change(paid, { zone: "Centro" })
+    expect(saved.json.order).toMatchObject({
+      totalCents: 13400,
+      balance: { confirmedCents: 13900, dueCents: 0, overCents: 500 },
+    })
+    const changed = (saved.json.order.events as Json[]).find((e) => e.action === "cambiado")!
+    expect(changed.detail.porRevisar).toMatch(/^Sobra S\/\s5 de lo pagado/)
+  })
+
+  it("antes de pagar, cambiar no mueve el stock", async () => {
+    const created = (await call("lucia", "POST", `${base}/pedidos`, andrea())).json.order.id
+    const before = [await stock(v.t37), await stock(v.t38)]
+    const saved = await change(created, { lines: [{ variantId: v.t37, quantity: 2 }] })
+    expect(saved.json.order).toMatchObject({ state: "por_pagar", totalCents: 26800 })
+    expect([await stock(v.t37), await stock(v.t38)]).toEqual(before)
+  })
+
+  it("«No se entregó» vuelve a «Por salir» el día elegido, sin mover el stock", async () => {
+    const jorge = (
+      await call(
+        "lucia",
+        "POST",
+        `${base}/pedidos`,
+        andrea({ customerName: "Jorge Paredes", paymentMethodId: ids.efectivo, deliverOn: today }),
+      )
+    ).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${jorge}/salio`, {})
+    const before = await stock(v.t37)
+    const past = await call("lucia", "POST", `${base}/pedidos/${jorge}/no-se-entrego`, {
+      reason: "No contestó",
+      deliverOn: "2020-01-01",
+    })
+    expect(past.status).toBe(400)
+    expect(past.json.error.fields).toHaveProperty("deliverOn")
+    const missed = await call("lucia", "POST", `${base}/pedidos/${jorge}/no-se-entrego`, {
+      reason: "No contestó",
+      deliverOn: tomorrow(),
+    })
+    expect(missed.json.order).toMatchObject({ state: "por_salir", deliverOn: tomorrow() })
+    expect((missed.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "no_entregado",
+      detail: { motivo: "No contestó" },
+    })
+    expect(await stock(v.t37)).toBe(before)
+    // Vuelve a salir sin descontar otra vez, y se cobra en la puerta.
+    await call("lucia", "POST", `${base}/pedidos/${jorge}/salio`, {})
+    expect(await stock(v.t37)).toBe(before)
+    const done = await call("lucia", "POST", `${base}/pedidos/${jorge}/entregado`, {
+      collectedCents: 13900,
+    })
+    expect(done.json.order.state).toBe("entregado")
+  })
+
+  it("«Pasar a…» cambia el día sin anular nada; uno en camino, no", async () => {
+    await restock(2)
+    const created = (await call("lucia", "POST", `${base}/pedidos`, andrea({ deliverOn: today })))
+      .json.order.id
+    const moved = await call("lucia", "POST", `${base}/pedidos/${created}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(moved.json.order).toMatchObject({ state: "por_pagar", deliverOn: tomorrow() })
+    expect((moved.json.order.events as Json[]).at(-1)?.action).toBe("reprogramado")
+    const again = await call("lucia", "POST", `${base}/pedidos/${created}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(again.status).toBe(409)
+    const onTheWay = (
+      await call("lucia", "POST", `${base}/pedidos`, andrea({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    await call("lucia", "POST", `${base}/pedidos/${onTheWay}/salio`, {})
+    const late = await call("lucia", "POST", `${base}/pedidos/${onTheWay}/pasar-a`, {
+      deliverOn: tomorrow(),
+    })
+    expect(late.status).toBe(409)
+    expect(late.json.error.message).toContain("No se entregó")
+  })
+
+  it("«Cambiar» no pasa un pedido a un día que ya pasó", async () => {
+    await restock(1)
+    const created = (await call("lucia", "POST", `${base}/pedidos`, andrea())).json.order.id
+    const d = new Date(`${today}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 1)
+    const late = await change(created, { deliverOn: d.toISOString().slice(0, 10) })
+    expect(late.status).toBe(400)
+    expect(late.json.error.fields).toMatchObject({ deliverOn: "Elige hoy o un día que viene" })
+  })
+
+  it("«Entregado» sin «Salió» deja las dos, con la misma hora", async () => {
+    await restock(1)
+    const created = (
+      await call("lucia", "POST", `${base}/pedidos`, andrea({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    const done = await call("lucia", "POST", `${base}/pedidos/${created}/entregado`, {
+      collectedCents: 13900,
+    })
+    const steps = (done.json.order.events as Json[]).filter((e) =>
+      ["salio", "entregado"].includes(e.action),
+    )
+    expect(steps.map((e) => e.action)).toEqual(["salio", "entregado"])
+    expect(steps[0].createdAt).toBe(steps[1].createdAt)
+  })
+})
+
+describe("deshacer la confirmación de un pago (tablero 7)", () => {
+  it("con motivo, vuelve a «por confirmar»; si era lo único, el pedido espera y el stock vuelve", async () => {
+    const id = (await call("lucia", "POST", `${base}/pedidos`, order())).json.order.id
+    const form = new FormData()
+    form.set("amountCents", "13900")
+    const sent = await call("lucia", "POST", `${base}/pedidos/${id}/comprobante`, undefined, form)
+    const paymentId = sent.json.order.payments[0].id
+    await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/revision`, {
+      decision: "confirmar",
+    })
+    const sold = (await stockOf(ids.t38)).stock
+    const noReason = await call(
+      "rosa",
+      "POST",
+      `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`,
+      {
+        reason: "",
+      },
+    )
+    expect(noReason.status).toBe(400)
+    const undone = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Lo confirmé en el pedido equivocado",
+    })
+    expect(undone.json.order).toMatchObject({
+      state: "por_confirmar",
+      balance: { confirmedCents: 0, pendingCents: 13900, dueCents: 0, paid: false },
+    })
+    expect(undone.json.order.payments[0]).toMatchObject({
+      status: "por_confirmar",
+      reviewedAt: null,
+      note: "Se deshizo la confirmación: Lo confirmé en el pedido equivocado",
+    })
+    expect((undone.json.order.events as Json[]).at(-1)).toMatchObject({
+      action: "pago_deshecho",
+      detail: { motivo: "Lo confirmé en el pedido equivocado", stockDevuelto: 1 },
+    })
+    expect((await stockOf(ids.t38)).stock).toBe(sold + 1)
+    // Se vuelve a confirmar y el stock baja otra vez, con la referencia del paso.
+    const again = await call("lucia", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/revision`, {
+      decision: "confirmar",
+    })
+    expect(again.json.order).toMatchObject({ state: "por_salir", paid: true })
+    expect((await stockOf(ids.t38)).stock).toBe(sold)
+    const twice = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Otra vez",
+    })
+    expect(twice.status).toBe(200)
+    expect(
+      (
+        await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+          reason: "Una tercera",
+        })
+      ).status,
+    ).toBe(409)
+  })
+
+  it("lo cobrado en la puerta no se deshace, ni el pago de un pedido entregado", async () => {
+    const id = (
+      await call("lucia", "POST", `${base}/pedidos`, order({ paymentMethodId: ids.efectivo }))
+    ).json.order.id
+    const done = await call("lucia", "POST", `${base}/pedidos/${id}/entregado`, {
+      collectedCents: 13900,
+    })
+    const paymentId = done.json.order.payments[0].id
+    const undo = await call("rosa", "POST", `${base}/pedidos/${id}/pagos/${paymentId}/deshacer`, {
+      reason: "Me equivoqué",
+    })
+    expect(undo.status).toBe(409)
+  })
+})
