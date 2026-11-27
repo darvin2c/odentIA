@@ -14,6 +14,7 @@ import type { Person } from "../cuenta.js"
 import { pad } from "../pedidos.js"
 import { balancesIn, unpaidBalance } from "../saldo.js"
 import { inStore, StoreError } from "../tiendas.js"
+import { choicesInput, DEFAULT_CHOICES, OFFER_NAMES, type OfferKind } from "./opciones.js"
 import { type AnswerResult, answer, type SofiDeps } from "./sofi.js"
 
 /**
@@ -23,7 +24,11 @@ import { type AnswerResult, answer, type SofiDeps } from "./sofi.js"
  * son de prueba (no mueven stock, no crean un link real y no cuentan en Reportes).
  */
 
-export const agentSettingsInput = z.object({
+/**
+ * Lo que la tienda pone de Sofi: todo se elige (ADR 0234). Lo único escrito es cómo se presenta,
+ * que va entre «» como su nombre; «Lo que sabe» va aparte (`saber.ts`).
+ */
+export const agentSettingsInput = choicesInput.extend({
   enabled: z.boolean(),
   displayName: z
     .string()
@@ -31,7 +36,6 @@ export const agentSettingsInput = z.object({
     .max(60, "Máximo 60 caracteres")
     .default("")
     .transform((value) => value || null),
-  knowledge: z.string().trim().max(2000, "Máximo 2000 caracteres").default(""),
   followPayment: z.boolean(),
   followThanks: z.boolean(),
   followRestock: z.boolean(),
@@ -43,9 +47,9 @@ export const customerMessageInput = z.object({
 })
 
 const DEFAULTS = {
+  ...DEFAULT_CHOICES,
   enabled: false,
   displayName: null,
-  knowledge: "",
   followPayment: true,
   followThanks: true,
   followRestock: true,
@@ -65,7 +69,17 @@ export async function agentSettings(
       ? {
           enabled: row.enabled,
           displayName: row.displayName,
-          knowledge: row.knowledge,
+          tone: row.tone,
+          address: row.address,
+          emojis: row.emojis,
+          offerShipping: row.offerShipping,
+          offerDiscount: row.offerDiscount,
+          offerGift: row.offerGift,
+          offerSecond: row.offerSecond,
+          handoffUpset: row.handoffUpset,
+          handoffOverCents: row.handoffOverCents,
+          teamHours: row.teamHours,
+          afterHoursSells: row.afterHoursSells,
           followPayment: row.followPayment,
           followThanks: row.followThanks,
           followRestock: row.followRestock,
@@ -136,6 +150,39 @@ const TOOL_WORDS: Record<string, string> = {
   ver_pedidos: "Miró los pedidos",
   avisar_cuando_vuelva: "Quedó en avisar cuando vuelva",
   pasar_a_persona: "La pasó a una persona",
+  leer_lo_que_sabe: "Leyó «Lo que sabe»",
+}
+
+const strings = (value: unknown) =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []
+
+/**
+ * «Por qué respondió así», solo de lo que quedó anotado en su respuesta (lo que de verdad le
+ * llegó): cómo habla, lo que leyó de «Lo que sabe», lo que ofreció de la lista de la tienda, lo que
+ * la tienda no la dejó ofrecer, la pregunta que no supo y si el equipo no estaba. No adivina por
+ * qué el modelo eligió algo.
+ */
+export function whyOf(detail: Record<string, unknown>): string[] {
+  const why: string[] = []
+  if (typeof detail.estilo === "string") why.push(`Habló ${detail.estilo}, como elegiste.`)
+  const read = strings(detail.sabe)
+  if (read.length)
+    why.push(`Usó de «Lo que sabe»: ${read.map((q) => `«${q}»`).join(", ")}.`)
+  const offered = strings(detail.ofrecio).filter((k): k is OfferKind => k in OFFER_NAMES)
+  if (offered.length)
+    why.push(
+      `Ofreció de tu lista: ${offered.map((k) => OFFER_NAMES[k]).join(" y ")}, sin bajar de tu mínimo.`,
+    )
+  const refused = strings(detail.no_dejo).filter((k): k is OfferKind => k in OFFER_NAMES)
+  if (refused.length)
+    why.push(
+      `Intentó ofrecer ${refused.map((k) => OFFER_NAMES[k]).join(" y ")} y tu regla no lo dejó.`,
+    )
+  if (typeof detail.pregunta === "string")
+    why.push(`No sabía «${detail.pregunta}»: no lo inventó y te lo pasó.`)
+  if (typeof detail.fuera_de_horario === "string")
+    why.push(`Tu equipo no estaba: dijo que le escriben ${detail.fuera_de_horario}.`)
+  return why
 }
 
 /** Lo que hizo Sofi para responder, en palabras del equipo (la marca «Agente» del tablero 8). */
@@ -150,6 +197,7 @@ function basisOf(detail: Record<string, unknown>) {
     stopped: Array.isArray(detail.frenado) ? (detail.frenado as string[][]).flat() : [],
     handoff: typeof detail.paso === "string" ? detail.paso : null,
     costMicros: typeof detail.costo === "number" ? detail.costo : null,
+    why: whyOf(detail),
   }
 }
 

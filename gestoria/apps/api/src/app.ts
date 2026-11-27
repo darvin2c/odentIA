@@ -160,6 +160,17 @@ import {
   writeAsCustomer,
 } from "./sofi/conversaciones.js"
 import type { ChatModel } from "./sofi/modelo.js"
+import {
+  addAnswer,
+  answerGap,
+  answerInput,
+  changeAnswer,
+  dismissGap,
+  gapAnswerInput,
+  gapDismissInput,
+  knowledgeView,
+  removeAnswer,
+} from "./sofi/saber.js"
 import { reportPeriod, storeReport } from "./sofi/reportes.js"
 import { addMovement, kardex, movementInput } from "./stock.js"
 import {
@@ -866,6 +877,33 @@ export function createApp(deps: AppDeps) {
     return c.json({
       settings: await saveAgentSettings(deps.appDb, c.get("person"), c.req.param("id"), input),
     })
+  })
+  // «Lo que sabe» y «Lo que aprendió» (ADR 0234): de quien cambia la configuración.
+  app.get("/api/tiendas/:id/sofi/sabe", async (c) =>
+    c.json(await knowledgeView(deps.appDb, c.get("person"), c.req.param("id"))),
+  )
+  app.post("/api/tiendas/:id/sofi/sabe", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    return c.json(await addAnswer(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.patch("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const input = await bodyOf(c, answerInput)
+    const { id, answerId } = c.req.param()
+    return c.json(await changeAnswer(deps.appDb, c.get("person"), id, answerId, input))
+  })
+  app.delete("/api/tiendas/:id/sofi/sabe/:answerId", async (c) => {
+    const { id, answerId } = c.req.param()
+    await removeAnswer(deps.appDb, c.get("person"), id, answerId)
+    return c.body(null, 204)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/responder", async (c) => {
+    const input = await bodyOf(c, gapAnswerInput)
+    return c.json(await answerGap(deps.appDb, c.get("person"), c.req.param("id"), input), 201)
+  })
+  app.post("/api/tiendas/:id/sofi/aprendio/quitar", async (c) => {
+    const input = await bodyOf(c, gapDismissInput)
+    await dismissGap(deps.appDb, c.get("person"), c.req.param("id"), input)
+    return c.body(null, 204)
   })
   app.post("/api/tiendas/:id/sofi/pruebas", async (c) =>
     c.json(await newTestConversation(deps.appDb, c.get("person"), c.req.param("id")), 201),
