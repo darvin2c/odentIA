@@ -54,6 +54,7 @@ import {
 } from "@gestoria/db"
 import { startTestDb } from "@gestoria/db/testing"
 import { asc, eq, inArray, sql } from "drizzle-orm"
+import { plainZone } from "../entregas.js"
 import type { LinkAdapter } from "../link-de-pago.js"
 import { sealSecret } from "../secretos.js"
 import { type ChatModel, costMicros, modelFromEnv, openAIModel, SOFI_MODEL } from "./modelo.js"
@@ -160,8 +161,8 @@ async function armarTienda(owner: Db, storeId: string, secretsKey: Buffer) {
       type: "DeliveryModeOwnFleet",
       cost: "por_zona",
       zones: [
-        { name: "Surco y Miraflores", priceCents: 1000 },
-        { name: "Callao", priceCents: 1500 },
+        plainZone("Surco y Miraflores", 1000, ["150140", "150122"]),
+        plainZone("Callao", 1500, ["070101"]),
       ],
       eta: "Al día siguiente",
       acceptsPayOnDelivery: true,

@@ -3,9 +3,11 @@ import {
   type Db,
   DELIVERY_COSTS,
   DELIVERY_TYPES,
+  FREIGHTS,
   PAYMENT_COLLECTIONS,
   PAYMENT_TYPE_CODES,
   product,
+  READY_IN,
   store,
   storeAgent,
   storeDeliveryMethod,
@@ -21,6 +23,7 @@ import { accountState } from "@odentia/contract"
 import { and, asc, count, eq, gt, isNull } from "drizzle-orm"
 import { z } from "zod"
 import type { Person } from "./cuenta.js"
+import { checkZonesIn, zoneInput, zonesProblem } from "./entregas.js"
 import { can } from "./permisos.js"
 import { setupFactsIn, setupSteps, skippedStepsIn } from "./primeros-pasos.js"
 import { couriersIn, slotLabel, storeSlotsIn } from "./repartidores.js"
@@ -82,11 +85,6 @@ export const paymentInput = z
 
 export const paymentPatch = patchOf(paymentInput)
 
-const zone = z.object({
-  name: z.string().trim().min(1, "Escribe el nombre de la zona").max(60),
-  priceCents: cents,
-})
-
 export const deliveryInput = z
   .object({
     name: z.string().trim().min(1, "Escribe cómo lo dirá Sofi").max(80, "Máximo 80 caracteres"),
@@ -94,14 +92,51 @@ export const deliveryInput = z
     details: z.string().trim().max(300, "Máximo 300 caracteres").default(""),
     cost: z.enum(DELIVERY_COSTS),
     priceCents: cents.nullable().default(null),
-    zones: z.array(zone).max(30, "Hasta 30 zonas").default([]),
+    zones: z.array(zoneInput).max(30, "Hasta 30 zonas").default([]),
     eta: z.string().trim().max(120, "Máximo 120 caracteres").default(""),
     acceptsPayOnDelivery: z.boolean().default(false),
     maxDiscountCents: positive.nullable().default(null),
     freeFromCents: positive.nullable().default(null),
+    /** Recojo en tienda: su horario y en cuánto está listo. */
+    openingHours: z
+      .array(
+        z
+          .object({
+            days: z.array(z.number().int().min(1).max(7)).min(1, "Elige los días").max(7),
+            opens: z
+              .number()
+              .int()
+              .min(0)
+              .max(24 * 60),
+            closes: z
+              .number()
+              .int()
+              .min(0)
+              .max(24 * 60),
+          })
+          .refine((h) => h.opens < h.closes, {
+            message: "Cierra después de abrir",
+            path: ["closes"],
+          }),
+      )
+      .max(7, "Hasta 7 horarios")
+      .default([]),
+    readyIn: z.enum(READY_IN).nullable().default(null),
+    /** Por agencia: con cuáles y quién paga el flete. */
+    agencies: z.array(z.string().trim().min(1).max(40)).max(10, "Hasta 10 agencias").default([]),
+    freight: z.enum(FREIGHTS).nullable().default(null),
+    freightCents: positive.nullable().default(null),
     isActive: z.boolean().default(true),
   })
   .superRefine((d, ctx) => {
+    if (d.freight === "antes" && d.freightCents === null)
+      ctx.addIssue({
+        code: "custom",
+        path: ["freightCents"],
+        message: "Escribe cuánto cobras de flete",
+      })
+    const zones = zonesProblem(d.zones)
+    if (d.cost === "por_zona" && zones) ctx.addIssue({ code: "custom", ...zones })
     if (d.cost === "fijo" && d.priceCents === null)
       ctx.addIssue({ code: "custom", path: ["priceCents"], message: "Escribe el precio del envío" })
     if (d.cost === "por_zona" && d.zones.length === 0)
@@ -114,13 +149,24 @@ export const deliveryInput = z
       })
   })
   // Lo que no aplica al costo elegido no se guarda.
-  .transform((d) => ({
-    ...d,
-    priceCents: d.cost === "fijo" ? d.priceCents : null,
-    zones: d.cost === "por_zona" ? d.zones : [],
-    maxDiscountCents: d.cost === "fijo" || d.cost === "por_zona" ? d.maxDiscountCents : null,
-    freeFromCents: d.cost === "fijo" || d.cost === "por_zona" ? d.freeFromCents : null,
-  }))
+  .transform((d) => {
+    // El pago al recibir de cada zona; si no lo dice, el de la forma de entrega. Con zonas, la
+    // forma acepta pago al recibir si alguna de sus zonas lo acepta.
+    const zones = (d.cost === "por_zona" ? d.zones : []).map((zone) => ({
+      ...zone,
+      payOnDelivery: zone.payOnDelivery ?? d.acceptsPayOnDelivery,
+    }))
+    return {
+      ...d,
+      acceptsPayOnDelivery:
+        zones.length > 0 ? zones.some((zone) => zone.payOnDelivery) : d.acceptsPayOnDelivery,
+      freightCents: d.freight === "antes" ? d.freightCents : null,
+      priceCents: d.cost === "fijo" ? d.priceCents : null,
+      zones,
+      maxDiscountCents: d.cost === "fijo" || d.cost === "por_zona" ? d.maxDiscountCents : null,
+      freeFromCents: d.cost === "fijo" || d.cost === "por_zona" ? d.freeFromCents : null,
+    }
+  })
 
 export const deliveryPatch = patchOf(deliveryInput)
 
@@ -244,9 +290,10 @@ export async function createDelivery(
 ) {
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
     await underLimit(tx, storeDeliveryMethod, storeId)
+    const zones = await checkZonesIn(tx, storeId, null, input.zones)
     const [row] = await tx
       .insert(storeDeliveryMethod)
-      .values({ storeId, ...input })
+      .values({ storeId, ...input, zones })
       .returning()
     await tx.insert(storeEvent).values({
       storeId,
@@ -268,9 +315,11 @@ export async function updateDelivery(
 ) {
   idOf(id, "forma de entrega")
   return inStore(appDb, person, storeId, "configuracion", async (tx) => {
+    const set =
+      "zones" in patch ? { ...patch, zones: await checkZonesIn(tx, storeId, id, patch.zones) } : patch
     const [row] = await tx
       .update(storeDeliveryMethod)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({ ...set, updatedAt: new Date() })
       .where(and(eq(storeDeliveryMethod.id, id), eq(storeDeliveryMethod.storeId, storeId)))
       .returning()
     if (!row) throw new StoreError(404, "NOT_FOUND", "Esa forma de entrega ya no está")
@@ -407,6 +456,7 @@ export async function configOverview(appDb: Db, person: Person, storeId: string,
       deliveries: deliveries.map(({ zones, ...delivery }) => ({
         ...delivery,
         zones: zones.length,
+        districts: zones.reduce((sum, zone) => sum + (zone.districts?.length ?? 0), 0),
       })),
       slots: slots.length,
       team: {

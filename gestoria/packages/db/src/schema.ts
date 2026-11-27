@@ -81,6 +81,13 @@ export interface DeliverySlot {
 export const MAX_DELIVERY_SLOTS = 8
 
 /**
+ * Quién paga el viaje cuando la clienta no estuvo: la primera vez la tienda y el siguiente ella,
+ * siempre ella, o siempre la tienda.
+ */
+export const FAILED_TRIPS = ["primera_tienda", "clienta", "tienda"] as const
+export type FailedTrip = (typeof FAILED_TRIPS)[number]
+
+/**
  * Una tienda (decisión 8: una persona puede tener o atender varias y elige al entrar). Vende
  * en una sola moneda, la que elige al crearla (decisión 9), con su código ISO 4217.
  */
@@ -115,6 +122,13 @@ export const store = pgTable(
      * 540–780). Un pedido sin franja sale igual. El pedido copia la suya: cambiarlas no lo toca.
      */
     deliverySlots: jsonb("delivery_slots").$type<DeliverySlot[]>().notNull().default([]),
+    /**
+     * Entregas (lienzo «gestorIA · Configuración, de nuevo», tablero 7): el distrito desde el que
+     * salen los pedidos, por su código UBIGEO del INEI (seis cifras), y quién paga el viaje que
+     * no se pudo entregar (decisión 6: la primera vez lo asume la tienda; el siguiente, la clienta).
+     */
+    shipFrom: text("ship_from"),
+    failedTrip: text("failed_trip").$type<FailedTrip>().notNull().default("primera_tienda"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -134,6 +148,11 @@ export const store = pgTable(
       "store_delivery_slots_check",
       sql`jsonb_typeof(${table.deliverySlots}) = 'array' and jsonb_array_length(${table.deliverySlots}) <= ${sql.raw(String(MAX_DELIVERY_SLOTS))}`,
     ),
+    check(
+      "store_ship_from_check",
+      sql`${table.shipFrom} is null or ${table.shipFrom} ~ '^[0-9]{6}$'`,
+    ),
+    check("store_failed_trip_check", inList("failed_trip", FAILED_TRIPS)),
     check(
       "store_time_zone_check",
       sql`char_length(${table.timeZone}) <= 64 and ${table.timeZone} ~ '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$'`,
@@ -367,10 +386,42 @@ export type DeliveryType = (typeof DELIVERY_TYPES)[number]
 export const DELIVERY_COSTS = ["gratis", "fijo", "por_zona", "se_acuerda"] as const
 export type DeliveryCost = (typeof DELIVERY_COSTS)[number]
 
+/** Cuándo llega lo de una zona: hoy si pide antes de la hora de corte, al día siguiente o en días fijos. */
+export const ZONE_LEADS = ["hoy", "manana", "dias"] as const
+export type ZoneLead = (typeof ZONE_LEADS)[number]
+
+/**
+ * Una zona de reparto (tablero 7): sus distritos por su código UBIGEO del INEI (un distrito está
+ * en una sola zona por tienda), su precio, cuándo llega (con la hora de corte en la zona horaria
+ * de la tienda, en minutos desde las 00:00), los días fijos (ISO 8601: 1 lunes … 7 domingo), sus
+ * franjas (de las de la tienda), si acepta pago al recibir y si le alcanza el envío gratis.
+ */
 export interface DeliveryZone {
   name: string
   priceCents: number
+  districts: string[]
+  lead: ZoneLead
+  cutoff: number | null
+  weekdays: number[]
+  slots: DeliverySlot[]
+  payOnDelivery: boolean
+  freeShipping: boolean
 }
+
+/** El horario del recojo: días (ISO 8601) y de qué hora a qué hora, en minutos desde las 00:00. */
+export interface OpeningHours {
+  days: number[]
+  opens: number
+  closes: number
+}
+
+/** En cuánto está listo para recoger. */
+export const READY_IN = ["1h", "2h", "dia_siguiente"] as const
+export type ReadyIn = (typeof READY_IN)[number]
+
+/** El flete de la agencia: lo paga la clienta al recoger, o la tienda lo cobra antes. */
+export const FREIGHTS = ["al_recoger", "antes"] as const
+export type Freight = (typeof FREIGHTS)[number]
 
 export const storeDeliveryMethod = pgTable(
   "store_delivery_method",
@@ -395,6 +446,13 @@ export const storeDeliveryMethod = pgTable(
      */
     maxDiscountCents: integer("max_discount_cents"),
     freeFromCents: integer("free_from_cents"),
+    /** Recojo en tienda: su horario y en cuánto está listo. */
+    openingHours: jsonb("opening_hours").$type<OpeningHours[]>().notNull().default([]),
+    readyIn: text("ready_in").$type<ReadyIn>(),
+    /** Por agencia: con cuáles («Shalom», «Olva Courier») y quién paga el flete. */
+    agencies: jsonb("agencies").$type<string[]>().notNull().default([]),
+    freight: text("freight").$type<Freight>(),
+    freightCents: integer("freight_cents"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -422,6 +480,15 @@ export const storeDeliveryMethod = pgTable(
     check(
       "store_delivery_method_deal_amounts_check",
       sql`(${table.maxDiscountCents} is null or ${table.maxDiscountCents} > 0) and (${table.freeFromCents} is null or ${table.freeFromCents} > 0)`,
+    ),
+    check(
+      "store_delivery_method_pickup_check",
+      sql`jsonb_typeof(${table.openingHours}) = 'array' and jsonb_array_length(${table.openingHours}) <= 7 and (${table.readyIn} is null or ${inList("ready_in", READY_IN)})`,
+    ),
+    // El flete cobrado antes lleva su monto; si no, no hay monto.
+    check(
+      "store_delivery_method_agency_check",
+      sql`jsonb_typeof(${table.agencies}) = 'array' and jsonb_array_length(${table.agencies}) <= 10 and (${table.freight} is null or ${inList("freight", FREIGHTS)}) and ((${table.freight} = 'antes') = (${table.freightCents} is not null)) and (${table.freightCents} is null or ${table.freightCents} > 0)`,
     ),
     check(
       "store_delivery_method_texts_check",

@@ -91,6 +91,18 @@ La app del Grupo Sallca para quien vende productos con envío por WhatsApp, Inst
   link es único entre tiendas (`store_link`), el de antes se queda con su tienda y los reservados
   los bloquea `linkNameProblem`.
 
+## Entregas por distrito (lienzo «gestorIA · Configuración, de nuevo», tablero 7; ADR 0233)
+
+- Los distritos son códigos UBIGEO del INEI (`apps/api/src/distritos.ts`: los 43 de Lima y los 7
+  del Callao), nunca texto: la pantalla los elige del mapa esquemático o de la lista de cada zona.
+  Un distrito está en una sola zona en toda la tienda (`checkZonesIn`).
+- El precio de un envío sale solo de `deliveryPriceOf` (`apps/api/src/entregas.ts`), con el pago
+  al recibir y el envío gratis por zona (`payOnDeliveryOf`, `freeFromOf`): pedidos, «Cambiar»,
+  cambios y Sofi la usan; nadie más calcula el envío. Cuándo llega se cuenta en la hora de la tienda.
+- Las franjas de una zona son de las de la tienda (`store.delivery_slots`): no hay otra lista.
+- Quién paga el viaje fallido es `store.failed_trip`: se informa (Sofi, «No se entregó»); cobrar
+  otro viaje no está hecho.
+
 ## Inicio y los primeros pasos (entregas 3 y 6 del lienzo «gestorIA como odentIA»; ADR 0227)
 
 - gestorIA abre en Inicio, primero en el menú, para quien atiende (`ventas.atender`); soporte entra

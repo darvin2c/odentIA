@@ -239,6 +239,20 @@
       "when": 1795805419993,
       "tag": "0033_reglas_dinero_devuelto",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795809015844,
+      "tag": "0037_entregas_por_distrito",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795809027466,
+      "tag": "0038_reglas_entregas",
+      "breakpoints": true
     }
   ]
 }
