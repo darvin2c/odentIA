@@ -316,3 +316,11 @@
     grid-column: auto / span 6;
   }
 }
+
+/* El nombre grande del cierre: a la medida del pie, para que no pise los grupos de abajo. */
+.closing .close__word {
+  font-size: clamp(56px, 10vw, 152px);
+  line-height: 1.05;
+  overflow: visible;
+  margin-bottom: var(--s-5);
+}

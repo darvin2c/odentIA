@@ -292,9 +292,9 @@ const faqLd = {
         </div>
         <div class="span-6 start-7 frame frame--lit canales" role="img" aria-label={`Sofi vende en WhatsApp, Instagram y Messenger. Ejemplos de rubros: ${rubros.join(", ")} y lo que tú vendas.`}>
           <ul class="canales__list" aria-label="Los chats donde vende Sofi">
-            <li><img class="ic" src={whatsapp.src} width="96" height="96" alt="WhatsApp" /><span aria-hidden="true">WhatsApp</span></li>
-            <li><img class="ic ic-ink" src={instagram.src} width="96" height="96" alt="Instagram" /><span aria-hidden="true">Instagram</span></li>
-            <li><img class="ic" src={messenger.src} width="96" height="96" alt="Messenger" /><span aria-hidden="true">Messenger</span></li>
+            <li><img class="ic" src={whatsapp.src} width="96" height="96" alt="WhatsApp" loading="lazy" /><span aria-hidden="true">WhatsApp</span></li>
+            <li><img class="ic ic-ink" src={instagram.src} width="96" height="96" alt="Instagram" loading="lazy" /><span aria-hidden="true">Instagram</span></li>
+            <li><img class="ic" src={messenger.src} width="96" height="96" alt="Messenger" loading="lazy" /><span aria-hidden="true">Messenger</span></li>
           </ul>
           <ul class="rubros__list" aria-label="Ejemplos de rubros">
             {rubros.map((r) => <li>{r}</li>)}
