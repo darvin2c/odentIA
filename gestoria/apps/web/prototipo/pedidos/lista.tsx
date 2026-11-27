@@ -126,6 +126,39 @@ export function TeTocaPedidos({
   )
 }
 
+function Foto({ p }: { p: Pedido }) {
+  return p.lineas[0]?.foto ? (
+    <img
+      src={foto(p.lineas[0].foto)}
+      alt=""
+      className="size-12 shrink-0 rounded-lg bg-muted object-cover"
+    />
+  ) : (
+    <span className="size-12 shrink-0 rounded-lg bg-muted" />
+  )
+}
+
+function Cobro({ p }: { p: Pedido }) {
+  const k = cuentas(p)
+  if (p.paso === "anulado") return <span className="text-muted-foreground">—</span>
+  if (k.alRecibir && !k.confirmado)
+    return (
+      <span className="tabular-nums">
+        {money(k.total)} <span className="text-muted-foreground">· al recibir</span>
+      </span>
+    )
+  return k.pagado ? (
+    <span className="tabular-nums">
+      {money(k.total)} <span className="text-success">· pagado</span>
+    </span>
+  ) : (
+    <span className="tabular-nums">
+      {money(k.total)}{" "}
+      <span className="text-warning">· falta {money(k.falta || k.porConfirmar)}</span>
+    </span>
+  )
+}
+
 function OrigenIcon({ p }: { p: Pedido }) {
   const I =
     p.origen.k === "campana"
@@ -226,17 +259,8 @@ function Lista() {
       {
         id: "foto",
         header: "Foto",
-        meta: { view: { role: "media" } },
-        cell: ({ row }) =>
-          row.original.lineas[0]?.foto ? (
-            <img
-              src={foto(row.original.lineas[0].foto)}
-              alt=""
-              className="size-11 rounded-lg bg-muted object-cover"
-            />
-          ) : (
-            <span className="size-11 rounded-lg bg-muted" />
-          ),
+        meta: { view: isMobile ? { tableOnly: true } : { role: "media" } },
+        cell: ({ row }) => <Foto p={row.original} />,
       },
       {
         id: "pedido",
@@ -244,17 +268,42 @@ function Lista() {
         meta: { view: { role: "title" } },
         cell: ({ row }) => {
           const p = row.original
+          const lleva = p.lineas
+            .filter((l) => !l.vuelve)
+            .map((l) => `${l.nombre} ${l.variante}`)
+            .join(" + ")
+          // En el celular, la tarjeta entera va en el título: foto a la izquierda y
+          // estado, cobro y entrega debajo, sin separadores que queden colgando.
+          if (isMobile)
+            return (
+              <span className="flex min-w-0 items-start gap-3">
+                <Foto p={p} />
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="truncate font-semibold">
+                    {p.id} · {p.clienta}
+                  </span>
+                  <span className="truncate text-xs font-normal text-muted-foreground">{lleva}</span>
+                  <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <Badge variant={PASO[p.paso].tono}>{PASO[p.paso].corto}</Badge>
+                    {p.toca ? <Badge variant="warning">Te toca</Badge> : null}
+                    <span className="text-sm font-normal">
+                      <Cobro p={p} />
+                    </span>
+                  </span>
+                  {p.paso !== "anulado" ? (
+                    <span className="truncate text-xs font-normal text-muted-foreground">
+                      {entregaTexto(p.entrega)}
+                    </span>
+                  ) : null}
+                </span>
+              </span>
+            )
           return (
             <span className="flex min-w-0 flex-col">
               <span className="truncate font-semibold">
                 {p.id} · {p.clienta}
               </span>
-              <span className="truncate text-xs text-muted-foreground">
-                {p.lineas
-                  .filter((l) => !l.vuelve)
-                  .map((l) => `${l.nombre} ${l.variante}`)
-                  .join(" + ")}
-              </span>
+              <span className="truncate text-xs text-muted-foreground">{lleva}</span>
             </span>
           )
         },
@@ -262,7 +311,7 @@ function Lista() {
       {
         id: "estado",
         header: "Estado",
-        meta: { view: { primary: true } },
+        meta: { view: isMobile ? { tableOnly: true } : { primary: true } },
         cell: ({ row }) => {
           const p = row.original
           return (
@@ -276,33 +325,13 @@ function Lista() {
       {
         id: "cobro",
         header: "Cobro",
-        meta: { view: { primary: true } },
-        cell: ({ row }) => {
-          const p = row.original
-          const k = cuentas(p)
-          if (p.paso === "anulado") return <span className="text-muted-foreground">—</span>
-          if (k.alRecibir && !k.confirmado)
-            return (
-              <span className="tabular-nums">
-                {money(k.total)} <span className="text-muted-foreground">· al recibir</span>
-              </span>
-            )
-          return k.pagado ? (
-            <span className="tabular-nums">
-              {money(k.total)} <span className="text-success">· pagado</span>
-            </span>
-          ) : (
-            <span className="tabular-nums">
-              {money(k.total)}{" "}
-              <span className="text-warning">· falta {money(k.falta || k.porConfirmar)}</span>
-            </span>
-          )
-        },
+        meta: { view: isMobile ? { tableOnly: true } : { primary: true } },
+        cell: ({ row }) => <Cobro p={row.original} />,
       },
       {
         id: "entrega",
         header: "Entrega",
-        meta: { view: { primary: true } },
+        meta: { view: isMobile ? { tableOnly: true } : { primary: true } },
         cell: ({ row }) => (
           <span className="truncate text-sm">
             {row.original.paso === "anulado" ? "—" : entregaTexto(row.original.entrega)}
@@ -332,7 +361,7 @@ function Lista() {
         },
       },
     ],
-    [],
+    [isMobile],
   )
   const table = useReactTable({ data: filas, columns, getCoreRowModel: getCoreRowModel() })
 
